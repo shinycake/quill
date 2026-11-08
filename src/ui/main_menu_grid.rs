@@ -52,6 +52,9 @@ impl MainMenuUi {
     }
 }
 
+/// The menu closes with the account it was opened on.
+impl super::on_screen::Farewell for MainMenuUi {}
+
 fn icon(entry: Entry) -> IconName {
     match entry {
         Entry::MyProfile => IconName::CircleUser,

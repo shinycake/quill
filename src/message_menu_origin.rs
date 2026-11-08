@@ -212,7 +212,7 @@ mod tests {
             content: MessageContent::Unsupported {
                 type_name: String::new(),
             },
-            pending: false,
+            send: crate::state::SendState::Sent,
             reply_to: None,
             forward_info: None,
             extras: Default::default(),
@@ -223,8 +223,6 @@ mod tests {
             self_destruct: None,
             auto_delete: None,
             author_signature: None,
-            failed: false,
-            can_retry: false,
             ephemeral: None,
         }
     }

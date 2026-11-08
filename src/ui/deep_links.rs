@@ -8,6 +8,7 @@
 //! (same take-once pattern as `pending_story_open`).
 #![deny(clippy::indexing_slicing)]
 use super::app::QuillApp;
+use super::links_state::PendingOpen;
 use super::shell::{DialogKind, QuillShell};
 use super::*;
 use crate::ui::status_note::StatusNote;
@@ -80,7 +81,7 @@ impl QuillApp {
         if live.driver.session.chats_state.deep_link.is_none()
             && let Some(link) = self.pending_deep_link.take()
         {
-            let from_agent = queued_by_agent(&mut self.links.agent_pending_link, &link);
+            let from_agent = queued_by_agent(&mut self.screen.links.agent_pending_link, &link);
             let _ = live.driver.request_deep_link_info_from(&link, from_agent);
         }
         // Consume terminal states once, retaining the invite preview until a decision.
@@ -90,7 +91,7 @@ impl QuillApp {
         // after an error or a closed box) leaves none behind.
         let from_agent = std::mem::take(&mut live.driver.session.chats_state.deep_link_from_agent)
             && state.is_some();
-        if !deep_link_step_redraws(state.as_ref(), self.links.deep_link_invite.as_ref()) {
+        if !deep_link_step_redraws(state.as_ref(), self.screen.links.deep_link_invite.as_ref()) {
             // Nothing new (this runs on every poll): put the state back and
             // don't redraw.
             live.driver.session.chats_state.deep_link = state;
@@ -129,12 +130,15 @@ impl QuillApp {
             }
             // The user decides on the invite; Join starts its own origin.
             Some(preview @ DeepLinkState::InvitePreview { .. }) => {
-                self.links.deep_link_invite = Some(preview.clone());
+                self.screen.links.deep_link_invite = Some(preview.clone());
                 live.driver.session.chats_state.deep_link = Some(preview);
             }
             Some(DeepLinkState::ChatReady { chat_id, action }) => {
-                self.links.pending_deep_link_open_from_agent = from_agent;
-                self.links.pending_deep_link_open = Some((chat_id, action));
+                self.links.pending_deep_link_open = Some(PendingOpen {
+                    chat_id,
+                    action,
+                    from_agent,
+                });
             }
             Some(DeepLinkState::ShowText(text)) => {
                 self.links.deep_link_dialog = Some(text);
@@ -177,15 +181,18 @@ impl QuillApp {
     /// resolved the link later, and the open is checked again now.
     pub(super) fn open_deep_link_chat(
         &mut self,
-        chat_id: ChatId,
-        action: &DeepLinkAction,
+        open: PendingOpen,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let from_agent = std::mem::take(&mut self.links.pending_deep_link_open_from_agent);
+        let PendingOpen {
+            chat_id,
+            action,
+            from_agent,
+        } = open;
         self.agent_step(from_agent, |this| {
             if !from_agent || this.agent_may_open(chat_id) {
-                this.open_deep_link_chat_now(chat_id, action, window, cx);
+                this.open_deep_link_chat_now(chat_id, &action, window, cx);
             }
         });
     }
@@ -245,7 +252,7 @@ impl QuillApp {
                 .select_search_chat_open(chat_id, open, text, reply, now_ms)
                 .is_ok();
             if let Some(note) = chat_link_note(opened) {
-                self.connection.set_note(note);
+                self.screen.connection.set_note(note);
             }
             if let Some(message_id) = jump_to
                 && live
@@ -258,7 +265,7 @@ impl QuillApp {
                 )));
             }
         }
-        self.dismiss_cross_chat_state(chat_id, cx);
+        self.enter_chat_ui(chat_id, cx);
         self.restore_open_draft(window, cx);
         // The inline results button's start goes out right away (the user
         // pressed it); a link's `start=` only prefills `/start <param>`,
@@ -455,13 +462,18 @@ crate::ui::shell::register_dialogs! {
         2700,
         |app| app.links.deep_link_dialog.is_some(),
         QuillApp::build_deep_link_dialog,
-    ),
+    )
+    .close(|app, _, cx| {
+            app.links.deep_link_dialog = None;
+            cx.notify();
+        }),
 
     DeepLinkInvite => DialogSpec::new(
         2800,
         |app| app.links.deep_link_invite.is_some(),
         QuillApp::build_deep_link_invite_dialog,
-    ),
+    )
+    .close(|app, _, cx| app.cancel_deep_link_invite(cx)),
 }
 
 #[cfg(test)]

@@ -229,7 +229,7 @@ impl QuillApp {
 impl QuillApp {
     /// "Join Group Call" on a conference call's link.
     fn join_conference_link(&mut self, cx: &mut Context<Self>) {
-        let Some(link) = self.calls.conference_link.take() else {
+        let Some(link) = self.call_boxes.conference_link.take() else {
             return;
         };
         match self.live.as_mut() {
@@ -256,7 +256,7 @@ impl QuillApp {
     ) -> Dialog {
         let on_close =
             QuillShell::on_close_kind(app, shell, DialogKind::ConferenceLink, |this, _, cx| {
-                this.calls.conference_link = None;
+                this.call_boxes.conference_link = None;
                 cx.notify();
             });
         app.update(cx, |_, cx| {
@@ -274,7 +274,7 @@ impl QuillApp {
                         .label(tr(keys::CALL_CANCEL))
                         .ghost()
                         .on_click(cx.listener(|this, _, window, cx| {
-                            this.calls.conference_link = None;
+                            this.call_boxes.conference_link = None;
                             this.close_kit_dialog_if_done(DialogKind::ConferenceLink, window, cx);
                         })),
                 )
@@ -303,9 +303,13 @@ crate::ui::shell::register_dialogs! {
     /// A conference call's link: join it?
     ConferenceLink => DialogSpec::new(
         2961,
-        |app| app.calls.conference_link.is_some(),
+        |app| app.call_boxes.conference_link.is_some(),
         QuillApp::build_conference_link_dialog,
-    ),
+    )
+    .close(|app, _, cx| {
+            app.call_boxes.conference_link = None;
+            cx.notify();
+        }),
 }
 
 /// A conference call's encryption under its title (tdesktop

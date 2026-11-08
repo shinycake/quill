@@ -247,7 +247,7 @@ impl QuillApp {
     /// color" is on and the OS reports one, else the theme's chosen one.
     pub(crate) fn theme_accent(&self, theme: BuiltinTheme) -> Option<u32> {
         if self.appearance.system_accent
-            && let Some(system) = self.settings.system_accent
+            && let Some(system) = self.preferences.system_accent
         {
             return Some(system);
         }
@@ -262,7 +262,7 @@ impl QuillApp {
         night: bool,
         cx: &mut Context<Self>,
     ) -> (ThemeId, Palette) {
-        if let Some(editor) = &self.settings.app_theme.editor {
+        if let Some(editor) = &self.preferences.app_theme.editor {
             return (editor.preview_id(), editor.palette.clone());
         }
         if self.appearance.follow_omarchy
@@ -306,14 +306,14 @@ impl QuillApp {
     pub(crate) fn install_app_theme(&mut self, applied: Option<(ThemeId, Palette)>, painted: bool) {
         let painted = applied.as_ref().filter(|_| painted).map(|(_, p)| p);
         installed_state::set(painted.map(Palette::colors));
-        self.settings.app_theme.chat_defaults = painted.map(ChatDefaults::from_palette);
-        self.settings.app_theme.applied = applied;
+        self.preferences.app_theme.chat_defaults = painted.map(ChatDefaults::from_palette);
+        self.preferences.app_theme.applied = applied;
     }
 
     /// The chat theme for chats that have none: the app theme's outgoing
     /// bubbles, and whether their fill is dark.
     pub(crate) fn default_chat_theme(&self) -> Option<(&ThemeSettings, bool)> {
-        self.settings
+        self.preferences
             .app_theme
             .chat_defaults
             .as_ref()
@@ -324,7 +324,7 @@ impl QuillApp {
     pub(super) fn theme_wallpaper(&self) -> Option<super::wallpaper::Wallpaper> {
         use super::wallpaper::Wallpaper;
         let background = self
-            .settings
+            .preferences
             .app_theme
             .chat_defaults
             .as_ref()?
@@ -345,7 +345,7 @@ impl QuillApp {
 
     /// Forget what was read from the themes folder after a change there.
     fn refresh_custom_themes(&mut self) {
-        let themes = &mut self.settings.app_theme;
+        let themes = &mut self.preferences.app_theme;
         themes.custom = None;
         themes.custom_read = None;
         themes.custom_cache.clear();
@@ -402,7 +402,7 @@ impl QuillApp {
 
     /// The built-in theme on screen, if the applied one is built in.
     pub(crate) fn applied_builtin_theme(&self) -> Option<BuiltinTheme> {
-        self.settings
+        self.preferences
             .app_theme
             .applied
             .as_ref()

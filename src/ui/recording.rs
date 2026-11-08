@@ -78,7 +78,7 @@ impl QuillApp {
         }
         let next = !matches!(self.record_mode(), RecordMode::Video);
         self.set_media_pref(|prefs| prefs.prefer_video_mode = next, cx);
-        self.connection.set_note(StatusNote::silent(format!(
+        self.screen.connection.set_note(StatusNote::silent(format!(
             "{} — {}",
             if next {
                 tr(keys::Q_MISC_VIDEO_NOTE_MODE)
@@ -94,15 +94,14 @@ impl QuillApp {
         if quill::agent::ui_driver::guard::refuse_if_injecting("record a voice or video message") {
             return;
         }
-        self.recording.lock_next = false;
         match self.record_mode() {
             RecordMode::Audio => self.start_voice_recording(cx),
-            RecordMode::Video => self.start_video_note_recording(cx),
+            RecordMode::Video => self.start_video_note_recording(false, cx),
         }
     }
 
     pub(super) fn start_voice_recording(&mut self, cx: &mut Context<Self>) {
-        if self.composer_ui.pending_edit.is_some() || self.recording_busy() {
+        if self.chat_ui.is_editing() || self.recording_busy() {
             return;
         }
         if self.gif_panel_open() {
@@ -123,9 +122,10 @@ impl QuillApp {
 
     /// MED2: start a round video-note camera capture (ffmpeg V4L2, squared
     /// at finish; HQ size from media prefs). Needs a camera, honest error
-    /// otherwise.
-    pub(super) fn start_video_note_recording(&mut self, cx: &mut Context<Self>) {
-        if self.composer_ui.pending_edit.is_some() || self.recording_busy() {
+    /// otherwise. `locked`: it starts locked (the "Record Round Message"
+    /// shortcut, `startRecordingAndLock`).
+    pub(super) fn start_video_note_recording(&mut self, locked: bool, cx: &mut Context<Self>) {
+        if self.chat_ui.is_editing() || self.recording_busy() {
             return;
         }
         // Phase S1: round video notes need secret-chat layer ≥ 66 (TGX
@@ -149,12 +149,20 @@ impl QuillApp {
         if self.deny_send(SendKind::VideoMessages, cx) {
             return;
         }
-        self.with_capture_access(true, Self::begin_video_note_capture, cx);
+        let begin = if locked {
+            Self::begin_locked_video_note_capture
+        } else {
+            Self::begin_video_note_capture
+        };
+        self.with_capture_access(true, begin, cx);
     }
 
     fn begin_video_note_capture(&mut self, cx: &mut Context<Self>) {
-        let lock = std::mem::take(&mut self.recording.lock_next);
-        self.start_video_capture(CaptureFor::Message, lock, cx);
+        self.start_video_capture(CaptureFor::Message, false, cx);
+    }
+
+    fn begin_locked_video_note_capture(&mut self, cx: &mut Context<Self>) {
+        self.start_video_capture(CaptureFor::Message, true, cx);
     }
 
     /// A capture that stopped by itself: a video message that reached the
@@ -203,11 +211,13 @@ impl QuillApp {
             return;
         }
         self.recording.locked = !self.recording.locked;
-        self.connection.set_note(if self.recording.locked {
-            StatusNote::silent(tr(keys::Q_MISC_RECORDING_LOCKED_ESC_WONT_CANCEL))
-        } else {
-            StatusNote::silent(tr(keys::Q_MISC_RECORDING_UNLOCKED))
-        });
+        self.screen
+            .connection
+            .set_note(if self.screen.recording.locked {
+                StatusNote::silent(tr(keys::Q_MISC_RECORDING_LOCKED_ESC_WONT_CANCEL))
+            } else {
+                StatusNote::silent(tr(keys::Q_MISC_RECORDING_UNLOCKED))
+            });
         cx.notify();
     }
 
@@ -253,21 +263,19 @@ impl QuillApp {
         };
         let seconds = f64::from(capture.elapsed_secs());
         let mut resumed_preview = false;
-        if let Some(clock) = self.recording.preview.as_mut() {
+        if let Some(clock) = self.screen.recording.preview.as_mut() {
             if clock.is_playing() {
                 clock.pause();
-                self.playback.audio.pause();
+                self.players.audio.pause();
                 cx.notify();
                 return;
             }
-            if !clock.finished()
-                && self.playback.audio.is_loaded()
-                && !self.playback.audio.is_ended()
+            if !clock.finished() && self.players.audio.is_loaded() && !self.players.audio.is_ended()
             {
                 let at = clock.elapsed_secs();
                 // The progress tick sleeps while the track is paused.
                 quill::wake::CHROME.poke();
-                if self.playback.audio.resume(at).is_ok() {
+                if self.players.audio.resume(at).is_ok() {
                     clock.resume();
                     resumed_preview = true;
                 }
@@ -298,7 +306,7 @@ impl QuillApp {
     /// The preview ran to its end: show it stopped, ready to play again.
     pub(super) fn check_record_preview(&mut self) {
         let ended = self.recording.preview.as_ref().is_some_and(|clock| {
-            clock.is_playing() && (clock.finished() || self.playback.audio.is_ended())
+            clock.is_playing() && (clock.finished() || self.players.audio.is_ended())
         });
         if ended {
             self.recording.preview = None;
@@ -309,11 +317,13 @@ impl QuillApp {
     /// Switch "Play once" for the voice message being recorded.
     pub(super) fn toggle_record_once(&mut self, cx: &mut Context<Self>) {
         self.recording.once = !self.recording.once;
-        self.connection.set_note(if self.recording.once {
-            StatusNote::info(tr(keys::RECORD_ONCE_ACTIVE_TOOLTIP))
-        } else {
-            StatusNote::silent(tr(keys::Q_MISC_PLAY_ONCE_OFF))
-        });
+        self.screen
+            .connection
+            .set_note(if self.screen.recording.once {
+                StatusNote::info(tr(keys::RECORD_ONCE_ACTIVE_TOOLTIP))
+            } else {
+                StatusNote::silent(tr(keys::Q_MISC_PLAY_ONCE_OFF))
+            });
         cx.notify();
     }
 
@@ -331,14 +341,11 @@ impl QuillApp {
 
     pub(super) fn cancel_recording(&mut self, cx: &mut Context<Self>) {
         self.stop_record_preview();
-        self.recording.once = false;
         let was_video = self.recording.video().is_some() || self.recording.opening_video();
         match self.recording.take() {
             Some(media) => cx.background_spawn(async move { media.discard() }).detach(),
             None => self.recording.cancel_start(),
         }
-        self.recording.locked = false;
-        self.recording.discard_confirm = false;
         self.sync_voice_action();
         self.connection.set_note(if was_video {
             StatusNote::silent(tr(keys::Q_MISC_VIDEO_RECORDING_CANCELLED))

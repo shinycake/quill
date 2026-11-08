@@ -6,11 +6,12 @@
 //! and `NotificationClosed` signals for clicks, inline replies and dismissals.
 //!
 //! One connection per process, made on the first notification's worker
-//! thread (never on the UI thread). A listener thread turns signals into the
-//! same `(chat, action)` clicks the other platforms queue (or, for an
-//! account that is not on screen, `(account, chat, action)`); the typed
-//! reply waits in [`take_reply_text`]. No session bus means [`notifier`] is
-//! `None` and the caller falls back to `notify-send`.
+//! thread (never on the UI thread). A listener thread turns signals into
+//! clicks that name the account the notification was shown for, queued for
+//! `drain_account_clicks` like the other platforms' (which runs them on the
+//! account on screen only when it is still theirs); the typed reply waits in
+//! [`take_reply_text`]. No session bus means [`notifier`] is `None` and the
+//! caller falls back to `notify-send`.
 
 use crate::ui::background_accounts::AccountClicks;
 use quill::ids::{AccountKey, ChatId};
@@ -20,17 +21,15 @@ use quill::notify::dbus::{
     APP_NAME, BUS_NAME, Capabilities, INTERFACE, OBJECT_PATH, Signal, app_icon, interpret_signal,
     notify_actions, notify_hints,
 };
+use quill::notify_accounts::ChatClick;
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 use zbus::blocking::{Connection, MessageIterator, Proxy};
 use zbus::zvariant::Value;
 
-type Clicks = Arc<Mutex<Vec<(ChatId, NotificationAction)>>>;
-
-/// Whose notification: the account it belongs to (`None` for the account
-/// on screen when it was shown) and the chat.
-pub(super) type NotifyKey = (Option<AccountKey>, ChatId);
+/// Whose notification: the account it was shown for and the chat.
+pub(super) type NotifyKey = (AccountKey, ChatId);
 
 /// Which chat each live notification belongs to, and the other way round so
 /// a newer message replaces the chat's toast and "read elsewhere" can close
@@ -62,8 +61,7 @@ pub(super) struct Notifier {
     connection: Connection,
     capabilities: Capabilities,
     shown: Mutex<Shown>,
-    clicks: Clicks,
-    account_clicks: AccountClicks,
+    clicks: AccountClicks,
     reply_texts: Mutex<HashMap<NotifyKey, String>>,
 }
 
@@ -75,20 +73,15 @@ fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 
 /// The process-wide notifier, connected on first use. `None`, for good,
 /// when the session bus or the daemon cannot be reached.
-pub(super) fn notifier(
-    clicks: &Clicks,
-    account_clicks: &AccountClicks,
-) -> Option<&'static Notifier> {
+pub(super) fn notifier(clicks: &AccountClicks) -> Option<&'static Notifier> {
     NOTIFIER
-        .get_or_init(
-            || match Notifier::connect(clicks.clone(), account_clicks.clone()) {
-                Ok(notifier) => Some(notifier),
-                Err(error) => {
-                    eprintln!("desktop notifications over D-Bus unavailable: {error}");
-                    None
-                }
-            },
-        )
+        .get_or_init(|| match Notifier::connect(clicks.clone()) {
+            Ok(notifier) => Some(notifier),
+            Err(error) => {
+                eprintln!("desktop notifications over D-Bus unavailable: {error}");
+                None
+            }
+        })
         .as_ref()
 }
 
@@ -131,15 +124,16 @@ pub(in crate::ui) fn linux_service_capabilities() -> quill::notify::custom::Nati
     *lock(slot)
 }
 
-/// The text typed into the chat's notification, if it was answered inline.
-/// Taking it clears it. Only the account on screen offers the field.
-pub(super) fn take_reply_text(chat_id: ChatId) -> Option<String> {
+/// The text typed into `account`'s notification for the chat, if it was
+/// answered inline. Taking it clears it. Only the account on screen offers
+/// the field.
+pub(super) fn take_reply_text(account: &AccountKey, chat_id: ChatId) -> Option<String> {
     let notifier = NOTIFIER.get()?.as_ref()?;
-    lock(&notifier.reply_texts).remove(&(None, chat_id))
+    lock(&notifier.reply_texts).remove(&(account.clone(), chat_id))
 }
 
 impl Notifier {
-    fn connect(clicks: Clicks, account_clicks: AccountClicks) -> zbus::Result<Self> {
+    fn connect(clicks: AccountClicks) -> zbus::Result<Self> {
         let connection = Connection::session()?;
         // Subscribe before the first `Notify` so no signal is missed.
         let rule = zbus::MatchRule::builder()
@@ -155,7 +149,6 @@ impl Notifier {
             capabilities,
             shown: Mutex::new(Shown::default()),
             clicks,
-            account_clicks,
             reply_texts: Mutex::new(HashMap::new()),
         };
         quill::thread_guard::spawn_guarded("quill-notify-signals", move || listen(signals))
@@ -217,12 +210,14 @@ impl Notifier {
         Self::proxy(&self.connection)?.call::<_, _, ()>("CloseNotification", &(id,))
     }
 
-    /// Queue a click for the account it belongs to.
+    /// Queue a click with the account its notification was shown for.
     fn push_click(&self, key: NotifyKey, action: NotificationAction) {
-        match key {
-            (None, chat_id) => lock(&self.clicks).push((chat_id, action)),
-            (Some(account), chat_id) => lock(&self.account_clicks).push((account, chat_id, action)),
-        }
+        let (account, chat_id) = key;
+        lock(&self.clicks).push(ChatClick {
+            account,
+            chat_id,
+            action,
+        });
         // The poll loop sleeps while idle; wake it for the click.
         quill::wake::UPDATES.poke();
     }
@@ -283,7 +278,7 @@ mod tests {
     #[test]
     fn a_newer_toast_for_the_chat_replaces_the_old_id() {
         let mut shown = Shown::default();
-        let key = (None, ChatId(7));
+        let key = (AccountKey::primary(), ChatId(7));
         shown.insert(1, key.clone());
         shown.insert(2, key.clone());
         assert_eq!(shown.id_by_chat.get(&key), Some(&2));
@@ -298,8 +293,8 @@ mod tests {
     #[test]
     fn the_same_chat_on_two_accounts_keeps_two_toasts() {
         let mut shown = Shown::default();
-        let active = (None, ChatId(7));
-        let other = (AccountKey::new("account-1"), ChatId(7));
+        let active = (AccountKey::primary(), ChatId(7));
+        let other = (AccountKey::new("account-1").unwrap(), ChatId(7));
         shown.insert(1, active.clone());
         shown.insert(2, other.clone());
         assert_eq!(shown.id_by_chat.get(&active), Some(&1));

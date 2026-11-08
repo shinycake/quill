@@ -88,7 +88,7 @@ pub(crate) fn synthetic_service_row(
         is_outgoing: false,
         date,
         content: MessageContent::Action(Box::new(action)),
-        pending: false,
+        send: crate::state::SendState::Sent,
         reply_to: None,
         forward_info: None,
         extras: MessageExtras::default(),
@@ -99,8 +99,6 @@ pub(crate) fn synthetic_service_row(
         self_destruct: None,
         auto_delete: None,
         author_signature: None,
-        failed: false,
-        can_retry: false,
         ephemeral: None,
     }
 }

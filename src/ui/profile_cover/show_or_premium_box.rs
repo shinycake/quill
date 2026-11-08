@@ -87,7 +87,7 @@ impl QuillApp {
         cx.notify();
     }
 
-    fn close_show_or_premium(&mut self, cx: &mut Context<Self>) {
+    pub(super) fn close_show_or_premium(&mut self, cx: &mut Context<Self>) {
         self.profile_cover.show_or_premium = None;
         cx.notify();
     }

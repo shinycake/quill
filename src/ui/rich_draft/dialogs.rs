@@ -248,11 +248,13 @@ crate::ui::shell::register_dialogs! {
         7626,
         |app| app.composer_ui.rich_draft.discard_confirm,
         QuillApp::build_rich_discard_dialog,
-    ),
+    )
+    .close(|app, _, cx| app.close_rich_discard_confirm(cx)),
     /// tdesktop's "Remove Formatting" box for a non-Premium rich send.
     RichPremiumChoice => DialogSpec::new(
         7627,
         |app| app.composer_ui.rich_draft.premium_choice.is_some(),
         QuillApp::build_rich_premium_choice_dialog,
-    ),
+    )
+    .close(|app, _, cx| app.close_rich_premium_choice(cx)),
 }

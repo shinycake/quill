@@ -258,12 +258,12 @@ impl<S: JsonSender> ConnectDriver<S> {
                         call.screen_share_pending = false;
                         call.screen_sharing = true;
                         call.screen_share_answer.clear();
-                        call.transport_error = None;
+                        call.screen_share_error = None;
                     }
                     Err(err) => {
                         call.screen_share_pending = false;
                         call.screen_share_answer.clear();
-                        call.transport_error = Some(err.to_string());
+                        call.screen_share_error = Some(err.to_string());
                     }
                 }
             }

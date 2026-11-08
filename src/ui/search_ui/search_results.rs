@@ -15,7 +15,7 @@ impl QuillApp {
         self.chat_list.keys.begin_search_rows();
         let session = self.session();
         let status = session
-            .map(|s| s.search.search.status)
+            .map(|s| s.search.search.status())
             .unwrap_or(SearchStatus::Closed);
         let recents = session.is_some_and(|s| s.search.search.recents);
         let query = session
@@ -176,9 +176,8 @@ impl QuillApp {
             // page that left the list short of the viewport asks for more.
             let tabs = &search.tabs;
             if tabs.has_more() && !tabs.loading_more && !tabs.more_failed {
-                let entity = cx.entity();
-                cx.defer(move |cx| {
-                    entity.update(cx, |this, cx| this.maybe_load_more_search(cx));
+                self.defer_screen(cx, move |this, cx| {
+                    this.maybe_load_more_search(cx);
                 });
             }
         }

@@ -4,18 +4,6 @@ use super::*;
 use quill::ids::AccountKey;
 
 impl QuillApp {
-    pub(super) fn spawn_call_notification(
-        &mut self,
-        notification: quill::notify_call::CallNotification,
-        cx: &mut Context<Self>,
-    ) {
-        let account = self
-            .session()
-            .map(|s| s.account.clone())
-            .unwrap_or_else(AccountKey::primary);
-        self.spawn_call_notification_as(&account, notification, cx);
-    }
-
     /// The incoming-call notification of `account` (the one on screen, or
     /// one in the background whose call rings).
     pub(in crate::ui) fn spawn_call_notification_as(
@@ -45,20 +33,25 @@ impl QuillApp {
             return;
         };
         let Some(slot) = quill::thread_guard::InflightSlot::acquire(
-            &self.notify.notify_inflight,
+            &self.delivery.notify_inflight,
             MAX_OS_NOTIFICATION_THREADS,
         ) else {
             return;
         };
         let clicks = self.calls.notify_clicks.clone();
         let call_id = notification.call_id;
+        let account = account.clone();
         let spawn = quill::thread_guard::spawn_guarded("quill-call-notify", move || {
             let action = quill::notify_call::run_call_command(&command);
             drop(slot);
             if let Some(action) = action
                 && let Ok(mut guard) = clicks.lock()
             {
-                guard.push((call_id, action));
+                guard.push(quill::notify_call::CallPick {
+                    account,
+                    call_id,
+                    action,
+                });
                 // The poll loop sleeps while idle; wake it for the click.
                 quill::wake::UPDATES.poke();
             }
@@ -128,34 +121,38 @@ impl QuillApp {
         chat_id: ChatId,
         cx: &mut Context<Self>,
     ) {
-        if account.is_none() {
-            self.notify.reply_targets.remove(&chat_id);
-        }
+        let account = self.notification_account(account);
+        let key = (account, chat_id);
+        self.delivery.reply_targets.remove(&key);
         // One still waiting for its photo never shows.
-        self.notify
-            .preview_waits
-            .remove(&(account.cloned(), chat_id));
+        self.delivery.preview_waits.remove(&key);
+        let (account, chat_id) = key;
         // Quill's own windows, whichever backend showed the rest.
-        self.clear_custom_notifications(account, chat_id, cx);
+        self.clear_custom_notifications(&account, chat_id, cx);
         if quill::notify::current_backend() == quill::notify::NotifyBackend::Native {
-            let tag = match account {
-                Some(key) => quill::notify::notification_tag(&key.0, chat_id),
-                None => self.notification_tag(chat_id),
-            };
-            cx.dismiss_system_notification(&tag);
+            cx.dismiss_system_notification(&quill::notify::notification_tag(&account.0, chat_id));
             return;
         }
-        self.close_linux_notification(account.cloned(), chat_id);
+        self.close_linux_notification(account, chat_id);
+    }
+
+    /// The account a notification is for: `account`, or the one on screen
+    /// when `None` ("primary" before any session). Every shown
+    /// notification keeps it, so a click or reply after an account switch
+    /// still knows whose it was.
+    pub(in crate::ui) fn notification_account(&self, account: Option<&AccountKey>) -> AccountKey {
+        account
+            .cloned()
+            .or_else(|| self.session().map(|s| s.account.clone()))
+            .unwrap_or_else(AccountKey::primary)
     }
 
     /// Linux: `CloseNotification` for the chat's toast on a worker thread,
     /// when the D-Bus notifier is up. Nothing elsewhere.
     #[cfg_attr(not(target_os = "linux"), allow(unused_variables, clippy::unused_self))]
-    fn close_linux_notification(&self, account: Option<AccountKey>, chat_id: ChatId) {
+    fn close_linux_notification(&self, account: AccountKey, chat_id: ChatId) {
         #[cfg(target_os = "linux")]
-        if let Some(notifier) =
-            super::linux_dbus::notifier(&self.notify.notify_clicks, &self.background.clicks)
-        {
+        if let Some(notifier) = super::linux_dbus::notifier(&self.background.clicks) {
             let _ = quill::thread_guard::spawn_guarded("quill-notify-close", move || {
                 if let Err(error) = notifier.close(&(account, chat_id)) {
                     eprintln!("failed to close the desktop notification: {error}");
@@ -184,7 +181,7 @@ impl QuillApp {
             None => Some(NotificationSound::DefaultTone),
         };
         if let Some(sound) = sound {
-            self.notify.notification_sounds.play_at(sound, volume);
+            self.delivery.notification_sounds.play_at(sound, volume);
         }
     }
 
@@ -240,11 +237,11 @@ impl QuillApp {
     }
 
     /// [`Self::show_os_notification`] for the account on screen (`account`
-    /// `None`) or a background account. A background account's
-    /// notification has no reply field (a reply needs that account on
-    /// screen: Reply switches to it and focuses the composer), and its
-    /// clicks go to `background.clicks`. `preview` is the message's photo
-    /// ("Show photo previews").
+    /// `None`) or a named account. The notification keeps the account it
+    /// was shown for, and its clicks run on that account (`ChatClick`). One
+    /// for an account not on screen has no reply field (a reply needs that
+    /// account on screen: Reply switches to it and focuses the composer).
+    /// `preview` is the message's photo ("Show photo previews").
     pub(in crate::ui) fn show_notification_as(
         &mut self,
         account: Option<&AccountKey>,
@@ -256,13 +253,16 @@ impl QuillApp {
     ) {
         let notification = notification.shown();
         let chat_id = notification.chat_id;
+        let account = self.notification_account(account);
+        let on_screen = self.session().is_some_and(|s| s.account == account);
         let offers_actions = notification.offers_actions(locked);
-        let reply_field = account.is_none() && offers_actions;
+        let reply_field = on_screen && offers_actions;
         // An inline reply answers the newest notified message.
-        if account.is_none() {
+        if on_screen {
+            let key = (account.clone(), chat_id);
             match notification.message_id {
-                Some(message_id) => self.notify.reply_targets.insert(chat_id, message_id),
-                None => self.notify.reply_targets.remove(&chat_id),
+                Some(message_id) => self.delivery.reply_targets.insert(key, message_id),
+                None => self.delivery.reply_targets.remove(&key),
             };
         }
         if self.custom_notifications_active() {
@@ -273,7 +273,7 @@ impl QuillApp {
                 && quill::notify_focus::dnd_active();
             if !skip {
                 self.show_custom_notification(
-                    account,
+                    &account,
                     notification,
                     icon,
                     preview,
@@ -289,10 +289,7 @@ impl QuillApp {
             // click returns through `on_system_notification_response`. The
             // picture and the reply field ride beside the GPUI notification;
             // a locked app offers no buttons, so no field either.
-            let tag = match account {
-                Some(key) => quill::notify::notification_tag(&key.0, chat_id),
-                None => self.notification_tag(chat_id),
-            };
+            let tag = quill::notify::notification_tag(&account.0, chat_id);
             super::native_extras::register(
                 &tag,
                 icon.as_deref(),
@@ -323,20 +320,20 @@ impl QuillApp {
             return;
         };
         let Some(slot) = quill::thread_guard::InflightSlot::acquire(
-            &self.notify.notify_inflight,
+            &self.delivery.notify_inflight,
             MAX_OS_NOTIFICATION_THREADS,
         ) else {
             return;
         };
-        let clicks = self.notify.notify_clicks.clone();
-        let account_clicks = self.background.clicks.clone();
-        let account = account.cloned();
+        // Every click goes to `background.clicks` with the account, and
+        // `drain_account_clicks` runs it on that account.
+        let clicks = self.background.clicks.clone();
         let spawn = quill::thread_guard::spawn_guarded("quill-notify", move || {
             // D-Bus first: `Notify` returns at once and the listener
             // thread reports the click. Without a session bus,
             // `notify-send --wait` holds the thread until the click.
             #[cfg(target_os = "linux")]
-            if let Some(notifier) = super::linux_dbus::notifier(&clicks, &account_clicks) {
+            if let Some(notifier) = super::linux_dbus::notifier(&clicks) {
                 if let Err(error) = notifier.show(
                     (account, chat_id),
                     &notification.title,
@@ -355,17 +352,12 @@ impl QuillApp {
             let Some(action) = outcome.action else {
                 return;
             };
-            match account {
-                Some(account) => {
-                    if let Ok(mut guard) = account_clicks.lock() {
-                        guard.push((account, chat_id, action));
-                    }
-                }
-                None => {
-                    if let Ok(mut guard) = clicks.lock() {
-                        guard.push((chat_id, action));
-                    }
-                }
+            if let Ok(mut guard) = clicks.lock() {
+                guard.push(quill::notify_accounts::ChatClick {
+                    account,
+                    chat_id,
+                    action,
+                });
             }
             quill::wake::UPDATES.poke();
         });
@@ -383,8 +375,8 @@ impl QuillApp {
             return;
         }
         let open_chat = self.open_chat_id();
-        let composer_idle = self.composer_ui.pending_edit.is_none()
-            && self.composer_ui.reply().is_none()
+        let composer_idle = !self.chat_ui.is_editing()
+            && self.chat_ui.reply().is_none()
             && self.composer.read(cx).value().trim().is_empty();
         for (chat_id, topic) in clears {
             let Some(flag) = self.composer_ui.clear_draft_on_success.clone() else {

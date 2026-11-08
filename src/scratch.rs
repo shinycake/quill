@@ -6,6 +6,9 @@
 //! or panics (libtest still exits through `exit`). A hard kill (SIGKILL) skips
 //! it, as it would any destructor.
 
+mod owned_file;
+
+pub use owned_file::OwnedFile;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, MutexGuard, Once, PoisonError};

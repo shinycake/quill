@@ -47,7 +47,7 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if !self.composer_ui.rich_editor_open {
+        if !self.chat_ui.rich_editor_open {
             let tag = super::composer_field::tag_for_action(&action);
             self.toggle_composer_tag(tag, window, cx);
             self.composer
@@ -73,7 +73,7 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if !self.composer_ui.rich_editor_open {
+        if !self.chat_ui.rich_editor_open {
             self.clear_composer_tags(window, cx);
             self.composer
                 .update(cx, |input, cx| input.focus(window, cx));
@@ -92,7 +92,7 @@ impl QuillApp {
 
     /// M1: load the chat's scheduled sends and open the dialog.
     pub(in crate::ui) fn open_scheduled_dialog(&mut self, cx: &mut Context<Self>) {
-        self.composer_ui.schedule_popup_open = false;
+        self.chat_ui.schedule_popup_open = false;
         if let Some(live) = self.live.as_mut()
             && let Some(chat_id) = live.driver.session.open_chat
         {
@@ -105,7 +105,7 @@ impl QuillApp {
                 ))),
             }
         }
-        self.composer_ui.scheduled_dialog_open = true;
+        self.chat_ui.scheduled_dialog_open = true;
         cx.notify();
     }
 
@@ -129,7 +129,7 @@ impl QuillApp {
                     .session
                     .messages
                     .scheduled_messages
-                    .retain(|m| m.id != message_id);
+                    .retain(|m| m.chat_id != chat_id || m.id != message_id);
                 self.connection.set_note(StatusNote::silent(tr(
                     keys::Q_CHAT_SCHEDULED_MESSAGE_DELETED,
                 )));
@@ -377,8 +377,8 @@ impl QuillApp {
             option_chip("chip-schedule", label, cx)
                 .cursor_pointer()
                 .on_click(cx.listener(|this, _, window, cx| {
-                    if this.composer_ui.schedule_popup_open {
-                        this.composer_ui.schedule_popup_open = false;
+                    if this.chat_ui.schedule_popup_open {
+                        this.chat_ui.schedule_popup_open = false;
                         cx.notify();
                     } else {
                         this.open_schedule_picker(ScheduleTarget::Composer, window, cx);
@@ -433,8 +433,7 @@ impl QuillApp {
     /// of opening the editor.
     #[inline(never)]
     fn rich_editor_entry(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        if self.composer_ui.rich_editor_open || self.composer.read(cx).value().lines().count() <= 3
-        {
+        if self.chat_ui.rich_editor_open || self.composer.read(cx).value().lines().count() <= 3 {
             return None;
         }
         Some(
@@ -449,7 +448,7 @@ impl QuillApp {
                     if premium {
                         // The editor works on block markup: show it raw.
                         let markup = this.composer_markup(cx);
-                        this.composer_ui.rich_editor_open = true;
+                        this.chat_ui.rich_editor_open = true;
                         this.set_composer_markup(&markup, window, cx);
                         this.connection.set_note(StatusNote::silent(tr(
                             keys::Q_CHAT_RICH_EDITOR_MARKUP_BECOMES_BLOCKS,
@@ -487,10 +486,12 @@ impl QuillApp {
         } else if let Some(live) = self.live.as_mut()
             && let Some(chat_id) = live.driver.session.open_chat
         {
-            self.connection.set_note(match send(live, chat_id, &text) {
-                Ok(_) => StatusNote::silent(working_note),
-                Err(_) => StatusNote::info(tr(keys::Q_CHAT_AI_TOOLS_UNAVAILABLE_HERE)),
-            });
+            self.screen
+                .connection
+                .set_note(match send(live, chat_id, &text) {
+                    Ok(_) => StatusNote::silent(working_note),
+                    Err(_) => StatusNote::info(tr(keys::Q_CHAT_AI_TOOLS_UNAVAILABLE_HERE)),
+                });
         } else {
             self.connection
                 .set_note(StatusNote::info(tr(keys::Q_CHAT_AI_TOOLS_UNAVAILABLE_HERE)));
@@ -648,7 +649,7 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(position) = self.playback.active_position_secs() else {
+        let Some(position) = self.active_position_secs() else {
             return;
         };
         let timecode = quill::message_menu::timecode_text(position);
@@ -667,7 +668,8 @@ impl QuillApp {
     /// all" action.
     pub(in crate::ui) fn unpin_all_messages(&mut self, chat_id: ChatId, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
-            self.connection
+            self.screen
+                .connection
                 .set_note(match live.driver.unpin_all_chat_messages(chat_id) {
                     Ok(_) => StatusNote::silent(tr(keys::Q_CHAT_UNPINNING_ALL)),
                     Err(_) => StatusNote::error(tr(keys::Q_CHAT_COULD_NOT_UNPIN_ALL)),
@@ -716,11 +718,12 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         if let Some(live) = self.live.as_mut() {
-            self.connection
-                .set_note(match live.driver.get_message_link(chat_id, message_id) {
+            self.screen.connection.set_note(
+                match live.driver.get_message_link(chat_id, message_id) {
                     Ok(_) => StatusNote::info(tr(keys::Q_CHAT_FETCHING_MESSAGE_LINK)),
                     Err(_) => StatusNote::error(tr(keys::Q_CHAT_COULD_NOT_GET_MESSAGE_LINK)),
-                });
+                },
+            );
         } else {
             self.connection
                 .set_note(StatusNote::silent(tr(keys::Q_CHAT_NO_LIVE_CONNECTION)));

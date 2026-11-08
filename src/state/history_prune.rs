@@ -168,7 +168,7 @@ fn tail_excess(messages: &HistoryMessages, keep: usize) -> Vec<i64> {
     let excess = messages.len().saturating_sub(keep);
     messages
         .iter()
-        .filter(|(_, message)| !message.pending && !message.failed)
+        .filter(|(_, message)| !message.pending() && !message.failed())
         .map(|(id, _)| *id)
         .take(excess)
         .collect()
@@ -195,7 +195,7 @@ impl HistoryState {
     fn has_unsent(&self) -> bool {
         self.messages
             .values()
-            .any(|message| message.pending || message.failed)
+            .any(|message| message.pending() || message.failed())
     }
 }
 
@@ -517,6 +517,9 @@ impl Session {
         let members = groups.supergroup_members.len();
         groups
             .supergroup_members
+            .retain(|(chat, _), _| *chat != chat_id.0);
+        groups
+            .supergroup_member_queries
             .retain(|(chat, _), _| *chat != chat_id.0);
         let dropped = groups.basic_group_members.remove(&chat_id.0).is_some()
             || groups.supergroup_members.len() != members;

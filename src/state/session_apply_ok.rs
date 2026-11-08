@@ -41,6 +41,7 @@ impl Session {
         self.apply_share_theme_ok(pending);
         self.apply_group_type_ok(pending);
         self.apply_ai_compose_ok(pending);
+        self.apply_hang_up_ok(pending);
         match pending.map(|p| p.purpose) {
             Some(
                 RequestPurpose::SetChatTheme
@@ -50,7 +51,9 @@ impl Session {
             Some(RequestPurpose::Messages(MessagesPurpose::EditMessageSchedulingState {
                 message_id,
                 scheduling,
-            })) => self.finish_scheduling_edit(message_id, scheduling),
+            })) => {
+                self.finish_scheduling_edit(pending.and_then(|p| p.chat_id), message_id, scheduling)
+            }
             Some(RequestPurpose::DeleteAllCallMessages) => {
                 self.calls.recent_calls.clear();
                 self.calls.recent_calls_offset.clear();
@@ -116,7 +119,7 @@ impl Session {
         ) {
             self.settings.sessions_stale = true;
             self.settings.sessions_mutating = false;
-            self.settings.sessions_error = None;
+            self.settings.sessions.clear_error();
         }
         // Slice A4: a `toggleSessionCanAcceptSecretChats` /
         // `toggleSessionCanAcceptCalls` succeeded — same stale
@@ -131,7 +134,7 @@ impl Session {
         ) {
             self.settings.sessions_stale = true;
             self.settings.sessions_mutating = false;
-            self.settings.sessions_error = None;
+            self.settings.sessions.clear_error();
         }
         if let Some(RequestPurpose::Settings(SettingsPurpose::SetDefaultAutoDelete { seconds })) =
             pending.map(|p| p.purpose)
@@ -183,6 +186,9 @@ impl Session {
             self.auth_state.change_number_phone = None;
             self.auth_state.change_number_timeout = None;
             self.auth_state.change_number_checking = false;
+            // The send/resend answers are dropped below, so nothing else
+            // would clear this.
+            self.auth_state.change_number_loading = false;
             self.auth_state.change_number_error = None;
             // A8: drop any stale in-flight send/resend purposes —
             // a late resend answer must not resurrect the

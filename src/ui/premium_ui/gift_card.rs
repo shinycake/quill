@@ -130,7 +130,7 @@ crate::ui::shell::register_dialogs! {
         |app| app.session().is_some_and(|s| s.payments.hub.stars_open),
         QuillApp::build_stars_dialog,
     )
-    .closes(|app, _, cx| app.close_stars(cx)),
+    .close(|app, _, cx| app.close_stars(cx)),
 
     /// Received gifts of a user or channel.
     ReceivedGifts => DialogSpec::new(
@@ -145,5 +145,5 @@ crate::ui::shell::register_dialogs! {
         |app| app.session().is_some_and(|s| s.payments.hub.premium_open),
         QuillApp::build_premium_dialog,
     )
-    .closes(|app, _, cx| app.close_premium(cx)),
+    .close(|app, _, cx| app.close_premium(cx)),
 }

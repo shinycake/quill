@@ -314,7 +314,7 @@ impl QuillApp {
                 };
                 let chat = target.chat;
                 // `crl::on_main`: on the next turn, checked again.
-                self.history.pull.jump = Some(cx.spawn(async move |this, cx| {
+                self.history.pull.jump = Some(self.spawn_screen(cx, async move |this, cx| {
                     let _ = cx.update_window(handle, |_, _, cx| {
                         let _ = this.update(cx, |this, cx| {
                             this.in_window_scope(scope, cx, |this, cx| {
@@ -340,7 +340,8 @@ impl QuillApp {
             return;
         };
         let started = Instant::now();
-        self.history.pull.jump = Some(cx.spawn(async move |this, cx| {
+        // `next` is a chat of the account the pull started on.
+        self.history.pull.jump = Some(self.spawn_screen(cx, async move |this, cx| {
             loop {
                 let waited = started.elapsed().as_millis() as u64;
                 let (history, pinned) = this

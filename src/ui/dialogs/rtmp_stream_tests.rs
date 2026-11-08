@@ -142,7 +142,7 @@ fn the_key_stays_hidden_until_the_warning_is_confirmed(cx: &mut TestAppContext) 
     let (app, mut main) = open_main(cx);
     answer(&app, &mut main);
     let shown = |app: &Entity<QuillApp>, vcx: &mut VisualTestContext| {
-        app.read_with(vcx, |app, _| app.group_call.rtmp_start.key_shown)
+        app.read_with(vcx, |app, _| app.group_call_boxes.rtmp_start.key_shown)
     };
     assert!(!shown(&app, &mut main));
     click(&mut main, "rtmp-start-key");
@@ -196,7 +196,7 @@ fn start_streaming_ends_the_process_and_joins_the_new_call(cx: &mut TestAppConte
     assert!(main.debug_bounds("rtmp-start-go").is_none(), "box closed");
     assert!(
         app.read_with(&main, |app, _| matches!(
-            app.group_call.stream.pending_join,
+            app.group_call_screen.stream_join,
             Some((
                 StreamJoinIntent::Created {
                     chat: CHANNEL,
@@ -283,14 +283,18 @@ fn revoke_asks_first_then_closes_its_confirmation(cx: &mut TestAppContext) {
     answer(&app, &mut main);
     // The "..." menu's "Revoke" item opens this confirmation.
     app.update(&mut main, |app, cx| {
-        app.group_call.rtmp_start.confirm = Some(super::RtmpConfirm::Revoke);
+        app.group_call_boxes.rtmp_start.confirm = Some(super::RtmpConfirm::Revoke);
         cx.notify();
     });
     frames(&mut main);
     assert!(main.debug_bounds("rtmp-start-confirm-text").is_some());
     click(&mut main, "rtmp-start-confirm");
     assert!(
-        app.read_with(&main, |app, _| app.group_call.rtmp_start.confirm.is_none()),
+        app.read_with(&main, |app, _| app
+            .group_call_boxes
+            .rtmp_start
+            .confirm
+            .is_none()),
         "Revoke closes the confirmation and asks for a new key"
     );
 }
@@ -307,7 +311,7 @@ fn start_streaming_during_a_call_asks_to_leave_it_first(cx: &mut TestAppContext)
             session.calls.active_group_call = Some(call);
         }
         // Its own window stays closed: the test is about this one.
-        app.group_call.window_closed_by_user = Some(77);
+        app.group_call_screen.window_closed_by_user = Some(77);
     });
     click(&mut main, "rtmp-start-go");
     assert!(

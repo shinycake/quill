@@ -413,7 +413,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 .histories
                 .get(&chat_id.0)
                 .and_then(|history| history.messages.get(&message_id.0))
-                .filter(|message| !message.pending && message.id.0 > 0)
+                .filter(|message| !message.pending() && message.id.0 > 0)
                 .is_some_and(|message| match &message.content {
                     crate::telegram::envelope::MessageContent::Location(location) => {
                         location.live.is_some_and(|live| {
@@ -490,7 +490,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         let Some(message) = message else {
             return Err(ConnectSendError::InvalidRequest);
         };
-        if message.pending || message.id.0 <= 0 {
+        if message.pending() || message.id.0 <= 0 {
             return Err(ConnectSendError::InvalidRequest);
         }
         let extra = self.session.request(

@@ -238,17 +238,24 @@ impl QuillApp {
         let current = viewer.current().map(StoryViewerItem::key);
         self.stories.viewer = viewer;
         // Phase 9.5: viewers list and report flow are per-story.
-        self.stories.viewers_open = false;
-        self.stories.report_open = false;
-        self.stories.stats_open = false;
+        if let Some(open) = self.stories.viewer_ui_mut() {
+            open.viewers_open = false;
+        }
+        if let Some(open) = self.stories.viewer_ui_mut() {
+            open.report_open = false;
+        }
+        if let Some(open) = self.stories.viewer_ui_mut() {
+            open.stats_open = false;
+        }
         self.switch_open_story(previous, current);
         // Phase 9.6: (re)start the playback clock + tick whenever the
         // viewer (re)opens — also covers the deferred `pending_story_open`
         // path, which funnels through here.
         self.stories.playback.start(Instant::now());
-        self.stories.pause.reset();
-        self.stories.native_failed = None;
-        self.stories.video_wait_since = Some(Instant::now());
+        if let Some(open) = self.stories.viewer_ui_mut() {
+            open.pause.reset();
+        }
+        self.stories.video.retry();
         self.sync_story_video(cx);
         self.ensure_story_tick(cx);
         self.ensure_story_download(cx);

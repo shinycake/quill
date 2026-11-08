@@ -105,7 +105,7 @@ fn demo_typing(app: &mut QuillApp, window: &mut Window, cx: &mut Context<QuillAp
         let end = input.value().len();
         input.set_selected_range(end..end, cx);
     });
-    QuillApp::spawn_main_in(window, cx, async move |app, cx| {
+    QuillApp::spawn_app_in(window, cx, async move |app, cx| {
         cx.background_executor()
             .timer(std::time::Duration::from_millis(600))
             .await;
@@ -152,7 +152,7 @@ const FRAME_MS: u64 = 1000 / super::agent_takeover_glow::SWEEP_FPS as u64;
 #[cfg(feature = "demo-capture")]
 fn record(dir: std::path::PathBuf, window: &mut Window, cx: &mut Context<QuillApp>) {
     let _ = std::fs::create_dir_all(&dir);
-    QuillApp::spawn_main_in(window, cx, async move |_app, cx| {
+    QuillApp::spawn_app_in(window, cx, async move |_app, cx| {
         // Let the window open and draw before the first frame.
         cx.background_executor()
             .timer(std::time::Duration::from_millis(800))

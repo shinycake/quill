@@ -516,7 +516,8 @@ crate::ui::shell::register_dialogs! {
         5450,
         |app| app.new_chat_dialog().is_some(),
         QuillApp::build_new_chat_dialog,
-    ),
+    )
+    .close(|app, _, cx| app.close_new_chat(cx)),
 }
 
 mod demo;

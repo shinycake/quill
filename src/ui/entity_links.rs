@@ -13,6 +13,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
+use super::playback_state::ChatMessage;
 use super::shell::{DialogKind, QuillShell};
 use super::*;
 use crate::ui::dismiss_layer::DismissLayer;
@@ -170,7 +171,7 @@ impl QuillApp {
                         let _ = live.driver.request_bank_card_info(&number);
                     }
                 }
-                self.message_ui.link_popup = Some(LinkPopup {
+                self.chat_ui.link_popup = Some(LinkPopup {
                     position: window.mouse_position(),
                     link,
                 });
@@ -286,7 +287,8 @@ impl QuillApp {
         }
         if let Some(live) = self.live.as_mut() {
             let snapshot = ComposerSnapshot::capture(chat_id, view_generation, text);
-            self.connection
+            self.screen
+                .connection
                 .set_note(match live.driver.send_snapshot(&snapshot) {
                     Ok(_) => StatusNote::silent(tr(keys::Q_OPS_SENDING)),
                     Err(_) => StatusNote::error(tr(keys::Q_OPS_COULD_NOT_SEND_THE_COMMAND)),
@@ -335,7 +337,9 @@ impl QuillApp {
                 let (file_id, listened, duration) =
                     (voice.file_id, voice.is_listened, voice.duration);
                 let secs = clamp_seek(seconds, duration);
-                self.playback.positions.insert(target_id, secs);
+                self.playback
+                    .positions
+                    .insert(ChatMessage::new(chat_id, target_id), secs);
                 if self.playback.playing_voice == Some(target_id)
                     && self.playback.player.chat.is_none_or(|c| c == chat_id)
                 {
@@ -354,7 +358,9 @@ impl QuillApp {
             (MessageContent::Audio(audio), SeekTarget::Audio) => {
                 let (file_id, duration) = (audio.file_id, audio.duration);
                 let secs = clamp_seek(seconds, duration);
-                self.playback.positions.insert(target_id, secs);
+                self.playback
+                    .positions
+                    .insert(ChatMessage::new(chat_id, target_id), secs);
                 if self.playback.playing_audio == Some(target_id)
                     && self.playback.player.chat.is_none_or(|c| c == chat_id)
                 {
@@ -457,7 +463,7 @@ impl QuillApp {
 
     /// The menu of a phone number, card number, date or TON address.
     pub(super) fn link_popup_overlay(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        self.message_ui.link_popup.as_ref()?;
+        self.chat_ui.link_popup.as_ref()?;
         self.link_popup_overlay_body(cx)
     }
 
@@ -467,7 +473,7 @@ impl QuillApp {
     /// The outer function repeats this body's first check; keep the two in step.
     #[inline(never)]
     fn link_popup_overlay_body(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let popup = self.message_ui.link_popup.clone()?;
+        let popup = self.chat_ui.link_popup.clone()?;
         let (label, text) = match &popup.link {
             LinkTarget::Phone(number) => (tr(keys::Q_OPS_COPY_PHONE_NUMBER), number.clone()),
             LinkTarget::BankCard(number) => (tr(keys::Q_OPS_COPY_CARD_NUMBER), number.clone()),
@@ -506,7 +512,7 @@ impl QuillApp {
             super::ton_wallet_ui::explorer_menu_row(
                 "link-popup-explorer",
                 address,
-                |this| this.message_ui.link_popup = None,
+                |this| this.chat_ui.link_popup = None,
                 None,
                 cx,
             )
@@ -515,7 +521,7 @@ impl QuillApp {
         let send_row = (ton_address.is_some() && wallet_on).then(|| {
             super::ton_wallet_ui::send_money_menu_row(
                 "link-popup-send-money",
-                |this| this.message_ui.link_popup = None,
+                |this| this.chat_ui.link_popup = None,
                 None,
                 cx,
             )
@@ -524,7 +530,7 @@ impl QuillApp {
             DismissLayer::new(
                 "link-popup-overlay",
                 cx.listener(|this, _, _, cx| {
-                    this.message_ui.link_popup = None;
+                    this.chat_ui.link_popup = None;
                     cx.notify();
                 }),
             )
@@ -567,7 +573,7 @@ impl QuillApp {
                             .child(Icon::new(gpui_kit::assets::IconName::Copy).size(px(16.)))
                             .child(label)
                             .on_click(cx.listener(move |this, _, _, cx| {
-                                this.message_ui.link_popup = None;
+                                this.chat_ui.link_popup = None;
                                 if ton_address.is_some() {
                                     this.copy_ton_address(text.clone(), cx);
                                 } else {
@@ -596,7 +602,7 @@ impl QuillApp {
                             .aria_label(label.clone())
                             .child(label)
                             .on_click(cx.listener(move |this, _, _, cx| {
-                                this.message_ui.link_popup = None;
+                                this.chat_ui.link_popup = None;
                                 this.open_link(&url, cx);
                             }))
                     })),
@@ -741,5 +747,9 @@ crate::ui::shell::register_dialogs! {
         3300,
         |app| app.message_ui.open_link_confirm.is_some(),
         QuillApp::build_open_link_dialog,
-    ),
+    )
+    .close(|app, _, cx| {
+            app.message_ui.open_link_confirm = None;
+            cx.notify();
+        }),
 }

@@ -9,6 +9,7 @@ use crate::ui::*;
 use gpui_kit::*;
 use quill::ids::ChatId;
 use quill::settings::ThemeChoice;
+use quill::state::fetch::Fetch;
 use std::sync::atomic::Ordering;
 
 register_demos![
@@ -79,9 +80,7 @@ impl QuillApp {
         // the overlay open (injected, no live Telegram).
         if let Some(session) = self.demo_session.as_mut() {
             self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
-            session.settings.sessions = Some(demo_sessions());
-            session.settings.sessions_loading = false;
-            session.settings.sessions_error = None;
+            session.settings.sessions = Fetch::Ready(demo_sessions());
         }
         self.open_sessions(cx);
         if std::env::var_os("QUILL_DEMO_DEVICE_LINK").is_some() {

@@ -102,6 +102,20 @@ impl ChatWindowView {
         });
     }
 
+    /// The app already did the window's bookkeeping (an account switch
+    /// closed it): its close runs nothing more. The platform reports the
+    /// close after the switch, when the bookkeeping would run on the new
+    /// account and file its windows as these, now gone.
+    pub(super) fn mark_closed(&mut self) {
+        self.closed = true;
+    }
+
+    /// Whether the window's bookkeeping ran.
+    #[cfg(test)]
+    pub(super) fn is_closed(&self) -> bool {
+        self.closed
+    }
+
     /// Close the window from inside it (title bar close, Cmd/Ctrl+W).
     pub(crate) fn close(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.closing(true, cx);

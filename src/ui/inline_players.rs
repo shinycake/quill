@@ -363,9 +363,27 @@ struct State {
 #[derive(Default)]
 pub(super) struct InlineVideos {
     state: RefCell<State>,
+    /// The account the players play for: the keys are its chat and
+    /// message ids, which another account's rows can repeat.
+    owner: RefCell<Option<quill::ids::AccountKey>>,
 }
 
 impl InlineVideos {
+    /// The account on screen plays its clips from here on: another
+    /// account's players go first, so a row of the same ids never shows
+    /// the other account's clip. Called at the start of every frame.
+    pub(super) fn own(&self, account: &quill::ids::AccountKey) {
+        let Ok(mut owner) = self.owner.try_borrow_mut() else {
+            return;
+        };
+        if owner.as_ref() == Some(account) {
+            return;
+        }
+        *owner = Some(account.clone());
+        drop(owner);
+        self.clear();
+    }
+
     /// A short borrow of the state; `None` when it is already borrowed
     /// further up the stack (never expected: the call is skipped, and
     /// `QUILL_TRACE_VIDEO=1` logs it).

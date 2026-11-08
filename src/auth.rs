@@ -94,6 +94,9 @@ pub enum StartupFailure {
     Library,
     /// The system refused the receive thread.
     NoThread,
+    /// The account's previous client stopped before it confirmed its
+    /// close, so this run never opens its database again.
+    CloseUnconfirmed,
 }
 
 impl StartupFailure {
@@ -106,6 +109,7 @@ impl StartupFailure {
             Self::DataFolder { .. } => tr(keys::Q_STARTUP_DATA_FOLDER),
             Self::Library => tr(keys::Q_STARTUP_LIBRARY),
             Self::NoThread => tr(keys::Q_STARTUP_NO_THREAD),
+            Self::CloseUnconfirmed => tr(keys::Q_STARTUP_CLOSE_UNCONFIRMED),
         }
     }
 

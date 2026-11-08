@@ -97,7 +97,7 @@ impl QuillApp {
             this.on_step_slider(key, event, cx);
         })
         .detach();
-        self.settings.index_sliders.map.insert(key, slider);
+        self.preferences.index_sliders.map.insert(key, slider);
     }
 
     /// A slider moved (`Change`, while dragging) or was let go (`Release`).
@@ -124,7 +124,7 @@ impl QuillApp {
 
     /// The limits the two storage sliders are on.
     pub(super) fn storage_slider_limits(&self, cx: &App) -> (Option<i64>, Option<i64>) {
-        let sliders = &self.settings.index_sliders;
+        let sliders = &self.preferences.index_sliders;
         let size = sliders
             .index(StepSlider::StorageSize, cx)
             .and_then(size_limit_at);
@@ -144,7 +144,7 @@ impl QuillApp {
         value: String,
         cx: &App,
     ) -> Option<AnyElement> {
-        let slider = self.settings.index_sliders.get(key)?;
+        let slider = self.preferences.index_sliders.get(key)?;
         Some(
             div()
                 .id(id)

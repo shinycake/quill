@@ -15,7 +15,7 @@ impl QuillApp {
         sender: MessageSender,
         cx: &mut Context<Self>,
     ) {
-        self.connection.set_note(match self.live.as_mut() {
+        self.screen.connection.set_note(match self.live.as_mut() {
             Some(live) => match live
                 .driver
                 .delete_message_reactions_from(chat_id, message_id, sender)

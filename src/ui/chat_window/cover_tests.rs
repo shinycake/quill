@@ -40,11 +40,11 @@ fn open(cx: &mut TestAppContext) -> (Entity<QuillApp>, VisualTestContext) {
     let handle = cx.open_window(size(px(1100.), px(700.)), move |window, cx| {
         let view = cx.new(|cx| QuillApp::new_with_demo(window, cx, None, Some(demo)));
         view.read(cx)
-            .playback
+            .players
             .stickers
             .follow(cx.background_executor().clone());
         for file in STICKER_FILES {
-            view.read(cx).playback.stickers.set_fixture(
+            view.read(cx).players.stickers.set_fixture(
                 file,
                 Arc::new(|edge| DecodedFrames {
                     frames: (0..30u8)
@@ -66,7 +66,7 @@ fn open(cx: &mut TestAppContext) -> (Entity<QuillApp>, VisualTestContext) {
             window.render_frame(cx);
         });
         vcx.run_until_parked();
-        app.read_with(&vcx, |app, _| app.playback.stickers.settle());
+        app.read_with(&vcx, |app, _| app.players.stickers.settle());
         app.update(&mut vcx, |_, cx| cx.notify());
     }
     vcx.run_until_parked();
@@ -372,7 +372,7 @@ fn a_covering_chat_window_keeps_its_own_stickers_animating(cx: &mut TestAppConte
     let vcx = &mut vcx;
     let chat = open_chat_window(&app, vcx, OPEN, beside());
     for _ in 0..4 {
-        app.read_with(vcx, |app, _| app.playback.stickers.settle());
+        app.read_with(vcx, |app, _| app.players.stickers.settle());
         app.update(vcx, |_, cx| cx.notify());
         let _ = frames_over(vcx, 1);
     }
@@ -393,7 +393,7 @@ fn a_chat_window_beside_the_main_window_ticks_alone(cx: &mut TestAppContext) {
     let vcx = &mut vcx;
     let chat = open_chat_window(&app, vcx, OPEN, beside());
     for _ in 0..4 {
-        app.read_with(vcx, |app, _| app.playback.stickers.settle());
+        app.read_with(vcx, |app, _| app.players.stickers.settle());
         app.update(vcx, |_, cx| cx.notify());
         let _ = frames_over(vcx, 1);
     }
@@ -517,7 +517,7 @@ fn a_tick_draws_a_sticker_frame_due_before_the_main_windows_next_refresh(cx: &mu
             app.idle_layer_tick(painter, app.tick_draw(None)).is_none()
         }));
         app.read_with(vcx, |app, _| {
-            app.playback.stickers.skip(Duration::from_millis(1));
+            app.players.stickers.skip(Duration::from_millis(1));
         });
     }
     // The main window refreshes every 16.7 ms (60 Hz).
@@ -549,7 +549,7 @@ fn a_chat_window_hidden_behind_the_active_one_draws_nothing(cx: &mut TestAppCont
     let vcx = &mut vcx;
     let under = open_chat_window(&app, vcx, OPEN, inside());
     for _ in 0..4 {
-        app.read_with(vcx, |app, _| app.playback.stickers.settle());
+        app.read_with(vcx, |app, _| app.players.stickers.settle());
         app.update(vcx, |_, cx| cx.notify());
         let _ = frames_over(vcx, 1);
     }

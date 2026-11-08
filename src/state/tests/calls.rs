@@ -128,7 +128,7 @@ fn join_as_answer_fills_options_and_preselects_the_saved_default() {
     assert_eq!(call.join_as_options.len(), 2);
     assert_eq!(call.join_as, Some(MessageSender::Chat { chat_id: -300 }));
     // The blocked-users list is untouched by a join-as answer.
-    assert!(session.settings.blocked_senders.is_none());
+    assert!(session.settings.blocked_senders.is_idle());
 }
 
 #[test]
@@ -186,7 +186,6 @@ fn call_privacy_loading_clears_only_after_both_gets_land() {
     // nothing selected instead of "Loading…".
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
-    session.calls.privacy_loading = true;
     session.calls.privacy_pending = 2;
     for setting in [
         CallPrivacySetting::AllowCalls,
@@ -206,11 +205,11 @@ fn call_privacy_loading_clears_only_after_both_gets_land() {
             ),
         );
         if setting == CallPrivacySetting::AllowCalls {
-            assert!(session.calls.privacy_loading);
+            assert!(session.calls.privacy_loading());
             assert_eq!(session.calls.privacy_p2p, None);
         }
     }
-    assert!(!session.calls.privacy_loading);
+    assert!(!session.calls.privacy_loading());
     assert_eq!(
         session.calls.privacy_allow_calls,
         Some(PrivacyWho::Everybody)
@@ -243,7 +242,7 @@ fn incoming_while_active_raises_swap_prompt() {
     apply_json(&mut session, &seq, &sink, &swap_active_json(77, 41));
     assert!(session.calls.active_call.is_some());
     apply_json(&mut session, &seq, &sink, &swap_pending_json(78, 42, false));
-    assert_eq!(session.calls.swap_pending, Some((78, 42, false)));
+    assert_eq!(session.calls.second_call.prompt(), Some((78, 42, false)));
     assert!(
         session.calls.busy_decline_queue.is_empty(),
         "first incoming raises the prompt, not the busy queue"
@@ -257,7 +256,7 @@ fn second_incoming_while_prompt_open_busy_declines() {
     apply_json(&mut session, &seq, &sink, &swap_active_json(77, 41));
     apply_json(&mut session, &seq, &sink, &swap_pending_json(78, 42, false));
     apply_json(&mut session, &seq, &sink, &swap_pending_json(79, 43, true));
-    assert_eq!(session.calls.swap_pending, Some((78, 42, false)));
+    assert_eq!(session.calls.second_call.prompt(), Some((78, 42, false)));
     assert_eq!(session.calls.busy_decline_queue, vec![(79, 43, true)]);
 }
 
@@ -268,22 +267,28 @@ fn caller_hangup_clears_swap_prompt() {
     apply_json(&mut session, &seq, &sink, &swap_active_json(77, 41));
     apply_json(&mut session, &seq, &sink, &swap_pending_json(78, 42, false));
     apply_json(&mut session, &seq, &sink, &swap_discarded_json(78, 42));
-    assert_eq!(session.calls.swap_pending, None);
+    assert_eq!(session.calls.second_call.prompt(), None);
     assert!(session.calls.active_call.is_some(), "active call untouched");
 }
 
 #[test]
-fn active_call_end_clears_open_swap_prompt() {
+fn active_call_end_rings_the_second_call() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
     apply_json(&mut session, &seq, &sink, &swap_active_json(77, 41));
-    apply_json(&mut session, &seq, &sink, &swap_pending_json(78, 42, false));
+    apply_json(&mut session, &seq, &sink, &swap_pending_json(78, 42, true));
     apply_json(&mut session, &seq, &sink, &swap_discarded_json(77, 41));
-    assert!(session.calls.active_call.is_none());
+    assert_eq!(session.calls.second_call, crate::state::SecondCall::None);
+    // The caller still rings and TDLib does not resend its pending
+    // update: it becomes the incoming call.
     assert_eq!(
-        session.calls.swap_pending, None,
-        "moot prompt clears when the active call ends on its own"
+        crate::notify_accounts::ringing_incoming_call(&session),
+        Some((78, 42, true))
     );
+    // Its later updates move it on as the tracked call.
+    apply_json(&mut session, &seq, &sink, &swap_discarded_json(78, 42));
+    assert!(session.calls.active_call.is_none());
+    assert_eq!(session.calls.summary.as_ref().map(|s| s.call_id), Some(78));
 }
 
 #[test]
@@ -293,8 +298,92 @@ fn swap_accept_queued_survives_active_call_end() {
     apply_json(&mut session, &seq, &sink, &swap_active_json(77, 41));
     apply_json(&mut session, &seq, &sink, &swap_pending_json(78, 42, false));
     // User chose "End & answer": prompt moves to the accept queue.
-    session.calls.swap_pending = None;
-    session.calls.swap_accept_queued = Some((78, false));
+    let queued = crate::state::SecondCall::AcceptAfterHangup {
+        call_id: 78,
+        user_id: 42,
+        is_video: false,
+    };
+    session.calls.second_call = queued;
     apply_json(&mut session, &seq, &sink, &swap_discarded_json(77, 41));
-    assert_eq!(session.calls.swap_accept_queued, Some((78, false)));
+    assert_eq!(session.calls.second_call, queued);
+    assert!(session.calls.active_call.is_none());
+}
+
+fn hanging_up(session: &mut Session, call_id: i32) -> RequestId {
+    let request = session.request(RequestPurpose::DiscardCall, None);
+    let call = session.calls.active_call.as_mut().expect("active call");
+    let resume = std::mem::replace(&mut call.state, CallState::HangingUp);
+    session.calls.hang_up = Some(crate::state::HangUp::new(request, call_id, resume));
+    request
+}
+
+fn error_json(request: RequestId) -> String {
+    format!(
+        r#"{{"@type":"error","@extra":"{}","code":400,"message":"CALL_PEER_INVALID"}}"#,
+        request.as_extra()
+    )
+}
+
+fn hanging_up_update_json(id: i32, user_id: i64) -> String {
+    format!(
+        r#"{{"@type":"updateCall","call":{{"@type":"call","id":{id},"unique_id":"98","user_id":{user_id},"is_outgoing":true,"is_video":false,"state":{{"@type":"callStateHangingUp"}}}}}}"#
+    )
+}
+
+#[test]
+fn non_terminal_update_keeps_a_hang_up_in_flight() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    apply_json(&mut session, &seq, &sink, &swap_pending_json(78, 42, false));
+    let request = hanging_up(&mut session, 78);
+    // An update queued before the discard lands.
+    apply_json(&mut session, &seq, &sink, &swap_active_json(78, 42));
+    let state = |s: &Session| s.calls.active_call.as_ref().map(|c| c.state.clone());
+    assert_eq!(state(&session), Some(CallState::HangingUp));
+    // The hang-up fails: the call is back in the phase it moved to.
+    apply_json(&mut session, &seq, &sink, &error_json(request));
+    assert_eq!(state(&session), Some(CallState::ExchangingKeys));
+    assert!(session.calls.hang_up.is_none());
+    assert!(session.calls.error.is_some());
+}
+
+#[test]
+fn failed_hang_up_reverts_and_brings_the_swap_prompt_back() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    apply_json(&mut session, &seq, &sink, &swap_active_json(77, 41));
+    apply_json(&mut session, &seq, &sink, &swap_pending_json(78, 42, false));
+    session.calls.second_call = crate::state::SecondCall::AcceptAfterHangup {
+        call_id: 78,
+        user_id: 42,
+        is_video: false,
+    };
+    let request = hanging_up(&mut session, 77);
+    apply_json(&mut session, &seq, &sink, &error_json(request));
+    let call = session.calls.active_call.as_ref().expect("call goes on");
+    assert_eq!(
+        (call.id, call.state.clone()),
+        (77, CallState::ExchangingKeys)
+    );
+    assert_eq!(session.calls.second_call.prompt(), Some((78, 42, false)));
+}
+
+#[test]
+fn other_discard_errors_leave_the_hang_up_alone() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    apply_json(&mut session, &seq, &sink, &swap_active_json(77, 41));
+    hanging_up(&mut session, 77);
+    // A busy decline of some other call fails.
+    let other = session.request(RequestPurpose::DiscardCall, None);
+    apply_json(&mut session, &seq, &sink, &error_json(other));
+    let call = session.calls.active_call.as_ref().expect("active call");
+    assert_eq!(call.state, CallState::HangingUp);
+    assert!(session.calls.hang_up.is_some());
+    // TDLib's own hanging-up update is kept as the phase to go back to.
+    apply_json(&mut session, &seq, &sink, &hanging_up_update_json(77, 41));
+    assert_eq!(
+        session.calls.hang_up.as_ref().map(|h| h.resume.clone()),
+        Some(CallState::HangingUp)
+    );
 }

@@ -213,6 +213,7 @@ impl Session {
                 // for again at once.
                 if state == ConnectionState::Ready && self.connection != ConnectionState::Ready {
                     self.stories.story_retry.clear();
+                    self.threads.saved.retry_when_online = false;
                 }
                 self.connection = state;
             }
@@ -255,7 +256,7 @@ impl Session {
                     self.apply_owned_bot_text(purpose, text);
                 }
                 Some(RequestPurpose::Calls(CallsPurpose::JoinVideoChat { group_call_id })) => {
-                    self.set_group_call_join_payload(group_call_id, text);
+                    self.set_group_call_join_payload(group_call_id, pending.map(|p| p.id), text);
                 }
                 Some(RequestPurpose::Calls(CallsPurpose::StartGroupCallScreenSharing {
                     group_call_id,

@@ -23,6 +23,7 @@ use std::path::{Path, PathBuf};
 
 pub(crate) mod batch;
 mod lifecycle;
+mod pumps;
 
 use std::sync::{Arc, Mutex};
 
@@ -607,12 +608,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if let Some(chat_id) = pins_changed.filter(|chat| self.session.open_chat == Some(*chat)) {
             let _ = self.fetch_pinned_messages(chat_id);
         }
-        self.pump_call_engine(active_call_before, bridge_signaling)?;
-        self.pump_group_call_transport(group_calls_before)?;
-        self.pump_call_media(std::time::Instant::now());
-        self.pump_call_audio()?;
-        self.maybe_send_parameters()?;
-        self.maybe_probe_channel_membership()?;
+        self.run_post_ingest_pumps(active_call_before, bridge_signaling, group_calls_before)?;
         // Slice G2: chain `boostChat` once the slots answer arrives.
         self.maybe_continue_boost()?;
         // A channel's boost level moved: refresh the status shown for it.

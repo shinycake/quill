@@ -674,7 +674,7 @@ impl QuillApp {
                     .tooltip(tr(keys::Q_PEOPLE_TOPIC_INFO))
                     .accessibility_label(tr(keys::Q_PEOPLE_TOPIC_INFO))
                     .on_click(cx.listener(|this, _, _, cx| {
-                        this.history.topic_info_open = !this.history.topic_info_open;
+                        this.chat_ui.topic_info_open = !this.chat_ui.topic_info_open;
                         cx.notify();
                     })),
             )
@@ -766,7 +766,8 @@ crate::ui::shell::register_dialogs! {
         5200,
         |app| app.admin.forum_manage_dialog.is_some(),
         QuillApp::build_forum_manage_dialog,
-    ),
+    )
+    .close(|app, _, cx| app.close_forum_manage_dialog(cx)),
 }
 
 mod forum_topics_pane;

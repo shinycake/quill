@@ -511,7 +511,8 @@ crate::ui::shell::register_dialogs! {
         7700,
         |app| app.group_edit_box().is_some(),
         QuillApp::build_group_edit_box_dialog,
-    ),
+    )
+    .close(|app, _, cx| app.close_group_edit_box(cx)),
 }
 
 mod demo;

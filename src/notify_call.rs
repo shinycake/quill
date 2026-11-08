@@ -11,6 +11,7 @@
 //! (not a chat id), so it never collides with a message notification.
 #![deny(clippy::indexing_slicing)]
 
+use crate::ids::AccountKey;
 use crate::notify::{NotificationCommand, NotifyBackend, current_backend};
 
 /// What the user picked on a call notification.
@@ -119,6 +120,37 @@ pub fn call_buttons(notification: &CallNotification) -> Vec<(&'static str, &'sta
         .collect()
 }
 
+/// A pick on an incoming-call notification, with the account whose call
+/// rang. TDLib call ids are per client, so two accounts can ring with the
+/// same id: a pick only ever answers the call of its own account.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CallPick {
+    pub account: AccountKey,
+    pub call_id: i32,
+    pub action: CallNotificationAction,
+}
+
+impl CallPick {
+    /// Whether this pick was made on `account`'s notification for `call_id`.
+    pub fn is_for(&self, account: &AccountKey, call_id: i32) -> bool {
+        self.call_id == call_id && &self.account == account
+    }
+}
+
+/// Take the picks made on the notification of `account`'s call `call_id`
+/// out of `picks`, in order; the others stay queued.
+pub fn take_call_picks(
+    picks: &mut Vec<CallPick>,
+    account: &AccountKey,
+    call_id: i32,
+) -> Vec<CallNotificationAction> {
+    let (mine, rest): (Vec<_>, Vec<_>) = picks
+        .drain(..)
+        .partition(|pick| pick.is_for(account, call_id));
+    *picks = rest;
+    mine.into_iter().map(|pick| pick.action).collect()
+}
+
 /// GPUI notification tag for a call: a new ring replaces the old toast, and
 /// the response carries the id back.
 pub fn call_notification_tag(account: &str, call_id: i32) -> String {
@@ -191,9 +223,42 @@ pub fn run_call_command(command: &NotificationCommand) -> Option<CallNotificatio
 #[cfg(test)]
 mod tests {
     use super::{
-        CallNotificationAction, CallNotifyInput, call_buttons, call_notification_tag,
-        decide_call_notify, linux_call_command, parse_call_notification_tag, parse_call_output,
+        AccountKey, CallNotificationAction, CallNotifyInput, CallPick, call_buttons,
+        call_notification_tag, decide_call_notify, linux_call_command, parse_call_notification_tag,
+        parse_call_output, take_call_picks,
     };
+
+    #[test]
+    fn a_pick_only_answers_the_call_of_its_own_account() {
+        let work = AccountKey::new("account-1").expect("key");
+        let home = AccountKey::primary();
+        // TDLib numbers calls per client: both accounts ring with id 5.
+        let mut picks = vec![
+            CallPick {
+                account: home.clone(),
+                call_id: 5,
+                action: CallNotificationAction::Accept,
+            },
+            CallPick {
+                account: work.clone(),
+                call_id: 5,
+                action: CallNotificationAction::Decline,
+            },
+        ];
+        // The background ring on `work` takes only its own pick.
+        assert_eq!(
+            take_call_picks(&mut picks, &work, 5),
+            vec![CallNotificationAction::Decline]
+        );
+        assert_eq!(picks.len(), 1);
+        assert!(picks.iter().all(|pick| pick.is_for(&home, 5)));
+        assert!(take_call_picks(&mut picks, &work, 5).is_empty());
+        assert_eq!(
+            take_call_picks(&mut picks, &home, 5),
+            vec![CallNotificationAction::Accept]
+        );
+        assert!(picks.is_empty());
+    }
 
     fn input(app_active: bool, last: Option<i32>, locked: bool) -> CallNotifyInput<'static> {
         CallNotifyInput {

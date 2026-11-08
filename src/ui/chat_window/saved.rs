@@ -69,13 +69,22 @@ impl QuillApp {
     /// keeps each window on its own account instead; Quill's windows have
     /// no session of their own.
     pub(in crate::ui) fn close_chat_windows_for_switch(&mut self, cx: &mut Context<Self>) {
-        let windows: Vec<(ChatId, AnyWindowHandle)> = self.windows.open_windows().collect();
-        if !windows.is_empty() {
+        let windows: Vec<_> = self
+            .windows
+            .open
+            .iter()
+            .map(|open| (open.chat_id, open.handle, open.view.clone()))
+            .collect();
+        // A change still waiting for its timer is saved now too: the timer
+        // is the screen's and goes with it, so a window closed just before
+        // the switch would otherwise come back next time.
+        if !windows.is_empty() || self.windows.save_pending {
             self.save_chat_windows_now(cx);
         }
-        for (chat_id, handle) in windows {
+        for (chat_id, handle, view) in windows {
             self.in_window_scope(Some(chat_id), cx, |app, cx| app.flush_leaving_draft(cx));
             self.forget_chat_window(chat_id, cx);
+            let _ = view.update(cx, |view, _| view.mark_closed());
             let _ = handle.update(cx, |_, window, _| window.remove_window());
         }
         self.windows.restore = Restore::Pending;
@@ -88,7 +97,11 @@ impl QuillApp {
             return;
         }
         self.windows.save_pending = true;
-        cx.spawn(async move |this, cx| {
+        // The screen's own timer: after a switch it does not run, so it
+        // cannot file the next account's (still empty) windows under that
+        // account before they are restored. The switch saves the old
+        // account's windows itself (`close_chat_windows_for_switch`).
+        self.spawn_screen(cx, async move |this, cx| {
             cx.background_executor()
                 .timer(std::time::Duration::from_millis(600))
                 .await;

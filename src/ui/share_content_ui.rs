@@ -89,7 +89,7 @@ impl QuillApp {
         {
             Ok(_) => {
                 self.share.content_dialog = None;
-                self.composer_ui.set_reply(None);
+                self.chat_ui.set_reply(None);
                 self.connection
                     .set_note(StatusNote::silent(tr(keys::Q_OPS_SENDING_CONTACT)));
             }
@@ -121,7 +121,7 @@ impl QuillApp {
             .share_dice_to_chat(chat_id, emoji, reply_to, &options)
         {
             Ok(_) => {
-                self.composer_ui.set_reply(None);
+                self.chat_ui.set_reply(None);
                 self.connection
                     .set_note(StatusNote::silent(tr(keys::Q_OPS_ROLLING)));
             }
@@ -281,5 +281,6 @@ crate::ui::shell::register_dialogs! {
         2947,
         |app| app.share.content_dialog.is_some(),
         QuillApp::build_share_contact_dialog,
-    ),
+    )
+    .close(|app, _, cx| app.close_share_content_dialog(cx)),
 }

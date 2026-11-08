@@ -291,7 +291,7 @@ fn sessions_fetch_guards() {
     );
     assert_eq!(recorder.snapshot().len(), sent_before);
     // Cached: no refetch.
-    driver.session.settings.sessions = Some(vec![]);
+    driver.session.settings.sessions = crate::state::fetch::Fetch::Ready(vec![]);
     assert!(
         driver
             .maybe_fetch_active_sessions()
@@ -307,7 +307,7 @@ fn sessions_fetch_guards() {
 #[test]
 fn sessions_terminate_guards() {
     let (dir, mut driver, recorder, _sink, _dyn_sink, _seq) = sessions_driver();
-    driver.session.settings.sessions = Some(vec![
+    driver.session.settings.sessions = crate::state::fetch::Fetch::Ready(vec![
         session_fixture(11, true, false),
         session_fixture(22, false, false),
     ]);
@@ -333,7 +333,7 @@ fn sessions_terminate_guards() {
 #[test]
 fn sessions_terminate_ok_triggers_authoritative_refetch() {
     let (dir, mut driver, recorder, _sink, dyn_sink, seq) = sessions_driver();
-    driver.session.settings.sessions = Some(vec![
+    driver.session.settings.sessions = crate::state::fetch::Fetch::Ready(vec![
         session_fixture(11, true, false),
         session_fixture(22, false, false),
     ]);
@@ -355,7 +355,7 @@ fn sessions_terminate_ok_triggers_authoritative_refetch() {
     let snapshot = recorder.snapshot();
     assert_eq!(snapshot.len(), sent + 1);
     assert!(snapshot[sent].contains("\"@type\":\"getActiveSessions\""));
-    assert_eq!(driver.session.settings.sessions.as_ref().unwrap().len(), 2);
+    assert_eq!(driver.session.settings.sessions.data().unwrap().len(), 2);
     assert!(driver.session.settings.sessions_stale);
     assert!(!driver.session.settings.sessions_mutating);
     // The authoritative answer lands — the @extra comes from the
@@ -382,12 +382,7 @@ fn sessions_terminate_ok_triggers_authoritative_refetch() {
                 .unwrap(),
             )
             .unwrap();
-    let sessions = driver
-        .session
-        .settings
-        .sessions
-        .as_ref()
-        .expect("refetched");
+    let sessions = driver.session.settings.sessions.data().expect("refetched");
     assert_eq!(sessions.len(), 1);
     assert_eq!(sessions[0].id, 11);
     assert!(!driver.session.settings.sessions_stale);
@@ -400,7 +395,7 @@ fn sessions_terminate_ok_triggers_authoritative_refetch() {
 #[test]
 fn session_toggle_guards() {
     let (dir, mut driver, recorder, _sink, _dyn_sink, _seq) = sessions_driver();
-    driver.session.settings.sessions = Some(vec![
+    driver.session.settings.sessions = crate::state::fetch::Fetch::Ready(vec![
         session_fixture(11, true, false),
         session_fixture(22, false, false),
     ]);
@@ -433,7 +428,7 @@ fn session_toggle_guards() {
 #[test]
 fn session_toggle_ok_triggers_authoritative_refetch() {
     let (dir, mut driver, recorder, _sink, dyn_sink, seq) = sessions_driver();
-    driver.session.settings.sessions = Some(vec![
+    driver.session.settings.sessions = crate::state::fetch::Fetch::Ready(vec![
         session_fixture(11, true, false),
         session_fixture(22, false, false),
     ]);
@@ -458,7 +453,7 @@ fn session_toggle_ok_triggers_authoritative_refetch() {
     let snapshot = recorder.snapshot();
     assert_eq!(snapshot.len(), sent + 1);
     assert!(snapshot[sent].contains("\"@type\":\"getActiveSessions\""));
-    assert!(driver.session.settings.sessions.as_ref().unwrap()[1].can_accept_calls);
+    assert!(driver.session.settings.sessions.data().unwrap()[1].can_accept_calls);
     assert!(driver.session.settings.sessions_stale);
     let _ = std::fs::remove_dir_all(&dir);
 }

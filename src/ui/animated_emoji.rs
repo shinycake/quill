@@ -232,11 +232,15 @@ impl QuillApp {
     /// Which head `key`'s view plays on, and how: once from the start until
     /// it played, then its first frame.
     fn lone_emoji_play(&self, key: MessageKey, file: FileId) -> (HeadId, PlayMode) {
-        let Ok(mut plays) = self.playback.emoji_plays.try_borrow_mut() else {
+        let Ok(mut owned) = self.players.emoji_plays.try_borrow_mut() else {
             return (rest_head(key), FIRST_FRAME);
         };
+        let Some(account) = self.session().map(|session| &session.account) else {
+            return (rest_head(key), FIRST_FRAME);
+        };
+        let plays = owned.for_owner(account);
         let head = play_head(key, plays.generation(key));
-        let known = self.playback.stickers.head_known(head, file.0);
+        let known = self.players.stickers.head_known(head, file.0);
         if known == Some(true) {
             plays.started(key);
         }
@@ -264,12 +268,16 @@ impl QuillApp {
             return;
         };
         let key = self.emoji_play_key(chat_id, message_id);
-        let Ok(mut plays) = self.playback.emoji_plays.try_borrow_mut() else {
+        let Ok(mut owned) = self.players.emoji_plays.try_borrow_mut() else {
             return;
         };
+        let Some(account) = self.session().map(|session| &session.account) else {
+            return;
+        };
+        let plays = owned.for_owner(account);
         let head = play_head(key, plays.generation(key));
         let playing = self
-            .playback
+            .players
             .stickers
             .head_progress(head, file.0)
             .is_some_and(|(pos, total)| pos < total);

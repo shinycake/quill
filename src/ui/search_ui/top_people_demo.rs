@@ -7,7 +7,6 @@ use crate::ui::status_note::StatusNote;
 use gpui_kit::*;
 use quill::diagnostics::DiagnosticSink;
 use quill::ids::ChatId;
-use quill::state::SearchStatus;
 use quill::telegram::client::copy_and_parse;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -68,7 +67,6 @@ impl QuillApp {
         session.search.search.top_chats = top;
         session.search.search.chat_ids = vec![ChatId(11), ChatId(12)];
         session.search.search.recents = true;
-        session.search.search.status = SearchStatus::Ready;
         self.connection
             .set_note(StatusNote::silent("screenshot demo — top people strip"));
     }

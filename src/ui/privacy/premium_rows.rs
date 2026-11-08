@@ -221,7 +221,8 @@ crate::ui::shell::register_dialogs! {
         3796,
         |app| app.privacy.last_seen_warning.is_some(),
         QuillApp::build_last_seen_warning,
-    ),
+    )
+    .close(|app, _, cx| app.dismiss_last_seen_warning(cx)),
 }
 
 #[cfg(test)]

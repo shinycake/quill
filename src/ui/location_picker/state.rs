@@ -29,6 +29,9 @@ pub(crate) struct LocationPickerUi {
     pub(super) map_focus: Option<FocusHandle>,
 }
 
+/// Its tasks (settle, resolve, search, locate, geocode) cancel on drop.
+impl crate::ui::on_screen::Farewell for LocationPickerUi {}
+
 impl LocationPickerUi {
     pub(super) fn reset(&mut self) {
         *self = Self::default();

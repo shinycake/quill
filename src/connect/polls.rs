@@ -41,7 +41,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .histories
             .get(&chat_id.0)
             .and_then(|history| history.messages.get(&message_id.0))
-            .filter(|message| !message.pending && message.id.0 > 0)
+            .filter(|message| !message.pending() && message.id.0 > 0)
             .and_then(|message| match &message.content {
                 MessageContent::Poll(poll) => Some(poll.poll.clone()),
                 _ => None,
@@ -71,7 +71,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .histories
             .get(&chat_id.0)
             .and_then(|history| history.messages.get(&message_id.0))
-            .filter(|message| !message.pending && message.id.0 > 0)
+            .filter(|message| !message.pending() && message.id.0 > 0)
             .is_some_and(|message| match &message.content {
                 MessageContent::Poll(poll) => crate::poll::can_retract_vote(&poll.poll),
                 _ => false,
@@ -184,7 +184,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .histories
             .get(&chat_id.0)
             .and_then(|history| history.messages.get(&message_id.0))
-            .filter(|message| !message.pending && message.id.0 > 0)
+            .filter(|message| !message.pending() && message.id.0 > 0)
             .and_then(|message| match &message.content {
                 MessageContent::Poll(poll) => Some(poll.poll.clone()),
                 _ => None,
@@ -279,7 +279,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .histories
             .get(&chat_id.0)
             .and_then(|history| history.messages.get(&message_id.0))
-            .filter(|message| !message.pending && message.id.0 > 0)
+            .filter(|message| !message.pending() && message.id.0 > 0)
             .and_then(|message| match &message.content {
                 // F4: defense in depth — the UI menu already gates on
                 // `can_stop_poll`, but the driver checks ownership too.

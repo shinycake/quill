@@ -222,13 +222,16 @@ impl QuillApp {
             let _ = handle.update(cx, |_, window, _| window.activate_window());
             return true;
         }
-        if self.screen_share.opening {
+        // Listing on this screen already. One started on an earlier screen
+        // does not count: its continuation was dropped with that screen
+        // and will never put the flag back.
+        if self.screen_share.opening == Some(self.screen_epoch()) {
             return true;
         }
-        self.screen_share.opening = true;
+        self.screen_share.opening = Some(self.screen_epoch());
         self.screen_share.generation = self.screen_share.generation.wrapping_add(1);
         let generation = self.screen_share.generation;
-        cx.spawn(async move |this, cx| {
+        self.spawn_screen(cx, async move |this, cx| {
             let listing = backend.clone();
             let sources = cx
                 .background_executor()
@@ -268,7 +271,7 @@ impl QuillApp {
         if generation != self.screen_share.generation {
             return false;
         }
-        self.screen_share.opening = false;
+        self.screen_share.opening = None;
         let sources = match sources {
             Ok(sources) => sources,
             Err(err) => {
@@ -301,7 +304,12 @@ impl QuillApp {
 
     fn open_screen_chooser_window(&mut self, cx: &mut Context<Self>) {
         let owner = cx.entity();
+        let screen = self.screen_epoch();
         cx.defer(move |cx| {
+            // Another account came on screen first: open nothing for it.
+            if owner.read(cx).screen_epoch() != screen {
+                return;
+            }
             let weak = owner.downgrade();
             let render_owner = owner.clone();
             let bounds = Bounds::centered(None, window_size(), cx);
@@ -322,7 +330,9 @@ impl QuillApp {
                     window.activate_window();
                     super::window_control::set_always_on_top(window, true);
                     window.on_window_should_close(cx, move |_, cx| {
-                        let _ = weak.update(cx, |app, cx| app.screen_chooser_closed(cx));
+                        let _ = weak.update(cx, |app, cx| {
+                            app.in_screen_scope(screen, cx, |app, cx| app.screen_chooser_closed(cx))
+                        });
                         true
                     });
                     let view = cx.new(|cx| ScreenChooserView {
@@ -333,11 +343,13 @@ impl QuillApp {
                 },
             );
             owner.update(cx, |app, cx| {
-                match result {
-                    Ok(handle) => app.screen_share.window = Some(handle.into()),
-                    Err(_) => app.screen_chooser_closed(cx),
-                }
-                cx.notify();
+                app.in_screen_scope(screen, cx, |app, cx| {
+                    match result {
+                        Ok(handle) => app.screen_share.window = Some(handle.into()),
+                        Err(_) => app.screen_chooser_closed(cx),
+                    }
+                    cx.notify();
+                });
             });
         });
     }
@@ -346,7 +358,7 @@ impl QuillApp {
     fn screen_chooser_closed(&mut self, cx: &mut Context<Self>) {
         let share = &mut self.screen_share;
         share.window = None;
-        share.opening = false;
+        share.opening = None;
         share.for_call = None;
         share.sources.clear();
         share.selected = None;
@@ -649,7 +661,8 @@ impl QuillApp {
             let asked = cx
                 .background_executor()
                 .spawn(async move { backend.ask_access() });
-            Self::spawn_main(cx, async move |this, cx| {
+            // screen-scope: the OS settings pane is the app's; its failure note goes to whichever account is on screen.
+            Self::spawn_app(cx, async move |this, cx| {
                 let Some(pane) = asked.await else {
                     return;
                 };
@@ -757,7 +770,7 @@ fn source_view(
 
 /// One picture per source, in order, each shown as it arrives.
 async fn load_thumbnails(
-    this: WeakEntity<QuillApp>,
+    this: super::chat_window::ScopedApp,
     backend: Arc<dyn ScreenBackend>,
     generation: u64,
     cx: &mut AsyncApp,

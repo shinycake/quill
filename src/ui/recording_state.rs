@@ -77,9 +77,6 @@ pub(crate) struct RecordingUi {
     /// MED2: lock-to-record — a locked recording ignores Esc; only Send
     /// or Cancel (with confirmation) ends it.
     pub(super) locked: bool,
-    /// The next video message starts locked (the "Record Round Message"
-    /// shortcut, `startRecordingAndLock`).
-    pub(super) lock_next: bool,
     /// MED2: the record bar is showing the discard-confirmation row.
     pub(super) discard_confirm: bool,
     /// The paused recording is being played back (position of the preview).
@@ -91,6 +88,20 @@ pub(crate) struct RecordingUi {
     pub(super) round_preview: std::cell::RefCell<super::round_record::RoundPreview>,
 }
 
+/// A recording still running, or a camera starting, is cancelled: its
+/// file would be the old account's message.
+impl super::on_screen::Farewell for RecordingUi {
+    fn farewell(
+        app: &mut QuillApp,
+        _: &mut gpui_kit::Window,
+        cx: &mut gpui_kit::Context<QuillApp>,
+    ) {
+        if app.recording_busy() {
+            app.cancel_recording(cx);
+        }
+    }
+}
+
 impl RecordingUi {
     pub(super) fn new() -> Self {
         Self {
@@ -99,7 +110,6 @@ impl RecordingUi {
             next_start: 0,
             open_voice: Arc::new(VoiceCapture::start),
             locked: false,
-            lock_next: false,
             discard_confirm: false,
             preview: None,
             once: false,
@@ -193,7 +203,10 @@ impl RecordingUi {
             Capture {
                 media: CaptureMedia::Voice(voice),
                 ..
-            } => Some(voice),
+            } => {
+                self.end_capture_flags();
+                Some(voice)
+            }
             other => {
                 self.capture = Some(other);
                 None
@@ -208,7 +221,10 @@ impl RecordingUi {
             Capture {
                 media: CaptureMedia::Video(video),
                 ..
-            } => Some(video),
+            } => {
+                self.end_capture_flags();
+                Some(video)
+            }
             other => {
                 self.capture = Some(other);
                 None
@@ -218,7 +234,20 @@ impl RecordingUi {
 
     /// Take whatever records, with its window.
     pub(super) fn take(&mut self) -> Option<CaptureMedia> {
-        self.capture.take().map(|capture| capture.media)
+        let media = self.capture.take().map(|capture| capture.media);
+        if media.is_some() {
+            self.end_capture_flags();
+        }
+        media
+    }
+
+    /// Lock, the discard row and "Play once" belong to one recording:
+    /// whatever ends it (send, story reply, cancel, a closed window) ends
+    /// them too, so none carries over into the next one.
+    fn end_capture_flags(&mut self) {
+        self.locked = false;
+        self.discard_confirm = false;
+        self.once = false;
     }
 }
 

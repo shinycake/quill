@@ -149,6 +149,20 @@ pub(crate) struct PeerQrUi {
     pub(super) pending_attach: Option<(ChatId, PathBuf)>,
 }
 
+/// The open box's share card is a file on disk: it goes with the box
+/// (`close_qr_box`).
+impl crate::ui::on_screen::Farewell for PeerQrUi {
+    fn farewell(
+        app: &mut QuillApp,
+        _: &mut gpui_kit::Window,
+        cx: &mut gpui_kit::Context<QuillApp>,
+    ) {
+        if app.peer_qr.open.is_some() {
+            app.close_qr_box(cx);
+        }
+    }
+}
+
 impl PeerQrUi {
     pub(crate) fn new(_cx: &mut App) -> Self {
         Self {
@@ -395,7 +409,7 @@ impl QuillApp {
         };
         let shown = Instant::now();
         open.toast = Some((toast, shown));
-        Self::spawn_main(cx, async move |this, cx| {
+        self.spawn_screen(cx, async move |this, cx| {
             cx.background_executor().timer(TOAST).await;
             let _ = this.update(cx, |this, cx| {
                 if let Some(open) = this.peer_qr.open.as_mut()
@@ -436,7 +450,7 @@ impl QuillApp {
         }
         open.clock_running = true;
         let id = open.state.id;
-        Self::spawn_main(cx, async move |this, cx| {
+        self.spawn_screen(cx, async move |this, cx| {
             loop {
                 cx.background_executor().timer(CLOCK).await;
                 let Ok(going) = this.update(cx, |this, cx| this.qr_clock(id, cx)) else {
@@ -579,7 +593,8 @@ crate::ui::shell::register_dialogs! {
         3050,
         |app| app.peer_qr.open.is_some(),
         QuillApp::build_peer_qr_dialog,
-    ),
+    )
+    .close(|app, _, cx| app.close_qr_box(cx)),
 }
 
 #[cfg(test)]

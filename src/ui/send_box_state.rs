@@ -15,9 +15,12 @@ pub(crate) struct SendBoxUi {
     /// Sizes read from the header of tray photos, once per file.
     pub(super) photo_sizes: RefCell<HashMap<PathBuf, Option<(u32, u32)>>>,
     /// Tray videos whose sound track is being read in the background, and
-    /// those already read (tdesktop `hasAudio`).
-    pub(super) sound_checking: HashSet<PathBuf>,
+    /// those already read (tdesktop `hasAudio`). Each read has its own
+    /// number, like the thumbnails below, so a stale read (a removed and
+    /// re-added file) can't settle a newer one.
+    pub(super) sound_checking: HashMap<PathBuf, u64>,
     pub(super) sound_checked: HashSet<PathBuf>,
+    pub(super) sound_jobs: u64,
     /// Tray pictures sent as files whose thumbnail is being made, and
     /// those done (`send_box_thumbnails.rs`).
     /// Each job has its own number, so a stale job (a removed and re-added
@@ -43,8 +46,9 @@ impl SendBoxUi {
     pub(super) fn new() -> Self {
         Self {
             photo_sizes: RefCell::new(HashMap::new()),
-            sound_checking: HashSet::new(),
+            sound_checking: HashMap::new(),
             sound_checked: HashSet::new(),
+            sound_jobs: 0,
             thumbnailing: HashMap::new(),
             thumbnailed: HashSet::new(),
             thumbnail_jobs: 0,

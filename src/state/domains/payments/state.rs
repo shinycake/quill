@@ -25,10 +25,18 @@ pub struct PaymentsState {
     /// checkout dialog (never a secret — order fields and credentials are
     /// never echoed here).
     pub note: Option<String>,
-    /// Slice P1: `sendPaymentForm` is in flight — the Pay button shows
-    /// "Processing…" and is disabled until the `paymentResult` answer (or
-    /// error) lands, so a double-click can't submit twice.
-    pub sending: bool,
+    /// The `getPaymentForm` whose answer the checkout waits for: an answer
+    /// to an earlier one (another invoice, opened before) is not this
+    /// checkout's form.
+    pub form_request: Option<RequestId>,
+    /// Slice P1: the `sendPaymentForm`s in flight, each with the invoice
+    /// and form it pays (tdesktop keeps one checkout process per invoice).
+    /// An answer goes to its own payment: the checkout on screen takes the
+    /// outcome only while it shows that invoice, and the "Media Unlocked"
+    /// note names what was paid for. The Pay button shows "Processing…"
+    /// and is disabled while one is in flight for the invoice shown
+    /// ([`PaymentsState::checkout_sending`]).
+    pub paying: Vec<PaymentInFlight>,
     /// The open form was paid: Pay stays off, so one form is never sent
     /// twice.
     pub form_paid: bool,
@@ -111,6 +119,46 @@ pub struct PaymentsState {
     pub gift_market: crate::gift_market::GiftMarketState,
 }
 
+/// One `sendPaymentForm` in flight and what it pays.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PaymentInFlight {
+    pub request_id: RequestId,
+    pub invoice: crate::payment_invoice::InputInvoice,
+    /// The form it was sent for, read by the paid-media note.
+    pub form: Option<PaymentFormData>,
+}
+
+impl PaymentsState {
+    /// The checkout on screen is being paid: its invoice has a
+    /// `sendPaymentForm` in flight.
+    pub fn checkout_sending(&self) -> bool {
+        self.request
+            .as_ref()
+            .is_some_and(|request| self.is_paying(&request.invoice))
+    }
+
+    /// `invoice` has a `sendPaymentForm` in flight.
+    pub fn is_paying(&self, invoice: &crate::payment_invoice::InputInvoice) -> bool {
+        self.paying.iter().any(|paying| &paying.invoice == invoice)
+    }
+
+    /// The checkout on screen shows `invoice`.
+    pub fn shows(&self, invoice: &crate::payment_invoice::InputInvoice) -> bool {
+        self.request
+            .as_ref()
+            .is_some_and(|request| &request.invoice == invoice)
+    }
+
+    /// The payment `request_id` answered: it leaves the in-flight list.
+    pub(crate) fn take_paying(&mut self, request_id: Option<RequestId>) -> Option<PaymentInFlight> {
+        let index = self
+            .paying
+            .iter()
+            .position(|paying| Some(paying.request_id) == request_id)?;
+        Some(self.paying.remove(index))
+    }
+}
+
 /// A tapped bank card number and the lookup's progress.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BankCardLookup {
@@ -131,7 +179,8 @@ impl PaymentsState {
             receipt: None,
             receipt_open: false,
             note: None,
-            sending: false,
+            form_request: None,
+            paying: Vec::new(),
             form_paid: false,
             unlocked_notice: None,
             receipt_error: None,

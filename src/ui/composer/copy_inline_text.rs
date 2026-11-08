@@ -50,12 +50,12 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         let as_file = self.composer_ui.edit_replace_as_file;
-        let Some(edit) = self.composer_ui.pending_edit.as_mut() else {
+        let Some(edit) = self.screen.chat_ui.pending_edit_mut() else {
             return;
         };
         match edit.replacement_for(path, as_file) {
             Ok(replacement) => {
-                self.connection.set_note(StatusNote::silent(tr_with(
+                self.screen.connection.set_note(StatusNote::silent(tr_with(
                     keys::Q_CHAT_REPLACING_ATTACHMENT_WITH,
                     &[("file_name", &replacement.file_name.to_string())],
                 )));
@@ -77,7 +77,7 @@ impl QuillApp {
 
     /// B5: drop the staged replacement and keep the original media.
     pub(in crate::ui) fn clear_edit_replacement(&mut self, cx: &mut Context<Self>) {
-        if let Some(edit) = self.composer_ui.pending_edit.as_mut() {
+        if let Some(edit) = self.chat_ui.pending_edit_mut() {
             edit.media_edit.replacement = None;
         }
         self.composer_ui.edit_replace_as_file = false;
@@ -90,9 +90,8 @@ impl QuillApp {
     pub(in crate::ui) fn toggle_edit_replace_as_file(&mut self, cx: &mut Context<Self>) {
         self.composer_ui.edit_replace_as_file = !self.composer_ui.edit_replace_as_file;
         let path = self
-            .composer_ui
-            .pending_edit
-            .as_ref()
+            .chat_ui
+            .pending_edit()
             .and_then(|e| e.media_edit.replacement.as_ref())
             .map(|r| r.path.clone());
         if let Some(path) = path {
@@ -102,9 +101,8 @@ impl QuillApp {
 
     pub(in crate::ui) fn toggle_edit_replace_spoiler(&mut self, cx: &mut Context<Self>) {
         if let Some(replacement) = self
-            .composer_ui
-            .pending_edit
-            .as_mut()
+            .chat_ui
+            .pending_edit_mut()
             .and_then(|e| e.media_edit.replacement.as_mut())
         {
             replacement.spoiler = !replacement.spoiler;
@@ -118,10 +116,10 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.composer_ui.pending_edit.is_some() {
+        if self.chat_ui.is_editing() {
             self.clear_edit(window, cx);
         }
-        self.composer_ui.set_reply(Some(reply));
+        self.chat_ui.set_reply(Some(reply));
         self.note_open_draft(true, cx);
         self.composer
             .update(cx, |input, cx| input.focus(window, cx));
@@ -137,11 +135,11 @@ impl QuillApp {
     ) -> bool {
         if !self.composer.read(cx).focus_handle(cx).is_focused(window)
             || !self.composer.read(cx).value().is_empty()
-            || self.composer_ui.pending_edit.is_some()
+            || self.chat_ui.is_editing()
             // tdesktop: `_replyTo` keeps Up for scrolling.
-            || self.composer_ui.has_reply()
+            || self.chat_ui.has_reply()
             || !self.pending_attachments().is_empty()
-            || self.composer_ui.command_menu_open
+            || self.chat_ui.command_menu_open
             || !self.mention_menu_items(cx).is_empty()
         {
             return false;
@@ -179,12 +177,10 @@ impl QuillApp {
         let current = self.composer_markup(cx);
         // Flush while the reply is still set so a reply-only draft is not wiped.
         self.note_open_draft(false, cx);
-        let reply = self.composer_ui.take_reply();
+        let reply = self.chat_ui.take_reply();
         let (edit, field, saved, stashed) =
             begin_edit_keeping_reply(current, edit, original, reply);
-        self.composer_ui.pending_edit = Some(edit);
-        self.composer_ui.saved_edit_draft = saved;
-        self.composer_ui.saved_edit_reply = stashed;
+        self.chat_ui.enter_edit(edit, saved, stashed);
         self.set_composer_markup(&field, window, cx);
         self.composer.update(cx, |input, cx| {
             let end = input.value().len();
@@ -198,13 +194,20 @@ impl QuillApp {
         cx.notify();
     }
 
+    /// Leave edit mode, returning the edit and the stashed draft and reply.
+    fn leave_edit_mode(&mut self) -> (Option<ComposerEdit>, String, Option<ComposerReplyTo>) {
+        match self.chat_ui.leave_edit() {
+            Some(mode) => (Some(mode.edit), mode.stashed_draft, mode.stashed_reply),
+            None => (None, String::new(), None),
+        }
+    }
+
     pub(in crate::ui) fn clear_edit(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         // tdesktop cancelEditMessage → applyDraft(): restore normal draft.
-        let saved = std::mem::take(&mut self.composer_ui.saved_edit_draft);
-        let stashed = self.composer_ui.saved_edit_reply.take();
-        let (_, restored) = cancel_edit_draft(self.composer_ui.pending_edit.take(), saved);
+        let (edit, saved, stashed) = self.leave_edit_mode();
+        let (_, restored) = cancel_edit_draft(edit, saved);
         let (restored, reply) = cancel_edit_keeping_reply(restored, stashed);
-        self.composer_ui.set_reply(reply);
+        self.chat_ui.set_reply(reply);
         self.set_composer_markup(&restored, window, cx);
         let restored = self.composer.read(cx).value().to_string();
         self.sync_composer_typing(&restored);
@@ -219,10 +222,8 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let saved = std::mem::take(&mut self.composer_ui.saved_edit_draft);
-        let reply = self.composer_ui.saved_edit_reply.take();
-        self.composer_ui.pending_edit = None;
-        self.composer_ui.set_reply(reply);
+        let (_, saved, reply) = self.leave_edit_mode();
+        self.chat_ui.set_reply(reply);
         self.set_composer_markup(&saved, window, cx);
     }
 
@@ -232,7 +233,7 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(edit) = self.composer_ui.pending_edit.clone() else {
+        let Some(edit) = self.chat_ui.pending_edit().cloned() else {
             return;
         };
         if self
@@ -248,7 +249,7 @@ impl QuillApp {
             s.histories
                 .get(&edit.chat_id.0)
                 .and_then(|history| history.messages.get(&edit.message_id.0))
-                .is_some_and(|m| m.pending)
+                .is_some_and(|m| m.pending())
         });
         if let Some(live) = self.live.as_mut() {
             let driver = &mut live.driver;
@@ -260,7 +261,7 @@ impl QuillApp {
             match result {
                 Ok(_) => {
                     self.finish_edit_restore_draft(window, cx);
-                    self.connection.set_note(
+                    self.screen.connection.set_note(
                         self.send_started_note(
                             ComposerScheduling::None,
                             tr(keys::Q_CHAT_SAVING_EDIT),
@@ -304,7 +305,7 @@ impl QuillApp {
     }
 
     pub(in crate::ui) fn confirm_delete(&mut self, cx: &mut Context<Self>) {
-        let Some(confirm) = self.message_ui.pending_delete.take() else {
+        let Some(confirm) = self.chat_ui.pending_delete.take() else {
             return;
         };
         self.begin_vanish(confirm.chat_id, &[confirm.message_id]);
@@ -325,8 +326,8 @@ impl QuillApp {
 
     pub(in crate::ui) fn clear_reply(&mut self, cx: &mut Context<Self>) {
         // tdesktop FieldHeader Escape / replyCancelled: header only — keep typed text.
-        let kept = cancel_reply_draft(self.composer_ui.take_reply(), String::new()).0;
-        self.composer_ui.set_reply(kept);
+        let kept = cancel_reply_draft(self.chat_ui.take_reply(), String::new()).0;
+        self.chat_ui.set_reply(kept);
         self.share.reply_elsewhere_open = false;
         self.share.reply_quote_open = false;
         self.note_open_draft(true, cx);
@@ -338,9 +339,9 @@ impl QuillApp {
     /// Sticker/GIF/voice sends consume the composer reply. Drop it from the UI
     /// and from the stored draft, and keep any unsent text.
     pub(in crate::ui) fn consume_sent_reply(&mut self, chat_id: ChatId, cx: &mut Context<Self>) {
-        self.composer_ui.set_reply(None);
-        if self.composer_ui.pending_edit.is_some() {
-            self.composer_ui.saved_edit_reply = None;
+        self.chat_ui.set_reply(None);
+        if self.chat_ui.is_editing() {
+            self.chat_ui.drop_stashed_reply();
             return;
         }
         let (content, _) = self.composer_draft_parts(chat_id, cx);

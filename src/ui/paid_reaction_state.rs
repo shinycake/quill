@@ -19,6 +19,8 @@ pub(crate) struct PaidReactionUi {
     pub(super) boxed: Option<PaidBox>,
 }
 
+impl crate::ui::on_screen::Farewell for PaidReactionUi {}
+
 impl PaidReactionUi {
     pub(super) fn new() -> Self {
         Self { boxed: None }

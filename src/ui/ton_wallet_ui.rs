@@ -46,7 +46,7 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut() {
             let _ = live.driver.fetch_ton_explorer_url();
         }
-        self.message_ui.link_popup = Some(LinkPopup {
+        self.chat_ui.link_popup = Some(LinkPopup {
             position: window.mouse_position(),
             link,
         });

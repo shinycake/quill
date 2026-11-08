@@ -192,7 +192,7 @@ fn switching_to_an_account_waits_for_its_old_client_to_close(cx: &mut TestAppCon
         // The account's client was handed to the closing set by the switch.
         app.background.closing.push(account(1), fake.boxed(), false);
         // What `start_connection` does before it opens the database.
-        QuillApp::spawn_main(cx, async move |this, cx| {
+        QuillApp::spawn_app(cx, async move |this, cx| {
             let safe = closed(&this, &account(1), cx).await;
             opened_in.set(Some(safe));
         })
@@ -213,7 +213,7 @@ fn switching_to_an_account_waits_for_its_old_client_to_close(cx: &mut TestAppCon
     let refused_in = refused.clone();
     app.update_in(&mut vcx, |app, _, cx| {
         app.background.closing.push(account(2), lost.boxed(), false);
-        QuillApp::spawn_main(cx, async move |this, cx| {
+        QuillApp::spawn_app(cx, async move |this, cx| {
             refused_in.set(Some(closed(&this, &account(2), cx).await));
         })
         .detach();

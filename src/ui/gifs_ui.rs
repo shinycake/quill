@@ -170,7 +170,8 @@ impl QuillApp {
 
     fn save_gif_pick(&mut self, file_id: FileId, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
-            self.connection
+            self.screen
+                .connection
                 .set_note(match live.driver.set_gif_saved(file_id, true) {
                     Ok(_) => StatusNote::silent(tr(keys::Q_MISC_SAVING_GIF)),
                     Err(_) => StatusNote::error(tr(keys::Q_MISC_COULD_NOT_SAVE_GIF)),
@@ -182,7 +183,7 @@ impl QuillApp {
     /// The GIFs tab of the media panel.
     pub(super) fn gif_picker_panel(&self, cx: &mut Context<Self>) -> AnyElement {
         // Clips whose tiles do not render in this pass stop.
-        self.playback
+        self.players
             .inline_videos
             .begin_panel_render(self.windows.scope, Panel::Gifs);
         let no_panel = GifPanel::default();

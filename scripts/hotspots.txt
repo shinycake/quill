@@ -17,8 +17,9 @@ src/telegram/requests/mod.rs | mod-lines | add or remove a `mod` or `use` line
 
 # Startup and app shell.
 src/main.rs | none | nothing: demos, dialogs and state register in their own modules
-src/ui/app.rs | max:3 | one `QuillApp` field (doc line and field) for a new ui/<feature>_state.rs struct
-src/ui/app_demo.rs | max:2 | one line in `new_with_demo` that builds a new feature state struct
+src/ui/app.rs | none | nothing: a feature's state is an `OnScreen` field (ui/on_screen.rs); the process's state is listed in scripts/app-wide-state.txt
+src/ui/app_demo.rs | none | nothing: feature state is built in `OnScreen::new` (ui/on_screen.rs)
+src/ui/on_screen.rs | max:3 | one `OnScreen` field (doc line and field) and its line in `new` for a new ui/<feature>_state.rs struct
 src/ui/shell.rs | none | nothing: dialogs register with `register_dialogs!` in their own module
 src/ui/screenshot_demo.rs | none | nothing: demos register with `register_demos!` in their own module
 

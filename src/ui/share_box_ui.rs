@@ -210,7 +210,7 @@ impl QuillApp {
             return false;
         };
         !self.share.forward_picker_open
-            && self.composer_ui.pending_edit.is_none()
+            && !self.chat_ui.is_editing()
             && self.forward_draft().is_some()
             && self.session().and_then(|s| s.open_chat) == Some(dest)
     }

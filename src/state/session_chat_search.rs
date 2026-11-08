@@ -122,23 +122,38 @@ impl Session {
         self.search.search.generation = self.search.search.generation.saturating_add(1);
         self.search.search.clear_results();
         self.search.search.recents = query.trim().is_empty();
-        self.search.search.chat_ids = self
-            .local_search_chats(query)
-            .into_iter()
-            .map(|chat| chat.id)
-            .collect();
-        self.search.search.chats_done = true;
-        self.search.search.messages_done = true;
-        if query.trim().is_empty() {
-            self.search.search.chat_ids.clear();
-            self.search.search.status = SearchStatus::Idle;
+        let chat_ids: Vec<ChatId> = if query.trim().is_empty() {
+            Vec::new()
         } else {
-            self.search.search.finish_if_complete();
-        }
+            self.local_search_chats(query)
+                .into_iter()
+                .map(|chat| chat.id)
+                .collect()
+        };
+        // Nothing is asked of TDLib: all three requests count as answered,
+        // so the derived status settles at once.
+        self.search.search.accept_chats(chat_ids, false);
+        self.search.search.accept_messages(Vec::new(), false);
+        self.search.search.accept_public_chats(Vec::new(), false);
     }
 
     pub fn begin_close(&mut self) {
         self.shutdown = ShutdownPhase::CloseRequested;
+        // A close asked for now is not undone by a refused `logOut`.
+        self.auth_state.logout_request = None;
+    }
+
+    /// `logOut` went out as `request`: the account's other requests settle
+    /// and its generation moves on, while `request` itself stays under the
+    /// new generation so TDLib's answer to it still lands.
+    pub fn logout_sent(&mut self, request: RequestId) {
+        let sent = self.requests.take(request);
+        self.begin_logout();
+        self.auth_state.logout_request = Some(request);
+        if let Some(mut sent) = sent {
+            sent.account_generation = self.account_generation;
+            self.requests.readmit(sent);
+        }
     }
 
     pub fn begin_logout(&mut self) {
@@ -155,8 +170,15 @@ impl Session {
 /// request; TDLib also marks a message this app is still sending in
 /// `updateNewMessage` and history pages.
 pub(crate) fn history_message(message: ParsedMessage, pending: bool) -> HistoryMessage {
-    let pending =
-        pending || message.send_state == crate::telegram::envelope::MessageSendState::Pending;
+    use crate::telegram::envelope::MessageSendState;
+    let send = match message.send_state {
+        MessageSendState::Failed => SendState::Failed {
+            can_retry: message.can_retry,
+        },
+        MessageSendState::Pending => SendState::Sending,
+        MessageSendState::Sent if pending => SendState::Sending,
+        MessageSendState::Sent => SendState::Sent,
+    };
     HistoryMessage {
         sender: message.sender,
         id: message.id,
@@ -164,7 +186,7 @@ pub(crate) fn history_message(message: ParsedMessage, pending: bool) -> HistoryM
         is_outgoing: message.is_outgoing,
         date: message.date,
         content: message.content,
-        pending,
+        send,
         reply_to: message.reply_to,
         forward_info: message.forward_info,
         extras: message.extras,
@@ -175,8 +197,6 @@ pub(crate) fn history_message(message: ParsedMessage, pending: bool) -> HistoryM
         self_destruct: message.self_destruct,
         auto_delete: message.auto_delete,
         author_signature: message.author_signature,
-        failed: false,
-        can_retry: message.can_retry,
         ephemeral: message.ephemeral,
     }
 }

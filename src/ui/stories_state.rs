@@ -8,10 +8,50 @@ use gpui_kit::*;
 use quill::lang::{keys, tr};
 use quill::story_composer::StoryComposer;
 use quill::story_viewer::{StoryPlayback, StoryViewer};
-use std::time::Instant;
 
 /// The facts the custom-emoji warm-up of the story viewer depends on.
 pub(super) type EmojiWarm = (Option<(quill::ids::ChatId, i32)>, Vec<i64>, usize, u32);
+
+/// What the story viewer has open over the story it shows: its panels,
+/// editors and their sent marks, the pause and the last result line. One
+/// value, held only while the viewer is open (`StoryUi::viewer_ui_mut`
+/// makes it then), and dropped by `release_story_viewer`: every close,
+/// the deleted-story and passcode ones included, ends all of it, so the
+/// next viewer cannot open on the last story's editor and Save cannot
+/// send the old `(chat_id, story_id)`.
+#[derive(Default)]
+pub(crate) struct StoryViewerUi {
+    /// Phase 9.2: story reaction picker open above the viewer overlay.
+    pub(super) reaction_picker_open: bool,
+    /// Phase 9.2: story reply input open in the viewer overlay.
+    pub(super) reply_open: bool,
+    /// The shared emoji / sticker / GIF panel was opened from the reply row.
+    pub(super) reply_panel: bool,
+    /// Phase 9.5: viewers panel open in the viewer overlay
+    /// (`getStoryInteractions`).
+    pub(super) viewers_open: bool,
+    /// The statistics panel of the story open in the viewer.
+    pub(super) stats_open: bool,
+    /// Phase 9.5: report flow UI open in the viewer overlay
+    /// (`reportStory`).
+    pub(super) report_open: bool,
+    /// Phase 9.5: cover-frame picker (viewer) — open on a video story
+    /// with `can_be_edited`: a preview over a strip of frames.
+    pub(super) cover: Option<super::story_albums::CoverPicker>,
+    pub(super) cover_sent: bool,
+    /// Phase 9.5: privacy editor (viewer) — open on a story with
+    /// `can_set_privacy_settings`; reuses the 4-way privacy selector
+    /// + contact checkboxes.
+    pub(super) privacy_edit: Option<StoryPrivacyEdit>,
+    pub(super) privacy_sent: bool,
+    /// B14: the press-and-hold / Space pause, and the viewer's extra
+    /// panels (close friends, share) with their last result line.
+    pub(super) pause: quill::story_extras::StoryUserPause,
+    pub(super) close_friends_edit: Option<quill::story_extras::CloseFriendsEdit>,
+    pub(super) close_friends_saving: bool,
+    pub(super) share_open: bool,
+    pub(super) notice: Option<String>,
+}
 
 pub(crate) struct StoryUi {
     /// Stories strip tiles and sideways scroll (`quill::stories_strip`).
@@ -27,32 +67,18 @@ pub(crate) struct StoryUi {
     /// story, the ids it needs, how many stickers were known): the work
     /// repeats only when this changes.
     pub(super) emoji_warm: Option<EmojiWarm>,
-    /// Phase 9.2: story reaction picker open above the viewer overlay.
-    pub(super) reaction_picker_open: bool,
-    /// Phase 9.2: story reply input open in the viewer overlay.
-    pub(super) reply_open: bool,
     /// Phase 9.2: reply-to-story draft (the viewer overlay's reply row).
     pub(super) reply_input: Entity<TextareaState>,
     /// The live story the viewer plays (its picture, field and boxes).
     pub(super) live: super::story_viewer::LiveStoryUi,
-    /// The shared emoji / sticker / GIF panel was opened from the reply row.
-    pub(super) reply_panel: bool,
-    /// Phase 9.5: viewers panel open in the viewer overlay
-    /// (`getStoryInteractions`).
-    pub(super) viewers_open: bool,
     /// The viewers list's scroll position: the next page loads near its end.
     pub(super) viewers_scroll: ScrollHandle,
-    /// The statistics panel of the story open in the viewer.
-    pub(super) stats_open: bool,
     /// The statistics panel and the sidebar's public-story hits page near
     /// their end (`scroll_load`).
     pub(super) stats_scroll: ScrollHandle,
     pub(super) stats_asked: super::scroll_load::Asked,
     pub(super) found_scroll: ScrollHandle,
     pub(super) found_asked: super::scroll_load::Asked,
-    /// Phase 9.5: report flow UI open in the viewer overlay
-    /// (`reportStory`).
-    pub(super) report_open: bool,
     /// Phase 9.5: report details draft (the
     /// `reportStoryResultTextRequired` step).
     pub(super) report_text_input: Entity<TextareaState>,
@@ -68,41 +94,66 @@ pub(crate) struct StoryUi {
     /// inputs.
     pub(super) composer_link: Entity<TextareaState>,
     pub(super) composer_reaction: Entity<TextareaState>,
-    /// Phase 9.5: cover-frame picker (viewer) — open on a video story
-    /// with `can_be_edited`: a preview over a strip of frames.
-    pub(super) cover: Option<super::story_albums::CoverPicker>,
-    pub(super) cover_sent: bool,
-    /// Phase 9.5: privacy editor (viewer) — open on a story with
-    /// `can_set_privacy_settings`; reuses the 4-way privacy selector
-    /// + contact checkboxes.
-    pub(super) privacy_edit: Option<StoryPrivacyEdit>,
     pub(super) privacy_user_search: Entity<TextareaState>,
-    pub(super) privacy_sent: bool,
-    /// B14: the player of the current video story (`Purpose::Story`, drawn
-    /// by `video_frame` in the story frame), the story it belongs to, and
-    /// the story whose clip could not play.
-    pub(super) player: Option<super::video_player::VideoPlayer>,
-    pub(super) native_key: Option<(i64, i32)>,
-    pub(super) native_failed: Option<(i64, i32)>,
-    pub(super) native_play_at: Instant,
-    pub(super) native_paused_by_us: bool,
-    pub(super) video_wait_since: Option<Instant>,
-    /// B14: story sound muted, the press-and-hold / Space pause, and the
-    /// viewer's extra panels (close friends, share) with their shared
-    /// search field and last result line.
+    /// B14: the current video story's clip: waiting for it, its player
+    /// (`Purpose::Story`, drawn by `video_frame` in the story frame), or
+    /// the fallback to the duration clock (`story_video_state`).
+    pub(super) video: super::story_video_state::StoryVideo,
+    /// B14: story sound muted, and the search field the viewer's extra
+    /// panels (close friends, share) share.
     pub(super) muted: bool,
-    pub(super) pause: quill::story_extras::StoryUserPause,
-    pub(super) close_friends_edit: Option<quill::story_extras::CloseFriendsEdit>,
-    pub(super) close_friends_saving: bool,
-    pub(super) share_open: bool,
     pub(super) more_search: Entity<TextareaState>,
-    pub(super) notice: Option<String>,
     pub(super) stealth_box: Option<super::story_stealth_ui::StealthBox>,
     pub(super) stealth_tick: Option<Task<()>>,
     pub(super) stealth_toast: Option<super::story_stealth_ui::ShownStealthToast>,
+    /// What the viewer has open over its story; `Some` only while the
+    /// viewer is open (`viewer_ui_mut`), dropped by every close
+    /// (`release_story_viewer`).
+    open: Option<StoryViewerUi>,
+    /// What reads see while the viewer is closed: always empty, since only
+    /// `viewer_ui` (shared) hands it out.
+    closed: StoryViewerUi,
+}
+
+/// The story viewer's `closeStory` and a live story's leave go to the old
+/// client (`leave_live_story_for_switch`).
+impl super::on_screen::Farewell for StoryUi {
+    fn farewell(
+        app: &mut QuillApp,
+        _: &mut gpui_kit::Window,
+        cx: &mut gpui_kit::Context<QuillApp>,
+    ) {
+        app.leave_live_story_for_switch(cx);
+    }
 }
 
 impl StoryUi {
+    /// What the viewer has open, or nothing while it is closed.
+    pub(super) fn viewer_ui(&self) -> &StoryViewerUi {
+        self.open.as_ref().unwrap_or(&self.closed)
+    }
+
+    /// What the viewer has open, made on first use while it is open.
+    /// `None` while it is closed: nothing opens over a closed viewer.
+    pub(super) fn viewer_ui_mut(&mut self) -> Option<&mut StoryViewerUi> {
+        if !self.viewer.is_open() {
+            return None;
+        }
+        Some(self.open.get_or_insert_with(StoryViewerUi::default))
+    }
+
+    /// Change what the viewer has open; nothing while it is closed.
+    pub(super) fn with_viewer_ui(&mut self, f: impl FnOnce(&mut StoryViewerUi)) {
+        if let Some(open) = self.viewer_ui_mut() {
+            f(open);
+        }
+    }
+
+    /// The viewer closed: what it had open goes, as one value.
+    pub(super) fn drop_viewer_ui(&mut self) {
+        self.open = None;
+    }
+
     pub(super) fn new(window: &mut Window, cx: &mut Context<QuillApp>) -> Self {
         let story_reply_input = cx.new(|cx| {
             TextareaState::new(window, cx)
@@ -164,14 +215,11 @@ impl StoryUi {
             strip: Default::default(),
             reply_input: story_reply_input,
             live: super::story_viewer::LiveStoryUi::new(window, cx),
-            viewers_open: false,
             viewers_scroll: ScrollHandle::new(),
-            stats_open: false,
             stats_scroll: ScrollHandle::new(),
             stats_asked: Default::default(),
             found_scroll: ScrollHandle::new(),
             found_asked: Default::default(),
-            report_open: false,
             report_text_input: story_report_text_input,
             page: None,
             composer: StoryComposer::default(),
@@ -179,34 +227,19 @@ impl StoryUi {
             composer_user_search: story_composer_user_search,
             composer_link: story_composer_link,
             composer_reaction: story_composer_reaction,
-            cover: None,
-            cover_sent: false,
-            privacy_edit: None,
             privacy_user_search: story_privacy_user_search,
-            player: None,
-            native_key: None,
-            native_failed: None,
-            native_play_at: std::time::Instant::now(),
-            native_paused_by_us: false,
-            video_wait_since: None,
+            video: Default::default(),
             muted: false,
-            pause: Default::default(),
-            close_friends_edit: None,
-            close_friends_saving: false,
-            share_open: false,
             more_search: story_more_search,
-            notice: None,
             stealth_box: None,
             stealth_tick: None,
             stealth_toast: None,
-            privacy_sent: false,
             viewer: StoryViewer::closed(),
             playback: StoryPlayback::default(),
             tick_active: false,
             emoji_warm: None,
-            reaction_picker_open: false,
-            reply_open: false,
-            reply_panel: false,
+            open: None,
+            closed: StoryViewerUi::default(),
         }
     }
 }

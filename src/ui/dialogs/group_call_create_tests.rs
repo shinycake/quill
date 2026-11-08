@@ -109,7 +109,7 @@ fn click(vcx: &mut VisualTestContext, selector: &'static str) {
 }
 
 fn flow_open(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> bool {
-    app.read_with(vcx, |app, _| app.group_call.start_dialog.is_some())
+    app.read_with(vcx, |app, _| app.group_call_boxes.start_dialog.is_some())
 }
 
 /// The join recorded for the channel's new call, and who it joins as.
@@ -117,7 +117,7 @@ fn join_noted(
     app: &Entity<QuillApp>,
     vcx: &mut VisualTestContext,
 ) -> Option<Option<MessageSender>> {
-    app.read_with(vcx, |app, _| match app.group_call.stream.pending_join {
+    app.read_with(vcx, |app, _| match app.group_call_screen.stream_join {
         Some((StreamJoinIntent::Created { chat, join_as }, _)) if chat == CHANNEL => Some(join_as),
         _ => None,
     })
@@ -171,9 +171,9 @@ fn in_other_call(app: &Entity<QuillApp>, vcx: &mut VisualTestContext, joined: bo
         }
         if !joined {
             // The join went out and waits for its answer.
-            app.group_call.stream.joining = Some(OTHER_CALL);
+            app.group_call_screen.stream_joining = Some(OTHER_CALL);
         }
-        app.group_call.window_closed_by_user = Some(OTHER_CALL);
+        app.group_call_screen.window_closed_by_user = Some(OTHER_CALL);
     });
 }
 
@@ -318,7 +318,7 @@ fn the_schedule_link_opens_the_schedule_box_on_the_next_hour(cx: &mut TestAppCon
     click(&mut main, "group-call-create-schedule");
     assert!(main.debug_bounds("group-call-schedule-picker").is_some());
     let picked = app.read_with(&main, |app, cx| {
-        match app.group_call.start_dialog.as_ref() {
+        match app.group_call_boxes.start_dialog.as_ref() {
             Some(GroupCallCreate {
                 step: CreateStep::Schedule(step),
                 ..
@@ -333,7 +333,7 @@ fn the_schedule_link_opens_the_schedule_box_on_the_next_hour(cx: &mut TestAppCon
     assert_eq!(picked, Some(WallClock::CHICAGO_FALL_BACK - 2 * 3600));
     // 00:00 is an hour and twenty minutes off on the box's clock.
     let line = app.read_with(&main, |app, cx| {
-        match app.group_call.start_dialog.as_ref() {
+        match app.group_call_boxes.start_dialog.as_ref() {
             Some(GroupCallCreate {
                 step: CreateStep::Schedule(step),
                 ..
@@ -367,7 +367,7 @@ fn the_schedule_demo_refuses_a_time_in_the_past(cx: &mut TestAppContext) {
         if let Some(GroupCallCreate {
             step: CreateStep::Schedule(step),
             ..
-        }) = app.group_call.start_dialog.as_ref()
+        }) = app.group_call_boxes.start_dialog.as_ref()
             && let Some(value) =
                 crate::ui::scheduled::picker_value(WallClock::of(cx).now() - 3600, cx)
         {
@@ -466,7 +466,10 @@ fn a_join_still_in_flight_counts_as_being_in_that_call(cx: &mut TestAppContext) 
     // `leaveGroupCall` and the transport teardown), not dropped quietly.
     assert!(!other_call_tracked(&app, &mut main));
     assert!(
-        app.read_with(&main, |app, _| app.group_call.stream.joining.is_none()),
+        app.read_with(&main, |app, _| app
+            .group_call_screen
+            .stream_joining
+            .is_none()),
         "no join of the old call is awaited any more"
     );
 }
@@ -481,7 +484,7 @@ fn a_call_only_looked_at_is_dropped_without_leaving_it(cx: &mut TestAppContext) 
             session.calls.active_group_call = Some(ActiveGroupCall::fresh(OTHER_CALL));
         }
         // Its own window is not part of this test.
-        app.group_call.window_closed_by_user = Some(OTHER_CALL);
+        app.group_call_screen.window_closed_by_user = Some(OTHER_CALL);
     });
     begin(&app, &mut main, CreateKind::Now);
     assert!(
@@ -507,7 +510,10 @@ fn a_refused_create_toasts_and_drops_the_join(cx: &mut TestAppContext) {
     let before = toasts(&mut main);
     // The server refuses that `createVideoChat`.
     app.update(&mut main, |app, cx| {
-        let request = app.group_call.create_request.expect("the create went out");
+        let request = app
+            .group_call_boxes
+            .create_request
+            .expect("the create went out");
         if let Some(session) = app.demo_session.as_mut() {
             // Another request's failure is not this one.
             session.calls.failed_creates.push(RequestId(request.0 + 1));
@@ -518,7 +524,7 @@ fn a_refused_create_toasts_and_drops_the_join(cx: &mut TestAppContext) {
     assert!(join_noted(&app, &mut main).is_some(), "not ours");
     assert_eq!(toasts(&mut main), before);
     app.update(&mut main, |app, cx| {
-        let request = app.group_call.create_request.expect("still waiting");
+        let request = app.group_call_boxes.create_request.expect("still waiting");
         if let Some(session) = app.demo_session.as_mut() {
             session.calls.failed_creates.push(request);
         }

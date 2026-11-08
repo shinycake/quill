@@ -330,8 +330,7 @@ fn a_dead_conference_gives_way_to_a_new_join() {
     // Its rejoins are spent: the new link replaces it, and it is left.
     let call = harness.1.session.calls.active_group_call.as_mut().unwrap();
     call.is_joined = true;
-    call.reconnecting = true;
-    call.rejoin_attempts = crate::state::MAX_GROUP_CALL_REJOIN_ATTEMPTS;
+    call.rejoin = crate::state::GroupCallRejoin::GaveUp;
     harness
         .1
         .join_conference_link("https://t.me/call/new".into())
@@ -357,8 +356,7 @@ fn rejoining_a_dead_conference_survives_the_old_leaves_ok() {
     feed(&mut harness, &answer(&extra, 555));
     let call = harness.1.session.calls.active_group_call.as_mut().unwrap();
     call.is_joined = true;
-    call.reconnecting = true;
-    call.rejoin_attempts = crate::state::MAX_GROUP_CALL_REJOIN_ATTEMPTS;
+    call.rejoin = crate::state::GroupCallRejoin::GaveUp;
     // The same conference again, by its link.
     harness
         .1

@@ -9,7 +9,6 @@ use crate::ui::status_note::StatusNote;
 use crate::ui::*;
 use gpui_kit::*;
 use quill::ids::ChatId;
-use quill::state::SearchStatus;
 use std::sync::atomic::Ordering;
 
 register_demos![
@@ -124,8 +123,11 @@ impl QuillApp {
         // Slice CL2: sidebar search showing the empty-result state.
         if let Some(session) = self.demo_session.as_mut() {
             session.open_search();
-            session.search.search.begin_query("xyzzy-no-such-chat");
-            session.search.search.status = SearchStatus::Empty;
+            let search = &mut session.search.search;
+            search.begin_query("xyzzy-no-such-chat");
+            search.accept_chats(Vec::new(), false);
+            search.accept_messages(Vec::new(), false);
+            search.accept_public_chats(Vec::new(), false);
         }
         self.connection
             .set_note(StatusNote::silent("screenshot demo — search empty state"));

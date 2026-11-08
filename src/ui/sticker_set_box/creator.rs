@@ -175,12 +175,14 @@ impl QuillApp {
             multiple: false,
             prompt: Some(tr(keys::Q_MEDIA_CHOOSE_IMAGE).into()),
         });
+        // The set is the account's own: no editor for it over another
+        // account (`spawn_scoped` carries the screen).
         self.spawn_scoped(cx, async move |this, cx| {
             if let Ok(Ok(Some(paths))) = picker.await
                 && let Some(path) = paths.into_iter().next()
             {
                 let _ = this.update(cx, |this, cx| {
-                    this.edit_image_for_set(set_id, kind, &path, cx);
+                    this.edit_image_for_set(set_id, kind, &path, cx)
                 });
             }
         })
@@ -238,7 +240,7 @@ impl QuillApp {
             let prepared = prepared_sticker_image(&job.render(), kind.image_side(), corners);
             super::super::edit_media_tools::write_edited_png(&prepared)
         });
-        cx.spawn(async move |this, cx| {
+        self.spawn_screen(cx, async move |this, cx| {
             let written = worker.await;
             let _ = this.update(cx, |this, cx| {
                 match written {
@@ -510,7 +512,7 @@ impl QuillApp {
         };
         let mut changed = false;
         if let Some(note) = live.driver.session.take_sticker_set_edit_note() {
-            self.connection.set_note(StatusNote::info(note));
+            self.screen.connection.set_note(StatusNote::info(note));
             changed = true;
         }
         let deleted = live

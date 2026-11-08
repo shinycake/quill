@@ -205,18 +205,14 @@ impl QuillApp {
         }
         let sent = self.live.as_mut().map(|live| {
             live.driver.session.payments.note = None;
-            let sent = live.driver.submit_payment_form(
+            live.driver.submit_payment_form(
                 &request.invoice,
                 form.id,
                 "",
                 "",
                 serde_json::Value::Null,
                 0,
-            );
-            if sent.is_ok() {
-                live.driver.session.payments.sending = true;
-            }
-            sent
+            )
         });
         if !matches!(sent, Some(Ok(_))) {
             self.connection.set_note(StatusNote::error(tr(
@@ -274,7 +270,7 @@ impl QuillApp {
                 &[("group_digits", &(group_digits(star_count)).to_string())],
             ))
             .primary();
-        body.child(if session.payments.sending {
+        body.child(if session.payments.checkout_sending() {
             pay.label(tr(keys::Q_MONEY_PROCESSING)).disabled(true)
         } else if session.payments.form_paid {
             pay.label(tr(keys::SR_MESSAGE_INVOICE_PAID)).disabled(true)

@@ -10,7 +10,6 @@ use crate::ui::status_note::StatusNote;
 use gpui_kit::*;
 use quill::ids::ChatId;
 use quill::lang::{keys, tr};
-use quill::locks::LockExt;
 use quill::notify::{NotificationAction, NotificationSoundKind, QueuedNotification};
 use quill::state::RedrawNeed;
 use quill::telegram::envelope::{AuthorizationState, ChatNotificationSettings};
@@ -198,20 +197,22 @@ impl PolledRedraw {
 
 impl QuillApp {
     pub(super) fn spawn_poll_loop(&mut self, cx: &mut Context<Self>) {
-        let generation = self.connection.generation;
+        let generation = self.connect.generation;
+        // screen-scope: the poll loop drains whichever client is on screen; its
+        // generation guard ends it when the client is replaced.
         // window-scope: `poll_live` puts the main window's state in place itself.
         cx.spawn(async move |this, cx| {
             let executor = cx.background_executor().clone();
             let hold = backlog_hold(&executor);
             run_poll_loop(executor, &quill::wake::UPDATES, POLL_PACE, hold, || {
                 this.update(cx, |this, cx| {
-                    if generation != this.connection.generation {
+                    if generation != this.connect.generation {
                         return None;
                     }
                     let work_left = this.poll_live(cx);
                     let now = std::time::Instant::now();
                     let active = this.frame.window_active.get();
-                    let redraw = this.notify.polled_redraw.next_due(active, now);
+                    let redraw = this.delivery.polled_redraw.next_due(active, now);
                     this.live.as_ref().map(|live| {
                         let timed = live.driver.next_deadline(now, quill::state::unix_ms_now());
                         PassEnd {
@@ -230,15 +231,15 @@ impl QuillApp {
 
     pub(super) fn reload_account_keybindings(&mut self, cx: &mut Context<Self>) {
         super::keybindings::invalidate_account_keybindings(
-            &mut self.settings.keybindings_applied,
-            &mut self.settings.keybinding_capture,
-            &mut self.settings.keybinding_error,
+            &mut self.preferences.keybindings_applied,
+            &mut self.preferences.keybinding_capture,
+            &mut self.preferences.keybinding_error,
         );
         self.apply_pending_keybindings(cx);
     }
 
     fn apply_pending_keybindings(&mut self, cx: &mut Context<Self>) {
-        if self.settings.keybindings_applied {
+        if self.preferences.keybindings_applied {
             return;
         }
         let Some(live) = self.live.as_ref() else {
@@ -247,7 +248,7 @@ impl QuillApp {
         let customs = live.driver.load_custom_keybindings();
         // Empty prefs rebuild defaults too, replacing the previous account's chords.
         super::keybindings::apply_custom_bindings(cx, &customs);
-        self.settings.keybindings_applied = true;
+        self.preferences.keybindings_applied = true;
     }
 
     /// Redraw for what the TDLib poll applied, as urgently as it needs
@@ -265,9 +266,9 @@ impl QuillApp {
         let active = self.frame.window_active.get();
         let now = std::time::Instant::now();
         let action = if deliver {
-            self.notify.polled_redraw.drawn(now)
+            self.delivery.polled_redraw.drawn(now)
         } else {
-            self.notify.polled_redraw.decide(need, active, now)
+            self.delivery.polled_redraw.decide(need, active, now)
         };
         match action {
             PolledAction::Wait => {}
@@ -298,8 +299,10 @@ impl QuillApp {
     }
 
     fn sync_rows_on_screen(&mut self) {
-        let rows = self.history.on_screen.try_borrow().ok();
-        let rows = rows.as_ref().filter(|_| !self.viewer.state.is_open());
+        let rows = self.screen.history.on_screen.try_borrow().ok();
+        let rows = rows
+            .as_ref()
+            .filter(|_| !self.screen.viewer.state.is_open());
         if let Some(live) = self.live.as_mut() {
             live.driver
                 .session
@@ -335,8 +338,8 @@ impl QuillApp {
         // Asked of the platform: a hidden or minimized main window does not
         // draw, so its last render may predate its deactivation.
         let main_active = self
-            .windows
-            .main
+            .main_window
+            .handle
             .is_some_and(|main| cx.active_window() == Some(main));
         let Some(live) = self.live.as_mut() else {
             self.clear_device_qr();
@@ -379,7 +382,7 @@ impl QuillApp {
                     .unwrap_or_default();
                 super::frame_clock::trace_ingested(name);
             }
-            self.notify.polled_redraw.record(
+            self.delivery.polled_redraw.record(
                 quill::state::redraw_need(&live.driver.session, &owned.envelope),
                 self.frame.window_active.get(),
             );
@@ -409,10 +412,10 @@ impl QuillApp {
         // nothing more will arrive, so surface it like an unexpected
         // Closed with a Retry instead of a UI that silently goes stale.
         if self
-            .connection
+            .connect
             .claim_closed_note(live.bridge.stopped_unexpectedly(), budget_hit)
         {
-            self.connection.set_note(StatusNote::silent(tr(
+            self.screen.connection.set_note(StatusNote::silent(tr(
                 keys::Q_PREFS_CONNECTION_TO_TELEGRAM_WAS_CLOSED,
             )));
             progressed = true;
@@ -433,7 +436,7 @@ impl QuillApp {
         let deliver = live.driver.session.bots.pending_force_reply.is_some();
         // Parity slice: the selected folder tab may have been deleted or
         // removed remotely (`updateChatFolders`); fall back to Main.
-        if let Some(folder_id) = self.folders.tab
+        if let Some(folder_id) = self.screen.folders.tab
             && !live
                 .driver
                 .session
@@ -443,8 +446,8 @@ impl QuillApp {
                 .any(|f| f.id == folder_id)
         {
             // (Same rule as `set_chat_list_view`; `live` is borrowed here.)
-            self.chat_list.selected.clear();
-            self.folders.tab = None;
+            self.screen.chat_list.selected.clear();
+            self.screen.folders.tab = None;
         }
         let err = live.driver.session.auth_state.last_auth_error;
         let new_auth = live.driver.session.auth.clone();
@@ -737,6 +740,19 @@ impl QuillApp {
             self.connection.set_note(StatusNote::error(notice));
             progressed = true;
         }
+        // TDLib refused the `logOut`: the account stays signed in.
+        if let Some(err) = self
+            .live
+            .as_mut()
+            .and_then(|live| live.driver.session.auth_state.logout_refused.take())
+        {
+            self.connection
+                .set_note(StatusNote::error(crate::ui::user_error::user_error_for(
+                    quill::lang::keys::Q_NOTES_FAILED_LOG_OUT,
+                    &err,
+                )));
+            progressed = true;
+        }
         self.poll_folder_new_chats();
         self.prune_drop_topic();
         if self.drain_folder_share(cx)
@@ -803,19 +819,13 @@ impl QuillApp {
         // Where Quill's own notification windows would go. The main
         // window's display is noted when it changes (`display_events`):
         // looking it up enumerates every display.
-        self.notify.windows.platform = super::notify_windows::platform_of(window);
+        self.delivery.windows.platform = super::notify_windows::platform_of(window);
         self.post_debug_notification_once(cx);
         // Inline replies and "Mark as read" need no window; what is left
         // opens a chat.
         self.drain_background_clicks(cx);
-        let clicks: Vec<(ChatId, NotificationAction)> = self
-            .notify
-            .notify_clicks
-            .lock_or_recover()
-            .drain(..)
-            .collect();
-        for (chat_id, action) in clicks {
-            self.run_notification_action(chat_id, action, window, cx);
+        for click in self.take_on_screen_clicks() {
+            self.run_notification_action(click.chat_id, click.action, window, cx);
         }
         // Other accounts: switches asked for by their notifications.
         self.flush_background_accounts(window, cx);

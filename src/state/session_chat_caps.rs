@@ -571,14 +571,14 @@ impl Session {
     /// a reschedule rewrites its planned send time in place.
     pub(crate) fn finish_scheduling_edit(
         &mut self,
+        chat_id: Option<ChatId>,
         message_id: MessageId,
         scheduling: ComposerScheduling,
     ) {
+        let is_it = |m: &ParsedMessage| Some(m.chat_id) == chat_id && m.id == message_id;
         match scheduling {
             ComposerScheduling::None => {
-                self.messages
-                    .scheduled_messages
-                    .retain(|m| m.id != message_id);
+                self.messages.scheduled_messages.retain(|m| !is_it(m));
                 self.messages.message_action_note = Some("message sent".into());
             }
             ComposerScheduling::SendAtDate(send_date) => {
@@ -586,7 +586,7 @@ impl Session {
                     .messages
                     .scheduled_messages
                     .iter_mut()
-                    .find(|m| m.id == message_id)
+                    .find(|m| is_it(m))
                 {
                     message.scheduling_state = Some(MessageSchedulingState::SendAtDate {
                         send_date: send_date as i32,
@@ -601,13 +601,21 @@ impl Session {
                     .messages
                     .scheduled_messages
                     .iter_mut()
-                    .find(|m| m.id == message_id)
+                    .find(|m| is_it(m))
                 {
                     message.scheduling_state = Some(MessageSchedulingState::SendWhenOnline);
                 }
                 self.messages.message_action_note = Some("message rescheduled".into());
             }
         }
+    }
+
+    /// The scheduled messages of `chat_id` that are known.
+    pub fn scheduled_in(&self, chat_id: ChatId) -> impl Iterator<Item = &ParsedMessage> {
+        self.messages
+            .scheduled_messages
+            .iter()
+            .filter(move |m| m.chat_id == chat_id)
     }
 
     /// Whether the user is a known bot.

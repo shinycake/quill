@@ -81,7 +81,7 @@ impl QuillApp {
             return;
         };
         search.top_view = search.top_view.toggled();
-        self.search_ui.top_drag.set(None);
+        self.screen.search_ui.top_drag.set(None);
         let expanding = search.top_view.expanded();
         self.search_ui
             .top_toggled_at

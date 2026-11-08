@@ -72,7 +72,7 @@ fn schedule_with_repeat(
     app.open_schedule_picker(ScheduleTarget::Composer, window, cx);
     // 01:20, which went by once already as CDT.
     let value = picker_value(WallClock::of(cx).now() + 900, cx).expect("a picker value");
-    let picker = app.composer_ui.schedule_picker.as_mut().expect("picker");
+    let picker = app.chat_ui.schedule_picker.as_mut().expect("picker");
     picker.repeat = repeat;
     let date = picker.date.state.clone();
     date.update(cx, |state, cx| state.set_date_time(value, window, cx));
@@ -144,11 +144,7 @@ fn the_schedule_shortcut_asks_for_a_time_and_then_sends(cx: &mut TestAppContext)
         app.composer
             .update(cx, |input, cx| input.set_value("later", window, cx));
         assert!(app.schedule_send_by_key(window, cx));
-        let picker = app
-            .composer_ui
-            .schedule_picker
-            .as_ref()
-            .expect("the picker");
+        let picker = app.chat_ui.schedule_picker.as_ref().expect("the picker");
         assert!(picker.send_after);
         // Confirming the time sends, as tdesktop's schedule box does.
         let date = picker.date.state.clone();
@@ -190,8 +186,8 @@ fn the_scheduled_list_and_the_link_preview_toggle_follow_the_chat(cx: &mut TestA
     let vcx = &mut vcx;
     app.update_in(vcx, |app, window, cx| {
         assert!(app.show_scheduled_by_key(window, cx));
-        assert!(app.composer_ui.scheduled_dialog_open);
-        app.composer_ui.scheduled_dialog_open = false;
+        assert!(app.chat_ui.scheduled_dialog_open);
+        app.chat_ui.scheduled_dialog_open = false;
 
         // No link in the text: nothing to toggle.
         assert!(!app.toggle_link_preview_by_key(window, cx));
@@ -358,7 +354,7 @@ fn pending_photo(app: &mut QuillApp, caption: &str) -> quill::ids::MessageId {
         .clone();
     message.id = id;
     message.is_outgoing = true;
-    message.pending = true;
+    message.send = quill::state::SendState::Sending;
     message.media_album_id = 0;
     message.forward_info = None;
     message.content = MessageContent::Photo(PhotoContent {
@@ -387,7 +383,7 @@ fn up_opens_the_caption_of_a_media_message_still_being_sent(cx: &mut TestAppCont
     vcx.simulate_keystrokes("up");
     let (edit, text) = app.read_with(vcx, |app, cx| {
         (
-            app.composer_ui.pending_edit.clone(),
+            app.chat_ui.pending_edit().cloned(),
             app.composer.read(cx).value().to_string(),
         )
     });
@@ -402,7 +398,7 @@ fn up_keeps_scrolling_while_a_reply_is_pending(cx: &mut TestAppContext) {
     let vcx = &mut vcx;
     app.update_in(vcx, |app, window, cx| {
         pending_photo(app, "on its way");
-        app.composer_ui
+        app.chat_ui
             .set_reply(Some(quill::composer::ComposerReplyTo::new(
                 OPEN,
                 quill::ids::MessageId(1),
@@ -410,5 +406,5 @@ fn up_keeps_scrolling_while_a_reply_is_pending(cx: &mut TestAppContext) {
         app.composer.update(cx, |input, cx| input.focus(window, cx));
     });
     vcx.simulate_keystrokes("up");
-    assert!(app.read_with(vcx, |app, _| app.composer_ui.pending_edit.is_none()));
+    assert!(app.read_with(vcx, |app, _| !app.chat_ui.is_editing()));
 }

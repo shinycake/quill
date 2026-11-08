@@ -173,7 +173,7 @@ impl QuillApp {
 
     /// The video area: the pinned tile large, the rest in a wrapped strip.
     fn retain_group_call_pin(&mut self, keys: &[TileKey]) {
-        if self.group_call.pin.retain_available(keys) {
+        if self.group_call_screen.pin.retain_available(keys) {
             self.sync_group_call_large_tile();
         }
     }
@@ -190,7 +190,7 @@ impl QuillApp {
         if built.is_empty() {
             return None;
         }
-        let layout = self.group_call.pin.layout(&keys);
+        let layout = self.group_call_screen.pin.layout(&keys);
         let mut main: Option<AnyElement> = None;
         let mut rest: Vec<AnyElement> = Vec::new();
         for tile in built {
@@ -223,7 +223,7 @@ impl QuillApp {
         let built = self.collect_group_tiles(call, true, cx);
         let keys: Vec<TileKey> = built.iter().map(|t| t.key).collect();
         self.retain_group_call_pin(&keys);
-        let stage = stage_tile(&self.group_call.pin, &keys)?;
+        let stage = stage_tile(&self.group_call_screen.pin, &keys)?;
         let tile = built.into_iter().find(|t| t.key == stage)?;
         let volume = (!tile.own)
             .then(|| self.stage_volume_slider(call, stage.participant, cx))

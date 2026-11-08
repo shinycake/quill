@@ -530,5 +530,6 @@ crate::ui::shell::register_dialogs! {
         5700,
         sticker_box_shown,
         QuillApp::build_sticker_set_dialog,
-    ),
+    )
+    .close(|app, _, cx| app.close_sticker_set_dialog(cx)),
 }

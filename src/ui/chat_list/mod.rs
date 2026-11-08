@@ -156,7 +156,7 @@ impl QuillApp {
         // A reply aimed at this chat from another one survives the draft
         // restore below ("Reply in Another Chat").
         let carried_reply = self
-            .composer_ui
+            .chat_ui
             .reply()
             .cloned()
             .filter(|reply| reply.target_chat == Some(chat_id));
@@ -165,7 +165,7 @@ impl QuillApp {
         // A chat opened from anywhere (a link, a notification) shows over
         // Settings' place.
         self.close_settings();
-        self.dismiss_cross_chat_state(chat_id, cx);
+        self.enter_chat_ui(chat_id, cx);
         // Voice notes and music keep playing across chats (the player bar
         // follows, as in Telegram Desktop).
         self.stop_animation_playback();
@@ -225,7 +225,7 @@ impl QuillApp {
         }
         self.restore_open_draft(window, cx);
         if carried_reply.is_some() {
-            self.composer_ui.set_reply(carried_reply);
+            self.chat_ui.set_reply(carried_reply);
         }
         let text = self.composer.read(cx).value().to_string();
         self.sync_composer_typing(&text);
@@ -555,17 +555,21 @@ impl QuillApp {
         self.chat_list.calls_tab_open = true;
         if let Some(live) = self.live.as_mut() {
             if let Err(err) = live.driver.fetch_call_history() {
-                self.connection.set_note(StatusNote::error(user_error_for(
-                    keys::Q_NOTES_FAILED_CALL_HISTORY,
-                    &err,
-                )));
+                self.screen
+                    .connection
+                    .set_note(StatusNote::error(user_error_for(
+                        keys::Q_NOTES_FAILED_CALL_HISTORY,
+                        &err,
+                    )));
             }
             for key in [PrivacySettingKey::AllowCalls, PrivacySettingKey::PeerToPeer] {
                 if let Err(err) = live.driver.fetch_privacy_rules(key) {
-                    self.connection.set_note(StatusNote::error(user_error_for(
-                        keys::Q_NOTES_FAILED_CALL_PRIVACY,
-                        &err,
-                    )));
+                    self.screen
+                        .connection
+                        .set_note(StatusNote::error(user_error_for(
+                            keys::Q_NOTES_FAILED_CALL_PRIVACY,
+                            &err,
+                        )));
                 }
             }
             // Slice S4: the call-settings "Use less data for calls"

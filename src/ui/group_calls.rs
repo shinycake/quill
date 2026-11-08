@@ -33,11 +33,12 @@ impl QuillApp {
             // A live stream joins in its window once it is tracked.
             self.note_stream_join_intent(StreamJoinIntent::Call(group_call_id));
             if let Some(live) = self.live.as_mut() {
-                self.connection
-                    .set_note(match live.driver.fetch_group_call(group_call_id) {
+                self.screen.connection.set_note(
+                    match live.driver.fetch_group_call(group_call_id) {
                         Ok(_) => StatusNote::silent(tr(keys::Q_AV_JOINING_VOICE_CHAT)),
                         Err(_) => StatusNote::error(tr(keys::Q_AV_COULDNT_REACH_THE_VOICE_CHAT)),
-                    });
+                    },
+                );
             } else if let Some(session) = self.demo_session.as_mut() {
                 // Screenshot demo: no live TDLib — the fixture already
                 // tracks the call; just surface the overlay.
@@ -99,7 +100,9 @@ impl QuillApp {
             });
             sent
         } else if let Some(session) = self.demo_session.as_mut() {
+            // As the driver's join: it starts without the last error.
             if let Some(call) = session.calls.active_group_call.as_mut() {
+                call.transport_error = None;
                 call.is_joined = true;
             }
             self.connection.set_note(StatusNote::silent(tr(
@@ -132,7 +135,8 @@ impl QuillApp {
     /// Phase C3a: rejoin after `need_rejoin`.
     pub(super) fn rejoin_active_group_call(&mut self, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
-            self.connection
+            self.screen
+                .connection
                 .set_note(match live.driver.rejoin_group_call(true) {
                     Ok(_) => StatusNote::silent(tr(keys::Q_AV_REJOINING_VOICE_CHAT)),
                     Err(err) => {
@@ -182,7 +186,7 @@ impl QuillApp {
             return;
         };
         if let Some(live) = self.live.as_mut() {
-            self.connection.set_note(
+            self.screen.connection.set_note(
                 match live.driver.toggle_group_call_participant_hand(me, raise) {
                     Ok(_) => {
                         if raise {
@@ -242,7 +246,8 @@ impl QuillApp {
                 cx.notify();
                 return;
             }
-            self.connection
+            self.screen
+                .connection
                 .set_note(match live.driver.toggle_group_call_my_video() {
                     Ok(_) => StatusNote::silent(tr(keys::Q_AV_TOGGLING_VIDEO)),
                     Err(_) => StatusNote::error(tr(keys::Q_AV_COULDNT_TOGGLE_VIDEO)),
@@ -278,7 +283,8 @@ impl QuillApp {
     /// toggles).
     pub(super) fn share_group_call_screen(&mut self, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
-            self.connection
+            self.screen
+                .connection
                 .set_note(match live.driver.toggle_group_call_screen_share() {
                     Ok(_) => StatusNote::silent(tr(keys::Q_AV_TOGGLING_SCREEN_SHARING)),
                     Err(_) => {
@@ -304,7 +310,7 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         if let Some(live) = self.live.as_mut() {
-            self.connection.set_note(
+            self.screen.connection.set_note(
                 match live
                     .driver
                     .toggle_group_call_participant_muted(sender, mute)
@@ -335,7 +341,7 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         if let Some(live) = self.live.as_mut() {
-            self.connection.set_note(
+            self.screen.connection.set_note(
                 match live
                     .driver
                     .toggle_group_call_participant_hand(sender, raise)
@@ -355,7 +361,7 @@ impl QuillApp {
     /// the cache is empty.
     pub(super) fn open_group_call_invite(&mut self, cx: &mut Context<Self>) {
         self.group_call_needs_unlock(cx);
-        self.group_call.invite_open = true;
+        self.group_call_boxes.invite_open = true;
         if let Some(live) = self.live.as_mut()
             && live.driver.session.users_state.contacts.is_none()
         {
@@ -370,11 +376,12 @@ impl QuillApp {
     /// success.
     pub(super) fn invite_group_call_participant(&mut self, user_id: i64, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
-            self.connection
-                .set_note(match live.driver.invite_group_call_participant(user_id) {
+            self.screen.connection.set_note(
+                match live.driver.invite_group_call_participant(user_id) {
                     Ok(_) => StatusNote::silent(tr(keys::Q_AV_INVITATION_SENT)),
                     Err(_) => StatusNote::error(tr(keys::Q_AV_COULDNT_INVITE_TO_THE_VOICE)),
-                });
+                },
+            );
         } else if self.demo_session.is_some() {
             self.connection.set_note(StatusNote::silent(tr(
                 keys::Q_AV_SCREENSHOT_DEMO_INVITATION_SENT_INJECTED,
@@ -391,11 +398,12 @@ impl QuillApp {
     /// (owner-gated by the driver on `groupCall.is_owned`).
     pub(super) fn ban_group_call_participant(&mut self, user_id: i64, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
-            self.connection
-                .set_note(match live.driver.ban_group_call_participant(user_id) {
+            self.screen.connection.set_note(
+                match live.driver.ban_group_call_participant(user_id) {
                     Ok(_) => StatusNote::silent(tr(keys::Q_AV_BANNING_PARTICIPANT)),
                     Err(_) => StatusNote::error(tr(keys::Q_AV_COULDNT_BAN_THE_PARTICIPANT)),
-                });
+                },
+            );
         } else if self.demo_session.is_some() {
             self.connection.set_note(StatusNote::silent(tr(
                 keys::Q_AV_SCREENSHOT_DEMO_PARTICIPANT_BANNED_INJECTED,
@@ -440,7 +448,7 @@ impl QuillApp {
     ) {
         let level = level.clamp(1, 20000);
         if let Some(live) = self.live.as_mut() {
-            self.connection.set_note(
+            self.screen.connection.set_note(
                 match live.driver.set_group_call_participant_volume(sender, level) {
                     Ok(_) => StatusNote::silent(tr_with(
                         keys::Q_AV_VOLUME,
@@ -473,7 +481,7 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         if let Some(live) = self.live.as_mut() {
-            self.connection.set_note(
+            self.screen.connection.set_note(
                 match live
                     .driver
                     .accept_group_call_invitation(chat_id.0, message_id.0)
@@ -502,7 +510,7 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         if let Some(live) = self.live.as_mut() {
-            self.connection.set_note(
+            self.screen.connection.set_note(
                 match live
                     .driver
                     .decline_group_call_invitation(chat_id.0, message_id.0)
@@ -550,7 +558,8 @@ impl QuillApp {
     /// Phase C3a: `endGroupCall` (admin).
     pub(super) fn end_active_group_call(&mut self, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
-            self.connection
+            self.screen
+                .connection
                 .set_note(match live.driver.end_group_call() {
                     Ok(_) => StatusNote::silent(tr(keys::Q_AV_ENDING_VOICE_CHAT)),
                     Err(_) => StatusNote::error(tr(keys::Q_AV_COULDNT_END_THE_VOICE_CHAT)),
@@ -566,7 +575,8 @@ impl QuillApp {
     /// Phase C3a: `toggleVideoChatMuteNewParticipants`.
     pub(super) fn toggle_video_chat_mute_new(&mut self, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
-            self.connection
+            self.screen
+                .connection
                 .set_note(match live.driver.toggle_video_chat_mute_new() {
                     Ok(_) => StatusNote::silent(tr(keys::Q_AV_TOGGLING_MUTE_NEW)),
                     Err(_) => StatusNote::error(tr(keys::Q_AV_COULDNT_TOGGLE_MUTE_NEW)),
@@ -598,25 +608,26 @@ impl QuillApp {
             .map(|c| c.title.clone())
             .unwrap_or_default();
         let dialog = GroupCallTitleDialog::new(window, cx, &current);
-        self.group_call.title_dialog = Some(dialog);
+        self.group_call_screen.title_dialog = Some(dialog);
         cx.notify();
     }
 
     pub(super) fn close_group_call_title_dialog(&mut self, cx: &mut Context<Self>) {
-        self.group_call.title_dialog = None;
+        self.group_call_screen.title_dialog = None;
         cx.notify();
     }
 
     pub(super) fn save_group_call_title(&mut self, cx: &mut Context<Self>) {
         let title = self
-            .group_call
+            .group_call_screen
             .title_dialog
             .as_ref()
             .map(|d| d.title_input.read(cx).value().to_string())
             .unwrap_or_default();
-        self.group_call.title_dialog = None;
+        self.group_call_screen.title_dialog = None;
         if let Some(live) = self.live.as_mut() {
-            self.connection
+            self.screen
+                .connection
                 .set_note(match live.driver.set_video_chat_title(title) {
                     Ok(_) => StatusNote::silent(tr(keys::Q_AV_RENAMING_VOICE_CHAT)),
                     Err(_) => StatusNote::error(tr(keys::Q_AV_COULDNT_RENAME_THE_VOICE_CHAT)),
@@ -633,7 +644,8 @@ impl QuillApp {
     /// (`revokeGroupCallInviteLink`); the cached link clears on `ok`.
     pub(super) fn revoke_group_call_invite_link(&mut self, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
-            self.connection
+            self.screen
+                .connection
                 .set_note(match live.driver.revoke_video_chat_invite_link() {
                     Ok(_) => StatusNote::silent(tr(keys::Q_AV_REVOKING_INVITE_LINK)),
                     Err(_) => StatusNote::error(tr(keys::Q_AV_COULDNT_REVOKE_THE_INVITE_LINK)),
@@ -659,7 +671,7 @@ impl QuillApp {
             .map(|c| c.title.clone())
             .unwrap_or_default();
         if let Some(live) = self.live.as_mut() {
-            self.connection.set_note(if recording {
+            self.screen.connection.set_note(if recording {
                 match live.driver.stop_group_call_recording() {
                     Ok(_) => StatusNote::silent(tr(keys::Q_AV_STOPPING_THE_RECORDING)),
                     Err(_) => StatusNote::error(tr(keys::Q_AV_COULDNT_STOP_THE_RECORDING)),
@@ -684,7 +696,8 @@ impl QuillApp {
     /// line on the card.
     pub(super) fn start_scheduled_video_chat(&mut self, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
-            self.connection
+            self.screen
+                .connection
                 .set_note(match live.driver.start_scheduled_video_chat() {
                     Ok(_) => StatusNote::silent(tr(keys::Q_AV_STARTING_THE_VIDEO_CHAT)),
                     Err(_) => StatusNote::error(tr(keys::Q_AV_COULDNT_START_THE_VIDEO_CHAT)),
@@ -702,13 +715,14 @@ impl QuillApp {
     /// arrives back as `updateGroupCall`.
     pub(super) fn toggle_video_chat_start_notification(&mut self, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
-            self.connection
-                .set_note(match live.driver.toggle_video_chat_start_notification() {
+            self.screen.connection.set_note(
+                match live.driver.toggle_video_chat_start_notification() {
                     Ok(_) => StatusNote::silent(tr(keys::Q_AV_UPDATING_YOUR_START_NOTIFICATION)),
                     Err(_) => {
                         StatusNote::error(tr(keys::Q_AV_COULDNT_UPDATE_THE_START_NOTIFICATION))
                     }
-                });
+                },
+            );
         } else {
             self.connection
                 .set_note(StatusNote::info(tr(keys::Q_AV_NOTIFY_ME_NEEDS_A_LIVE)));
@@ -719,7 +733,8 @@ impl QuillApp {
     /// Phase C2h: `getVideoChatRtmpUrl` — fetch the RTMP URL + key.
     pub(super) fn fetch_video_chat_rtmp_url(&mut self, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
-            self.connection
+            self.screen
+                .connection
                 .set_note(match live.driver.fetch_video_chat_rtmp_url() {
                     Ok(_) => StatusNote::silent(tr(keys::Q_AV_FETCHING_THE_STREAM_KEY)),
                     Err(_) => StatusNote::error(tr(keys::Q_AV_COULDNT_FETCH_THE_STREAM_KEY)),
@@ -735,7 +750,8 @@ impl QuillApp {
     /// (owner only).
     pub(super) fn replace_video_chat_rtmp_url(&mut self, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
-            self.connection
+            self.screen
+                .connection
                 .set_note(match live.driver.replace_video_chat_rtmp_url() {
                     Ok(_) => StatusNote::silent(tr(keys::Q_AV_REGENERATING_THE_STREAM_KEY)),
                     Err(_) => StatusNote::error(tr(keys::Q_AV_COULDNT_REGENERATE_THE_STREAM_KEY)),
@@ -763,7 +779,7 @@ impl QuillApp {
     /// surfaces via `group_call_error`.
     pub(super) fn send_group_call_message(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let text = quill::composer::send_text_on_enter(
-            self.group_call.composer.read(cx).value().to_string(),
+            self.group_call_screen.composer.read(cx).value().to_string(),
             self.chat_prefs.send_key_mode,
         );
         if text.trim().is_empty() {
@@ -772,7 +788,7 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut() {
             match live.driver.send_group_call_message(text) {
                 Ok(_) => {
-                    self.group_call.composer.update(cx, |input, cx| {
+                    self.group_call_screen.composer.update(cx, |input, cx| {
                         input.set_value("", window, cx);
                     });
                 }
@@ -792,11 +808,12 @@ impl QuillApp {
     /// Phase C2h: `toggleGroupCallAreMessagesAllowed`.
     pub(super) fn toggle_group_call_chat(&mut self, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
-            self.connection
-                .set_note(match live.driver.toggle_group_call_are_messages_allowed() {
+            self.screen.connection.set_note(
+                match live.driver.toggle_group_call_are_messages_allowed() {
                     Ok(_) => StatusNote::silent(tr(keys::Q_AV_TOGGLING_IN_CALL_CHAT)),
                     Err(_) => StatusNote::error(tr(keys::Q_AV_COULDNT_TOGGLE_IN_CALL_CHAT)),
-                });
+                },
+            );
         } else {
             self.connection
                 .set_note(StatusNote::info(tr(keys::Q_AV_IN_CALL_CHAT_NEEDS_A)));

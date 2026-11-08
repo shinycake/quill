@@ -56,10 +56,15 @@ fn other_chat(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> ChatId {
 
 fn click(app: &Entity<QuillApp>, vcx: &mut VisualTestContext, chat: ChatId) {
     app.update(vcx, |app, cx| {
-        app.notify
+        let account = app.notification_account(None);
+        app.delivery
             .notify_clicks
             .lock_or_recover()
-            .push((chat, NotificationAction::Open));
+            .push(quill::notify_accounts::ChatClick {
+                account,
+                chat_id: chat,
+                action: NotificationAction::Open,
+            });
         cx.notify();
     });
     frames(vcx);

@@ -87,14 +87,16 @@ impl Session {
                 self.settings.read_date_show = None;
             }
             Some(RequestPurpose::Settings(SettingsPurpose::GetBlockedSenders { .. })) => {
-                self.settings.blocked_loading = false;
-                self.settings.blocked_error = true;
+                self.settings
+                    .blocked_senders
+                    .fail(sessions_error_line("load the blocked users", err));
             }
             Some(RequestPurpose::Settings(SettingsPurpose::SetSenderBlockList { .. })) => {
-                self.settings.blocked_error = true;
                 // Drop the optimistic list; the next fetch
                 // restores the truth.
-                self.settings.blocked_senders = None;
+                self.settings
+                    .blocked_senders
+                    .fail_dropping_data(sessions_error_line("change the block list", err));
             }
             // Phase S2: a failed `getStorageStatistics` clears the
             // in-flight flag so the overlay shows "No storage data
@@ -113,7 +115,9 @@ impl Session {
             Some(RequestPurpose::ConfirmDeviceLogin) => {
                 self.settings.device_login_result = Some(crate::auth::DeviceLoginResult::Failed);
                 self.settings.sessions_mutating = false;
-                self.settings.sessions_error = Some(sessions_error_line("link the device", err));
+                self.settings
+                    .sessions
+                    .fail(sessions_error_line("link the device", err));
             }
             Some(
                 purpose @ (RequestPurpose::GetProxies
@@ -142,18 +146,19 @@ impl Session {
                 | RequestPurpose::HideContactCloseBirthdays),
             ) => self.apply_privacy_data_error(purpose, err),
             Some(RequestPurpose::GetActiveSessions) => {
-                self.settings.sessions_loading = false;
                 self.settings.sessions_stale = false;
-                self.settings.sessions_error =
-                    Some(sessions_error_line("load the sessions list", err));
+                self.settings
+                    .sessions
+                    .fail(sessions_error_line("load the sessions list", err));
             }
             Some(
                 RequestPurpose::Settings(SettingsPurpose::TerminateSession { .. })
                 | RequestPurpose::TerminateAllOtherSessions,
             ) => {
                 self.settings.sessions_mutating = false;
-                self.settings.sessions_error =
-                    Some(sessions_error_line("terminate the session", err));
+                self.settings
+                    .sessions
+                    .fail(sessions_error_line("terminate the session", err));
             }
             // Slice A4: a refused session toggle surfaces an honest
             // classified error and leaves the list untouched (the
@@ -163,8 +168,9 @@ impl Session {
                 | RequestPurpose::Settings(SettingsPurpose::ToggleSessionCalls { .. }),
             ) => {
                 self.settings.sessions_mutating = false;
-                self.settings.sessions_error =
-                    Some(sessions_error_line("change the session setting", err));
+                self.settings
+                    .sessions
+                    .fail(sessions_error_line("change the session setting", err));
             }
             // Slice A7: a refused account-lifecycle op (TTL fetch
             // or set, account deletion) clears the in-flight

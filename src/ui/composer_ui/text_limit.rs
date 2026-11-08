@@ -97,7 +97,7 @@ impl QuillApp {
             let markup = self.composer_markup(cx);
             let count =
                 cx.background_spawn(async move { TextLimitNote::of(&markup, key.limit, editing) });
-            let task = Self::spawn_main(cx, async move |this, cx| {
+            let task = self.spawn_screen(cx, async move |this, cx| {
                 let note = count.await;
                 this.update(cx, |this, cx| {
                     this.composer_ui.text_limit.set(key, note);
@@ -116,10 +116,10 @@ impl QuillApp {
     /// several messages), so the label says how many.
     pub(in crate::ui) fn text_limit_bar(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         // The rich editor sends one message, and refuses text over its own limit.
-        if self.composer_ui.rich_editor_open || !self.pending_attachments().is_empty() {
+        if self.chat_ui.rich_editor_open || !self.pending_attachments().is_empty() {
             return None;
         }
-        let editing = self.composer_ui.pending_edit.as_ref();
+        let editing = self.chat_ui.pending_edit();
         if editing.is_some_and(|edit| !matches!(edit.kind, quill::composer::ComposerEditKind::Text))
         {
             return None;

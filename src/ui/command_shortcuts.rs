@@ -29,7 +29,7 @@ impl QuillApp {
     /// its "Send" state, `computeSendButtonType() == Send`), so the send
     /// commands of the button's menu apply.
     fn composer_sendable(&self, cx: &App) -> bool {
-        self.composer_ui.pending_edit.is_none()
+        !self.chat_ui.is_editing()
             && !self.recording_here()
             && (!self.composer.read(cx).value().trim().is_empty()
                 || !self.pending_attachments().is_empty()
@@ -53,7 +53,7 @@ impl QuillApp {
         if self.shortcut_blocked(window, cx) || self.writable_open_chat().is_none() {
             return false;
         }
-        self.composer_ui.scheduled_selected.clear();
+        self.chat_ui.scheduled_selected.clear();
         self.open_scheduled_dialog(cx);
         true
     }
@@ -105,7 +105,7 @@ impl QuillApp {
             return false;
         }
         self.open_schedule_picker(super::scheduled::ScheduleTarget::Composer, window, cx);
-        if let Some(picker) = self.composer_ui.schedule_picker.as_mut() {
+        if let Some(picker) = self.chat_ui.schedule_picker.as_mut() {
             picker.send_after = true;
         }
         true
@@ -149,15 +149,14 @@ impl QuillApp {
     ) -> bool {
         if self.shortcut_blocked(window, cx)
             || self.writable_open_chat().is_none()
-            || self.composer_ui.pending_edit.is_some()
+            || self.chat_ui.is_editing()
             || self.recording_active()
             || !self.composer.read(cx).value().trim().is_empty()
             || !self.pending_attachments().is_empty()
         {
             return false;
         }
-        self.recording.lock_next = true;
-        self.start_video_note_recording(cx);
+        self.start_video_note_recording(true, cx);
         true
     }
 

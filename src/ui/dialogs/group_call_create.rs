@@ -89,15 +89,15 @@ impl QuillApp {
             .chats
             .get(&chat_id.0)
             .is_some_and(|chat| chat.kind.is_channel());
-        let current = session.current_call_for_create(self.group_call.stream.joining);
+        let current = session.current_call_for_create(self.group_call_screen.stream_joining);
         match before_create(current, chat_id, to_channel) {
             BeforeCreate::Proceed => self.continue_group_call_create(chat_id, kind, window, cx),
             BeforeCreate::ShowCurrent => {
-                self.group_call.start_dialog = None;
+                self.group_call_boxes.start_dialog = None;
                 self.show_group_call_window(cx);
             }
             BeforeCreate::Ask(text) => {
-                self.group_call.start_dialog = Some(GroupCallCreate {
+                self.group_call_boxes.start_dialog = Some(GroupCallCreate {
                     chat_id,
                     kind,
                     step: CreateStep::Leave(text),
@@ -121,7 +121,7 @@ impl QuillApp {
             CreateKind::Now => match self.live.as_mut() {
                 Some(live) => match live.driver.request_create_join_as(chat_id) {
                     Ok(request) => {
-                        self.group_call.start_dialog = Some(GroupCallCreate {
+                        self.group_call_boxes.start_dialog = Some(GroupCallCreate {
                             chat_id,
                             kind,
                             step: CreateStep::Waiting(request),
@@ -129,13 +129,13 @@ impl QuillApp {
                         });
                     }
                     Err(_) => {
-                        self.group_call.start_dialog = None;
+                        self.group_call_boxes.start_dialog = None;
                         server_error_toast(window, cx);
                     }
                 },
                 // Screenshot demos and tests have no TDLib: yourself only.
                 None => {
-                    self.group_call.start_dialog = Some(GroupCallCreate {
+                    self.group_call_boxes.start_dialog = Some(GroupCallCreate {
                         chat_id,
                         kind,
                         step: CreateStep::Confirm,
@@ -145,7 +145,7 @@ impl QuillApp {
             },
             CreateKind::Schedule => self.open_group_call_schedule(chat_id, window, cx),
             CreateKind::Rtmp => {
-                self.group_call.start_dialog = None;
+                self.group_call_boxes.start_dialog = None;
                 self.start_rtmp_stream_now(window, cx);
             }
         }
@@ -166,14 +166,17 @@ impl QuillApp {
         let initial = default_schedule_at(now, &offset_at);
         let max = schedule_max(now, &offset_at);
         let picker = new_date_time_picker(window, cx, initial, max - now);
-        let refresh = cx.spawn(async move |this, cx| {
+        let refresh = self.spawn_screen(cx, async move |this, cx| {
             loop {
                 cx.background_executor()
                     .timer(Duration::from_secs(COUNTDOWN_REFRESH_SECS))
                     .await;
                 let open = this.update(cx, |app, cx| {
                     let open = matches!(
-                        app.group_call.start_dialog.as_ref().map(|flow| &flow.step),
+                        app.group_call_boxes
+                            .start_dialog
+                            .as_ref()
+                            .map(|flow| &flow.step),
                         Some(CreateStep::Schedule(_))
                     );
                     if open {
@@ -187,11 +190,11 @@ impl QuillApp {
             }
         });
         let join_as = self
-            .group_call
+            .group_call_boxes
             .start_dialog
             .as_ref()
             .and_then(|flow| flow.join_as);
-        self.group_call.start_dialog = Some(GroupCallCreate {
+        self.group_call_boxes.start_dialog = Some(GroupCallCreate {
             chat_id,
             kind: CreateKind::Schedule,
             step: CreateStep::Schedule(ScheduleStep {
@@ -205,7 +208,7 @@ impl QuillApp {
     }
 
     fn close_group_call_create(&mut self, cx: &mut Context<Self>) {
-        self.group_call.start_dialog = None;
+        self.group_call_boxes.start_dialog = None;
         cx.notify();
     }
 
@@ -216,7 +219,7 @@ impl QuillApp {
             chat_id,
             step: CreateStep::Schedule(step),
             ..
-        }) = self.group_call.start_dialog.as_ref()
+        }) = self.group_call_boxes.start_dialog.as_ref()
         else {
             return;
         };
@@ -233,7 +236,7 @@ impl QuillApp {
                 if let Some(GroupCallCreate {
                     step: CreateStep::Schedule(step),
                     ..
-                }) = self.group_call.start_dialog.as_mut()
+                }) = self.group_call_boxes.start_dialog.as_mut()
                 {
                     step.error = Some(err.message());
                 }
@@ -252,7 +255,12 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(chat_id) = self.group_call.start_dialog.as_ref().map(|f| f.chat_id) else {
+        let Some(chat_id) = self
+            .group_call_boxes
+            .start_dialog
+            .as_ref()
+            .map(|f| f.chat_id)
+        else {
             return;
         };
         let options = match answer {
@@ -268,7 +276,7 @@ impl QuillApp {
             .map(|user_id| MessageSender::User { user_id });
         let (step, join_as) = match join_as_step(options, me) {
             JoinAsStep::Empty => {
-                self.group_call.start_dialog = None;
+                self.group_call_boxes.start_dialog = None;
                 server_error_toast(window, cx);
                 cx.notify();
                 return;
@@ -279,7 +287,7 @@ impl QuillApp {
                 Some(selected),
             ),
         };
-        if let Some(flow) = self.group_call.start_dialog.as_mut() {
+        if let Some(flow) = self.group_call_boxes.start_dialog.as_mut() {
             flow.step = step;
             flow.join_as = join_as;
         }
@@ -292,7 +300,7 @@ impl QuillApp {
         sender: MessageSender,
         cx: &mut Context<Self>,
     ) {
-        if let Some(flow) = self.group_call.start_dialog.as_mut()
+        if let Some(flow) = self.group_call_boxes.start_dialog.as_mut()
             && let CreateStep::ChooseJoinAs { selected, .. } = &mut flow.step
         {
             *selected = sender;
@@ -308,7 +316,7 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let waiting = match self.group_call.start_dialog.as_ref().map(|f| &f.step) {
+        let waiting = match self.group_call_boxes.start_dialog.as_ref().map(|f| &f.step) {
             Some(CreateStep::Waiting(request)) => Some(*request),
             _ => None,
         };
@@ -330,15 +338,15 @@ impl QuillApp {
         if let Some(answer) = answer {
             self.accept_create_join_as(answer, window, cx);
         }
-        if let Some(request) = self.group_call.create_request
+        if let Some(request) = self.group_call_boxes.create_request
             && failed.contains(&request)
         {
-            self.group_call.create_request = None;
+            self.group_call_boxes.create_request = None;
             if matches!(
-                self.group_call.stream.pending_join,
+                self.group_call_screen.stream_join,
                 Some((StreamJoinIntent::Created { .. }, _))
             ) {
-                self.group_call.stream.pending_join = None;
+                self.group_call_screen.stream_join = None;
             }
             server_error_toast(window, cx);
             cx.notify();
@@ -357,7 +365,7 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.group_call.start_dialog = None;
+        self.group_call_boxes.start_dialog = None;
         self.end_current_call_for_create(cx);
         let sent = match self.live.as_mut() {
             Some(live) => live
@@ -381,7 +389,7 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.group_call.create_request = sent;
+        self.group_call_boxes.create_request = sent;
         match sent {
             None => server_error_toast(window, cx),
             Some(_) if join => self.note_stream_join_intent(StreamJoinIntent::Created {
@@ -401,7 +409,7 @@ impl QuillApp {
     /// nothing, and TDLib would refuse the leave with an error that lands
     /// on the new call.
     pub(in crate::ui) fn end_current_call_for_create(&mut self, cx: &mut Context<Self>) {
-        let joining = self.group_call.stream.joining;
+        let joining = self.group_call_screen.stream_joining;
         let Some(session) = self.session() else {
             return;
         };
@@ -423,7 +431,7 @@ impl QuillApp {
         } else {
             self.leave_active_group_call(cx);
         }
-        self.group_call.stream.joining = None;
+        self.group_call_screen.stream_joining = None;
     }
 
     /// The registered dialog: the step on screen.
@@ -438,7 +446,7 @@ impl QuillApp {
                 this.close_group_call_create(cx);
             });
         app.update(cx, |this, cx| {
-            let Some(flow) = this.group_call.start_dialog.as_ref() else {
+            let Some(flow) = this.group_call_boxes.start_dialog.as_ref() else {
                 return dialog.overlay(true).on_close(on_close);
             };
             let channel = this
@@ -464,7 +472,7 @@ impl QuillApp {
                         cx,
                         |this, window, cx| {
                             if let Some((chat_id, join_as)) = this
-                                .group_call
+                                .group_call_boxes
                                 .start_dialog
                                 .as_ref()
                                 .map(|f| (f.chat_id, f.join_as))
@@ -483,7 +491,7 @@ impl QuillApp {
                         cx,
                         |this, window, cx| {
                             if let Some((chat_id, join_as)) = this
-                                .group_call
+                                .group_call_boxes
                                 .start_dialog
                                 .as_ref()
                                 .map(|f| (f.chat_id, f.join_as))
@@ -627,7 +635,7 @@ fn leave_button(text: LeaveText, cx: &mut Context<QuillApp>) -> AnyElement {
         cx,
         |this, window, cx| {
             if let Some((chat_id, kind)) = this
-                .group_call
+                .group_call_boxes
                 .start_dialog
                 .as_ref()
                 .map(|flow| (flow.chat_id, flow.kind))
@@ -758,12 +766,13 @@ crate::ui::shell::register_dialogs! {
     GroupCallStart => DialogSpec::new(
         400,
         |app| app
-            .group_call
+            .group_call_boxes
             .start_dialog
             .as_ref()
             .is_some_and(|flow| !matches!(flow.step, CreateStep::Waiting(_))),
         QuillApp::build_group_call_create_dialog,
-    ),
+    )
+    .close(|app, _, cx| app.close_group_call_create(cx)),
 }
 
 #[cfg(feature = "demo-capture")]

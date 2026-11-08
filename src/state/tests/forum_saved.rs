@@ -337,6 +337,45 @@ fn load_topics_404_marks_the_list_complete() {
     assert!(session.chats_state.chat_action_error.is_none());
 }
 
+/// Round 7, 2d: a failed first page is not "sent" any more, so the pane
+/// does not wait on it for the rest of the session. The pump holds off
+/// until the connection is back, and failed tags wait the same way
+/// instead of being sent again on every poll pass.
+#[test]
+fn a_failed_first_page_is_asked_again_once_back_online() {
+    let (mut session, sink, seq) = saved_session();
+    session.connection = ConnectionState::Ready;
+    let error = |extra: RequestId| {
+        format!(
+            r#"{{"@type":"error","@extra":"{}","code":500,"message":"Timeout"}}"#,
+            extra.0
+        )
+    };
+    session.threads.saved.topics_requested = true;
+    let page = session.request(RequestPurpose::LoadSavedMessagesTopics, None);
+    apply_json(&mut session, &seq, &sink, &error(page));
+    assert!(!session.threads.saved.topics_requested);
+    assert!(session.threads.saved.retry_when_online);
+    assert!(
+        !session.threads.saved.topics_exhausted,
+        "the pane is not 'no chats'"
+    );
+
+    let state = |name: &str| {
+        format!(
+            r#"{{"@type":"updateConnectionState","state":{{"@type":"connectionState{name}"}}}}"#
+        )
+    };
+    apply_json(&mut session, &seq, &sink, &state("Connecting"));
+    assert!(session.threads.saved.retry_when_online);
+    apply_json(&mut session, &seq, &sink, &state("Ready"));
+    assert!(!session.threads.saved.retry_when_online);
+
+    let tags = session.request(RequestPurpose::GetSavedMessagesTags { topic_id: 0 }, None);
+    apply_json(&mut session, &seq, &sink, &error(tags));
+    assert!(session.threads.saved.retry_when_online);
+}
+
 #[test]
 fn delete_sublist_history_removes_the_row_and_leaves_the_sublist() {
     let (mut session, sink, seq) = saved_session();

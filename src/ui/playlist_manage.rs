@@ -182,6 +182,7 @@ impl QuillApp {
         let dir =
             quill::media_viewer::downloads_dir().unwrap_or_else(|| std::path::PathBuf::from("."));
         let picker = cx.prompt_for_new_path(&dir, Some(&suggested));
+        // screen-scope: the note reports a local file save to whichever account is on screen.
         cx.spawn(async move |this, cx| {
             let Ok(Ok(Some(dest))) = picker.await else {
                 return;
@@ -213,7 +214,7 @@ impl QuillApp {
         };
         match self.live.as_mut() {
             Some(live) => {
-                self.connection.set_note(
+                self.screen.connection.set_note(
                     match live.driver.save_audio_to_profile(
                         file_id,
                         track.duration,
@@ -237,7 +238,7 @@ impl QuillApp {
     }
 
     fn save_playlist_track_to_saved_messages(&mut self, file_id: FileId, cx: &mut Context<Self>) {
-        self.connection.set_note(match self.live.as_mut() {
+        self.screen.connection.set_note(match self.live.as_mut() {
             Some(live) => match live.driver.send_track_to_saved_messages(file_id) {
                 Ok(_) => StatusNote::info(tr(keys::Q_AV_SAVED_TO_SAVED_MESSAGES)),
                 Err(_) => StatusNote::error(tr(keys::Q_AV_COULD_NOT_SAVE_TO_SAVED)),
@@ -534,7 +535,11 @@ crate::ui::shell::register_dialogs! {
         5461,
         |app| app.playback.playlist_remove.is_some(),
         QuillApp::build_remove_playlist_track_dialog,
-    ),
+    )
+    .close(|app, _, cx| {
+            app.playback.playlist_remove = None;
+            cx.notify();
+        }),
 }
 
 #[cfg(test)]

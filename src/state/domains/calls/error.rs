@@ -58,6 +58,16 @@ impl Session {
                 }
             }
             Some(RequestPurpose::DiscardCall) => {
+                // The active call's hang-up failed: the call goes on in
+                // the phase it had, and a swap waiting on it asks again.
+                if let Some(hang_up) = self.calls.hang_up.take_if(|h| Some(h.request) == extra) {
+                    if let Some(call) = self.calls.active_call.as_mut()
+                        && call.id == hang_up.call_id
+                    {
+                        call.state = hang_up.resume;
+                    }
+                    self.calls.second_call.back_to_prompt();
+                }
                 self.calls.error = Some(call_request_error_line(err, "Could not hang up the call"));
             }
             Some(RequestPurpose::SendCallRating) => {
@@ -126,7 +136,7 @@ impl Session {
                 }
             }
             // A conference join or create: nothing is tracked yet. A failed
-            // rejoin re-arms `reconnecting`, as for a video chat.
+            // rejoin makes the next attempt due, as for a video chat.
             Some(RequestPurpose::JoinConference) => {
                 if let Some(pending) = self.conference_join_failed(extra) {
                     match pending.follows {
@@ -138,33 +148,25 @@ impl Session {
                     }
                 } else if let Some(call) = self.calls.active_group_call.as_mut()
                     && call.is_conference()
-                    && call.rejoin_attempts > 0
+                    && extra.is_some_and(|request| call.rejoin.attempt_failed(request))
+                    && call.rejoin == crate::state::GroupCallRejoin::GaveUp
                 {
-                    call.reconnecting = true;
-                    if call.rejoin_attempts >= crate::state::MAX_GROUP_CALL_REJOIN_ATTEMPTS {
-                        self.calls.group_call_error =
-                            Some("Reconnect attempts exhausted.".to_string());
-                    }
+                    self.calls.group_call_error = Some("Reconnect attempts exhausted.".to_string());
                 }
             }
             Some(RequestPurpose::Calls(CallsPurpose::JoinVideoChat { group_call_id })) => {
-                // Phase C2f: a failed rejoin re-arms
-                // `reconnecting` so the driver's auto-rejoin
-                // retries (max 3 attempts, the C2d discipline);
-                // a plain initial-join failure just reports.
-                // `rejoin_attempts > 0` marks the failed join
-                // as a rejoin (only `rejoin_group_call`
-                // increments the counter).
+                // Phase C2f: a failed rejoin makes the next attempt
+                // due so the driver's auto-rejoin retries (max 3
+                // attempts, the C2d discipline); a plain initial-join
+                // failure just reports. The rejoin in flight names its
+                // request, so only its own failure counts.
                 let current = self.calls.is_current_group_call(group_call_id);
                 let Some(call) = self.calls.group_call_mut(group_call_id) else {
                     return;
                 };
-                if call.rejoin_attempts > 0 {
-                    // Keep the banner + manual Rejoin
-                    // available even after exhaustion.
-                    call.reconnecting = true;
-                    let exhausted =
-                        call.rejoin_attempts >= crate::state::MAX_GROUP_CALL_REJOIN_ATTEMPTS;
+                if extra.is_some_and(|request| call.rejoin.attempt_failed(request)) {
+                    // The banner + manual Rejoin stay after exhaustion.
+                    let exhausted = call.rejoin == crate::state::GroupCallRejoin::GaveUp;
                     if current && exhausted {
                         self.calls.group_call_error =
                             Some("Reconnect attempts exhausted.".to_string());

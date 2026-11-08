@@ -182,7 +182,7 @@ fn an_animated_sticker_with_no_thumbnail_shows_its_first_frame(cx: &mut TestAppC
     let (bare, stilled) = (61, 62);
     app.update(vcx, |app, _| {
         for file in [bare, stilled] {
-            app.playback.stickers.set_fixture(
+            app.players.stickers.set_fixture(
                 file,
                 Arc::new(|edge| quill::sticker_playback::player::DecodedFrames {
                     frames: vec![vec![1; (edge as usize).pow(2) * 4]],
@@ -209,8 +209,8 @@ fn an_animated_sticker_with_no_thumbnail_shows_its_first_frame(cx: &mut TestAppC
     frames(vcx);
     app.read_with(vcx, |app, _| {
         assert_eq!(found_cells(app), 2);
-        assert_eq!(app.playback.stickers.clips_of(bare), 1);
-        assert_eq!(app.playback.stickers.clips_of(stilled), 0);
+        assert_eq!(app.players.stickers.clips_of(bare), 1);
+        assert_eq!(app.players.stickers.clips_of(stilled), 0);
     });
 }
 

@@ -164,15 +164,12 @@ impl QuillApp {
             })
             .unwrap_or_default();
         if !missing.is_empty() {
-            let app = cx.entity().downgrade();
-            cx.defer(move |cx| {
-                let _ = app.update(cx, |this, _| {
-                    if let Some(live) = this.live.as_mut() {
-                        for id in missing {
-                            let _ = live.driver.download_file(id, 8);
-                        }
+            self.defer_screen(cx, move |this, _| {
+                if let Some(live) = this.live.as_mut() {
+                    for id in missing {
+                        let _ = live.driver.download_file(id, 8);
                     }
-                });
+                }
             });
         }
         let stickers: Vec<_> = self

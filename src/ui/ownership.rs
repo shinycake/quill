@@ -533,5 +533,6 @@ crate::ui::shell::register_dialogs! {
         4700,
         |app| app.admin.ownership_dialog.is_some(),
         QuillApp::build_ownership_dialog,
-    ),
+    )
+    .close(|app, _, cx| app.close_ownership_dialog(cx)),
 }

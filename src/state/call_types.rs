@@ -1,5 +1,6 @@
 //! Call state types: 1:1 and group calls.
 use super::*;
+use crate::calls::engine::ConnectParams;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -22,8 +23,9 @@ pub struct ActiveCall {
     /// here.
     pub ready_at: Option<Instant>,
     pub ready: Option<ReadyParams>,
-    pub transport: Option<TransportState>,
-    pub transport_error: Option<String>,
+    /// The media transport, its retained connect parameters and its
+    /// error, as one value (see `CallTransport`).
+    pub transport: CallTransport,
     /// Phase C2b: chunks from `updateNewCallSignalingData`; the engine now
     /// consumes them too, while this queue remains the honest diagnostic
     /// record. Capped at
@@ -99,7 +101,157 @@ pub struct CallSummary {
     pub muted: bool,
 }
 
+/// The 1:1 call's media transport. One value, so a phase can never sit
+/// next to a stale error and the retry budget lives with the call it
+/// belongs to. Quill connects once per Ready call, retries the retained
+/// parameters up to `MAX_CALL_RECONNECT_ATTEMPTS` times on a reported
+/// failure, and a `Connected` report starts the budget over.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CallTransport {
+    /// Not connected yet. `start_error`: the engine could not start the
+    /// call; the call stays signaling-only and still connects on Ready.
+    NotStarted {
+        start_error: Option<String>,
+    },
+    /// Connect issued, or the engine reports it is connecting.
+    Connecting(CallLink),
+    Connected(CallLink),
+    /// A retry of the retained parameters is in flight.
+    Reconnecting(CallLink),
+    /// The engine closed the transport.
+    Closed(CallLink),
+    /// No transport. `link` is kept when one was connected, so a later
+    /// engine failure report can still retry (or say the budget is spent).
+    Failed {
+        reason: String,
+        link: Option<CallLink>,
+    },
+}
+
+/// What a connected transport keeps for its reconnects.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct CallLink {
+    pub params: ConnectParams,
+    /// Reconnects since the last `Connected` report.
+    pub reconnect_attempts: usize,
+}
+
+/// Reconnects Quill tries on its own after the engine reports a failure.
+pub const MAX_CALL_RECONNECT_ATTEMPTS: usize = 3;
+
+impl Default for CallTransport {
+    fn default() -> Self {
+        Self::NotStarted { start_error: None }
+    }
+}
+
+impl CallTransport {
+    /// The phase the engine API and the UI speak; `None` before connect.
+    pub fn state(&self) -> Option<TransportState> {
+        match self {
+            Self::NotStarted { .. } => None,
+            Self::Connecting(_) => Some(TransportState::Connecting),
+            Self::Connected(_) => Some(TransportState::Connected),
+            Self::Reconnecting(_) => Some(TransportState::Reconnecting),
+            Self::Closed(_) => Some(TransportState::Closed),
+            Self::Failed { .. } => Some(TransportState::Failed),
+        }
+    }
+
+    /// The error to show: a failed start before connect, or the failure.
+    pub fn error(&self) -> Option<&str> {
+        match self {
+            Self::NotStarted { start_error } => start_error.as_deref(),
+            Self::Failed { reason, .. } => Some(reason),
+            _ => None,
+        }
+    }
+
+    /// A connect was attempted (the engine owns a transport, or failed to).
+    pub fn started(&self) -> bool {
+        !matches!(self, Self::NotStarted { .. })
+    }
+
+    pub fn is_connected(&self) -> bool {
+        matches!(self, Self::Connected(_))
+    }
+
+    pub fn link(&self) -> Option<&CallLink> {
+        match self {
+            Self::NotStarted { .. } => None,
+            Self::Connecting(link)
+            | Self::Connected(link)
+            | Self::Reconnecting(link)
+            | Self::Closed(link) => Some(link),
+            Self::Failed { link, .. } => link.as_ref(),
+        }
+    }
+
+    pub fn reconnect_attempts(&self) -> usize {
+        self.link().map_or(0, |link| link.reconnect_attempts)
+    }
+
+    /// The engine could not start the call. Before connect it is the
+    /// start error; a failed transport takes it as its reason; a live
+    /// transport has outgrown it.
+    pub fn record_start_error(&mut self, error: String) {
+        match self {
+            Self::NotStarted { start_error } => *start_error = Some(error),
+            Self::Failed { reason, .. } => *reason = error,
+            _ => {}
+        }
+    }
+
+    /// A live phase the engine reported, carrying `link`. `Failed` is not
+    /// one: a reported failure goes through the reconnect decision.
+    pub fn reported(state: TransportState, link: CallLink) -> Option<Self> {
+        match state {
+            TransportState::Connecting => Some(Self::Connecting(link)),
+            TransportState::Connected => Some(Self::Connected(CallLink {
+                reconnect_attempts: 0,
+                ..link
+            })),
+            TransportState::Reconnecting => Some(Self::Reconnecting(link)),
+            TransportState::Closed => Some(Self::Closed(link)),
+            TransportState::Failed => None,
+        }
+    }
+}
+
 impl ActiveCall {
+    /// A call first seen now, in `state`: nothing exchanged yet, camera on
+    /// for a video call.
+    pub fn fresh(
+        id: i32,
+        user_id: i64,
+        is_outgoing: bool,
+        is_video: bool,
+        state: CallState,
+        ready: Option<ReadyParams>,
+    ) -> Self {
+        Self {
+            id,
+            user_id,
+            is_outgoing,
+            is_video,
+            state,
+            started_at: Instant::now(),
+            ready_at: None,
+            ready,
+            transport: CallTransport::default(),
+            signaling_queue: Vec::new(),
+            signaling_dropped: 0,
+            muted: false,
+            camera_on: is_video,
+            screen_sharing: false,
+            remote_video: RemoteVideoState::Inactive,
+            remote_screen: RemoteVideoState::Inactive,
+            remote_audio_muted: false,
+            remote_battery_low: false,
+            signal_bars: None,
+        }
+    }
+
     /// Seconds since `callStateReady` (the billable call duration).
     pub fn connected_secs(&self) -> i64 {
         self.ready_at
@@ -136,14 +288,12 @@ pub struct ActiveGroupCall {
     pub is_joined: bool,
     /// `need_rejoin` arrived (kicked by network loss).
     pub need_rejoin: bool,
-    /// UI "reconnecting" banner; set on `need_rejoin`, cleared when a
-    /// rejoin is issued or a fresh joined `updateGroupCall` arrives.
-    pub reconnecting: bool,
-    /// Phase C2f: group-call rejoin attempts after `need_rejoin` —
-    /// the C2d 1:1 reconnect discipline (max 3 attempts). Reset on a
-    /// fresh joined `updateGroupCall` or when a new call takes the
-    /// slot (`fresh()`).
-    pub rejoin_attempts: usize,
+    /// Where Quill's own rejoin after a network loss stands (the
+    /// C2d 1:1 reconnect discipline, at most
+    /// `MAX_GROUP_CALL_REJOIN_ATTEMPTS`). Reset by a joined
+    /// `updateGroupCall` without `need_rejoin`, and when a new call takes
+    /// the slot (`fresh()`).
+    pub rejoin: GroupCallRejoin,
     pub can_be_managed: bool,
     pub is_owned: bool,
     pub participant_count: i32,
@@ -188,6 +338,10 @@ pub struct ActiveGroupCall {
     /// sent `toggleGroupCallScreenSharingIsPaused`). Your own tile shows
     /// the paused state at once, before the participant update.
     pub screen_share_paused: bool,
+    /// The last screen share's failure (its offer, start, connect or
+    /// stop). Kept apart from `transport_error`: a failed share leaves
+    /// the call itself working.
+    pub screen_share_error: Option<String>,
     /// The `Text` presentation answer from
     /// `startGroupCallScreenSharing`; consumed by the driver pump to
     /// finish the presentation handshake.
@@ -251,6 +405,112 @@ pub struct ActiveGroupCall {
     pub conference: Option<ConferenceCall>,
 }
 
+/// Quill's own rejoin of a group call that TDLib (or a stream feeder)
+/// says needs one. One value, so "a rejoin is due" and "the banner shows"
+/// cannot drift apart: the driver sends a rejoin only from `Wanted`, and
+/// a repeated `need_rejoin` while one is `InFlight` changes nothing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum GroupCallRejoin {
+    /// Joined, or never dropped.
+    #[default]
+    Idle,
+    /// A rejoin is due; `attempts` were already spent on this drop.
+    Wanted { attempts: usize },
+    /// Attempt number `attempt` is being made: its offer is being built,
+    /// or its join request (`request`) waits for TDLib.
+    InFlight { request: RequestId, attempt: usize },
+    /// Every attempt failed; only the manual Rejoin is left.
+    GaveUp,
+}
+
+impl GroupCallRejoin {
+    /// TDLib's `need_rejoin` (or a stream's own rejoin): a drop starts
+    /// one rejoin series, and a series already under way goes on.
+    pub fn want(&mut self) {
+        if *self == GroupCallRejoin::Idle {
+            *self = GroupCallRejoin::Wanted { attempts: 0 };
+        }
+    }
+
+    /// The attempt the driver may start now, if any: from `Wanted` with
+    /// attempts left.
+    pub fn next_attempt(&self) -> Option<usize> {
+        match *self {
+            GroupCallRejoin::Wanted { attempts } if attempts < MAX_GROUP_CALL_REJOIN_ATTEMPTS => {
+                Some(attempts + 1)
+            }
+            _ => None,
+        }
+    }
+
+    pub fn in_flight(&self) -> Option<RequestId> {
+        match *self {
+            GroupCallRejoin::InFlight { request, .. } => Some(request),
+            _ => None,
+        }
+    }
+
+    /// Due or under way, with attempts left.
+    pub fn is_rejoining(&self) -> bool {
+        match *self {
+            GroupCallRejoin::Wanted { .. } => self.next_attempt().is_some(),
+            GroupCallRejoin::InFlight { .. } => true,
+            GroupCallRejoin::Idle | GroupCallRejoin::GaveUp => false,
+        }
+    }
+
+    /// The attempt behind `request` failed: the next one is due, or the
+    /// series gave up. Whether `request` was this call's rejoin.
+    pub fn attempt_failed(&mut self, request: RequestId) -> bool {
+        match *self {
+            GroupCallRejoin::InFlight {
+                request: mine,
+                attempt,
+            } if mine == request => {
+                *self = if attempt >= MAX_GROUP_CALL_REJOIN_ATTEMPTS {
+                    GroupCallRejoin::GaveUp
+                } else {
+                    GroupCallRejoin::Wanted { attempts: attempt }
+                };
+                true
+            }
+            _ => false,
+        }
+    }
+
+    /// TDLib answered the join behind `request`: the rejoin succeeded and
+    /// the attempts start over. Any other answer (a first join, a stale
+    /// rejoin) leaves the state alone.
+    pub fn attempt_joined(&mut self, request: RequestId) {
+        if self.in_flight() == Some(request) {
+            *self = GroupCallRejoin::Idle;
+        }
+    }
+
+    /// TDLib reports the call joined again after it was not: a join went
+    /// through, so whatever was due or spent is over. A joined update that
+    /// follows a joined one says nothing about a rejoin Quill started on
+    /// its own (a stream's part fetch) and is not this.
+    pub fn rejoined(&mut self) {
+        *self = GroupCallRejoin::Idle;
+    }
+
+    /// The attempt behind `request` never reached TDLib (the send
+    /// failed): it is not counted.
+    pub fn attempt_unsent(&mut self, request: RequestId) {
+        if let GroupCallRejoin::InFlight {
+            request: mine,
+            attempt,
+        } = *self
+            && mine == request
+        {
+            *self = GroupCallRejoin::Wanted {
+                attempts: attempt.saturating_sub(1),
+            };
+        }
+    }
+}
+
 /// stories-live-play: a pending "Join live" from the story viewer — the
 /// group call id plus the `getGroupCall` request behind it, so the pump
 /// can tell "still waiting" from "the fetch failed".
@@ -274,20 +534,23 @@ impl ActiveGroupCall {
     }
 
     /// Dropped by the network and still being rejoined on its own: a
-    /// rejoin is due or under way and attempts are left. A rejoin whose
-    /// answer is pending (`reconnecting` cleared) still counts, the last
-    /// one included; once the last one failed (`reconnecting` set again
-    /// with no attempts left) the call waits for the manual Rejoin.
+    /// rejoin is due or under way and attempts are left. Once the last one
+    /// failed the call waits for the manual Rejoin.
     pub fn rejoining(&self) -> bool {
-        (self.need_rejoin || self.reconnecting)
-            && (self.rejoin_attempts < MAX_GROUP_CALL_REJOIN_ATTEMPTS || !self.reconnecting)
+        self.rejoin.is_rejoining()
+    }
+
+    /// The "Connection lost" banner and the connecting self row: from
+    /// `need_rejoin` until the rejoined `updateGroupCall`, the spent
+    /// state included (the banner is the manual Rejoin).
+    pub fn reconnecting(&self) -> bool {
+        self.rejoin != GroupCallRejoin::Idle
     }
 
     /// The join or its transport failed, or the rejoins are spent: only a
     /// manual retry brings it back.
     pub fn join_failed(&self) -> bool {
-        self.transport_error.is_some()
-            || (self.reconnecting && self.rejoin_attempts >= MAX_GROUP_CALL_REJOIN_ATTEMPTS)
+        self.transport_error.is_some() || self.rejoin == GroupCallRejoin::GaveUp
     }
 
     /// Blank tracked call for a newly seen call id. Participant state
@@ -300,8 +563,7 @@ impl ActiveGroupCall {
             is_live_story: false,
             is_joined: false,
             need_rejoin: false,
-            reconnecting: false,
-            rejoin_attempts: 0,
+            rejoin: GroupCallRejoin::Idle,
             can_be_managed: false,
             is_owned: false,
             participant_count: 0,
@@ -321,6 +583,7 @@ impl ActiveGroupCall {
             screen_share_pending: false,
             screen_sharing: false,
             screen_share_paused: false,
+            screen_share_error: None,
             screen_share_answer: String::new(),
             share_links: Default::default(),
             is_rtmp_stream: false,

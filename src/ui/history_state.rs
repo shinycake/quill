@@ -5,9 +5,18 @@ use super::history::HistoryShared;
 use super::*;
 use gpui_kit::component::message_scroller::MessageScrollerState;
 use gpui_kit::*;
-use quill::ids::ChatId;
 use quill::ids::MessageId;
+use quill::ids::{AccountChat, ChatId};
 use std::collections::HashMap;
+
+/// A place the reader asked the history to go that may have to wait for
+/// pages.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum ScrollGoal {
+    /// The open thread's first row, its root post: due once the older
+    /// replies are all loaded ("jump to root").
+    ThreadRoot,
+}
 
 pub(crate) struct HistoryUi {
     /// kit Phase 3: message-history virtualization — scroller state with
@@ -40,8 +49,10 @@ pub(crate) struct HistoryUi {
     /// kit Phase 3: `(open_chat_id, open_topic)` the scroller state was
     /// last synced for — a change means reset + scroll to bottom.
     pub(super) key: Option<(i64, Option<i32>, i64)>,
-    /// "Jump to root" was asked while older replies were still loading.
-    pub(super) thread_root_jump: bool,
+    /// Where the reader asked the history to go. The history list owns it:
+    /// it reaches the goal once the rows allow, and a goal due this render
+    /// wins over the view hold (`ScrollGoal`).
+    pub(super) scroll_goal: Option<ScrollGoal>,
     /// kit Phase 3: first/last message ids of the last-synced history, to
     /// tell appends apart from prepends without re-scanning.
     pub(super) ends: Option<(MessageId, MessageId)>,
@@ -113,10 +124,10 @@ pub(crate) struct HistoryUi {
     pub(super) palette: std::cell::Cell<Option<super::chat_palette::ChatPalette>>,
     /// Pinned bar position per chat: index into the pinned list, newest
     /// first. A click on the bar jumps there and steps to the next older.
-    pub(super) pinned_cursor: HashMap<i64, usize>,
+    pub(super) pinned_cursor: HashMap<AccountChat, usize>,
     /// Chats whose pinned bar was hidden, with the newest pinned message
     /// at the time: the bar returns when a newer message is pinned.
-    pub(super) hidden_pinned: HashMap<i64, MessageId>,
+    pub(super) hidden_pinned: HashMap<AccountChat, MessageId>,
     /// The open chat's pinned-messages list (bar's list button).
     pub(super) pinned_list_open: bool,
     /// Middle-click autoscroll over the history (`autoscroll_ui`).
@@ -141,10 +152,6 @@ pub(crate) struct HistoryUi {
     /// The open chat whose live-location countdowns are being refreshed
     /// (`Some` exactly while that task runs; see `live_location_tick`).
     pub(super) live_location_tick_chat: Option<ChatId>,
-    /// The info card under the open forum topic's strip.
-    pub(super) topic_info_open: bool,
-    /// The info card under the open reply thread's root bar.
-    pub(super) thread_info_open: bool,
     /// The history's width class at the last paint (tdesktop
     /// `Adaptive::ChatLayout`, `chat_wide_ui`).
     pub(super) chat_layout: std::rc::Rc<std::cell::Cell<quill::chat_wide::ChatLayout>>,
@@ -160,6 +167,18 @@ pub(crate) struct HistoryUi {
     pub(super) pane_width: std::rc::Rc<std::cell::Cell<Pixels>>,
     /// The pull to the next unread channel (`pull_next_ui`).
     pub(super) pull: super::pull_next_ui::PullUi,
+}
+
+/// The open chat is left as any leave: the draft is saved through the old
+/// client (`leave_chat_for_switch`).
+impl super::on_screen::Farewell for HistoryUi {
+    fn farewell(
+        app: &mut super::app::QuillApp,
+        window: &mut gpui_kit::Window,
+        cx: &mut gpui_kit::Context<super::app::QuillApp>,
+    ) {
+        app.leave_chat_for_switch(window, cx);
+    }
 }
 
 impl HistoryUi {
@@ -183,7 +202,7 @@ impl HistoryUi {
             window_active: false,
             shared: HistoryShared::default(),
             key: None,
-            thread_root_jump: false,
+            scroll_goal: None,
             ends: None,
             window_epoch: 0,
             anchor_pending: false,
@@ -223,8 +242,6 @@ impl HistoryUi {
             vanish_clock: Default::default(),
             self_destruct_tick_chat: None,
             live_location_tick_chat: None,
-            topic_info_open: false,
-            thread_info_open: false,
             chat_layout: Default::default(),
             width: Default::default(),
             width_probed: Default::default(),

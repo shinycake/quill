@@ -14,7 +14,7 @@ fn video_edit(driver: &ConnectDriver<Arc<RecordingSender>>) -> crate::composer::
         ChatId(7),
         MessageId(9),
         message.is_outgoing,
-        message.pending,
+        message.pending(),
         &message.content,
     )
     .expect("editable video")

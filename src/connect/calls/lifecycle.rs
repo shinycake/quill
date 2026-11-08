@@ -1,5 +1,6 @@
 //! Connect driver: starting, accepting, swapping and ending one-to-one calls.
 use super::*;
+use crate::lang::{keys, tr};
 use crate::notify_accounts::ringing_incoming_call;
 
 impl<S: JsonSender> ConnectDriver<S> {
@@ -83,8 +84,11 @@ impl<S: JsonSender> ConnectDriver<S> {
 
     /// Phase C1: `discardCall` for the tracked call (decline an
     /// incoming call / hang up an active one). Marks the call
-    /// `HangingUp` optimistically; the discard states arrive as
-    /// `updateCall`. `duration` is the connected time in seconds.
+    /// `HangingUp` while the request is in flight (`calls.hang_up`): the
+    /// discard states arrive as `updateCall`, and an error puts the call
+    /// back. A second hang-up while one is in flight sends nothing and
+    /// returns the first request. `duration` is the connected time in
+    /// seconds.
     pub fn discard_call(&mut self) -> Result<RequestId, ConnectSendError> {
         self.discard_call_with_link("")
     }
@@ -102,6 +106,11 @@ impl<S: JsonSender> ConnectDriver<S> {
             Some(call) => (call.id, call.connected_secs() as i32, call.is_video),
             None => return Err(ConnectSendError::InvalidRequest),
         };
+        if let Some(hang_up) = &self.session.calls.hang_up
+            && hang_up.call_id == call_id
+        {
+            return Ok(hang_up.request);
+        }
         let extra = self.session.request(RequestPurpose::DiscardCall, None);
         if let Err(err) = self.sender.send_json(&discard_call_into_conference(
             extra,
@@ -115,14 +124,12 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(err);
         }
         if let Some(call) = self.session.calls.active_call.as_mut() {
-            call.state = CallState::HangingUp;
+            let resume = std::mem::replace(&mut call.state, CallState::HangingUp);
+            self.session.calls.hang_up = Some(crate::state::HangUp::new(extra, call_id, resume));
         }
-        self.log_call_sound_summary(call_id);
-        if let Some(engine) = self.call_engine.as_deref_mut() {
-            // Prompt teardown; the later terminal updateCall repeats this
-            // idempotently through `pump_call_engine`.
-            let _ = engine.hangup(call_id);
-        }
+        // The engine hangs up once TDLib took the hang-up (its `ok` or
+        // the terminal updateCall, through `pump_call_engine`): an error
+        // puts the call back, and its sound with it.
         Ok(extra)
     }
 
@@ -133,8 +140,12 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// tdesktop's `Call::answer` leaves the waiting state at once.
     pub(crate) fn hang_up_for_close(&mut self) {
         let (call_running, joined) = (self.call_running(), self.group_call_joined());
-        if call_running {
-            let _ = self.discard_call();
+        if call_running && self.discard_call().is_ok() {
+            // The client goes now: no answer will come back to wait for.
+            let hanging_up = self.session.calls.hang_up.as_ref().map(|h| h.call_id);
+            if let (Some(call_id), Some(engine)) = (hanging_up, self.call_engine.as_deref_mut()) {
+                let _ = engine.hangup(call_id);
+            }
         }
         if joined {
             let _ = self.leave_group_call();
@@ -188,11 +199,12 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
+        let prompt = self.session.calls.second_call;
         let (call_id, _user_id, is_video) = self
             .session
             .calls
-            .swap_pending
-            .take()
+            .second_call
+            .take_prompt()
             .ok_or(ConnectSendError::InvalidRequest)?;
         let extra = self.session.request(RequestPurpose::DiscardCall, None);
         if let Err(err) = self
@@ -200,6 +212,8 @@ impl<S: JsonSender> ConnectDriver<S> {
             .send_json(&discard_call_request(extra, call_id, false, 0, is_video))
         {
             self.session.requests.take(extra);
+            // Nothing went out: the prompt stays up.
+            self.session.calls.second_call = prompt;
             return Err(err);
         }
         Ok(())
@@ -214,29 +228,42 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        let (pending_id, _user_id, is_video) = self
+        let prompt = self.session.calls.second_call;
+        let (call_id, user_id, is_video) = self
             .session
             .calls
-            .swap_pending
-            .take()
+            .second_call
+            .take_prompt()
             .ok_or(ConnectSendError::InvalidRequest)?;
-        self.session.calls.swap_accept_queued = Some((pending_id, is_video));
-        if self.session.calls.active_call.is_some() {
-            self.discard_call().map(|_| ())
-        } else {
-            self.maybe_accept_queued_swap()
+        if self.session.calls.active_call.is_some()
+            && let Err(err) = self.discard_call()
+        {
+            // The current call goes on: answering later would take a
+            // call the person no longer sees, so the prompt stays up.
+            self.session.calls.second_call = prompt;
+            return Err(err);
         }
+        self.session.calls.second_call = crate::state::SecondCall::AcceptAfterHangup {
+            call_id,
+            user_id,
+            is_video,
+        };
+        self.maybe_accept_queued_swap()
     }
 
     /// Driver pump: fire the queued post-swap `acceptCall` once no
     /// call is active. Called from `ingest` next to
     /// `maybe_decline_busy_calls`. If the caller hung up meanwhile,
     /// the server rejects the accept and the update stream records it.
+    /// If the accept cannot be sent, the second call rings as the
+    /// incoming call, so it can be answered again, and the error shows.
     pub(crate) fn maybe_accept_queued_swap(&mut self) -> Result<(), ConnectSendError> {
         if !self.chats_path_active() || self.session.calls.active_call.is_some() {
             return Ok(());
         }
-        let Some((call_id, _is_video)) = self.session.calls.swap_accept_queued.take() else {
+        let Some((call_id, user_id, is_video)) =
+            self.session.calls.second_call.take_queued_accept()
+        else {
             return Ok(());
         };
         let extra = self
@@ -248,6 +275,9 @@ impl<S: JsonSender> ConnectDriver<S> {
             .send_json(&accept_call_with_protocol(extra, call_id, &protocol))
         {
             self.session.requests.take(extra);
+            self.session.ring_second_call(call_id, user_id, is_video);
+            self.session.calls.error = Some(tr(keys::Q_OPS_COULD_NOT_ANSWER_THE_CALL).to_string());
+            self.start_engine_for_tracked_call();
             return Err(err);
         }
         self.session.calls.answered_call = Some(call_id);
@@ -266,7 +296,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         let Some(call) = self.session.calls.active_call.as_mut() else {
             return Err(EngineError::NoActiveCall);
         };
-        if call.transport.is_some()
+        if call.transport.started()
             && let Some(engine) = self.call_engine.as_deref_mut()
             && engine.is_available()
         {
@@ -289,7 +319,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     ) -> Result<(), EngineError> {
         let selection = (mic, speaker);
         if let Some(call) = self.session.calls.active_call.as_ref()
-            && call.transport.is_some()
+            && call.transport.started()
             && let Some(engine) = self.call_engine.as_deref_mut()
         {
             engine.select_devices(call.id, selection.0.as_deref(), selection.1.as_deref())?;

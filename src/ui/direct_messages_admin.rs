@@ -338,5 +338,5 @@ crate::ui::shell::register_dialogs! {
         |app| app.direct_messages.confirm.is_some(),
         QuillApp::build_direct_confirm_dialog,
     )
-    .closes(|app, _, cx| app.close_direct_confirm(cx)),
+    .close(|app, _, cx| app.close_direct_confirm(cx)),
 }

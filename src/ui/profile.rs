@@ -706,5 +706,6 @@ crate::ui::shell::register_dialogs! {
         6000,
         |app| app.dialogs.edit_profile_dialog.is_some(),
         QuillApp::build_edit_profile_dialog,
-    ),
+    )
+    .close(|app, _, cx| app.close_edit_profile_dialog(cx)),
 }

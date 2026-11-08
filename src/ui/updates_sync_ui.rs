@@ -107,7 +107,7 @@ impl QuillApp {
                         .child(tr(keys::Q_OPS_CLICK_TO_VIEW_DETAILS)),
                 )
                 .on_click(cx.listener(|this, _, _, cx| {
-                    this.account.freeze_info_open = true;
+                    this.account_boxes.freeze_info_open = true;
                     cx.notify();
                 }))
                 .into_any_element(),
@@ -257,7 +257,7 @@ impl QuillApp {
                     .label(tr(keys::CLOSE))
                     .ghost()
                     .on_click(cx.listener(|this, _, _, cx| {
-                        this.account.freeze_info_open = false;
+                        this.account_boxes.freeze_info_open = false;
                         cx.notify();
                     })),
             )
@@ -314,7 +314,7 @@ impl QuillApp {
                     .label(tr(keys::CLOSE))
                     .ghost()
                     .on_click(cx.listener(|this, _, _, cx| {
-                        this.account.age_verify_open = false;
+                        this.account_boxes.age_verify_open = false;
                         cx.notify();
                     })),
             )
@@ -324,7 +324,7 @@ impl QuillApp {
                         .label(tr(keys::Q_OPS_VERIFY_MY_AGE))
                         .primary()
                         .on_click(cx.listener(move |this, _, _, cx| {
-                            this.account.age_verify_started = true;
+                            this.account_boxes.age_verify_started = true;
                             this.open_link(&url, cx);
                         })),
                 )
@@ -345,8 +345,12 @@ impl QuillApp {
         let needs_verification = self
             .session()
             .is_some_and(|s| s.sync.age_verification.is_some());
-        if quill::state::age_gate_blocks(on, needs_verification, self.account.age_verify_started) {
-            self.account.age_verify_open = true;
+        if quill::state::age_gate_blocks(
+            on,
+            needs_verification,
+            self.account_boxes.age_verify_started,
+        ) {
+            self.account_boxes.age_verify_open = true;
             cx.notify();
         } else {
             self.set_sensitive_content(on, cx);

@@ -374,7 +374,7 @@ impl QuillApp {
         match send(live, chat_id, reply_to, &options) {
             Ok(_) => {
                 self.close_location_picker(cx);
-                self.composer_ui.set_reply(None);
+                self.chat_ui.set_reply(None);
                 self.connection
                     .set_note(StatusNote::silent(tr(keys::Q_OPS_SENDING_LOCATION)));
             }

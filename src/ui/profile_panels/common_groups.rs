@@ -15,6 +15,8 @@ pub(in crate::ui) struct CommonGroupsUi {
     search: Option<CommonGroupsSearch>,
 }
 
+impl crate::ui::on_screen::Farewell for CommonGroupsUi {}
+
 struct CommonGroupsSearch {
     user_id: i64,
     input: Entity<TextareaState>,

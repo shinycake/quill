@@ -228,7 +228,7 @@ fn search_chats_and_messages_happy_path() {
             chats_extra.0
         ),
     );
-    assert_eq!(session.search.search.status, SearchStatus::Searching);
+    assert_eq!(session.search.search.status(), SearchStatus::Searching);
     apply_json(
         &mut session,
         &seq,
@@ -238,7 +238,7 @@ fn search_chats_and_messages_happy_path() {
             public_extra.0
         ),
     );
-    assert_eq!(session.search.search.status, SearchStatus::Searching);
+    assert_eq!(session.search.search.status(), SearchStatus::Searching);
     apply_json(
         &mut session,
         &seq,
@@ -248,7 +248,7 @@ fn search_chats_and_messages_happy_path() {
             messages_extra.0
         ),
     );
-    assert_eq!(session.search.search.status, SearchStatus::Ready);
+    assert_eq!(session.search.search.status(), SearchStatus::Ready);
     assert_eq!(session.search.search.chat_ids, vec![ChatId(11)]);
     assert_eq!(session.search.search.public_chat_ids, vec![ChatId(42)]);
     assert_eq!(session.search.search.messages.len(), 1);
@@ -266,7 +266,7 @@ fn search_chats_and_messages_happy_path() {
             .contains_key(&101)
     );
     session.close_search();
-    assert_eq!(session.search.search.status, SearchStatus::Closed);
+    assert_eq!(session.search.search.status(), SearchStatus::Closed);
     assert!(session.search.search.query.is_empty());
     assert!(!sink.rendered().contains("CANARY_SEARCH"));
 }
@@ -298,7 +298,7 @@ fn search_empty_and_error_and_stale_generation() {
         ),
     );
     // Phase 7.2: still waiting on the public leg.
-    assert_eq!(session.search.search.status, SearchStatus::Searching);
+    assert_eq!(session.search.search.status(), SearchStatus::Searching);
     apply_json(
         &mut session,
         &seq,
@@ -308,7 +308,7 @@ fn search_empty_and_error_and_stale_generation() {
             public_extra.0
         ),
     );
-    assert_eq!(session.search.search.status, SearchStatus::Empty);
+    assert_eq!(session.search.search.status(), SearchStatus::Empty);
 
     let stale = session.search.search.begin_query("old");
     let stale_chats = session.request_search(RequestPurpose::SearchChats, stale);
@@ -336,7 +336,7 @@ fn search_empty_and_error_and_stale_generation() {
             stale_messages.0
         ),
     );
-    assert_eq!(session.search.search.status, SearchStatus::Searching);
+    assert_eq!(session.search.search.status(), SearchStatus::Searching);
     assert!(session.search.search.chat_ids.is_empty());
     apply_json(
         &mut session,
@@ -359,7 +359,7 @@ fn search_empty_and_error_and_stale_generation() {
             chats_extra.0
         ),
     );
-    assert_eq!(session.search.search.status, SearchStatus::Searching);
+    assert_eq!(session.search.search.status(), SearchStatus::Searching);
     apply_json(
         &mut session,
         &seq,
@@ -369,7 +369,7 @@ fn search_empty_and_error_and_stale_generation() {
             public_extra.0
         ),
     );
-    assert_eq!(session.search.search.status, SearchStatus::Failed);
+    assert_eq!(session.search.search.status(), SearchStatus::Failed);
     assert!(!sink.rendered().contains("CANARY_SEARCH_ERR"));
 }
 
@@ -401,7 +401,7 @@ fn search_recently_found_chats_empty_query() {
             extra.0
         ),
     );
-    assert_eq!(session.search.search.status, SearchStatus::Ready);
+    assert_eq!(session.search.search.status(), SearchStatus::Ready);
     assert_eq!(session.search.search.chat_ids, vec![ChatId(11)]);
     assert!(session.search.search.messages.is_empty());
     let empty_gen = session.search.search.begin_recents();
@@ -415,7 +415,7 @@ fn search_recently_found_chats_empty_query() {
             empty_extra.0
         ),
     );
-    assert_eq!(session.search.search.status, SearchStatus::Idle);
+    assert_eq!(session.search.search.status(), SearchStatus::Idle);
     assert!(session.search.search.recents);
 }
 
@@ -673,7 +673,7 @@ fn public_search_results_accepted() {
     );
     assert_eq!(session.search.search.public_chat_ids, vec![ChatId(42)]);
     // Still waiting on `searchChats` / `searchMessages` → still Searching.
-    assert_eq!(session.search.search.status, SearchStatus::Searching);
+    assert_eq!(session.search.search.status(), SearchStatus::Searching);
     let chats_extra = session.request_search(RequestPurpose::SearchChats, search_gen);
     let messages_extra = session.request_search(RequestPurpose::SearchMessages, search_gen);
     apply_json(
@@ -694,7 +694,7 @@ fn public_search_results_accepted() {
             messages_extra.0
         ),
     );
-    assert_eq!(session.search.search.status, SearchStatus::Ready);
+    assert_eq!(session.search.search.status(), SearchStatus::Ready);
 }
 
 #[test]
@@ -733,7 +733,7 @@ fn public_search_error_resolves_status() {
             messages_extra.0
         ),
     );
-    assert_eq!(session.search.search.status, SearchStatus::Failed);
+    assert_eq!(session.search.search.status(), SearchStatus::Failed);
     assert!(session.search.search.public_chat_ids.is_empty());
 }
 
@@ -928,4 +928,51 @@ fn quill_media(file_id: i32) -> crate::telegram::envelope::InlineMedia {
         width: 100,
         height: 50,
     }
+}
+
+#[test]
+fn an_error_on_one_leg_with_results_on_another_is_ready() {
+    let mut search = SearchState::default();
+    search.open_field();
+    search.begin_query("ada");
+    assert_eq!(search.status(), SearchStatus::Searching);
+    search.accept_chats(Vec::new(), true);
+    search.accept_public_chats(Vec::new(), false);
+    assert_eq!(search.status(), SearchStatus::Searching);
+    search.accept_messages(Vec::new(), false);
+    // Only the failed leg answered: nothing to show but the failure.
+    assert_eq!(search.status(), SearchStatus::Failed);
+    search.accept_public_chats(vec![ChatId(9)], false);
+    // A leg that found something beats the failed one.
+    assert_eq!(search.status(), SearchStatus::Ready);
+}
+
+#[test]
+fn status_follows_open_and_the_legs() {
+    let mut search = SearchState::default();
+    assert_eq!(search.status(), SearchStatus::Closed);
+    search.open_field();
+    assert_eq!(search.status(), SearchStatus::Idle);
+    search.begin_recents();
+    assert_eq!(search.status(), SearchStatus::Searching);
+    search.accept_chats(Vec::new(), false);
+    assert_eq!(search.status(), SearchStatus::Idle);
+    search.begin_query("x");
+    search.begin_public_scope();
+    assert_eq!(search.status(), SearchStatus::Searching);
+    search.accept_messages(Vec::new(), false);
+    assert_eq!(search.status(), SearchStatus::Empty);
+    search.close();
+    assert_eq!(search.status(), SearchStatus::Closed);
+}
+
+#[test]
+fn the_demo_local_filter_settles_its_status() {
+    let (mut session, _sink) = session();
+    session.apply_local_search_filter("zzz-no-such-chat");
+    assert_eq!(session.search.search.status(), SearchStatus::Empty);
+    session.apply_local_search_filter("");
+    assert_eq!(session.search.search.status(), SearchStatus::Idle);
+    session.close_search();
+    assert_eq!(session.search.search.status(), SearchStatus::Closed);
 }

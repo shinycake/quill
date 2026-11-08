@@ -31,7 +31,7 @@ impl QuillApp {
             let reply = self.reply_for_send(cx);
             self.apply_demo_outgoing(command, None, reply.as_ref());
             if reply.is_some() {
-                self.composer_ui.set_reply(None);
+                self.chat_ui.set_reply(None);
             }
             self.connection.set_note(StatusNote::silent(tr(
                 keys::Q_CHAT_DEMO_SEND_APPLIED_LOCALLY_NO,
@@ -81,7 +81,7 @@ impl QuillApp {
         match live.driver.send_snapshot(&snapshot) {
             Ok(_) => {
                 if reply.is_some() {
-                    self.composer_ui.set_reply(None);
+                    self.chat_ui.set_reply(None);
                 }
                 let note = self.send_started_note(
                     quill::composer::ComposerScheduling::None,

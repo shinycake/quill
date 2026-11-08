@@ -234,7 +234,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if self.sender.send_json(&json).is_err() {
             self.session.requests.take(extra);
             self.discard_offered_instance(key);
-            self.undo_offer(id, &send);
+            self.undo_offer(id, extra, &send);
             return;
         }
         match send {
@@ -242,12 +242,10 @@ impl<S: JsonSender> ConnectDriver<S> {
                 orphaned_presentation,
                 ..
             } => {
+                // The attempt stays in flight until the rejoined
+                // `updateGroupCall`, or until its request fails.
                 if orphaned_presentation && let Some(engine) = self.call_engine.as_deref_mut() {
                     let _ = engine.stop_screen_share(id);
-                }
-                if let Some(call) = self.session.calls.group_call_mut(id) {
-                    call.rejoin_attempts += 1;
-                    call.reconnecting = false;
                 }
             }
             OfferSend::Conference => self.forget_accepted_invite(),
@@ -290,22 +288,29 @@ impl<S: JsonSender> ConnectDriver<S> {
         let id = key.id();
         if matches!(send, OfferSend::Conference) {
             self.session.calls.group_call_error = Some(format!("Could not join the call: {err}"));
+        } else if matches!(send, OfferSend::Screen)
+            && let Some(call) = self.session.calls.group_call_mut(id)
+        {
+            // The share failed; the call it was for still works.
+            call.screen_share_error = Some(err.to_string());
         } else if let Some(call) = self.session.calls.group_call_mut(id) {
             call.transport_error = Some(err.to_string());
             if matches!(send, OfferSend::Rejoin { .. }) {
-                call.rejoin_attempts += 1;
+                // The attempt counts: the next one is due, or none is left.
+                call.rejoin.attempt_failed(extra);
             }
         }
-        self.undo_offer(id, &send);
+        self.undo_offer(id, extra, &send);
     }
 
     /// Puts back what starting the offer changed.
-    fn undo_offer(&mut self, id: i32, send: &OfferSend) {
+    fn undo_offer(&mut self, id: i32, extra: RequestId, send: &OfferSend) {
         match send {
             OfferSend::Join => {}
             OfferSend::Rejoin { .. } => {
+                // Unsent, so not counted (a failed offer already moved on).
                 if let Some(call) = self.session.calls.group_call_mut(id) {
-                    call.reconnecting = true;
+                    call.rejoin.attempt_unsent(extra);
                 }
             }
             OfferSend::Conference => {

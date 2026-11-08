@@ -247,7 +247,7 @@ fn the_slash_list_starts_below_the_edit_row_and_tab_inserts(cx: &mut TestAppCont
     let (items, selected) = app.update(vcx, |app, cx| {
         (
             app.command_menu_state(cx).expect("menu is open").1,
-            app.composer_ui.command_menu_selected,
+            app.chat_ui.command_menu_selected,
         )
     });
     assert_eq!(items[0].quick_reply, Some(quill::quick_replies::EDIT_ROW));

@@ -56,7 +56,7 @@ fn move_slider(
     release: bool,
 ) {
     app.update_in(vcx, |app, window, cx| {
-        let Some(slider) = app.settings.index_sliders.get(key).cloned() else {
+        let Some(slider) = app.preferences.index_sliders.get(key).cloned() else {
             panic!("slider {key:?} missing");
         };
         let value = SliderValue::Single(index as f32);

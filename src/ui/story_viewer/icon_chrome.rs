@@ -90,7 +90,7 @@ impl QuillApp {
                         .on_click(cx.listener(|this, _, _, cx| this.toggle_story_mute(cx))),
                 );
             }
-            let (icon, label) = if self.stories.pause.is_paused() {
+            let (icon, label) = if self.stories.viewer_ui().pause.is_paused() {
                 (IconName::Play, tr(keys::Q_MEDIA_RESUME))
             } else {
                 (IconName::Pause, tr(keys::Q_MEDIA_PAUSE))
@@ -419,7 +419,7 @@ impl QuillApp {
                     .custom(chrome::ghost(cx))
                     .icon(Icon::new(IconName::Eye).with_size(px(ICON)))
                     .label(label)
-                    .selected(self.stories.viewers_open)
+                    .selected(self.stories.viewer_ui().viewers_open)
                     .tooltip(tr(keys::Q_MEDIA_VIEWERS))
                     .on_click(cx.listener(|this, _, _, cx| this.toggle_story_viewers(cx))),
             );
@@ -449,7 +449,7 @@ impl QuillApp {
                 ))
                 .child(div().flex_1());
         } else {
-            if can_reply && !self.stories.reply_open {
+            if can_reply && !self.stories.viewer_ui().reply_open {
                 row = row.child(
                     div()
                         .id("story-reply")
@@ -521,7 +521,7 @@ impl QuillApp {
             );
         }
         let mut column = div().flex().flex_col().gap_2().items_center();
-        if self.stories.reply_open && !interactions {
+        if self.stories.viewer_ui().reply_open && !interactions {
             column = column.child(self.story_reply_row(cx));
         }
         column.child(row).into_any_element()
@@ -548,7 +548,7 @@ impl QuillApp {
     /// Load the next viewers page when the list is scrolled near its end
     /// (live only; the demo has no further pages to fetch).
     pub(in crate::ui) fn story_viewers_scrolled(&mut self, cx: &mut Context<Self>) {
-        if !self.stories.viewers_open || self.live.is_none() {
+        if !self.stories.viewer_ui().viewers_open || self.live.is_none() {
             return;
         }
         let more = self

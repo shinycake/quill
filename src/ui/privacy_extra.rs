@@ -738,6 +738,7 @@ impl QuillApp {
             .to_string();
         let dir = quill::media_viewer::downloads_dir().unwrap_or_else(|| PathBuf::from("."));
         let picker = cx.prompt_for_new_path(&dir, Some(&name));
+        // screen-scope: the note reports a local file save to whichever account is on screen.
         cx.spawn(async move |this, cx| {
             let Ok(Ok(Some(dest))) = picker.await else {
                 return;
@@ -913,7 +914,7 @@ crate::ui::shell::register_dialogs! {
         |app| app.privacy.extra.file_open.is_some(),
         QuillApp::build_file_open_dialog,
     )
-    .closes(|app, _, cx| { app.privacy.extra.file_open = None; cx.notify(); }),
+    .close(|app, _, cx| { app.privacy.extra.file_open = None; cx.notify(); }),
 }
 
 #[cfg(test)]

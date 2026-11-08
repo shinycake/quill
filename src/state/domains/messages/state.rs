@@ -113,8 +113,9 @@ pub struct MessagesState {
     /// user action (send, edit, join, ...) hit a rate limit. The UI drains
     /// it into the status note; the composer text is left untouched.
     pub flood_notice: Option<String>,
-    /// M1: `getChatScheduledMessages` results — the chat's scheduled sends,
-    /// with `scheduling_state` showing the planned send time.
+    /// M1: `getChatScheduledMessages` results — scheduled sends, with
+    /// `scheduling_state` showing the planned send time. Rows of every chat
+    /// asked for: read one chat's through `Session::scheduled_in`.
     pub scheduled_messages: Vec<ParsedMessage>,
     /// Replied-to messages outside the loaded window, keyed by the
     /// replying message `(chat_id, message_id)`.

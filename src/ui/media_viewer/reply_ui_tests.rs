@@ -43,7 +43,7 @@ fn add_photo(app: &Entity<QuillApp>, vcx: &mut VisualTestContext, id: i64, pendi
         let history = session.histories.get_mut(&CHAT.0).expect("history");
         let mut message = history.messages.get(&101).expect("a message").clone();
         message.id = MessageId(id);
-        message.pending = pending;
+        message.send = quill::state::SendState::from_flags(pending, false, false);
         message.content = MessageContent::Photo(PhotoContent {
             caption: String::new(),
             caption_entities: Vec::new(),
@@ -89,7 +89,7 @@ fn reply_closes_the_viewer_and_arms_the_composer(cx: &mut TestAppContext) {
     vcx.run_until_parked();
     app.read_with(vcx, |app, _| {
         assert!(!app.viewer.state.is_open(), "Reply closes the viewer");
-        let reply = app.composer_ui.reply().expect("a reply");
+        let reply = app.chat_ui.reply().expect("a reply");
         assert_eq!((reply.chat_id, reply.message_id), (CHAT, MessageId(8901)));
     });
 }

@@ -23,13 +23,10 @@ impl QuillApp {
         let session = self.session()?;
         let Some(info) = session.user_full_info(user_id) else {
             // The full info carries the start page; ask once.
-            let weak = cx.weak_entity();
-            cx.defer(move |cx| {
-                let _ = weak.update(cx, |this, _| {
-                    if let Some(live) = this.live.as_mut() {
-                        let _ = live.driver.fetch_user_full_info(user_id);
-                    }
-                });
+            self.defer_screen(cx, move |this, _| {
+                if let Some(live) = this.live.as_mut() {
+                    let _ = live.driver.fetch_user_full_info(user_id);
+                }
             });
             return None;
         };

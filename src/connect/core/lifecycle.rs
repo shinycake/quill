@@ -67,8 +67,6 @@ impl<S: JsonSender> ConnectDriver<S> {
             call_devices_listing: None,
             selected_devices: (None, None),
             group_playback_muted: Default::default(),
-            call_connect_params: None,
-            reconnect_attempts: 0,
             call_sound_watch: None,
             credentials,
             paths: prepared.paths,
@@ -185,9 +183,15 @@ impl<S: JsonSender> ConnectDriver<S> {
         ) {
             return Err(ConnectSendError::InvalidRequest);
         }
+        let before = self.session.shutdown;
         self.session.begin_close();
         let extra = self.session.request(RequestPurpose::Close, None);
-        self.sender.send_json(&close_request(extra))?;
+        if let Err(err) = self.sender.send_json(&close_request(extra)) {
+            // Nothing went out: the session keeps running.
+            self.session.requests.take(extra);
+            self.session.shutdown = before;
+            return Err(err);
+        }
         Ok(extra)
     }
 
@@ -200,9 +204,14 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !matches!(self.session.auth, AuthorizationState::Ready) {
             return Err(ConnectSendError::InvalidRequest);
         }
-        self.session.begin_logout();
         let extra = self.session.request(RequestPurpose::LogOut, None);
-        self.sender.send_json(&log_out(extra))?;
+        if let Err(err) = self.sender.send_json(&log_out(extra)) {
+            // Nothing went out: the account stays signed in and usable,
+            // its requests and generation untouched.
+            self.session.requests.take(extra);
+            return Err(err);
+        }
+        self.session.logout_sent(extra);
         Ok(extra)
     }
 }

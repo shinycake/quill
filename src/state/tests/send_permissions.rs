@@ -50,8 +50,8 @@ fn sticker_gif_denials_surface_for_requests_and_async_failures_without_raw_text(
             Some(notice)
         );
         let row = &session.histories[&1].messages[&88];
-        assert!(row.failed);
-        assert!(!row.can_retry);
+        assert!(row.failed());
+        assert!(!row.can_retry());
     }
     let extra = session.request(RequestPurpose::SendMessage, Some(ChatId(1)));
     apply_json(

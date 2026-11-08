@@ -36,7 +36,7 @@ impl QuillApp {
     /// The story the reply row is replying to.
     pub(in crate::ui) fn story_reply_target(&self) -> Option<(ChatId, i32)> {
         reply_target(
-            self.stories.reply_open,
+            self.stories.viewer_ui().reply_open,
             self.stories
                 .viewer
                 .current()
@@ -46,15 +46,18 @@ impl QuillApp {
 
     /// The emoji / sticker / GIF panel is open for the story reply.
     pub(in crate::ui) fn story_reply_panel_active(&self) -> bool {
-        picks_go_to_story(self.stories.reply_open, self.stories.reply_panel)
-            && self.pickers.media_panel.open
+        picks_go_to_story(
+            self.stories.viewer_ui().reply_open,
+            self.stories.viewer_ui().reply_panel,
+        ) && self.pickers.media_panel.open
             && self.pickers.media_panel.reaction.is_none()
             && self.pickers.media_panel.status.is_none()
     }
 
     /// A recording started from the story reply row is in progress.
     pub(in crate::ui) fn story_reply_recording_active(&self) -> bool {
-        self.stories.reply_open && self.recording.purpose() == Some(CaptureFor::StoryReply)
+        self.stories.viewer_ui().reply_open
+            && self.recording.purpose() == Some(CaptureFor::StoryReply)
     }
 
     /// The reply row is done (sent, closed, or the story changed): close
@@ -67,16 +70,24 @@ impl QuillApp {
         {
             self.cancel_recording(cx);
         }
-        self.stories.reply_open = false;
-        self.stories.reply_panel = false;
+        if let Some(open) = self.stories.viewer_ui_mut() {
+            open.reply_open = false;
+        }
+        if let Some(open) = self.stories.viewer_ui_mut() {
+            open.reply_panel = false;
+        }
     }
 
     pub(super) fn toggle_story_reply_panel(&mut self, tab: PanelTab, cx: &mut Context<Self>) {
         if self.story_reply_panel_active() && self.pickers.media_panel.tab == tab {
-            self.stories.reply_panel = false;
+            if let Some(open) = self.stories.viewer_ui_mut() {
+                open.reply_panel = false;
+            }
             self.close_media_panel(cx);
         } else {
-            self.stories.reply_panel = true;
+            if let Some(open) = self.stories.viewer_ui_mut() {
+                open.reply_panel = true;
+            }
             self.open_media_panel(tab, cx);
         }
     }
@@ -372,7 +383,9 @@ impl QuillApp {
             return;
         }
         if self.story_reply_panel_active() {
-            self.stories.reply_panel = false;
+            if let Some(open) = self.stories.viewer_ui_mut() {
+                open.reply_panel = false;
+            }
             self.close_media_panel(cx);
         }
         match self.record_mode() {
@@ -409,11 +422,11 @@ impl QuillApp {
         let Some(capture) = self.recording.take_video() else {
             return true;
         };
-        self.recording.locked = false;
-        self.recording.discard_confirm = false;
         cx.notify();
         let finished = cx.background_spawn(async move { capture.finish() });
-        Self::spawn_main_in(window, cx, async move |this, cx| {
+        // Story ids are the poster's, the same on every account: the reply
+        // goes out only from the screen it was recorded on (`spawn_screen`).
+        self.spawn_screen_in(window, cx, async move |this, cx| {
             let result = finished.await;
             let path = result.as_ref().ok().map(|draft| draft.path.clone());
             let updated = this.update_in(cx, |this, _window, cx| {
@@ -437,10 +450,10 @@ impl QuillApp {
                 };
                 this.finish_story_reply_media(sent, tr(keys::Q_MEDIA_VIDEO_MESSAGE), cx);
             });
-            if updated.is_err()
-                && let Some(path) = path
-            {
-                let _ = std::fs::remove_file(path);
+            if updated.is_err() {
+                let _ = this
+                    .app()
+                    .update(cx, |this, cx| this.recording_dropped_with_screen(path, cx));
             }
         })
         .detach();
@@ -469,14 +482,14 @@ impl QuillApp {
         let Some(capture) = self.recording.take_voice() else {
             return true;
         };
-        self.recording.locked = false;
-        self.recording.discard_confirm = false;
         self.stop_record_preview();
         let finish = capture.close_microphone();
         cx.notify();
         // The encoder is joined off the UI thread.
         let finished = cx.background_spawn(async move { finish.complete() });
-        Self::spawn_main(cx, async move |this, cx| {
+        // Story ids are the poster's, the same on every account: the reply
+        // goes out only from the screen it was recorded on (`spawn_screen`).
+        self.spawn_screen(cx, async move |this, cx| {
             let result = finished.await;
             let path = result.as_ref().ok().map(|draft| draft.path.clone());
             let updated = this.update(cx, |this, cx| {
@@ -502,10 +515,10 @@ impl QuillApp {
                 }
                 this.finish_story_reply_media(sent, tr(keys::Q_MEDIA_VOICE_MESSAGE), cx);
             });
-            if updated.is_err()
-                && let Some(path) = path
-            {
-                let _ = std::fs::remove_file(path);
+            if updated.is_err() {
+                let _ = this
+                    .app()
+                    .update(cx, |this, cx| this.recording_dropped_with_screen(path, cx));
             }
         })
         .detach();

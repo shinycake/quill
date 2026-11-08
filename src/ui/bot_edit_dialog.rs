@@ -104,7 +104,7 @@ impl QuillApp {
             local_error: None,
         });
         // The texts arrive from the session on the poll; fill the fields once.
-        cx.spawn_in(window, async move |this, cx| {
+        self.spawn_screen_in(window, cx, async move |this, cx| {
             for _ in 0..100 {
                 cx.background_executor()
                     .timer(Duration::from_millis(150))
@@ -203,7 +203,9 @@ impl QuillApp {
             multiple: false,
             prompt: Some(tr(keys::Q_MEDIA_CHOOSE_PHOTO).into()),
         });
-        cx.spawn(async move |this, cx| {
+        // The bot is the account's own: another account on screen does
+        // not get the photo (`spawn_screen`).
+        self.spawn_screen(cx, async move |this, cx| {
             if let Ok(Ok(Some(paths))) = picker.await
                 && let Some(path) = paths.into_iter().next()
             {
@@ -448,5 +450,6 @@ crate::ui::shell::register_dialogs! {
         5420,
         |app| app.dialogs.bot_edit_dialog.is_some(),
         QuillApp::build_bot_edit_dialog,
-    ),
+    )
+    .close(|app, _, cx| app.close_bot_edit(cx)),
 }

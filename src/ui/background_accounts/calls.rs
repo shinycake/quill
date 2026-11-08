@@ -13,7 +13,9 @@ use gpui_kit::component::button::*;
 use gpui_kit::component::dialog::Dialog;
 use quill::lang::{keys, tr, tr_with};
 use quill::notify_accounts::{BackgroundCallPlan, plan_background_call, ringing_incoming_call};
-use quill::notify_call::{CallNotificationAction, CallNotifyInput, decide_call_notify};
+use quill::notify_call::{
+    CallNotificationAction, CallNotifyInput, CallPick, decide_call_notify, take_call_picks,
+};
 
 /// A call ringing on a background account.
 pub(super) struct BackgroundRing {
@@ -34,6 +36,25 @@ impl QuillApp {
     /// The account whose call rings in the background, if one does.
     pub(in crate::ui) fn background_ring_account(&self) -> Option<&AccountKey> {
         self.background.ringing.as_ref().map(|ring| &ring.account)
+    }
+
+    /// Whether `pick` answers a call still ringing on a background account:
+    /// the tracked ring, or the call its client rings before that ring is
+    /// tracked (the account was switched away from while it rang).
+    pub(in crate::ui) fn background_call_rings(&self, pick: &CallPick) -> bool {
+        if self
+            .background
+            .ringing
+            .as_ref()
+            .is_some_and(|ring| pick.is_for(&ring.account, ring.call_id))
+        {
+            return true;
+        }
+        self.background
+            .client(&pick.account)
+            .and_then(|client| client.live.as_ref())
+            .and_then(|live| ringing_incoming_call(&live.driver.session))
+            .is_some_and(|(call_id, ..)| call_id == pick.call_id)
     }
 
     /// Whether the background ring should sound in the app.
@@ -207,23 +228,25 @@ impl QuillApp {
     }
 
     /// Picks on the ringing call's OS notification (they arrive in
-    /// `calls.notify_clicks` with the other call picks). Runs at render,
-    /// before the on-screen account's call picks.
+    /// `calls.notify_clicks` with the other call picks, each with its
+    /// account). Runs at render, before the on-screen account's call picks.
     pub(super) fn flush_background_call_picks(
         &mut self,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(call_id) = self.background.ringing.as_ref().map(|ring| ring.call_id) else {
+        let Some((account, call_id)) = self
+            .background
+            .ringing
+            .as_ref()
+            .map(|ring| (ring.account.clone(), ring.call_id))
+        else {
             return;
         };
+        // Only the picks made on this account's call: the account on
+        // screen can ring with the same call id.
         let picks: Vec<CallNotificationAction> = match self.calls.notify_clicks.lock() {
-            Ok(mut guard) => {
-                let (mine, rest): (Vec<_>, Vec<_>) =
-                    guard.drain(..).partition(|(id, _)| *id == call_id);
-                *guard = rest;
-                mine.into_iter().map(|(_, action)| action).collect()
-            }
+            Ok(mut guard) => take_call_picks(&mut guard, &account, call_id),
             Err(_) => return,
         };
         for action in picks {
@@ -320,5 +343,5 @@ crate::ui::shell::register_dialogs! {
         |app| app.background_ring_audible() && !app.account.passcode.locked,
         QuillApp::build_background_call_dialog,
     )
-    .closes(|app, _, cx| { if let Some(ring) = app.background.ringing.as_mut() { ring.dismissed = true; } cx.notify(); }),
+    .close(|app, _, cx| { if let Some(ring) = app.background.ringing.as_mut() { ring.dismissed = true; } cx.notify(); }),
 }

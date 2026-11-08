@@ -222,7 +222,7 @@ impl QuillApp {
             return;
         }
         self.privacy.passkeys.ticking = true;
-        cx.spawn_in(window, async move |this, cx| {
+        self.spawn_screen_in(window, cx, async move |this, cx| {
             loop {
                 cx.background_executor().timer(TICK).await;
                 let keep = this
@@ -610,7 +610,7 @@ crate::ui::shell::register_dialogs! {
             .is_some_and(|ui| ui.sheet != CeremonySheet::Probing),
         QuillApp::build_passkey_ceremony_dialog,
     )
-    .closes(|app, window, cx| app.close_passkey_ceremony(window, cx)),
+    .close(|app, window, cx| app.close_passkey_ceremony(window, cx)),
 }
 
 crate::ui::screenshot_demo::register_demos![

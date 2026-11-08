@@ -46,7 +46,7 @@ impl QuillApp {
     }
 
     pub(super) fn note_open_draft(&mut self, delayed: bool, cx: &mut Context<Self>) {
-        if self.composer_ui.pending_edit.is_some() {
+        if self.chat_ui.is_editing() {
             return;
         }
         let Some(chat_id) = self.open_chat_id() else {
@@ -73,17 +73,22 @@ impl QuillApp {
         chat_id: ChatId,
         cx: &App,
     ) -> (DraftContent, Option<SendReply>) {
-        if self.composer_ui.pending_edit.is_some() {
-            let reply = self.draft_reply(self.composer_ui.saved_edit_reply.as_ref(), chat_id);
+        if self.chat_ui.is_editing() {
+            let reply = self.draft_reply(self.chat_ui.stashed_reply(), chat_id);
             let content = match self.stored_rich_draft() {
                 Some(rich) => DraftContent::Rich(rich.clone()),
-                None => DraftContent::Text(self.composer_ui.saved_edit_draft.clone()),
+                None => DraftContent::Text(
+                    self.chat_ui
+                        .stashed_draft()
+                        .map(str::to_string)
+                        .unwrap_or_default(),
+                ),
             };
             return (content, reply);
         }
-        let reply = self.draft_reply(self.composer_ui.reply(), chat_id);
+        let reply = self.draft_reply(self.chat_ui.reply(), chat_id);
         let markup = self.composer_markup(cx);
-        let content = if self.composer_ui.rich_editor_open {
+        let content = if self.chat_ui.rich_editor_open {
             let blocks = self
                 .composer_ui
                 .rich_draft
@@ -112,56 +117,6 @@ impl QuillApp {
         };
         let (content, reply) = self.composer_draft_parts(chat_id, cx);
         (content, reply, now_ms)
-    }
-
-    /// Close what was open for another chat before `chat_id` shows: menus,
-    /// confirmations and a recording. The next send's attachments and
-    /// options need nothing here, they are per chat (`composer_sends.rs`).
-    pub(super) fn dismiss_cross_chat_state(&mut self, chat_id: ChatId, cx: &mut Context<Self>) {
-        // Phase B4: the TTL picker belongs to the previous chat.
-        self.notify.ttl_picker_open = false;
-        if self
-            .composer_ui
-            .reply()
-            .is_some_and(|reply| !reply.belongs_to(chat_id))
-        {
-            self.composer_ui.set_reply(None);
-        }
-        if self
-            .composer_ui
-            .pending_edit
-            .as_ref()
-            .is_some_and(|edit| edit.chat_id != chat_id)
-        {
-            self.composer_ui.pending_edit = None;
-            self.composer_ui.saved_edit_draft.clear();
-            self.composer_ui.saved_edit_reply = None;
-        }
-        if self
-            .message_ui
-            .pending_delete
-            .as_ref()
-            .is_some_and(|confirm| confirm.chat_id != chat_id)
-        {
-            self.message_ui.pending_delete = None;
-        }
-        // B4: a pending stop-poll confirm belongs to its own chat.
-        if self
-            .message_ui
-            .pending_stop_poll
-            .is_some_and(|(id, _, _)| id != chat_id)
-        {
-            self.message_ui.pending_stop_poll = None;
-        }
-        self.dismiss_forward_for_chat(chat_id);
-        // Phase 3.3: the `/` menu never survives a chat switch.
-        self.composer_ui.command_menu_open = false;
-        self.composer_ui.command_menu_selected = 0;
-        // Bots slice: neither does the inline-results dropdown.
-        self.composer_ui.inline_results_open = false;
-        self.composer_ui.inline_results_selected = 0;
-        self.composer_ui.inline_query_armed = None;
-        self.cancel_recording_here(cx);
     }
 
     /// Save the composer before the view moves to another chat, topic or
@@ -200,7 +155,7 @@ impl QuillApp {
             return;
         };
         if std::mem::replace(&mut self.composer_ui.remote_draft_seen, revision) == revision
-            || self.composer_ui.pending_edit.is_some()
+            || self.chat_ui.is_editing()
         {
             return;
         }
@@ -213,7 +168,7 @@ impl QuillApp {
             let held = session.draft_is_dirty(chat_id, topic)
                 || !session.accepts_composer_draft(chat_id, topic);
             // The rich editor holds what the user is writing.
-            let held = held || self.composer_ui.rich_editor_open;
+            let held = held || self.chat_ui.rich_editor_open;
             (topic, draft, held)
         }) else {
             return;
@@ -229,7 +184,7 @@ impl QuillApp {
         if held {
             return;
         }
-        let reply = self.composer_ui.reply().map(|reply| reply.message_id);
+        let reply = self.chat_ui.reply().map(|reply| reply.message_id);
         let markup = self.composer_markup(cx);
         let shown = draft_text_to_store(&markup, reply.is_some());
         let take = match previous {
@@ -298,8 +253,9 @@ impl QuillApp {
         {
             return;
         }
-        // window-scope: the pending draft names its own chat and topic (and
-        // its token), so the commit needs no window's state.
+        // window-scope: the pending draft names its own chat and topic, so no window.
+        // screen-scope: the driver on screen holds the draft and ignores a token it
+        // did not issue; a task bound to one screen would strand the shared timer.
         cx.spawn(async move |this, cx| {
             loop {
                 let step = this
@@ -338,7 +294,7 @@ impl QuillApp {
     }
 
     pub(super) fn restore_open_draft(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.composer_ui.pending_edit.is_some() {
+        if self.chat_ui.is_editing() {
             return;
         }
         let Some(chat_id) = self.open_chat_id() else {
@@ -379,9 +335,9 @@ impl QuillApp {
             }
             .to_item(item)
         });
-        self.composer_ui.set_reply(restored_reply);
+        self.chat_ui.set_reply(restored_reply);
         if draft.as_ref().is_some_and(|draft| draft.rich.is_some()) {
-            self.composer_ui.rich_editor_open = false;
+            self.chat_ui.rich_editor_open = false;
         }
         self.set_composer_markup(&text, window, cx);
         // `set_value` emits no Change: re-check the restored draft.
@@ -395,7 +351,7 @@ impl QuillApp {
         let Some(live) = self.live.as_mut() else {
             return;
         };
-        let editing = self.composer_ui.pending_edit.is_some();
+        let editing = self.screen.chat_ui.is_editing();
         let now_ms = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_millis() as u64)

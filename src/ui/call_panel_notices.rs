@@ -54,7 +54,7 @@ impl BarsStyle {
 pub(super) fn shown_signal_bars(call: &ActiveCall) -> Option<u8> {
     let established = matches!(call.state, CallState::Ready)
         && matches!(
-            call.transport,
+            call.transport.state(),
             Some(TransportState::Connected | TransportState::Reconnecting)
         );
     call.signal_bars.filter(|_| established)
@@ -201,7 +201,7 @@ mod tests {
         shown_signal_bars,
     };
     use quill::calls::engine::{RemoteVideoState, TransportState};
-    use quill::state::ActiveCall;
+    use quill::state::{ActiveCall, CallTransport};
     use quill::telegram::envelope::CallState;
 
     fn call(state: CallState, transport: Option<TransportState>, bars: Option<u8>) -> ActiveCall {
@@ -214,8 +214,14 @@ mod tests {
             started_at: std::time::Instant::now(),
             ready_at: None,
             ready: None,
-            transport,
-            transport_error: None,
+            transport: transport.map_or_else(Default::default, |state| {
+                CallTransport::reported(state, Default::default()).unwrap_or(
+                    CallTransport::Failed {
+                        reason: String::new(),
+                        link: None,
+                    },
+                )
+            }),
             signaling_queue: Vec::new(),
             signaling_dropped: 0,
             muted: false,

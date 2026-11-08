@@ -621,7 +621,7 @@ mod tests {
             is_outgoing: false,
             date: 0,
             content: crate::telegram::envelope::MessageContent::Text(TextContent::plain("x")),
-            pending: false,
+            send: crate::state::SendState::Sent,
             reply_to: None,
             forward_info: None,
             extras: Default::default(),
@@ -632,8 +632,6 @@ mod tests {
             self_destruct: None,
             auto_delete: None,
             author_signature: None,
-            failed: false,
-            can_retry: false,
             ephemeral: None,
         };
         let history = vec![

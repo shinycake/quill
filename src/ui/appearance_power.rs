@@ -78,9 +78,10 @@ impl QuillApp {
         if self.demo_session.is_some() {
             return;
         }
-        self.settings.system_accent = quill::system_accent::read();
-        self.settings.system_accent_probed = true;
+        self.preferences.system_accent = quill::system_accent::read();
+        self.preferences.system_accent_probed = true;
         if quill::system_accent::pending() {
+            // screen-scope: the system accent is an app-wide setting; it applies to whichever account is on screen.
             cx.spawn(async move |this, cx| {
                 while quill::system_accent::pending() {
                     cx.background_executor()
@@ -88,7 +89,7 @@ impl QuillApp {
                         .await;
                 }
                 let _ = this.update(cx, |this, cx| {
-                    this.settings.system_accent = quill::system_accent::read();
+                    this.preferences.system_accent = quill::system_accent::read();
                     this.apply_appearance(cx);
                     cx.notify();
                 });
@@ -157,7 +158,7 @@ impl QuillApp {
                 cx,
                 tr(keys::Q_MISC_FONT_FAMILY),
                 &hint,
-                Select::new(&self.settings.font_picker)
+                Select::new(&self.preferences.font_picker)
                     .search_placeholder(tr(keys::Q_MISC_SEARCH_FONTS))
                     .accessibility_label(tr(keys::Q_MISC_INTERFACE_FONT_FAMILY))
                     .menu_max_h(px(280.))

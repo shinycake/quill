@@ -62,7 +62,7 @@ fn send_success_replaces_pending_id() {
     let history = session.histories.get(&1).unwrap();
     assert!(!history.messages.contains_key(&-1));
     assert!(history.messages.contains_key(&88));
-    assert!(!history.messages.get(&88).unwrap().pending);
+    assert!(!history.messages.get(&88).unwrap().pending());
 }
 
 #[test]
@@ -138,9 +138,10 @@ fn send_failed_marks_can_retry_from_sending_state() {
             .messages
             .get(&88)
             .unwrap();
-        assert!(row.failed, "{label}: failed send marks the row failed");
+        assert!(row.failed(), "{label}: failed send marks the row failed");
         assert_eq!(
-            row.can_retry, can_retry,
+            row.can_retry(),
+            can_retry,
             "{label}: can_retry parsed through"
         );
     }
@@ -797,4 +798,28 @@ fn update_message_content_rewrites_own_text() {
             .is_tombstone(MessageId(102))
     );
     assert!(!sink.rendered().contains("CANARY_EDITED"));
+}
+
+#[test]
+fn a_failed_send_loaded_again_still_shows_failed() {
+    // After a restart TDLib hands the failed send back in history pages and
+    // updates, marked messageSendingStateFailed; it must not read as sent.
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        r#"{"@type":"updateNewMessage","message":{"id":-5,"chat_id":1,"is_outgoing":true,"sending_state":{"@type":"messageSendingStateFailed","can_retry":true},"content":{"@type":"messageText","text":{"@type":"formattedText","text":"hi","entities":[]}}}}"#,
+    );
+    let row = session
+        .histories
+        .get(&1)
+        .unwrap()
+        .messages
+        .get(&-5)
+        .unwrap();
+    assert!(row.failed(), "the row keeps its failed state");
+    assert!(row.can_retry());
+    assert!(row.pending(), "a failed send is not a delivered message");
 }

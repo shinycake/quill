@@ -92,7 +92,7 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) -> Option<MenuRow> {
         let session = self.session()?;
-        if !session.is_replies_chat(chat_id) || message.id.0 <= 0 || message.pending {
+        if !session.is_replies_chat(chat_id) || message.id.0 <= 0 || message.pending() {
             return None;
         }
         let block = match replies_sender(message)? {

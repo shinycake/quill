@@ -85,8 +85,8 @@ impl QuillApp {
         };
         let return_to = Some(window.window_handle());
         self.open_live_pip(player, LivePipSource::Stream { call_id }, return_to, cx);
-        self.group_call.window_closed_by_user = Some(call_id);
-        self.group_call.stream.pending_join = None;
+        self.group_call_screen.window_closed_by_user = Some(call_id);
+        self.group_call_screen.stream_join = None;
         self.group_call.stream.overlay = None;
         // The stream window goes now, out of full screen first, rather
         // than on the main window's next frame.
@@ -147,6 +147,7 @@ impl QuillApp {
         };
         // Window creation draws at once: let this update finish first.
         // window-scope: the live PiP is the app's (`group_call`), no chat window's.
+        // screen-scope: the live PiP belongs to the app and outlives an account switch; this opens or closes its window.
         cx.defer(move |cx| {
             let opened = open_pip_window(open, cx);
             let _ = weak.update(cx, |app, cx| {

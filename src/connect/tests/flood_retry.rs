@@ -241,7 +241,7 @@ fn failed_send_with_flood_keeps_the_retry_affordance() {
         .and_then(|history| history.messages.get(&5))
         .expect("failed row kept");
     assert!(
-        row.failed && row.can_retry,
+        row.failed() && row.can_retry(),
         "text stays, Retry send offered"
     );
 }

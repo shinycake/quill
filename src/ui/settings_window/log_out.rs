@@ -86,5 +86,5 @@ crate::ui::shell::register_dialogs! {
         |app| app.settings.open && app.settings.log_out_confirm,
         QuillApp::build_log_out_dialog,
     )
-    .closes(|app, _, cx| { app.settings.log_out_confirm = false; cx.notify(); }),
+    .close(|app, _, cx| { app.settings.log_out_confirm = false; cx.notify(); }),
 }

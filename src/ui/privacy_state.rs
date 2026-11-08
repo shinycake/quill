@@ -40,6 +40,18 @@ pub(crate) struct PrivacyState {
     pub(super) last_seen_warning: Option<quill::privacy::PrivacyRuleDetail>,
 }
 
+/// A passkey ceremony still running with the OS is cancelled
+/// (`close_passkey_ceremony`); the rest is flags and inputs.
+impl crate::ui::on_screen::Farewell for PrivacyState {
+    fn farewell(
+        app: &mut QuillApp,
+        window: &mut gpui_kit::Window,
+        cx: &mut gpui_kit::Context<QuillApp>,
+    ) {
+        app.close_passkey_ceremony(window, cx);
+    }
+}
+
 impl PrivacyState {
     pub(super) fn new(window: &mut Window, cx: &mut Context<QuillApp>) -> Self {
         Self {

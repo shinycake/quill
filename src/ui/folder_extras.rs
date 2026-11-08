@@ -860,14 +860,19 @@ crate::ui::shell::register_dialogs! {
         1300,
         |app| app.folders.limit_box.is_some(),
         QuillApp::build_folder_limit_dialog,
-    ),
+    )
+    .close(|app, _, cx| {
+            app.folders.limit_box = None;
+            cx.notify();
+        }),
 
     /// The shared folder's "N new chats" join dialog.
     FolderNewChats => DialogSpec::new(
         2200,
         |app| app.folders.new_chats_dialog.is_some(),
         QuillApp::build_folder_new_chats_dialog,
-    ),
+    )
+    .close(|app, _, cx| app.close_folder_new_chats(cx)),
 }
 
 #[cfg(test)]

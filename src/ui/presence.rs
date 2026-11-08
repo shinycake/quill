@@ -103,7 +103,7 @@ impl QuillApp {
         }
         // A locked window is not in use: offline until unlocked.
         let desired = should_be_online(active && !self.account.passcode.locked, idle_ms());
-        if let Some(value) = self.connection.presence.next(desired)
+        if let Some(value) = self.screen.connection.presence.next(desired)
             && live.driver.set_online(value).is_err()
         {
             self.connection.presence.reset();

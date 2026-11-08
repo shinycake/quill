@@ -195,6 +195,14 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.send_draft(chat_id, topic, None, None, None).map(Some)
     }
 
+    /// Send the draft waiting for its quiet window now.
+    pub fn flush_pending_draft(&mut self) -> Result<Option<RequestId>, ConnectSendError> {
+        match self.pending_draft.as_ref().map(|pending| pending.token) {
+            Some(token) => self.commit_debounced_draft(token),
+            None => Ok(None),
+        }
+    }
+
     pub fn cancel_pending_draft(&mut self) {
         self.pending_draft = None;
         self.draft_clock = DraftSaveClock::idle();

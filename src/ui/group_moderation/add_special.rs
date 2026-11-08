@@ -363,5 +363,6 @@ crate::ui::shell::register_dialogs! {
         4295,
         |app| app.admin.add_special.is_some(),
         QuillApp::build_add_special_dialog,
-    ),
+    )
+    .close(|app, _, cx| app.close_add_special(cx)),
 }

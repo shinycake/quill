@@ -228,7 +228,7 @@ impl QuillApp {
         // (tdesktop `AddAddToOwnedSetAction`: lottie fits both, ≤100 px is
         // an emoji; nothing while the message is still sending).
         let joins = match content {
-            MessageContent::Sticker(sticker) if sticker.set_id == 0 && !message.pending => {
+            MessageContent::Sticker(sticker) if sticker.set_id == 0 && !message.pending() => {
                 let (to_stickers, to_emoji) = quill::sticker_set_box::joinable_kinds(
                     sticker.format == quill::telegram::envelope::StickerFormat::Tgs,
                     sticker.width,
@@ -440,6 +440,7 @@ impl QuillApp {
         let suggested = quill::message_menu::suggested_save_name(&target, &local_name);
         let dir = quill::media_viewer::downloads_dir().unwrap_or_else(|| PathBuf::from("."));
         let picker = cx.prompt_for_new_path(&dir, Some(&suggested));
+        // screen-scope: the note reports a local file save to whichever account is on screen.
         cx.spawn(async move |this, cx| {
             let Ok(Ok(Some(dest))) = picker.await else {
                 return;
@@ -524,7 +525,8 @@ impl QuillApp {
     /// "Save for Notifications" (`addSavedNotificationSound`).
     fn save_message_tone(&mut self, file_id: FileId, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
-            self.connection
+            self.screen
+                .connection
                 .set_note(match live.driver.save_notification_tone(file_id) {
                     Ok(_) => StatusNote::silent(tr(keys::Q_CHAT_SAVING_SOUND)),
                     Err(_) => StatusNote::error(tr(keys::Q_CHAT_COULD_NOT_SAVE_THE_SOUND)),
@@ -569,7 +571,8 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         if let Some(live) = self.live.as_mut() {
-            self.connection
+            self.screen
+                .connection
                 .set_note(match live.driver.cancel_upload(chat_id, message_id) {
                     Ok(_) => {
                         self.begin_vanish(chat_id, &[message_id]);
@@ -630,7 +633,8 @@ crate::ui::shell::register_dialogs! {
         5600,
         |app| app.message_ui.menu_ui.report_open,
         QuillApp::build_message_report_dialog,
-    ),
+    )
+    .close(|app, _, cx| app.close_message_report(cx)),
 }
 
 mod delete_member_reaction;

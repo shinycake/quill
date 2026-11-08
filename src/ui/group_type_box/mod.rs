@@ -209,7 +209,7 @@ impl QuillApp {
         if local_link_status(&text) != LinkStatus::Pending || text == facts.editable {
             return;
         }
-        cx.spawn(async move |this, cx| {
+        self.spawn_screen(cx, async move |this, cx| {
             cx.background_executor()
                 .timer(Duration::from_millis(CHECK_DELAY_MS))
                 .await;
@@ -485,7 +485,8 @@ crate::ui::shell::register_dialogs! {
         7650,
         |app| app.group_type_box_dialog_open(),
         QuillApp::build_group_type_box_dialog,
-    ),
+    )
+    .close(|app, _, cx| app.close_group_type_box(cx)),
 }
 
 mod demo;

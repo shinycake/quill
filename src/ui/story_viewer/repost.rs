@@ -83,7 +83,9 @@ impl QuillApp {
                 self.open_story_poster_profile(MessageSender::Chat { chat_id }, window, cx);
             }
             RepostGone::Expired => {
-                self.stories.notice = Some(tr(keys::FORWARDED_STORY_EXPIRED).into());
+                if let Some(open) = self.stories.viewer_ui_mut() {
+                    open.notice = Some(tr(keys::FORWARDED_STORY_EXPIRED).into());
+                }
                 cx.notify();
             }
         }

@@ -77,7 +77,7 @@ impl QuillApp {
     fn sent_since(&self, newest: MessageId) -> bool {
         messages_newest_first(&self.history.rows)
             .take_while(|message| message.id.0 > newest.0)
-            .any(|message| message.is_outgoing && message.pending && !message.failed)
+            .any(|message| message.is_outgoing && message.pending() && !message.failed())
     }
 }
 

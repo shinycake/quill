@@ -8,6 +8,7 @@ use crate::ids::RequestId;
 use crate::locks::LockExt;
 use crate::state::CallsPurpose;
 use crate::state::RequestPurpose;
+use crate::state::{CallLink, CallTransport, MAX_CALL_RECONNECT_ATTEMPTS};
 use crate::telegram::envelope::{CallState, ReadyParams};
 use crate::telegram::requests::{
     CallPrivacySetting, PrivacyWho, accept_call_with_protocol, create_call_with_protocol,
@@ -47,7 +48,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if let Err(err) = engine.start_call(call_id, user_id, is_outgoing)
             && let Some(call) = self.session.calls.active_call.as_mut()
         {
-            call.transport_error = Some(err.to_string());
+            call.transport.record_start_error(err.to_string());
         }
     }
 
@@ -326,7 +327,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         let Some(call) = self.session.calls.active_call.as_mut() else {
             return Err(EngineError::NoActiveCall);
         };
-        if call.transport.is_some()
+        if call.transport.started()
             && let Some(engine) = self.call_engine.as_deref_mut()
             && engine.is_available()
         {
@@ -368,7 +369,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if enabled && !screen_available {
             return Err(EngineError::NoScreenSource);
         }
-        if call.transport.is_some()
+        if call.transport.started()
             && let Some(engine) = self.call_engine.as_deref_mut()
             && engine.is_available()
         {
@@ -392,7 +393,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .calls
             .active_call
             .as_ref()
-            .filter(|call| call.camera_on && call.transport.is_some())
+            .filter(|call| call.camera_on && call.transport.started())
             .map(|call| call.id);
         if let Some(call_id) = sending
             && let Some(engine) = self.call_engine.as_deref_mut()
@@ -446,11 +447,27 @@ impl<S: JsonSender> ConnectDriver<S> {
             .as_ref()
             .map(|(call_id, _, _, _)| *call_id);
 
-        if tracked_call_id != active_call_before && tracked_call_id.is_some() {
-            self.call_connect_params = None;
-            self.reconnect_attempts = 0;
+        // The call before went: gone, or replaced by the second call that
+        // rang while it was on.
+        if let Some(call_id) = active_call_before
+            && tracked_call_id != Some(call_id)
+        {
+            self.log_call_sound_summary(call_id);
+            if let Some(engine) = self.call_engine.as_deref_mut() {
+                let _ = engine.hangup(call_id);
+            }
         }
-
+        // TDLib took the hang-up before its terminal update: the call is
+        // over for the engine.
+        if let Some(hang_up) = self.session.calls.hang_up.as_mut()
+            && std::mem::take(&mut hang_up.engine_hang_up_due)
+        {
+            let call_id = hang_up.call_id;
+            self.log_call_sound_summary(call_id);
+            if let Some(engine) = self.call_engine.as_deref_mut() {
+                let _ = engine.hangup(call_id);
+            }
+        }
         if let Some((call_id, user_id, is_outgoing, _)) = &active_call_after
             && Some(*call_id) != active_call_before
             && let Some(engine) = self.call_engine.as_deref_mut()
@@ -460,27 +477,8 @@ impl<S: JsonSender> ConnectDriver<S> {
             if let Err(err) = engine.start_call(*call_id, *user_id, *is_outgoing)
                 && let Some(call) = self.session.calls.active_call.as_mut()
             {
-                call.transport_error = Some(err.to_string());
+                call.transport.record_start_error(err.to_string());
             }
-        }
-        if tracked_call_id.is_none()
-            && let Some(call_id) = active_call_before
-        {
-            if let Some(summary) = self
-                .session
-                .calls
-                .summary
-                .as_mut()
-                .filter(|summary| summary.call_id == call_id)
-            {
-                summary.reconnect_attempts = self.reconnect_attempts;
-            }
-            self.log_call_sound_summary(call_id);
-            if let Some(engine) = self.call_engine.as_deref_mut() {
-                let _ = engine.hangup(call_id);
-            }
-            self.call_connect_params = None;
-            self.reconnect_attempts = 0;
         }
         if let Some((call_id, data)) = bridge_signaling
             && tracked_call_id == Some(call_id)
@@ -504,23 +502,22 @@ impl<S: JsonSender> ConnectDriver<S> {
                 .calls
                 .active_call
                 .as_ref()
-                .is_some_and(|call| call.transport.is_none())
+                .is_some_and(|call| !call.transport.started())
         {
             let call_id = *call_id;
             let is_outgoing = *is_outgoing;
             if ready.encryption_key.is_empty() {
                 if let Some(call) = self.session.calls.active_call.as_mut() {
-                    call.transport = Some(TransportState::Failed);
-                    call.transport_error =
-                        Some("call became ready without an encryption key".into());
+                    call.transport = CallTransport::Failed {
+                        reason: "call became ready without an encryption key".into(),
+                        link: None,
+                    };
                 }
             } else {
                 // The list warmed when the call began serves this connect;
                 // the refresh keeps it current for the call.
                 self.refresh_call_devices();
                 let params = self.call_connect_params(is_outgoing, ready);
-                self.call_connect_params = Some(params.clone());
-                self.reconnect_attempts = 0;
                 let result = self.connect_call_transport(call_id, &params);
                 // Phase C2i: a screen-share toggle made before the
                 // transport existed applies once it does (mirrors the
@@ -539,16 +536,19 @@ impl<S: JsonSender> ConnectDriver<S> {
                     let _ = engine.set_screen_share_enabled(call_id, true);
                 }
                 if let Some(call) = self.session.calls.active_call.as_mut() {
-                    match result {
-                        Ok(()) => {
-                            call.transport = Some(TransportState::Connecting);
-                            call.transport_error = None;
-                        }
-                        Err(err) => {
-                            call.transport = Some(TransportState::Failed);
-                            call.transport_error = Some(err.to_string());
-                        }
-                    }
+                    // The parameters stay with the transport either way: a
+                    // later engine failure report retries them.
+                    let link = CallLink {
+                        params,
+                        reconnect_attempts: 0,
+                    };
+                    call.transport = match result {
+                        Ok(()) => CallTransport::Connecting(link),
+                        Err(err) => CallTransport::Failed {
+                            reason: err.to_string(),
+                            link: Some(link),
+                        },
+                    };
                 }
             }
         }
@@ -568,46 +568,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 continue;
             }
             crate::advanced::debug_mode::call_log(&format!("[call] {call_id} transport {state:?}"));
-            if state == TransportState::Failed {
-                let failure = if self.reconnect_attempts >= 3 {
-                    Some("reconnect attempts exhausted".to_string())
-                } else if !self
-                    .call_engine
-                    .as_ref()
-                    .is_some_and(|engine| engine.is_available())
-                {
-                    Some("call engine is unavailable for reconnect".to_string())
-                } else if let Some(params) = self.call_connect_params.clone() {
-                    self.reconnect_attempts += 1;
-                    if let Some(call) = self.session.calls.active_call.as_mut() {
-                        call.transport = Some(TransportState::Reconnecting);
-                        call.transport_error = None;
-                    }
-                    match self.connect_call_transport(call_id, &params) {
-                        // The retry is in flight: leave the call in
-                        // `Reconnecting` so the UI can show it. The
-                        // engine's own state callbacks move it to
-                        // `Connecting`/`Connected` (or back to `Failed`)
-                        // when they arrive.
-                        Ok(()) => None,
-                        Err(err) => Some(err.to_string()),
-                    }
-                } else {
-                    Some("no retained call parameters for reconnect".to_string())
-                };
-                if let Some(error) = failure
-                    && let Some(call) = self.session.calls.active_call.as_mut()
-                {
-                    call.transport = Some(TransportState::Failed);
-                    call.transport_error = Some(error);
-                }
-            } else if let Some(call) = self.session.calls.active_call.as_mut() {
-                if state == TransportState::Connected {
-                    self.reconnect_attempts = 0;
-                }
-                call.transport = Some(state);
-                call.transport_error = None;
-            }
+            self.apply_transport_report(state);
         }
 
         // Phase C2e: peer camera state follows the same gate as
@@ -673,6 +634,67 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
 
         Ok(())
+    }
+
+    /// One engine transport report for the tracked call. A failure retries
+    /// the retained parameters while the budget and the engine allow; any
+    /// other report moves the transport to that phase. A report for a
+    /// transport Quill never connected has nothing to describe and is
+    /// dropped.
+    fn apply_transport_report(&mut self, state: TransportState) {
+        let Some(call) = self.session.calls.active_call.as_ref() else {
+            return;
+        };
+        let call_id = call.id;
+        let link = call.transport.link().cloned();
+        let next = if state == TransportState::Failed {
+            let engine_available = self
+                .call_engine
+                .as_ref()
+                .is_some_and(|engine| engine.is_available());
+            match link {
+                Some(link) if link.reconnect_attempts >= MAX_CALL_RECONNECT_ATTEMPTS => {
+                    CallTransport::Failed {
+                        reason: "reconnect attempts exhausted".into(),
+                        link: Some(link),
+                    }
+                }
+                link if !engine_available => CallTransport::Failed {
+                    reason: "call engine is unavailable for reconnect".into(),
+                    link,
+                },
+                None => CallTransport::Failed {
+                    reason: "no retained call parameters for reconnect".into(),
+                    link: None,
+                },
+                Some(mut link) => {
+                    link.reconnect_attempts += 1;
+                    match self.connect_call_transport(call_id, &link.params) {
+                        // The retry is in flight: `Reconnecting` until the
+                        // engine's own reports move it on.
+                        Ok(()) => CallTransport::Reconnecting(link),
+                        Err(err) => CallTransport::Failed {
+                            reason: err.to_string(),
+                            link: Some(link),
+                        },
+                    }
+                }
+            }
+        } else {
+            match link.and_then(|link| CallTransport::reported(state, link)) {
+                Some(next) => next,
+                None => return,
+            }
+        };
+        if let Some(call) = self
+            .session
+            .calls
+            .active_call
+            .as_mut()
+            .filter(|call| call.id == call_id)
+        {
+            call.transport = next;
+        }
     }
 
     fn connect_call_transport(

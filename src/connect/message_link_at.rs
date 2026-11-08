@@ -25,7 +25,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .histories
             .get(&chat_id.0)
             .and_then(|history| history.messages.get(&message_id.0))
-            .is_some_and(|message| !message.pending && message.id.0 > 0);
+            .is_some_and(|message| !message.pending() && message.id.0 > 0);
         if !sent {
             return Err(ConnectSendError::InvalidRequest);
         }

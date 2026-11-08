@@ -96,7 +96,7 @@ impl QuillApp {
     fn demo_gift_delete(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if std::env::var("QUILL_DEMO_GIFT_DELETE").is_ok_and(|v| v == "confirm") {
             // The window's dialog layer exists only after the first frame.
-            cx.defer_in(window, |this, window, cx| {
+            self.defer_screen_in(window, cx, |this, window, cx| {
                 this.ask_delete_gift(DELETABLE, window, cx)
             });
         }

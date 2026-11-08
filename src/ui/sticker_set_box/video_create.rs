@@ -32,8 +32,11 @@ impl QuillApp {
         let worker = cx.background_spawn(async move {
             encode_sticker(&job.source, &job.edits, &job.info, kind, &cancel)
         });
-        cx.spawn_in(window, async move |this, cx| {
-            let result = worker.await;
+        self.spawn_screen_in(window, cx, async move |this, cx| {
+            // Removed with the continuation when the screen is gone.
+            let result = worker
+                .await
+                .map(|encoded| quill::scratch::OwnedFile::new(encoded.path));
             let _ = this.update_in(cx, |this, window, cx| {
                 // The box moved on (closed, or another sticker): the
                 // result is nobody's.
@@ -43,16 +46,15 @@ impl QuillApp {
                 match result {
                     Ok(encoded) if current => {
                         let uploaded = CreateSticker {
-                            path: encoded.path,
+                            path: encoded.keep(),
                             video: None,
                             ..create
                         };
                         this.upload_created_sticker(uploaded, cx);
                         this.close_kit_dialog_if_done(DialogKind::StickerCreate, window, cx);
                     }
-                    Ok(encoded) => {
-                        let _ = std::fs::remove_file(encoded.path);
-                    }
+                    // Nobody's: dropping it removes it.
+                    Ok(_) => {}
                     Err(error) => {
                         if let Some(note) = error.note().filter(|_| current) {
                             this.connection.set_note(StatusNote::error(note));

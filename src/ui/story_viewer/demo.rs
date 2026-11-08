@@ -83,7 +83,9 @@ impl QuillApp {
             "own" | "own-viewers" | "own-viewers-loading" => {
                 self.open_story_viewer(ChatId(LEO), 3, StoryOpenScope::Single, cx);
                 if variant != "own" {
-                    self.stories.viewers_open = true;
+                    if let Some(open) = self.stories.viewer_ui_mut() {
+                        open.viewers_open = true;
+                    }
                     if let Some(session) = self.demo_session.as_mut() {
                         session.stories.viewers =
                             Some(demo_viewers(variant == "own-viewers-loading"));

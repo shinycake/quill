@@ -463,7 +463,7 @@ impl QuillApp {
             if dialog.delete_chat {
                 ok &= live.driver.remove_chat_from_list(dialog.chat_id).is_ok();
             }
-            self.connection.set_note(if ok {
+            self.screen.connection.set_note(if ok {
                 StatusNote::silent(tr_with(
                     keys::Q_CHAT_IS_NOW_BLOCKED,
                     &[(
@@ -679,12 +679,14 @@ crate::ui::shell::register_dialogs! {
         6300,
         |app| app.dialogs.block_bar_dialog.is_some(),
         QuillApp::build_block_bar_dialog,
-    ),
+    )
+    .close(|app, _, cx| app.close_block_bar_dialog(cx)),
 
     /// Batch 8: the chat's pending join requests.
     JoinRequests => DialogSpec::new(
         6400,
         |app| app.admin.join_requests_dialog.is_some(),
         QuillApp::build_join_requests_dialog,
-    ),
+    )
+    .close(|app, _, cx| app.close_join_requests_dialog(cx)),
 }

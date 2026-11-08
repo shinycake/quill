@@ -100,7 +100,10 @@ impl QuillApp {
         translate.translatable_chats.insert(CHANNEL);
         translate.revision += 1;
         if hidden {
-            self.settings.translate.prefs.set_bar_hidden(CHANNEL, true);
+            self.preferences
+                .translate
+                .prefs
+                .set_bar_hidden(CHANNEL, true);
         }
         cx.notify();
     }

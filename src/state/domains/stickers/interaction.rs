@@ -107,8 +107,8 @@ impl Session {
             .filter_map(|id| history.messages.get(&id.0))
             .filter(|message| {
                 !message.is_outgoing
-                    && !message.pending
-                    && !message.failed
+                    && !message.pending()
+                    && !message.failed()
                     && message.id.0 > 0
                     && message.id.0 > read_till
             })

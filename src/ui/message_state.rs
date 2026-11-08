@@ -3,7 +3,6 @@
 
 use super::*;
 use gpui_kit::*;
-use quill::composer::DeleteConfirm;
 use quill::ids::ChatId;
 use quill::ids::MessageId;
 use std::collections::HashSet;
@@ -28,20 +27,14 @@ pub(crate) struct MessageUi {
     pub(super) link_tooltip: Option<super::entity_links::LinkTooltip>,
     /// The "Open this link?" box (`DialogKind::OpenLink`).
     pub(super) open_link_confirm: Option<super::entity_links::OpenLinkConfirm>,
-    /// The copy menu of a phone number, card number or date.
-    pub(super) link_popup: Option<super::entity_links::LinkPopup>,
     /// A clicked message entity (mention, hashtag, link…) waiting for
     /// render to act on it (`entity_links`).
     pub(super) pending_link: Option<super::entity_links::PendingLink>,
-    /// Last row clicked in selection mode: the Shift+click range anchor.
-    pub(super) selection_anchor: Option<MessageId>,
     /// A left press on a row that may become a drag selection, and the
     /// range it covers once it did (`selection_drag`).
     pub(super) selection_drag: Option<super::selection_drag::DragSelect>,
     /// The 15 ms pointer poll of a held press is running.
     pub(super) selection_drag_loop: bool,
-    /// The row keyboard selection acts on (Ctrl+Space, Up / Down).
-    pub(super) selection_focus: Option<MessageId>,
     /// Keyboard focus of the history while selecting: a row press or a
     /// drag moves focus here, so Space, Up and Down act on the rows and
     /// not on the composer (tdesktop focuses `HistoryInner`).
@@ -51,13 +44,6 @@ pub(crate) struct MessageUi {
     /// tdesktop hover React / Unigram ReactionButton picker (emoji only).
     /// The message menu's reaction strip is expanded to every reaction.
     pub(super) reactions_expanded: bool,
-    /// Delete confirm (tdesktop `DeleteMessagesBox` / Unigram popup).
-    pub(super) pending_delete: Option<DeleteConfirm>,
-    /// B4: pending "Stop poll" confirm (`stopPoll`, schema 1.8.67 line
-    /// 12953) — (chat, message, is_quiz) for the warning copy. TGX
-    /// `StopPollWarn` / `StopQuizWarn`: nobody can vote afterwards and
-    /// the action can't be undone.
-    pub(super) pending_stop_poll: Option<(ChatId, MessageId, bool)>,
     /// M1: swipe-to-reply press origin (chat, message, press x).
     pub(super) swipe_reply_start: Option<(ChatId, MessageId, Pixels)>,
     /// Phase 4.1: revealed text-entity spoilers, keyed by
@@ -78,9 +64,10 @@ pub(crate) struct MessageUi {
     pub(super) request_locate: Option<Task<()>>,
     /// "About These Ads" box (`DialogKind::SponsoredAbout`) is open.
     pub(super) sponsored_about: Option<super::sponsored_about::SponsoredAbout>,
-    /// Sponsored message ids the footer painted last frame; reported to
-    /// TDLib as viewed at the next frame start (`report_visible_sponsored`).
-    pub(super) rendered_sponsored: std::cell::RefCell<Vec<i64>>,
+    /// Sponsored message ids the footer painted last frame, with the chat
+    /// painted; reported to TDLib as viewed at the next frame start
+    /// (`report_visible_sponsored`) when that chat is still open.
+    pub(super) rendered_sponsored: std::cell::RefCell<Vec<(ChatId, i64)>>,
     /// The custom emoji card already on screen (it times itself out).
     pub(super) custom_emoji_card_seen: Option<quill::state::CustomEmojiPreview>,
     /// B4: poll voter-list viewer.
@@ -103,17 +90,12 @@ impl MessageUi {
             right_clicked_item: None,
             link_tooltip: None,
             open_link_confirm: None,
-            link_popup: None,
             pending_link: None,
-            selection_anchor: None,
             selection_drag: None,
             selection_drag_loop: false,
-            selection_focus: None,
             history_focus: cx.focus_handle(),
             a11y: Default::default(),
             reactions_expanded: false,
-            pending_delete: None,
-            pending_stop_poll: None,
             swipe_reply_start: None,
             spoiler_revealed: HashSet::new(),
             fact_check_expanded: HashSet::new(),
@@ -130,3 +112,6 @@ impl MessageUi {
         }
     }
 }
+
+/// Nothing to say: its state is the account's only app-side.
+impl super::on_screen::Farewell for MessageUi {}

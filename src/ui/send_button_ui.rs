@@ -41,7 +41,7 @@ impl QuillApp {
     /// What the button should be right now.
     pub(super) fn send_button_kind_now(&self, can_record: bool, sendable: bool) -> SendButtonKind {
         send_button_kind(SendButtonInputs {
-            editing: self.composer_ui.pending_edit.is_some(),
+            editing: self.chat_ui.is_editing(),
             sendable,
             can_record,
             record_video: self.record_mode() == RecordMode::Video,

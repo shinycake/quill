@@ -240,7 +240,7 @@ impl QuillApp {
                 && live.driver.session.open_chat == Some(old)
             {
                 let _ = live.driver.select_chat(new);
-                self.dismiss_cross_chat_state(new, cx);
+                self.enter_chat_ui(new, cx);
             }
         }
         cx.notify();
@@ -846,5 +846,6 @@ crate::ui::shell::register_dialogs! {
         4900,
         |app| app.admin.group_settings_dialog.is_some(),
         QuillApp::build_group_settings_dialog,
-    ),
+    )
+    .close(|app, _, cx| app.close_group_settings_dialog(cx)),
 }

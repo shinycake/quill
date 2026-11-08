@@ -23,13 +23,14 @@ impl QuillApp {
         let Some(message) = message else {
             return div().into_any_element();
         };
-        let failed = message.failed;
+        let failed = message.failed();
+        let pending = message.pending();
         let copyable = Self::message_copyable_text(effective_content(
             &message.content,
             message.ephemeral.as_ref(),
         ));
         let delete_confirm =
-            DeleteConfirm::for_message(chat_id, message_id, message.is_outgoing, message.pending);
+            DeleteConfirm::for_message(chat_id, message_id, message.is_outgoing, message.pending());
         let pinned = message.is_pinned;
         // What TDLib says this message allows (`messageProperties`), as
         // Telegram Desktop gates its menu. Until it arrives (a local call,
@@ -152,7 +153,7 @@ impl QuillApp {
             effective_content(&message.content, message.ephemeral.as_ref()),
             playing_here,
             can_reply,
-        ) && let Some(position) = self.playback.active_position_secs()
+        ) && let Some(position) = self.active_position_secs()
         {
             let timecode = quill::message_menu::timecode_text(position);
             let label_timecode = timecode.clone();
@@ -373,7 +374,7 @@ impl QuillApp {
             }
         }
         let selectable =
-            quill::composer::ForwardDraft::from_message(chat_id, message_id, message.pending)
+            quill::composer::ForwardDraft::from_message(chat_id, message_id, message.pending())
                 .is_some();
         if !is_secret && !protected && allows(true, |a| a.can_be_forwarded) && selectable {
             item!(
@@ -385,7 +386,7 @@ impl QuillApp {
                 window,
                 cx,
                 {
-                    this.begin_forward_one(chat_id, message_id, message.pending, window, cx);
+                    this.begin_forward_one(chat_id, message_id, pending, window, cx);
                     this.message_ui.menu = None;
                     cx.notify();
                 }
@@ -403,7 +404,7 @@ impl QuillApp {
                 _window,
                 cx,
                 {
-                    this.toggle_forward_select(chat_id, message_id, message.pending, cx);
+                    this.toggle_forward_select(chat_id, message_id, pending, cx);
                     this.message_ui.menu = None;
                     cx.notify();
                 }
@@ -426,7 +427,7 @@ impl QuillApp {
             }
         }
         // Telegram Desktop's share box copies a game's `t.me/<bot>?game=` link.
-        if matches!(message.content, MessageContent::Game(_)) && !message.pending {
+        if matches!(message.content, MessageContent::Game(_)) && !message.pending() {
             item!(
                 51,
                 gpui_kit::assets::IconName::Link,
@@ -446,7 +447,7 @@ impl QuillApp {
             chat_id,
             message_id,
             message.is_outgoing,
-            message.pending,
+            message.pending(),
             &message.content,
         )
         .map(|edit| edit.in_album(message.media_album_id != 0))
@@ -468,7 +469,7 @@ impl QuillApp {
             );
         }
         // Channel admins (and anyone TDLib allows) add or edit a fact check.
-        if allows(false, |a| a.can_set_fact_check) && message.id.0 > 0 && !message.pending {
+        if allows(false, |a| a.can_set_fact_check) && message.id.0 > 0 && !message.pending() {
             let existing = message
                 .extras
                 .fact_check
@@ -580,7 +581,7 @@ impl QuillApp {
         if let MessageContent::Poll(poll_content) = &message.content
             && quill::poll::can_retract_vote(&poll_content.poll)
             && message.id.0 > 0
-            && !message.pending
+            && !message.pending()
         {
             item!(
                 order::RETRACT_VOTE,
@@ -665,7 +666,7 @@ impl QuillApp {
                 }
             );
         }
-        if failed && message.can_retry {
+        if failed && message.can_retry() {
             item!(
                 58,
                 gpui_kit::assets::IconName::RotateCw,
@@ -711,7 +712,7 @@ impl QuillApp {
             );
         }
         // Cancel Upload takes Delete's place on a message still being sent.
-        if message.pending
+        if message.pending()
             && quill::message_menu::media_target(effective_content(
                 &message.content,
                 message.ephemeral.as_ref(),
@@ -740,7 +741,7 @@ impl QuillApp {
         rows.extend(self.menu_item_rows(chat_id, message_id, content, can_reply, cx));
         rows.extend(self.menu_gift_row(chat_id, &message, cx));
         rows.extend(self.menu_block_sender_row(chat_id, &message, cx));
-        let reportable = !message.pending
+        let reportable = !message.pending()
             && message.id.0 > 0
             && !message.is_outgoing
             && !saved
@@ -821,7 +822,7 @@ impl QuillApp {
             rows.extend(audience_rows);
         }
         // Nothing to copy or forward: say why (`AddSelectRestrictionAction`).
-        if protected && !message.pending {
+        if protected && !message.pending() {
             let is_group = matches!(
                 chat_kind,
                 Some(ChatKind::Supergroup { .. } | ChatKind::BasicGroup { .. })

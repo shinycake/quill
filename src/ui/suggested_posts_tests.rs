@@ -87,14 +87,14 @@ fn the_toggle_takes_the_reply_s_place(cx: &mut TestAppContext) {
     vcx.run_until_parked();
     app.update_in(vcx, |app, _, cx| {
         app.set_suggest_bar(ChatId(CHAT), None, cx);
-        app.composer_ui
+        app.chat_ui
             .set_reply(Some(quill::composer::ComposerReplyTo::new(
                 ChatId(CHAT),
                 MessageId(COUNTER),
             )));
         assert!(app.suggest_post_toggle(cx).is_some());
         app.toggle_suggest_post(ChatId(CHAT), cx);
-        assert!(app.composer_ui.reply().is_none());
+        assert!(app.chat_ui.reply().is_none());
         let bar = app.session().and_then(|s| s.suggest_bar(ChatId(CHAT)));
         assert_eq!(bar.map(|bar| bar.terms), Some(SuggestTerms::default()));
         // No box opens: the bar's line asks for the terms.

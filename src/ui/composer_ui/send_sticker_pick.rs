@@ -222,14 +222,14 @@ impl QuillApp {
     /// while editing (tdesktop seeds the edit draft with the message's own
     /// `WebPageDraft`), otherwise the next send's.
     pub(in crate::ui) fn preview_choice(&self) -> LinkPreviewChoice {
-        match self.composer_ui.pending_edit.as_ref() {
+        match self.chat_ui.pending_edit() {
             Some(edit) => edit.link_preview,
             None => self.pending_send().preview,
         }
     }
 
     pub(in crate::ui) fn set_preview_choice(&mut self, choice: LinkPreviewChoice) {
-        match self.composer_ui.pending_edit.as_mut() {
+        match self.chat_ui.pending_edit_mut() {
             Some(edit) => edit.link_preview = choice,
             None => {
                 self.update_pending_send(|send| send.preview = choice);
@@ -369,13 +369,10 @@ impl QuillApp {
     /// `inputMessageText.link_preview_options`.
     pub(in crate::ui) fn preview_chip(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let editing_text = self
-            .composer_ui
-            .pending_edit
-            .as_ref()
+            .chat_ui
+            .pending_edit()
             .is_some_and(|edit| matches!(edit.kind, quill::composer::ComposerEditKind::Text));
-        if !self.pending_attachments().is_empty()
-            || (self.composer_ui.pending_edit.is_some() && !editing_text)
-        {
+        if !self.pending_attachments().is_empty() || (self.chat_ui.is_editing() && !editing_text) {
             return None;
         }
         let text = self.composer.read(cx).value();
@@ -506,9 +503,8 @@ impl QuillApp {
         &self,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
-        self.composer_ui
-            .pending_edit
-            .as_ref()?
+        self.chat_ui
+            .pending_edit()?
             .media_edit
             .replacement
             .as_ref()?;
@@ -521,7 +517,7 @@ impl QuillApp {
     /// The outer function repeats this body's first check; keep the two in step.
     #[inline(never)]
     fn edit_replacement_chip_body(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let edit = self.composer_ui.pending_edit.as_ref()?;
+        let edit = self.chat_ui.pending_edit()?;
         let replacement = edit.media_edit.replacement.as_ref()?;
         let as_file_toggle = edit.can_toggle_as_file(replacement);
         let spoiler_toggle = matches!(
@@ -596,19 +592,18 @@ impl QuillApp {
     /// `message_caption_length_max` option. Shown while attachments are
     /// pending or a caption is being edited.
     pub(in crate::ui) fn caption_bar(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let editing_caption =
-            self.composer_ui.pending_edit.as_ref().is_some_and(|edit| {
-                matches!(edit.kind, quill::composer::ComposerEditKind::Caption)
-            });
+        let editing_caption = self
+            .chat_ui
+            .pending_edit()
+            .is_some_and(|edit| matches!(edit.kind, quill::composer::ComposerEditKind::Caption));
         if self.pending_attachments().is_empty() && !editing_caption {
             return None;
         }
         // Documents and music have no caption position; photos, videos and
         // GIFs do (`show_caption_above_media`), also after a replacement.
         let captionable = self
-            .composer_ui
-            .pending_edit
-            .as_ref()
+            .chat_ui
+            .pending_edit()
             .is_some_and(|edit| editing_caption && edit.caption_position_applies())
             || self.pending_attachments().iter().any(|att| {
                 matches!(
@@ -617,9 +612,8 @@ impl QuillApp {
                 )
             });
         let above = if editing_caption {
-            self.composer_ui
-                .pending_edit
-                .as_ref()
+            self.chat_ui
+                .pending_edit()
                 .is_some_and(|edit| edit.caption_above)
         } else {
             self.pending_send().caption_above
@@ -657,7 +651,7 @@ impl QuillApp {
                                     .label(tr(keys::Q_CHAT_CAPTION_ABOVE_MEDIA))
                                     .checked(above)
                                     .on_click(cx.listener(|this, _, _, cx| {
-                                        if let Some(edit) = this.composer_ui.pending_edit.as_mut() {
+                                        if let Some(edit) = this.chat_ui.pending_edit_mut() {
                                             edit.caption_above = !edit.caption_above;
                                         } else {
                                             this.update_pending_send(|send| {

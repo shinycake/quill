@@ -465,3 +465,37 @@ fn the_unread_memo_sees_a_chat_marked_unread_before_tdlib_confirms() {
         .unwrap();
     assert_eq!(memo.get(&account.driver.session).count, before + 1);
 }
+
+#[test]
+fn a_click_shown_for_one_account_never_runs_on_the_next() {
+    let shown_for = AccountKey::primary();
+    let switched_to = AccountKey::new("account-1").unwrap();
+    let click = ChatClick {
+        account: shown_for.clone(),
+        chat_id: ChatId(42),
+        action: NotificationAction::Reply,
+    };
+    // Still on the account the toast was shown for: the usual path.
+    let (here, elsewhere) = split_by_account(vec![click.clone()], Some(&shown_for));
+    assert_eq!(here, vec![click.clone()]);
+    assert!(elsewhere.is_empty());
+    // Switched since: the click goes back to its own account.
+    let (here, elsewhere) = split_by_account(vec![click.clone()], Some(&switched_to));
+    assert!(here.is_empty());
+    assert_eq!(elsewhere, vec![click]);
+    let known = [shown_for.clone()];
+    assert_eq!(
+        plan_account_click(
+            &shown_for,
+            NotificationAction::Reply,
+            Some(&switched_to),
+            &known
+        ),
+        ClickPlan::SwitchThenOpen(shown_for.clone())
+    );
+    // No account on screen yet: never the active path.
+    assert_eq!(
+        plan_account_click(&shown_for, NotificationAction::Open, None, &[]),
+        ClickPlan::Ignore
+    );
+}

@@ -5,10 +5,10 @@
 //! (`notification_extras`) registers both under the notification's tag right
 //! before `show_system_notification`, and parks the typed text under the tag
 //! before the response arrives. Linux: `linux_dbus` keeps the typed text per
-//! chat itself. Everywhere else the functions are no-ops, so the callers stay
+//! account and chat itself. Everywhere else the functions are no-ops, so the callers stay
 //! free of `cfg`.
 
-use quill::ids::ChatId;
+use quill::ids::{AccountKey, ChatId};
 use std::path::Path;
 
 #[cfg(target_os = "macos")]
@@ -46,22 +46,27 @@ pub(in crate::ui) fn register(
     );
 }
 
-/// The text typed into the reply field of the chat's notification, if its
-/// last activation came from that field. Taking it clears it.
+/// The text typed into the reply field of `account`'s notification for the
+/// chat (`tag` is its tag), if its last activation came from that field.
+/// Taking it clears it.
 #[cfg_attr(
     not(any(target_os = "macos", target_os = "windows", target_os = "linux")),
     allow(unused_variables)
 )]
-pub(in crate::ui) fn take_reply_text(tag: &str, chat_id: ChatId) -> Option<String> {
+pub(in crate::ui) fn take_reply_text(
+    tag: &str,
+    account: &AccountKey,
+    chat_id: ChatId,
+) -> Option<String> {
     #[cfg(any(target_os = "macos", target_os = "windows"))]
     {
-        let _ = chat_id;
+        let _ = (account, chat_id);
         backend::take_reply_text(tag)
     }
     #[cfg(target_os = "linux")]
     {
         let _ = tag;
-        super::linux_dbus::take_reply_text(chat_id)
+        super::linux_dbus::take_reply_text(account, chat_id)
     }
     #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
     None

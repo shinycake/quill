@@ -79,7 +79,7 @@ fn inline_tiles_play_muted_on_the_layer_and_stop_with_the_chat(cx: &mut TestAppC
     settle(vcx);
     // Behind another app the muted loops open but wait.
     app.read_with(vcx, |app, _| {
-        let videos = &app.playback.inline_videos;
+        let videos = &app.players.inline_videos;
         for key in [TILE, ROUND] {
             let player = videos.player(key).expect("a player for each clip");
             assert!(!player.state().animates(), "{key:?}: {:?}", player.state());
@@ -93,7 +93,7 @@ fn inline_tiles_play_muted_on_the_layer_and_stop_with_the_chat(cx: &mut TestAppC
     vcx.update(|window, _| window.activate_window());
     settle(vcx);
     let (tile, round) = app.read_with(vcx, |app, _| {
-        let videos = &app.playback.inline_videos;
+        let videos = &app.players.inline_videos;
         (videos.player(TILE), videos.player(ROUND))
     });
     let tile = tile.expect("the video tile has a player");
@@ -120,7 +120,7 @@ fn inline_tiles_play_muted_on_the_layer_and_stop_with_the_chat(cx: &mut TestAppC
     assert!(targets.contains(&layer), "{targets:?} (layer {layer:?})");
     assert!(!targets.contains(&slice), "{targets:?} (slice {slice:?})");
     app.read_with(vcx, |app, _| {
-        let videos = &app.playback.inline_videos;
+        let videos = &app.players.inline_videos;
         assert!(!videos.is_hidden(TILE) && !videos.is_hidden(ROUND));
     });
 
@@ -137,7 +137,7 @@ fn inline_tiles_play_muted_on_the_layer_and_stop_with_the_chat(cx: &mut TestAppC
     });
     settle(vcx);
     app.read_with(vcx, |app, _| {
-        let videos = &app.playback.inline_videos;
+        let videos = &app.players.inline_videos;
         assert!(videos.player(TILE).is_none() && videos.player(ROUND).is_none());
     });
     for script in &scripts {
@@ -157,7 +157,7 @@ fn a_clips_layer_builds_no_hitboxes(cx: &mut TestAppContext) {
     let (app, mut vcx) = new_app(cx);
     vcx.update(|window, _| window.activate_window());
     settle(&mut vcx);
-    let tile = app.read_with(&vcx, |app, _| app.playback.inline_videos.player(TILE));
+    let tile = app.read_with(&vcx, |app, _| app.players.inline_videos.player(TILE));
     assert!(tile.is_some_and(|tile| tile.state().animates()));
     let interactive = vcx.update(|window, _| window.interactive_live_views());
     assert_eq!(interactive, 0);
@@ -203,7 +203,7 @@ fn scroll_until_playing(app: &Entity<QuillApp>, vcx: &mut VisualTestContext, dy:
 /// off screen, and whether play is asked of it.
 fn round_state(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> Option<(bool, bool)> {
     app.read_with(vcx, |app, _| {
-        let videos = &app.playback.inline_videos;
+        let videos = &app.players.inline_videos;
         videos
             .player(ROUND)
             .map(|player| (videos.is_hidden(ROUND), player.wants_play()))
@@ -239,7 +239,7 @@ fn a_clip_scrolled_out_of_view_pauses_is_released_and_comes_back(cx: &mut TestAp
         scroll(vcx, -10.);
     }
     let held = app
-        .read_with(vcx, |app, _| app.playback.inline_videos.player(ROUND))
+        .read_with(vcx, |app, _| app.players.inline_videos.player(ROUND))
         .expect("the held player");
     let script = scripts
         .iter()
@@ -260,7 +260,7 @@ fn a_clip_scrolled_out_of_view_pauses_is_released_and_comes_back(cx: &mut TestAp
     vcx.executor().advance_clock(RELEASE_AFTER);
     vcx.run_until_parked();
     assert!(script.borrow().dropped, "the backend is released");
-    assert!(app.read_with(vcx, |app, _| app.playback.inline_videos.is_asleep(ROUND)));
+    assert!(app.read_with(vcx, |app, _| app.players.inline_videos.is_asleep(ROUND)));
     // Later passes that still render the row (in the overdraw) open no
     // new backend: the sleeping slot waits to be painted in view.
     let used = |scripts: &[Rc<RefCell<Script>>]| {
@@ -288,10 +288,10 @@ fn a_clip_scrolled_out_of_view_pauses_is_released_and_comes_back(cx: &mut TestAp
         }
     }
     scroll_until_playing(&app, vcx, 40.);
-    assert!(!app.read_with(vcx, |app, _| app.playback.inline_videos.is_asleep(ROUND)));
+    assert!(!app.read_with(vcx, |app, _| app.players.inline_videos.is_asleep(ROUND)));
     assert_eq!(used(&scripts), before + 1);
     let player = app
-        .read_with(vcx, |app, _| app.playback.inline_videos.player(ROUND))
+        .read_with(vcx, |app, _| app.players.inline_videos.player(ROUND))
         .expect("the new player");
     assert!(
         player.current_picture().is_some(),
@@ -313,16 +313,16 @@ fn a_round_video_playing_with_sound_keeps_going_off_screen(cx: &mut TestAppConte
     scroll_until_playing(&app, vcx, -40.);
     // A click plays it from the start with sound.
     assert!(app.read_with(vcx, |app, _| {
-        app.playback.inline_videos.toggle_sound(ROUND.0, ROUND.1)
+        app.players.inline_videos.toggle_sound(ROUND.0, ROUND.1)
     }));
     settle(vcx);
     let player = app
-        .read_with(vcx, |app, _| app.playback.inline_videos.player(ROUND))
+        .read_with(vcx, |app, _| app.players.inline_videos.player(ROUND))
         .expect("the sounding player");
     // Scrolled until its picture leaves the view: still heard, never
     // paused or released.
     let mut steps = 0;
-    while !app.read_with(vcx, |app, _| app.playback.inline_videos.is_hidden(ROUND)) {
+    while !app.read_with(vcx, |app, _| app.players.inline_videos.is_hidden(ROUND)) {
         steps += 1;
         assert!(steps < 60, "never left the view");
         scroll(vcx, -10.);
@@ -330,7 +330,7 @@ fn a_round_video_playing_with_sound_keeps_going_off_screen(cx: &mut TestAppConte
     assert!(player.wants_play(), "kept playing off screen");
     vcx.executor().advance_clock(RELEASE_AFTER * 2);
     vcx.run_until_parked();
-    let kept = app.read_with(vcx, |app, _| app.playback.inline_videos.player(ROUND));
+    let kept = app.read_with(vcx, |app, _| app.players.inline_videos.player(ROUND));
     assert!(
         kept.is_some_and(|kept| kept.wants_play()),
         "not released while heard"
@@ -347,7 +347,12 @@ fn a_story_paused_while_its_clip_opens_does_not_start_once_open(cx: &mut TestApp
     assert_eq!(player.state(), PlayState::Opening);
     let story_player = player.clone();
     app.update_in(vcx, |app, _, _| {
-        app.stories.player = Some(story_player);
+        app.stories.video = crate::ui::story_video_state::StoryVideo::Playing {
+            key: (1, 1),
+            player: story_player,
+            paused_by_us: false,
+            play_at: Instant::now(),
+        };
         // Press-and-hold (or Space) right after the story opened.
         app.apply_story_native_pause(true);
     });
@@ -357,7 +362,7 @@ fn a_story_paused_while_its_clip_opens_does_not_start_once_open(cx: &mut TestApp
     assert_eq!(player.state(), PlayState::Ready);
     let calls = calls(&script);
     assert!(!calls.iter().any(|c| c.starts_with("play")), "{calls:?}");
-    app.update_in(vcx, |app, _, _| app.stories.player = None);
+    app.update_in(vcx, |app, _, _| app.stories.video = Default::default());
 }
 
 /// Scrolled up a little, the jump button stays hidden and nothing covers

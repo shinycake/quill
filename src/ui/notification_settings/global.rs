@@ -379,7 +379,8 @@ impl QuillApp {
     /// refill them. Demo: seed the schema defaults directly.
     pub(in crate::ui) fn reset_all_notification_settings(&mut self, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
-            self.connection
+            self.screen
+                .connection
                 .set_note(match live.driver.reset_all_notification_settings() {
                     Ok(_) => {
                         StatusNote::silent(tr(keys::Q_PREFS_RESETTING_ALL_NOTIFICATION_SETTINGS))

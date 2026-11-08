@@ -119,6 +119,9 @@ impl QuillApp {
         if self.background.wiping {
             return;
         }
+        // Boxes, viewers and the mini app act for the account on screen:
+        // they end while `self.live` is still that account's client.
+        self.end_account_surfaces(window, cx);
         let Some(root) = safe_app_root() else {
             self.fail_account_switch(tr(keys::Q_OPS_COULD_NOT_SWITCH_ACCOUNT_NO), window, cx);
             return;
@@ -133,49 +136,6 @@ impl QuillApp {
         };
         self.clear_device_qr();
         self.close_accounts(window, cx);
-        self.auth_ui.accepted_registration_terms = None;
-        self.auth_ui.registration_notify_contacts = false;
-        self.auth_ui
-            .registration_first_input
-            .update(cx, |input, cx| input.set_value("", window, cx));
-        self.auth_ui
-            .registration_last_input
-            .update(cx, |input, cx| input.set_value("", window, cx));
-        self.auth_ui
-            .email_input
-            .update(cx, |input, cx| input.set_value("", window, cx));
-        self.auth_ui
-            .code_input
-            .update(cx, |input, cx| input.set_value("", window, cx));
-        self.pickers
-            .emoji_set_search_input
-            .update(cx, |input, cx| input.set_value("", window, cx));
-        self.pickers.media_panel.open = false;
-        self.payments.marketplace_open = false;
-        self.payments.marketplace_private = true;
-        self.payments.marketplace_error = None;
-        self.payments
-            .marketplace_name_input
-            .update(cx, |input, cx| input.set_value("", window, cx));
-        self.payments
-            .marketplace_comment_input
-            .update(cx, |input, cx| input.set_value("", window, cx));
-        self.pickers
-            .emoji_search_input
-            .update(cx, |input, cx| input.set_value("", window, cx));
-        self.pickers
-            .gif_search_input
-            .update(cx, |input, cx| input.set_value("", window, cx));
-        self.settings.sticker_settings_open = false;
-        self.pickers
-            .sticker_search_input
-            .update(cx, |input, cx| input.set_value("", window, cx));
-        self.stop_sticker_playback();
-        self.playback.intent = None;
-        // Chat windows draw the account on screen: the outgoing account's
-        // close (and come back when it is switched to again).
-        self.close_chat_windows_for_switch(cx);
-        self.history.scroll_memory.clear();
         // Quill's notification windows point at the account on screen.
         self.close_all_notify_windows(cx);
         // `parity:notify-all-accounts`: the outgoing account stays connected
@@ -502,5 +462,5 @@ crate::ui::shell::register_dialogs! {
         |app| app.account.accounts.open,
         QuillApp::build_accounts_dialog,
     )
-    .closes(|app, window, cx| app.close_accounts(window, cx)),
+    .close(|app, window, cx| app.close_accounts(window, cx)),
 }

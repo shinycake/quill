@@ -28,7 +28,7 @@ use quill::ids::{AccountKey, ChatId};
 use quill::lang::{keys, tr};
 use quill::notify::NotificationAction;
 use quill::notify_accounts::{
-    AccountUnread, BackgroundStatus, NotifyDrain, background_status, drain_background,
+    AccountUnread, BackgroundStatus, ChatClick, NotifyDrain, background_status, drain_background,
     set_other_accounts_unread,
 };
 use quill::settings::{
@@ -46,9 +46,12 @@ pub(super) mod closing;
 pub(in crate::ui) mod deleting;
 mod switch;
 
-/// Clicks on notifications of accounts that are not on screen, queued by
-/// the OS callback and the Linux notification threads.
-pub(crate) type AccountClicks = Arc<Mutex<Vec<(AccountKey, ChatId, NotificationAction)>>>;
+/// Clicks on notifications, each with the account it was shown for, queued
+/// by the OS callback, Quill's notification windows and the Linux
+/// notification threads. `drain_account_clicks` hands the ones for the
+/// account on screen to `notify.notify_clicks` and runs the rest on their
+/// own account.
+pub(crate) type AccountClicks = Arc<Mutex<Vec<ChatClick>>>;
 
 /// Most time one background poll spends applying one account's updates;
 /// the rest waits for the next poll (a reconnect burst must not stall the
@@ -284,7 +287,8 @@ impl QuillApp {
             });
             let credentials = credentials.clone();
             let root = root.clone();
-            Self::spawn_main(cx, async move |this, cx| {
+            // screen-scope: a background start belongs to the app's account list, not to the account on screen; its generation guard ends it on a restart.
+            Self::spawn_app(cx, async move |this, cx| {
                 let prepared = prepared.await;
                 let _ = this.update(cx, |this, cx| {
                     this.background.prepared(&key);
@@ -398,7 +402,8 @@ impl QuillApp {
         }
         self.background.polling = true;
         let generation = self.background.generation;
-        Self::spawn_main(cx, async move |this, cx| {
+        // screen-scope: the poll loop drains the background accounts; its generation guard ends it on a restart.
+        Self::spawn_app(cx, async move |this, cx| {
             let executor = cx.background_executor().clone();
             let hold = backlog_hold(&executor);
             run_poll_loop(

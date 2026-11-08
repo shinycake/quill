@@ -41,42 +41,33 @@ fn stamp(date: i32) -> String {
 }
 
 /// Fetch a recent post's preview once (the driver skips repeats).
-fn request_post(chat_id: i64, message_id: i64, cx: &mut Context<QuillApp>) {
-    let weak = cx.weak_entity();
-    cx.defer(move |cx| {
-        let _ = weak.update(cx, |this, cx| {
-            if let Some(live) = this.live.as_mut()
-                && matches!(
-                    live.driver
-                        .fetch_stats_post(ChatId(chat_id), MessageId(message_id)),
-                    Ok(Some(_))
-                )
-            {
-                cx.notify();
-            }
-        });
+fn request_post(app: &QuillApp, chat_id: i64, message_id: i64, cx: &mut Context<QuillApp>) {
+    app.defer_screen(cx, move |this, cx| {
+        if let Some(live) = this.live.as_mut()
+            && matches!(
+                live.driver
+                    .fetch_stats_post(ChatId(chat_id), MessageId(message_id)),
+                Ok(Some(_))
+            )
+        {
+            cx.notify();
+        }
     });
 }
 
 /// Ask once for a poll's votes chart.
-fn request_poll_votes(chat_id: i64, message_id: i64, cx: &mut Context<QuillApp>) {
-    let weak = cx.weak_entity();
-    cx.defer(move |cx| {
-        let _ = weak.update(cx, |this, cx| {
-            let is_dark = super::chat_theme::is_dark_palette();
-            if let Some(live) = this.live.as_mut()
-                && matches!(
-                    live.driver.fetch_stats_poll_votes(
-                        ChatId(chat_id),
-                        MessageId(message_id),
-                        is_dark
-                    ),
-                    Ok(Some(_))
-                )
-            {
-                cx.notify();
-            }
-        });
+fn request_poll_votes(app: &QuillApp, chat_id: i64, message_id: i64, cx: &mut Context<QuillApp>) {
+    app.defer_screen(cx, move |this, cx| {
+        let is_dark = super::chat_theme::is_dark_palette();
+        if let Some(live) = this.live.as_mut()
+            && matches!(
+                live.driver
+                    .fetch_stats_poll_votes(ChatId(chat_id), MessageId(message_id), is_dark),
+                Ok(Some(_))
+            )
+        {
+            cx.notify();
+        }
     });
 }
 
@@ -142,7 +133,7 @@ impl QuillApp {
                             ),
                             PostLookup::Missing => continue,
                             PostLookup::Unknown => {
-                                request_post(chat_id, message_id, cx);
+                                request_post(self, chat_id, message_id, cx);
                                 continue;
                             }
                         }
@@ -364,7 +355,7 @@ impl QuillApp {
         let post = match session.stats_post(chat_id, message_id) {
             PostLookup::Ready(post) => Some(post),
             PostLookup::Unknown => {
-                request_post(chat_id, message_id, cx);
+                request_post(self, chat_id, message_id, cx);
                 None
             }
             PostLookup::Missing => None,
@@ -495,7 +486,7 @@ impl QuillApp {
         // A poll adds its votes (tdesktop `fillPollVotesGraph`).
         if post.as_ref().is_some_and(|post| post.is_poll) {
             match session.messages.poll_stats.get(&(chat_id, message_id)) {
-                None => request_poll_votes(chat_id, message_id, cx),
+                None => request_poll_votes(self, chat_id, message_id, cx),
                 Some(PollStatsFetch::Loaded(graph)) => {
                     let id = format!("message-{chat_id}-{message_id}-poll");
                     if let Some(section) = self.stat_graph_section(

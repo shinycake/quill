@@ -34,7 +34,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .histories
             .get(&chat_id.0)
             .and_then(|history| history.messages.get(&message_id.0))
-            .filter(|message| !message.pending && message.id.0 > 0)
+            .filter(|message| !message.pending() && message.id.0 > 0)
             .map(|message| &message.content)
             .ok_or(ConnectSendError::InvalidRequest)
     }

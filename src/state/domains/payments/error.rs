@@ -8,7 +8,7 @@ impl Session {
         &mut self,
         err: &TdError,
         pending: Option<&PendingRequest>,
-        _extra: Option<RequestId>,
+        extra: Option<RequestId>,
         _seq: u64,
     ) {
         match pending.map(|p| p.purpose) {
@@ -17,14 +17,26 @@ impl Session {
             // forever. The receipt fetch has its own error field:
             // the checkout dialog may be closed, so `payment_note`
             // (rendered only there) would stay invisible.
-            Some(
-                RequestPurpose::GetPaymentForm
-                | RequestPurpose::ValidateOrderInfo
-                | RequestPurpose::SendPaymentForm,
-            ) => {
+            // An earlier checkout's form fetch failing is not this one's.
+            Some(RequestPurpose::GetPaymentForm) => {
+                if extra.is_some() && self.payments.form_request == extra {
+                    self.payments.form_request = None;
+                    self.payments.form_loading = false;
+                    self.payments.note = Some(format!("Payment failed: {}", error_reason(err)));
+                }
+            }
+            Some(RequestPurpose::ValidateOrderInfo) => {
                 self.payments.form_loading = false;
-                self.payments.sending = false;
                 self.payments.note = Some(format!("Payment failed: {}", error_reason(err)));
+            }
+            // The payment that failed leaves the in-flight list; the note
+            // is the checkout's only while it shows that invoice.
+            Some(RequestPurpose::SendPaymentForm) => {
+                if let Some(failed) = self.payments.take_paying(extra)
+                    && self.payments.shows(&failed.invoice)
+                {
+                    self.payments.note = Some(format!("Payment failed: {}", error_reason(err)));
+                }
             }
             Some(RequestPurpose::GetPaymentReceipt) => {
                 self.payments.receipt_error =

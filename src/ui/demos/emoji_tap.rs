@@ -71,7 +71,7 @@ impl QuillApp {
         if let Some(history) = session.histories.get_mut(&CHAT) {
             history.messages.retain(|id, _| *id == MESSAGE);
         }
-        cx.spawn(async move |this, cx| {
+        self.spawn_screen(cx, async move |this, cx| {
             cx.background_executor().timer(TAP_AFTER).await;
             let _ = this.update(cx, |this, cx| {
                 let Some(session) = this.demo_session.as_mut() else {

@@ -214,7 +214,7 @@ impl QuillApp {
 
     /// Open the editor on the replacement video of the edit box.
     pub(super) fn open_edit_video_editor(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(edit) = self.composer_ui.pending_edit.as_ref() else {
+        let Some(edit) = self.chat_ui.pending_edit() else {
             return;
         };
         let Some(replacement) = edit
@@ -577,7 +577,7 @@ impl QuillApp {
                 }
             }
             Some(EditorTarget::MessageEdit) => {
-                let Some(edit) = self.composer_ui.pending_edit.as_mut() else {
+                let Some(edit) = self.chat_ui.pending_edit_mut() else {
                     return;
                 };
                 let Some(replacement) = edit.media_edit.replacement.as_mut() else {
@@ -666,7 +666,8 @@ crate::ui::shell::register_dialogs! {
         5442,
         |app| app.composer_ui.send_box.video_editor.is_some(),
         QuillApp::build_video_editor_dialog,
-    ),
+    )
+    .close(|app, _, cx| app.close_video_editor(cx)),
 }
 
 #[cfg(test)]

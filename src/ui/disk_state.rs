@@ -120,7 +120,9 @@ fn watch(
     first_frame: futures_channel::oneshot::Receiver<()>,
     cx: &Context<QuillApp>,
 ) {
-    QuillApp::spawn_main(cx, async move |this, cx| {
+    // screen-scope: the disk watcher polls for the whole process and applies each
+    // reading to whichever client is on screen; every reading names its account.
+    QuillApp::spawn_app(cx, async move |this, cx| {
         let _ = first_frame.await;
         let mut device = None;
         loop {
@@ -238,7 +240,7 @@ impl QuillApp {
         let Some(root) = quill::settings::safe_app_root() else {
             return;
         };
-        QuillApp::spawn_main(cx, async move |this, cx| {
+        QuillApp::spawn_app(cx, async move |this, cx| {
             let files = cx
                 .background_executor()
                 .spawn(async move { account_files(&root) })

@@ -3,6 +3,7 @@
 //! `paid_messages_channel.rs`).
 #![deny(clippy::indexing_slicing)]
 
+use super::app::QuillApp;
 use super::composer_sends::SendSlot;
 use gpui_kit::component::slider::SliderState;
 use gpui_kit::*;
@@ -53,6 +54,18 @@ pub(crate) struct PaidMessagesUi {
     pub(super) confirm_trust: bool,
     pub(super) remove_fee: Option<RemoveFeeBox>,
     pub(super) direct: Option<DirectMessagesBox>,
+}
+
+/// A send held for the paid confirmation is discarded in the old client's
+/// sender (`cancel_paid_confirm`): it is the old account's message.
+impl crate::ui::on_screen::Farewell for PaidMessagesUi {
+    fn farewell(
+        app: &mut QuillApp,
+        _: &mut gpui_kit::Window,
+        cx: &mut gpui_kit::Context<QuillApp>,
+    ) {
+        app.cancel_paid_confirm(cx);
+    }
 }
 
 impl PaidMessagesUi {

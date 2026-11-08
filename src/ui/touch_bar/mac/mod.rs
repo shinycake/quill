@@ -134,7 +134,9 @@ pub(super) fn install(demo: bool, window: &mut Window, cx: &mut Context<QuillApp
         emoji: RefCell::new((None, Rc::default())),
     });
     // Touches run on the app in its window.
-    QuillApp::spawn_main_in(window, cx, async move |this, cx| {
+    // screen-scope: a touch bar press acts on whichever account is on screen
+    // when it is pressed; it carries no state of an earlier screen
+    QuillApp::spawn_app_in(window, cx, async move |this, cx| {
         loop {
             let command = next_command().await;
             let alive = this
@@ -179,6 +181,8 @@ pub(super) fn install(demo: bool, window: &mut Window, cx: &mut Context<QuillApp
     let on_app = schedule.clone();
     cx.observe_self(move |_, cx| on_app(cx)).detach();
     // The app is mid-update here, so its composer is read once it is not.
+    // screen-scope: installed once at startup for the app's OS integration;
+    // it only schedules a sync, which reads the screen's state when it runs
     let on_composer = schedule.clone();
     cx.defer_in(window, move |app, _, cx| {
         let Some(composer) = app.in_window_scope(None, cx, |app, _| app.composer.clone()) else {

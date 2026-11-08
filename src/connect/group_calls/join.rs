@@ -1,5 +1,6 @@
 //! Connect driver: starting, joining, rejoining and leaving group calls.
 use super::*;
+use crate::state::GroupCallRejoin;
 
 impl<S: JsonSender> ConnectDriver<S> {
     /// Phase C3a / C2h: `createVideoChat` — start a voice chat on a
@@ -123,6 +124,11 @@ impl<S: JsonSender> ConnectDriver<S> {
         // Joining it again: its joined updates count once more.
         if self.session.calls.left_group_call == Some(group_call_id) {
             self.session.calls.left_group_call = None;
+        }
+        // A join starts over: a transport error left by the last time in
+        // the call is not this join's failure.
+        if let Some(call) = self.session.calls.active_group_call.as_mut() {
+            call.transport_error = None;
         }
         Ok(self.start_group_join(group_call_id))
     }
@@ -364,8 +370,9 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// the call needs to be rejoined"). Same attempt discipline as the
     /// C2d 1:1 reconnect: at most 3 attempts with identical join params
     /// (current self-mute state, a fresh payload). A failed attempt
-    /// re-arms `reconnecting` via the `JoinVideoChat` error arm so the
-    /// driver's auto-rejoin retries; `manual` (the UI Rejoin button)
+    /// makes the next one due (`GroupCallRejoin::attempt_failed`, from the
+    /// offer or the `JoinVideoChat` error arm) so the driver's auto-rejoin
+    /// retries; `manual` (the UI Rejoin button)
     /// resets the counter — explicit user intent starts the attempts
     /// over.
     pub fn rejoin_group_call(&mut self, manual: bool) -> Result<RequestId, ConnectSendError> {
@@ -395,18 +402,27 @@ impl<S: JsonSender> ConnectDriver<S> {
         if let Some(extra) = self.offer_waiting(GroupOfferKey::Call(group_call_id)) {
             return Ok(extra);
         }
-        if manual && let Some(call) = self.session.calls.group_call_mut(group_call_id) {
-            call.rejoin_attempts = 0;
-        }
-        let conference = match self.session.calls.group_call(group_call_id) {
-            Some(call)
-                if call.reconnecting
-                    && call.rejoin_attempts < crate::state::MAX_GROUP_CALL_REJOIN_ATTEMPTS =>
-            {
-                call.is_conference().then(|| call.conference_input())
-            }
-            _ => return Err(ConnectSendError::InvalidRequest),
+        let pending = |request| self.session.requests.get(request).is_some();
+        let Some(call) = self.session.calls.group_call(group_call_id) else {
+            return Err(ConnectSendError::InvalidRequest);
         };
+        let mut rejoin = call.rejoin;
+        // One rejoin at a time. A manual press may restart one whose request
+        // is no longer pending (answered, or its offer was dropped): the user
+        // asked, and nothing else would.
+        if let Some(request) = rejoin.in_flight()
+            && (!manual || pending(request))
+        {
+            return Ok(request);
+        }
+        // Explicit user intent starts the attempts over.
+        if manual && rejoin != GroupCallRejoin::Idle {
+            rejoin = GroupCallRejoin::Wanted { attempts: 0 };
+        }
+        let Some(attempt) = rejoin.next_attempt() else {
+            return Err(ConnectSendError::InvalidRequest);
+        };
+        let conference = call.is_conference().then(|| call.conference_input());
         // A conference call is rejoined by its link; without one known
         // there is nothing to rejoin with.
         if conference == Some(None) {
@@ -439,7 +455,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         self.drop_group_offer(GroupOfferKey::Screen(group_call_id));
         if let Some(call) = self.session.calls.group_call_mut(group_call_id) {
-            call.reconnecting = false;
+            call.rejoin = GroupCallRejoin::InFlight {
+                request: extra,
+                attempt,
+            };
             // Review fix: the fresh native context must run the join
             // handshake again — reset the transport gate, the stale
             // answer, and the stale screen-share state so the pump
@@ -470,19 +489,16 @@ impl<S: JsonSender> ConnectDriver<S> {
     }
 
     /// Phase C2f: auto-rejoin a dropped group call (`need_rejoin`) —
-    /// one attempt per ingest tick while the tracked call still wants
-    /// reconnecting and attempts remain (the `rejoin_group_call`
-    /// guard caps at 3, the C2d discipline).
+    /// one attempt per ingest tick while a rejoin is due
+    /// (`GroupCallRejoin::Wanted`) and attempts remain (capped at 3, the
+    /// C2d discipline). One in flight is never restarted.
     pub(crate) fn maybe_auto_rejoin_group_call(&mut self) -> Result<(), ConnectSendError> {
         for group_call_id in self.session.calls.group_call_ids().into_iter().flatten() {
             let wants = self
                 .session
                 .calls
                 .group_call(group_call_id)
-                .is_some_and(|call| {
-                    call.reconnecting
-                        && call.rejoin_attempts < crate::state::MAX_GROUP_CALL_REJOIN_ATTEMPTS
-                });
+                .is_some_and(|call| call.rejoin.next_attempt().is_some());
             if wants {
                 let _ = self.rejoin_tracked_group_call(group_call_id, false);
             }

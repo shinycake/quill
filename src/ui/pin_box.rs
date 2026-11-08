@@ -116,7 +116,7 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         if let Some(live) = self.live.as_mut() {
-            self.connection.set_note(
+            self.screen.connection.set_note(
                 match live
                     .driver
                     .pin_chat_message_with(chat_id, message_id, silent, only_for_self)

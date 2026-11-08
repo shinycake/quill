@@ -22,7 +22,11 @@ use gpui_kit::*;
 /// in: the main window's or a chat window's.
 pub(super) fn cover(dialog: Dialog, app: &QuillApp, window: &Window) -> Dialog {
     let id = window.window_handle().window_id();
-    let cache = if app.windows.main.is_some_and(|main| main.window_id() == id) {
+    let cache = if app
+        .main_window
+        .handle
+        .is_some_and(|main| main.window_id() == id)
+    {
         app.slices.image_cache()
     } else {
         app.windows.image_cache_for(id)

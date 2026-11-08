@@ -20,6 +20,7 @@
 "qll_notes_password_submitted" = "Password submitted. Waiting for Telegram.";
 "qll_notes_phone_submitted" = "Phone number submitted. Waiting for Telegram.";
 "qll_notes_qr_login_requested" = "QR login requested. Scan the code with a signed-in Telegram app.";
+"qll_notes_recording_not_sent_account_changed" = "Recording not sent: you switched accounts before it was ready.";
 "qll_notes_recording_not_sent_chat_changed" = "Recording not sent: the chat changed before it was ready.";
 "qll_notes_recording_not_sent_no_account" = "Recording not sent: no account is connected.";
 "qll_notes_server_error" = "Telegram had a problem. Try again in a moment.";

@@ -14,10 +14,12 @@ pub(crate) struct CallUi {
     /// its feed.
     pub(super) remote_player: Option<VideoPlayer>,
     pub(super) local_player: Option<VideoPlayer>,
-    /// Accept / Decline / body picks on incoming-call notifications.
-    pub(super) notify_clicks: Arc<Mutex<Vec<(i32, quill::notify_call::CallNotificationAction)>>>,
-    /// The incoming call last announced with a system notification.
-    pub(super) notified: Option<i32>,
+    /// Accept / Decline / body picks on incoming-call notifications, each
+    /// with the account whose call rang.
+    pub(super) notify_clicks: Arc<Mutex<Vec<quill::notify_call::CallPick>>>,
+    /// The incoming call last announced with a system notification, and
+    /// the account it rang on (call ids are per account).
+    pub(super) notified: Option<(quill::ids::AccountKey, i32)>,
     /// Phase C1: whether the call-duration 1s tick task is running
     /// (keeps the overlay's ringing/connected clock fresh). Mirrors
     /// `voice_tick`.
@@ -31,10 +33,42 @@ pub(crate) struct CallUi {
     pub(super) window: Option<AnyWindowHandle>,
     pub(super) window_opening: bool,
     pub(super) window_raised: bool,
+    pub(super) sounds: super::call_sounds::CallSounds,
+}
+
+/// What the account on screen remembers about its 1:1 call: the call
+/// whose window you closed, when the window's call ended, and which
+/// sounds that call already played. TDLib numbers calls per client from 1,
+/// so kept app-wide these would match the next account's call of the same
+/// id: its window would stay shut and its chimes would be skipped. The
+/// call itself does not outlive the screen (`retire_live_to_background`
+/// closes a client in a call). A field of `OnScreen`.
+#[derive(Default)]
+pub(crate) struct CallScreen {
     pub(super) window_closed_by_user: Option<i32>,
     pub(super) ended_at: Option<(i32, std::time::Instant)>,
-    pub(super) sounds: super::call_sounds::CallSounds,
     pub(super) sound_marks: super::call_sounds::SoundMarks,
+}
+
+/// Ids and marks of the account's own calls are dropped with the screen;
+/// the call window follows the session on screen and closes on the next
+/// sync. The screen share chooser and its privacy box name a call of this
+/// account (`ScreenFor::Private` holds its id), which ends with the
+/// switch, so they close here.
+impl super::on_screen::Farewell for CallScreen {
+    fn farewell(
+        app: &mut super::app::QuillApp,
+        _window: &mut Window,
+        cx: &mut Context<super::app::QuillApp>,
+    ) {
+        app.close_screen_chooser(cx);
+        app.screen_share.privacy_for = None;
+    }
+}
+
+/// The boxes the account on screen opens around calls. A field of
+/// `OnScreen`.
+pub(crate) struct CallBoxes {
     /// Phase C2i: pending "call again" / profile-call confirmation when
     /// the confirm-before-calling pref is on: `(user_id, is_video)`.
     pub(super) confirm: Option<(i64, bool)>,
@@ -57,6 +91,26 @@ pub(crate) struct CallUi {
     pub(super) conference_link: Option<String>,
 }
 
+impl CallBoxes {
+    pub(super) fn new() -> Self {
+        Self {
+            confirm: None,
+            history_scroll: ScrollHandle::new(),
+            history_asked: Default::default(),
+            dialing: None,
+            mic_test: Default::default(),
+            mic_test_starts: 0,
+            open_mic_test: super::call_audio_ui::open_default_mic_test(),
+            add_people: None,
+            conference_link: None,
+        }
+    }
+}
+
+/// The microphone test's device closes with the value; the boxes hold ids
+/// and flags.
+impl super::on_screen::Farewell for CallBoxes {}
+
 impl CallUi {
     /// The call window is gone (closed by the user or by the app): drop its
     /// handle and its panel view, so the clock's tick has no dead view to
@@ -77,19 +131,7 @@ impl CallUi {
             window: None,
             window_opening: false,
             window_raised: false,
-            window_closed_by_user: None,
-            ended_at: None,
             sounds: super::call_sounds::CallSounds::new(audio_output),
-            sound_marks: Default::default(),
-            confirm: None,
-            history_scroll: ScrollHandle::new(),
-            history_asked: Default::default(),
-            dialing: None,
-            mic_test: Default::default(),
-            mic_test_starts: 0,
-            open_mic_test: super::call_audio_ui::open_default_mic_test(),
-            add_people: None,
-            conference_link: None,
         }
     }
 }

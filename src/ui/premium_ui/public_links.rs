@@ -175,7 +175,7 @@ impl QuillApp {
             return;
         }
         cx.notify();
-        cx.spawn(async move |this, cx| {
+        self.spawn_screen(cx, async move |this, cx| {
             for _ in 0..REVOKE_POLLS {
                 cx.background_executor().timer(REVOKE_POLL).await;
                 let done = this

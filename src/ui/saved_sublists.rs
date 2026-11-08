@@ -340,6 +340,10 @@ impl QuillApp {
             return;
         }
         let session = &live.driver.session;
+        // A failed first page or tags request waits for the connection.
+        if session.threads.saved.retry_when_online {
+            return;
+        }
         if !session.threads.saved.tags_loaded
             && !session
                 .requests
@@ -775,11 +779,12 @@ impl QuillApp {
         let label = clean_tag_label(dialog.input.read(cx).value().as_ref());
         match self.live.as_mut() {
             Some(live) => {
-                self.connection
-                    .set_note(match live.driver.set_saved_tag_label(&tag, &label) {
+                self.screen.connection.set_note(
+                    match live.driver.set_saved_tag_label(&tag, &label) {
                         Ok(_) => StatusNote::silent(tr(keys::Q_PEOPLE_TAG_NAME_SAVED)),
                         Err(_) => StatusNote::error(tr(keys::Q_PEOPLE_COULD_NOT_RENAME_THE_TAG)),
-                    });
+                    },
+                );
             }
             None => self.connection.set_note(StatusNote::info(tr(
                 keys::Q_PEOPLE_NAMING_TAGS_NEEDS_A_LIVE,
@@ -925,7 +930,8 @@ crate::ui::shell::register_dialogs! {
         5300,
         |app| app.dialogs.saved_tag_dialog.is_some(),
         QuillApp::build_saved_tag_dialog,
-    ),
+    )
+    .close(|app, _, cx| app.close_saved_tag_dialog(cx)),
 }
 
 #[cfg(test)]

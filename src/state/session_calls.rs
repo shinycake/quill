@@ -27,8 +27,15 @@ impl Session {
                 if matches!(call.state, CallState::Ready) {
                     active.ready = call.ready.clone();
                 }
-                active.state = call.state.clone();
                 active.is_video = call.is_video;
+                // A hang-up in flight keeps showing: the update is where
+                // the call goes back to if the discardCall fails.
+                match self.calls.hang_up.as_mut() {
+                    Some(hang_up) if hang_up.call_id == call.id => {
+                        hang_up.resume = call.state.clone();
+                    }
+                    _ => active.state = call.state.clone(),
+                }
             }
             return;
         }
@@ -37,15 +44,9 @@ impl Session {
             // update for the swap-pending/queued incoming call (the
             // caller hung up) clears it; the first pending incoming
             // raises the swap prompt; further ones auto-decline busy.
-            let swap_id = self
-                .calls
-                .swap_pending
-                .map(|(id, _, _)| id)
-                .or_else(|| self.calls.swap_accept_queued.map(|(id, _)| id));
-            if Some(call.id) == swap_id {
+            if Some(call.id) == self.calls.second_call.call_id() {
                 if call.state.is_terminal() {
-                    self.calls.swap_pending = None;
-                    self.calls.swap_accept_queued = None;
+                    self.calls.second_call = SecondCall::None;
                 }
                 return;
             }
@@ -57,10 +58,12 @@ impl Session {
                     .iter()
                     .any(|(id, _, _)| *id == call.id)
             {
-                let note = if self.calls.swap_pending.is_none()
-                    && self.calls.swap_accept_queued.is_none()
-                {
-                    self.calls.swap_pending = Some((call.id, call.user_id, call.is_video));
+                let note = if self.calls.second_call == SecondCall::None {
+                    self.calls.second_call = SecondCall::Prompt {
+                        call_id: call.id,
+                        user_id: call.user_id,
+                        is_video: call.is_video,
+                    };
                     "incoming-while-active-swap-prompt"
                 } else {
                     self.calls
@@ -82,28 +85,14 @@ impl Session {
             self.calls.summary = Some(CallSummary::from_terminal(call, 0, false));
             return;
         }
-        self.calls.active_call = Some(ActiveCall {
-            id: call.id,
-            user_id: call.user_id,
-            is_outgoing: call.is_outgoing,
-            is_video: call.is_video,
-            state: call.state.clone(),
-            started_at: Instant::now(),
-            ready_at: None,
-            ready: call.ready.clone(),
-            transport: None,
-            transport_error: None,
-            signaling_queue: Vec::new(),
-            signaling_dropped: 0,
-            muted: false,
-            camera_on: call.is_video,
-            screen_sharing: false,
-            remote_video: RemoteVideoState::Inactive,
-            remote_screen: RemoteVideoState::Inactive,
-            remote_audio_muted: false,
-            remote_battery_low: false,
-            signal_bars: None,
-        });
+        self.calls.active_call = Some(ActiveCall::fresh(
+            call.id,
+            call.user_id,
+            call.is_outgoing,
+            call.is_video,
+            call.state.clone(),
+            call.ready.clone(),
+        ));
         self.calls.summary = None;
         self.calls.error = None;
     }
@@ -146,35 +135,65 @@ impl Session {
             .ready_at
             .map(|t| t.elapsed().as_secs() as i64)
             .unwrap_or(0);
-        let mut summary = CallSummary::from_terminal(
-            call,
-            duration_secs,
-            active.transport == Some(TransportState::Connected),
-        );
-        summary.final_transport = active.transport;
+        let mut summary =
+            CallSummary::from_terminal(call, duration_secs, active.transport.is_connected());
+        summary.final_transport = active.transport.state();
+        summary.reconnect_attempts = active.transport.reconnect_attempts();
         summary.muted = active.muted;
         // A call taken into a conference call goes on there, with no end
         // screen (tdesktop's panel migrates).
         if !self.note_call_migration(call, &summary) {
             self.calls.summary = Some(summary);
         }
-        // The active call ended on its own — a still-open swap prompt
-        // is moot (the incoming call now flows through the normal
-        // incoming path). A queued post-swap accept survives: the
-        // driver issues acceptCall once this terminal update lands.
-        self.calls.swap_pending = None;
+        if self
+            .calls
+            .hang_up
+            .as_ref()
+            .is_some_and(|hang_up| hang_up.call_id == call.id)
+        {
+            self.calls.hang_up = None;
+        }
+        if self.calls.answered_call == Some(call.id) {
+            self.calls.answered_call = None;
+        }
         self.calls
             .busy_decline_queue
             .retain(|(id, _, _)| *id != call.id);
+        // The active call ended with the swap prompt still up: the
+        // second call keeps ringing and becomes the incoming call, as if
+        // its pending update had just arrived (TDLib does not send it
+        // again). A queued post-swap accept survives: the driver issues
+        // acceptCall once this terminal update lands.
+        if let Some((call_id, user_id, is_video)) = self.calls.second_call.take_prompt() {
+            self.ring_second_call(call_id, user_id, is_video);
+        }
+    }
+
+    /// Track the second call as the ringing incoming call.
+    pub(crate) fn ring_second_call(&mut self, call_id: i32, user_id: i64, is_video: bool) {
+        self.calls.active_call = Some(ActiveCall::fresh(
+            call_id,
+            user_id,
+            false,
+            is_video,
+            CallState::Pending {
+                is_created: true,
+                is_received: false,
+            },
+            None,
+        ));
+        self.calls.summary = None;
+        self.calls.error = None;
     }
 
     /// Phase C3a: `updateGroupCall` state machine. The current call holds
     /// one group call at a time (like the single 1:1 call):
     /// - a different call id replaces the tracked call (participants
     ///   reload via updates);
-    /// - `need_rejoin` sets the `reconnecting` flag so the UI shows
-    ///   "Reconnecting…" and the driver re-issues the join;
-    /// - a fresh joined, non-`need_rejoin` update clears `reconnecting`;
+    /// - `need_rejoin` makes a rejoin due (`GroupCallRejoin::want`) so the
+    ///   UI shows "Reconnecting…" and the driver re-issues the join;
+    /// - a joined, non-`need_rejoin` update that follows a not-joined one
+    ///   ends the rejoin (so does the rejoin's own join answer);
     /// - `!is_active` (ended) drops the tracked call.
     ///
     /// The watched live story's call goes to its own slot
@@ -244,7 +263,10 @@ impl Session {
             *tracked = ActiveGroupCall::fresh(group_call.id);
         }
         apply_group_call_fields(tracked, group_call);
-        if group_call.is_joined && !group_call.need_rejoin {
+        if group_call.is_joined
+            && !group_call.need_rejoin
+            && tracked.rejoin == GroupCallRejoin::Idle
+        {
             // Phase C2f: the failure is resolved — a stale
             // group-call error line would lie now.
             self.calls.group_call_error = None;
@@ -473,19 +495,27 @@ impl Session {
         }
     }
 
-    /// Phase C3a: clear the `reconnecting` flag once a rejoin has been
-    /// issued by the driver.
+    /// Screenshot demo: the Rejoin press reconnects at once.
     pub fn clear_group_call_reconnecting(&mut self) {
         if let Some(tracked) = self.calls.active_group_call.as_mut() {
-            tracked.reconnecting = false;
+            tracked.rejoin = GroupCallRejoin::Idle;
         }
     }
 
     /// Phase C3a: store the `joinVideoChat` `Text` response payload on
     /// the tracked call. Phase C2g consumes it in the driver pump to
-    /// finish the native group handshake.
-    pub fn set_group_call_join_payload(&mut self, group_call_id: i32, payload: String) {
+    /// finish the native group handshake. The answer to the rejoin in
+    /// flight (`request`) ends that rejoin.
+    pub fn set_group_call_join_payload(
+        &mut self,
+        group_call_id: i32,
+        request: Option<RequestId>,
+        payload: String,
+    ) {
         if let Some(tracked) = self.calls.group_call_mut(group_call_id) {
+            if let Some(request) = request {
+                tracked.rejoin.attempt_joined(request);
+            }
             tracked.join_payload = payload;
         }
     }
@@ -519,6 +549,7 @@ fn apply_group_call_fields(tracked: &mut ActiveGroupCall, group_call: &ParsedGro
     tracked.is_live_story = group_call.is_live_story;
     tracked.is_rtmp_stream = group_call.is_rtmp_stream;
     tracked.scheduled_start_date = 0;
+    let was_joined = tracked.is_joined;
     tracked.is_joined = group_call.is_joined;
     tracked.need_rejoin = group_call.need_rejoin;
     tracked.can_be_managed = group_call.can_be_managed;
@@ -547,12 +578,16 @@ fn apply_group_call_fields(tracked: &mut ActiveGroupCall, group_call: &ParsedGro
         .map(|(sender, _)| *sender)
         .collect();
     if group_call.need_rejoin {
-        tracked.reconnecting = true;
-    } else if group_call.is_joined {
-        tracked.reconnecting = false;
-        // Phase C2f: a clean joined update means the rejoin
-        // succeeded — the attempt counter starts over.
-        tracked.rejoin_attempts = 0;
+        // A rejoin already under way is not re-armed: the update predates
+        // its join answer.
+        tracked.rejoin.want();
+    } else if group_call.is_joined && !was_joined {
+        // Phase C2f: TDLib went from not joined to joined, so a join went
+        // through. A routine joined update (a viewer count) is no evidence:
+        // a rejoin Quill armed while TDLib still said joined (a stream's
+        // part fetch) ends only on its own join answer
+        // (`GroupCallRejoin::attempt_joined`).
+        tracked.rejoin.rejoined();
     }
     tracked.sort_participants();
 }

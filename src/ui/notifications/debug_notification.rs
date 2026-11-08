@@ -50,8 +50,9 @@ impl QuillApp {
                 .and_then(|times| times.parse::<usize>().ok())
                 .unwrap_or(1);
             for _ in 0..times {
+                let account = self.notification_account(None);
                 self.show_custom_notification(
-                    None,
+                    &account,
                     notification.clone(),
                     icon.clone(),
                     preview.clone(),

@@ -848,13 +848,15 @@ crate::ui::shell::register_dialogs! {
         3000,
         |app| app.settings.proxy.editor.is_some(),
         QuillApp::build_proxy_edit_dialog,
-    ),
+    )
+    .close(|app, _, cx| app.close_proxy_editor(cx)),
 
     ProxyLink => DialogSpec::new(
         3100,
         |app| app.settings.proxy.link.is_some(),
         QuillApp::build_proxy_link_dialog,
-    ),
+    )
+    .close(|app, _, cx| app.close_proxy_link(cx)),
 }
 
 mod build_proxy_edit_dialog;

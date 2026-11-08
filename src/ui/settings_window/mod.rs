@@ -35,6 +35,7 @@ use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::settings_catalog::Page;
+use quill::state::fetch::Fetch;
 
 /// Below this window width the page list and a page take turns.
 const NARROW: f32 = 720.;
@@ -83,7 +84,7 @@ impl QuillApp {
         self.settings.search.close();
         self.settings.arrival = None;
         self.settings.page_scroll.set_offset(point(px(0.), px(0.)));
-        self.settings.app_theme.editor_read = None;
+        self.preferences.app_theme.editor_read = None;
         self.settings.open = false;
         self.settings.page = None;
         self.settings.sub = None;
@@ -129,7 +130,7 @@ impl QuillApp {
             Page::DataStorage => self.leave_data_storage(),
             Page::AgentAccess => self.leave_agent_page(),
             // The test lives with its section, as in tdesktop.
-            Page::Calls => self.calls.mic_test = Default::default(),
+            Page::Calls => self.call_boxes.mic_test = Default::default(),
             _ => {}
         }
     }
@@ -214,7 +215,7 @@ impl QuillApp {
             // Escape and Find are app-wide bindings: answered here first,
             // so they act on Settings rather than on the chats behind it.
             .on_action(cx.listener(|this, _: &CancelSearch, window, cx| {
-                if this.settings.keybinding_capture.is_some() {
+                if this.preferences.keybinding_capture.is_some() {
                     return;
                 }
                 if this.search_field_focused(window, cx) {
@@ -400,9 +401,8 @@ impl QuillApp {
             }
             ids.push(id);
         }
-        session.settings.blocked_senders = Some(ids);
+        session.settings.blocked_senders = Fetch::Loading { stale: Some(ids) };
         session.settings.blocked_total = 120;
-        session.settings.blocked_loading = true;
         self.demo_ui.seq.store(
             seq.load(std::sync::atomic::Ordering::SeqCst),
             std::sync::atomic::Ordering::SeqCst,

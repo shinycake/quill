@@ -190,7 +190,9 @@ impl QuillApp {
     /// call replaces a pending one.
     pub(super) fn start_spell_engine(&mut self, chosen: Vec<String>, cx: &mut Context<Self>) {
         let build = self.spell.engine_builder.clone();
-        self.spell.engine_task = Some(Self::spawn_main(cx, async move |this, cx| {
+        // screen-scope: the spell engine belongs to the app, not to an
+        // account; it installs on whichever screen is up when it is built
+        self.spell.engine_task = Some(Self::spawn_app(cx, async move |this, cx| {
             let (checker, info) = cx.background_spawn(async move { build(&chosen) }).await;
             let _ = this.update(cx, |this, cx| this.install_spell_engine(checker, info, cx));
         }));
@@ -268,6 +270,8 @@ impl QuillApp {
             return;
         }
         let checker = self.spell.checker.clone();
+        // screen-scope: the result is applied only while the composer still
+        // holds the checked text (a new screen's composer is empty).
         self.spell.task = Some(cx.spawn(async move |this, cx| {
             cx.background_executor().timer(delay).await;
             let checked = text.clone();
@@ -347,7 +351,7 @@ impl QuillApp {
         // Cut / Copy / Paste / Paste as Plain Text / Select All, then the
         // Formatting submenu with its shortcuts (tdesktop's field menu).
         let menu = Self::unicode_control_menu(edit_menu_items(menu, has_selection, true));
-        let in_code_block = if app.composer_ui.rich_editor_open {
+        let in_code_block = if app.chat_ui.rich_editor_open {
             quill::code_language::fence_at(&input.value(), caret).is_some()
         } else {
             app.composer_code_block_at_caret(cx).is_some()

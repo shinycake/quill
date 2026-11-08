@@ -41,19 +41,19 @@ impl QuillApp {
         is_quiz: bool,
         cx: &mut Context<Self>,
     ) {
-        self.message_ui.pending_stop_poll = Some((chat_id, message_id, is_quiz));
+        self.chat_ui.pending_stop_poll = Some((chat_id, message_id, is_quiz));
         cx.notify();
     }
 
     pub(super) fn cancel_stop_poll(&mut self, cx: &mut Context<Self>) {
-        self.message_ui.pending_stop_poll = None;
+        self.chat_ui.pending_stop_poll = None;
         cx.notify();
     }
 
     /// B4: confirm `stopPoll` (schema 1.8.67 line 12953). The closed
     /// poll arrives via `updatePoll`; demo mode flips it locally.
     pub(super) fn confirm_stop_poll(&mut self, cx: &mut Context<Self>) {
-        let Some((chat_id, message_id, _)) = self.message_ui.pending_stop_poll.take() else {
+        let Some((chat_id, message_id, _)) = self.chat_ui.pending_stop_poll.take() else {
             return;
         };
         if let Some(live) = self.live.as_mut() {
@@ -440,11 +440,12 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         if let Some(live) = self.live.as_mut() {
-            self.connection
-                .set_note(match live.driver.retract_poll_vote(chat_id, message_id) {
+            self.screen.connection.set_note(
+                match live.driver.retract_poll_vote(chat_id, message_id) {
                     Ok(_) => StatusNote::silent(tr(keys::Q_MEDIA_VOTE_RETRACTED)),
                     Err(_) => StatusNote::error(tr(keys::Q_MEDIA_COULD_NOT_RETRACT_THE_VOTE)),
-                });
+                },
+            );
         } else if let Some(session) = self.demo_session.as_mut()
             && let Some(message) = session
                 .histories
@@ -681,7 +682,7 @@ impl QuillApp {
             match result {
                 Ok(_) => {
                     self.composer_ui.poll_dialog = None;
-                    self.composer_ui.set_reply(None);
+                    self.chat_ui.set_reply(None);
                     self.connection
                         .set_note(StatusNote::silent(tr(keys::Q_MEDIA_SENDING_POLL)));
                 }
@@ -868,7 +869,8 @@ crate::ui::shell::register_dialogs! {
         5500,
         |app| app.message_ui.poll_voters_dialog.is_some(),
         QuillApp::build_poll_voters_dialog,
-    ),
+    )
+    .close(|app, _, cx| app.close_poll_voters_dialog(cx)),
 }
 
 mod demo;

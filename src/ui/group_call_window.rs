@@ -34,9 +34,9 @@ impl QuillApp {
             .and_then(|s| s.calls.active_group_call.as_ref())
             .map(|c| c.id)
         {
-            self.group_call.window_closed_by_user = Some(id);
+            self.group_call_screen.window_closed_by_user = Some(id);
         }
-        self.group_call.stream.pending_join = None;
+        self.group_call_screen.stream_join = None;
         cx.notify();
     }
 
@@ -60,8 +60,8 @@ impl QuillApp {
         // tdesktop closes the panel with the call. Full screen is left
         // first so the window does not close into an empty space.
         if let Some((id, true, true, joined)) = call {
-            if self.group_call.window_closed_by_user != Some(id) {
-                self.group_call.window_closed_by_user = Some(id);
+            if self.group_call_screen.window_closed_by_user != Some(id) {
+                self.group_call_screen.window_closed_by_user = Some(id);
                 if let Some(handle) = self.group_call.window {
                     let _ = handle.update(cx, |_, window, _| leave_stream_full(window));
                 }
@@ -69,18 +69,20 @@ impl QuillApp {
             if joined {
                 self.leave_active_group_call(cx);
             }
-            self.group_call.stream.pending_join = None;
+            self.group_call_screen.stream_join = None;
         }
         // The stream you asked for, or the call you created, is tracked:
         // join it. Nothing else joins by itself; an unjoined window offers
         // its Join button.
         self.consume_stream_join_intent(cx);
+        self.settle_stream_join();
         let call = self
             .session()
             .and_then(|s| s.calls.active_group_call.as_ref())
             .filter(|call| !call.is_live_story)
             .map(|call| (call.id, uses_stream_layout(call)));
-        let wanted = call.filter(|(id, _)| self.group_call.window_closed_by_user != Some(*id));
+        let wanted =
+            call.filter(|(id, _)| self.group_call_screen.window_closed_by_user != Some(*id));
         // Tile players of a call that is no longer shown go.
         let shown = wanted.map(|(id, _)| id);
         self.group_call.players.retain(|key, player| {
@@ -93,6 +95,8 @@ impl QuillApp {
         // A live PiP plays the stream on: its player stays.
         if wanted.is_none_or(|(_, stream)| !stream) && !self.live_pip_keeps_stream() {
             self.group_call.stream.clear(cx);
+            self.group_call_screen.stream_joining = None;
+            self.group_call_screen.stream_join_timeout = None;
         }
         match (wanted, self.group_call.window) {
             (Some((_, stream)), None) => self.open_group_call_window(stream, cx),
@@ -135,6 +139,8 @@ impl QuillApp {
             (size(px(420.), px(640.)), size(px(380.), px(520.)))
         };
         let owner = cx.entity();
+        // screen-scope: the window and its handle belong to the app, so the open must
+        // finish after a switch; its handlers read the account on screen when they fire.
         cx.defer(move |cx| {
             let weak = owner.downgrade();
             let render_owner = owner.clone();
@@ -158,11 +164,11 @@ impl QuillApp {
                     window.on_window_should_close(cx, move |_, cx| {
                         let _ = weak.update(cx, |app, cx| {
                             app.group_call.window = None;
-                            app.group_call.window_closed_by_user = app
+                            app.group_call_screen.window_closed_by_user = app
                                 .session()
                                 .and_then(|s| s.calls.active_group_call.as_ref())
                                 .map(|c| c.id);
-                            app.group_call.stream.pending_join = None;
+                            app.group_call_screen.stream_join = None;
                             app.group_call.stream.overlay = None;
                             app.sync_group_call_large_tile();
                             cx.notify();
@@ -247,7 +253,7 @@ impl QuillApp {
 
     pub(super) fn group_call_large_tile(&self) -> Option<quill::calls::tile_pin::TileKey> {
         let seen = self.group_call.window.is_some() && self.group_call.window_visible;
-        self.group_call.pin.pinned().filter(|_| seen)
+        self.group_call_screen.pin.pinned().filter(|_| seen)
     }
 
     pub(super) fn sync_group_call_large_tile(&mut self) {
@@ -259,7 +265,7 @@ impl QuillApp {
 
     /// Bring the group call window back (the call bar).
     pub(super) fn show_group_call_window(&mut self, cx: &mut Context<Self>) {
-        self.group_call.window_closed_by_user = None;
+        self.group_call_screen.window_closed_by_user = None;
         if let Some(handle) = self.group_call.window {
             let _ = handle.update(cx, |_, window, _| window.activate_window());
         }

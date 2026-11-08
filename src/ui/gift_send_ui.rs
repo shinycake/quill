@@ -112,7 +112,7 @@ impl QuillApp {
         self.payments.gift_pay_upgrade = false;
     }
 
-    fn close_send_gift_dialog(&mut self, cx: &mut Context<Self>) {
+    pub(super) fn close_send_gift_dialog(&mut self, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
             live.driver.close_send_gift();
         } else if let Some(session) = self.demo_session.as_mut() {
@@ -669,5 +669,5 @@ crate::ui::shell::register_dialogs! {
         |app| app.session().is_some_and(|s| s.payments.gifts_manage.send.open),
         QuillApp::build_send_gift_dialog,
     )
-    .closes(|app, _, cx| app.close_send_gift_dialog(cx)),
+    .close(|app, _, cx| app.close_send_gift_dialog(cx)),
 }

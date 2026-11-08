@@ -24,6 +24,8 @@ pub(crate) struct SharedMediaSearchUi {
     pub(super) keystroke: u64,
 }
 
+impl crate::ui::on_screen::Farewell for SharedMediaSearchUi {}
+
 impl SharedMediaSearchUi {
     pub(super) fn new(window: &mut Window, cx: &mut Context<QuillApp>) -> Self {
         Self {

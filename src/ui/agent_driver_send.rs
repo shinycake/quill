@@ -20,7 +20,7 @@ impl QuillApp {
     /// chat becomes a [`UiSend`]; everything else the composer could send
     /// (an edit, a forward, attachments, rich blocks) is refused.
     pub(super) fn agent_route_send(&mut self, text: String, cx: &mut Context<Self>) {
-        if self.composer_ui.pending_edit.is_some() {
+        if self.chat_ui.is_editing() {
             guard::refuse_if_injecting("edit a message");
             return;
         }
@@ -28,7 +28,7 @@ impl QuillApp {
             guard::refuse_if_injecting("forward messages");
             return;
         }
-        if self.composer_ui.rich_editor_open {
+        if self.chat_ui.rich_editor_open {
             guard::refuse_if_injecting("send formatted blocks");
             return;
         }
@@ -68,7 +68,7 @@ impl QuillApp {
             .and_then(|session| session.chats.get(&chat_id.0))
             .map(|chat| chat.title.clone())
             .unwrap_or_default();
-        self.agent_ui.ui_send = Some(UiSend {
+        self.agent_bridge.ui_send = Some(UiSend {
             chat_id: chat_id.0,
             chat_title,
             text,
@@ -95,7 +95,7 @@ impl QuillApp {
         }
         self.composer
             .update(cx, |input, cx| input.set_value("", window, cx));
-        self.composer_ui.set_reply(None);
+        self.chat_ui.set_reply(None);
         let chat = ChatId(chat_id);
         let topic = self.open_draft_topic(chat);
         match self.live.as_mut() {

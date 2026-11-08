@@ -94,5 +94,9 @@ crate::ui::shell::register_dialogs! {
         6110,
         |app| app.dialogs.photo_delete.is_some(),
         QuillApp::build_photo_delete_dialog,
-    ),
+    )
+    .close(|app, _, cx| {
+            app.dialogs.photo_delete = None;
+            cx.notify();
+        }),
 }

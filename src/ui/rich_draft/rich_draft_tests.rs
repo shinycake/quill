@@ -128,7 +128,7 @@ fn the_editor_opens_the_draft_and_closing_it_shows_the_draft_again(cx: &mut Test
     let vcx = &mut vcx;
     remote_rich_draft(&app, vcx, true);
     click(vcx, "rich-draft-preview");
-    assert!(app.read_with(vcx, |app, _| app.composer_ui.rich_editor_open));
+    assert!(app.read_with(vcx, |app, _| app.chat_ui.rich_editor_open));
     assert_eq!(composer_text(&app, vcx), "# Plan\n\n**ship it**");
     assert!(!shown(vcx, "rich-draft-preview"));
 
@@ -185,7 +185,7 @@ fn the_rich_editor_shows_the_blocks_of_a_long_draft(cx: &mut TestAppContext) {
     let vcx = &mut vcx;
     let markup = crate::ui::demos::composer::rich_editor_markup(32 * 1024);
     app.update_in(vcx, |app, window, cx| {
-        app.composer_ui.rich_editor_open = true;
+        app.chat_ui.rich_editor_open = true;
         app.set_composer_markup(&markup, window, cx);
     });
     frames(vcx);

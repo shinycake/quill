@@ -3,7 +3,7 @@
 //!
 //! `QuillApp` keeps one copy of the view state its conversation, composer
 //! and overlay code reads (`history`, `composer`, `composer_ui`,
-//! `message_ui`, `pickers`, `viewer`, and the slices that draw them,
+//! `chat_ui`, `message_ui`, `pickers`, `viewer`, and the slices that draw them,
 //! `slices.window`) and the `Session` keeps one view
 //! (`open_chat`, `open_topic`, the thread, Saved Messages and search
 //! views, the gallery). A chat window owns its own copy of the app's part
@@ -20,6 +20,7 @@
 
 use super::super::app::QuillApp;
 use super::super::app_slice::WindowSlices;
+use super::super::chat_ui_state::ChatUi;
 use super::super::composer_state::ComposerUi;
 use super::super::glyph_sweep;
 use super::super::history_state::HistoryUi;
@@ -36,18 +37,43 @@ use quill::lang::{keys, tr};
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
-/// One chat window's view state.
-pub(super) struct WindowSlot {
-    pub(super) history: HistoryUi,
-    pub(super) composer: Entity<TextareaState>,
-    pub(super) composer_ui: Box<ComposerUi>,
-    pub(super) message_ui: MessageUi,
-    pub(super) pickers: PickerUi,
-    pub(super) viewer: ViewerUi,
-    /// The window's own "Search in chat" field (`SearchUi::chat_input`).
-    pub(super) chat_search_input: Entity<TextareaState>,
-    /// The window's own share box, forward selection and picker field.
-    pub(super) share: ShareUi,
+/// What one field of a chat window's state says when the window closes,
+/// run with that state in place (`QuillApp::farewell_window`): the viewer
+/// closes its Picture-in-Picture window. Most fields say nothing. The
+/// window's own leave (`forget_chat_window`: the recording, the TDLib
+/// chat close) is the window's, not a field's.
+pub(in crate::ui) trait SlotFarewell {
+    fn farewell(_app: &mut QuillApp, _cx: &mut Context<QuillApp>) {}
+}
+
+impl<T: SlotFarewell> SlotFarewell for Box<T> {
+    fn farewell(app: &mut QuillApp, cx: &mut Context<QuillApp>) {
+        T::farewell(app, cx);
+    }
+}
+
+impl SlotFarewell for HistoryUi {}
+impl SlotFarewell for Entity<TextareaState> {}
+impl SlotFarewell for ComposerUi {}
+impl SlotFarewell for ChatUi {}
+impl SlotFarewell for MessageUi {}
+impl SlotFarewell for PickerUi {}
+impl SlotFarewell for ShareUi {}
+
+/// The Picture-in-Picture window opened from this window's viewer plays
+/// the window's clip, with its link in this slot: it closes with it.
+impl SlotFarewell for ViewerUi {
+    fn farewell(app: &mut QuillApp, cx: &mut Context<QuillApp>) {
+        app.close_video_pip(cx);
+    }
+}
+
+super::super::on_screen::on_screen_fields! {
+    /// One chat window's view state.
+    pub(super) struct WindowSlot via SlotFarewell;
+    /// What the window's state says as the window closes, with the
+    /// window's state in place.
+    fn farewell_window(&mut self, cx: &mut Context<Self>) => (self, cx);
     pub(super) slices: WindowSlices,
     /// The pictures the window shows (`image_budget`); they go with it.
     /// Stays here while the window's state is in place.
@@ -59,6 +85,19 @@ pub(super) struct WindowSlot {
     pub(super) active: bool,
     /// Where the window stood then (`cover`).
     pub(super) place: Option<super::cover::WindowPlace>,
+    ;
+    history: HistoryUi,
+    composer: Entity<TextareaState>,
+    composer_ui: Box<ComposerUi>,
+    /// What the window has open for its chat (`chat_ui_state`).
+    chat_ui: Box<ChatUi>,
+    message_ui: MessageUi,
+    pickers: PickerUi,
+    viewer: ViewerUi,
+    /// The window's own "Search in chat" field (`SearchUi::chat_input`).
+    chat_search_input: Entity<TextareaState>,
+    /// The window's own share box, forward selection and picker field.
+    share: ShareUi,
 }
 
 pub(super) type SharedSlot = Rc<RefCell<WindowSlot>>;
@@ -96,6 +135,7 @@ impl WindowSlot {
             history: HistoryUi::new(cx),
             composer,
             composer_ui: Box::new(ComposerUi::new()),
+            chat_ui: Box::new(ChatUi::for_chat(Some(chat_id))),
             message_ui: MessageUi::new(window, cx),
             pickers: PickerUi::new(window, cx, emoji_search_input, reaction_search_input),
             viewer: ViewerUi::new(),
@@ -156,6 +196,7 @@ impl QuillApp {
         std::mem::swap(&mut self.history, &mut slot.history);
         std::mem::swap(&mut self.composer, &mut slot.composer);
         std::mem::swap(&mut self.composer_ui, &mut slot.composer_ui);
+        std::mem::swap(&mut self.screen.chat_ui, &mut slot.chat_ui);
         std::mem::swap(&mut self.message_ui, &mut slot.message_ui);
         std::mem::swap(&mut self.pickers, &mut slot.pickers);
         std::mem::swap(&mut self.viewer, &mut slot.viewer);

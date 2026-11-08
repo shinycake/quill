@@ -182,7 +182,6 @@ pub(super) struct SoundMarks {
 impl super::app::QuillApp {
     /// Ring, ring back, chime on connect and on hang-up, click on mute.
     pub(super) fn sync_call_sounds(&mut self) {
-        use quill::calls::engine::TransportState;
         use quill::telegram::envelope::CallState;
         let Some(session) = self.session() else {
             return;
@@ -193,7 +192,7 @@ impl super::app::QuillApp {
         );
         let enabled = session.settings.inapp_sounds_enabled;
         let background_ring = self.background_ring_audible();
-        let marks = &mut self.calls.sound_marks;
+        let marks = &mut self.screen.call_screen.sound_marks;
         let sounds = &mut self.calls.sounds;
         sounds.set_enabled(enabled);
         match (call, summary) {
@@ -213,8 +212,8 @@ impl super::app::QuillApp {
                     _ => None,
                 };
                 sounds.keep_looping(ringing);
-                let connected = matches!(call.state, CallState::Ready)
-                    && call.transport == Some(TransportState::Connected);
+                let connected =
+                    matches!(call.state, CallState::Ready) && call.transport.is_connected();
                 if connected && !marks.connected {
                     marks.connected = true;
                     sounds.play(CallSound::Connect);

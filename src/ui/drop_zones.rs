@@ -27,8 +27,8 @@ impl QuillApp {
     pub(super) fn file_drop_enabled(&self) -> bool {
         matches!(self.pane_mode(), PaneMode::Ready)
             && self.composer_available(PaneMode::Ready)
-            && self.composer_ui.pending_edit.is_none()
-            && !self.composer_ui.rich_editor_open
+            && !self.chat_ui.is_editing()
+            && !self.chat_ui.rich_editor_open
             && !self.recording_active()
     }
 
@@ -76,7 +76,7 @@ impl QuillApp {
     pub(super) fn drop_files_plain(&mut self, paths: &[PathBuf], cx: &mut Context<Self>) {
         self.composer_ui.drop_state = None;
         self.composer_ui.drop_paths.clear();
-        if self.file_drop_enabled() || self.composer_ui.pending_edit.is_some() {
+        if self.file_drop_enabled() || self.chat_ui.is_editing() {
             self.attach_dropped_files(paths, cx);
         }
     }
@@ -135,7 +135,9 @@ impl QuillApp {
                         .background_spawn(async move {
                             build_archive(&source, &dir, ARCHIVE_SIZE_LIMIT)
                         })
-                        .await;
+                        .await
+                        // Removed with its folder when the screen is gone.
+                        .map(quill::scratch::OwnedFile::with_folder);
                     let _ = this.update(cx, |this, cx| this.archive_ready(slot, built, cx));
                 })
                 .detach();
@@ -146,26 +148,27 @@ impl QuillApp {
     fn archive_ready(
         &mut self,
         slot: SendSlot,
-        built: Result<PathBuf, ArchiveError>,
+        built: Result<quill::scratch::OwnedFile, ArchiveError>,
         cx: &mut Context<Self>,
     ) {
         match built {
-            Ok(path) => {
+            Ok(archive) => {
                 // The person moved on to another chat (or account) while
-                // it was zipped.
+                // it was zipped: dropping it removes it.
                 if self.send_slot().as_ref() != Some(&slot) {
-                    if let Some(folder) = path.parent() {
-                        let _ = std::fs::remove_dir_all(folder);
-                    }
                     return;
                 }
+                let path = archive.path().to_path_buf();
                 let Some(appended) = self.update_pending_attachments(|tray| {
                     ComposerAttachment::append_planned(tray, &[(path, AttachmentKind::Document)])
                 }) else {
                     return;
                 };
                 self.connection.set_note(match appended {
-                    Ok(_) => StatusNote::silent(tr(keys::Q_MISC_ATTACHED_THE_ARCHIVE_SEND_TO)),
+                    Ok(_) => {
+                        archive.keep();
+                        StatusNote::silent(tr(keys::Q_MISC_ATTACHED_THE_ARCHIVE_SEND_TO))
+                    }
                     Err(note) => StatusNote::error(note),
                 });
             }

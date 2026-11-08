@@ -106,8 +106,10 @@ impl QuillApp {
             );
             return;
         }
+        // The decode may outlast an account switch: the notification stays
+        // with the account it was queued for.
         let waiting = Waiting {
-            account,
+            account: Some(self.notification_account(account.as_ref())),
             notification,
             preview,
             locked,
@@ -131,7 +133,9 @@ impl QuillApp {
         };
         let key = photo.clone();
         let job = cx.background_spawn(async move { circular_icon_for(&photo) });
-        Self::spawn_main(cx, async move |this, cx| {
+        // screen-scope: each queued notification names the account it was made for,
+        // and show_notification_as shows it for that account whichever is on screen.
+        Self::spawn_app(cx, async move |this, cx| {
             let icon = job.await;
             let rest = DECODING
                 .with(|map| {

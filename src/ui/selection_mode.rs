@@ -80,7 +80,7 @@ impl QuillApp {
             now,
         );
         let interactive = self.selecting_in(chat_id);
-        let focused = interactive && self.message_ui.selection_focus == Some(message_id);
+        let focused = interactive && self.chat_ui.selection_focus == Some(message_id);
         let ring_color = cx.theme().ring;
         let forward = self.selection_forward_drag(chat_id, message_id);
         let overlay = (mode > 0.).then(|| {
@@ -241,8 +241,8 @@ impl QuillApp {
             quill::selection_pin::room_for(draft.count()),
         );
         self.add_to_selection(chat_id, span);
-        self.message_ui.selection_anchor = Some(message_id);
-        self.message_ui.selection_focus = Some(message_id);
+        self.chat_ui.selection_anchor = Some(message_id);
+        self.chat_ui.selection_focus = Some(message_id);
         cx.notify();
     }
 
@@ -406,6 +406,7 @@ impl QuillApp {
             multiple: false,
             prompt: Some(tr(keys::SETTINGS_SAVE).into()),
         });
+        // screen-scope: the note reports a local file save to whichever account is on screen.
         cx.spawn(async move |this, cx| {
             let Ok(Ok(Some(dirs))) = picker.await else {
                 return;
@@ -466,7 +467,7 @@ impl QuillApp {
                 history
                     .messages
                     .get(&id.0)
-                    .is_some_and(|m| !m.is_outgoing && !m.pending && m.id.0 > 0)
+                    .is_some_and(|m| !m.is_outgoing && !m.pending() && m.id.0 > 0)
             })
     }
 
@@ -846,7 +847,7 @@ impl QuillApp {
                                 picked,
                             );
                         }
-                        this.message_ui.pending_delete = Some(confirm);
+                        this.chat_ui.pending_delete = Some(confirm);
                         this.confirm_delete(cx);
                     });
                     true

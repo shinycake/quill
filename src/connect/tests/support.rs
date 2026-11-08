@@ -410,7 +410,7 @@ pub(crate) fn call_state_for_rejoin(driver: &mut ConnectDriver<Arc<RecordingSend
         .active_group_call
         .as_mut()
         .unwrap()
-        .reconnecting = true;
+        .rejoin = crate::state::GroupCallRejoin::Wanted { attempts: 0 };
 }
 
 /// A participant's camera on (`video_info`), for `group_participant_json`.

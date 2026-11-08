@@ -127,7 +127,7 @@ impl QuillApp {
             .filter(|action| passes(&filter, action))
             .collect();
         let now = civil_local(now_unix());
-        let shown = self.agent_ui.activity_shown.max(ACTIVITY_PAGE);
+        let shown = self.agent_bridge.activity_shown.max(ACTIVITY_PAGE);
         let more = shown_log.len() > shown;
         let mut rows: Vec<AnyElement> = if shown_log.is_empty() {
             vec![empty_line(
@@ -157,7 +157,7 @@ impl QuillApp {
                             .ghost()
                             .small()
                             .on_click(cx.listener(|this, _, _, cx| {
-                                this.agent_ui.activity_shown += ACTIVITY_PAGE;
+                                this.agent_bridge.activity_shown += ACTIVITY_PAGE;
                                 cx.notify();
                             })),
                     )
@@ -170,7 +170,7 @@ impl QuillApp {
                         .tooltip(tr(keys::Q_AGENT_ACTIVITY_CLEAR_HINT))
                         .on_click(cx.listener(|this, _, _, cx| {
                             activity::clear();
-                            this.agent_ui.activity_shown = ACTIVITY_PAGE;
+                            this.agent_bridge.activity_shown = ACTIVITY_PAGE;
                             this.agent_ui.page.filter = Default::default();
                             cx.notify();
                         })),

@@ -318,7 +318,7 @@ impl QuillApp {
             .and_then(|history| history.messages.get(&message_id.0))
             .is_some_and(|message| {
                 use quill::telegram::envelope::MessageContent as C;
-                !message.pending
+                !message.pending()
                     && message.id.0 > 0
                     && message.media_album_id == 0
                     && message.extras.suggested_post.is_none()
@@ -589,17 +589,19 @@ crate::ui::shell::register_dialogs! {
         |app| app.suggested_posts.grams_needed.is_some(),
         QuillApp::build_grams_needed_dialog,
     )
-    .closes(|app, _, cx| app.close_grams_needed(cx)),
+    .close(|app, _, cx| app.close_grams_needed(cx)),
     /// "Accept Terms" of a suggested post.
     SuggestAccept => DialogSpec::new(
         3964,
         |app| app.suggested_posts.accept.is_some(),
         QuillApp::build_suggest_accept_dialog,
-    ),
+    )
+    .close(|app, _, cx| app.close_suggest_accept(cx)),
     /// "Decline" of a suggested post, with the reason.
     SuggestDecline => DialogSpec::new(
         3966,
         |app| app.suggested_posts.decline.is_some(),
         QuillApp::build_suggest_decline_dialog,
-    ),
+    )
+    .close(|app, _, cx| app.close_suggest_decline(cx)),
 }

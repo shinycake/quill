@@ -24,7 +24,7 @@ fn forwardable(session: &Session, chat: ChatId, id: MessageId) -> bool {
     else {
         return false;
     };
-    !message.pending
+    !message.pending()
         && message.ephemeral.is_none()
         && !session.is_secret_chat(chat)
         && session

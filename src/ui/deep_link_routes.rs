@@ -4,6 +4,7 @@
 //! hand-off, the settings pages and the proxy confirmation.
 #![deny(clippy::indexing_slicing)]
 use super::app::QuillApp;
+use super::links_state::PendingOpen;
 use super::navigation::NavigationAction;
 use super::shell::{DialogKind, QuillShell};
 use super::*;
@@ -76,7 +77,7 @@ impl QuillApp {
             }
             DeepLinkUi::FolderInvite { link } => self.open_folder_invite(link, cx),
             DeepLinkUi::ConferenceCall { link } => {
-                self.calls.conference_link = Some(link);
+                self.call_boxes.conference_link = Some(link);
                 cx.notify();
             }
             DeepLinkUi::Background { name } => self.open_background_link(name, cx),
@@ -135,10 +136,12 @@ impl QuillApp {
 
     /// Chat picked in the share chooser: open it with the text in the
     /// composer. Never sent; the user confirms (tdesktop `shareUrl`).
-    fn choose_share_chat(&mut self, chat_id: ChatId, cx: &mut Context<Self>) {
+    pub(super) fn choose_share_chat(&mut self, chat_id: ChatId, cx: &mut Context<Self>) {
         if let Some(text) = self.share.link_text.take() {
-            self.links.pending_deep_link_open =
-                Some((chat_id, DeepLinkAction::ShareDraft { text }));
+            self.links.pending_deep_link_open = Some(PendingOpen::user(
+                chat_id,
+                DeepLinkAction::ShareDraft { text },
+            ));
         }
         self.qr_share_chosen(chat_id, cx);
         cx.notify();
@@ -332,7 +335,8 @@ crate::ui::shell::register_dialogs! {
         2900,
         |app| app.share.link_text.is_some(),
         QuillApp::build_deep_link_share_dialog,
-    ),
+    )
+    .close(|app, _, cx| app.cancel_share_link(cx)),
 }
 
 #[cfg(test)]

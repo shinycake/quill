@@ -238,7 +238,7 @@ fn a_story_opened_during_a_call_with_its_poster_plays_beside_it() {
     h.ingest(&LIVE_CALL.replace("JOINED", "true"));
     assert!(!story_failed(&h));
     let call = h.driver.session.calls.active_call.as_ref();
-    assert!(call.is_some_and(|call| call.transport_error.is_none()));
+    assert!(call.is_some_and(|call| call.transport.error().is_none()));
     assert!(handle.group_leaves().is_empty());
 }
 
@@ -256,7 +256,7 @@ fn a_call_with_the_poster_leaves_the_story_playing() {
     assert!(!story_failed(&h));
     assert_eq!(handle.started_calls().len(), 1);
     let call = h.driver.session.calls.active_call.as_ref();
-    assert!(call.is_some_and(|call| call.transport_error.is_none()));
+    assert!(call.is_some_and(|call| call.transport.error().is_none()));
 }
 
 #[test]
@@ -275,8 +275,7 @@ fn spent_rejoins_show_on_the_story() {
     let mut h = watching();
     h.ingest(&LIVE_CALL.replace("JOINED", "true"));
     if let Some(call) = h.driver.session.calls.story_stream.as_mut() {
-        call.reconnecting = true;
-        call.rejoin_attempts = crate::state::MAX_GROUP_CALL_REJOIN_ATTEMPTS;
+        call.rejoin = crate::state::GroupCallRejoin::GaveUp;
     }
     assert!(story_failed(&h));
 }

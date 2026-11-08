@@ -9,10 +9,10 @@ use super::inline_players::Demand;
 use super::inline_video::InlineTile;
 use super::message_media::MediaFrameKind;
 use super::play_intent::{PlayKind, PlayTarget};
-use super::playback_state::GifDecode;
+use super::playback_state::{ChatMessage, GifDecode};
 use crate::ui::status_note::StatusNote;
 use gpui_kit::*;
-use quill::ids::{FileId, MessageId};
+use quill::ids::{ChatId, FileId, MessageId};
 use quill::lang::{keys, tr};
 use quill::local_path::sandboxed_display_path;
 use quill::telegram::envelope::MessageContent;
@@ -141,6 +141,9 @@ impl QuillApp {
     }
 
     fn play_gif_file(&mut self, message_id: MessageId, file_id: FileId, cx: &mut Context<Self>) {
+        let Some(chat_id) = self.session().and_then(|session| session.open_chat) else {
+            return;
+        };
         let path = self.session().and_then(|session| {
             session
                 .media
@@ -174,7 +177,7 @@ impl QuillApp {
         self.playback.playing_animation = Some(message_id);
         self.connection
             .set_note(StatusNote::silent(tr(keys::Q_AV_LOADING_GIF_PLAYBACK)));
-        self.spawn_gif_decode(message_id, file_id, safe, cx);
+        self.spawn_gif_decode(chat_id, message_id, file_id, safe, cx);
         cx.notify();
     }
 
@@ -183,12 +186,14 @@ impl QuillApp {
     /// taken back instead of starting a second.
     pub(super) fn spawn_gif_decode(
         &mut self,
+        chat_id: ChatId,
         message_id: MessageId,
         file_id: FileId,
         path: PathBuf,
         cx: &mut Context<Self>,
     ) {
-        if let Some(decode) = self.playback.gif_decodes.get(&message_id) {
+        let key = ChatMessage::new(chat_id, message_id);
+        if let Some(decode) = self.playback.gif_decodes.get(&key) {
             decode.cancel.store(false, Ordering::Relaxed);
             // Its first picture already came: play from it again now.
             if let Some(clip) = decode.first.clone() {
@@ -198,14 +203,14 @@ impl QuillApp {
         }
         let cancel = Arc::new(AtomicBool::new(false));
         self.playback.gif_decodes.insert(
-            message_id,
+            key,
             GifDecode {
                 cancel: cancel.clone(),
                 first: None,
             },
         );
         let max_edge = self.gif_decode_edge(message_id, cx);
-        Self::spawn_main(cx, async move |this, cx| {
+        self.spawn_screen(cx, async move |this, cx| {
             let (first, first_in) = futures_channel::oneshot::channel();
             let decode = cx.background_executor().spawn(async move {
                 GifClip::decode(&path, max_edge, &cancel, |clip| {
@@ -215,15 +220,17 @@ impl QuillApp {
             // The first picture plays while the rest decode.
             if let Ok(clip) = first_in.await {
                 let _ = this.update(cx, |this, cx| {
-                    if let Some(decode) = this.playback.gif_decodes.get_mut(&message_id) {
+                    if let Some(decode) = this.playback.gif_decodes.get_mut(&key) {
                         decode.first = Some(clip.clone());
                     }
-                    this.gif_started(message_id, clip, cx);
+                    if this.session().and_then(|session| session.open_chat) == Some(chat_id) {
+                        this.gif_started(message_id, clip, cx);
+                    }
                 });
             }
             let decoded = decode.await;
             let _ = this.update(cx, |this, cx| {
-                this.gif_decoded(message_id, file_id, decoded, cx);
+                this.gif_decoded(key, file_id, decoded, cx);
             });
         })
         .detach();
@@ -242,7 +249,7 @@ impl QuillApp {
     /// The longer side to decode the GIF at: its tile in device pixels
     /// (`InlineTile::decode_edge`, capped at `INLINE_MAX_EDGE`).
     fn gif_decode_edge(&self, message_id: MessageId, cx: &mut Context<Self>) -> u32 {
-        let scale = self.playback.inline_videos.scale();
+        let scale = self.players.inline_videos.scale();
         let message = self.session().and_then(|session| {
             let chat = session.open_chat?;
             session.histories.get(&chat.0)?.messages.get(&message_id.0)
@@ -285,13 +292,17 @@ impl QuillApp {
 
     fn gif_decoded(
         &mut self,
-        message_id: MessageId,
+        key: ChatMessage,
         file_id: FileId,
         decoded: Result<Arc<GifClip>, GifError>,
         cx: &mut Context<Self>,
     ) {
-        self.playback.gif_decodes.remove(&message_id);
-        if self.playback.playing_animation != Some(message_id) {
+        let message_id = key.message;
+        self.playback.gif_decodes.remove(&key);
+        // Playing is the open chat's: the same id in another chat is not
+        // this decode's row.
+        let in_open_chat = self.session().and_then(|session| session.open_chat) == Some(key.chat);
+        if !in_open_chat || self.playback.playing_animation != Some(message_id) {
             // Stopped or replaced meanwhile.
             return;
         }
@@ -337,7 +348,7 @@ impl QuillApp {
         }
         self.recording.voice_tick = true;
         // The tick is the app's; each step runs as the recording's window.
-        Self::spawn_main(cx, async move |this, cx| {
+        self.spawn_screen(cx, async move |this, cx| {
             loop {
                 cx.background_executor()
                     .timer(Duration::from_millis(100))

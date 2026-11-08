@@ -148,3 +148,98 @@ fn a_cancelled_start_that_failed_says_nothing(cx: &mut TestAppContext) {
         assert_ne!(app.connection.status_note(), "No microphone found.");
     });
 }
+
+/// Send is pressed on one account and the file is ready after a switch:
+/// the chat id is the old account's, so nothing goes out on the new one.
+#[gpui_kit::test]
+fn a_recording_finished_after_a_switch_is_not_sent(cx: &mut TestAppContext) {
+    use quill::lang::{keys, tr};
+    let (app, mut vcx) = open_chat(cx);
+    fake_microphone(&app, &mut vcx);
+    start(&app, CaptureFor::Message, &mut vcx);
+    vcx.run_until_parked();
+    let count = |app: &QuillApp| {
+        app.session()
+            .and_then(|session| session.histories.get(&CHAT.0))
+            .map_or(0, |history| history.messages.len())
+    };
+    let before = app.read_with(&vcx, |app, _| count(app));
+    app.update_in(&mut vcx, |app, window, cx| {
+        app.send_voice_recording(window, cx);
+        // The account on screen leaves while the encoder is joined (what
+        // `switch_account` does first).
+        app.end_account_surfaces(window, cx);
+    });
+    vcx.run_until_parked();
+    app.read_with(&vcx, |app, _| {
+        assert_eq!(count(app), before, "nothing sent");
+        assert_eq!(
+            app.connection.status_note(),
+            tr(keys::Q_NOTES_RECORDING_NOT_SENT_ACCOUNT_CHANGED)
+        );
+    });
+}
+
+/// The same for a voice reply to a story: story ids are the poster's, the
+/// same on every account, so the new account would reply to the story
+/// from its own chat with the poster.
+#[gpui_kit::test]
+fn a_story_reply_finished_after_a_switch_is_not_sent(cx: &mut TestAppContext) {
+    use quill::lang::{keys, tr};
+    cx.update(gpui_kit::init);
+    let slot = std::rc::Rc::new(std::cell::RefCell::new(None));
+    let slot_in = slot.clone();
+    let demo = ScreenshotDemo::named("ready-story-viewer");
+    let handle = cx.open_window(size(px(1100.), px(900.)), move |window, cx| {
+        let view = cx.new(|cx| QuillApp::new_with_demo(window, cx, None, Some(demo)));
+        *slot_in.borrow_mut() = Some(view.clone());
+        let shell = cx.new(|_| QuillShell::new(view));
+        Root::new(shell, window, cx)
+    });
+    let app: Entity<QuillApp> = slot.borrow().clone().expect("demo app");
+    let mut vcx = VisualTestContext::from_window(handle.into(), cx);
+    vcx.run_until_parked();
+    vcx.update(|window, cx| window.render_frame(cx));
+    app.update(&mut vcx, |app, _| {
+        app.stories.with_viewer_ui(|open| open.reply_open = true)
+    });
+    fake_microphone(&app, &mut vcx);
+    start(&app, CaptureFor::StoryReply, &mut vcx);
+    vcx.run_until_parked();
+    app.update_in(&mut vcx, |app, window, cx| {
+        assert!(app.story_reply_target().is_some(), "a story is on screen");
+        assert!(
+            app.send_story_reply_voice_recording(cx),
+            "the reply took it"
+        );
+        // The account on screen leaves while the encoder is joined (what
+        // `switch_account` does first).
+        app.end_account_surfaces(window, cx);
+    });
+    vcx.run_until_parked();
+    app.read_with(&vcx, |app, _| {
+        assert_eq!(
+            app.connection.status_note(),
+            tr(keys::Q_NOTES_RECORDING_NOT_SENT_ACCOUNT_CHANGED)
+        );
+    });
+}
+
+#[gpui_kit::test]
+fn play_once_and_lock_end_with_the_recording_whoever_takes_it(cx: &mut TestAppContext) {
+    let (app, mut vcx) = open_chat(cx);
+    fake_microphone(&app, &mut vcx);
+    start(&app, CaptureFor::Message, &mut vcx);
+    vcx.run_until_parked();
+    app.update(&mut vcx, |app, cx| {
+        app.toggle_record_once(cx);
+        app.recording.locked = true;
+        // A story reply sends the capture without reading "Play once".
+        assert!(app.recording.take_voice().is_some());
+        assert!(
+            !app.recording.once,
+            "the next voice message is not view-once"
+        );
+        assert!(!app.recording.locked);
+    });
+}

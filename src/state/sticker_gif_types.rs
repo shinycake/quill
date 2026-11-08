@@ -48,6 +48,9 @@ pub struct StickerPanel {
     /// `getAttachedStickerSets` answered: the sets (first opens in the
     /// sticker set dialog; `None` inside: the media has none).
     pub attached_answer: Option<Option<i64>>,
+    /// The `getAttachedStickerSets` the open "Attached Stickers" box waits
+    /// for. An answer or error of an earlier one is dropped.
+    pub attached_request: Option<RequestId>,
     pub recent_stale: bool,
     pub favorites_stale: bool,
     pub trending_stale: bool,

@@ -130,7 +130,7 @@ fn load_state(root: &std::path::Path, wanted: Option<EmojiSetId>) -> Loaded {
 impl QuillApp {
     /// Apply the saved set once, at the first frame.
     pub(super) fn sync_emoji_style(&mut self, cx: &mut Context<Self>) {
-        let state = &mut self.settings.emoji_style;
+        let state = &mut self.preferences.emoji_style;
         if state.started {
             return;
         }
@@ -153,14 +153,14 @@ impl QuillApp {
             }
             loaded
         });
-        self.settings.emoji_style.switch_task = Some(cx.spawn(async move |this, cx| {
+        self.preferences.emoji_style.switch_task = Some(cx.spawn(async move |this, cx| {
             let loaded = load.await;
             let _ = this.update(cx, |this, cx| this.apply_emoji_state(loaded, cx));
         }));
     }
 
     fn apply_emoji_state(&mut self, loaded: Loaded, cx: &mut Context<Self>) {
-        let state = &mut self.settings.emoji_style;
+        let state = &mut self.preferences.emoji_style;
         state.ready = loaded.ready;
         let download_fallback = loaded.fallback;
         let changed =
@@ -180,13 +180,13 @@ impl QuillApp {
     }
 
     pub(super) fn open_emoji_set_style(&mut self, cx: &mut Context<Self>) {
-        self.settings.emoji_style.open = true;
-        self.settings.emoji_style.file_error = None;
+        self.preferences.emoji_style.open = true;
+        self.preferences.emoji_style.file_error = None;
         cx.notify();
     }
 
     fn emoji_set_state(&self, id: EmojiSetId) -> SetState {
-        let state = &self.settings.emoji_style;
+        let state = &self.preferences.emoji_style;
         let loading = state
             .download
             .as_ref()
@@ -224,13 +224,13 @@ impl QuillApp {
             }
             loaded
         });
-        self.settings.emoji_style.switch_task = Some(cx.spawn(async move |this, cx| {
+        self.preferences.emoji_style.switch_task = Some(cx.spawn(async move |this, cx| {
             let loaded = load.await;
             let _ = this.update(cx, |this, cx| {
                 if loaded.current == id {
                     this.apply_emoji_state(loaded, cx);
                 } else {
-                    this.settings.emoji_style.ready.remove(&id);
+                    this.preferences.emoji_style.ready.remove(&id);
                     this.download_emoji_set(id, cx);
                 }
             });
@@ -243,7 +243,7 @@ impl QuillApp {
         let Some(root) = app_root() else {
             return;
         };
-        let state = &mut self.settings.emoji_style;
+        let state = &mut self.preferences.emoji_style;
         if let Some(previous) = state.download.take() {
             previous.progress.cancel();
         }
@@ -269,7 +269,7 @@ impl QuillApp {
             }
             let result = worker.await;
             let _ = this.update(cx, |this, cx| {
-                let state = &mut this.settings.emoji_style;
+                let state = &mut this.preferences.emoji_style;
                 if state.download.as_ref().is_some_and(|d| d.id == id) {
                     state.download = None;
                 }
@@ -292,19 +292,19 @@ impl QuillApp {
     /// file's hash picks the set, then it is switched to like a download.
     fn install_emoji_set_file(&mut self, cx: &mut Context<Self>) {
         let Some(root) = app_root() else {
-            self.settings.emoji_style.file_error =
+            self.preferences.emoji_style.file_error =
                 Some(tr(keys::Q_MEDIA_COULDNT_OPEN_QUILLS_DATA_FOLDER).into());
             cx.notify();
             return;
         };
-        self.settings.emoji_style.file_error = None;
+        self.preferences.emoji_style.file_error = None;
         let picker = cx.prompt_for_paths(PathPromptOptions {
             files: true,
             directories: false,
             multiple: false,
             prompt: Some(tr(keys::Q_MEDIA_INSTALL).into()),
         });
-        self.settings.emoji_style.file_task = Some(cx.spawn(async move |this, cx| {
+        self.preferences.emoji_style.file_task = Some(cx.spawn(async move |this, cx| {
             let Ok(Ok(Some(paths))) = picker.await else {
                 return;
             };
@@ -318,7 +318,7 @@ impl QuillApp {
             let _ = this.update(cx, |this, cx| {
                 match result {
                     Ok(id) => {
-                        let state = &mut this.settings.emoji_style;
+                        let state = &mut this.preferences.emoji_style;
                         // The file wins over a download in flight, which
                         // would switch sets again when it lands.
                         if let Some(previous) = state.download.take() {
@@ -330,7 +330,7 @@ impl QuillApp {
                         }
                         this.switch_emoji_set(id, cx);
                     }
-                    Err(message) => this.settings.emoji_style.file_error = Some(message),
+                    Err(message) => this.preferences.emoji_style.file_error = Some(message),
                 }
                 cx.notify();
             });
@@ -356,7 +356,7 @@ impl QuillApp {
                         div()
                             .text_xs()
                             .text_color(cx.theme().muted_foreground)
-                            .child(self.settings.emoji_style.current.name()),
+                            .child(self.preferences.emoji_style.current.name()),
                     ),
             )
             .child(
@@ -431,7 +431,7 @@ impl QuillApp {
     ) -> Dialog {
         let on_close =
             QuillShell::on_close_kind(app, shell, DialogKind::EmojiSetStyle, |this, _, cx| {
-                this.settings.emoji_style.open = false;
+                this.preferences.emoji_style.open = false;
                 cx.notify();
             });
         app.update(cx, |this, cx| {
@@ -455,7 +455,7 @@ impl QuillApp {
                         .child(format!("{}.", credits.join(". "))),
                 )
                 .when_some(
-                    this.settings.emoji_style.file_error.clone(),
+                    this.preferences.emoji_style.file_error.clone(),
                     |body, error| {
                         body.child(div().text_xs().text_color(cx.theme().danger).child(error))
                     },
@@ -468,7 +468,7 @@ impl QuillApp {
                 Button::new("emoji-sets-close")
                     .label(tr(keys::CLOSE))
                     .on_click(cx.listener(|this, _, window, cx| {
-                        this.settings.emoji_style.open = false;
+                        this.preferences.emoji_style.open = false;
                         cx.notify();
                         this.close_kit_dialog_if_done(DialogKind::EmojiSetStyle, window, cx);
                     })),
@@ -571,7 +571,7 @@ crate::ui::shell::register_dialogs! {
     /// Settings → Chat → "Choose emoji set".
     EmojiSetStyle => DialogSpec::new(
         7250,
-        |app| app.settings.emoji_style.open,
+        |app| app.preferences.emoji_style.open,
         QuillApp::build_emoji_set_style_dialog,
     ),
 }

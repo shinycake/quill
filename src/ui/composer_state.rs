@@ -3,11 +3,8 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::*;
-use quill::composer::ComposerEdit;
-use quill::composer::ComposerReplyTo;
 use quill::composer::DraftTopic;
 use quill::ids::ChatId;
-use quill::ids::MessageId;
 use quill::telegram::envelope::ChatDraft;
 
 /// A draft to clear once a send is acknowledged. `sent` is the composer
@@ -46,28 +43,14 @@ impl DraftClear {
 }
 
 pub(crate) struct ComposerUi {
-    /// Phase 3.3: `/` command menu state. Open while the composer text
-    /// ends with a `/`-led token and the open bot chat has commands;
-    /// `command_menu_selected` is the highlighted row (Up/Down/Enter).
-    pub(super) command_menu_open: bool,
-    pub(super) command_menu_selected: usize,
     /// Highlighted row of the composer's `@` suggestions.
     pub(super) mention_selected: usize,
     /// Composer `#hashtag` / `:emoji` autocomplete popup.
     pub(super) suggest: super::composer_suggest::SuggestUi,
     pub(super) emoji_words: super::emoji_words_ui::EmojiWordsUi,
-    /// Bots slice: `@botname query` inline-mode results dropdown above
-    /// the composer. `inline_results_selected` is the highlighted row
-    /// (Up/Down/Enter); `inline_query_token` debounces the
-    /// `getInlineQueryResults` dispatch (100ms quiet window, TGX).
-    /// `inline_query_armed` is the `(username, query)` a debounce timer
-    /// is currently armed for — `poll_live` re-runs the inline progress
-    /// check after every batch of session updates, and the armed identity
-    /// keeps it from spawning a duplicate timer per poll.
-    pub(super) inline_results_open: bool,
-    pub(super) inline_results_selected: usize,
+    /// Debounces the `getInlineQueryResults` dispatch (100ms quiet
+    /// window, TGX); the dropdown itself is the chat's (`ChatUi`).
     pub(super) inline_query_token: u64,
-    pub(super) inline_query_armed: Option<(String, String)>,
     /// Scroll position of the inline results panel (`inline_grid.rs`).
     pub(super) inline_scroll: gpui_kit::ScrollHandle,
     /// The chat an inline results button left, to come back to
@@ -93,28 +76,9 @@ pub(crate) struct ComposerUi {
     /// The send button's options menu and its effect picker
     /// (`send_effects`).
     pub(super) send_menu: super::send_effects::SendMenuUi,
-    /// M1: the schedule picker popup above the composer.
-    pub(super) schedule_popup_open: bool,
-    /// The date+time picker behind the schedule popup (created when the
-    /// popup opens, see `open_schedule_picker`).
-    pub(super) schedule_picker: Option<super::scheduled::SchedulePicker>,
-    /// M1: the scheduled-messages dialog (view/delete).
-    pub(super) scheduled_dialog_open: bool,
-    /// Scheduled messages ticked in the dialog (send now, reschedule or
-    /// delete together).
-    pub(super) scheduled_selected: Vec<MessageId>,
-    /// M2: the rich editor is open — the composer textarea is interpreted
-    /// as block markup (`quill::rich::markup_to_blocks`) and sends via
-    /// `inputMessageRichMessage`. Opened via the ⛶ button (visible after
-    /// 3+ lines, per the anniversary post).
-    pub(super) rich_editor_open: bool,
     /// A rich draft's discard and Premium boxes and the rich paste notice
     /// (`rich_draft`).
     pub(super) rich_draft: super::rich_draft::RichDraftUi,
-    /// Same-chat reply draft (tdesktop `FieldHeader::replyToMessage`).
-    /// Private on purpose: a sender must take the reply through
-    /// `QuillApp::reply_for_send` so a reply to a deleted message is dropped.
-    pending_reply: Option<ComposerReplyTo>,
     /// Chat whose draft should be cleared after `updateMessageSendSucceeded`
     /// if the composer is still empty, and the text that send took.
     pub(super) clear_draft_on_success: Option<DraftClear>,
@@ -128,17 +92,9 @@ pub(crate) struct ComposerUi {
     /// a change to that draft replaces the field: text a link put in the
     /// composer survives drafts arriving for other chats.
     pub(super) shown_draft: Option<(ChatId, DraftTopic, Option<ChatDraft>)>,
-    /// Own-message edit (tdesktop `FieldHeader::editMessage`).
-    pub(super) pending_edit: Option<ComposerEdit>,
-    /// The "Cancel editing?" box is open (`DialogKind::CancelEditConfirm`).
-    pub(super) cancel_edit_confirm: bool,
     /// What the compose field's placeholder was last built from
     /// (`sync_composer_placeholder`): the facts and the language.
     pub(super) placeholder_shown: Option<(quill::composer::PlaceholderFacts, usize)>,
-    /// Normal composer draft stashed while editing (`DraftType::Normal`).
-    pub(super) saved_edit_draft: String,
-    /// Reply that belonged to that normal draft. Restored with the text on cancel.
-    pub(super) saved_edit_reply: Option<ComposerReplyTo>,
     /// The composer's link dialog (Cmd/Ctrl+K on a selection).
     pub(super) link_dialog: Option<super::composer_shortcuts::ComposerLinkDialog>,
     /// The composer's date box (Formatting > Date).
@@ -164,8 +120,6 @@ pub(crate) struct ComposerUi {
     pub(super) drop_state: Option<quill::drop_modes::DragState>,
     /// A demo's fixed drop-zone state (no real drag in a screenshot).
     pub(super) drop_preview: Option<quill::drop_modes::DragState>,
-    /// The composer's "send as" identity list is open.
-    pub(super) send_as_open: bool,
     /// Phase A1: the open chat whose slow-mode countdown is ticking
     /// (`Some` exactly while the 1s tick task runs). Mirrors `voice_tick`.
     pub(super) slow_mode_tick_chat: Option<ChatId>,
@@ -179,35 +133,12 @@ pub(crate) struct ComposerUi {
 }
 
 impl ComposerUi {
-    /// The reply the bar shows. Display and bookkeeping only: anything that
-    /// sends reads `QuillApp::reply_for_send`, which drops a deleted target.
-    pub(super) fn reply(&self) -> Option<&ComposerReplyTo> {
-        self.pending_reply.as_ref()
-    }
-
-    pub(super) fn has_reply(&self) -> bool {
-        self.pending_reply.is_some()
-    }
-
-    pub(super) fn set_reply(&mut self, reply: Option<ComposerReplyTo>) {
-        self.pending_reply = reply;
-    }
-
-    pub(super) fn take_reply(&mut self) -> Option<ComposerReplyTo> {
-        self.pending_reply.take()
-    }
-
     pub(super) fn new() -> Self {
         Self {
-            command_menu_open: false,
-            command_menu_selected: 0,
             mention_selected: 0,
             suggest: super::composer_suggest::SuggestUi::load(),
             emoji_words: Default::default(),
-            inline_results_open: false,
-            inline_results_selected: 0,
             inline_query_token: 0,
-            inline_query_armed: None,
             inline_scroll: gpui_kit::ScrollHandle::new(),
             inline_return: None,
             edit_replace_as_file: false,
@@ -217,22 +148,12 @@ impl ComposerUi {
             send_silent_once: false,
             send_effect_once: 0,
             send_menu: Default::default(),
-            schedule_popup_open: false,
-            schedule_picker: None,
-            scheduled_dialog_open: false,
-            scheduled_selected: Vec::new(),
-            rich_editor_open: false,
             rich_draft: Default::default(),
-            pending_reply: None,
             clear_draft_on_success: None,
             draft_restore_pending: false,
             remote_draft_seen: 0,
             shown_draft: None,
-            pending_edit: None,
-            cancel_edit_confirm: false,
             placeholder_shown: None,
-            saved_edit_draft: String::new(),
-            saved_edit_reply: None,
             link_dialog: None,
             date_dialog: None,
             code_language: None,
@@ -243,12 +164,24 @@ impl ComposerUi {
             drop_paths: Vec::new(),
             drop_state: None,
             drop_preview: None,
-            send_as_open: false,
             slow_mode_tick_chat: None,
             poll_dialog: None,
             checklist_dialog: None,
             send_box: super::send_box_state::SendBoxUi::new(),
             text_limit: Default::default(),
         }
+    }
+}
+
+/// The video editor's preview is a file on disk: it goes with the editor
+/// (`close_video_editor`); the rest of the composer's state is the
+/// account's only app-side.
+impl super::on_screen::Farewell for ComposerUi {
+    fn farewell(
+        app: &mut super::app::QuillApp,
+        _: &mut gpui_kit::Window,
+        cx: &mut gpui_kit::Context<super::app::QuillApp>,
+    ) {
+        app.close_video_editor(cx);
     }
 }

@@ -83,7 +83,7 @@ impl QuillApp {
         };
         match sent {
             Ok(_) => {
-                if let Some(dialog) = self.dialogs.add_contact_dialog.as_mut() {
+                if let Some(dialog) = self.screen.dialogs.add_contact_dialog.as_mut() {
                     dialog.sent_name = Some(first);
                     if self.live.is_none() {
                         dialog.not_joined = true;

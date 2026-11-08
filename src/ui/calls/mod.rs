@@ -56,7 +56,7 @@ impl QuillApp {
     /// Phase C2i: the user confirmed the pending call in the
     /// confirm-before-calling dialog.
     pub(super) fn confirm_pending_call(&mut self, cx: &mut Context<Self>) {
-        if let Some((user_id, is_video)) = self.calls.confirm.take() {
+        if let Some((user_id, is_video)) = self.call_boxes.confirm.take() {
             self.dial_user(user_id, is_video, cx);
         } else {
             cx.notify();
@@ -66,7 +66,7 @@ impl QuillApp {
     /// Phase C2i: the user cancelled the pending call in the
     /// confirm-before-calling dialog.
     pub(super) fn cancel_pending_call(&mut self, cx: &mut Context<Self>) {
-        self.calls.confirm = None;
+        self.call_boxes.confirm = None;
         cx.notify();
     }
 
@@ -104,7 +104,8 @@ impl QuillApp {
                 .active_call
                 .as_ref()
                 .is_some_and(|call| !call.muted);
-            self.connection
+            self.screen
+                .connection
                 .set_note(match live.driver.set_call_muted(muted) {
                     Ok(()) => {
                         if muted {
@@ -210,8 +211,8 @@ impl QuillApp {
                 return;
             };
             let call_id = call.id;
-            self.connection
-                .set_note(match live.driver.set_call_screen_share(call_id, sharing) {
+            self.screen.connection.set_note(
+                match live.driver.set_call_screen_share(call_id, sharing) {
                     Ok(()) => {
                         if sharing {
                             StatusNote::silent(tr(keys::Q_OPS_SCREEN_SHARE_ON))
@@ -223,7 +224,8 @@ impl QuillApp {
                         keys::Q_OPS_COULD_NOT_CHANGE_SCREEN_SHARE,
                         &[("err", &err.to_string())],
                     )),
-                });
+                },
+            );
         } else if let Some(call) = self
             .demo_session
             .as_mut()
@@ -247,7 +249,7 @@ impl QuillApp {
             // Phase C2e: camera selection goes to the driver, which
             // stores it and re-applies the camera on the active call.
             if kind == quill::calls::engine::MediaDeviceKind::Camera {
-                self.connection.set_note(
+                self.screen.connection.set_note(
                     match live.driver.select_call_camera(Some(device_id.to_string())) {
                         Ok(()) => StatusNote::silent(tr(keys::Q_OPS_CAMERA_SELECTED)),
                         Err(err) => StatusNote::error(tr_with(
@@ -269,14 +271,15 @@ impl QuillApp {
                 }
                 _ => return,
             };
-            self.connection
-                .set_note(match live.driver.select_call_devices(microphone, speaker) {
+            self.screen.connection.set_note(
+                match live.driver.select_call_devices(microphone, speaker) {
                     Ok(()) => StatusNote::silent(tr(keys::Q_OPS_AUDIO_DEVICE_SELECTED)),
                     Err(err) => StatusNote::error(tr_with(
                         keys::Q_OPS_COULD_NOT_SELECT_AUDIO_DEVICE,
                         &[("err", &err.to_string())],
                     )),
-                });
+                },
+            );
         } else {
             match kind {
                 quill::calls::engine::MediaDeviceKind::Microphone => {
@@ -414,7 +417,8 @@ impl QuillApp {
 
     pub(super) fn upload_call_diagnostics(&mut self, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
-            self.connection
+            self.screen
+                .connection
                 .set_note(match live.driver.send_call_debug_information() {
                     Ok(_) => StatusNote::silent(tr(keys::Q_OPS_DIAGNOSTICS_UPLOAD_SENT)),
                     Err(_) => StatusNote::error(tr(keys::Q_OPS_COULD_NOT_UPLOAD_DIAGNOSTICS)),
@@ -437,10 +441,12 @@ impl QuillApp {
     /// ended call's log file (schema 1.8.67 :14240).
     pub(super) fn upload_call_log(&mut self, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
-            self.connection.set_note(match live.driver.send_call_log() {
-                Ok(_) => StatusNote::silent(tr(keys::Q_OPS_CALL_LOG_UPLOAD_SENT)),
-                Err(_) => StatusNote::error(tr(keys::Q_OPS_COULD_NOT_UPLOAD_THE_CALL)),
-            });
+            self.screen
+                .connection
+                .set_note(match live.driver.send_call_log() {
+                    Ok(_) => StatusNote::silent(tr(keys::Q_OPS_CALL_LOG_UPLOAD_SENT)),
+                    Err(_) => StatusNote::error(tr(keys::Q_OPS_COULD_NOT_UPLOAD_THE_CALL)),
+                });
         } else if let Some(summary) = self
             .demo_session
             .as_mut()
@@ -509,6 +515,7 @@ impl QuillApp {
             return;
         }
         self.calls.tick_active = true;
+        // screen-scope: the call tick reads the current screen and the background accounts' rings on every beat, and must keep running across a switch.
         cx.spawn(async move |this, cx| {
             loop {
                 // Frames wake their own pictures (`call_video`).
@@ -564,7 +571,7 @@ impl QuillApp {
                 this.cancel_pending_call(cx);
             });
         app.update(cx, |this, cx| {
-            let Some((user_id, is_video)) = this.calls.confirm else {
+            let Some((user_id, is_video)) = this.call_boxes.confirm else {
                 return dialog
                     .overlay(true)
                     .title(crate::ui::shell::dialog_title(tr(keys::Q_OPS_CONFIRM_CALL)))
@@ -648,7 +655,7 @@ impl QuillApp {
                 Err(_) => StatusNote::error(tr(keys::Q_OPS_COULD_NOT_ANSWER_THE_CALL)),
             });
         } else if let Some(session) = self.demo_session.as_mut() {
-            if let Some((call_id, user_id, is_video)) = session.calls.swap_pending.take() {
+            if let Some((call_id, user_id, is_video)) = session.calls.second_call.take_prompt() {
                 session.calls.active_call = None;
                 session.calls.summary = None;
                 session.calls.active_call = Some(ActiveCall {
@@ -663,8 +670,7 @@ impl QuillApp {
                     started_at: Instant::now(),
                     ready_at: None,
                     ready: None,
-                    transport: None,
-                    transport_error: None,
+                    transport: Default::default(),
                     signaling_queue: Vec::new(),
                     signaling_dropped: 0,
                     muted: false,
@@ -693,7 +699,7 @@ impl QuillApp {
                 Err(_) => StatusNote::error(tr(keys::Q_OPS_COULD_NOT_DECLINE_THE_CALL)),
             });
         } else if let Some(session) = self.demo_session.as_mut() {
-            session.calls.swap_pending = None;
+            session.calls.second_call.take_prompt();
             self.connection.set_note(StatusNote::silent(tr(
                 keys::Q_OPS_DEMO_SWAP_DECLINED_NO_LIVE,
             )));
@@ -717,7 +723,7 @@ impl QuillApp {
             });
         app.update(cx, |this, cx| {
             let Some((_call_id, user_id, is_video)) =
-                this.session().and_then(|s| s.calls.swap_pending)
+                this.session().and_then(|s| s.calls.second_call.prompt())
             else {
                 return dialog
                     .overlay(true)
@@ -851,15 +857,16 @@ impl QuillApp {
 crate::ui::shell::register_dialogs! {
     CallConfirm => DialogSpec::new(
         1100,
-        |app| app.calls.confirm.is_some(),
+        |app| app.call_boxes.confirm.is_some(),
         QuillApp::build_call_confirm_dialog,
-    ),
+    )
+    .close(|app, _, cx| app.cancel_pending_call(cx)),
 
     /// Swap prompt: incoming call while another call is active.
     CallSwap => DialogSpec::new(
         // Swap prompt is call-urgent: same priority band as CallConfirm.
         1200,
-        |app| app.session().is_some_and(|s| s.calls.swap_pending.is_some()),
+        |app| app.session().is_some_and(|s| s.calls.second_call.prompt().is_some()),
         QuillApp::build_call_swap_dialog,
     ),
 }

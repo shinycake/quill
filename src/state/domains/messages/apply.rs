@@ -264,8 +264,9 @@ impl Session {
                 // separately on `can_retry` (`resendMessages` via
                 // `driver.resend_failed_message`) — not every failed send
                 // may be retried.
+                let can_retry = message.can_retry;
                 let mut row = history_message(message, true);
-                row.failed = true;
+                row.send = SendState::Failed { can_retry };
                 self.index_poll(&row);
                 let history = self.history_entry(chat_id);
                 history.replace_id(old_message_id, row.clone());
@@ -498,7 +499,7 @@ impl Session {
                         .messages
                         .scheduled_messages
                         .iter_mut()
-                        .find(|m| m.id == message.id)
+                        .find(|m| m.chat_id == message.chat_id && m.id == message.id)
                     {
                         *slot = message;
                     } else {

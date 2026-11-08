@@ -435,7 +435,8 @@ crate::ui::shell::register_dialogs! {
         1056,
         |app| app.agent_consent_open(),
         QuillApp::build_agent_consent_dialog,
-    ),
+    )
+    .close(|app, _, cx| app.cancel_all_chats(cx)),
 
     /// Settings: "Reset token" asks first.
     AgentResetToken => DialogSpec::new(
@@ -443,7 +444,7 @@ crate::ui::shell::register_dialogs! {
         |app| app.agent_reset_open(),
         QuillApp::build_agent_reset_dialog,
     )
-    .closes(|app, _, cx| {
+    .close(|app, _, cx| {
         app.agent_ui.page.reset_confirm = false;
         cx.notify();
     }),

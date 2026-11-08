@@ -261,8 +261,8 @@ impl QuillApp {
             None => (None, None, false, false),
         };
         keep_password_field(
-            &self.payments.gift_export_password,
-            &mut self.payments.gift_export_password_focused,
+            &self.screen.payments.gift_export_password,
+            &mut self.screen.payments.gift_export_password_focused,
             in_password,
             idle_password,
             window,
@@ -386,5 +386,5 @@ crate::ui::shell::register_dialogs! {
         },
         QuillApp::build_gift_transfer_dialog,
     )
-    .closes(|app, window, cx| app.close_gift_transfer(window, cx)),
+    .close(|app, window, cx| app.close_gift_transfer(window, cx)),
 }

@@ -44,7 +44,7 @@ impl QuillApp {
             multiple: false,
             prompt: Some(tr(keys::Q_PEOPLE_IMPORT_CONTACTS).into()),
         });
-        cx.spawn(async move |this, cx| {
+        self.spawn_screen(cx, async move |this, cx| {
             if let Ok(Ok(Some(paths))) = picker.await
                 && let Some(path) = paths.into_iter().next()
             {
@@ -66,7 +66,7 @@ impl QuillApp {
             file_name: display_name(&path),
         };
         cx.notify();
-        cx.spawn(async move |this, cx| {
+        self.spawn_screen(cx, async move |this, cx| {
             let state = cx
                 .background_executor()
                 .spawn(async move { read_vcard_file(&path) })

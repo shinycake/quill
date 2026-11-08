@@ -290,7 +290,7 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.group_call.rtmp_start = RtmpStartUi::default();
+        self.group_call_boxes.rtmp_start = RtmpStartUi::default();
         match self.live.as_mut() {
             Some(live) => {
                 if live.driver.begin_rtmp_start(chat_id).is_err() {
@@ -310,7 +310,7 @@ impl QuillApp {
 
     /// The box closed (Cancel, Esc, backdrop): end the process.
     pub(in crate::ui) fn close_rtmp_start(&mut self, cx: &mut Context<Self>) {
-        self.group_call.rtmp_start = RtmpStartUi::default();
+        self.group_call_boxes.rtmp_start = RtmpStartUi::default();
         match self.live.as_mut() {
             Some(live) => live.driver.close_rtmp_start(),
             None => {
@@ -360,7 +360,7 @@ impl QuillApp {
             self.session().is_some_and(|s| s.chat_am_creator(chat_id)),
         );
         self.end_current_call_for_create(cx);
-        self.group_call.rtmp_start = RtmpStartUi::default();
+        self.group_call_boxes.rtmp_start = RtmpStartUi::default();
         let sent = match self.live.as_mut() {
             Some(live) => live.driver.start_rtmp_stream().ok(),
             // Screenshot demos and tests have no TDLib: the process ends.
@@ -374,8 +374,8 @@ impl QuillApp {
 
     /// The revoke confirmation was accepted: ask for a new URL and key.
     fn revoke_rtmp_start_key(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.group_call.rtmp_start.confirm = None;
-        self.group_call.rtmp_start.key_shown = false;
+        self.group_call_boxes.rtmp_start.confirm = None;
+        self.group_call_boxes.rtmp_start.key_shown = false;
         if let Some(live) = self.live.as_mut()
             && live.driver.revoke_rtmp_start_key().is_err()
         {
@@ -439,7 +439,7 @@ impl QuillApp {
                     )))
                     .on_close(on_close.clone());
             };
-            let confirm = this.group_call.rtmp_start.confirm;
+            let confirm = this.group_call_boxes.rtmp_start.confirm;
             let body = match confirm {
                 Some(which) => confirm_view(which, cx),
                 None => div()
@@ -451,16 +451,17 @@ impl QuillApp {
                             prefix: "rtmp-start",
                             url,
                             key,
-                            key_shown: this.group_call.rtmp_start.key_shown,
+                            key_shown: this.group_call_boxes.rtmp_start.key_shown,
                             revoke_label: tr(keys::GROUP_INVITE_CONTEXT_REVOKE),
                         },
                         cx,
                         |this, cx| {
-                            this.group_call.rtmp_start.confirm = Some(RtmpConfirm::KeyWarning);
+                            this.group_call_boxes.rtmp_start.confirm =
+                                Some(RtmpConfirm::KeyWarning);
                             cx.notify();
                         },
                         |this, cx| {
-                            this.group_call.rtmp_start.confirm = Some(RtmpConfirm::Revoke);
+                            this.group_call_boxes.rtmp_start.confirm = Some(RtmpConfirm::Revoke);
                             cx.notify();
                         },
                     ))
@@ -565,7 +566,7 @@ fn confirm_view(which: RtmpConfirm, cx: &mut Context<QuillApp>) -> AnyElement {
                         .label(tr(keys::CANCEL))
                         .ghost()
                         .on_click(cx.listener(|this, _, _, cx| {
-                            this.group_call.rtmp_start.confirm = None;
+                            this.group_call_boxes.rtmp_start.confirm = None;
                             cx.notify();
                         })),
                 )
@@ -580,8 +581,8 @@ fn confirm_view(which: RtmpConfirm, cx: &mut Context<QuillApp>) -> AnyElement {
                             .on_click(cx.listener(move |this, _, window, cx| match which {
                                 RtmpConfirm::Revoke => this.revoke_rtmp_start_key(window, cx),
                                 RtmpConfirm::KeyWarning => {
-                                    this.group_call.rtmp_start.confirm = None;
-                                    this.group_call.rtmp_start.key_shown = true;
+                                    this.group_call_boxes.rtmp_start.confirm = None;
+                                    this.group_call_boxes.rtmp_start.key_shown = true;
                                     cx.notify();
                                 }
                             })),

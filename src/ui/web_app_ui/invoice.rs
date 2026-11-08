@@ -53,9 +53,12 @@ impl InvoiceWatch {
             return Some("paid");
         }
         if !view.dialog_open {
+            // A payment still being sent when the checkout closed (Esc, or
+            // the 3-D Secure page taking over before the next look) may
+            // still go through: that is pending, never cancelled.
             return Some(if self.failed {
                 "failed"
-            } else if self.pending {
+            } else if self.pending || self.sending || view.sending {
                 "pending"
             } else {
                 "cancelled"
@@ -113,14 +116,25 @@ impl QuillApp {
 
     /// Reports the checkout's end to the app; called by the mini app poll.
     pub(super) fn poll_invoice(&mut self, cx: &mut Context<Self>) {
+        // The watched invoice's own payment: a checkout opened for another
+        // invoice, or a payment of one closed before, says nothing here.
+        let Some(invoice) = self
+            .mini_apps
+            .window
+            .as_ref()
+            .and_then(|window| window.invoice.as_ref())
+            .and_then(|watch| invoice_link_invoice(&watch.slug))
+        else {
+            return;
+        };
+        let payments = self.session().map(|s| &s.payments);
+        let shown = payments.is_some_and(|p| p.shows(&invoice));
         let view = CheckoutView {
             dialog_open: self.payments.dialog.is_some(),
-            paid: self.session().is_some_and(|s| s.payments.form_paid),
-            sending: self.session().is_some_and(|s| s.payments.sending),
-            note: self.session().is_some_and(|s| s.payments.note.is_some()),
-            verification: self
-                .session()
-                .is_some_and(|s| s.payments.verification_started),
+            paid: shown && payments.is_some_and(|p| p.form_paid),
+            sending: payments.is_some_and(|p| p.is_paying(&invoice)),
+            note: shown && payments.is_some_and(|p| p.note.is_some()),
+            verification: shown && payments.is_some_and(|p| p.verification_started),
         };
         let Some(window) = self.mini_apps.window.as_mut() else {
             return;
@@ -200,6 +214,31 @@ mod tests {
         assert_eq!(watch.observe(sending), None);
         assert_eq!(watch.observe(verifying), None);
         assert_eq!(watch.observe(CheckoutView::default()), Some("pending"));
+    }
+
+    #[test]
+    fn a_checkout_closed_while_the_payment_is_sent_is_pending() {
+        let mut watch = InvoiceWatch::new("s");
+        let sending = CheckoutView {
+            sending: true,
+            ..open()
+        };
+        assert_eq!(watch.observe(sending), None);
+        // Closed (Esc, or the 3-D Secure page) before the next look.
+        assert_eq!(watch.observe(CheckoutView::default()), Some("pending"));
+    }
+
+    #[test]
+    fn a_checkout_closed_before_any_look_saw_the_send_is_pending() {
+        let mut watch = InvoiceWatch::new("s");
+        assert_eq!(watch.observe(open()), None);
+        // Pay, then Esc within one poll: the first look already finds the
+        // dialog closed with the payment still being sent.
+        let closed_sending = CheckoutView {
+            sending: true,
+            ..CheckoutView::default()
+        };
+        assert_eq!(watch.observe(closed_sending), Some("pending"));
     }
 
     #[test]

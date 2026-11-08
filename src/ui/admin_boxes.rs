@@ -189,17 +189,20 @@ crate::ui::shell::register_dialogs! {
         2948,
         |app| matches!(admin_kind(app), Some(AdminDialogKind::Promote { .. })),
         QuillApp::build_admin_promote_dialog,
-    ),
+    )
+    .close(|app, _, cx| app.close_admin_dialog(cx)),
     AdminRights => DialogSpec::new(
         2949,
         |app| matches!(admin_kind(app), Some(AdminDialogKind::EditRights { .. })),
         QuillApp::build_admin_rights_dialog,
-    ),
+    )
+    .close(|app, _, cx| app.close_admin_dialog(cx)),
     AdminDemote => DialogSpec::new(
         2951,
         |app| matches!(admin_kind(app), Some(AdminDialogKind::DemoteConfirm { .. })),
         QuillApp::build_admin_demote_dialog,
-    ),
+    )
+    .close(|app, _, cx| app.close_admin_dialog(cx)),
 }
 
 super::screenshot_demo::register_demos![

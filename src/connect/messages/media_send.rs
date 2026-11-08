@@ -365,7 +365,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         else {
             return Err(ConnectSendError::InvalidRequest);
         };
-        if message.pending || message.id.0 <= 0 {
+        if message.pending() || message.id.0 <= 0 {
             return Err(ConnectSendError::InvalidRequest);
         }
         let extra = self

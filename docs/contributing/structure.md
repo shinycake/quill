@@ -25,10 +25,26 @@ State that belongs to one feature lives in that feature's struct in
 touches only that file: the declaration and its initial value in `new`.
 
 A feature with no struct yet adds `ui/<feature>_state.rs` with a
-`pub(crate) struct <Feature>Ui` and a `new`, plus one `mod` line in
-`ui/mod.rs`, one field in `QuillApp` (`ui/app.rs`) and one line in
-`new_with_demo` (`ui/app_demo.rs`). `new` creates the feature's own text
-fields. Details: `docs/decisions/codex-refactor-3.md`, `-3b.md`, `-3c.md`.
+`pub(crate) struct <Feature>Ui`, a `new` and an
+`impl crate::ui::on_screen::Farewell for <Feature>Ui` (empty unless the
+struct must tell the old client something before it goes), plus one `mod`
+line in `ui/mod.rs` and one field in `OnScreen` (`ui/on_screen.rs`: the
+`on_screen_fields!` list and its line in `OnScreen::new`). `new` creates
+the feature's own text fields. The struct is a field of `QuillApp`
+(`ui/app.rs`) only when it is the process's, not the account on screen's
+(a player engine, the accounts list, a window handle), and then it is
+listed in `scripts/app-wide-state.txt` with the reason;
+`scripts/check-screen-state.py` checks both.
+
+State a view holds for the chat it shows (a bar, a menu, a box opened
+over one chat's messages) is a field of `ChatUi` (`ui/chat_ui_state.rs`),
+which is replaced whole when that chat changes; each chat window has its
+own. A field of `ComposerUi`, `MessageUi`, `HistoryUi`, `PickerUi`,
+`ShareUi` or `ViewerUi` that names one chat's ids goes there, or is
+listed in `scripts/view-state-not-chat.txt` with the reason it may outlive
+its chat; the same script checks it. The design:
+`docs/decisions/account-scoped-ui-state.md`; the older layout:
+`docs/decisions/codex-refactor-3.md`, `-3b.md`, `-3c.md`.
 
 ### A screenshot demo
 
@@ -115,7 +131,7 @@ state is in place then, so it has to say which window it belongs to:
   `spawn_scoped` / `spawn_scoped_in`. It finishes in that window, or not
   at all once the window has closed.
 - Work that belongs to no chat window (the poll loop, background accounts,
-  the passcode): `QuillApp::spawn_main` / `spawn_main_in`.
+  the passcode): `QuillApp::spawn_app` / `spawn_app_in`.
 - A subscription or observer made with a window (`subscribe_in`,
   `on_focus_out`, `observe_window_activation`, `window.defer`): run its body
   in `in_window_of(window, cx, ...)`. GPUI calls it with the window it was
@@ -130,8 +146,21 @@ state is in place then, so it has to say which window it belongs to:
   takes the window with it, and goes through `in_window_scope` with it. A
   separate "which window" field next to it goes stale.
 
+The account on screen is the outer owner of the same kind
+(docs/decisions/account-scoped-ui-state.md): a continuation (`cx.spawn`,
+`spawn_in`, `cx.defer`, `defer_in`, `window.spawn`, `window.defer`,
+`on_next_frame`) acts for the account that was on screen when it started.
+One that touches that account's state (`live`, `session()`, the screen's
+feature structs, or a method that does) starts with `spawn_scoped*`,
+`spawn_screen*` or `defer_screen*`, or does that work inside
+`in_screen_scope(epoch, ...)`; after a switch its update comes back `Gone`
+and nothing runs. `spawn_app*` is for the app's own work and must not touch
+the screen's state. Work that acts for whichever account is on screen says
+why with `// screen-scope: <why>` on one of the three lines above the call.
+
 `scripts/check-window-scope.py` (CI step "window scope") flags async calls
-in `src/ui` whose closure touches window state without one of these. Work
+in `src/ui` whose closure touches window or screen state without one of
+these. Work
 that really needs no window says why in a comment on one of the three lines
 above the call:
 

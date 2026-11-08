@@ -156,18 +156,18 @@ impl Session {
     /// After a successful Stars payment for a paid-media message: the note
     /// tdesktop shows as a toast (`ShowPaidMediaUnlockedToast`, "Media
     /// Unlocked"). Only for paid media; an invoice message gets none.
-    pub(crate) fn note_paid_media_unlocked(&mut self) {
+    pub(crate) fn note_paid_media_unlocked(&mut self, paid: &crate::state::PaymentInFlight) {
         use crate::payment_invoice::InputInvoice;
         use crate::telegram::envelope::PaymentFormTypeData;
-        let Some(InputInvoice::Message {
+        let InputInvoice::Message {
             chat_id,
             message_id,
-        }) = self.payments.request.as_ref().map(|r| r.invoice.clone())
+        } = paid.invoice.clone()
         else {
             return;
         };
         let Some(PaymentFormTypeData::Stars { star_count }) =
-            self.payments.form.as_ref().map(|f| f.form_type.clone())
+            paid.form.as_ref().map(|f| f.form_type.clone())
         else {
             return;
         };

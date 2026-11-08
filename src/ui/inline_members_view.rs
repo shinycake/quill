@@ -156,9 +156,8 @@ impl QuillApp {
 
         // Look again once this frame is laid out: a short list or a
         // page that arrived may leave the end in view.
-        let entity = cx.entity();
-        cx.defer(move |cx| {
-            entity.update(cx, |this, cx| this.maybe_load_more_inline(cx));
+        self.defer_screen(cx, move |this, cx| {
+            this.maybe_load_more_inline(cx);
         });
         Some(block.into_any_element())
     }

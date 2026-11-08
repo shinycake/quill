@@ -268,7 +268,7 @@ impl QuillApp {
             chat_id,
             item.message_id,
             message.is_outgoing,
-            message.pending,
+            message.pending(),
         )?;
         let actions = session
             .messages
@@ -682,7 +682,7 @@ impl QuillApp {
                 .histories
                 .get(&item.chat_id.0)
                 .and_then(|history| history.messages.get(&item.message_id.0))
-                .is_none_or(|message| !message.pending);
+                .is_none_or(|message| !message.pending());
         sent && session.open_chat == Some(item.chat_id) && self.composer_available(self.pane_mode())
     }
 

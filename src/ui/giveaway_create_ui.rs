@@ -117,7 +117,7 @@ impl QuillApp {
         cx.notify();
     }
 
-    fn close_giveaway_form(&mut self, cx: &mut Context<Self>) {
+    pub(super) fn close_giveaway_form(&mut self, cx: &mut Context<Self>) {
         let boosted = self.giveaway.form.take().map(|f| f.draft.boosted_chat_id);
         if let Some(live) = self.live.as_mut() {
             let launched = live.driver.session.payments.giveaway.launch == GiveawayLaunch::Launched;
@@ -649,5 +649,5 @@ crate::ui::shell::register_dialogs! {
         |app| app.giveaway.form.is_some() && !app.payment_dialog_visible(),
         QuillApp::build_giveaway_dialog,
     )
-    .closes(|app, _, cx| app.close_giveaway_form(cx)),
+    .close(|app, _, cx| app.close_giveaway_form(cx)),
 }

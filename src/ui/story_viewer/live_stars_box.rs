@@ -375,11 +375,15 @@ crate::ui::shell::register_dialogs! {
         |app| app.stories.live.stars_box.is_some(),
         QuillApp::build_live_stars_dialog,
     )
-    .closes(|app, _, cx| app.close_live_stars_box(cx)),
+    .close(|app, _, cx| app.close_live_stars_box(cx)),
     /// Deleting a live story comment.
     LiveStoryDelete => DialogSpec::new(
         3853,
         |app| app.stories.live.delete.is_some(),
         QuillApp::build_live_delete_dialog,
-    ),
+    )
+    .close(|app, _, cx| {
+            app.stories.live.delete = None;
+            cx.notify();
+        }),
 }

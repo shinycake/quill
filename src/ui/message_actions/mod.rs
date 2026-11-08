@@ -45,11 +45,12 @@ impl QuillApp {
             cx.notify();
             return;
         };
-        self.connection
-            .set_note(match live.driver.stop_live_location(chat_id, message_id) {
+        self.screen.connection.set_note(
+            match live.driver.stop_live_location(chat_id, message_id) {
                 Ok(_) => StatusNote::silent(tr(keys::Q_CHAT_STOPPED_SHARING_YOUR_LIVE_LOCATION)),
                 Err(_) => StatusNote::error(tr(keys::Q_CHAT_COULDNT_STOP_SHARING_TRY_AGAIN)),
-            });
+            },
+        );
         cx.notify();
     }
 
@@ -121,7 +122,9 @@ fn confirm_hide_pinned(
         tr(keys::Q_CHAT_HIDE),
         move |cx| {
             let _ = app.update(cx, |this, cx| {
-                this.history.hidden_pinned.insert(chat_id.0, newest);
+                if let Some(key) = this.pinned_key(chat_id) {
+                    this.history.hidden_pinned.insert(key, newest);
+                }
                 this.history.pinned_list_open = false;
                 cx.notify();
             });

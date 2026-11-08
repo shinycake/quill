@@ -46,6 +46,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             }),
             None,
         );
+        self.session.stickers.stickers.attached_request = Some(extra);
         match self
             .sender
             .send_json(&crate::telegram::requests::get_attached_sticker_sets(
@@ -54,6 +55,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             Ok(()) => Ok(extra),
             Err(err) => {
                 self.session.requests.take(extra);
+                self.session.stickers.stickers.attached_request = None;
                 self.session.stickers.sticker_set_view = None;
                 Err(err)
             }
@@ -61,8 +63,22 @@ impl<S: JsonSender> ConnectDriver<S> {
     }
 
     /// The attached sets arrived: show the first, or say there are none.
+    /// Only into the box still waiting for them (set 0, loading): one
+    /// closed meanwhile stays closed, and another set's box is left alone.
     pub(crate) fn open_attached_sticker_set(&mut self) -> Result<(), ConnectSendError> {
-        match self.session.stickers.stickers.attached_answer.take() {
+        let answer = self.session.stickers.stickers.attached_answer.take();
+        let waiting = self
+            .session
+            .stickers
+            .sticker_set_view
+            .as_ref()
+            .is_some_and(|view| {
+                view.set_id == 0 && view.stage == crate::state::StickerSetViewStage::Loading
+            });
+        if !waiting {
+            return Ok(());
+        }
+        match answer {
             Some(Some(set_id)) => {
                 self.view_sticker_set(set_id)?;
             }

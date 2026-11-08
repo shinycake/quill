@@ -8,6 +8,7 @@
 //! open when the file is ready.
 #![deny(clippy::indexing_slicing)]
 
+use super::account_job::StartedOn;
 use super::app::QuillApp;
 use super::composer_state::DraftClear;
 use super::recording_state::{CaptureFor, CaptureMedia, StartId};
@@ -23,14 +24,24 @@ use quill::voice::{VoiceCapture, VoiceDraft};
 /// Where a recording goes, fixed when Send is tapped.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct SendTarget {
+    /// Chat ids are the account's own: the recording goes out only while
+    /// the screen it was fixed on is current, never through the account
+    /// switched to.
+    account: StartedOn,
     chat_id: ChatId,
     reply: Option<ComposerReplyTo>,
     caption: String,
 }
 
 impl SendTarget {
-    pub(super) fn new(chat_id: ChatId, reply: Option<ComposerReplyTo>, caption: &str) -> Self {
+    pub(super) fn new(
+        account: StartedOn,
+        chat_id: ChatId,
+        reply: Option<ComposerReplyTo>,
+        caption: &str,
+    ) -> Self {
         Self {
+            account,
             chat_id,
             reply,
             caption: caption.trim().to_owned(),
@@ -83,12 +94,13 @@ impl QuillApp {
         caption: &str,
         cx: &mut Context<Self>,
     ) -> Option<SendTarget> {
+        let account = self.started_on()?;
         let chat_id = self.open_chat_id()?;
         if self.slow_mode_blocked(chat_id, cx) {
             return None;
         }
         let reply = self.reply_for_send(cx);
-        Some(SendTarget::new(chat_id, reply, caption))
+        Some(SendTarget::new(account, chat_id, reply, caption))
     }
 
     /// The recording consumes the composer when Send is tapped, not when
@@ -104,7 +116,7 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         if take_text {
-            self.composer_ui.set_reply(None);
+            self.chat_ui.set_reply(None);
             self.composer
                 .update(cx, |input, cx| input.set_value("", window, cx));
             self.forget_local_draft(target.chat_id);
@@ -122,9 +134,9 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         let text = self.composer.read(cx).value().to_string();
-        let plan = target.restore_plan(self.open_chat_id(), &text, self.composer_ui.reply());
+        let plan = target.restore_plan(self.open_chat_id(), &text, self.chat_ui.reply());
         if plan.reply {
-            self.composer_ui.set_reply(target.reply.clone());
+            self.chat_ui.set_reply(target.reply.clone());
         }
         if plan.caption {
             self.set_composer_markup(&target.caption, window, cx);
@@ -144,16 +156,12 @@ impl QuillApp {
         let Some(target) = self.begin_recording_send(&caption, cx) else {
             return;
         };
+        let play_once = self.recording.once;
         let Some(capture) = self.recording.take_voice() else {
             return;
         };
-        // The send consumes the recording: locked state must not leak into
-        // the next one.
-        self.recording.locked = false;
-        self.recording.discard_confirm = false;
         self.stop_record_preview();
         self.consume_composer_for_send(&target, true, window, cx);
-        let play_once = std::mem::take(&mut self.recording.once);
         let finish = capture.close_microphone();
         self.sync_voice_action();
         cx.notify();
@@ -166,18 +174,40 @@ impl QuillApp {
                 this.send_finished_voice(result, &target, play_once, window, cx);
             });
             if sent.is_err() {
-                if let Some(path) = path {
-                    let _ = std::fs::remove_file(path);
-                }
-                let _ = this.main().update(cx, |this, cx| {
-                    this.connection.set_note(StatusNote::silent(tr(
+                let _ = this.app().update(cx, |this, cx| {
+                    this.recording_dropped(
+                        &target,
+                        path,
                         keys::Q_NOTES_VOICE_NOTE_NOT_SENT_WINDOW_CLOSED,
-                    )));
-                    cx.notify();
+                        cx,
+                    );
                 });
             }
         })
         .detach();
+    }
+
+    /// The send's update came back `Gone`: its window closed, or the
+    /// account it was recorded on left the screen. Runs as the app
+    /// (`ScopedApp::app`): the file goes, and the note says which, rather
+    /// than send the file to whichever chat or account is current.
+    fn recording_dropped(
+        &mut self,
+        target: &SendTarget,
+        path: Option<std::path::PathBuf>,
+        window_closed: quill::lang::Key,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(path) = path {
+            let _ = std::fs::remove_file(path);
+        }
+        let key = if self.on_screen(&target.account) {
+            window_closed
+        } else {
+            keys::Q_NOTES_RECORDING_NOT_SENT_ACCOUNT_CHANGED
+        };
+        self.connection.set_note(StatusNote::silent(tr(key)));
+        cx.notify();
     }
 
     fn send_finished_voice(
@@ -266,9 +296,6 @@ impl QuillApp {
         let Some(capture) = self.recording.take_video() else {
             return;
         };
-        self.recording.once = false;
-        self.recording.locked = false;
-        self.recording.discard_confirm = false;
         self.consume_composer_for_send(&target, false, window, cx);
         self.sync_voice_action();
         cx.notify();
@@ -281,16 +308,13 @@ impl QuillApp {
                 this.send_finished_video_note(result, &target, window, cx);
             });
             if sent.is_err() {
-                // Its window closed while the file was finished: say so,
-                // rather than send it to whichever chat is open now.
-                if let Some(path) = path {
-                    let _ = std::fs::remove_file(path);
-                }
-                let _ = this.main().update(cx, |this, cx| {
-                    this.connection.set_note(StatusNote::silent(tr(
+                let _ = this.app().update(cx, |this, cx| {
+                    this.recording_dropped(
+                        &target,
+                        path,
                         keys::Q_MISC_VIDEO_NOTE_NOT_SENT_ITS_WINDOW_CLOSED,
-                    )));
-                    cx.notify();
+                        cx,
+                    );
                 });
             }
         })
@@ -491,8 +515,13 @@ mod start_tests;
 #[cfg(test)]
 mod tests {
     use super::{Restore, SendTarget};
+    use crate::ui::account_job::StartedOn;
     use quill::composer::ComposerReplyTo;
     use quill::ids::{ChatId, MessageId};
+
+    fn on_screen() -> StartedOn {
+        StartedOn::new(Default::default())
+    }
 
     fn reply_in(chat: i64) -> ComposerReplyTo {
         ComposerReplyTo::new(ChatId(chat), MessageId(40))
@@ -500,7 +529,7 @@ mod tests {
 
     #[test]
     fn the_target_keeps_the_chat_it_was_fixed_for() {
-        let target = SendTarget::new(ChatId(1), None, "  hi ");
+        let target = SendTarget::new(on_screen(), ChatId(1), None, "  hi ");
         assert!(target.is_open(Some(ChatId(1))));
         // The user opened another chat while the file was finished.
         assert!(!target.is_open(Some(ChatId(2))));
@@ -511,7 +540,7 @@ mod tests {
 
     #[test]
     fn a_failed_send_puts_back_what_the_user_has_not_replaced() {
-        let target = SendTarget::new(ChatId(1), Some(reply_in(1)), " caption ");
+        let target = SendTarget::new(on_screen(), ChatId(1), Some(reply_in(1)), " caption ");
         let open = Some(ChatId(1));
         // Composer still empty: both come back.
         assert_eq!(
@@ -539,7 +568,7 @@ mod tests {
 
     #[test]
     fn a_failed_send_restores_nothing_into_another_chat() {
-        let target = SendTarget::new(ChatId(1), Some(reply_in(1)), "caption");
+        let target = SendTarget::new(on_screen(), ChatId(1), Some(reply_in(1)), "caption");
         assert_eq!(
             target.restore_plan(Some(ChatId(2)), "", None),
             Restore::default()
@@ -549,7 +578,7 @@ mod tests {
 
     #[test]
     fn a_video_without_caption_restores_only_the_reply() {
-        let target = SendTarget::new(ChatId(1), Some(reply_in(1)), "");
+        let target = SendTarget::new(on_screen(), ChatId(1), Some(reply_in(1)), "");
         assert_eq!(
             target.restore_plan(Some(ChatId(1)), "", None),
             Restore {
@@ -561,9 +590,9 @@ mod tests {
 
     #[test]
     fn the_reply_belongs_to_the_target_chat_only() {
-        let target = SendTarget::new(ChatId(1), Some(reply_in(1)), "");
+        let target = SendTarget::new(on_screen(), ChatId(1), Some(reply_in(1)), "");
         assert_eq!(target.reply_to().map(|r| r.message_id), Some(MessageId(40)));
-        let elsewhere = SendTarget::new(ChatId(2), Some(reply_in(1)), "");
+        let elsewhere = SendTarget::new(on_screen(), ChatId(2), Some(reply_in(1)), "");
         assert!(elsewhere.reply_to().is_none());
     }
 }

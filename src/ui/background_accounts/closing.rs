@@ -88,9 +88,13 @@ impl QuillApp {
         self.close_later(key, live, restart, cx);
     }
 
-    /// Close the client on screen, if any, without waiting for it.
+    /// Close the client on screen, if any, without waiting for it. The
+    /// screen's UI goes with it at the end of this update
+    /// (`screen_leaves_later`): the callers have no window, and the
+    /// client (logging out, or on a full disk) has nothing to say.
     pub(in crate::ui) fn close_screen_client(&mut self, cx: &mut Context<Self>) {
-        if let Some(live) = self.live.take() {
+        self.screen_leaves_later(cx);
+        if let Some(live) = self.take_live() {
             self.close_live_later(live, false, cx);
         }
     }
@@ -121,7 +125,8 @@ impl QuillApp {
         then: impl FnOnce(&mut QuillApp, bool, &mut Context<QuillApp>) + 'static,
     ) {
         let mut then = Some(then);
-        Self::spawn_main(cx, async move |this, cx| {
+        // screen-scope: the wait covers the closing clients of every account, and its follow-up acts on whatever is on screen then.
+        Self::spawn_app(cx, async move |this, cx| {
             loop {
                 let finished = this.update(cx, |this, cx| {
                     this.reap_closing(cx);

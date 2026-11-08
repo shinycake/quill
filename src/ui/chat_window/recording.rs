@@ -51,18 +51,21 @@ impl QuillApp {
         };
         let handle = match origin {
             Some(chat_id) => self.windows.window_for(chat_id).map(|open| open.handle),
-            None => self.windows.main,
+            None => self.main_window.handle,
         };
         let Some(handle) = handle else {
             self.discard_recording_of_closed_window(cx);
             return;
         };
         let app = cx.weak_entity();
+        let screen = self.screen_epoch();
         // Deferred: updating the window needs the app entity, leased now.
         // window-scope: send_recording puts the recording's window in place
         cx.defer(move |cx| {
             let _ = handle.update(cx, |_, window, cx| {
-                app.update(cx, |app, cx| app.send_recording(window, cx))
+                app.update(cx, |app, cx| {
+                    app.in_screen_scope(screen, cx, |app, cx| app.send_recording(window, cx))
+                })
             });
         });
     }

@@ -46,7 +46,7 @@ fn muting_the_pip_window_shows_on_a_paused_player_bar(cx: &mut TestAppContext) {
     let (app, mut vcx) = open(cx);
     let vcx = &mut vcx;
     app.update(vcx, |app, cx| app.toggle_active_playback(cx));
-    assert!(app.read_with(vcx, |app, _| !app.playback.is_playing()));
+    assert!(app.read_with(vcx, |app, _| !app.is_playing()));
     vcx.update(|window, _| {
         window.set_a11y_forced(true);
         window.refresh();

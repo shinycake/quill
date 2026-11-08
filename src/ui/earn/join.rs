@@ -10,6 +10,7 @@ use gpui_kit::component::button::*;
 use gpui_kit::component::menu::{ContextMenuExt, DropdownMenu, PopupMenuItem};
 use gpui_kit::component::spinner::Spinner;
 use quill::earn::*;
+use quill::ids::OfAccount;
 use quill::lang::{keys, tr, tr_with};
 
 /// How many screens ahead of the end the next page loads (tdesktop
@@ -393,17 +394,24 @@ impl QuillApp {
             self.session().and_then(|s| s.users_state.open_info_panel),
             Some(InfoPanelTarget::Earn(EarnPanel::Join { .. }))
         );
+        let Some(account) = self.current_account() else {
+            return;
+        };
         let Some(live) = self.live.as_mut() else {
             return;
         };
         for bot in bots {
             if live.driver.session.user_photo_path(bot).is_none()
-                && self.earn.photos_asked.insert(bot)
+                && self
+                    .screen
+                    .earn
+                    .photos_asked
+                    .insert(OfAccount::new(account.clone(), bot))
             {
                 let _ = live.driver.download_user_photo(bot);
             }
         }
-        if join_open && near_end(&self.earn.scroll) {
+        if join_open && near_end(&self.screen.earn.scroll) {
             // tdesktop loads "My Programs" to the end before the rest.
             match page_more {
                 Some((true, _)) => {
@@ -415,7 +423,7 @@ impl QuillApp {
                 _ => {}
             }
         }
-        if box_more && near_end(&self.earn.box_scroll) {
+        if box_more && near_end(&self.screen.earn.box_scroll) {
             let _ = live.driver.more_starref_programs(false, true);
         }
     }

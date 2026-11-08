@@ -50,7 +50,7 @@ fn settings_with_a_microphone(
     let open = Arc::new(AtomicUsize::new(0));
     let counted = open.clone();
     app.update(&mut vcx, |app, _| {
-        app.calls.open_mic_test = Arc::new(move || {
+        app.call_boxes.open_mic_test = Arc::new(move || {
             counted.fetch_add(1, Ordering::SeqCst);
             Ok(Box::new(Microphone(counted.clone())) as Box<dyn LevelSource + Send>)
         });
@@ -59,7 +59,9 @@ fn settings_with_a_microphone(
 }
 
 fn testing(app: &Entity<QuillApp>, vcx: &VisualTestContext) -> bool {
-    app.read_with(vcx, |app, _| !matches!(app.calls.mic_test, MicTestRun::Off))
+    app.read_with(vcx, |app, _| {
+        !matches!(app.call_boxes.mic_test, MicTestRun::Off)
+    })
 }
 
 #[gpui_kit::test]

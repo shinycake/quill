@@ -8,6 +8,7 @@ use gpui_kit::component::input::InputState;
 use gpui_kit::component::slider::SliderState;
 use gpui_kit::*;
 use quill::earn::{EarnPeer, TonTx};
+use quill::ids::OfAccount;
 use quill::lang::{keys, tr};
 use quill::premium_hub::StarTx;
 use quill::state::InfoPanelTarget;
@@ -60,7 +61,7 @@ pub(crate) struct EarnUi {
     pub(super) commission: Option<(Entity<SliderState>, Vec<i32>)>,
     pub(super) duration: Option<(Entity<SliderState>, Vec<i32>)>,
     /// Bots whose photo was asked for by a program list.
-    pub(super) photos_asked: HashSet<i64>,
+    pub(super) photos_asked: HashSet<OfAccount<i64>>,
     /// The earn page's scroll; its end loads the next programs page.
     pub(super) scroll: ScrollHandle,
     /// The programs box's list.
@@ -69,6 +70,8 @@ pub(crate) struct EarnUi {
     /// (tdesktop's `starref_link` animation).
     pub(super) link_shown: Option<std::time::Instant>,
 }
+
+impl crate::ui::on_screen::Farewell for EarnUi {}
 
 impl EarnUi {
     pub(super) fn new(window: &mut Window, cx: &mut Context<QuillApp>) -> Self {

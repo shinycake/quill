@@ -7,7 +7,7 @@ use crate::ui::app::QuillApp;
 use crate::ui::screenshot_demo::ScreenshotDemo;
 use crate::ui::web_app_ui::helper_pipe::HelperWriter;
 use crate::ui::web_app_ui::invoice::InvoiceWatch;
-use crate::ui::web_app_ui::{MiniAppWindow, PopupPurpose, RenderAction, theme_params};
+use crate::ui::web_app_ui::{MiniAppWindow, PendingOpen, PopupPurpose, RenderAction, theme_params};
 use gpui_kit::component::Root;
 use gpui_kit::{AppContext, Entity, TestAppContext, VisualTestContext, px, size};
 use quill::web_app::bridge::WebAppEvent;
@@ -219,11 +219,46 @@ fn a_paid_checkout_reports_paid_and_closes(cx: &mut TestAppContext) {
         let received = open_window(app, cx);
         app.open_payment_dialog(window, cx);
         app.mini_apps.window.as_mut().unwrap().invoice = Some(InvoiceWatch::new("abc"));
-        app.demo_session.as_mut().unwrap().payments.form_paid = true;
+        // The checkout shows the watched invoice: a payment of another
+        // invoice would not be reported here.
+        let payments = &mut app.demo_session.as_mut().unwrap().payments;
+        payments.request = Some(quill::state::PaymentRequest {
+            invoice: quill::payment_invoice::InputInvoice::Name("abc".into()),
+        });
+        payments.form_paid = true;
         app.poll_invoice(cx);
         let (event, data) = reply(&received);
         assert_eq!(event, "invoice_closed");
         assert_eq!(data["status"], "paid");
         assert!(app.payments.dialog.is_none(), "the checkout closes");
+    });
+}
+
+/// The window and the launches waiting for TDLib belong to the account on
+/// screen: a switch closes the window and drops what waits, so nothing acts
+/// as the account switched to and nothing keeps the 30 ms poll running.
+#[gpui_kit::test]
+fn an_account_switch_closes_the_mini_app_and_what_waits(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    app.update_in(&mut vcx, |app, window, cx| {
+        let received = open_window(app, cx);
+        let waiting = PendingOpen::Attach {
+            chat_id: quill::ids::ChatId(11),
+            bot_id: BOT,
+        };
+        app.mini_apps.awaiting_attach_bot = Some(waiting.clone());
+        app.mini_apps.awaiting_search = Some(waiting.clone());
+        app.mini_apps.awaiting_toggle = Some(waiting);
+        app.ensure_mini_app_poll(cx);
+
+        app.switch_account(&quill::ids::AccountKey("other".into()), "", window, cx);
+
+        assert!(app.mini_apps.window.is_none(), "the window closed");
+        assert!(matches!(next(&received), HostCommand::Close));
+        assert!(app.mini_apps.awaiting_attach_bot.is_none());
+        assert!(app.mini_apps.awaiting_search.is_none());
+        assert!(app.mini_apps.awaiting_toggle.is_none());
+        assert!(app.mini_apps.poll.is_none(), "the poll stopped");
+        assert!(!app.poll_mini_apps(cx), "nothing is left to wait for");
     });
 }

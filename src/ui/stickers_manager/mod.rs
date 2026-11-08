@@ -234,7 +234,7 @@ impl QuillApp {
                 .commit_sticker_manager(kind == Kind::Masks, removed, order)
                 .is_err()
             {
-                self.connection.set_note(StatusNote::error(tr(
+                self.screen.connection.set_note(StatusNote::error(tr(
                     keys::Q_MEDIA_COULDNT_UPDATE_STICKERS_TRY_AGAIN,
                 )));
             }
@@ -564,7 +564,8 @@ crate::ui::shell::register_dialogs! {
         5000,
         |app| app.settings.sticker_settings_open,
         QuillApp::build_stickers_manager_dialog,
-    ),
+    )
+    .close(|app, _, cx| app.close_stickers_manager(cx)),
     /// The photo editor's "Manage masks".
     MaskSets => DialogSpec::new(
         5110,

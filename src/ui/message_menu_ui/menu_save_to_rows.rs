@@ -45,7 +45,7 @@ impl QuillApp {
                     let target = target.clone();
                     move |this, _, cx| {
                         if let Some(live) = this.live.as_mut() {
-                            this.connection.set_note(
+                            this.screen.connection.set_note(
                                 match live.driver.save_audio_to_profile(
                                     target.file_id,
                                     target.duration,
@@ -85,7 +85,7 @@ impl QuillApp {
                     let draft =
                         quill::composer::ForwardDraft::from_message(chat_id, message_id, false);
                     if let (Some(live), Some(me), Some(draft)) = (this.live.as_mut(), me, draft) {
-                        this.connection.set_note(
+                        this.screen.connection.set_note(
                             match live.driver.forward_messages(ChatId(me), &draft) {
                                 Ok(_) => StatusNote::info(tr(keys::Q_CHAT_SAVED_TO_SAVED_MESSAGES)),
                                 Err(_) => {
@@ -291,7 +291,7 @@ impl QuillApp {
         // a forward shows its original date (add_origin_rows), an edited
         // message its edit date, and only a plain message the sent date.
         let forwarded = message.forward_info.is_some() || message.extras.import_info.is_some();
-        if message.date > 0 && message_id.0 > 0 && !message.pending && !forwarded {
+        if message.date > 0 && message_id.0 > 0 && !message.pending() && !forwarded {
             if message.extras.edit_date > 0 {
                 let edited = quill::local_time::civil_local(i64::from(message.extras.edit_date));
                 rows.push(info_row(

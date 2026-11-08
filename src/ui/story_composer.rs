@@ -180,8 +180,8 @@ impl QuillApp {
         // `live` borrow below.
         let target = self.story_composer_target_chat();
         if let Some(live) = self.live.as_mut() {
-            self.stories.composer.local_error = None;
-            self.stories.composer.check_sent = true;
+            self.screen.stories.composer.local_error = None;
+            self.screen.stories.composer.check_sent = true;
             live.driver.session.stories.post.check_error = None;
             live.driver.session.stories.post.eligibility = None;
             live.driver.session.stories.post.outcome = StoryPostOutcome::None;
@@ -230,7 +230,7 @@ impl QuillApp {
             cx.notify();
             return;
         };
-        self.stories.composer.local_error = None;
+        self.screen.stories.composer.local_error = None;
         match live.driver.edit_story(
             ChatId(poster_chat_id),
             story_id,
@@ -275,16 +275,22 @@ impl QuillApp {
                 let from_story = self.stories.composer.repost_source;
                 let media = self.stories.composer.media.clone();
                 if let (Some(live), Some(media)) = (self.live.as_mut(), media) {
-                    let caption = self.stories.composer_caption.read(cx).value().to_string();
-                    let privacy = self.stories.composer.privacy;
-                    let user_ids = self.stories.composer.selected_user_ids.clone();
+                    let caption = self
+                        .screen
+                        .stories
+                        .composer_caption
+                        .read(cx)
+                        .value()
+                        .to_string();
+                    let privacy = self.screen.stories.composer.privacy;
+                    let user_ids = self.screen.stories.composer.selected_user_ids.clone();
                     // Phase 9.4: areas + options are read from composer state
                     // (synced in `story_composer_post`), so what lands in the
                     // `postStory` JSON is exactly what the UI showed.
-                    let areas = self.stories.composer.areas_json();
-                    let active_period = self.stories.composer.expiry.seconds();
-                    let is_posted_to_chat_page = self.stories.composer.post_to_chat_page;
-                    let protect_content = self.stories.composer.protect_content;
+                    let areas = self.screen.stories.composer.areas_json();
+                    let active_period = self.screen.stories.composer.expiry.seconds();
+                    let is_posted_to_chat_page = self.screen.stories.composer.post_to_chat_page;
+                    let protect_content = self.screen.stories.composer.protect_content;
                     match live.driver.post_story(
                         target,
                         media.kind,
@@ -299,12 +305,12 @@ impl QuillApp {
                         protect_content,
                     ) {
                         Ok(_) => {
-                            self.stories.composer.local_error = None;
+                            self.screen.stories.composer.local_error = None;
                             // Phase 9.3: request sent, answer not yet landed —
                             // the Post button stays disabled (busy) until the
                             // outcome moves, so a second press can't post a
                             // duplicate story.
-                            self.stories.composer.post_sent = true;
+                            self.screen.stories.composer.post_sent = true;
                             // Fresh eligibility for the next post.
                             live.driver.session.stories.post.eligibility = None;
                         }
@@ -331,7 +337,7 @@ impl QuillApp {
             multiple: false,
             prompt: Some(tr(keys::ATTACH_PHOTO_OR_VIDEO).into()),
         });
-        cx.spawn(async move |this, cx| {
+        self.spawn_screen(cx, async move |this, cx| {
             if let Ok(Ok(Some(paths))) = picker.await
                 && let Some(path) = paths.into_iter().next()
             {

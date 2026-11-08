@@ -181,7 +181,7 @@ impl ThreadView {
             .messages
             .values()
             .rev()
-            .find(|message| message.id.0 > 0 && !message.pending && !message.failed)
+            .find(|message| message.id.0 > 0 && !message.pending() && !message.failed())
             .map(|message| message.id)
     }
 

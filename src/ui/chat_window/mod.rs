@@ -52,8 +52,9 @@ pub(in crate::ui) use slot::scope_probe;
 use view::ChatWindowView;
 pub(in crate::ui) use view::WindowScope;
 
-/// The open chat windows and the scope bookkeeping (a `QuillApp` field,
-/// `windows`).
+/// The open chat windows and the scope bookkeeping of the account on
+/// screen (a field of `OnScreen`, `windows`). The main window itself is
+/// the app's ([`MainWindow`]).
 pub(crate) struct ChatWindows {
     open: Vec<OpenChatWindow>,
     /// The chat whose window's state is in place (`None`: the main
@@ -64,12 +65,6 @@ pub(crate) struct ChatWindows {
     pub(super) last_input: Option<ChatId>,
     /// The window showing the kit dialog (`Some(None)`: the main window).
     dialog_host: Option<Option<ChatId>>,
-    /// The main window, as last rendered.
-    pub(super) main: Option<AnyWindowHandle>,
-    /// Where the main window stood at its last render (`cover`).
-    main_place: Option<WindowPlace>,
-    /// New windows cascade from the main window; this counts them.
-    cascade: u32,
     /// A write of the open windows is scheduled (`saved`).
     save_pending: bool,
     /// Windows the user closed, newest last, for "Reopen closed window"
@@ -77,9 +72,71 @@ pub(crate) struct ChatWindows {
     closed: Vec<(ChatId, Bounds<Pixels>)>,
     /// The windows from last time (`saved`).
     restore: saved::Restore,
+}
+
+/// The outgoing account's windows close, their places saved under that
+/// account and their drafts flushed through its client
+/// (`close_chat_windows_for_switch`); the new screen's `restore` starts
+/// `Pending`, so the incoming account's saved windows come back.
+impl crate::ui::on_screen::Farewell for ChatWindows {
+    fn farewell(app: &mut QuillApp, _: &mut Window, cx: &mut Context<QuillApp>) {
+        app.close_chat_windows_for_switch(cx);
+    }
+}
+
+/// The main window as the chat windows see it: its handle and place, the
+/// cascade of windows opened from it, and the switch's dialog close. The
+/// process's: a `QuillApp` field (`main_window`).
+pub(crate) struct MainWindow {
+    /// The main window, as last rendered.
+    pub(super) handle: Option<AnyWindowHandle>,
+    /// Where the main window stood at its last render (`cover`).
+    place: Option<WindowPlace>,
+    /// New windows cascade from the main window; this counts them.
+    cascade: u32,
+    /// An account switch closed every kit dialog in the main window: its
+    /// shell forgets the one it showed (`QuillShell::sync_kit_dialogs_in`).
+    pub(super) dialogs_closed: bool,
     /// Keys go to the window that received them: the interceptor runs
     /// before any handler and puts that window's state in place.
     _key_scope: Subscription,
+}
+
+impl MainWindow {
+    pub(super) fn new(cx: &mut Context<QuillApp>) -> Self {
+        let app = cx.weak_entity();
+        let key_scope = cx.intercept_keystrokes(move |_, window, cx| {
+            let id = window.window_handle().window_id();
+            let _ = app.update(cx, |app, _| {
+                let chat = app.windows.chat_for_window(id);
+                app.note_window_input(chat);
+            });
+        });
+        Self {
+            handle: None,
+            place: None,
+            cascade: 0,
+            dialogs_closed: false,
+            _key_scope: key_scope,
+        }
+    }
+
+    /// Where the next window opens: a 3/4-sized window stepping down and
+    /// right from the main window, as Telegram Desktop's child windows
+    /// do (`MainWindow::countInitialGeometry`, 3/4 of the default size,
+    /// each new child offset from the last).
+    fn next_bounds(&mut self, main: Bounds<Pixels>) -> Bounds<Pixels> {
+        self.cascade = self.cascade % 6 + 1;
+        let step = px(36.) * self.cascade as f32;
+        let size = size(
+            (main.size.width * 0.75).max(px(480.)),
+            (main.size.height * 0.75).max(px(420.)),
+        );
+        Bounds {
+            origin: main.origin + point(step, step),
+            size,
+        }
+    }
 }
 
 struct OpenChatWindow {
@@ -92,27 +149,15 @@ struct OpenChatWindow {
 }
 
 impl ChatWindows {
-    pub(super) fn new(cx: &mut Context<QuillApp>) -> Self {
-        let app = cx.weak_entity();
-        let key_scope = cx.intercept_keystrokes(move |_, window, cx| {
-            let id = window.window_handle().window_id();
-            let _ = app.update(cx, |app, _| {
-                let chat = app.windows.chat_for_window(id);
-                app.note_window_input(chat);
-            });
-        });
+    pub(super) fn new() -> Self {
         Self {
             open: Vec::new(),
             scope: None,
             last_input: None,
             dialog_host: None,
-            main: None,
-            main_place: None,
-            cascade: 0,
             save_pending: false,
             closed: Vec::new(),
             restore: saved::Restore::default(),
-            _key_scope: key_scope,
         }
     }
 
@@ -273,23 +318,6 @@ impl ChatWindows {
         });
         true
     }
-
-    /// Where the next window opens: a 3/4-sized window stepping down and
-    /// right from the main window, as Telegram Desktop's child windows
-    /// do (`MainWindow::countInitialGeometry`, 3/4 of the default size,
-    /// each new child offset from the last).
-    fn next_bounds(&mut self, main: Bounds<Pixels>) -> Bounds<Pixels> {
-        self.cascade = self.cascade % 6 + 1;
-        let step = px(36.) * self.cascade as f32;
-        let size = size(
-            (main.size.width * 0.75).max(px(480.)),
-            (main.size.height * 0.75).max(px(420.)),
-        );
-        Bounds {
-            origin: main.origin + point(step, step),
-            size,
-        }
-    }
 }
 
 impl QuillApp {
@@ -393,48 +421,59 @@ impl QuillApp {
         // Cascade from the main window, wherever the request came from.
         let bounds = bounds.unwrap_or_else(|| {
             let main = self
-                .windows
-                .main
+                .main_window
+                .handle
                 .and_then(|main| main.update(cx, |_, window, _| window.bounds()).ok())
                 .unwrap_or_else(|| window.bounds());
-            self.windows.next_bounds(main)
+            self.main_window.next_bounds(main)
         });
         let owner = cx.entity();
+        let screen = self.screen_epoch();
         // window-scope: window bookkeeping by chat id; the draft goes in with
         // the new window's state in place (`in_window_scope` below).
         cx.defer(move |cx| {
+            // Another account came on screen meanwhile: the chat is not its.
+            if owner.read(cx).screen_epoch() != screen {
+                return;
+            }
             let opened = view::open_chat_window(owner.clone(), chat_id, bounds, cx);
             let (handle, view, slot) = match opened {
                 Ok(opened) => opened,
                 Err(_) => {
                     owner.update(cx, |app, cx| {
-                        app.connection.set_note(StatusNote::error(tr(
-                            keys::Q_MISC_COULDNT_OPEN_THE_CHAT_WINDOW,
-                        )));
-                        app.chat_window_closed(chat_id, None, cx);
+                        app.in_screen_scope(screen, cx, |app, cx| {
+                            app.connection.set_note(StatusNote::error(tr(
+                                keys::Q_MISC_COULDNT_OPEN_THE_CHAT_WINDOW,
+                            )));
+                            app.chat_window_closed(chat_id, None, cx);
+                        });
                     });
                     return;
                 }
             };
             owner.update(cx, |app, cx| {
-                let views = slot.borrow().slices.view_ids().collect();
-                app.windows.open.push(OpenChatWindow {
-                    chat_id,
-                    handle,
-                    view,
-                    slot,
-                    views,
+                app.in_screen_scope(screen, cx, |app, cx| {
+                    let views = slot.borrow().slices.view_ids().collect();
+                    app.windows.open.push(OpenChatWindow {
+                        chat_id,
+                        handle,
+                        view,
+                        slot,
+                        views,
+                    });
+                    app.schedule_chat_windows_save(cx);
+                    cx.notify();
                 });
-                app.schedule_chat_windows_save(cx);
-                cx.notify();
             });
             // The chat's draft goes into the window's compose field, which
             // takes the keyboard.
             let _ = handle.update(cx, |_, window, cx| {
                 owner.update(cx, |app, cx| {
-                    app.in_window_scope(Some(chat_id), cx, |app, cx| {
-                        app.restore_open_draft(window, cx);
-                        app.composer.update(cx, |input, cx| input.focus(window, cx));
+                    app.in_screen_scope(screen, cx, |app, cx| {
+                        app.in_window_scope(Some(chat_id), cx, |app, cx| {
+                            app.restore_open_draft(window, cx);
+                            app.composer.update(cx, |input, cx| input.focus(window, cx));
+                        });
                     });
                 });
             });
@@ -467,14 +506,16 @@ impl QuillApp {
             // The window shows it already.
             return true;
         }
-        let Some(main) = self.windows.main else {
+        let Some(main) = self.main_window.handle else {
             return false;
         };
         let owner = cx.entity();
+        let screen = self.screen_epoch();
+        // window-scope: `in_screen_scope` puts the main window's state in place.
         cx.defer(move |cx| {
             let _ = main.update(cx, |_, window, cx| {
                 owner.update(cx, |app, cx| {
-                    app.in_window_scope(None, cx, |app, cx| {
+                    app.in_screen_scope(screen, cx, |app, cx| {
                         app.select_chat_with(chat_id, thread_switch, window, cx);
                     });
                 });
@@ -522,6 +563,9 @@ impl QuillApp {
     /// Drop the window's bookkeeping, end what it was recording and close
     /// its chat in TDLib.
     fn forget_chat_window(&mut self, chat_id: ChatId, cx: &mut Context<Self>) {
+        // What its state says as it goes (its Picture-in-Picture), with
+        // that state in place.
+        self.in_window_scope(Some(chat_id), cx, |app, cx| app.farewell_window(cx));
         // Its state must not stay in the app's place.
         if self.windows.scope == Some(chat_id) {
             self.set_window_scope(None);
@@ -547,9 +591,9 @@ impl QuillApp {
             .window_closed(chat_id, std::time::Instant::now());
         self.windows.dialog_closed_in(Some(chat_id));
         self.set_window_chat_active(chat_id, false);
-        self.playback.userpic_videos.forget_window(chat_id);
-        self.playback.inline_videos.forget_window(chat_id, cx);
-        self.playback.stickers.window_closed(chat_id);
+        self.players.userpic_videos.forget_window(chat_id);
+        self.players.inline_videos.forget_window(chat_id, cx);
+        self.players.stickers.window_closed(chat_id);
         self.leave_sticker_chat(
             Some(chat_id),
             Some(chat_id),
@@ -605,12 +649,7 @@ impl QuillApp {
     /// and message state goes, and the pane shows "Select a chat".
     pub(super) fn leave_open_chat(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.flush_leaving_draft(cx);
-        self.composer_ui.set_reply(None);
-        self.composer_ui.pending_edit = None;
-        self.composer_ui.saved_edit_draft.clear();
-        self.composer_ui.saved_edit_reply = None;
-        self.message_ui.pending_delete = None;
-        self.message_ui.pending_stop_poll = None;
+        self.leave_chat_ui();
         self.notify.ttl_picker_open = false;
         self.cancel_recording_here(cx);
         self.stop_animation_playback();

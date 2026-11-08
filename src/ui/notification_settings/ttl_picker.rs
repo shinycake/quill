@@ -36,7 +36,7 @@ impl QuillApp {
 
     /// The period the slider is on; 0 is Off.
     fn picked_ttl(&self, cx: &App) -> i32 {
-        self.settings
+        self.preferences
             .index_sliders
             .index(StepSlider::AutoDelete, cx)
             .and_then(|index| index.checked_sub(1))

@@ -12,7 +12,7 @@ use std::rc::Rc;
 impl QuillApp {
     /// Whether the field differs from the message being edited.
     fn edit_text_is_changed(&self, cx: &App) -> bool {
-        let Some(edit) = self.composer_ui.pending_edit.as_ref() else {
+        let Some(edit) = self.chat_ui.pending_edit() else {
             return false;
         };
         let Some(original) = self
@@ -32,7 +32,7 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         if self.edit_text_is_changed(cx) {
-            self.composer_ui.cancel_edit_confirm = true;
+            self.chat_ui.set_cancel_edit_confirm(true);
             cx.notify();
         } else {
             self.clear_edit(window, cx);
@@ -40,7 +40,7 @@ impl QuillApp {
     }
 
     fn close_cancel_edit_confirm(&mut self, cx: &mut Context<Self>) {
-        self.composer_ui.cancel_edit_confirm = false;
+        self.chat_ui.set_cancel_edit_confirm(false);
         cx.notify();
     }
 
@@ -81,8 +81,12 @@ impl QuillApp {
                         .label(tr(keys::CANCEL_EDIT_POST_YES))
                         .primary()
                         .on_click(cx.listener(|this, _, window, cx| {
+                            // No edit, nothing to discard: the box only closes.
+                            let editing = this.chat_ui.is_editing();
                             this.close_cancel_edit_confirm(cx);
-                            this.clear_edit(window, cx);
+                            if editing {
+                                this.clear_edit(window, cx);
+                            }
                             this.close_kit_dialog_if_done(
                                 DialogKind::CancelEditConfirm,
                                 window,
@@ -112,9 +116,10 @@ crate::ui::shell::register_dialogs! {
     /// tdesktop's "Cancel editing?" box.
     CancelEditConfirm => DialogSpec::new(
         7625,
-        |app| app.composer_ui.cancel_edit_confirm,
+        |app| app.chat_ui.cancel_edit_confirm_open(),
         QuillApp::build_cancel_edit_dialog,
-    ),
+    )
+    .close(|app, _, cx| app.close_cancel_edit_confirm(cx)),
 }
 
 #[cfg(test)]

@@ -12,6 +12,8 @@ impl QuillApp {
         #[cfg(feature = "frame-profiler")]
         self.frame_profile_tick(window);
         self.flush_notifications(window, cx);
+        // What was open for a chat the view no longer shows goes.
+        self.sync_chat_ui();
         self.sync_history_holds();
         self.fetch_missing_reply_target();
         // The inline results button's round trip back to its chat.
@@ -112,8 +114,8 @@ impl QuillApp {
         self.resolve_pending_story_open(window, cx);
         // `parity:platform-deep-links`: open the chat the deep link
         // resolved to (take-once; render owns the `Window`).
-        if let Some((chat_id, action)) = self.links.pending_deep_link_open.take() {
-            self.open_deep_link_chat(chat_id, &action, window, cx);
+        if let Some(open) = self.links.pending_deep_link_open.take() {
+            self.open_deep_link_chat(open, window, cx);
             self.drop_shared_card(cx);
         }
         if let Some(ui) = self.links.pending_deep_link_ui.take() {
@@ -175,23 +177,31 @@ impl QuillApp {
         // Phase 9.5: the viewer cover editor / privacy editor sent a
         // management call — once `story_manage.pending` clears, close
         // the panel on success or leave it open showing the error.
-        if self.stories.cover_sent && self.session().is_some_and(|s| !s.stories.manage.pending) {
-            self.stories.cover_sent = false;
-            if self
+        if self.stories.viewer_ui().cover_sent
+            && self.session().is_some_and(|s| !s.stories.manage.pending)
+        {
+            let saved = self
                 .session()
-                .is_some_and(|s| s.stories.manage.error.is_none())
-            {
-                self.stories.cover = None;
-            }
+                .is_some_and(|s| s.stories.manage.error.is_none());
+            self.stories.with_viewer_ui(|open| {
+                open.cover_sent = false;
+                if saved {
+                    open.cover = None;
+                }
+            });
         }
-        if self.stories.privacy_sent && self.session().is_some_and(|s| !s.stories.manage.pending) {
-            self.stories.privacy_sent = false;
-            if self
+        if self.stories.viewer_ui().privacy_sent
+            && self.session().is_some_and(|s| !s.stories.manage.pending)
+        {
+            let saved = self
                 .session()
-                .is_some_and(|s| s.stories.manage.error.is_none())
-            {
-                self.stories.privacy_edit = None;
-            }
+                .is_some_and(|s| s.stories.manage.error.is_none());
+            self.stories.with_viewer_ui(|open| {
+                open.privacy_sent = false;
+                if saved {
+                    open.privacy_edit = None;
+                }
+            });
         }
         // Phase 9.2: a story that vanished from the cache while being
         // viewed was deleted (`updateStoryDeleted`) — close the viewer.
@@ -205,8 +215,12 @@ impl QuillApp {
         });
         if current_deleted {
             self.release_story_viewer();
-            self.stories.reaction_picker_open = false;
-            self.stories.reply_open = false;
+            if let Some(open) = self.stories.viewer_ui_mut() {
+                open.reaction_picker_open = false;
+            }
+            if let Some(open) = self.stories.viewer_ui_mut() {
+                open.reply_open = false;
+            }
             self.connection
                 .set_note(StatusNote::silent(tr(keys::Q_REST_STORY_DELETED)));
         }

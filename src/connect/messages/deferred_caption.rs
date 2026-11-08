@@ -59,7 +59,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .get(&edit.chat_id.0)
             .and_then(|history| history.messages.get(&edit.message_id.0))
             .is_some_and(|m| {
-                m.is_outgoing && m.pending && !m.failed && has_editable_caption(&m.content)
+                m.is_outgoing && m.pending() && !m.failed() && has_editable_caption(&m.content)
             });
         if !pending_media {
             return Err(ConnectSendError::InvalidRequest);

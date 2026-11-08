@@ -6,7 +6,7 @@
 use super::*;
 use crate::state::{
     ActiveGroupCall, ConferenceInput, ConferenceInviteResults, ConferenceOrigin, ConferenceUpgrade,
-    MAX_GROUP_CALL_REJOIN_ATTEMPTS,
+    GroupCallRejoin,
 };
 use crate::telegram::envelope::{CallState, CallsPayload, Envelope, EnvelopePayload};
 use crate::telegram::group_call_crypto::GroupCallCrypto;
@@ -462,7 +462,5 @@ impl<S: JsonSender> ConnectDriver<S> {
 /// A recorded `transport_error` alone is not enough: a failed screen
 /// share or mute leaves a working call.
 fn conference_dead(call: &ActiveGroupCall) -> bool {
-    call.is_conference()
-        && call.reconnecting
-        && call.rejoin_attempts >= MAX_GROUP_CALL_REJOIN_ATTEMPTS
+    call.is_conference() && call.rejoin == GroupCallRejoin::GaveUp
 }

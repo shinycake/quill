@@ -4,6 +4,7 @@ use super::*;
 use crate::ui::lean_buttons::ghost_text_button;
 use crate::ui::status_note::StatusNote;
 use crate::ui::surface_reveal::{self, PinnedShown};
+use quill::ids::AccountChat;
 use quill::lang::{keys, tr, tr_with, trn};
 
 /// The pinned bar's height until it was laid out once.
@@ -96,20 +97,27 @@ impl QuillApp {
         ))
     }
 
+    /// The pinned bar's memory key for `chat_id` in the account on screen
+    /// (`None` with no session).
+    pub(in crate::ui) fn pinned_key(&self, chat_id: ChatId) -> Option<AccountChat> {
+        Some(AccountChat::new(self.session()?.account.clone(), chat_id))
+    }
+
     /// Which pinned message the bar shows, `None` while it shows none:
     /// nothing pinned, or the newest pin hidden.
     fn pinned_bar_state(&self, chat_id: ChatId) -> Option<PinnedShown> {
         let session = self.session()?;
         let list = session.pinned_list(chat_id);
         let newest = list.first()?.id;
-        if self.history.hidden_pinned.get(&chat_id.0) == Some(&newest) {
+        let key = self.pinned_key(chat_id)?;
+        if self.history.hidden_pinned.get(&key) == Some(&newest) {
             return None;
         }
         let count = list.len();
         let index = self
             .history
             .pinned_cursor
-            .get(&chat_id.0)
+            .get(&key)
             .copied()
             .unwrap_or(0)
             .min(count.saturating_sub(1));
@@ -248,9 +256,11 @@ impl QuillApp {
                         .cursor_pointer()
                         .on_click(cx.listener(move |this, _, _, cx| {
                             this.jump_to_pinned_message(message_id, cx);
-                            this.history
-                                .pinned_cursor
-                                .insert(chat_id.0, (index + 1) % count.max(1));
+                            if let Some(key) = this.pinned_key(chat_id) {
+                                this.history
+                                    .pinned_cursor
+                                    .insert(key, (index + 1) % count.max(1));
+                            }
                             cx.notify();
                         }))
                         .child(
@@ -313,7 +323,9 @@ impl QuillApp {
                 ))
                 .on_click(cx.listener(move |this, _, _, cx| {
                     this.jump_to_pinned_message(message_id, cx);
-                    this.history.pinned_cursor.insert(chat_id.0, index);
+                    if let Some(key) = this.pinned_key(chat_id) {
+                        this.history.pinned_cursor.insert(key, index);
+                    }
                     this.history.pinned_list_open = false;
                     cx.notify();
                 }));
@@ -321,7 +333,7 @@ impl QuillApp {
             if !quill::go_to_message::go_to_message_offered(
                 quill::go_to_message::MessageListContext::Pinned,
                 message_id,
-                message.pending,
+                message.pending(),
             ) {
                 return row.into_any_element();
             }
@@ -334,7 +346,9 @@ impl QuillApp {
                         .on_click(move |_, _, cx| {
                             let _ = owner.update(cx, |this, cx| {
                                 this.jump_to_pinned_message(message_id, cx);
-                                this.history.pinned_cursor.insert(chat_id.0, index);
+                                if let Some(key) = this.pinned_key(chat_id) {
+                                    this.history.pinned_cursor.insert(key, index);
+                                }
                                 this.history.pinned_list_open = false;
                                 cx.notify();
                             });
@@ -413,14 +427,17 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         if let Some(live) = self.live.as_mut() {
-            self.connection
-                .set_note(match live.driver.jump_to_replied_message(message_id) {
+            self.screen.connection.set_note(
+                match live.driver.jump_to_replied_message(message_id) {
                     Ok(_) => chat_search_jump_note(&live.driver.session),
                     Err(_) => StatusNote::error(tr(keys::Q_CHAT_COULD_NOT_JUMP_TO_MESSAGE)),
-                });
+                },
+            );
         } else if let Some(session) = self.demo_session.as_mut() {
             let _ = session.begin_chat_search_jump(message_id);
-            self.connection.set_note(chat_search_jump_note(session));
+            self.screen
+                .connection
+                .set_note(chat_search_jump_note(session));
         }
         cx.notify();
     }

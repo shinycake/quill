@@ -6,13 +6,11 @@ use super::status_note::{NoteKind, StatusNote};
 use super::toast_queue::ToastQueue;
 use std::time::Instant;
 
+/// The connection as the account on screen shows it: its status, the
+/// status note and the toasts, presence sync. A field of `OnScreen`; the
+/// connection count itself is the app's ([`ConnectGeneration`]).
 pub(crate) struct ConnectionUi {
     pub(super) status: ConnectUiStatus,
-    pub(super) generation: u64,
-    /// The connection generation whose lost bridge already posted the
-    /// "connection closed" note. A new connection bumps `generation`, which
-    /// re-arms it; other notes cannot, so they are never overwritten again.
-    closed_noted_generation: Option<u64>,
     /// The current note. Private: every write names its kind through
     /// `set_note`, so a toast never depends on the words.
     note: StatusNote,
@@ -33,8 +31,6 @@ impl ConnectionUi {
     pub(super) fn new(connect_status: ConnectUiStatus, status_note: String) -> Self {
         Self {
             status: connect_status,
-            generation: 0,
-            closed_noted_generation: None,
             note: StatusNote::new(NoteKind::Silent, status_note),
             toasts: ToastQueue::default(),
             note_window: None,
@@ -44,6 +40,10 @@ impl ConnectionUi {
         }
     }
 }
+
+/// The note and its toasts were the old account's; presence is sent
+/// again by the client put on screen next.
+impl super::on_screen::Farewell for ConnectionUi {}
 
 impl ConnectionUi {
     /// Replaces the current note. Progress chatter ([`NoteKind::Silent`])
@@ -94,15 +94,35 @@ impl ConnectionUi {
             self.note = StatusNote::default();
         }
     }
+}
+
+/// Counts the clients put on screen, so a poll loop or a "connection
+/// closed" note of an older one stops. The process's: a `QuillApp` field
+/// (`connect`), bumped by `start_connection` and `adopt_live`.
+pub(crate) struct ConnectGeneration {
+    pub(super) generation: u64,
+    /// The connection generation whose lost bridge already posted the
+    /// "connection closed" note. A new connection bumps `generation`, which
+    /// re-arms it; other notes cannot, so they are never overwritten again.
+    closed_noted: Option<u64>,
+}
+
+impl ConnectGeneration {
+    pub(super) fn new() -> Self {
+        Self {
+            generation: 0,
+            closed_noted: None,
+        }
+    }
 
     /// Whether the poll should post the "connection closed" note now: the
     /// bridge stopped on its own, its queue is fully drained, and this
     /// connection has not posted it yet. True at most once per connection.
     pub(super) fn claim_closed_note(&mut self, bridge_stopped: bool, budget_hit: bool) -> bool {
-        if !bridge_stopped || budget_hit || self.closed_noted_generation == Some(self.generation) {
+        if !bridge_stopped || budget_hit || self.closed_noted == Some(self.generation) {
             return false;
         }
-        self.closed_noted_generation = Some(self.generation);
+        self.closed_noted = Some(self.generation);
         true
     }
 }
@@ -125,7 +145,7 @@ pub(super) fn auth_for_bridge(
 
 #[cfg(test)]
 mod tests {
-    use super::{ConnectionUi, StatusNote, auth_for_bridge};
+    use super::{ConnectGeneration, ConnectionUi, StatusNote, auth_for_bridge};
     use quill::telegram::envelope::AuthorizationState;
 
     #[test]
@@ -146,23 +166,20 @@ mod tests {
 
     #[test]
     fn closed_note_waits_for_the_queue_and_fires_once() {
-        let mut c = connection();
-        assert!(!c.claim_closed_note(false, false));
-        assert!(!c.claim_closed_note(true, true), "queue not drained");
-        assert!(c.claim_closed_note(true, false));
-        assert!(!c.claim_closed_note(true, false), "latched");
+        let mut g = ConnectGeneration::new();
+        assert!(!g.claim_closed_note(false, false));
+        assert!(!g.claim_closed_note(true, true), "queue not drained");
+        assert!(g.claim_closed_note(true, false));
+        assert!(!g.claim_closed_note(true, false), "latched");
     }
 
     #[test]
-    fn replacing_the_note_does_not_refire_while_the_bridge_stays_stopped() {
-        let mut c = connection();
-        assert!(c.claim_closed_note(true, false));
-        c.set_note(StatusNote::info("Copied"));
-        assert!(!c.claim_closed_note(true, false));
-        assert_eq!(c.status_note(), "Copied", "the user's note is kept");
-        // A new connection re-arms the latch.
-        c.generation += 1;
-        assert!(c.claim_closed_note(true, false));
+    fn a_new_connection_rearms_the_closed_note() {
+        let mut g = ConnectGeneration::new();
+        assert!(g.claim_closed_note(true, false));
+        assert!(!g.claim_closed_note(true, false));
+        g.generation += 1;
+        assert!(g.claim_closed_note(true, false));
     }
 
     #[test]

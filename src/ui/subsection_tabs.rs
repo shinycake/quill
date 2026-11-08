@@ -619,7 +619,10 @@ impl QuillApp {
             if self.session().and_then(|s| s.open_topic) != Some(topic_id) {
                 self.select_topic_ui(topic_id, cx);
             }
-            self.history.topic_info_open = true;
+            // The card is the topic's: take the new topic's `ChatUi` first,
+            // so the next frame's sync does not drop the card with the old.
+            self.sync_chat_ui();
+            self.chat_ui.topic_info_open = true;
             cx.notify();
             return;
         }

@@ -32,7 +32,8 @@ pub(super) fn update_stream_rate() -> Option<u32> {
 
 impl QuillApp {
     pub(super) fn spawn_demo_update_stream(&mut self, rate: u32, cx: &mut Context<Self>) {
-        Self::spawn_main(cx, async move |this, cx| {
+        // screen-scope: the demo update stream feeds the one demo session, which never switches accounts.
+        Self::spawn_app(cx, async move |this, cx| {
             let mut step = 0_u64;
             loop {
                 cx.background_executor()

@@ -15,6 +15,8 @@ pub fn install_link_inbox(
         }
     })
     .detach();
+    // screen-scope: a link from the OS goes to the app's own deep-link queue, which
+    // waits for whichever account is on screen to take it.
     cx.spawn({
         let view = view.downgrade();
         let window_handle = window.window_handle();

@@ -160,7 +160,7 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
-        if self.shortcut_blocked(window, cx) || self.composer_ui.pending_edit.is_some() {
+        if self.shortcut_blocked(window, cx) || self.chat_ui.is_editing() {
             return false;
         }
         if cfg!(target_os = "macos")
@@ -187,7 +187,7 @@ impl QuillApp {
             return false;
         }
         if self
-            .composer_ui
+            .chat_ui
             .reply()
             .is_some_and(|reply| reply.chat_id != chat_id)
         {
@@ -201,13 +201,13 @@ impl QuillApp {
             .values()
             .filter(|m| {
                 m.id.0 > 0
-                    && !m.pending
-                    && !m.failed
+                    && !m.pending()
+                    && !m.failed()
                     && !super::service_row::is_service_row(&m.content)
             })
             .map(|m| m.id.0)
             .collect();
-        let current = self.composer_ui.reply().map(|reply| reply.message_id.0);
+        let current = self.chat_ui.reply().map(|reply| reply.message_id.0);
         match reply_nav(&ids, current, forward, !session.history_has_newer(chat_id)) {
             ReplyNav::Reply(id) => {
                 self.jump_to_replied_message(MessageId(id), cx);
@@ -224,7 +224,7 @@ impl QuillApp {
 
     /// Cmd/Ctrl+O: the attach picker (`chooseAttach`).
     pub(super) fn attach_by_key(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
-        if self.shortcut_blocked(window, cx) || self.composer_ui.pending_edit.is_some() {
+        if self.shortcut_blocked(window, cx) || self.chat_ui.is_editing() {
             return false;
         }
         let can_attach = self.session().is_some_and(|session| {
@@ -349,15 +349,15 @@ impl QuillApp {
         };
         let ids = self.loaded_selectable_ids(chat_id);
         let focus = self
-            .message_ui
+            .chat_ui
             .selection_focus
             .filter(|id| ids.contains(id))
             .or(ids.last().copied());
         let Some(focus) = focus else {
             return false;
         };
-        self.message_ui.selection_anchor = Some(focus);
-        self.message_ui.selection_focus = Some(focus);
+        self.chat_ui.selection_anchor = Some(focus);
+        self.chat_ui.selection_focus = Some(focus);
         self.toggle_forward_select(chat_id, focus, false, cx);
         if self.selecting_in(chat_id) {
             // The keyboard stays on the rows: Space keeps toggling, Up and
@@ -469,16 +469,13 @@ impl QuillApp {
             return false;
         }
         let ids = self.loaded_selectable_ids(chat_id);
-        let old = self
-            .message_ui
-            .selection_focus
-            .filter(|id| ids.contains(id));
+        let old = self.chat_ui.selection_focus.filter(|id| ids.contains(id));
         let Some(new) = quill::selection_pin::step_focus(&ids, old, older) else {
             return false;
         };
         if extend {
             let anchor = self
-                .message_ui
+                .chat_ui
                 .selection_anchor
                 .filter(|id| ids.contains(id))
                 .or(old)
@@ -497,11 +494,11 @@ impl QuillApp {
                     draft.toggle(chat_id, id, false);
                 }
             }
-            self.message_ui.selection_anchor = Some(anchor);
+            self.chat_ui.selection_anchor = Some(anchor);
         } else {
-            self.message_ui.selection_anchor = Some(new);
+            self.chat_ui.selection_anchor = Some(new);
         }
-        self.message_ui.selection_focus = Some(new);
+        self.chat_ui.selection_focus = Some(new);
         self.scroll_selection_focus_into_view(new, cx);
         cx.notify();
         true

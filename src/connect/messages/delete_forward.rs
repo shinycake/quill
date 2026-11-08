@@ -34,7 +34,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             message.chat_id,
             message.id,
             message.is_outgoing,
-            message.pending,
+            message.pending(),
         )
         .is_none()
         {
@@ -85,7 +85,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 message.chat_id,
                 message.id,
                 message.is_outgoing,
-                message.pending,
+                message.pending(),
             )
             .is_none()
             {
@@ -154,7 +154,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             else {
                 return Err(ConnectSendError::InvalidRequest);
             };
-            if message.pending || id.0 <= 0 {
+            if message.pending() || id.0 <= 0 {
                 return Err(ConnectSendError::InvalidRequest);
             }
         }

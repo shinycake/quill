@@ -654,7 +654,7 @@ impl ChatSummary {
     }
 
     pub fn outbox_receipt(&self, message: &HistoryMessage) -> OutboxReceipt {
-        if !message.is_outgoing || message.pending {
+        if !message.is_outgoing || message.pending() {
             return OutboxReceipt::None;
         }
         if self.last_read_outbox_message_id.0 > 0

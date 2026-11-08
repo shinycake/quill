@@ -624,7 +624,9 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        Self::spawn_main_in(window, cx, async move |this, cx| {
+        // screen-scope: the passcode lock is the app's, not an account's; unlocking
+        // finishes whichever account is on screen (it starts a deferred connect).
+        Self::spawn_app_in(window, cx, async move |this, cx| {
             let ok = loop {
                 match receiver.try_recv() {
                     Ok(ok) => break ok,
@@ -687,7 +689,9 @@ impl QuillApp {
     }
 
     pub(crate) fn spawn_passcode_tick(&mut self, cx: &mut Context<Self>) {
-        Self::spawn_main(cx, async move |this, cx| {
+        // screen-scope: the auto-lock timer belongs to the app and only reads the
+        // passcode state, so it runs whichever account is on screen.
+        Self::spawn_app(cx, async move |this, cx| {
             // Parked: nothing to time, so the next tick follows a long gap.
             let mut parked = true;
             loop {
@@ -944,7 +948,7 @@ crate::ui::shell::register_dialogs! {
         |app| app.account.passcode.open,
         QuillApp::build_passcode_dialog,
     )
-    .closes(|app, window, cx| app.close_passcode(window, cx)),
+    .close(|app, window, cx| app.close_passcode(window, cx)),
 }
 
 mod build_passcode_dialog;

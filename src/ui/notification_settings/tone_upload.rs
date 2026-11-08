@@ -90,11 +90,18 @@ impl QuillApp {
             multiple: false,
             prompt: Some(tr(keys::RINGTONES_BOX_UPLOAD_CHOOSE).into()),
         });
-        cx.spawn(async move |this, cx| {
+        // The sound is the account's own: a picker answered after a switch
+        // uploads nothing to the account switched to.
+        let asked_on = self.session().map(|session| session.account.clone());
+        self.spawn_screen(cx, async move |this, cx| {
             if let Ok(Ok(Some(paths))) = picker.await
                 && let Some(path) = paths.into_iter().next()
             {
-                let _ = this.update(cx, |this, cx| this.begin_tone_upload(target, &path, cx));
+                let _ = this.update(cx, |this, cx| {
+                    if this.session().map(|session| &session.account) == asked_on.as_ref() {
+                        this.begin_tone_upload(target, &path, cx);
+                    }
+                });
             }
         })
         .detach();

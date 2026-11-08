@@ -144,7 +144,7 @@ fn a_clicked_round_video_plays_with_sound_once_downloaded(cx: &mut TestAppContex
     let (app, mut vcx) = autoplay_off(cx);
     let vcx = &mut vcx;
     assert!(
-        app.read_with(vcx, |app, _| app.playback.inline_videos.player(ROUND))
+        app.read_with(vcx, |app, _| app.players.inline_videos.player(ROUND))
             .is_none(),
         "with autoplay off the round video rests on its still"
     );
@@ -164,14 +164,14 @@ fn a_clicked_round_video_plays_with_sound_once_downloaded(cx: &mut TestAppContex
             Some(FileId(ROUND_FILE)),
             "the press waits for the clip"
         );
-        assert!(app.playback.inline_videos.player(ROUND).is_none());
+        assert!(app.players.inline_videos.player(ROUND).is_none());
     });
     // The download lands: it plays from the start with sound.
     set_local(&app, vcx, ROUND_FILE, true);
     land(&app, vcx);
     let player = app
         .read_with(vcx, |app, _| {
-            let videos = &app.playback.inline_videos;
+            let videos = &app.players.inline_videos;
             assert!(videos.is_sounding(ROUND), "plays with sound");
             videos.player(ROUND)
         })
@@ -197,7 +197,7 @@ fn a_clicked_round_video_plays_with_sound_once_downloaded(cx: &mut TestAppContex
     settle(&app, vcx);
     settle(&app, vcx);
     app.read_with(vcx, |app, _| {
-        let videos = &app.playback.inline_videos;
+        let videos = &app.players.inline_videos;
         assert_eq!(videos.demand(ROUND), None);
         assert!(!videos.is_sounding(ROUND));
         assert!(videos.player(ROUND).is_none(), "rests on its still");
@@ -221,7 +221,7 @@ fn a_clicked_mp4_gif_loops_on_the_inline_player(cx: &mut TestAppContext) {
     });
     reopen_at_bottom(&app, vcx);
     assert!(
-        app.read_with(vcx, |app, _| app.playback.inline_videos.player(MP4_GIF))
+        app.read_with(vcx, |app, _| app.players.inline_videos.player(MP4_GIF))
             .is_none()
     );
     // The play disc.
@@ -235,7 +235,7 @@ fn a_clicked_mp4_gif_loops_on_the_inline_player(cx: &mut TestAppContext) {
     });
     settle(&app, vcx);
     let player = app.read_with(vcx, |app, _| {
-        let videos = &app.playback.inline_videos;
+        let videos = &app.players.inline_videos;
         assert_eq!(videos.demand(MP4_GIF), Some(Demand::Loop));
         assert!(!videos.is_sounding(MP4_GIF));
         // The MP4 never reaches the GIF decoder.
@@ -279,7 +279,7 @@ fn a_video_labelled_image_gif_plays_on_the_inline_player(cx: &mut TestAppContext
     // hands the file over.
     settle(&app, vcx);
     app.read_with(vcx, |app, _| {
-        let videos = &app.playback.inline_videos;
+        let videos = &app.players.inline_videos;
         assert!(app.playback.playing_animation.is_none());
         assert!(app.playback.gif.is_none());
         assert!(app.playback.gif_decodes.is_empty());
@@ -314,7 +314,7 @@ fn a_second_press_while_the_round_video_downloads_cancels_it(cx: &mut TestAppCon
     set_local(&app, vcx, ROUND_FILE, true);
     land(&app, vcx);
     assert!(
-        app.read_with(vcx, |app, _| app.playback.inline_videos.player(ROUND))
+        app.read_with(vcx, |app, _| app.players.inline_videos.player(ROUND))
             .is_none()
     );
 }
@@ -380,16 +380,17 @@ fn one_press_on_a_voice_note_plays_it_once_downloaded(cx: &mut TestAppContext) {
 #[gpui_kit::test]
 fn a_gif_played_again_while_it_decodes_starts_at_once(cx: &mut TestAppContext) {
     use crate::ui::gif_clip::GifClip;
-    use crate::ui::playback_state::GifDecode;
+    use crate::ui::playback_state::{ChatMessage, GifDecode};
     use std::sync::Arc;
     use std::sync::atomic::AtomicBool;
     let (app, mut vcx) = new_app(cx);
     let vcx = &mut vcx;
     let message = MessageId(LABELLED_GIF.1);
+    let chat = ChatId(LABELLED_GIF.0);
     app.update_in(vcx, |app, _, cx| {
         let clip = GifClip::decoding_with_one_picture();
         app.playback.gif_decodes.insert(
-            message,
+            ChatMessage::new(chat, message),
             GifDecode {
                 cancel: Arc::new(AtomicBool::new(false)),
                 first: Some(clip.clone()),
@@ -401,6 +402,7 @@ fn a_gif_played_again_while_it_decodes_starts_at_once(cx: &mut TestAppContext) {
         assert!(app.playback.gif.is_none());
         app.playback.playing_animation = Some(message);
         app.spawn_gif_decode(
+            chat,
             message,
             FileId(LABELLED_GIF_FILE),
             "/nonexistent/played-again.gif".into(),
@@ -408,7 +410,10 @@ fn a_gif_played_again_while_it_decodes_starts_at_once(cx: &mut TestAppContext) {
         );
         let playing = app.playback.gif.as_ref();
         assert!(playing.is_some_and(|playing| Arc::ptr_eq(playing, &clip)));
-        let decode = app.playback.gif_decodes.get(&message);
+        let decode = app
+            .playback
+            .gif_decodes
+            .get(&ChatMessage::new(chat, message));
         assert!(
             decode.is_some_and(|decode| !decode.cancel.load(std::sync::atomic::Ordering::Relaxed))
         );

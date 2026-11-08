@@ -106,3 +106,54 @@ fn next_page_goes_out_at_the_loaded_offset_and_appends() {
     assert_eq!((members.len(), *total_count), (6, 9));
     drop(dir);
 }
+
+/// Round 7, 2e: a member search for another query is sent while the last
+/// one is in flight, and only the latest query's answer fills the list.
+#[test]
+fn a_new_search_query_supersedes_the_one_in_flight() {
+    let (dir, prepared) = prepared_tmp(&MemorySecretStore::new());
+    let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+    let recorder = Arc::new(RecordingSender::new());
+    let seq = AtomicU64::new(0);
+    let mut driver = ready_driver(&recorder, prepared, &sink, &seq);
+    let feed = |driver: &mut ConnectDriver<Arc<RecordingSender>>, json: &str| {
+        driver
+            .ingest(copy_and_parse(json, &seq, &sink).unwrap())
+            .unwrap();
+    };
+    feed(
+        &mut driver,
+        r#"{"@type":"updateNewChat","chat":{"id":13,"title":"G","type":{"@type":"chatTypeSupergroup","supergroup_id":113,"is_channel":false},"unread_count":0}}"#,
+    );
+    let key = (13, MemberListFilter::Search);
+    let ann = driver
+        .refresh_supergroup_members(ChatId(13), MemberListFilter::Search, "ann")
+        .unwrap()
+        .expect("first search sent");
+    // The same query again is not sent twice.
+    assert_eq!(
+        driver
+            .fetch_supergroup_members(ChatId(13), MemberListFilter::Search, "ann")
+            .unwrap(),
+        None
+    );
+    let bob = driver
+        .refresh_supergroup_members(ChatId(13), MemberListFilter::Search, "bob")
+        .unwrap()
+        .expect("another query is sent while the first is in flight");
+    feed(&mut driver, &members_json(1..4, 3, &ann.as_extra()));
+    assert_eq!(
+        driver.session.groups.supergroup_members.get(&key),
+        Some(&SupergroupMembersFetch::Loading),
+        "the first query's answer does not show under the second"
+    );
+    feed(&mut driver, &members_json(7..8, 1, &bob.as_extra()));
+    let Some(SupergroupMembersFetch::Loaded { members, .. }) =
+        driver.session.groups.supergroup_members.get(&key)
+    else {
+        panic!("the second query's answer fills the list");
+    };
+    assert_eq!(members.len(), 1);
+    assert_eq!(driver.session.groups.member_query(key), "bob");
+    drop(dir);
+}

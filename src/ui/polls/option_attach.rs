@@ -70,10 +70,10 @@ impl QuillApp {
     /// Every media slot being written, rows first.
     fn attach_slots(&mut self) -> Vec<&mut OptionAttach> {
         let mut slots: Vec<&mut OptionAttach> = Vec::new();
-        if let Some(dialog) = self.composer_ui.poll_dialog.as_mut() {
+        if let Some(dialog) = self.screen.composer_ui.poll_dialog.as_mut() {
             slots.extend(dialog.attach.iter_mut());
         }
-        if let Some(panel) = self.message_ui.poll_add_option.as_mut() {
+        if let Some(panel) = self.screen.message_ui.poll_add_option.as_mut() {
             slots.push(&mut panel.attach);
         }
         slots

@@ -21,9 +21,8 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) -> bool {
         let edit_gone = self
-            .composer_ui
-            .pending_edit
-            .as_ref()
+            .chat_ui
+            .pending_edit()
             .zip(self.session())
             .is_some_and(|(edit, session)| session.edit_target_gone(edit));
         if edit_gone {
@@ -40,7 +39,7 @@ impl QuillApp {
     /// new sender cannot skip this.
     pub(super) fn reply_for_send(&mut self, cx: &mut Context<Self>) -> Option<ComposerReplyTo> {
         self.cancel_gone_reply(cx);
-        let reply = self.composer_ui.reply()?;
+        let reply = self.chat_ui.reply()?;
         Some(match self.session() {
             Some(session) => reply.effective(session),
             None => reply.clone(),
@@ -78,7 +77,7 @@ impl QuillApp {
     /// text instead of "Loading...".
     pub(super) fn fetch_missing_reply_target(&mut self) {
         let Some((chat_id, message_id)) = self
-            .composer_ui
+            .chat_ui
             .reply()
             .map(|reply| (reply.chat_id, reply.message_id))
         else {
@@ -91,7 +90,7 @@ impl QuillApp {
 
     fn cancel_gone_reply(&mut self, cx: &mut Context<Self>) {
         let reply_gone =
-            self.composer_ui
+            self.chat_ui
                 .reply()
                 .zip(self.session())
                 .is_some_and(|(reply, session)| {

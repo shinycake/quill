@@ -770,5 +770,6 @@ crate::ui::shell::register_dialogs! {
         5950,
         |app| app.dialogs.peer_color_dialog.is_some(),
         QuillApp::build_peer_color_dialog,
-    ),
+    )
+    .close(|app, _, cx| app.close_peer_color_dialog(cx)),
 }

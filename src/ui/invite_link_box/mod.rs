@@ -305,7 +305,8 @@ crate::ui::shell::register_dialogs! {
         4870,
         |app| app.invite_link_box_open(),
         QuillApp::build_invite_link_box_dialog,
-    ),
+    )
+    .close(|app, _, cx| app.close_invite_link_box(cx)),
 }
 
 mod demo;

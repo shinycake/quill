@@ -10,6 +10,7 @@ use crate::ui::status_note::StatusNote;
 use gpui_kit::component::switch::Switch;
 use gpui_kit::component::*;
 use gpui_kit::*;
+use quill::ids::OfAccount;
 use quill::lang::{keys, tr};
 
 impl QuillApp {
@@ -28,7 +29,12 @@ impl QuillApp {
             .get(&user_id)
             .and_then(|info| info.as_ref())
             .map(|info| info.can_manage_emoji_status)?;
-        if !allowed && !self.mini_apps.emoji_access_shown.contains(&user_id) {
+        let shown = self.current_account().is_some_and(|account| {
+            self.mini_apps
+                .emoji_access_shown
+                .contains(&OfAccount::new(account, user_id))
+        });
+        if !allowed && !shown {
             return None;
         }
         let muted = cx.theme().muted_foreground;
@@ -80,7 +86,11 @@ impl QuillApp {
         allowed: bool,
         cx: &mut Context<Self>,
     ) {
-        self.mini_apps.emoji_access_shown.insert(user_id);
+        if let Some(account) = self.current_account() {
+            self.mini_apps
+                .emoji_access_shown
+                .insert(OfAccount::new(account, user_id));
+        }
         if let Some(live) = self.live.as_mut() {
             if live
                 .driver

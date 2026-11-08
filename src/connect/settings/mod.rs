@@ -159,11 +159,10 @@ impl<S: JsonSender> ConnectDriver<S> {
             .session
             .settings
             .blocked_senders
-            .as_ref()
+            .data()
             .map(|list| list.len())
             .unwrap_or(0);
-        self.session.settings.blocked_loading = true;
-        self.session.settings.blocked_error = false;
+        self.session.settings.blocked_senders.begin();
         let extra = self.session.request(
             RequestPurpose::Settings(SettingsPurpose::GetBlockedSenders {
                 offset: offset as i32,
@@ -175,8 +174,10 @@ impl<S: JsonSender> ConnectDriver<S> {
                 .send_json(&get_blocked_message_senders(extra, offset as i32, 100))
         {
             self.session.requests.take(extra);
-            self.session.settings.blocked_loading = false;
-            self.session.settings.blocked_error = true;
+            self.session
+                .settings
+                .blocked_senders
+                .fail("The blocked users request was not sent.");
             return Err(err);
         }
         Ok(())
@@ -201,10 +202,13 @@ impl<S: JsonSender> ConnectDriver<S> {
             .send_json(&set_message_sender_block_list(extra, user_id, false))
         {
             self.session.requests.take(extra);
-            self.session.settings.blocked_error = true;
+            self.session
+                .settings
+                .blocked_senders
+                .fail("The unblock request was not sent.");
             return Err(err);
         }
-        if let Some(list) = self.session.settings.blocked_senders.as_mut() {
+        if let Some(list) = self.session.settings.blocked_senders.data_mut() {
             list.retain(|id| *id != user_id);
             self.session.settings.blocked_total =
                 self.session.settings.blocked_total.saturating_sub(1);
@@ -231,17 +235,20 @@ impl<S: JsonSender> ConnectDriver<S> {
             .send_json(&set_message_sender_block_list(extra, user_id, true))
         {
             self.session.requests.take(extra);
-            self.session.settings.blocked_error = true;
+            self.session
+                .settings
+                .blocked_senders
+                .fail("The block request was not sent.");
             return Err(err);
         }
-        let list = self
-            .session
-            .settings
-            .blocked_senders
-            .get_or_insert_with(Vec::new);
-        if !list.contains(&user_id) {
+        let blocked = &mut self.session.settings.blocked_senders;
+        blocked.insert_data_if_missing(Vec::new);
+        if let Some(list) = blocked.data_mut()
+            && !list.contains(&user_id)
+        {
             list.push(user_id);
-            self.session.settings.blocked_total += 1;
+            self.session.settings.blocked_total =
+                self.session.settings.blocked_total.saturating_add(1);
         }
         Ok(extra)
     }

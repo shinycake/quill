@@ -589,35 +589,59 @@ crate::ui::shell::register_dialogs! {
         5610,
         |app| super::sticker_box_shown(app) && app.sticker_box.rename_open,
         QuillApp::build_rename_set_dialog,
-    ),
+    )
+    .close(|app, _, cx| {
+            app.sticker_box.rename_open = false;
+            cx.notify();
+        }),
     /// A cell's "Delete sticker" / "Delete emoji".
     StickerDelete => DialogSpec::new(
         5620,
         |app| super::sticker_box_shown(app) && app.sticker_box.delete_sticker.is_some(),
         QuillApp::build_delete_sticker_dialog,
-    ),
+    )
+    .close(|app, _, cx| {
+            app.sticker_box.delete_sticker = None;
+            cx.notify();
+        }),
     /// "Delete Pack" → "Delete for Everyone".
     StickerSetDelete => DialogSpec::new(
         5630,
         |app| super::sticker_box_shown(app) && app.sticker_box.delete_set_open,
         QuillApp::build_delete_set_dialog,
-    ),
+    )
+    .close(|app, _, cx| {
+            app.sticker_box.delete_set_open = false;
+            cx.notify();
+        }),
     /// "Delete Pack" → "Delete for Myself".
     StickerSetRemove => DialogSpec::new(
         5640,
         |app| super::sticker_box_shown(app) && app.sticker_box.remove_set_open,
         QuillApp::build_remove_set_dialog,
-    ),
+    )
+    .close(|app, _, cx| {
+            app.sticker_box.remove_set_open = false;
+            cx.notify();
+        }),
     /// The "New Sticker" / "New Emoji" emoji step.
     StickerCreate => DialogSpec::new(
         5650,
         |app| super::sticker_box_shown(app) && app.sticker_box.create.is_some(),
         QuillApp::build_create_sticker_dialog,
-    ),
+    )
+    .close(|app, _, cx| {
+            app.sticker_box.discard_create();
+            cx.notify();
+        }),
     /// "Add an Existing Sticker" / "Adapt from a Sticker".
     StickerPick => DialogSpec::new(
         5660,
         |app| super::sticker_box_shown(app) && app.sticker_box.pick.is_some(),
         QuillApp::build_pick_sticker_dialog,
-    ),
+    )
+    .close(|app, _, cx| {
+            app.sticker_box.pick = None;
+            cx.notify();
+        }),
 }

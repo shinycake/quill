@@ -111,8 +111,8 @@ impl Session {
         }
         let history = self.histories.get(&chat_id.0)?;
         if let Some(last) = history.messages.values().next_back()
-            && last.pending
-            && !last.failed
+            && last.pending()
+            && !last.failed()
         {
             return crate::composer::ComposerEdit::from_pending_media(
                 chat_id,
@@ -129,8 +129,8 @@ impl Session {
             // are skipped, the scan goes on to older ones.
             .filter(|message| {
                 message.is_outgoing
-                    && !message.pending
-                    && !message.failed
+                    && !message.pending()
+                    && !message.failed()
                     && message.forward_info.is_none()
                     && message.extras.via_bot_user_id == 0
             })
@@ -139,7 +139,7 @@ impl Session {
                     chat_id,
                     message.id,
                     message.is_outgoing,
-                    message.pending,
+                    message.pending(),
                     &message.content,
                 )
                 .map(|edit| edit.in_album(message.media_album_id != 0))
@@ -308,7 +308,7 @@ impl Session {
             let doomed: Vec<MessageId> = history
                 .messages
                 .values()
-                .filter(|message| !message.pending && !message.failed)
+                .filter(|message| !message.pending() && !message.failed())
                 .map(|message| message.id)
                 .collect();
             for id in doomed {

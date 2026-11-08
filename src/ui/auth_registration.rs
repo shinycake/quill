@@ -89,12 +89,14 @@ impl QuillApp {
             return;
         };
         let mut first = self
+            .screen
             .auth_ui
             .registration_first_input
             .read(cx)
             .value()
             .to_string();
         let mut last = self
+            .screen
             .auth_ui
             .registration_last_input
             .read(cx)
@@ -103,20 +105,22 @@ impl QuillApp {
         let result = live.driver.register_user(
             &first,
             &last,
-            self.auth_ui.accepted_registration_terms.as_ref(),
-            self.auth_ui.registration_notify_contacts,
+            self.screen.auth_ui.accepted_registration_terms.as_ref(),
+            self.screen.auth_ui.registration_notify_contacts,
         );
         first.zeroize();
         last.zeroize();
-        self.connection.set_note(match result {
+        self.screen.connection.set_note(match result {
             Ok(_) => {
-                self.auth_ui
+                self.screen
+                    .auth_ui
                     .registration_first_input
                     .update(cx, |input, cx| input.set_value("", window, cx));
-                self.auth_ui
+                self.screen
+                    .auth_ui
                     .registration_last_input
                     .update(cx, |input, cx| input.set_value("", window, cx));
-                self.auth_ui.accepted_registration_terms = None;
+                self.screen.auth_ui.accepted_registration_terms = None;
                 StatusNote::silent(tr(keys::Q_MISC_REGISTRATION_SUBMITTED_WAITING_FOR_TELEGRAM))
             }
             Err(_) => StatusNote::error(tr(keys::Q_MISC_COULD_NOT_REGISTER_CHECK_YOUR)),

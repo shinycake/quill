@@ -14,7 +14,7 @@ impl QuillApp {
         if self.live.is_some() {
             return;
         }
-        self.auth_ui.demo_state = match &self.auth_ui.demo_state {
+        self.auth_demo.demo_state = match &self.auth_demo.demo_state {
             AuthorizationState::WaitPhoneNumber => AuthorizationState::WaitCode {
                 code_length: Some(5),
                 delivery: Default::default(),
@@ -38,12 +38,13 @@ impl QuillApp {
         let Some(live) = self.live.as_mut() else {
             return;
         };
-        let mut email = self.auth_ui.email_input.read(cx).value().to_string();
+        let mut email = self.screen.auth_ui.email_input.read(cx).value().to_string();
         let result = live.driver.submit_email(&email);
         email.zeroize();
-        self.connection.set_note(match result {
+        self.screen.connection.set_note(match result {
             Ok(_) => {
-                self.auth_ui
+                self.screen
+                    .auth_ui
                     .email_input
                     .update(cx, |input, cx| input.set_value("", window, cx));
                 StatusNote::silent(tr(keys::Q_NOTES_EMAIL_SUBMITTED))
@@ -103,7 +104,7 @@ impl QuillApp {
         ) {
             return;
         }
-        let mut code = self.auth_ui.code_input.read(cx).value().to_string();
+        let mut code = self.screen.auth_ui.code_input.read(cx).value().to_string();
         let result = live.driver.submit_code(&code);
         code.zeroize();
         match result {
@@ -132,7 +133,13 @@ impl QuillApp {
         ) {
             return;
         }
-        let mut password = self.auth_ui.password_input.read(cx).value().to_string();
+        let mut password = self
+            .screen
+            .auth_ui
+            .password_input
+            .read(cx)
+            .value()
+            .to_string();
         let result = live.driver.submit_password(&password);
         password.zeroize();
         match result {

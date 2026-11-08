@@ -94,8 +94,8 @@ impl QuillApp {
     /// The "Test microphone" row for Settings > Calls: a button, and the
     /// meter while the test runs.
     pub(super) fn mic_test_section(&self, cx: &mut Context<Self>) -> AnyElement {
-        let testing = !matches!(self.calls.mic_test, MicTestRun::Off);
-        let test = match &self.calls.mic_test {
+        let testing = !matches!(self.call_boxes.mic_test, MicTestRun::Off);
+        let test = match &self.call_boxes.mic_test {
             MicTestRun::On(test) => Some(test),
             _ => None,
         };
@@ -164,24 +164,24 @@ impl QuillApp {
 
     /// Start or stop the microphone test; a click while it opens stops it.
     pub(super) fn toggle_mic_test(&mut self, cx: &mut Context<Self>) {
-        if matches!(self.calls.mic_test, MicTestRun::Off) {
+        if matches!(self.call_boxes.mic_test, MicTestRun::Off) {
             self.open_mic_test(cx);
         } else {
-            self.calls.mic_test = MicTestRun::Off;
+            self.call_boxes.mic_test = MicTestRun::Off;
         }
         cx.notify();
     }
 
     fn open_mic_test(&mut self, cx: &mut Context<Self>) {
-        self.calls.mic_test_starts = self.calls.mic_test_starts.wrapping_add(1);
-        let start = self.calls.mic_test_starts;
-        self.calls.mic_test = MicTestRun::Opening(start);
-        let open = self.calls.open_mic_test.clone();
+        self.call_boxes.mic_test_starts = self.call_boxes.mic_test_starts.wrapping_add(1);
+        let start = self.call_boxes.mic_test_starts;
+        self.call_boxes.mic_test = MicTestRun::Opening(start);
+        let open = self.call_boxes.open_mic_test.clone();
         let opening = cx.background_spawn(async move { open() });
-        Self::spawn_main(cx, async move |this, cx| {
+        self.spawn_screen(cx, async move |this, cx| {
             let opened = opening.await;
             let _ = this.update(cx, |this, cx| {
-                if !matches!(this.calls.mic_test, MicTestRun::Opening(s) if s == start) {
+                if !matches!(this.call_boxes.mic_test, MicTestRun::Opening(s) if s == start) {
                     if let Ok(stale) = opened {
                         cx.background_spawn(async move { drop(stale) }).detach();
                     }
@@ -190,7 +190,7 @@ impl QuillApp {
                 match opened {
                     Ok(tap) => this.start_mic_test(tap, cx),
                     Err(err) => {
-                        this.calls.mic_test = MicTestRun::Off;
+                        this.call_boxes.mic_test = MicTestRun::Off;
                         this.connection.set_note(StatusNote::error(err));
                     }
                 }
@@ -201,21 +201,22 @@ impl QuillApp {
     }
 
     fn start_mic_test(&mut self, source: Box<dyn LevelSource + Send>, cx: &mut Context<Self>) {
-        self.calls.mic_test = MicTestRun::On(MicTest::new(source));
+        self.call_boxes.mic_test = MicTestRun::On(MicTest::new(source));
         // Stop the test, and close the microphone, once its meter stops
         // rendering: the Calls section is gone, so nobody is watching.
-        cx.spawn(async move |this, cx| {
+        // The test is the screen's: a switch drops it with its box.
+        self.spawn_screen(cx, async move |this, cx| {
             loop {
                 cx.background_executor()
                     .timer(Duration::from_millis(500))
                     .await;
                 let keep = this
-                    .update(cx, |this, cx| match &this.calls.mic_test {
+                    .update(cx, |this, cx| match &this.call_boxes.mic_test {
                         MicTestRun::On(test) if test.last_render.get().elapsed() < UNSEEN_STOP => {
                             true
                         }
                         MicTestRun::On(_) => {
-                            this.calls.mic_test = MicTestRun::Off;
+                            this.call_boxes.mic_test = MicTestRun::Off;
                             cx.notify();
                             false
                         }

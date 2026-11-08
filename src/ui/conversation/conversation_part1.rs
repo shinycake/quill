@@ -143,8 +143,7 @@ impl QuillApp {
                 |this, banner| this.child(banner),
             )
             .when(composer.is_some() && part.bottom(), |this| {
-                let show_attach =
-                    matches!(mode, PaneMode::Ready) && self.composer_ui.pending_edit.is_none();
+                let show_attach = matches!(mode, PaneMode::Ready) && !self.chat_ui.is_editing();
                 // Something to send (text, an attachment, an edit): the
                 // composer shows Send instead of the mic.
                 // A rich draft shown in place of the field sends too.
@@ -272,12 +271,10 @@ impl QuillApp {
                         // buttons that summon them.
                         // The share box's schedule step shows inside its dialog.
                         .when(
-                            self.composer_ui.schedule_popup_open
-                                && !self.composer_ui.schedule_picker.as_ref().is_some_and(
-                                    |picker| {
-                                        picker.target == super::scheduled::ScheduleTarget::Share
-                                    },
-                                ),
+                            self.chat_ui.schedule_popup_open
+                                && !self.chat_ui.schedule_picker.as_ref().is_some_and(|picker| {
+                                    picker.target == super::scheduled::ScheduleTarget::Share
+                                }),
                             |this| this.child(self.schedule_popup(cx)),
                         )
                         .when_some(self.paid_messages_notice(cx), |this, row| this.child(row))
@@ -417,7 +414,7 @@ impl QuillApp {
                         )
                         // M2: rich editor block bar + live block preview
                         // under the textarea while the editor is open.
-                        .when(self.composer_ui.rich_editor_open, |this| {
+                        .when(self.chat_ui.rich_editor_open, |this| {
                             this.child(self.rich_editor_bar(cx))
                         }),
                 )
@@ -541,7 +538,7 @@ impl QuillApp {
                 this.child(self.forum_topic_strip(&info, cx))
             })
             .when_some(
-                topic_info.clone().filter(|_| self.history.topic_info_open),
+                topic_info.clone().filter(|_| self.chat_ui.topic_info_open),
                 |this, info| this.child(self.topic_info_card(&info, cx)),
             )
             .children(self.subsection_tabs_strip(SubsectionTabsMode::Top, cx))
@@ -680,10 +677,13 @@ impl QuillApp {
                     if open.is_some() && !history_loading && !history_failed {
                         let weak = cx.weak_entity();
                         let window_chat = self.windows.scope;
+                        let screen = self.screen_epoch();
                         cx.defer(move |cx| {
                             let _ = weak.update(cx, |this, cx| {
-                                this.in_window_scope(window_chat, cx, |this, cx| {
-                                    this.maybe_auto_load_older(cx)
+                                this.in_screen_scope(screen, cx, |this, cx| {
+                                    this.in_window_scope(window_chat, cx, |this, cx| {
+                                        this.maybe_auto_load_older(cx)
+                                    })
                                 })
                             });
                         });
@@ -740,7 +740,7 @@ impl QuillApp {
             .min_h_0()
             .min_w_0()
             .children(self.thread_root_bar(cx))
-            .when(self.history.thread_info_open, |this| {
+            .when(self.chat_ui.thread_info_open, |this| {
                 this.children(self.thread_info_card(cx))
             })
             .child(list)

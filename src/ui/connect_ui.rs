@@ -3,7 +3,7 @@
 
 use super::early_connect::First;
 use crate::ui::status_note::StatusNote;
-use quill::auth::view_for;
+use quill::auth::{StartupFailure, view_for};
 use quill::connect::{
     ConnectBlocker, ConnectGate, LiveConnect, evaluate_gate, start_prepared_live_connect,
 };
@@ -120,11 +120,11 @@ impl super::app::QuillApp {
             return;
         }
         quill::startup_trace::mark("connect_start");
-        self.connection.generation += 1;
-        let generation = self.connection.generation;
+        self.connect.generation += 1;
+        let generation = self.connect.generation;
         let credentials = self.credentials.clone();
         self.connection.status = ConnectUiStatus::Live;
-        self.auth_ui.demo_state = AuthorizationState::WaitTdlibParameters;
+        self.auth_demo.demo_state = AuthorizationState::WaitTdlibParameters;
         self.connection
             .set_note(StatusNote::silent(tr(keys::Q_MISC_CONNECTING_TO_TELEGRAM)));
         // The first connection of the run first deletes folders an earlier
@@ -161,7 +161,8 @@ impl super::app::QuillApp {
             let prepared = prepare_startup(credentials, root, secrets().as_ref(), done);
             (swept, prepared)
         });
-        Self::spawn_main(cx, async move |this, cx| {
+        // screen-scope: connecting puts the prepared client on the screen, replacing what is there; its connection generation guard ends it on a restart.
+        Self::spawn_app(cx, async move |this, cx| {
             let (swept, prepared) = connect.await;
             quill::startup_trace::mark("prepare_done");
             let _ = this.update(cx, |this, _| {
@@ -183,26 +184,35 @@ impl super::app::QuillApp {
                 };
                 let again = this
                     .update(cx, |this, cx| {
-                        if generation != this.connection.generation {
+                        if generation != this.connect.generation {
                             return false;
                         }
                         if !safe {
                             // Its old client's close can't be confirmed in
-                            // this run: never open the database again.
-                            this.connection.set_note(StatusNote::silent(tr(
-                                keys::Q_REST_CONNECTION_TO_TELEGRAM_WAS_CLOSED,
-                            )));
+                            // this run: never open the database again, and
+                            // say so instead of staying on Connecting.
+                            this.auth_demo.demo_state =
+                                AuthorizationState::StartupFailed(StartupFailure::CloseUnconfirmed);
+                            this.connection.status = ConnectUiStatus::Blocked;
+                            this.connection.clear_note();
                             cx.notify();
                             return false;
                         }
-                        // A client still on screen closes first; when it is
-                        // this account's, wait for that close too.
-                        if let Some(old) = this.live.take() {
-                            let same = Some(&old.driver.session.account) == account.as_ref();
+                        // A client still on screen closes first, and its
+                        // screen's goodbyes (deferred to the end of this
+                        // update) run before the new client is put there:
+                        // the loop comes round again for the open, which
+                        // also waits for that close when it is this
+                        // account's.
+                        if this.live.is_some() {
+                            this.screen_leaves_later(cx);
+                        }
+                        if let Some(old) = this.take_live() {
                             this.close_live_later(old, false, cx);
-                            if same {
-                                return true;
-                            }
+                            return true;
+                        }
+                        if this.goodbyes_due() {
+                            return true;
                         }
                         let Some(prepared) = prepared.take() else {
                             return false;
@@ -245,9 +255,9 @@ impl super::app::QuillApp {
         match result {
             Ok(mut live) => {
                 quill::startup_trace::mark("client_open");
-                live.driver.set_stream_volume(self.playback.volume);
+                live.driver.set_stream_volume(self.players.volume);
                 self.disk.seed(&mut live.driver);
-                self.live = Some(live);
+                self.put_on_screen(live);
             }
             Err(ConnectBlocker::DiskFull) => {
                 self.refuse_screen_open(cx);
@@ -256,12 +266,12 @@ impl super::app::QuillApp {
             Err(blocker) => match blocker.startup_failure() {
                 Some(failure) => {
                     eprintln!("quill: no client: {}", blocker.user_message());
-                    self.auth_ui.demo_state = AuthorizationState::StartupFailed(failure);
+                    self.auth_demo.demo_state = AuthorizationState::StartupFailed(failure);
                     self.connection.status = ConnectUiStatus::Blocked;
                     self.connection.clear_note();
                 }
                 None => {
-                    self.auth_ui.demo_state = AuthorizationState::WaitPhoneNumber;
+                    self.auth_demo.demo_state = AuthorizationState::WaitPhoneNumber;
                     self.connection.status = ConnectUiStatus::NeedCredentials;
                     self.connection
                         .set_note(StatusNote::error(blocker.user_message()));

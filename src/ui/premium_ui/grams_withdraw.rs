@@ -36,7 +36,7 @@ crate::ui::shell::register_dialogs! {
         },
         QuillApp::build_grams_withdraw_dialog,
     )
-    .closes(|app, window, cx| app.cancel_grams_withdraw(window, cx)),
+    .close(|app, window, cx| app.cancel_grams_withdraw(window, cx)),
 }
 
 /// The Collect button under the available amount (tdesktop
@@ -165,8 +165,8 @@ impl QuillApp {
             None => (None, false, false, false),
         };
         keep_password_field(
-            &self.payments.grams_withdraw_password,
-            &mut self.payments.grams_withdraw_password_focused,
+            &self.screen.payments.grams_withdraw_password,
+            &mut self.screen.payments.grams_withdraw_password_focused,
             showing,
             idle,
             window,

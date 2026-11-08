@@ -179,7 +179,7 @@ fn a_failed_send_left_in_an_open_chat_does_not_turn_the_cap_off() {
     session.open_chat(ChatId(7));
     feed_live(&mut session, 7, 1..=10);
     let mut failed = history_message(outgoing(7, 11), true);
-    failed.failed = true;
+    failed.send = crate::state::SendState::Failed { can_retry: false };
     session.history_entry(ChatId(7)).upsert(failed);
     feed_live(&mut session, 7, 12..=4_000);
     let history = &session.histories[&7];

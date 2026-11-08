@@ -237,7 +237,7 @@ pub(in crate::ui) fn session_history_row(
         .interaction_info
         .as_ref()
         .and_then(|info| info.reply_info.as_ref())
-        .filter(|_| !in_thread && message.id.0 > 0 && !message.pending)
+        .filter(|_| !in_thread && message.id.0 > 0 && !message.pending())
         .and_then(|info| {
             let kind = if in_channel {
                 super::super::threads::ReplyBarKind::Comments
@@ -403,7 +403,7 @@ pub(in crate::ui) fn session_history_row(
             crate::ui::premium_sticker_effect::wrap(
                 message.id.0 as u64,
                 sticker,
-                message.pending,
+                message.pending(),
                 message.chat_id.0,
                 message.id.0,
                 // The effect plays toward the side the sticker faces.
@@ -879,7 +879,7 @@ pub(in crate::ui) fn session_history_row(
             receipt,
             sender_avatar.clone(),
             message.date,
-            message.pending,
+            message.pending(),
         );
         // A spacer (no link) keeps its slot: taking it would drop the gutter.
         if let Some(link) = avatar_link.take()
@@ -925,6 +925,7 @@ pub(in crate::ui) fn session_history_row(
     };
     if let Some(rich_body) = rich_body {
         return session_bubble_rich(
+            message.chat_id,
             message.id.0 as u64,
             chrome(false),
             message.is_outgoing,
@@ -937,6 +938,7 @@ pub(in crate::ui) fn session_history_row(
     }
     if let Some(text_body) = text_body {
         return session_bubble_rich(
+            message.chat_id,
             message.id.0 as u64,
             chrome(
                 (text_reserved || matches!(content, MessageContent::Call { .. })) && extra_is_empty,
@@ -954,6 +956,7 @@ pub(in crate::ui) fn session_history_row(
     // through to the quoted fallback with an empty body.
     if let Some(caption_el) = caption_above_el {
         return session_bubble_rich(
+            message.chat_id,
             message.id.0 as u64,
             chrome(false),
             message.is_outgoing,
@@ -965,6 +968,7 @@ pub(in crate::ui) fn session_history_row(
         );
     }
     session_bubble_quoted(
+        message.chat_id,
         message.id.0 as u64,
         chrome(caption_reserved),
         String::new(),

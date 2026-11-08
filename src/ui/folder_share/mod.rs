@@ -118,10 +118,12 @@ impl QuillApp {
                 .contains_key(&folder_id)
                 && let Err(err) = live.driver.fetch_chat_folder(folder_id)
             {
-                self.connection.set_note(StatusNote::error(user_error_for(
-                    keys::Q_NOTES_FAILED_FOLDER,
-                    &err,
-                )));
+                self.screen
+                    .connection
+                    .set_note(StatusNote::error(user_error_for(
+                        keys::Q_NOTES_FAILED_FOLDER,
+                        &err,
+                    )));
             }
             if let Err(err) = live.driver.fetch_folder_share(folder_id) {
                 self.connection.set_note(StatusNote::error(user_error_for(
@@ -856,7 +858,7 @@ impl QuillApp {
                 changed = true;
             }
         }
-        if let Some(dialog) = self.folders.invite.as_mut()
+        if let Some(dialog) = self.screen.folders.invite.as_mut()
             && dialog.adding
             && self
                 .live
@@ -922,13 +924,15 @@ crate::ui::shell::register_dialogs! {
         1900,
         |app| app.folders.share.is_some(),
         QuillApp::build_folder_share_dialog,
-    ),
+    )
+    .close(|app, _, cx| app.close_folder_share(cx)),
 
     FolderInvite => DialogSpec::new(
         2000,
         |app| app.folders.invite.is_some(),
         QuillApp::build_folder_invite_dialog,
-    ),
+    )
+    .close(|app, _, cx| app.close_folder_invite(cx)),
 }
 
 mod build_folder_invite_dialog;

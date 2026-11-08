@@ -154,7 +154,7 @@ fn assert_plays(app: &Entity<QuillApp>, vcx: &mut VisualTestContext, keys: &[(i6
     for key in keys {
         let player = player(app, vcx, *key);
         let (hidden, asleep) = app.read_with(vcx, |app, _| {
-            let videos = &app.playback.inline_videos;
+            let videos = &app.players.inline_videos;
             (videos.is_hidden(*key), videos.is_asleep(*key))
         });
         assert!(!hidden && !asleep, "{key:?} is held as if off screen");
@@ -167,7 +167,7 @@ fn assert_plays(app: &Entity<QuillApp>, vcx: &mut VisualTestContext, keys: &[(i6
 }
 
 fn player(app: &Entity<QuillApp>, vcx: &mut VisualTestContext, key: (i64, i64)) -> VideoPlayer {
-    app.read_with(vcx, |app, _| app.playback.inline_videos.player(key))
+    app.read_with(vcx, |app, _| app.players.inline_videos.player(key))
         .unwrap_or_else(|| panic!("{key:?} has a player"))
 }
 
@@ -235,7 +235,7 @@ fn a_chat_windows_clips_keep_playing_while_the_main_window_draws(cx: &mut TestAp
     vcx.run_until_parked();
     settle(vcx);
     app.read_with(vcx, |app, _| {
-        let videos = &app.playback.inline_videos;
+        let videos = &app.players.inline_videos;
         assert!(videos.player(ROUND).is_none() && videos.player(TILE).is_none());
     });
     assert_eq!(live(&scripts), 0, "every backend is released");
@@ -250,14 +250,14 @@ fn assert_sleeps_out_of_sight(
     scripts: &[Rc<RefCell<Script>>],
 ) {
     for key in [ROUND, TILE] {
-        let hidden = app.read_with(vcx, |app, _| app.playback.inline_videos.is_hidden(key));
+        let hidden = app.read_with(vcx, |app, _| app.players.inline_videos.is_hidden(key));
         assert!(hidden, "{key:?} pauses out of sight");
         assert!(!player(app, vcx, key).wants_play(), "{key:?} is paused");
     }
     vcx.executor().advance_clock(RELEASE_AFTER);
     vcx.run_until_parked();
     for key in [ROUND, TILE] {
-        let asleep = app.read_with(vcx, |app, _| app.playback.inline_videos.is_asleep(key));
+        let asleep = app.read_with(vcx, |app, _| app.players.inline_videos.is_asleep(key));
         assert!(asleep, "{key:?} sleeps after RELEASE_AFTER");
     }
     assert_eq!(live(scripts), 0, "every decoder is released");
@@ -445,7 +445,7 @@ fn a_viewer_in_the_main_window_leaves_a_click_in_a_chat_window_alone(cx: &mut Te
         panic!("message 611 is a round video");
     };
     assert!(
-        app.read_with(vcx, |app, _| app.playback.inline_videos.player(ROUND))
+        app.read_with(vcx, |app, _| app.players.inline_videos.player(ROUND))
             .is_none(),
         "with autoplay off the round video rests on its still"
     );
@@ -464,7 +464,7 @@ fn a_viewer_in_the_main_window_leaves_a_click_in_a_chat_window_alone(cx: &mut Te
         draw_chat_window(chat_window, vcx);
     }
     app.read_with(vcx, |app, _| {
-        let videos = &app.playback.inline_videos;
+        let videos = &app.players.inline_videos;
         assert!(videos.player(ROUND).is_some(), "the click plays it");
         assert!(videos.is_sounding(ROUND), "with sound");
     });
@@ -755,7 +755,7 @@ fn a_minimized_chat_windows_sleeping_clips_stay_asleep_as_the_app_hides(cx: &mut
     assert_sleeps_out_of_sight(&app, vcx, &scripts);
     let asleep = |app: &Entity<QuillApp>, vcx: &mut VisualTestContext, when: &str| {
         for key in [ROUND, TILE] {
-            let asleep = app.read_with(vcx, |app, _| app.playback.inline_videos.is_asleep(key));
+            let asleep = app.read_with(vcx, |app, _| app.players.inline_videos.is_asleep(key));
             assert!(asleep, "{key:?} sleeps on {when}");
         }
         assert_eq!(live(&scripts), 0, "a decoder opened {when}");
@@ -854,7 +854,7 @@ fn a_click_in_a_chat_window_closed_before_its_clip_lands_plays_nothing(cx: &mut 
         draw_main(&app, vcx);
     }
     app.read_with(vcx, |app, _| {
-        let videos = &app.playback.inline_videos;
+        let videos = &app.players.inline_videos;
         assert_eq!(videos.demand(ROUND), None, "a request outlived its window");
         assert!(
             !videos.is_sounding(ROUND),

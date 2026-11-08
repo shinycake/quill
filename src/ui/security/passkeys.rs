@@ -639,14 +639,18 @@ crate::ui::shell::register_dialogs! {
         }),
         QuillApp::build_passkey_delete_dialog,
     )
-    .closes(|app, _, cx| app.dismiss_delete_passkey(cx)),
+    .close(|app, _, cx| app.dismiss_delete_passkey(cx)),
 
     /// "Protect your account" (`PasskeysNoneBox`).
     PasskeysAbout => DialogSpec::new(
         620,
         |app| app.privacy.passkeys.about_open,
         QuillApp::build_passkeys_about_dialog,
-    ),
+    )
+    .close(|app, _, cx| {
+            app.privacy.passkeys.about_open = false;
+            cx.notify();
+        }),
 
     /// The Passkeys list.
     Passkeys => DialogSpec::new(
@@ -654,7 +658,7 @@ crate::ui::shell::register_dialogs! {
         |app| app.privacy.passkeys.list_open,
         QuillApp::build_passkeys_dialog,
     )
-    .closes(|app, _, cx| app.close_passkeys(cx)),
+    .close(|app, _, cx| app.close_passkeys(cx)),
 }
 
 crate::ui::screenshot_demo::register_demos![

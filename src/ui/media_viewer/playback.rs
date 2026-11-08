@@ -253,7 +253,7 @@ impl QuillApp {
             return;
         }
         if let Some(slider) = self.viewer.controls.volume.as_ref() {
-            let value = (self.playback.volume * 100.0).round();
+            let value = (self.players.volume * 100.0).round();
             let changed = slider.read(cx).value() != SliderValue::Single(value);
             if changed {
                 slider.update(cx, |state, cx| {
@@ -272,7 +272,7 @@ impl QuillApp {
         const SPEEDS: [f64; 6] = [0.5, 0.7, 1.0, 1.2, 1.5, 2.0];
         let next = SPEEDS
             .iter()
-            .position(|s| (*s - self.playback.speed).abs() < 0.01)
+            .position(|s| (*s - self.players.speed).abs() < 0.01)
             .and_then(|i| SPEEDS.get((i + 1) % SPEEDS.len()).copied())
             .unwrap_or(1.0);
         self.set_playback_speed(next, cx);
@@ -282,16 +282,16 @@ impl QuillApp {
     /// active track and the viewer video.
     pub(in crate::ui) fn set_playback_speed(&mut self, speed: f64, cx: &mut Context<Self>) {
         let next = quill::viewer_extras::clamp_speed(speed);
-        self.playback.speed = next;
+        self.players.speed = next;
         self.viewer.controls.speed_preview = None;
         // A chosen speed ends a Space hold (the rate is set below).
         self.viewer.controls.boost_timer = None;
         let _ = self.viewer.controls.boost.cancel();
         let mut restarted = false;
         if self.playback.track_duration().is_some() {
-            let was_playing = self.playback.is_playing();
+            let was_playing = self.is_playing();
             // The tempo stretcher follows the new speed on the fly.
-            self.playback.audio.set_speed(next);
+            self.players.audio.set_speed(next);
             restarted = was_playing;
         }
         if let Some(player) = self.viewer.player.as_ref().filter(|_| !self.viewer_loops()) {
@@ -318,7 +318,7 @@ impl QuillApp {
                 .min(quill::viewer_extras::SPEED_MIN as f32)
                 .max(quill::viewer_extras::SPEED_MAX as f32)
                 .step(0.1)
-                .default_value(self.playback.speed as f32)
+                .default_value(self.players.speed as f32)
         });
         // The slider is this viewer's: its events act on this window's.
         let scope = self.windows.scope;
@@ -342,7 +342,7 @@ impl QuillApp {
 
     /// Move the speed dial's thumb to the current speed.
     fn sync_speed_slider(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let speed = self.playback.speed as f32;
+        let speed = self.players.speed as f32;
         if let Some(slider) = self.viewer.controls.speed.as_ref() {
             slider.update(cx, |state, cx| state.set_value(speed, window, cx));
         }
@@ -361,7 +361,7 @@ impl QuillApp {
         use crate::ui::video_player::controls::SpeedMenu;
         let slider = self.ensure_speed_slider(cx);
         let dragging = self.viewer.controls.speed_preview.is_some();
-        let current = self.playback.speed;
+        let current = self.players.speed;
         let shown = self.viewer.controls.speed_preview.unwrap_or(current);
         let view = cx.entity().downgrade();
         Popover::new((id, 1usize))
@@ -401,7 +401,7 @@ impl QuillApp {
             .viewer
             .controls
             .speed_preview
-            .unwrap_or(self.playback.speed);
+            .unwrap_or(self.players.speed);
         Button::new((id, 0usize))
             .label(Self::speed_label(shown))
             .ghost()
@@ -418,11 +418,11 @@ impl QuillApp {
     /// MED1: mute toggle — 0 volume remembers the previous level and
     /// restores it on unmute; the sound restarts at the new volume.
     pub(in crate::ui) fn toggle_playback_mute(&mut self, cx: &mut Context<Self>) {
-        if self.playback.volume > 0.01 {
-            self.playback.unmuted_volume = self.playback.volume;
+        if self.players.volume > 0.01 {
+            self.players.unmuted_volume = self.players.volume;
             self.set_playback_volume(0.0, cx);
         } else {
-            let restore = self.playback.unmuted_volume.max(0.01);
+            let restore = self.players.unmuted_volume.max(0.01);
             self.set_playback_volume(restore, cx);
         }
     }
@@ -430,13 +430,13 @@ impl QuillApp {
     /// MED1: set playback volume 0.0–1.0 and restart any active player so
     /// the sound picks up the new volume.
     pub(in crate::ui) fn set_playback_volume(&mut self, volume: f32, cx: &mut Context<Self>) {
-        self.playback.volume = volume.clamp(0.0, 1.0);
-        self.playback.audio.set_volume(self.playback.volume);
+        self.players.volume = volume.clamp(0.0, 1.0);
+        self.players.audio.set_volume(self.players.volume);
         if let Some(live) = self.live.as_mut() {
-            live.driver.set_stream_volume(self.playback.volume);
+            live.driver.set_stream_volume(self.players.volume);
         }
         if let Some(player) = self.viewer.player.as_ref().filter(|_| !self.viewer_loops()) {
-            player.set_volume(self.playback.volume);
+            player.set_volume(self.players.volume);
         }
         cx.notify();
     }
@@ -575,9 +575,11 @@ impl QuillApp {
         if delta_y == 0.0 {
             return;
         }
-        self.viewer
-            .zoom
-            .zoom_at(wheel_zoom_factor(delta_y), anchor, self.viewer.frame);
+        self.screen.viewer.zoom.zoom_at(
+            wheel_zoom_factor(delta_y),
+            anchor,
+            self.screen.viewer.frame,
+        );
         cx.notify();
     }
 
@@ -586,13 +588,19 @@ impl QuillApp {
         if !self.viewer.zoom.is_zoomed() {
             return;
         }
-        self.viewer.zoom.pan_by(dx, dy, self.viewer.frame);
+        self.screen
+            .viewer
+            .zoom
+            .pan_by(dx, dy, self.screen.viewer.frame);
         cx.notify();
     }
 
     /// Parity slice 5: step the viewer zoom in or out one notch.
     pub(in crate::ui) fn viewer_zoom_step(&mut self, zoom_in: bool, cx: &mut Context<Self>) {
-        self.viewer.zoom.step(zoom_in, self.viewer.frame);
+        self.screen
+            .viewer
+            .zoom
+            .step(zoom_in, self.screen.viewer.frame);
         cx.notify();
     }
 
@@ -602,7 +610,10 @@ impl QuillApp {
         if self.viewer.extra.video_fullscreen.is_on() {
             return;
         }
-        self.viewer.zoom.toggle_natural(self.viewer.frame);
+        self.screen
+            .viewer
+            .zoom
+            .toggle_natural(self.screen.viewer.frame);
         self.viewer.drag = None;
         cx.notify();
     }

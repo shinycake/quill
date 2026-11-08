@@ -135,6 +135,7 @@ impl QuillApp {
         }
         self.admin.event_log_hooked = true;
         let app = cx.weak_entity();
+        let screen = self.screen_epoch();
         // Runs while the list holds its own state: it must not touch the
         // list, so the load starts after the scroll event is done.
         self.admin
@@ -144,9 +145,11 @@ impl QuillApp {
                     let app = app.clone();
                     cx.defer(move |cx| {
                         app.update(cx, |this, cx| {
-                            if let Some(chat_id) = this.event_log_open_chat() {
-                                this.load_more_event_log(chat_id, cx);
-                            }
+                            this.in_screen_scope(screen, cx, |this, cx| {
+                                if let Some(chat_id) = this.event_log_open_chat() {
+                                    this.load_more_event_log(chat_id, cx);
+                                }
+                            });
                         })
                         .ok();
                     });
@@ -174,7 +177,11 @@ impl QuillApp {
                     break;
                 }
             }
-            let _ = this.update(cx, |this, _| {
+            // Through the main window: when the chat window this started
+            // in has closed, `this` is gone, and the screen-wide flag would
+            // otherwise keep the page from ever polling again. A screen
+            // that is gone took the flag with it.
+            let _ = this.main().update(cx, |this, _| {
                 if this.admin.event_log_poll == Some(chat_id) {
                     this.admin.event_log_poll = None;
                 }
@@ -460,11 +467,7 @@ impl QuillApp {
             // Short lists never scroll, so the next page is asked for here,
             // once for each length the list reaches.
             self.admin.event_log_autoload.set(page.events.len());
-            let app = cx.weak_entity();
-            cx.defer(move |cx| {
-                app.update(cx, |this, cx| this.load_more_event_log(chat_id, cx))
-                    .ok();
-            });
+            self.defer_screen(cx, move |this, cx| this.load_more_event_log(chat_id, cx));
         }
         let rows = Rc::clone(&entries);
         let rows_list = list(state, move |ix, _, cx| {

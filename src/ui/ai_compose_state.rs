@@ -8,7 +8,7 @@ use super::app::QuillApp;
 use gpui_kit::component::input::{InputEvent, TextareaState};
 use gpui_kit::*;
 use quill::ai_compose::{AiComposeBox, StyleExample, StyleExamples, TextCompositionStyle};
-use quill::ids::ChatId;
+use quill::ids::{ChatId, OfAccount};
 use quill::lang::{keys, tr};
 use std::collections::HashSet;
 use std::ops::Range;
@@ -105,8 +105,10 @@ pub(crate) struct AiComposeUi {
     /// here); `None` while it is hidden.
     pub(super) button_shown_at: Option<Instant>,
     /// Custom emoji ids the style pills already asked TDLib for.
-    pub(super) emoji_asked: HashSet<i64>,
+    pub(super) emoji_asked: HashSet<OfAccount<i64>>,
 }
+
+impl crate::ui::on_screen::Farewell for AiComposeUi {}
 
 impl AiComposeUi {
     pub(super) fn new(window: &mut Window, cx: &mut Context<QuillApp>) -> Self {

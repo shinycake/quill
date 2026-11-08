@@ -22,7 +22,7 @@ fn clicks_on_the_story_and_its_header_keep_the_viewer_open(cx: &mut TestAppConte
     vcx.simulate_click(pause.center(), Modifiers::default());
     frames(vcx);
     assert!(open(&app, vcx), "a click on the pause button");
-    let paused = app.read_with(vcx, |app, _| app.stories.pause.is_paused());
+    let paused = app.read_with(vcx, |app, _| app.stories.viewer_ui().pause.is_paused());
     assert!(paused, "the pause button pauses");
     let panel = vcx.debug_bounds("story-viewer-panel").expect("the panel");
     let edge = point(panel.origin.x + px(4.), panel.origin.y + px(4.));

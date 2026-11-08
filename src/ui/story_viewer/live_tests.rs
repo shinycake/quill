@@ -352,7 +352,7 @@ fn space_types_in_the_comment_field_and_does_not_pause(cx: &mut TestAppContext) 
         app.stories.live.input.read(cx).value().to_string()
     });
     assert_eq!(value, "a b");
-    assert!(!app.read_with(vcx, |app, _| app.stories.pause.is_paused()));
+    assert!(!app.read_with(vcx, |app, _| app.stories.viewer_ui().pause.is_paused()));
     // The placeholder goes once there is text.
     assert!(find(vcx, "live-story-placeholder").is_none());
 }
@@ -533,7 +533,10 @@ fn the_emoji_panel_closes_with_the_reply_row(cx: &mut TestAppContext) {
     frames(vcx);
     app.read_with(vcx, |app, _| {
         assert!(!app.story_reply_panel_active());
-        assert!(!app.stories.reply_open, "the reply row is not left open");
+        assert!(
+            !app.stories.viewer_ui().reply_open,
+            "the reply row is not left open"
+        );
     });
 }
 
@@ -598,7 +601,12 @@ fn a_story_stream_that_failed_offers_retry(cx: &mut TestAppContext) {
 fn an_account_switch_leaves_the_live_story(cx: &mut TestAppContext) {
     let (app, mut vcx) = open_live(cx, "ready-live-story-in-call");
     let vcx = &mut vcx;
-    app.update(vcx, |app, cx| app.retire_live_to_background(cx));
+    // What `switch_account` does: the screen's goodbyes (the story's leave
+    // is `StoryUi`'s farewell), then the client goes to the background.
+    app.update_in(vcx, |app, window, cx| {
+        app.end_account_surfaces(window, cx);
+        app.retire_live_to_background(cx);
+    });
     frames(vcx);
     app.read_with(vcx, |app, _| {
         assert!(!app.stories.viewer.is_open());
@@ -616,7 +624,12 @@ fn an_account_switch_closes_a_story_pip(cx: &mut TestAppContext) {
     app.update_in(vcx, |app, window, cx| app.open_story_pip(window, cx));
     frames(vcx);
     assert!(app.read_with(vcx, |app, _| app.live_pip_story().is_some()));
-    app.update(vcx, |app, cx| app.retire_live_to_background(cx));
+    // What `switch_account` does: the screen's goodbyes (the story's leave
+    // is `StoryUi`'s farewell), then the client goes to the background.
+    app.update_in(vcx, |app, window, cx| {
+        app.end_account_surfaces(window, cx);
+        app.retire_live_to_background(cx);
+    });
     frames(vcx);
     app.read_with(vcx, |app, _| {
         assert!(app.group_call.live_pip.is_none());
@@ -646,7 +659,9 @@ fn a_stream_in_pip_leaves_the_header_of_another_story_alone(cx: &mut TestAppCont
     // The reply panel feeds the photo story's reply field, not the hidden
     // live comment field.
     app.update(vcx, |app, cx| {
-        app.stories.reply_open = true;
+        if let Some(open) = app.stories.viewer_ui_mut() {
+            open.reply_open = true;
+        }
         app.toggle_story_reply_panel(crate::ui::media_panel::PanelTab::Emoji, cx);
     });
     frames(vcx);
@@ -714,7 +729,7 @@ fn a_tinted_burst_is_made_off_thread_and_plays_for_effects_after_it(cx: &mut Tes
 
     // Three white frames in place of the file.
     app.update(vcx, |app, cx| {
-        app.playback.stickers.set_fixture(
+        app.players.stickers.set_fixture(
             file.0,
             std::sync::Arc::new(|edge| {
                 let len = (edge as usize).pow(2) * 4;
@@ -728,11 +743,11 @@ fn a_tinted_burst_is_made_off_thread_and_plays_for_effects_after_it(cx: &mut Tes
     });
     for _ in 0..3 {
         frames(vcx);
-        app.read_with(vcx, |app, _| app.playback.stickers.settle());
+        app.read_with(vcx, |app, _| app.players.stickers.settle());
     }
     frames(vcx);
     let first_pixel = app.read_with(vcx, |app, _| {
-        let image = app.playback.stickers.any_frame(file.0)?;
+        let image = app.players.stickers.any_frame(file.0)?;
         let bytes = image.as_bytes(0)?;
         bytes.get(..4).map(<[u8]>::to_vec)
     });

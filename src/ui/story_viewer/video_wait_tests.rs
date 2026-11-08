@@ -4,7 +4,7 @@
 //! Telegram.
 use super::demo::{LEO, apply_video_story};
 use super::open_tests::{frames, open_app};
-use crate::ui::story_more::VIDEO_WAIT;
+use crate::ui::story_video_state::{StoryVideo, VIDEO_WAIT};
 use gpui_kit::TestAppContext;
 use quill::diagnostics::DiagnosticSink;
 use quill::ids::ChatId;
@@ -37,14 +37,21 @@ fn a_clip_that_never_arrives_falls_back_to_the_picture(cx: &mut TestAppContext) 
         }
         // Ticks while the clip is missing must not restart the wait.
         app.sync_story_video(cx);
-        let long_ago = Instant::now().checked_sub(VIDEO_WAIT + Duration::from_secs(1));
-        app.stories.video_wait_since = long_ago;
+        if let (StoryVideo::Waiting { since, .. }, Some(long_ago)) = (
+            &mut app.stories.video,
+            Instant::now().checked_sub(VIDEO_WAIT + Duration::from_secs(1)),
+        ) {
+            *since = long_ago;
+        }
         app.sync_story_video(cx);
         app.sync_story_video(cx);
     });
     let (failed, driven) = app.read_with(vcx, |app, _| {
-        (app.stories.native_failed, app.story_video_driven())
+        (
+            app.stories.video.failed_for(Some((LEO, 3))),
+            app.story_video_driven(),
+        )
     });
-    assert_eq!(failed, Some((LEO, 3)), "the wait ran out");
+    assert!(failed, "the wait ran out");
     assert!(!driven, "the duration clock takes over");
 }

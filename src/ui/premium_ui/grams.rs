@@ -47,7 +47,7 @@ crate::ui::shell::register_dialogs! {
         |app| app.session().is_some_and(|s| s.payments.hub.grams.open),
         QuillApp::build_grams_dialog,
     )
-    .closes(|app, _, cx| app.close_grams(cx)),
+    .close(|app, _, cx| app.close_grams(cx)),
 }
 
 fn tab_label(filter: TxFilter) -> &'static str {

@@ -130,7 +130,7 @@ impl QuillApp {
         if call.are_messages_allowed && call.can_send_messages {
             section = section
                 .child(
-                    Textarea::new(&self.group_call.composer)
+                    Textarea::new(&self.group_call_screen.composer)
                         .aria_label(tr(keys::Q_AV_VOICE_CHAT_MESSAGE))
                         .h(px(40.)),
                 )
@@ -200,7 +200,7 @@ impl QuillApp {
                             .accessibility_label(tr(keys::GROUP_CALL_CLOSE))
                             .ghost()
                             .on_click(cx.listener(|this, _, _, cx| {
-                                this.group_call.invite_open = false;
+                                this.group_call_boxes.invite_open = false;
                                 this.close_conference_link();
                                 cx.notify();
                             })),

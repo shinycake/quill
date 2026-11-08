@@ -34,7 +34,7 @@ tightened in the review round lists 82 against `origin/main` 80fb887c, see
 
 The rest of the 57 are app-wide work (poll loop, background accounts,
 passcode, spellcheck, mini apps, story viewer, playback tick); they now say
-so with `spawn_main`.
+so with `spawn_app`.
 
 Proven by tests that fail on `origin/main`: the chat search answer (core
 and driver), the saved toast timer in a window and from a closed window
@@ -65,7 +65,7 @@ the scope. B gives that work the window as a key:
   slot no longer carries a copy of the session view.
 - UI async work starts with `spawn_scoped` / `spawn_scoped_in`. The
   task receives a `ScopedApp` instead of the app's weak handle, and each
-  `update` puts the starting window's state in place first. App-wide work uses `spawn_main` / `spawn_main_in`.
+  `update` puts the starting window's state in place first. App-wide work uses `spawn_app` / `spawn_app_in`.
 - `in_window_scope` runs nothing for a window that has closed, so that work
   can't fall back to the main window's state.
 - `scripts/check-window-scope.py` (CI step "window scope") flags async
@@ -78,7 +78,7 @@ Trade-off: B is enforced by a lint, A would be enforced by the type system.
 The lint matches methods by name, so it can flag something harmless (then
 add the marker) or miss state it can't see (listed under "Review round").
 B also drops work whose window has closed. That's right for window state,
-but app-wide flags set from a window's work have to use `spawn_main`, or
+but app-wide flags set from a window's work have to use `spawn_app`, or
 they would stay set forever.
 
 This is not performance work. The added cost is one `BTreeMap` remove and
@@ -107,7 +107,7 @@ for the next one. From there (`chat_window/recording.rs`):
   the handle of the window it was recorded in (the main window's for
   `None`). It does not wait for that window to draw: GPUI does not draw a
   covered or minimized window.
-- The 100 ms tick runs as a `spawn_main` task whose every step goes through
+- The 100 ms tick runs as a `spawn_app` task whose every step goes through
   `in_window_scope(origin)`, so `sync_voice_action` addresses the right chat.
 - Closing the window (`forget_chat_window`, also on an account switch) ends
   the recording with a status note ("recording discarded — its chat window
@@ -194,7 +194,7 @@ the call, for work that needs no window's state.
 Limits the lint keeps: methods are matched by name, not type; a field
 reached through a binding made outside the closure or through a helper on
 another type is not seen; a function pointer passed in (`with_capture_access`
-takes `start: fn(...)`) is not followed; `spawn_scoped*` / `spawn_main*`
+takes `start: fn(...)`) is not followed; `spawn_scoped*` / `spawn_app*`
 bodies are not checked, they name their window by construction; and it
 cannot tell a wrongly chosen window, which is how the recording send got
 past it (`defer_scoped`, since removed, called from the main window's

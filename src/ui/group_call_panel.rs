@@ -113,7 +113,7 @@ fn mute_state(call: &ActiveGroupCall) -> MuteState {
         return MuteState::Join;
     }
     let me = call.participants.iter().find(|p| p.is_current_user);
-    let Some(me) = me.filter(|_| !call.reconnecting) else {
+    let Some(me) = me.filter(|_| !call.reconnecting()) else {
         return MuteState::Connecting;
     };
     if me.is_muted_for_all_users && !me.can_unmute_self {
@@ -352,7 +352,7 @@ impl QuillApp {
                     .on_click(cx.listener(|this, _, _, cx| this.dismiss_group_call_error(cx)))
                     .child(error)
             });
-        let banner = call.reconnecting.then(|| {
+        let banner = call.reconnecting().then(|| {
             div()
                 .id("group-call-rejoin")
                 .mx(px(16.))
@@ -372,7 +372,8 @@ impl QuillApp {
 
         // A conference made with "Create Call Link" opens on its link.
         let link_open = call.conference.as_ref().is_some_and(|c| c.link_open);
-        let invite = ((self.group_call.invite_open || link_open) && !self.account.passcode.locked)
+        let invite = ((self.group_call_boxes.invite_open || link_open)
+            && !self.account.passcode.locked)
             .then(|| {
                 div()
                     .absolute()
@@ -485,7 +486,7 @@ impl QuillApp {
         heading: SharedString,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
-        let dialog = self.group_call.title_dialog.as_ref()?;
+        let dialog = self.group_call_screen.title_dialog.as_ref()?;
         Some(
             div()
                 .absolute()

@@ -185,7 +185,7 @@ impl QuillApp {
                 // M1: `cx.listener` closures must be `'static`, so the
                 // row's ids are copied out of the message first.
                 let (row_chat, row_msg) = (message.chat_id, message.id);
-                let message_pending = message.pending;
+                let message_pending = message.pending();
                 let wide_right = look.wide.then(|| {
                     let limit = crate::ui::history::bubble_width::message_width_limit(
                         cx,
@@ -202,7 +202,7 @@ impl QuillApp {
                     quill::chat_wide::selection_right(limit, width)
                 });
                 let selection =
-                    self.selection_row(row_chat, row_msg, message.pending, wide_right, cx);
+                    self.selection_row(row_chat, row_msg, message.pending(), wide_right, cx);
                 let (selection_overlay, selection_tint, selection_slide) =
                     (selection.overlay, selection.tint, selection.slide);
                 // The side the bubble sits on (`hasRightLayout`): the wide
@@ -210,14 +210,16 @@ impl QuillApp {
                 let right = quill::chat_wide::has_right_layout(message.is_outgoing, look.wide);
                 let vanishing = inputs
                     .vanishing
-                    .then(|| self.vanish_progress(row_msg))
+                    .then(|| self.vanish_progress(row_chat, row_msg))
                     .flatten();
                 let highlighted = inputs.highlighted;
-                let failed = message.failed;
+                let failed = message.failed();
                 let run_start = inputs.run_start;
                 let element = div()
                     .relative()
-                    .child(super::vanish::row_tracker(row_msg.0))
+                    .child(super::vanish::row_tracker(quill::ids::ChatMessage::new(
+                        row_chat, row_msg,
+                    )))
                     .when(run_start, |this| this.pt_2())
                     // Jump target, forward selection and failed sends tint
                     // the whole row instead of outlining it: no border or
@@ -335,7 +337,7 @@ impl QuillApp {
                     .children(selection_overlay)
                     .into_any_element();
                 match vanishing {
-                    Some(t) => self.ghost_row(row_msg, t, element),
+                    Some(t) => self.ghost_row(row_chat, row_msg, t, element),
                     None => element,
                 }
             }

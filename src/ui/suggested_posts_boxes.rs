@@ -213,7 +213,7 @@ impl QuillApp {
                 chat_id,
                 message_id,
             } => {
-                self.connection.set_note(match self.live.as_mut() {
+                self.screen.connection.set_note(match self.live.as_mut() {
                     Some(live) => match live.driver.add_offer(chat_id, message_id, terms) {
                         Ok(_) => StatusNote::silent(tr(keys::Q_MONEY_SENDING_THE_OFFER)),
                         Err(_) => StatusNote::error(tr(keys::Q_MONEY_COULDNT_SEND_THE_OFFER)),
@@ -575,12 +575,13 @@ crate::ui::shell::register_dialogs! {
         3960,
         |app| app.suggested_posts.time.is_some(),
         QuillApp::build_suggest_time_dialog,
-    ),
+    )
+    .close(|app, _, cx| app.close_suggest_time(cx)),
     /// "Suggest a Message" / "Suggest Changes".
     SuggestPrice => DialogSpec::new(
         3968,
         |app| app.suggested_posts.price.is_some(),
         QuillApp::build_suggest_price_dialog,
     )
-    .closes(|app, _, cx| app.close_suggest_price(cx)),
+    .close(|app, _, cx| app.close_suggest_price(cx)),
 }

@@ -106,6 +106,32 @@ pub fn effective_preview(message: &HistoryMessage) -> String {
     effective_content(&message.content, message.ephemeral.as_ref()).preview()
 }
 
+/// A row's send state, from `message.sending_state` (TDLib 1.8.67, line
+/// 3034) or `updateMessageSendFailed`. A row that is sending or failed is
+/// not on the server yet: it can't be reacted to, pinned or forwarded.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum SendState {
+    #[default]
+    Sent,
+    Sending,
+    /// `can_retry`: `resendMessages` may retry it (not every failure can).
+    Failed {
+        can_retry: bool,
+    },
+}
+
+impl SendState {
+    /// The state as `history_message` and tests spell it: `pending` is a
+    /// row not on the server yet, `failed` its send failed.
+    pub fn from_flags(pending: bool, failed: bool, can_retry: bool) -> Self {
+        match (pending, failed) {
+            (_, true) => Self::Failed { can_retry },
+            (true, false) => Self::Sending,
+            (false, false) => Self::Sent,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HistoryMessage {
     pub sender: Option<MessageSender>,
@@ -116,7 +142,8 @@ pub struct HistoryMessage {
     /// in-bubble timestamp. `0` when the source didn't carry one.
     pub date: i32,
     pub content: MessageContent,
-    pub pending: bool,
+    /// Where the send stands: delivered, still sending, or failed.
+    pub send: SendState,
     pub reply_to: Option<MessageReplyTo>,
     pub forward_info: Option<MessageForwardInfo>,
     /// `edit_date`, `via_bot_user_id` and `import_info`.
@@ -147,16 +174,6 @@ pub struct HistoryMessage {
     /// messages. Rendered as a small signature line under the post, except
     /// under forwarded-message headers (which already attribute it).
     pub author_signature: Option<String>,
-    /// M1: the send failed (`updateMessageSendFailed`). `true` means the
-    /// row renders a failed state. A "Retry send" affordance is offered
-    /// only when `can_retry` is also true — TDLib does not allow every
-    /// failed send to be retried.
-    pub failed: bool,
-    /// M1 fix-up: `message.sending_state.can_retry` (TDLib 1.8.67 line
-    /// 3038) — whether the failed send may be retried via
-    /// `resendMessages`. Gates the retry affordance and the driver's
-    /// `resend_failed_message`.
-    pub can_retry: bool,
     /// M2: parsed `message.ephemeral_content` (TDLib 1.8.67 lines
     /// 3161/3165). When present the row renders it instead of `content`
     /// (use `effective_content`); it carries its own `reply_markup`.
@@ -164,14 +181,29 @@ pub struct HistoryMessage {
 }
 
 impl HistoryMessage {
+    /// Not on the server yet: still sending, or its send failed.
+    pub fn pending(&self) -> bool {
+        self.send != SendState::Sent
+    }
+
+    /// The send failed (the row shows the failed mark).
+    pub fn failed(&self) -> bool {
+        matches!(self.send, SendState::Failed { .. })
+    }
+
+    /// The failed send may be retried (`resendMessages`).
+    pub fn can_retry(&self) -> bool {
+        matches!(self.send, SendState::Failed { can_retry: true })
+    }
+
     pub fn can_react(&self) -> bool {
-        !self.pending && self.id.0 > 0
+        !self.pending() && self.id.0 > 0
     }
 
     /// Already-sent messages can be pinned/unpinned (live `messageProperties.can_be_pinned`
     /// stays out — same default as edit/forward/react).
     pub fn can_pin(&self) -> bool {
-        !self.pending && self.id.0 > 0
+        !self.pending() && self.id.0 > 0
     }
 
     pub fn emoji_reaction_chips(&self) -> Vec<&MessageReaction> {
@@ -597,8 +629,8 @@ impl HistoryState {
             .rev()
             .find(|message| {
                 !message.is_outgoing
-                    && !message.pending
-                    && !message.failed
+                    && !message.pending()
+                    && !message.failed()
                     && !deleted.contains(&message.id)
             })
             .map_or(0, |message| message.id.0);
@@ -610,7 +642,7 @@ impl HistoryState {
     pub fn oldest_id(&self) -> Option<MessageId> {
         self.messages
             .values()
-            .find(|message| !message.pending && !message.failed)
+            .find(|message| !message.pending() && !message.failed())
             .map(|message| message.id)
     }
 
@@ -620,7 +652,7 @@ impl HistoryState {
         self.messages
             .values()
             .rev()
-            .find(|message| !message.pending && !message.failed)
+            .find(|message| !message.pending() && !message.failed())
             .map(|message| message.id)
     }
 
@@ -631,6 +663,9 @@ impl HistoryState {
         self.loaded_complete = false;
         self.newer_failed = false;
         self.load_failed = false;
+        // The latch belongs to the window it was learned in; a new window
+        // asks TDLib again.
+        self.newer_exhausted = None;
         self.reader = ReaderPosition::Tail;
         self.window_epoch = self.window_epoch.wrapping_add(1);
     }
@@ -642,7 +677,7 @@ impl HistoryState {
         // Incoming messages always carry server ids; an outgoing row may
         // still hold a temporary id that never becomes a server position
         // (failed sends), and the chat summary covers outgoing tails.
-        if !message.is_outgoing && !message.pending && !message.failed {
+        if !message.is_outgoing && !message.pending() && !message.failed() {
             self.latest_seen = self.latest_seen.max(message.id.0);
         }
         self.messages.insert(message.id.0, message);

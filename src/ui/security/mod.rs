@@ -18,6 +18,7 @@ use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::key_fingerprint;
 use quill::lang::{keys, tr, tr_with};
+use quill::state::fetch::Fetch;
 use quill::telegram::envelope::{ParsedSecretChat, ParsedSession, ParsedWebsite, PasswordState};
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -133,14 +134,14 @@ impl QuillApp {
             let session = this.session();
             let sessions = session
                 .as_ref()
-                .and_then(|s| s.settings.sessions.clone())
+                .and_then(|s| s.settings.sessions.data().cloned())
                 .unwrap_or_default();
-            let loading = session.is_some_and(|s| s.settings.sessions_loading);
+            let loading = session.is_some_and(|s| s.settings.sessions.is_loading());
             let mutating = session.is_some_and(|s| s.settings.sessions_mutating);
             let stale = session.is_some_and(|s| s.settings.sessions_stale);
             let error = session
                 .as_ref()
-                .and_then(|s| s.settings.sessions_error.clone());
+                .and_then(|s| s.settings.sessions.error().map(str::to_string));
             let current = sessions.iter().find(|s| s.is_current);
             let mut incomplete: Vec<&ParsedSession> = sessions
                 .iter()
@@ -594,13 +595,11 @@ impl QuillApp {
     /// fetch refires; demo re-injects the fixture.
     pub(super) fn refresh_sessions(&mut self, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
-            live.driver.session.settings.sessions = None;
+            live.driver.session.settings.sessions = Fetch::Idle;
             live.driver.session.settings.sessions_stale = false;
             let _ = live.driver.maybe_fetch_active_sessions();
         } else if let Some(session) = self.demo_session.as_mut() {
-            session.settings.sessions = Some(demo_sessions());
-            session.settings.sessions_loading = false;
-            session.settings.sessions_error = None;
+            session.settings.sessions = Fetch::Ready(demo_sessions());
         }
         cx.notify();
     }
@@ -798,7 +797,7 @@ crate::ui::shell::register_dialogs! {
         |app| app.privacy.websites_open,
         QuillApp::build_websites_dialog,
     )
-    .closes(|app, _, cx| app.close_websites(cx)),
+    .close(|app, _, cx| app.close_websites(cx)),
 
     TwoFa => DialogSpec::new(
         800,
@@ -806,7 +805,7 @@ crate::ui::shell::register_dialogs! {
         QuillApp::build_twofa_dialog,
     )
 
-    .closes(|app, window, cx| app.close_twofa(window, cx)),
+    .close(|app, window, cx| app.close_twofa(window, cx)),
 }
 
 mod passkey_ceremony;

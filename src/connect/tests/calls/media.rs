@@ -617,7 +617,7 @@ fn engine_reports_apply_without_a_telegram_update() {
     handle.emit_remote_audio_muted(77, true);
     assert!(driver.request_tick(Instant::now()), "the UI redraws");
     let call = driver.session.calls.active_call.as_ref().unwrap();
-    assert_eq!(call.transport, Some(TransportState::Connected));
+    assert_eq!(call.transport.state(), Some(TransportState::Connected));
     assert_eq!(call.remote_video, RemoteVideoState::Active);
     assert!(call.remote_audio_muted);
     // The peer's feed is open before any window asks for it, so the

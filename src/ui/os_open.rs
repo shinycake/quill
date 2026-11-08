@@ -131,7 +131,7 @@ impl QuillApp {
     ) {
         match open {
             OsOpen::Answered(opened) => answered(self, opened, cx),
-            OsOpen::Pending(answer) => Self::spawn_main(cx, async move |app, cx| {
+            OsOpen::Pending(answer) => Self::spawn_app(cx, async move |app, cx| {
                 let opened = answer.await.unwrap_or(false);
                 let _ = app.update(cx, |this, cx| answered(this, opened, cx));
             })

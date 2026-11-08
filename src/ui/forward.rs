@@ -77,9 +77,9 @@ impl QuillApp {
             return;
         };
         self.drop_deleted_selection();
-        if let Some(existing) = self.share.pending_forward.as_mut()
+        if let Some(existing) = self.screen.share.pending_forward.as_mut()
             && existing.from_chat_id == chat_id
-            && self.share.forward_picker_open
+            && self.screen.share.forward_picker_open
         {
             existing.toggle(chat_id, message_id, pending);
             if existing.is_empty() {
@@ -105,7 +105,7 @@ impl QuillApp {
                 draft.toggle(chat_id, message_id, pending);
                 if draft.is_empty() {
                     self.share.pending_forward = None;
-                    self.message_ui.selection_focus = None;
+                    self.chat_ui.selection_focus = None;
                     self.share.forward_picker_open = false;
                 }
             }
@@ -114,7 +114,8 @@ impl QuillApp {
                     ForwardDraft::from_message(chat_id, message_id, pending);
             }
         }
-        self.connection
+        self.screen
+            .connection
             .set_note(match self.forward_draft().map(|d| d.count()) {
                 Some(1) => StatusNote::silent(tr(keys::Q_MISC_1_MESSAGE_SELECTED)),
                 Some(n) => StatusNote::silent(trn(keys::Q_MISC_MESSAGES_SELECTED, n)),
@@ -151,7 +152,7 @@ impl QuillApp {
 
     pub(super) fn close_forward_picker(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self
-            .composer_ui
+            .chat_ui
             .schedule_picker
             .as_ref()
             .is_some_and(|picker| picker.target == super::scheduled::ScheduleTarget::Share)
@@ -168,7 +169,7 @@ impl QuillApp {
 
     pub(super) fn clear_forward(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let _ = cancel_forward_draft(self.share.pending_forward.take());
-        self.message_ui.selection_focus = None;
+        self.chat_ui.selection_focus = None;
         self.share.forward_picker_open = false;
         self.share.forward_bar_dest = None;
         self.share.selection.clear();
@@ -183,8 +184,6 @@ impl QuillApp {
     /// Chat switch: a forward draft stays only for its source chat (the
     /// selection) and for the chat the forward bar waits in.
     pub(super) fn dismiss_forward_for_chat(&mut self, chat_id: ChatId) {
-        // The send-as list belongs to the chat it was opened in.
-        self.composer_ui.send_as_open = false;
         if self
             .share
             .forward_bar_dest

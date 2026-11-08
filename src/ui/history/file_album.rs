@@ -117,7 +117,7 @@ pub(in crate::ui) fn file_album_history_row(
         );
     }
     let avatar_link = avatar_link(&sender_avatar, first, cx);
-    let mut chrome = message_chrome(sender, receipt, sender_avatar, first.date, first.pending);
+    let mut chrome = message_chrome(sender, receipt, sender_avatar, first.date, first.pending());
     if let Some(link) = avatar_link
         && let Some(avatar) = chrome.avatar.take()
     {
@@ -126,6 +126,7 @@ pub(in crate::ui) fn file_album_history_row(
     chrome.sender_status = sender_status;
     chrome.actions = corner.mount(|| message_actions_button(first.chat_id, first.id, cx));
     session_bubble_quoted(
+        first.chat_id,
         album_id as u64,
         chrome,
         String::new(),

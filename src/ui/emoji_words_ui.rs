@@ -153,7 +153,7 @@ impl QuillApp {
         let generation = self
             .session()
             .map_or(0, |s| s.stickers.emoji.keyword_lookups.generation);
-        let on = self.emoji_words_on() && self.composer_ui.pending_edit.is_none();
+        let on = self.emoji_words_on() && !self.chat_ui.is_editing();
         let skip = composer.spans().iter().filter(|span| {
             matches!(
                 ComposerTag::from_tag(span.tag()),
@@ -203,7 +203,7 @@ impl QuillApp {
             None => Vec::new(),
         };
         let now = Instant::now();
-        let ui = &mut self.composer_ui.emoji_words;
+        let ui = &mut self.screen.composer_ui.emoji_words;
         // A word glimmers once while it is in the draft: one the caret
         // passes through does not replay it.
         if !ui.lit_at.is_empty() {

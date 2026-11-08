@@ -76,12 +76,21 @@ is built once and holds 73 pointers (584 bytes).
            4150,
            |app| app.foo_dialog.is_some(),
            QuillApp::build_foo_dialog,
-       ),
+       )
+       .closes(|app, _, cx| app.close_foo_dialog(cx)),
    }
    ```
 
    `DialogSpec` is in scope inside the macro, so you need no import. Put
    several dialogs in one block by separating the entries with commas.
+
+   Every entry says what switching accounts does to it (`shell::OnSwitch`),
+   or it does not compile: `.closes(f)` when app-side state holds the
+   account's ids (the switch runs `f`, the same clear the builder hands
+   `on_close_kind`), `.follows_account()` when the open state is read from
+   the account on screen (its `Session`), and `.app_wide()` (or
+   `.app_wide_closes(f)`) for the few that belong to no account. When in
+   doubt, close it.
 3. Pick the priority. Lower numbers win when several open flags are set. Find
    the dialog yours should sit just after, and use a free number between it
    and the next one. To list the current numbers, run

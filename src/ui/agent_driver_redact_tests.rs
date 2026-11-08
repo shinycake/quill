@@ -15,7 +15,7 @@ use quill::ids::{AccountKey, ChatId, MessageId};
 use quill::lang::{keys, tr};
 use quill::search_filters::GlobalSearchFilters;
 use quill::search_tabs::SearchTab;
-use quill::state::{PublicPostLimits, SearchMessageHit, SearchStatus};
+use quill::state::{PublicPostLimits, SearchMessageHit};
 use quill::telegram::envelope::MessageContent;
 
 const GRANTED: &str = "Demo chat A";
@@ -78,7 +78,7 @@ fn show_search_tab(app: &Entity<QuillApp>, vcx: &mut VisualTestContext, tab: Sea
         } else {
             "demo".to_string()
         };
-        search.status = SearchStatus::Ready;
+        search.open = true;
         search.recents = false;
         search.filters = tab.apply(GlobalSearchFilters::default());
         search.messages = vec![hit(12, 1, "top secret post"), hit(11, 2, "granted hit")];
@@ -112,7 +112,7 @@ fn list_parts_hide_rows_of_ungranted_chats_and_untagged_rows(cx: &mut TestAppCon
 
     // The reply chooser lists every destination, server search included.
     app.update_in(vcx, |app, _, cx| {
-        app.composer_ui
+        app.chat_ui
             .set_reply(Some(ComposerReplyTo::new(ChatId(11), MessageId(101))));
         app.share.reply_elsewhere_open = true;
         cx.notify();
@@ -134,7 +134,7 @@ fn list_parts_hide_rows_of_ungranted_chats_and_untagged_rows(cx: &mut TestAppCon
     );
     app.update_in(vcx, |app, window, cx| {
         app.close_reply_panels(window, cx);
-        app.composer_ui.set_reply(None);
+        app.chat_ui.set_reply(None);
     });
 
     // The search tabs: channels (joined channel 13), photos (media rows

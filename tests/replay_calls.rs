@@ -63,7 +63,7 @@ fn replay_call_signaling_lifecycle() {
             .id,
         77
     );
-    assert_eq!(session.calls.swap_pending, Some((78, 42, false)));
+    assert_eq!(session.calls.second_call.prompt(), Some((78, 42, false)));
     assert!(session.calls.busy_decline_queue.is_empty());
 
     // Keys exchange, then Ready; signaling data is queued honestly.
@@ -87,11 +87,14 @@ fn replay_call_signaling_lifecycle() {
     assert_eq!(call.signaling_queue[0], vec![0x00, 0x01, 0x02]);
 
     // Remote hangup with need_rating → summary drives the end screen.
+    // Call 78's caller gave up first: with its prompt still up it would
+    // ring on as the incoming call once 77 ends.
     apply_all_seq(
         &mut session,
         &sink,
         &seq,
         &[
+            r#"{"@type":"updateCall","call":{"@type":"call","id":78,"unique_id":"100","user_id":42,"is_outgoing":false,"is_video":false,"state":{"@type":"callStateDiscarded","reason":{"@type":"callDiscardReasonMissed"},"need_rating":false,"need_debug_information":false,"need_log":false}}}"#,
             r#"{"@type":"updateCall","call":{"@type":"call","id":77,"unique_id":"99","user_id":41,"is_outgoing":false,"is_video":false,"state":{"@type":"callStateDiscarded","reason":{"@type":"callDiscardReasonHungUp"},"need_rating":true,"need_debug_information":false,"need_log":false}}}"#,
         ],
     );
@@ -262,15 +265,16 @@ fn replay_video_call_signaling() {
             .id,
         90
     );
-    assert_eq!(session.calls.swap_pending, Some((91, 42, true)));
+    assert_eq!(session.calls.second_call.prompt(), Some((91, 42, true)));
 
     // Remote hangup → the summary keeps `is_video: true` (the driver
-    // sends it back in `discardCall`).
+    // sends it back in `discardCall`). Call 91's caller gave up first.
     apply_all_seq(
         &mut session,
         &sink,
         &seq,
         &[
+            r#"{"@type":"updateCall","call":{"@type":"call","id":91,"unique_id":"201","user_id":42,"is_outgoing":false,"is_video":true,"state":{"@type":"callStateDiscarded","reason":{"@type":"callDiscardReasonMissed"},"need_rating":false,"need_debug_information":false,"need_log":false}}}"#,
             r#"{"@type":"updateCall","call":{"@type":"call","id":90,"unique_id":"200","user_id":41,"is_outgoing":true,"is_video":true,"state":{"@type":"callStateDiscarded","reason":{"@type":"callDiscardReasonHungUp"},"need_rating":true,"need_debug_information":false,"need_log":false}}}"#,
         ],
     );
@@ -354,7 +358,7 @@ fn replay_group_call_signaling() {
     assert_eq!(call.id, 555);
     assert_eq!(call.title, "Demo voice");
     assert!(!call.is_joined);
-    assert!(!call.reconnecting);
+    assert!(!call.reconnecting());
     assert!(call.can_be_managed);
     assert!(call.can_toggle_mute_new_participants);
     assert!(call.participants.is_empty());
@@ -490,7 +494,7 @@ fn replay_group_call_signaling() {
     );
     let call = session.calls.active_group_call.as_ref().expect("rejoining");
     assert!(call.need_rejoin);
-    assert!(call.reconnecting);
+    assert!(call.reconnecting());
     session.clear_group_call_reconnecting();
     assert!(
         !session
@@ -498,7 +502,7 @@ fn replay_group_call_signaling() {
             .active_group_call
             .as_ref()
             .expect("call")
-            .reconnecting
+            .reconnecting()
     );
 
     // Call ends → tracked call cleared.

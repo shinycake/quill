@@ -283,7 +283,7 @@ impl QuillApp {
             let trimmed = query.trim();
             if session.search.search.open
                 && session.search.search.query == trimmed
-                && !matches!(session.search.search.status, SearchStatus::Closed)
+                && !matches!(session.search.search.status(), SearchStatus::Closed)
             {
                 cx.notify();
                 return;
@@ -294,7 +294,7 @@ impl QuillApp {
     }
 
     pub(in crate::ui) fn schedule_search_commit(&mut self, token: u64, cx: &mut Context<Self>) {
-        cx.spawn(async move |this, cx| {
+        self.spawn_screen(cx, async move |this, cx| {
             cx.background_executor().timer(SEARCH_DEBOUNCE).await;
             this.update(cx, |this, cx| {
                 if let Some(live) = this.live.as_mut() {
@@ -367,7 +367,7 @@ impl QuillApp {
         let (text, reply, now_ms) = self.leaving_draft_parts(cx);
         let open = self.chat_open_at(chat_id, None);
         if let Some(live) = self.live.as_mut() {
-            self.connection.set_note(
+            self.screen.connection.set_note(
                 match live
                     .driver
                     .select_search_chat_open(chat_id, open, text, reply, now_ms)
@@ -392,7 +392,7 @@ impl QuillApp {
             self.connection
                 .set_note(StatusNote::silent(tr(keys::Q_CHAT_CHAT_SELECTED)));
         }
-        self.dismiss_cross_chat_state(chat_id, cx);
+        self.enter_chat_ui(chat_id, cx);
         self.restore_open_draft(window, cx);
         self.search_ui
             .input
@@ -414,7 +414,7 @@ impl QuillApp {
         // The found message wins over the chat's saved scroll position.
         let _ = self.chat_open_at(chat_id, Some(message_id));
         if let Some(live) = self.live.as_mut() {
-            self.connection.set_note(
+            self.screen.connection.set_note(
                 match live
                     .driver
                     .select_search_message(chat_id, message_id, text, reply, now_ms)
@@ -440,7 +440,7 @@ impl QuillApp {
             self.connection
                 .set_note(StatusNote::silent(tr(keys::Q_CHAT_OPENED_CHAT)));
         }
-        self.dismiss_cross_chat_state(chat_id, cx);
+        self.enter_chat_ui(chat_id, cx);
         self.restore_open_draft(window, cx);
         self.search_ui
             .input

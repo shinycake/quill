@@ -826,7 +826,7 @@ crate::ui::shell::register_dialogs! {
         |app| app.earn_state().and_then(|e| e.setup.as_ref()).is_some_and(|s| s.confirm.is_some()),
         QuillApp::build_earn_setup_confirm_dialog,
     )
-    .closes(|app, _, cx| app.close_setup_confirm(cx)),
+    .close(|app, _, cx| app.close_setup_confirm(cx)),
     /// "View existing programs".
     EarnPrograms => DialogSpec::new(
         7616,

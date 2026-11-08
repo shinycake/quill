@@ -81,7 +81,7 @@ impl SearchMessageHit {
             is_outgoing: self.is_outgoing,
             date: self.date,
             content: self.content,
-            pending: false,
+            send: crate::state::SendState::Sent,
             reply_to: self.reply_to,
             forward_info: self.forward_info,
             extras: self.extras,
@@ -92,19 +92,40 @@ impl SearchMessageHit {
             self_destruct: self.self_destruct,
             auto_delete: self.auto_delete,
             author_signature: self.author_signature,
-            failed: false,
-            can_retry: false,
             ephemeral: None,
         }
     }
 }
 
+/// One request of a global search (chats, messages or public chats).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Leg {
+    /// Nothing asked yet (the field is open, or the results were reset).
+    #[default]
+    Idle,
+    /// This search does not make the request.
+    Skipped,
+    /// Asked, no answer yet.
+    Pending,
+    Done,
+    /// The request answered with an error.
+    Failed,
+}
+
+impl Leg {
+    fn answered(error: bool) -> Self {
+        if error { Self::Failed } else { Self::Done }
+    }
+}
+
+/// `status` is derived (see [`SearchState::status`]): the search is open or
+/// not, and what is known about its three requests and its results is all the
+/// UI needs.
 #[derive(Debug, Clone)]
 pub struct SearchState {
     pub open: bool,
     pub query: String,
     pub generation: u64,
-    pub status: SearchStatus,
     pub chat_ids: Vec<ChatId>,
     pub messages: Vec<SearchMessageHit>,
     /// Phase 7.2: `searchPublicChats` results (username/title lookup across
@@ -140,12 +161,12 @@ pub struct SearchState {
     pub recents: bool,
     /// Paging, recommendations and quota of the strip's tabs.
     pub tabs: SearchTabsState,
-    pub(crate) chats_done: bool,
-    pub(crate) messages_done: bool,
-    pub(crate) public_done: bool,
-    pub(crate) chats_error: bool,
-    pub(crate) messages_error: bool,
-    pub(crate) public_error: bool,
+    /// The offline `searchChats` request.
+    pub(crate) chats: Leg,
+    /// `searchMessages`.
+    pub(crate) messages_leg: Leg,
+    /// `searchPublicChats`.
+    pub(crate) public: Leg,
 }
 
 impl Default for SearchState {
@@ -154,7 +175,6 @@ impl Default for SearchState {
             open: false,
             query: String::new(),
             generation: 0,
-            status: SearchStatus::Closed,
             chat_ids: Vec::new(),
             messages: Vec::new(),
             public_chat_ids: Vec::new(),
@@ -168,12 +188,9 @@ impl Default for SearchState {
             public_limits_exceeded: false,
             recents: false,
             tabs: SearchTabsState::default(),
-            chats_done: false,
-            messages_done: false,
-            public_done: false,
-            chats_error: false,
-            messages_error: false,
-            public_error: false,
+            chats: Leg::Idle,
+            messages_leg: Leg::Idle,
+            public: Leg::Idle,
         }
     }
 }
@@ -186,7 +203,6 @@ impl SearchState {
         self.open = true;
         self.query.clear();
         self.recents = true;
-        self.status = SearchStatus::Idle;
         self.clear_results();
     }
 
@@ -198,7 +214,6 @@ impl SearchState {
         self.filters = Default::default();
         self.confirm = None;
         self.top_view = Default::default();
-        self.status = SearchStatus::Closed;
         self.generation = self.generation.saturating_add(1);
         self.clear_results();
     }
@@ -210,11 +225,33 @@ impl SearchState {
         self.filters = Default::default();
         self.generation = self.generation.saturating_add(1);
         self.clear_results();
-        self.status = if self.open {
+    }
+
+    /// What the search panel shows, from what is open, which requests are
+    /// out or answered, and whether anything was found.
+    pub fn status(&self) -> SearchStatus {
+        if !self.open {
+            return SearchStatus::Closed;
+        }
+        let legs = [self.chats, self.messages_leg, self.public];
+        if legs.contains(&Leg::Pending) {
+            return SearchStatus::Searching;
+        }
+        let any = !self.chat_ids.is_empty()
+            || !self.server_chat_ids.is_empty()
+            || !self.messages.is_empty()
+            || !self.public_chat_ids.is_empty();
+        if any {
+            SearchStatus::Ready
+        } else if legs.contains(&Leg::Idle) {
+            SearchStatus::Idle
+        } else if legs.contains(&Leg::Failed) {
+            SearchStatus::Failed
+        } else if self.recents {
             SearchStatus::Idle
         } else {
-            SearchStatus::Closed
-        };
+            SearchStatus::Empty
+        }
     }
 
     /// Empty search field: wait only for `searchRecentlyFoundChats`.
@@ -222,11 +259,11 @@ impl SearchState {
         self.open = true;
         self.query.clear();
         self.generation = self.generation.saturating_add(1);
-        self.status = SearchStatus::Searching;
         self.clear_results();
         self.recents = true;
-        self.messages_done = true;
-        self.public_done = true;
+        self.chats = Leg::Pending;
+        self.messages_leg = Leg::Skipped;
+        self.public = Leg::Skipped;
         self.generation
     }
 
@@ -235,19 +272,25 @@ impl SearchState {
     pub fn begin_browse(&mut self) -> u64 {
         self.open = true;
         self.generation = self.generation.saturating_add(1);
-        self.status = SearchStatus::Searching;
         self.clear_results();
         self.recents = false;
+        self.mark_all_pending();
         self.generation
+    }
+
+    fn mark_all_pending(&mut self) {
+        self.chats = Leg::Pending;
+        self.messages_leg = Leg::Pending;
+        self.public = Leg::Pending;
     }
 
     pub fn begin_query(&mut self, query: &str) -> u64 {
         self.open = true;
         self.query = query.to_string();
         self.generation = self.generation.saturating_add(1);
-        self.status = SearchStatus::Searching;
         self.clear_results();
         self.recents = false;
+        self.mark_all_pending();
         self.generation
     }
 
@@ -258,12 +301,9 @@ impl SearchState {
         self.server_chat_ids.clear();
         self.public_limits_exceeded = false;
         self.tabs.reset_paging();
-        self.chats_done = false;
-        self.messages_done = false;
-        self.public_done = false;
-        self.chats_error = false;
-        self.messages_error = false;
-        self.public_error = false;
+        self.chats = Leg::Idle;
+        self.messages_leg = Leg::Idle;
+        self.public = Leg::Idle;
     }
 
     pub(crate) fn matches_generation(&self, pending: Option<&PendingRequest>) -> bool {
@@ -273,25 +313,19 @@ impl SearchState {
             && self.open
     }
 
-    pub(crate) fn accept_chats(&mut self, chat_ids: Vec<ChatId>, error: bool) {
+    pub fn accept_chats(&mut self, chat_ids: Vec<ChatId>, error: bool) {
         self.chat_ids = chat_ids;
-        self.chats_done = true;
-        self.chats_error = error;
-        self.finish_if_complete();
+        self.chats = Leg::answered(error);
     }
 
-    pub(crate) fn accept_messages(&mut self, messages: Vec<SearchMessageHit>, error: bool) {
+    pub fn accept_messages(&mut self, messages: Vec<SearchMessageHit>, error: bool) {
         self.messages = messages;
-        self.messages_done = true;
-        self.messages_error = error;
-        self.finish_if_complete();
+        self.messages_leg = Leg::answered(error);
     }
 
-    pub(crate) fn accept_public_chats(&mut self, chat_ids: Vec<ChatId>, error: bool) {
+    pub fn accept_public_chats(&mut self, chat_ids: Vec<ChatId>, error: bool) {
         self.public_chat_ids = chat_ids;
-        self.public_done = true;
-        self.public_error = error;
-        self.finish_if_complete();
+        self.public = Leg::answered(error);
     }
 
     /// The chats section: the offline hits first, then what only the server
@@ -320,16 +354,13 @@ impl SearchState {
     /// results, never the other way round.
     pub(crate) fn accept_server_chats(&mut self, chat_ids: Vec<ChatId>) {
         self.server_chat_ids = chat_ids;
-        if self.chats_done && self.messages_done && self.public_done {
-            self.finish_if_complete();
-        }
     }
 
     /// Public-posts scope: only one request is in flight; the chat sections
     /// are not searched.
     pub fn begin_public_scope(&mut self) {
-        self.chats_done = true;
-        self.public_done = true;
+        self.chats = Leg::Skipped;
+        self.public = Leg::Skipped;
     }
 
     /// Drop one entry of the Recent list (`removeRecentlyFoundChat`).
@@ -341,9 +372,16 @@ impl SearchState {
         self.chat_ids.retain(|id| *id != chat_id);
         let removed = self.chat_ids.len() != before;
         if removed && self.chat_ids.is_empty() && self.messages.is_empty() {
-            self.status = SearchStatus::Idle;
+            self.chats = Leg::Idle;
         }
         removed
+    }
+
+    /// The Recent list was cleared (`clearRecentlyFoundChats`): back to the
+    /// empty-field surface.
+    pub fn clear_recents(&mut self) {
+        self.chat_ids.clear();
+        self.chats = Leg::Idle;
     }
 
     /// Drop one frequent contact (`removeTopChat`).
@@ -351,25 +389,6 @@ impl SearchState {
         let before = self.top_chats.len();
         self.top_chats.retain(|id| *id != chat_id);
         self.top_chats.len() != before
-    }
-
-    pub(crate) fn finish_if_complete(&mut self) {
-        if !(self.chats_done && self.messages_done && self.public_done) {
-            return;
-        }
-        let any = !self.chat_ids.is_empty()
-            || !self.server_chat_ids.is_empty()
-            || !self.messages.is_empty()
-            || !self.public_chat_ids.is_empty();
-        self.status = if any {
-            SearchStatus::Ready
-        } else if self.chats_error || self.messages_error || self.public_error {
-            SearchStatus::Failed
-        } else if self.recents {
-            SearchStatus::Idle
-        } else {
-            SearchStatus::Empty
-        };
     }
 }
 

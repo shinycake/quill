@@ -238,7 +238,7 @@ crate::ui::shell::register_dialogs! {
         |app| app.payments.gift_recipients_open,
         QuillApp::build_gift_recipients_dialog,
     )
-    .closes(|app, _, cx| app.close_gift_recipients(cx)),
+    .close(|app, _, cx| app.close_gift_recipients(cx)),
 }
 
 #[cfg(test)]

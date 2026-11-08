@@ -326,7 +326,7 @@ fn a_pending_photo_does_not_lift(cx: &mut TestAppContext) {
             .and_then(|s| s.histories.get_mut(&11))
             .and_then(|h| h.messages.get_mut(&901))
         {
-            message.pending = true;
+            message.send = quill::state::SendState::Sending;
         }
     });
     frames(vcx);
@@ -424,7 +424,7 @@ fn a_lifted_photo_released_over_the_history_does_not_reply(cx: &mut TestAppConte
     press_and_move(vcx, from, to);
     vcx.simulate_mouse_up(to, MouseButton::Left, Modifiers::default());
     frames(vcx);
-    let replying = app.read_with(vcx, |app, _| app.composer_ui.reply().is_some());
+    let replying = app.read_with(vcx, |app, _| app.chat_ui.reply().is_some());
     assert!(!replying, "the release ended a drag, not a swipe to reply");
 }
 

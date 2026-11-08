@@ -649,6 +649,56 @@ fn request_logout_sends_logout_then_logging_out_then_closed() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// TDLib refusing `logOut` leaves the account signed in: the session goes
+/// back to running (the chat list loads again) and the UI hears why. A
+/// quit asked for before the refusal stays a quit.
+#[test]
+fn a_refused_logout_puts_the_session_back_to_running() {
+    use crate::state::ShutdownPhase;
+    for quit_meanwhile in [false, true] {
+        let store = MemorySecretStore::new();
+        let (dir, prepared) = prepared_tmp(&store);
+        let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+        let recorder = Arc::new(RecordingSender::new());
+        let session = Session::new(AccountKey::primary(), sink.clone());
+        let mut driver =
+            ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
+        let seq = AtomicU64::new(0);
+        let ingest = |driver: &mut ConnectDriver<Arc<RecordingSender>>, json: &str| {
+            driver
+                .ingest(copy_and_parse(json, &seq, &sink).unwrap())
+                .unwrap();
+        };
+        ingest(
+            &mut driver,
+            r#"{"@type":"updateAuthorizationState","authorization_state":{"@type":"authorizationStateReady"}}"#,
+        );
+        let extra = driver.request_logout().unwrap();
+        assert_eq!(driver.session.shutdown, ShutdownPhase::CloseRequested);
+        if quit_meanwhile {
+            driver.session.begin_close();
+        }
+        ingest(
+            &mut driver,
+            &format!(
+                r#"{{"@type":"error","@extra":"{}","code":500,"message":"Internal"}}"#,
+                extra.as_extra()
+            ),
+        );
+        if quit_meanwhile {
+            assert_eq!(driver.session.shutdown, ShutdownPhase::CloseRequested);
+            assert!(driver.session.auth_state.logout_refused.is_none());
+        } else {
+            assert_eq!(driver.session.shutdown, ShutdownPhase::Running);
+            assert!(driver.session.auth_state.logout_refused.is_some());
+            assert!(matches!(driver.session.auth, AuthorizationState::Ready));
+        }
+        drop(driver);
+        drop(recorder);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+}
+
 /// What `setTdlibParameters` answers from the real TDLib 1.8.69 for a
 /// read-only folder and a parent that is a file (`TdDb.cpp` for the key).
 #[test]

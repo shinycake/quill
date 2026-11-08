@@ -28,8 +28,15 @@ impl Session {
                         StickersPurpose::GetAttachedStickerSets { .. }
                     ))
                 ) {
-                    // B11: "Attached Stickers" of a photo or video.
-                    self.stickers.stickers.attached_answer = Some(sets.first().map(|set| set.id));
+                    // B11: "Attached Stickers" of a photo or video, for the
+                    // request the box waits for.
+                    if pending.map(|p| p.id).is_some()
+                        && pending.map(|p| p.id) == self.stickers.stickers.attached_request
+                    {
+                        self.stickers.stickers.attached_request = None;
+                        self.stickers.stickers.attached_answer =
+                            Some(sets.first().map(|set| set.id));
+                    }
                 } else if pending.map(|p| p.purpose)
                     == Some(RequestPurpose::GetInstalledStickerSets)
                 {

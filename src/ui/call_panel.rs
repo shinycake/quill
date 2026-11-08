@@ -187,7 +187,7 @@ impl QuillApp {
         let (status, connecting) = call_status(
             &call.state,
             call.is_outgoing,
-            call.transport,
+            call.transport.state(),
             call.connected_secs(),
         );
         let ready = matches!(call.state, CallState::Ready);
@@ -250,21 +250,22 @@ impl QuillApp {
         // The window's call, and when it ended.
         if ended {
             if self
-                .calls
+                .call_screen
                 .ended_at
                 .is_none_or(|(id, _)| Some(id) != call_id)
             {
-                self.calls.ended_at = call_id.map(|id| (id, Instant::now()));
+                self.call_screen.ended_at = call_id.map(|id| (id, Instant::now()));
             }
         } else {
-            self.calls.ended_at = None;
+            self.call_screen.ended_at = None;
         }
         let lingering = self
-            .calls
+            .call_screen
             .ended_at
             .is_some_and(|(_, at)| busy || at.elapsed() < ENDED_LINGER);
-        let wanted = call_id
-            .filter(|id| (!ended || lingering) && self.calls.window_closed_by_user != Some(*id));
+        let wanted = call_id.filter(|id| {
+            (!ended || lingering) && self.call_screen.window_closed_by_user != Some(*id)
+        });
         match (wanted, self.calls.window) {
             (Some(_), Some(handle)) => {
                 if incoming && !self.calls.window_raised {
@@ -299,6 +300,7 @@ impl QuillApp {
         self.calls.window_opening = true;
         self.calls.window_raised = false;
         let owner = cx.entity();
+        // screen-scope: the call window is the app's; its failure note goes to whichever account is on screen.
         cx.defer(move |cx| {
             let weak = owner.downgrade();
             let render_owner = owner.clone();
@@ -323,7 +325,7 @@ impl QuillApp {
                     window.on_window_should_close(cx, move |_, cx| {
                         let _ = weak.update(cx, |app, cx| {
                             app.calls.forget_window();
-                            app.calls.window_closed_by_user = Some(call_id);
+                            app.call_screen.window_closed_by_user = Some(call_id);
                             cx.notify();
                         });
                         true
@@ -367,7 +369,7 @@ impl QuillApp {
         let (status, _) = call_status(
             &call.state,
             call.is_outgoing,
-            call.transport,
+            call.transport.state(),
             call.connected_secs(),
         );
         let muted = call.muted;
@@ -464,7 +466,7 @@ impl QuillApp {
 
     /// Bring the call window back (the call bar's click).
     pub(super) fn show_call_window(&mut self, cx: &mut Context<Self>) {
-        self.calls.window_closed_by_user = None;
+        self.call_screen.window_closed_by_user = None;
         if let Some(handle) = self.calls.window {
             let _ = handle.update(cx, |_, window, _| window.activate_window());
         }

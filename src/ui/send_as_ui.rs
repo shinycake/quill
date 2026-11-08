@@ -48,11 +48,11 @@ impl QuillApp {
         Some(
             Popover::new("composer-send-as-menu")
                 .anchor(Anchor::BottomLeft)
-                .open(self.composer_ui.send_as_open)
+                .open(self.chat_ui.send_as_open)
                 .on_open_change(move |open, _, cx| {
                     let open = *open;
                     let _ = view.update(cx, |this, cx| {
-                        if this.composer_ui.send_as_open != open {
+                        if this.chat_ui.send_as_open != open {
                             this.toggle_send_as(cx);
                         }
                     });
@@ -78,8 +78,8 @@ impl QuillApp {
     }
 
     pub(super) fn toggle_send_as(&mut self, cx: &mut Context<Self>) {
-        self.composer_ui.send_as_open = !self.composer_ui.send_as_open;
-        if self.composer_ui.send_as_open {
+        self.chat_ui.send_as_open = !self.chat_ui.send_as_open;
+        if self.chat_ui.send_as_open {
             let chat = self.session().and_then(|s| s.open_chat);
             if let (Some(chat), Some(live)) = (chat, self.live.as_mut()) {
                 let _ = live.driver.get_chat_available_message_senders(chat);
@@ -103,15 +103,16 @@ impl QuillApp {
             return;
         }
         if let Some(live) = self.live.as_mut() {
-            self.connection
-                .set_note(match live.driver.set_chat_message_sender(chat_id, sender) {
+            self.screen.connection.set_note(
+                match live.driver.set_chat_message_sender(chat_id, sender) {
                     Ok(()) => StatusNote::silent(tr(keys::Q_OPS_CHANGING_SENDER)),
                     Err(_) => StatusNote::error(tr(keys::Q_OPS_COULD_NOT_CHANGE_THE_SENDER)),
-                });
+                },
+            );
         } else {
             self.apply_demo_message_sender(chat_id, sender);
         }
-        self.composer_ui.send_as_open = false;
+        self.chat_ui.send_as_open = false;
         cx.notify();
     }
 
@@ -259,7 +260,7 @@ impl QuillApp {
                 ],
             );
         }
-        self.composer_ui.send_as_open = true;
+        self.chat_ui.send_as_open = true;
         cx.notify();
     }
 }

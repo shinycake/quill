@@ -139,9 +139,11 @@ pub(crate) struct DialogSpec {
     /// not here.
     is_open: fn(&QuillApp) -> bool,
     build: DialogBuilder,
-    /// How the shell closes the dialog without the kit: set for every
-    /// dialog agents never use (`agent_driver_surface::HARD_DIALOGS`), so
-    /// one an agent's step opened is closed before it shows.
+    /// How the shell closes the dialog without the kit, for a dialog
+    /// agents never use (`agent_driver_surface::HARD_DIALOGS`): when an
+    /// agent's step opened it, before it shows. An account switch needs
+    /// none: a flag held by the account's UI (`ui/on_screen.rs`) is gone
+    /// with it, one read from the session is the next account's own.
     close: Option<DialogClose>,
 }
 
@@ -161,9 +163,8 @@ impl DialogSpec {
         }
     }
 
-    /// The dialog's own close, for the shell to run when the dialog may not
-    /// show ([`DialogClose`]).
-    pub(crate) const fn closes(self, close: DialogClose) -> Self {
+    /// The dialog's own close ([`DialogClose`]), run by the agent block.
+    pub(crate) const fn close(self, close: DialogClose) -> Self {
         Self {
             close: Some(close),
             ..self
@@ -188,7 +189,8 @@ inventory::collect!(DialogSpec);
 ///         4150,
 ///         |app| app.example_dialog.is_some(),
 ///         QuillApp::build_example_dialog,
-///     ),
+///     )
+///     .close(|app, _, cx| app.close_example_dialog(cx)),
 /// }
 /// ```
 ///
@@ -273,7 +275,7 @@ impl QuillShell {
         registry().iter().map(|spec| spec.kind.0).collect()
     }
 
-    /// The registered dialogs with a close of their own ([`DialogSpec::closes`]).
+    /// The registered dialogs with a close of their own ([`DialogSpec::close`]).
     #[cfg(test)]
     pub(super) fn closable_dialog_names() -> Vec<&'static str> {
         registry()
@@ -350,6 +352,14 @@ impl QuillShell {
         // Snapshot the flags once; the app is not leased here.
         let winner = Self::first_open(app.read(cx));
         let first_open = winner.map(|r| r.kind);
+        // An account switch already closed the kit dialog this shell showed.
+        if host.is_none()
+            && app.update(cx, |app, _| {
+                std::mem::take(&mut app.main_window.dialogs_closed)
+            })
+        {
+            self.open_dialog = None;
+        }
         if self.open_dialog.is_none() {
             // Closed by the kit (Esc, backdrop, ✕): the host is free again.
             app.update(cx, |app, _| app.windows.dialog_closed_in(host));

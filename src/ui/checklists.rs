@@ -164,7 +164,7 @@ impl QuillApp {
             match live.driver.send_checklist_draft(chat_id, &draft, reply_to) {
                 Ok(_) => {
                     self.composer_ui.checklist_dialog = None;
-                    self.composer_ui.set_reply(None);
+                    self.chat_ui.set_reply(None);
                     self.connection
                         .set_note(StatusNote::silent(tr(keys::Q_MEDIA_SENDING_CHECKLIST)));
                 }
@@ -195,7 +195,7 @@ impl QuillApp {
                 self.checklist_premium_toast(keys::TODO_MARK_PREMIUM, window, cx);
                 return;
             }
-            self.connection.set_note(
+            self.screen.connection.set_note(
                 match live
                     .driver
                     .toggle_checklist_task(chat_id, message_id, task_id)

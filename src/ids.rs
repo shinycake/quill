@@ -55,6 +55,90 @@ impl ChatId {
 )]
 pub struct MessageId(pub i64);
 
+/// Something of one account: a bot, a custom emoji, a file. Sets of "asked
+/// once" ids live app-wide, but TDLib answers per account.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct OfAccount<T> {
+    pub account: AccountKey,
+    pub item: T,
+}
+
+impl<T> OfAccount<T> {
+    pub fn new(account: AccountKey, item: T) -> Self {
+        Self { account, item }
+    }
+}
+
+/// An app-wide value that belongs to one account at a time: kept by ids
+/// that repeat across accounts (chat and message ids), so the account it
+/// was filled for is part of its key. Asked for under another account it
+/// starts over, whatever path changed the account on screen.
+#[derive(Debug, Default)]
+pub struct OwnedBy<T> {
+    owner: Option<AccountKey>,
+    value: T,
+}
+
+impl<T: Default> OwnedBy<T> {
+    /// The value for `owner`: the one kept when it is `owner`'s, else a
+    /// fresh one (what another account kept is dropped).
+    pub fn for_owner(&mut self, owner: &AccountKey) -> &mut T {
+        if self.owner.as_ref() != Some(owner) {
+            self.owner = Some(owner.clone());
+            self.value = T::default();
+        }
+        &mut self.value
+    }
+
+    /// The account the value was filled for.
+    pub fn owner(&self) -> Option<&AccountKey> {
+        self.owner.as_ref()
+    }
+
+    /// The value, for reading (and for changes that stay with whatever
+    /// owner it has: forgetting entries, clearing).
+    pub fn value_mut(&mut self) -> &mut T {
+        &mut self.value
+    }
+}
+
+impl<T> std::ops::Deref for OwnedBy<T> {
+    type Target = T;
+
+    fn deref(&self) -> &T {
+        &self.value
+    }
+}
+
+/// A chat of one account: chat ids are TDLib's, the same for a group two
+/// signed-in accounts share, so per-chat memory kept app-wide carries the
+/// account.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct AccountChat {
+    pub account: AccountKey,
+    pub chat: ChatId,
+}
+
+impl AccountChat {
+    pub fn new(account: AccountKey, chat: ChatId) -> Self {
+        Self { account, chat }
+    }
+}
+
+/// A message of one chat. Message ids repeat across chats (supergroups and
+/// channels number their own), so state kept per message is keyed by both.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct ChatMessage {
+    pub chat: ChatId,
+    pub message: MessageId,
+}
+
+impl ChatMessage {
+    pub fn new(chat: ChatId, message: MessageId) -> Self {
+        Self { chat, message }
+    }
+}
+
 impl MessageId {
     /// Convert a Telegram server message ID (as used by deep links) to TDLib's
     /// client ID. TDLib reserves 20 low bits for local IDs and type flags:

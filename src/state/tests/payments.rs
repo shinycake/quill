@@ -14,6 +14,7 @@ fn payment_form_applies_only_to_own_request() {
     apply_json(&mut session, &seq, &sink, &form_json("999"));
     assert!(session.payments.form.is_none());
     let extra = session.request(RequestPurpose::GetPaymentForm, Some(ChatId(51)));
+    session.payments.form_request = Some(extra);
     session.payments.form_loading = true;
     apply_json(&mut session, &seq, &sink, &form_json(&extra.0.to_string()));
     let form = session.payments.form.as_ref().expect("form applies");
@@ -28,6 +29,7 @@ fn payment_request_survives_form_and_validated_answers() {
     let seq = AtomicU64::new(0);
     // Buy press: `getPaymentForm` sent, request context set.
     let extra = session.request(RequestPurpose::GetPaymentForm, Some(ChatId(51)));
+    session.payments.form_request = Some(extra);
     session.payments.request = Some(PaymentRequest {
         invoice: crate::payment_invoice::InputInvoice::Message {
             chat_id: ChatId(51),
@@ -79,6 +81,7 @@ fn payment_form_error_surfaces_note() {
     let seq = AtomicU64::new(0);
     session.payments.form_loading = true;
     let extra = session.request(RequestPurpose::GetPaymentForm, Some(ChatId(51)));
+    session.payments.form_request = Some(extra);
     apply_json(
         &mut session,
         &seq,
@@ -103,12 +106,16 @@ fn payment_form_error_surfaces_note() {
 fn payment_result_notes_and_verification_url() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
+    session.payments.request = Some(PaymentRequest {
+        invoice: crate::payment_invoice::InputInvoice::Name("shop".into()),
+    });
     let result_json = |extra: &str, success: bool, url: &str| {
         format!(
             r#"{{"@type":"paymentResult","@extra":"{extra}","success":{success},"verification_url":"{url}"}}"#
         )
     };
     let extra = session.request(RequestPurpose::SendPaymentForm, Some(ChatId(51)));
+    session.payment_sent(extra);
     apply_json(
         &mut session,
         &seq,
@@ -120,6 +127,7 @@ fn payment_result_notes_and_verification_url() {
         Some("✅ Payment successful")
     );
     let extra = session.request(RequestPurpose::SendPaymentForm, Some(ChatId(51)));
+    session.payment_sent(extra);
     apply_json(
         &mut session,
         &seq,
@@ -131,6 +139,7 @@ fn payment_result_notes_and_verification_url() {
         Some("https://pay.example.com/3ds")
     );
     let extra = session.request(RequestPurpose::SendPaymentForm, Some(ChatId(51)));
+    session.payment_sent(extra);
     apply_json(
         &mut session,
         &seq,

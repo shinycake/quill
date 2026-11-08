@@ -91,7 +91,7 @@ fn driver_sends_photo_and_document_from_picked_paths() {
         .messages
         .get(&-5)
         .unwrap();
-    assert!(msg.pending);
+    assert!(msg.pending());
     assert!(msg.is_outgoing);
     assert!(matches!(
         msg.content,
@@ -241,7 +241,7 @@ fn driver_sends_photo_and_document_from_picked_paths() {
     let history = driver.session.histories.get(&7).unwrap();
     let first = history.messages.get(&-8).unwrap();
     let second = history.messages.get(&-7).unwrap();
-    assert!(first.pending && second.pending);
+    assert!(first.pending() && second.pending());
     assert_eq!(first.media_album_id, 9001);
     assert_eq!(second.media_album_id, 9001);
     assert_eq!(history.messages.get(&-5).unwrap().media_album_id, 0);

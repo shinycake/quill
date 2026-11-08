@@ -42,19 +42,23 @@ impl QuillApp {
         self.stories.page = Some(StoryPage::new(chat_id, window, cx));
         if let Some(live) = self.live.as_mut() {
             if let Err(err) = live.driver.get_chat_story_albums(chat_id) {
-                self.connection.set_note(StatusNote::error(user_error_for(
-                    keys::Q_NOTES_FAILED_STORY_ALBUMS,
-                    &err,
-                )));
+                self.screen
+                    .connection
+                    .set_note(StatusNote::error(user_error_for(
+                        keys::Q_NOTES_FAILED_STORY_ALBUMS,
+                        &err,
+                    )));
             }
             if let Err(err) = live
                 .driver
                 .get_chat_posted_to_chat_page_stories(chat_id, 0, 50)
             {
-                self.connection.set_note(StatusNote::error(user_error_for(
-                    keys::Q_NOTES_FAILED_CHAT_PAGE_STORIES,
-                    &err,
-                )));
+                self.screen
+                    .connection
+                    .set_note(StatusNote::error(user_error_for(
+                        keys::Q_NOTES_FAILED_CHAT_PAGE_STORIES,
+                        &err,
+                    )));
             }
             if let Err(err) = live.driver.get_chat_archived_stories(chat_id, 0, 50) {
                 self.connection.set_note(StatusNote::error(user_error_for(
@@ -508,8 +512,10 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.stories.privacy_edit.is_some() {
-            self.stories.privacy_edit = None;
+        if self.stories.viewer_ui().privacy_edit.is_some() {
+            if let Some(open) = self.stories.viewer_ui_mut() {
+                open.privacy_edit = None;
+            }
             return;
         }
         let Some(item) = self.stories.viewer.current().cloned() else {
@@ -521,13 +527,18 @@ impl QuillApp {
             .and_then(|story| story.privacy_settings.as_ref())
             .and_then(StoryPrivacy::from_settings_json)
             .unwrap_or((StoryPrivacy::Everyone, Vec::new()));
-        self.stories.privacy_edit = Some(StoryPrivacyEdit {
+        let value = Some(StoryPrivacyEdit {
             chat_id: item.chat_id.0,
             story_id: item.story_id,
             privacy,
             selected_user_ids,
         });
-        self.stories.privacy_sent = false;
+        if let Some(open) = self.stories.viewer_ui_mut() {
+            open.privacy_edit = value;
+        }
+        if let Some(open) = self.stories.viewer_ui_mut() {
+            open.privacy_sent = false;
+        }
         self.stories
             .privacy_user_search
             .update(cx, |input, cx| input.set_value("", window, cx));
@@ -537,7 +548,11 @@ impl QuillApp {
     /// Phase 9.5: toggle a contact in the privacy editor's
     /// "Selected users" picker.
     pub(super) fn toggle_story_privacy_user(&mut self, user_id: i64, cx: &mut Context<Self>) {
-        if let Some(edit) = self.stories.privacy_edit.as_mut() {
+        if let Some(edit) = self
+            .stories
+            .viewer_ui_mut()
+            .and_then(|open| open.privacy_edit.as_mut())
+        {
             if edit.selected_user_ids.contains(&user_id) {
                 edit.selected_user_ids.retain(|id| *id != user_id);
             } else {
@@ -550,7 +565,7 @@ impl QuillApp {
     /// Phase 9.5: the privacy editor panel — the 4-way selector plus
     /// the contact picker for "Selected users".
     pub(super) fn story_privacy_panel(&self, cx: &mut Context<Self>) -> AnyElement {
-        let edit = match self.stories.privacy_edit.as_ref() {
+        let edit = match self.stories.viewer_ui().privacy_edit.as_ref() {
             Some(edit) => edit,
             None => return div().into_any_element(),
         };
@@ -573,7 +588,10 @@ impl QuillApp {
                     Radio::new(format!("story-privacy-{}", option.label())).label(option.label())
                 }))
                 .on_click(cx.listener(move |this, &ix, _, cx| {
-                    if let Some(edit) = this.stories.privacy_edit.as_mut()
+                    if let Some(edit) = this
+                        .stories
+                        .viewer_ui_mut()
+                        .and_then(|open| open.privacy_edit.as_mut())
                         && let Some(&privacy) = StoryPrivacy::ALL.get(ix)
                     {
                         edit.privacy = privacy;
@@ -634,7 +652,7 @@ impl QuillApp {
                     .child(list),
             );
         }
-        let busy = self.stories.privacy_sent;
+        let busy = self.stories.viewer_ui().privacy_sent;
         // Review fix-up: shared `story_manage.pending` slot — no second
         // op while one is in flight.
         let manage_busy = self.session().is_some_and(|s| s.stories.manage.pending);
@@ -660,7 +678,9 @@ impl QuillApp {
                         .ghost()
                         .text_color(text_bright())
                         .on_click(cx.listener(|this, _, _, cx| {
-                            this.stories.privacy_edit = None;
+                            if let Some(open) = this.stories.viewer_ui_mut() {
+                                open.privacy_edit = None;
+                            }
                             cx.notify();
                         })),
                 ),
@@ -673,10 +693,10 @@ impl QuillApp {
     /// `can_set_privacy_settings`; the tick closes the panel on
     /// success.
     pub(super) fn story_privacy_save(&mut self, cx: &mut Context<Self>) {
-        if self.stories.privacy_sent {
+        if self.stories.viewer_ui().privacy_sent {
             return;
         }
-        let Some(edit) = self.stories.privacy_edit.clone() else {
+        let Some(edit) = self.stories.viewer_ui().privacy_edit.clone() else {
             return;
         };
         // Demo mode: surface the same notice as `story_composer_save_edit`
@@ -704,7 +724,11 @@ impl QuillApp {
                 edit.story_id,
                 settings,
             ) {
-                Ok(_) => self.stories.privacy_sent = true,
+                Ok(_) => {
+                    if let Some(open) = self.stories.viewer_ui_mut() {
+                        open.privacy_sent = true;
+                    }
+                }
                 Err(_) => {
                     live.driver.session.stories.manage.error =
                         Some(tr(keys::Q_MEDIA_COULD_NOT_SEND_THE_PRIVACY).into());

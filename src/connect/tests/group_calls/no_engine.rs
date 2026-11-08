@@ -72,7 +72,7 @@ fn an_unavailable_engine_counts_as_none() {
 fn a_live_stream_is_not_rejoined_without_an_engine() {
     let (dir, recorder, mut driver) = tracking_a_voice_chat();
     if let Some(call) = driver.session.calls.active_group_call.as_mut() {
-        call.reconnecting = true;
+        call.rejoin.want();
     }
     assert_eq!(
         driver.rejoin_group_call(true),

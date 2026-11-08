@@ -60,9 +60,9 @@ impl QuillApp {
             Some(AccountNotice::Service)
         } else if self.auth_ui.login_prevented.is_some() {
             Some(AccountNotice::LoginPrevented)
-        } else if self.account.freeze_info_open && session.sync.freeze.is_some() {
+        } else if self.account_boxes.freeze_info_open && session.sync.freeze.is_some() {
             Some(AccountNotice::Frozen)
-        } else if self.account.age_verify_open && session.sync.age_verification.is_some() {
+        } else if self.account_boxes.age_verify_open && session.sync.age_verification.is_some() {
             Some(AccountNotice::AgeVerify)
         } else {
             None
@@ -197,8 +197,8 @@ impl QuillApp {
                         }
                     }
                     Some(AccountNotice::LoginPrevented) => this.auth_ui.login_prevented = None,
-                    Some(AccountNotice::Frozen) => this.account.freeze_info_open = false,
-                    Some(AccountNotice::AgeVerify) => this.account.age_verify_open = false,
+                    Some(AccountNotice::Frozen) => this.account_boxes.freeze_info_open = false,
+                    Some(AccountNotice::AgeVerify) => this.account_boxes.age_verify_open = false,
                     _ => {}
                 }
                 cx.notify();

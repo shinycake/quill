@@ -92,7 +92,7 @@ fn click(cx: &mut VisualTestContext, id: &'static str) {
 
 fn reply_item(app: &Entity<QuillApp>, cx: &mut VisualTestContext) -> Option<ReplyItem> {
     app.read_with(cx, |app, _| {
-        app.composer_ui.reply().map(|reply| reply.item.clone())
+        app.chat_ui.reply().map(|reply| reply.item.clone())
     })
 }
 
@@ -155,7 +155,7 @@ fn right_clicking_an_option_offers_its_rows_and_replies_to_it(cx: &mut TestAppCo
     assert!(!menu_open(&app, vcx));
     // The reply goes out naming the option.
     let sent = app.read_with(vcx, |app, _| {
-        app.composer_ui
+        app.chat_ui
             .reply()
             .and_then(|reply| reply.send_target(GROUP))
     });
@@ -186,7 +186,7 @@ fn a_reply_to_a_vanished_task_becomes_a_plain_reply(cx: &mut TestAppContext) {
     let (app, mut vcx) = new_app(cx);
     let vcx = &mut vcx;
     app.update(vcx, |app, cx| {
-        app.composer_ui.set_reply(Some(
+        app.chat_ui.set_reply(Some(
             ComposerReplyTo::new(GROUP, MessageId(CHECKLIST)).to_item(ReplyItem::Task(99)),
         ));
         cx.notify();
@@ -195,7 +195,7 @@ fn a_reply_to_a_vanished_task_becomes_a_plain_reply(cx: &mut TestAppContext) {
     let (sent, draft) = app.update(vcx, |app, cx| {
         let sent = app.send_reply_for(GROUP, cx).map(|reply| reply.item);
         let draft = app
-            .draft_reply(app.composer_ui.reply(), GROUP)
+            .draft_reply(app.chat_ui.reply(), GROUP)
             .map(|reply| reply.item);
         (sent, draft)
     });
@@ -209,7 +209,7 @@ fn a_reply_to_an_existing_task_keeps_it(cx: &mut TestAppContext) {
     let (app, mut vcx) = new_app(cx);
     let vcx = &mut vcx;
     app.update(vcx, |app, cx| {
-        app.composer_ui.set_reply(Some(
+        app.chat_ui.set_reply(Some(
             ComposerReplyTo::new(GROUP, MessageId(CHECKLIST)).to_item(ReplyItem::Task(2)),
         ));
         cx.notify();
@@ -257,7 +257,7 @@ fn the_reply_bar_shows_the_task_text(cx: &mut TestAppContext) {
     frames(vcx);
     click(vcx, "menu-reply-task");
     let text = app.read_with(vcx, |app, _| {
-        let reply = app.composer_ui.reply()?;
+        let reply = app.chat_ui.reply()?;
         let message = app
             .session()?
             .reply_target(reply.chat_id, reply.message_id)?

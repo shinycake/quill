@@ -67,9 +67,9 @@ pub(super) static ESC_LAYERS: &[EscLayer] = &[
     ),
     layer!(
         "link-popup",
-        |app| app.message_ui.link_popup.is_some(),
+        |app| app.chat_ui.link_popup.is_some(),
         |app, _, cx| {
-            app.message_ui.link_popup = None;
+            app.chat_ui.link_popup = None;
             cx.notify();
         }
     ),
@@ -99,12 +99,12 @@ pub(super) static ESC_LAYERS: &[EscLayer] = &[
     ),
     layer!(
         "group-call-settings",
-        |app| app.group_call.settings_open,
+        |app| app.group_call_screen.settings_open,
         |app, _, cx| app.close_group_call_settings(cx)
     ),
     layer!(
         "group-call-title",
-        |app| app.group_call.title_dialog.is_some(),
+        |app| app.group_call_screen.title_dialog.is_some(),
         |app, _, cx| app.close_group_call_title_dialog(cx)
     ),
     // Phase 9.7: the chat story page paints above the story composer.
@@ -139,7 +139,9 @@ pub(super) static ESC_LAYERS: &[EscLayer] = &[
         "story-reply-panel",
         |app| app.story_reply_panel_active(),
         |app, _, cx| {
-            app.stories.reply_panel = false;
+            if let Some(open) = app.stories.viewer_ui_mut() {
+                open.reply_panel = false;
+            }
             app.close_media_panel(cx);
         }
     ),
@@ -238,18 +240,14 @@ pub(super) static ESC_LAYERS: &[EscLayer] = &[
             .is_some_and(|session| session.messages.sponsored_report.is_some()),
         |app, _, cx| app.dismiss_sponsored_report_ui(cx)
     ),
-    layer!(
-        "send-as",
-        |app| app.composer_ui.send_as_open,
-        |app, _, cx| {
-            app.composer_ui.send_as_open = false;
-            cx.notify();
-        }
-    ),
+    layer!("send-as", |app| app.chat_ui.send_as_open, |app, _, cx| {
+        app.chat_ui.send_as_open = false;
+        cx.notify();
+    }),
     layer!(
         "reply-panels",
         |app| (app.share.reply_elsewhere_open || app.share.reply_quote_open)
-            && app.composer_ui.has_reply(),
+            && app.chat_ui.has_reply(),
         |app, window, cx| app.close_reply_panels(window, cx)
     ),
     layer!(
@@ -300,12 +298,12 @@ pub(super) static ESC_LAYERS: &[EscLayer] = &[
     ),
     layer!(
         "pending-reply",
-        |app| app.composer_ui.has_reply(),
+        |app| app.chat_ui.has_reply(),
         |app, _, cx| app.clear_reply(cx)
     ),
     layer!(
         "pending-edit",
-        |app| app.composer_ui.pending_edit.is_some(),
+        |app| app.chat_ui.is_editing(),
         |app, window, cx| app.request_cancel_edit(window, cx)
     ),
     layer!(
@@ -524,12 +522,12 @@ mod dispatch_tests {
                     Some(crate::ui::story_page::StoryPage::new(ChatId(1), window, cx));
             }),
             ("group-call-title", |app, window, cx| {
-                app.group_call.title_dialog = Some(
+                app.group_call_screen.title_dialog = Some(
                     crate::ui::dialogs::group_call::GroupCallTitleDialog::new(window, cx, "x"),
                 );
             }),
             ("link-popup", |app, _, _| {
-                app.message_ui.link_popup = Some(crate::ui::entity_links::LinkPopup {
+                app.chat_ui.link_popup = Some(crate::ui::entity_links::LinkPopup {
                     position: point(px(10.), px(10.)),
                     link: quill::text::LinkTarget::Mention("@x".into()),
                 });
@@ -568,7 +566,7 @@ mod dispatch_tests {
         app.update_in(vcx, |app, window, cx| {
             app.privacy.editor = Some(any_rule());
             app.stories.page = Some(crate::ui::story_page::StoryPage::new(ChatId(1), window, cx));
-            app.message_ui.link_popup = Some(crate::ui::entity_links::LinkPopup {
+            app.chat_ui.link_popup = Some(crate::ui::entity_links::LinkPopup {
                 position: point(px(10.), px(10.)),
                 link: quill::text::LinkTarget::Mention("@x".into()),
             });

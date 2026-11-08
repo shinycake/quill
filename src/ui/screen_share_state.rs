@@ -27,7 +27,11 @@ pub(crate) struct ChooserSource {
 pub(crate) struct ScreenShareUi {
     /// The chooser's own window (tdesktop opens it as a separate window).
     pub(super) window: Option<AnyWindowHandle>,
-    pub(super) opening: bool,
+    /// The screen whose source listing is under way. An epoch, not a
+    /// flag: the listing's continuation is dropped when the screen
+    /// changes, so a flag it was meant to clear would stay set for the
+    /// rest of the run.
+    pub(super) opening: Option<super::on_screen::ScreenEpoch>,
     /// The call the open chooser shares into.
     pub(super) for_call: Option<ScreenFor>,
     pub(super) sources: Vec<ChooserSource>,

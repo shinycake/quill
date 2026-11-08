@@ -32,7 +32,7 @@ fn replay_global_search_happy_empty_and_error() {
         )],
     );
     assert_eq!(
-        session.search.search.status,
+        session.search.search.status(),
         quill::state::SearchStatus::Ready
     );
     assert!(session.search.search.recents);
@@ -64,7 +64,7 @@ fn replay_global_search_happy_empty_and_error() {
         ],
     );
     assert_eq!(
-        session.search.search.status,
+        session.search.search.status(),
         quill::state::SearchStatus::Ready
     );
     assert_eq!(session.search.search.chat_ids[0].0, 7);
@@ -104,7 +104,7 @@ fn replay_global_search_happy_empty_and_error() {
         ],
     );
     assert_eq!(
-        session.search.search.status,
+        session.search.search.status(),
         quill::state::SearchStatus::Empty
     );
 
@@ -132,12 +132,12 @@ fn replay_global_search_happy_empty_and_error() {
         ],
     );
     assert_eq!(
-        session.search.search.status,
+        session.search.search.status(),
         quill::state::SearchStatus::Failed
     );
     session.close_search();
     assert_eq!(
-        session.search.search.status,
+        session.search.search.status(),
         quill::state::SearchStatus::Closed
     );
     assert!(!sink.rendered().contains("CANARY_REPLAY"));
