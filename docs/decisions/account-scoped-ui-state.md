@@ -1818,3 +1818,107 @@ PTT slider; nothing here overlaps it.
   - The `group_call.ptt_delay_slider` entry in
     `scripts/app-wide-fields.txt` belongs to part 1, which moved the
     slider to `SettingsUi`.
+
+### Phase 12 (area A)
+
+Round 12 of the review, area A, on `claude/sm-review12-a`. Both material
+findings held up in code.
+
+**Your own level ran only on updates (1).** `pump_call_audio` is the
+only reader of your microphone level and the only caller of the
+speaking tracker. It ran from `run_post_ingest_pumps`, so it moved only
+when a TDLib envelope arrived. In a call where nobody else speaks, the
+halo froze at the peak of the last gap. Your row kept its speaking mark
+after you stopped. TDLib heard "speaking" once per envelope, not every
+500 ms.
+
+- `pump_call_audio(now)` now runs in `request_tick`, as
+  `pump_call_engine_reports` does. It no longer runs on ingest. The poll
+  ticks run after every ingest pass, so a mute in an update still closes
+  the tap in that pass.
+- The capture writes the level cell without waking the poll loop. While
+  the tap is open and the microphone runs (or you are still marked
+  speaking), `next_deadline` wakes the loop one level window (92 ms)
+  after the last read: `ConnectDriver::call_audio_deadline`. The panel
+  redraws at 30 fps during a call (unless power saving stills it), so the
+  level is not a redraw.
+  `request_tick` asks for one only when your speaking state changes.
+- A poll with no new window calls `SpeakingTracker::idle`. Speaking runs
+  out after tdesktop's 1.5 s, "stopped" is sent once, and the level drops
+  to 0 once no window has come for 1.5 s. Before, a stopped capture or a
+  rejoin left `speaking` as it was.
+- The tracker's clock is the poll's `now`, not `Instant::elapsed`, so
+  tests drive it with fixed times.
+- The pump checks the source's error on every read, not only after a
+  level arrived.
+
+**The other post-ingest pumps, checked.**
+
+| Pump | Inputs that change with no update | Moved |
+| --- | --- | --- |
+| `pump_call_engine` | engine reports (already polled through `pump_call_engine_reports`) | no |
+| `pump_group_call_transport` | the picked camera, a device list landing, an engine mute or camera switch to retry | added per poll for connected calls |
+| `pump_call_media` | already in `request_tick` | no |
+| `maybe_send_parameters` | auth state only | no |
+| `maybe_probe_channel_membership` | the open chat (its opener calls it), `my_user_id`, answers | no |
+
+`pump_connected_group_calls` runs `pump_one_group_call` per poll for
+each call whose transport is up. A call still connecting is left to
+ingest: its join answer is an update, and a failing `connect_group_call`
+would otherwise be retried on every 92 ms wake. Teardown stays on
+ingest, because it needs the ids from before the update.
+
+**A ringing invitation is the current call (2).** As tdesktop's invite
+`Call` is `_currentCall` (`Instance::inCall`, `calls_instance.cpp:842`):
+
+- An incoming 1:1 call while it rings goes to `busy_decline_queue`
+  (`Session::decline_call_while_invite_rings`, from `accept_call_update`)
+  and never becomes `active_call`. The busy banner names the caller, as
+  for a second call during a call (tdesktop `:705-713`).
+- A second invitation is declined (tdesktop `:1194`).
+- `start_call` (once `createCall` goes out), `join_video_chat`, and a
+  conference join that is not this invitation call
+  `decline_ringing_invite`. It clears the invitation and sends
+  `declineGroupCallInvitation`, as tdesktop's `hangup` of the invite call
+  does. tdesktop asks first ("leave your active voice chat?"). Quill's
+  call window offers no join while the invitation rings, so these come
+  from a chat's Join button or a link.
+
+**Smaller items on the same paths.**
+
+- A failed `declineGroupCallInvitation` shows nothing. Before, it set
+  "Voice chat request failed" on whatever voice chat you were in.
+  tdesktop sends it with no fail handler, and the invitation has already
+  left the screen.
+- An invitation to the conference you are in, or a repeat of the one
+  ringing (same message, or same `unique_id`), is left alone, as in
+  tdesktop `:1179-1186`. `ActiveGroupCall::unique_id` and
+  `ConferenceInvite::unique_id` are new for this.
+- `ringing_invite_key` mixes the chat id into the window key (FNV-1a,
+  folded to a negative 31-bit value). Two invitations from different
+  chats with the same server message id get different windows.
+
+**Tests.**
+
+- `connect/tests/call_audio.rs`,
+  `your_level_and_speaking_move_on_polls_without_updates`, runs with no
+  envelope at all. It checks the 92 ms wake, the level per poll,
+  speaking and its send, the 500 ms re-send, the kept-for time, the run
+  out with one "stopped", and the wake ending on mute. With the per-poll
+  call taken out of `request_tick` (the old, ingest-only pump), it fails
+  at its first step: the level stays at 0 instead of 0.1.
+- `connect/tests/group_calls/ringing_invite.rs`: busy decline of a 1:1
+  call, a second invitation, repeats left alone, placing a call, joining
+  a voice chat, joining another conference, accepting the invitation
+  itself, an invitation to your own conference, and a failed busy
+  decline that leaves `group_call_error` empty.
+- `state/conference_invite_tests.rs` covers the reducer side, and the
+  `call_conference_ui` tests cover the window key.
+
+**Not done.**
+
+- tdesktop's "leave the current call?" confirm before joining over a
+  ringing invitation. Quill declines it without asking.
+- The raw level tap (non-UI builds) still keeps a stale error after a
+  call ends, as round 12 noted. UI builds do not take that path.
+- Not run on real hardware.

@@ -130,6 +130,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if let Some(call) = self.session.calls.active_group_call.as_mut() {
             call.transport_error = None;
         }
+        self.decline_ringing_invite(None);
         Ok(self.start_group_join(group_call_id))
     }
 

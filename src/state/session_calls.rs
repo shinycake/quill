@@ -85,6 +85,9 @@ impl Session {
             self.calls.summary = Some(CallSummary::from_terminal(call, 0, false));
             return;
         }
+        if self.decline_call_while_invite_rings(call) {
+            return;
+        }
         self.calls.active_call = Some(ActiveCall::fresh(
             call.id,
             call.user_id,
@@ -545,6 +548,7 @@ impl Session {
 fn apply_group_call_fields(tracked: &mut ActiveGroupCall, group_call: &ParsedGroupCall) {
     tracked.title = group_call.title.clone();
     tracked.invite_link = group_call.invite_link.clone();
+    tracked.unique_id = group_call.unique_id;
     tracked.is_video_chat = group_call.is_video_chat;
     tracked.is_live_story = group_call.is_live_story;
     tracked.is_rtmp_stream = group_call.is_rtmp_stream;

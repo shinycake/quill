@@ -400,6 +400,9 @@ pub struct ActiveGroupCall {
     pub message_sender_id: Option<MessageSender>,
     /// `groupCall.invite_link`: a conference call's link.
     pub invite_link: String,
+    /// `groupCall.unique_id` (0 until an update names it): an invitation
+    /// to this call carries the same id.
+    pub unique_id: i64,
     /// What a conference call keeps beyond its `groupCall` fields; `None`
     /// for a video chat, or a conference this session didn't join.
     pub conference: Option<ConferenceCall>,
@@ -607,6 +610,7 @@ impl ActiveGroupCall {
             paid_message_star_count: 0,
             message_sender_id: None,
             invite_link: String::new(),
+            unique_id: 0,
             conference: None,
         }
     }
