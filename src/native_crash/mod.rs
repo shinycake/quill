@@ -5,12 +5,15 @@
 //!
 //! * Unix (`unix.rs`): `sigaction` for SIGSEGV, SIGBUS, SIGILL, SIGFPE and
 //!   SIGABRT on the thread's alternate signal stack. The handler only calls
-//!   `write(2)` and `backtrace(3)` on a file opened at startup, calls the
+//!   `write(2)` on a file opened at startup, with the faulting thread's
+//!   frames (walked from its registers on macOS, `interrupted_stack.rs`;
+//!   `backtrace(3)` on Linux), calls the
 //!   handler that was there before (Rust's stack-overflow message), restores
 //!   the default action and lets the fault happen again (or re-raises), so
 //!   the OS crash reporter still runs with the real faulting frame.
 //! * Windows (`windows.rs`): an unhandled-exception filter that wakes a
-//!   dump thread, which writes the exception code, its address and a
+//!   dump thread, which writes the exception code, its address, the
+//!   faulting thread's frames as module+offset (`windows_stack.rs`) and a
 //!   minidump to files opened at startup; the filter itself allocates
 //!   nothing, then chains to the previous filter.
 //!
@@ -31,10 +34,14 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
+#[cfg(target_os = "macos")]
+mod interrupted_stack;
 #[cfg(unix)]
 mod unix;
 #[cfg(windows)]
 mod windows;
+#[cfg(all(windows, target_arch = "x86_64"))]
+mod windows_stack;
 
 #[cfg(test)]
 mod tests;

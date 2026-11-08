@@ -199,3 +199,14 @@ PostScript name, OpenType features and fallbacks
 (`line_cache_names_by_font_id`, filled by `load_family`). Layouts are
 recorded from the start until `save`, which hands them to the app as bytes:
 they hold the lines' text, so the app decides where they may be kept.
+
+## Display link teardown outside its update (issue #1389)
+
+`src/display_link.rs`: a window stops its link when it goes idle, and that
+happens from inside the link's own `metalDisplayLink:needsUpdate:`. Dropping
+a `MetalFrameSource` there now only pauses the link; it is invalidated on the
+main queue after the update returns (`invalidate_retired`), as Chromium does
+from its link callbacks. `MetalFrameSource::new` and a draw without a link
+(`MetalRenderer::draw`, before `nextDrawable`) invalidate any such link first,
+so none is left attached to the layer. Invalidating mid-update is the suspect
+for a null-pointer crash about a second after launch on macOS 14.
