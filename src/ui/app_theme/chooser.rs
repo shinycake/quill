@@ -94,7 +94,11 @@ fn theme_tile(
 
 impl QuillApp {
     fn applied_theme_id(&self) -> Option<&ThemeId> {
-        self.settings.app_theme.applied.as_ref().map(|(id, _)| id)
+        self.preferences
+            .app_theme
+            .applied
+            .as_ref()
+            .map(|(id, _)| id)
     }
 
     /// Themes: the built-in tiles, the accent of the one on screen, custom
@@ -197,7 +201,7 @@ impl QuillApp {
         };
         let current = self.theme_accent(theme).unwrap_or(theme.accent());
         let system = self
-            .settings
+            .preferences
             .system_accent
             .filter(|_| self.appearance.system_accent);
         let mut choices = vec![theme.accent()];
@@ -236,7 +240,7 @@ impl QuillApp {
             );
         }
         row = row.child(
-            ColorSelect::new(&self.settings.accent_picker)
+            ColorSelect::new(&self.preferences.accent_picker)
                 .featured_colors(
                     theme
                         .accent_choices()
@@ -249,7 +253,7 @@ impl QuillApp {
                 .w(px(150.)),
         );
         let mut body = div().flex().flex_col().gap_2().child(row);
-        if self.settings.system_accent.is_some() {
+        if self.preferences.system_accent.is_some() {
             body = body.child(
                 self.setting_spot(
                     &["appearance.system_accent"],
@@ -287,7 +291,7 @@ impl QuillApp {
         );
         let section = self.setting_spot(&["appearance.accent_color"], section, cx);
         self.setting_stand_in(
-            self.settings.system_accent.is_none(),
+            self.preferences.system_accent.is_none(),
             &["appearance.system_accent"],
             section,
             cx,
@@ -408,6 +412,7 @@ impl QuillApp {
             multiple: false,
             prompt: Some(tr(keys::THEME_EDITOR_MENU_IMPORT).into()),
         });
+        // screen-scope: the theme import is an app-wide setting; it applies to whichever account is on screen.
         cx.spawn(async move |this, cx| {
             let Ok(Ok(Some(paths))) = picker.await else {
                 return;
@@ -429,7 +434,7 @@ impl QuillApp {
                 Ok((name, palette)) => {
                     this.refresh_custom_themes();
                     let night = palette.is_dark();
-                    this.settings
+                    this.preferences
                         .app_theme
                         .cache_palette(name.clone(), Some(palette));
                     this.choose_app_theme(ThemeId::Custom(name), night, cx);

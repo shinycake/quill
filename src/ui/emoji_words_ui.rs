@@ -203,7 +203,7 @@ impl QuillApp {
             None => Vec::new(),
         };
         let now = Instant::now();
-        let ui = &mut self.composer_ui.emoji_words;
+        let ui = &mut self.screen.composer_ui.emoji_words;
         // A word glimmers once while it is in the draft: one the caret
         // passes through does not replay it.
         if !ui.lit_at.is_empty() {

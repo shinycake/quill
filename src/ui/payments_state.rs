@@ -74,6 +74,35 @@ pub(crate) struct PaymentUi {
         Option<std::sync::Arc<dyn quill::payment_card::transport::Transport>>,
 }
 
+/// The checkout, the receipt and the payments hub's boxes (Stars, Premium,
+/// gifts, Grams, the money page) keep their open flags in the session,
+/// which goes to the background with the account: each closes through its
+/// own closer, as a close does, so none is open when the account comes
+/// back and what a close tells TDLib (the money page's hint) still goes
+/// through the old client.
+impl crate::ui::on_screen::Farewell for PaymentUi {
+    fn farewell(
+        app: &mut QuillApp,
+        window: &mut gpui_kit::Window,
+        cx: &mut gpui_kit::Context<QuillApp>,
+    ) {
+        app.close_payment_dialog(cx);
+        app.close_payment_receipt(cx);
+        app.close_subscriptions(cx);
+        app.close_stars(cx);
+        app.close_premium(cx);
+        app.cancel_grams_withdraw(window, cx);
+        app.close_grams(cx);
+        app.dismiss_premium_limit();
+        app.close_stars_gift_dialog(cx);
+        app.close_send_gift_dialog(cx);
+        app.close_gift_transfer(window, cx);
+        app.close_gift_value(cx);
+        app.close_gift_code_box(cx);
+        app.close_money(cx);
+    }
+}
+
 impl PaymentUi {
     pub(super) fn new(window: &mut Window, cx: &mut Context<QuillApp>) -> Self {
         let pick_search = cx.new(|cx| {

@@ -278,10 +278,11 @@ impl QuillApp {
         self.dismiss_group_call_error(cx);
         if self.send_group_call_join() {
             self.group_call.stream.joining = Some(id);
-            self.group_call.stream.join_timeout = Some(cx.spawn(async move |this, cx| {
-                cx.background_executor().timer(JOIN_TIMEOUT).await;
-                let _ = this.update(cx, |app, cx| app.stream_join_ended(id, cx));
-            }));
+            self.group_call.stream.join_timeout =
+                Some(self.spawn_screen(cx, async move |this, cx| {
+                    cx.background_executor().timer(JOIN_TIMEOUT).await;
+                    let _ = this.update(cx, |app, cx| app.stream_join_ended(id, cx));
+                }));
         } else {
             self.stream_join_failed();
         }
@@ -463,7 +464,7 @@ impl QuillApp {
             .group_call_stream_bar(facts, volume, full, shown, cx)
             .into_any_element();
         let band = (!full).then(|| self.stream_title_band(cx));
-        let share = if self.group_call.share_open {
+        let share = if self.group_call_boxes.share_open {
             self.session()
                 .and_then(|s| s.calls.active_group_call.as_ref())
                 .and_then(|call| self.group_call_share_overlay(call, cx))
@@ -698,7 +699,7 @@ impl QuillApp {
     ) -> bool {
         let stream = &self.group_call.stream;
         if stream.overlay.is_some()
-            || self.group_call.share_open
+            || self.group_call_boxes.share_open
             || self.group_call.title_dialog.is_some()
         {
             return false;

@@ -112,7 +112,7 @@ impl QuillApp {
             self.drop_earn_layer(cx);
             return;
         }
-        cx.spawn(async move |this, cx| {
+        self.spawn_screen(cx, async move |this, cx| {
             cx.background_executor().timer(CLOSE_FADE).await;
             this.update(cx, |this, cx| {
                 if this

@@ -48,7 +48,7 @@ impl QuillApp {
         let Some(screen) = self.code_screen() else {
             return;
         };
-        if let Some(code) = self.settings.advanced.codes.feed(text) {
+        if let Some(code) = self.preferences.advanced.codes.feed(text) {
             self.in_window_scope(None, cx, |this, cx| {
                 this.run_secret_code(code, screen, window, cx)
             });
@@ -59,7 +59,7 @@ impl QuillApp {
         let signed_in = matches!(self.current_auth(), AuthorizationState::Ready);
         // A screenshot demo's sign-in screen (`demo_inputs`) takes them too,
         // with no connection behind it.
-        if !signed_in && (self.live.is_some() || self.auth_ui.demo_inputs) {
+        if !signed_in && (self.live.is_some() || self.auth_demo.demo_inputs) {
             return Some(CodeScreen::SignIn);
         }
         (signed_in && self.settings.open && self.settings.sub.is_none())
@@ -75,7 +75,7 @@ impl QuillApp {
     ) {
         match code {
             Code::DebugMode => {
-                self.settings.advanced.debug_confirm = Some(debug_mode::enabled());
+                self.preferences.advanced.debug_confirm = Some(debug_mode::enabled());
                 cx.notify();
             }
             Code::ViewLogs => self.show_log_folder(cx),
@@ -164,12 +164,12 @@ impl QuillApp {
         let Some(action) = test_environment::plan_test_mode(
             1,
             signed_out,
-            self.settings.advanced.test_environment(),
+            self.preferences.advanced.test_environment(),
         ) else {
             return;
         };
         let to_test = action == test_environment::TestModeAction::AddTest;
-        self.settings.advanced.set_demo_test_environment(to_test);
+        self.preferences.advanced.set_demo_test_environment(to_test);
         self.connection.set_note(StatusNote::info(if to_test {
             test_environment::SWITCHED_TO_TEST
         } else {
@@ -223,11 +223,12 @@ impl QuillApp {
     ) -> Dialog {
         let on_close =
             QuillShell::on_close_kind(app, shell, DialogKind::DebugModeConfirm, |this, _, cx| {
-                this.settings.advanced.debug_confirm = None;
+                this.preferences.advanced.debug_confirm = None;
                 cx.notify();
             });
         app.update(cx, |this, cx| {
-            let text = debug_mode::confirm_text(this.settings.advanced.debug_confirm == Some(true));
+            let text =
+                debug_mode::confirm_text(this.preferences.advanced.debug_confirm == Some(true));
             let footer = div()
                 .flex()
                 .justify_end()
@@ -237,7 +238,7 @@ impl QuillApp {
                         .label(tr(keys::CANCEL))
                         .ghost()
                         .on_click(cx.listener(|this, _, window, cx| {
-                            this.settings.advanced.debug_confirm = None;
+                            this.preferences.advanced.debug_confirm = None;
                             this.close_kit_dialog_if_done(DialogKind::DebugModeConfirm, window, cx);
                             cx.notify();
                         })),
@@ -247,7 +248,7 @@ impl QuillApp {
                         .label(tr(keys::BOX_OK))
                         .primary()
                         .on_click(cx.listener(|this, _, window, cx| {
-                            this.settings.advanced.debug_confirm = None;
+                            this.preferences.advanced.debug_confirm = None;
                             this.switch_debug_mode(cx);
                             this.close_kit_dialog_if_done(DialogKind::DebugModeConfirm, window, cx);
                         })),
@@ -276,8 +277,8 @@ crate::ui::shell::register_dialogs! {
     /// The `debugmode` code's question: turn the debug logs on or off.
     DebugModeConfirm => DialogSpec::new(
         1050,
-        |app| app.settings.advanced.debug_confirm.is_some(),
+        |app| app.preferences.advanced.debug_confirm.is_some(),
         QuillApp::build_debug_mode_dialog,
     )
-    .closes(|app, _, cx| { app.settings.advanced.debug_confirm = None; cx.notify(); }),
+    .close(|app, _, cx| { app.preferences.advanced.debug_confirm = None; cx.notify(); }),
 }

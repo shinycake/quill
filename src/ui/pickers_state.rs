@@ -99,3 +99,6 @@ impl PickerUi {
         }
     }
 }
+
+/// Nothing to say: its state is the account's only app-side.
+impl super::on_screen::Farewell for PickerUi {}

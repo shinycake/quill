@@ -39,7 +39,7 @@ impl QuillApp {
     ) -> Option<AnyElement> {
         let support = self.native_notify_support();
         let prefs = quill::notify_prefs::current();
-        let platform = self.notify.windows.platform;
+        let platform = self.delivery.windows.platform;
         let custom_active = self.custom_notifications_active();
         if !custom::native_switch_shown(support) && !custom_active {
             return None;

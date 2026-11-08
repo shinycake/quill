@@ -530,12 +530,12 @@ crate::ui::shell::register_dialogs! {
         |app| app.details_session().is_some(),
         QuillApp::build_session_details_dialog,
     )
-    .closes(|app, _, cx| app.close_session_details(cx)),
+    .close(|app, _, cx| app.close_session_details(cx)),
 
     SessionsConfirm => DialogSpec::new(
         615,
         |app| app.privacy.sessions_confirm.is_some(),
         QuillApp::build_sessions_confirm_dialog,
     )
-    .closes(|app, _, cx| app.cancel_sessions_confirm(cx)),
+    .close(|app, _, cx| app.cancel_sessions_confirm(cx)),
 }

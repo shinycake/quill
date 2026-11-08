@@ -459,7 +459,7 @@ crate::ui::shell::register_dialogs! {
         },
         QuillApp::build_earn_withdraw_dialog,
     )
-    .closes(|app, window, cx| app.cancel_withdraw(window, cx)),
+    .close(|app, window, cx| app.cancel_withdraw(window, cx)),
 }
 
 #[cfg(test)]

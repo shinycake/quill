@@ -75,6 +75,7 @@ impl QuillApp {
         let probed = self.history.width_probed.clone();
         let pane_width = self.history.pane_width.clone();
         let app = cx.weak_entity();
+        let screen = self.screen_epoch();
         canvas(
             |_, _, _| {},
             move |bounds, _, window, cx| {
@@ -89,19 +90,21 @@ impl QuillApp {
                     let app = app.clone();
                     window.defer(cx, move |window, cx| {
                         let _ = app.update(cx, |this, cx| {
-                            // The history painted is this window's.
-                            this.in_window_of(window, cx, |this, _, cx| {
-                                // Rows change height (photos join, dates
-                                // move). A new bubble width only changes
-                                // what the rows draw, not the rows: their
-                                // heights are measured again below.
-                                if layout_changed {
-                                    this.history.rows_key = None;
-                                }
-                                this.history
-                                    .scroller
-                                    .update(cx, |state, cx| state.remeasure(cx));
-                                cx.notify();
+                            this.in_screen_scope(screen, cx, |this, cx| {
+                                // The history painted is this window's.
+                                this.in_window_of(window, cx, |this, _, cx| {
+                                    // Rows change height (photos join, dates
+                                    // move). A new bubble width only changes
+                                    // what the rows draw, not the rows: their
+                                    // heights are measured again below.
+                                    if layout_changed {
+                                        this.history.rows_key = None;
+                                    }
+                                    this.history
+                                        .scroller
+                                        .update(cx, |state, cx| state.remeasure(cx));
+                                    cx.notify();
+                                });
                             });
                         });
                     });

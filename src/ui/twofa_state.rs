@@ -27,6 +27,8 @@ pub(crate) struct TwoStepUi {
     pub(super) confirm: Option<TwofaConfirm>,
 }
 
+impl crate::ui::on_screen::Farewell for TwoStepUi {}
+
 impl TwoStepUi {
     pub(super) fn new(window: &mut Window, cx: &mut Context<QuillApp>) -> Self {
         // Slice A2: two-step verification overlay inputs. Passwords live

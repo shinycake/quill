@@ -228,7 +228,7 @@ impl QuillApp {
         quill::passcode::forget_passcode(&root, &quill::passcode::global_unlock());
         self.background.wiping = true;
         // A connection being prepared must not open now.
-        self.connection.generation += 1;
+        self.connect.generation += 1;
         self.close_screen_client(cx);
         self.stop_background_accounts(cx);
         self.delete_after_close(

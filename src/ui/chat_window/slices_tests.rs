@@ -11,7 +11,7 @@ fn opened(cx: &mut TestAppContext) -> (Entity<QuillApp>, VisualTestContext, Visu
     let (app, mut vcx) = open(cx);
     let chat = open_chat_window(&app, &mut vcx, OPEN, beside());
     for _ in 0..4 {
-        app.read_with(&vcx, |app, _| app.playback.stickers.settle());
+        app.read_with(&vcx, |app, _| app.players.stickers.settle());
         app.update(&mut vcx, |_, cx| cx.notify());
         let _ = frames_over(&mut vcx, 1);
     }
@@ -104,7 +104,7 @@ fn held(cx: &mut TestAppContext) -> (Entity<QuillApp>, VisualTestContext, AnyWin
     let (app, mut vcx) = open(cx);
     let under = open_chat_window(&app, &mut vcx, OPEN, inside());
     for _ in 0..4 {
-        app.read_with(&vcx, |app, _| app.playback.stickers.settle());
+        app.read_with(&vcx, |app, _| app.players.stickers.settle());
         app.update(&mut vcx, |_, cx| cx.notify());
         let _ = frames_over(&mut vcx, 1);
     }

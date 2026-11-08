@@ -137,9 +137,9 @@ impl QuillApp {
                                     if this.earn.diamonds < 100 {
                                         this.earn.diamonds += 1;
                                     }
-                                    this.connection.set_note(StatusNote::info(diamonds_toast(
-                                        this.earn.diamonds,
-                                    )));
+                                    this.screen.connection.set_note(StatusNote::info(
+                                        diamonds_toast(this.screen.earn.diamonds),
+                                    ));
                                     cx.notify();
                                 }))
                                 .child(ton_icon(20., primary)),
@@ -390,28 +390,28 @@ impl QuillApp {
 crate::ui::shell::register_dialogs! {
     /// The Monetization page's "Learn more" box.
     EarnLearn => DialogSpec::new(7610, |app| app.earn.learn, QuillApp::build_earn_learn_dialog)
-    .closes(|app, _, cx| app.close_earn_learn(cx)),
+    .close(|app, _, cx| app.close_earn_learn(cx)),
     /// A TON transaction's details.
     EarnTonTx => DialogSpec::new(
         7611,
         |app| app.earn.ton_tx.is_some(),
         QuillApp::build_earn_ton_tx_dialog,
     )
-    .closes(|app, _, cx| app.close_earn_tx(cx)),
+    .close(|app, _, cx| app.close_earn_tx(cx)),
     /// A Stars transaction's receipt from a revenue page.
     EarnStarTx => DialogSpec::new(
         7613,
         |app| app.earn.star_tx.is_some(),
         QuillApp::build_earn_star_tx_dialog,
     )
-    .closes(|app, _, cx| app.close_earn_tx(cx)),
+    .close(|app, _, cx| app.close_earn_tx(cx)),
     /// The boost box of a locked "Switch Off Ads".
     EarnAskBoost => DialogSpec::new(
         7614,
         |app| app.earn.ask_boost.is_some(),
         QuillApp::build_earn_ask_boost_dialog,
     )
-    .closes(|app, _, cx| app.close_earn_ask_boost(cx)),
+    .close(|app, _, cx| app.close_earn_ask_boost(cx)),
 }
 
 #[cfg(test)]

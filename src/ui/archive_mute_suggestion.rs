@@ -113,8 +113,7 @@ crate::ui::shell::register_dialogs! {
         1420,
         QuillApp::archive_mute_suggested,
         QuillApp::build_archive_mute_suggestion_dialog,
-    )
-    .follows_account(),
+    ),
 }
 
 crate::ui::screenshot_demo::register_demos![

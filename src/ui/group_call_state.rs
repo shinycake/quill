@@ -10,23 +10,10 @@ use std::time::Instant;
 pub(crate) struct GroupCallUi {
     /// Phase C3a: voice-chat title rename dialog (`setVideoChatTitle`).
     pub(super) title_dialog: Option<GroupCallTitleDialog>,
-    /// Starting a video chat: leave-current, create and schedule boxes
-    /// (`dialogs/group_call_create.rs`).
-    pub(super) start_dialog: Option<super::dialogs::group_call_create::GroupCallCreate>,
-    /// The last `createVideoChat` sent, to match a server failure.
-    pub(super) create_request: Option<quill::ids::RequestId>,
     /// The call window's Settings box (`group_call_settings.rs`).
     pub(super) settings_open: bool,
     /// Phase C2h: in-call chat composer (sendGroupCallMessage).
     pub(super) composer: Entity<TextareaState>,
-    /// Phase C2f: voice-chat invite picker overlay (contacts list).
-    pub(super) invite_open: bool,
-    /// "Share Invite Link" box: asked for (it shows once both links are
-    /// in), its "Users with this link can speak" checkbox, and whether
-    /// the link was just copied.
-    pub(super) share_open: bool,
-    pub(super) share_speaker: bool,
-    pub(super) share_copied: bool,
     /// The voice / video chat window, as for 1:1 calls; the in-call
     /// chat shows under the members when asked.
     pub(super) window: Option<AnyWindowHandle>,
@@ -71,25 +58,55 @@ pub(crate) struct GroupCallUi {
     pub(super) stage_volume: Option<super::group_call_stage_volume::StageVolume>,
     /// The live stream layout (RTMP): picture, placeholder and controls.
     pub(super) stream: super::group_call_stream_layout::StreamWindow,
-    /// The "Stream with other apps" box (`dialogs/rtmp_stream.rs`).
-    pub(super) rtmp_start: super::dialogs::rtmp_stream::RtmpStartUi,
     /// The live Picture-in-Picture of a stream or a live story
     /// (`calls::live_pip`).
     pub(super) live_pip: Option<super::calls::live_pip::LivePipLink>,
 }
+
+/// The boxes the account on screen opens around a video chat: starting
+/// one, the invite picker, the share-link box. The call window and the
+/// call ([`GroupCallUi`]) are the app's. A field of `OnScreen`.
+pub(crate) struct GroupCallBoxes {
+    /// Starting a video chat: leave-current, create and schedule boxes
+    /// (`dialogs/group_call_create.rs`).
+    pub(super) start_dialog: Option<super::dialogs::group_call_create::GroupCallCreate>,
+    /// The last `createVideoChat` sent, to match a server failure.
+    pub(super) create_request: Option<quill::ids::RequestId>,
+    /// The "Stream with other apps" box (`dialogs/rtmp_stream.rs`).
+    pub(super) rtmp_start: super::dialogs::rtmp_stream::RtmpStartUi,
+    /// Phase C2f: voice-chat invite picker overlay (contacts list).
+    pub(super) invite_open: bool,
+    /// "Share Invite Link" box: asked for (it shows once both links are
+    /// in), its "Users with this link can speak" checkbox, and whether
+    /// the link was just copied.
+    pub(super) share_open: bool,
+    pub(super) share_speaker: bool,
+    pub(super) share_copied: bool,
+}
+
+impl GroupCallBoxes {
+    pub(super) fn new() -> Self {
+        Self {
+            start_dialog: None,
+            create_request: None,
+            rtmp_start: Default::default(),
+            invite_open: false,
+            share_open: false,
+            share_speaker: true,
+            share_copied: false,
+        }
+    }
+}
+
+/// Flags and a pending request id: nothing to say.
+impl super::on_screen::Farewell for GroupCallBoxes {}
 
 impl GroupCallUi {
     pub(super) fn new(composer: Entity<TextareaState>) -> Self {
         Self {
             composer,
             title_dialog: None,
-            start_dialog: None,
-            create_request: None,
             settings_open: false,
-            invite_open: false,
-            share_open: false,
-            share_speaker: true,
-            share_copied: false,
             window: None,
             window_opening: false,
             window_closed_by_user: None,
@@ -115,7 +132,6 @@ impl GroupCallUi {
             rows_place: Default::default(),
             players: HashMap::new(),
             stream: Default::default(),
-            rtmp_start: Default::default(),
             live_pip: None,
         }
     }

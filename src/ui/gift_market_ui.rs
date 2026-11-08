@@ -559,5 +559,5 @@ crate::ui::shell::register_dialogs! {
         },
         QuillApp::build_gift_market_dialog,
     )
-    .closes(|app, _, cx| app.market_back(cx)),
+    .close(|app, _, cx| app.market_back(cx)),
 }

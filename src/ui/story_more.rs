@@ -160,7 +160,7 @@ impl QuillApp {
         if self.stories.muted {
             0.0
         } else {
-            self.playback.volume
+            self.players.volume
         }
     }
 
@@ -499,13 +499,13 @@ impl QuillApp {
     /// has not touched it, close after a confirmed save.
     pub(super) fn tick_close_friends(&mut self, cx: &mut Context<Self>) {
         let loaded = self.session().and_then(|s| s.stories.close_friends.clone());
-        let Some(edit) = self.stories.close_friends_edit.as_mut() else {
+        let Some(edit) = self.screen.stories.close_friends_edit.as_mut() else {
             return;
         };
         let Some(loaded) = loaded else {
             return;
         };
-        if self.stories.close_friends_saving {
+        if self.screen.stories.close_friends_saving {
             if CloseFriendsEdit::new(&loaded).ids() == edit.ids() {
                 self.stories.close_friends_saving = false;
                 self.stories.close_friends_edit = None;

@@ -45,7 +45,7 @@ impl QuillApp {
                     let target = target.clone();
                     move |this, _, cx| {
                         if let Some(live) = this.live.as_mut() {
-                            this.connection.set_note(
+                            this.screen.connection.set_note(
                                 match live.driver.save_audio_to_profile(
                                     target.file_id,
                                     target.duration,
@@ -85,7 +85,7 @@ impl QuillApp {
                     let draft =
                         quill::composer::ForwardDraft::from_message(chat_id, message_id, false);
                     if let (Some(live), Some(me), Some(draft)) = (this.live.as_mut(), me, draft) {
-                        this.connection.set_note(
+                        this.screen.connection.set_note(
                             match live.driver.forward_messages(ChatId(me), &draft) {
                                 Ok(_) => StatusNote::info(tr(keys::Q_CHAT_SAVED_TO_SAVED_MESSAGES)),
                                 Err(_) => {

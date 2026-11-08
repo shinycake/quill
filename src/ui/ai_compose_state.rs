@@ -108,6 +108,8 @@ pub(crate) struct AiComposeUi {
     pub(super) emoji_asked: HashSet<OfAccount<i64>>,
 }
 
+impl crate::ui::on_screen::Farewell for AiComposeUi {}
+
 impl AiComposeUi {
     pub(super) fn new(window: &mut Window, cx: &mut Context<QuillApp>) -> Self {
         let language_search = cx.new(|cx| {

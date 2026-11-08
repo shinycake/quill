@@ -139,8 +139,8 @@ impl QuillApp {
             player.set_looping(true);
             player.set_volume(0.0);
         } else {
-            player.set_volume(self.playback.volume);
-            player.set_rate(self.playback.speed);
+            player.set_volume(self.players.volume);
+            player.set_rate(self.players.speed);
         }
         if start > 0.0 {
             player.seek(start);
@@ -162,7 +162,7 @@ impl QuillApp {
             SliderState::new()
                 .min(0.0)
                 .max(100.0)
-                .default_value((self.playback.volume * 100.0).round())
+                .default_value((self.players.volume * 100.0).round())
                 .label(tr(keys::Q_AV_VOLUME_2))
         });
         // The sliders are this viewer's: their events act on this window's.
@@ -282,7 +282,7 @@ impl QuillApp {
             transport.total(),
             transport.position,
             transport.is_playing(),
-            self.playback.speed,
+            self.players.speed,
         );
         quill::media_session::publish(Some(&info));
     }

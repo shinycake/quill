@@ -38,6 +38,8 @@ pub(super) struct VideoAvatarUi {
     failed: Option<FileId>,
 }
 
+impl crate::ui::on_screen::Farewell for VideoAvatarUi {}
+
 struct CoverClip {
     owner: PhotoOwner,
     file_id: FileId,

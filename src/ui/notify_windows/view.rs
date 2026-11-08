@@ -98,6 +98,8 @@ impl NotifyView {
     fn send(&self, event: ViewEvent, cx: &mut Context<Self>) {
         let owner = self.owner.clone();
         let id = self.id;
+        // screen-scope: the notification's own account decides what a click or a
+        // reply does (notify_key names it), and it need not be the one on screen.
         cx.defer(move |cx| {
             // A notification acts as the main window does (its chat opens
             // there, its reply goes from there).

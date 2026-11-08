@@ -406,27 +406,20 @@ impl QuillApp {
         if self.slow_mode_blocked(chat_id, cx) {
             return true;
         }
-        // Story ids are the poster's, the same on every account: the reply
-        // goes out only from the account it was recorded on.
-        let Some(account) = self.started_on() else {
-            return true;
-        };
         let Some(capture) = self.recording.take_video() else {
             return true;
         };
         cx.notify();
         let finished = cx.background_spawn(async move { capture.finish() });
-        Self::spawn_main_in(window, cx, async move |this, cx| {
+        // Story ids are the poster's, the same on every account: the reply
+        // goes out only from the screen it was recorded on (`spawn_screen`).
+        self.spawn_screen_in(window, cx, async move |this, cx| {
             let result = finished.await;
             let path = result.as_ref().ok().map(|draft| draft.path.clone());
             let updated = this.update_in(cx, |this, _window, cx| {
                 let sent = match result {
                     Ok(draft) => {
-                        if this.drop_recording_of_other_account(&account, &draft.path) {
-                            cx.notify();
-                            return;
-                        }
-                        let sent = this.live_for(&account).map(|live| {
+                        let sent = this.live.as_mut().map(|live| {
                             live.driver
                                 .send_story_reply_video_note(chat_id, story_id, &draft)
                                 .is_ok()
@@ -444,10 +437,10 @@ impl QuillApp {
                 };
                 this.finish_story_reply_media(sent, tr(keys::Q_MEDIA_VIDEO_MESSAGE), cx);
             });
-            if updated.is_err()
-                && let Some(path) = path
-            {
-                let _ = std::fs::remove_file(path);
+            if updated.is_err() {
+                let _ = this
+                    .app()
+                    .update(cx, |this, cx| this.recording_dropped_with_screen(path, cx));
             }
         })
         .detach();
@@ -473,11 +466,6 @@ impl QuillApp {
         if self.slow_mode_blocked(chat_id, cx) {
             return true;
         }
-        // Story ids are the poster's, the same on every account: the reply
-        // goes out only from the account it was recorded on.
-        let Some(account) = self.started_on() else {
-            return true;
-        };
         let Some(capture) = self.recording.take_voice() else {
             return true;
         };
@@ -486,7 +474,9 @@ impl QuillApp {
         cx.notify();
         // The encoder is joined off the UI thread.
         let finished = cx.background_spawn(async move { finish.complete() });
-        Self::spawn_main(cx, async move |this, cx| {
+        // Story ids are the poster's, the same on every account: the reply
+        // goes out only from the screen it was recorded on (`spawn_screen`).
+        self.spawn_screen(cx, async move |this, cx| {
             let result = finished.await;
             let path = result.as_ref().ok().map(|draft| draft.path.clone());
             let updated = this.update(cx, |this, cx| {
@@ -498,12 +488,9 @@ impl QuillApp {
                         return;
                     }
                 };
-                if this.drop_recording_of_other_account(&account, &draft.path) {
-                    cx.notify();
-                    return;
-                }
                 let sent = this
-                    .live_for(&account)
+                    .live
+                    .as_mut()
                     .map(|live| {
                         live.driver
                             .send_story_reply_voice(chat_id, story_id, &draft)
@@ -515,10 +502,10 @@ impl QuillApp {
                 }
                 this.finish_story_reply_media(sent, tr(keys::Q_MEDIA_VOICE_MESSAGE), cx);
             });
-            if updated.is_err()
-                && let Some(path) = path
-            {
-                let _ = std::fs::remove_file(path);
+            if updated.is_err() {
+                let _ = this
+                    .app()
+                    .update(cx, |this, cx| this.recording_dropped_with_screen(path, cx));
             }
         })
         .detach();

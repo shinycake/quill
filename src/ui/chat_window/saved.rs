@@ -94,6 +94,7 @@ impl QuillApp {
             return;
         }
         self.windows.save_pending = true;
+        // screen-scope: the save reads the windows and the account on screen when it fires, so it saves whatever is current.
         cx.spawn(async move |this, cx| {
             cx.background_executor()
                 .timer(std::time::Duration::from_millis(600))

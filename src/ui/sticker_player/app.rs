@@ -139,8 +139,8 @@ impl QuillApp {
     /// in every window: another account, the loop setting changed, the app
     /// goes.
     pub(in crate::ui) fn stop_sticker_playback(&mut self) {
-        self.playback.stickers.stop();
-        self.playback.emoji_plays.get_mut().clear();
+        self.players.stickers.stop();
+        self.players.emoji_plays.get_mut().clear();
     }
 
     /// `window` let go of `chat` (`None`: the main window), or of all of it
@@ -160,13 +160,13 @@ impl QuillApp {
         what: Leaving,
         cx: &mut Context<QuillApp>,
     ) {
-        let frames = self.playback.stickers.leave(window, what);
+        let frames = self.players.stickers.leave(window, what);
         // Lone emoji plays are kept by chat, which may still show in
         // another window.
         if let Some(chat) = chat
             && !self.chat_shown_elsewhere(chat, window, cx)
         {
-            self.playback.emoji_plays.get_mut().leave_chat(chat.0);
+            self.players.emoji_plays.get_mut().leave_chat(chat.0);
         }
         match what {
             // On screen until the window draws again.
@@ -207,13 +207,10 @@ impl QuillApp {
             && session.should_download(file)
         {
             // Asked for after this frame: rendering borrows the app.
-            let weak = cx.entity().downgrade();
-            cx.defer(move |cx| {
-                let _ = weak.update(cx, |this, _| {
-                    if let Some(live) = this.live.as_mut() {
-                        let _ = live.driver.download_file(file, 1);
-                    }
-                });
+            self.defer_screen(cx, move |this, _| {
+                if let Some(live) = this.live.as_mut() {
+                    let _ = live.driver.download_file(file, 1);
+                }
             });
         }
         path
@@ -249,7 +246,7 @@ impl QuillApp {
             return None;
         }
         #[cfg(test)]
-        let path = if self.playback.stickers.has_fixture(ask.file.0) {
+        let path = if self.players.stickers.has_fixture(ask.file.0) {
             Some(std::path::PathBuf::new())
         } else {
             self.sticker_path(ask.file, cx)
@@ -269,7 +266,7 @@ impl QuillApp {
             hz: key.hz,
         };
         let edge = key.edge;
-        let player = &self.playback.stickers;
+        let player = &self.players.stickers;
         let ready = player.prepare(&spec, edge, Place::of(ask.head, self.windows.scope));
         self.ensure_sticker_closer(cx);
         if !ready {
@@ -295,7 +292,7 @@ impl QuillApp {
         cx: &mut Context<QuillApp>,
     ) -> Option<StickerView> {
         if !self
-            .playback
+            .players
             .stickers
             .has_clip_like(&ask.key(self.windows.scope))
         {
@@ -307,7 +304,7 @@ impl QuillApp {
     /// Whether the clip `ask` names failed to open.
     #[cfg(feature = "demo-capture")]
     pub(in crate::ui) fn sticker_failed(&self, ask: ViewAsk) -> bool {
-        self.playback
+        self.players
             .stickers
             .failed_key(&ask.key(self.windows.scope))
     }
@@ -315,7 +312,7 @@ impl QuillApp {
     /// A window starts a frame, before anything in it renders (`None`: the
     /// main window).
     pub(in crate::ui) fn sticker_frame_starts(&self, cx: &mut Context<QuillApp>) {
-        self.playback.stickers.frame_starts();
+        self.players.stickers.frame_starts();
         self.ensure_sticker_closer(cx);
     }
 
@@ -327,15 +324,17 @@ impl QuillApp {
     /// off screen is due (each plus `CLOSE_SLACK`), and ends once no clip
     /// is open.
     fn ensure_sticker_closer(&self, cx: &mut Context<QuillApp>) {
-        let player = &self.playback.stickers;
+        let player = &self.players.stickers;
         if player.closer.get() || !player.has_clips() {
             return;
         }
         player.closer.set(true);
+        // screen-scope: the sticker player is the app's; the closer
+        // drops clips no window draws, whatever is on screen.
         cx.spawn(async move |this, cx| {
             loop {
                 let wait = this.update(cx, |this, cx| {
-                    let player = this.playback.stickers.clone();
+                    let player = this.players.stickers.clone();
                     let closed = player.close_stale(player.now());
                     drop_frames(closed.frames, cx);
                     player.trace_closed(closed.clips);
@@ -365,7 +364,7 @@ impl QuillApp {
     /// Starts the task that redraws the app when a clip opened or its first
     /// frame is ready (views then switch from the still to the animation).
     fn ensure_sticker_pump(&self, cx: &mut Context<QuillApp>) {
-        let player = &self.playback.stickers;
+        let player = &self.players.stickers;
         // Tests run GPUI's deterministic scheduler, which a wake from a
         // worker thread would trip; they take frames with `Player::settle`.
         if cfg!(test) || player.pump.replace(true) {
@@ -387,6 +386,8 @@ impl QuillApp {
         }));
         // window-scope: the player is shared by every window; a wake
         // redraws the app, which redraws them all.
+        // screen-scope: same: a frame wake redraws the app for the
+        // account on screen at that time.
         cx.spawn(async move |this, cx| {
             loop {
                 let (tx, rx) = oneshot::channel::<()>();
@@ -396,7 +397,7 @@ impl QuillApp {
                 }
                 pending.store(false, Ordering::Release);
                 let alive = this.update(cx, |this, cx| {
-                    this.playback.stickers.drain();
+                    this.players.stickers.drain();
                     cx.notify();
                 });
                 if alive.is_err() {

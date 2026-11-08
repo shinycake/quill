@@ -37,7 +37,7 @@ impl QuillApp {
                 quill::notify_prefs::set_volume_memory(volume_from_slider(value.end()));
                 quill::notify_prefs::persist();
                 // tdesktop plays the sound at the new volume on release.
-                self.notify
+                self.delivery
                     .notification_sounds
                     .play(crate::ui::audio::NotificationSound::DefaultTone);
                 cx.notify();

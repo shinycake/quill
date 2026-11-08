@@ -103,6 +103,8 @@ pub(crate) struct SuggestedPostsUi {
     pub(super) grams_needed: Option<SuggestedPrice>,
 }
 
+impl crate::ui::on_screen::Farewell for SuggestedPostsUi {}
+
 impl SuggestedPostsUi {
     pub(super) fn new() -> Self {
         Self {

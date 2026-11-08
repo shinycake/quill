@@ -32,7 +32,7 @@ impl QuillApp {
                 .player
                 .chat
                 .is_none_or(|playing| Some(playing) == chat);
-        if active && self.playback.is_playing() {
+        if active && self.is_playing() {
             return IconName::Pause;
         }
         let fetching = self.session().is_some_and(|session| {

@@ -487,10 +487,12 @@ impl QuillApp {
         } else if let Some(live) = self.live.as_mut()
             && let Some(chat_id) = live.driver.session.open_chat
         {
-            self.connection.set_note(match send(live, chat_id, &text) {
-                Ok(_) => StatusNote::silent(working_note),
-                Err(_) => StatusNote::info(tr(keys::Q_CHAT_AI_TOOLS_UNAVAILABLE_HERE)),
-            });
+            self.screen
+                .connection
+                .set_note(match send(live, chat_id, &text) {
+                    Ok(_) => StatusNote::silent(working_note),
+                    Err(_) => StatusNote::info(tr(keys::Q_CHAT_AI_TOOLS_UNAVAILABLE_HERE)),
+                });
         } else {
             self.connection
                 .set_note(StatusNote::info(tr(keys::Q_CHAT_AI_TOOLS_UNAVAILABLE_HERE)));
@@ -648,7 +650,7 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(position) = self.playback.active_position_secs() else {
+        let Some(position) = self.active_position_secs() else {
             return;
         };
         let timecode = quill::message_menu::timecode_text(position);
@@ -667,7 +669,8 @@ impl QuillApp {
     /// all" action.
     pub(in crate::ui) fn unpin_all_messages(&mut self, chat_id: ChatId, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
-            self.connection
+            self.screen
+                .connection
                 .set_note(match live.driver.unpin_all_chat_messages(chat_id) {
                     Ok(_) => StatusNote::silent(tr(keys::Q_CHAT_UNPINNING_ALL)),
                     Err(_) => StatusNote::error(tr(keys::Q_CHAT_COULD_NOT_UNPIN_ALL)),
@@ -716,11 +719,12 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         if let Some(live) = self.live.as_mut() {
-            self.connection
-                .set_note(match live.driver.get_message_link(chat_id, message_id) {
+            self.screen.connection.set_note(
+                match live.driver.get_message_link(chat_id, message_id) {
                     Ok(_) => StatusNote::info(tr(keys::Q_CHAT_FETCHING_MESSAGE_LINK)),
                     Err(_) => StatusNote::error(tr(keys::Q_CHAT_COULD_NOT_GET_MESSAGE_LINK)),
-                });
+                },
+            );
         } else {
             self.connection
                 .set_note(StatusNote::silent(tr(keys::Q_CHAT_NO_LIVE_CONNECTION)));

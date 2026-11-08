@@ -119,9 +119,9 @@ impl QuillApp {
     ) {
         match source {
             EditorSource::Current => {
-                self.settings.app_theme.editor_read = None;
+                self.preferences.app_theme.editor_read = None;
                 let palette = self
-                    .settings
+                    .preferences
                     .app_theme
                     .applied
                     .as_ref()
@@ -135,7 +135,7 @@ impl QuillApp {
             // The theme's picture is decoded off the UI thread. The read is
             // dropped when the editor, Settings or the theme goes away first.
             EditorSource::Custom(name) => {
-                let themes = &mut self.settings.app_theme;
+                let themes = &mut self.preferences.app_theme;
                 if themes
                     .editor_read
                     .as_ref()
@@ -152,11 +152,12 @@ impl QuillApp {
                     })
                 });
                 let editing = name.clone();
+                // screen-scope: the theme editor is an app-wide setting; it opens for whichever account is on screen.
                 let task = cx.spawn_in(window, async move |this, cx| {
                     let read = read.await;
                     let _ = this.update_in(cx, |this, window, cx| {
-                        this.settings.app_theme.editor_read = None;
-                        if this.settings.app_theme.editor.is_some() {
+                        this.preferences.app_theme.editor_read = None;
+                        if this.preferences.app_theme.editor.is_some() {
                             return;
                         }
                         match read {
@@ -215,7 +216,7 @@ impl QuillApp {
                 },
             ),
         ];
-        self.settings.app_theme.editor = Some(ThemeEditor {
+        self.preferences.app_theme.editor = Some(ThemeEditor {
             name,
             search,
             picker,
@@ -232,8 +233,8 @@ impl QuillApp {
 
     /// Close the editor; what it changed goes away unless it was saved.
     pub(crate) fn close_theme_editor(&mut self, cx: &mut Context<Self>) {
-        self.settings.app_theme.editor = None;
-        self.settings.app_theme.editor_read = None;
+        self.preferences.app_theme.editor = None;
+        self.preferences.app_theme.editor_read = None;
         self.apply_appearance(cx);
         cx.notify();
     }
@@ -244,7 +245,7 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(editor) = self.settings.app_theme.editor.as_mut() else {
+        let Some(editor) = self.preferences.app_theme.editor.as_mut() else {
             return;
         };
         editor.selected = row;
@@ -257,7 +258,7 @@ impl QuillApp {
 
     /// The picker committed `color` for the selected row: show it live.
     pub(super) fn editor_color_changed(&mut self, color: Hsla, cx: &mut Context<Self>) {
-        let Some(editor) = self.settings.app_theme.editor.as_mut() else {
+        let Some(editor) = self.preferences.app_theme.editor.as_mut() else {
             return;
         };
         let rgba = rgba_of(color);
@@ -276,7 +277,7 @@ impl QuillApp {
     /// Store the edited theme under its name and apply it.
     fn save_theme_editor(&mut self, cx: &mut Context<Self>) -> bool {
         let names = self.custom_theme_names();
-        let Some(editor) = self.settings.app_theme.editor.as_ref() else {
+        let Some(editor) = self.preferences.app_theme.editor.as_ref() else {
             return false;
         };
         let typed = store::clean_name(editor.name.read(cx).value().as_ref());
@@ -297,7 +298,7 @@ impl QuillApp {
                 if let Some(old) = replaced {
                     let _ = store::delete(&dir, &old);
                 }
-                self.settings.app_theme.editor = None;
+                self.preferences.app_theme.editor = None;
                 self.refresh_custom_themes();
                 self.choose_app_theme(ThemeId::Custom(name), night, cx);
                 true
@@ -322,6 +323,7 @@ impl QuillApp {
             quill::media_viewer::downloads_dir().unwrap_or_else(|| std::path::PathBuf::from("."));
         let suggested = format!("{}.{}", store::clean_name(name), store::EXTENSION);
         let picker = cx.prompt_for_new_path(&dir, Some(&suggested));
+        // screen-scope: the note reports a local file save to whichever account is on screen.
         cx.spawn(async move |this, cx| {
             let Ok(Ok(Some(dest))) = picker.await else {
                 return;
@@ -416,7 +418,7 @@ impl QuillApp {
     }
 
     fn theme_editor_body(&self, cx: &mut Context<Self>) -> AnyElement {
-        let Some(editor) = self.settings.app_theme.editor.as_ref() else {
+        let Some(editor) = self.preferences.app_theme.editor.as_ref() else {
             return div().into_any_element();
         };
         let query = editor.search.read(cx).value().to_string();
@@ -480,7 +482,7 @@ impl QuillApp {
                         .label(tr(keys::Q_MISC_EXPORT))
                         .ghost()
                         .on_click(cx.listener(|this, _, _, cx| {
-                            let Some(editor) = this.settings.app_theme.editor.as_ref() else {
+                            let Some(editor) = this.preferences.app_theme.editor.as_ref() else {
                                 return;
                             };
                             let file = editor.file.clone();
@@ -532,10 +534,9 @@ impl QuillApp {
 crate::ui::shell::register_dialogs! {
     ThemeEditor => DialogSpec::new(
         6590,
-        |app| app.settings.app_theme.editor.is_some(),
+        |app| app.preferences.app_theme.editor.is_some(),
         QuillApp::build_theme_editor_dialog,
-    )
-    .app_wide(),
+    ),
 }
 
 #[cfg(test)]

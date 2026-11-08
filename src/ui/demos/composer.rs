@@ -35,6 +35,7 @@ register_demos![
     // A HEIC in the tray: its JPEG is made as it joins, and it goes as a photo.
     // window-scope: the check only reads files and fills the tray.
     DemoSpec::chat_list("ready-send-heic")
+        // screen-scope: the demo runs in one fixed demo session that never switches accounts.
         .setup(|_, window, cx| cx.defer_in(window, |app, _, cx| app.check_tray_videos(cx)))
         .attachments(|| {
             attachments(&[

@@ -156,9 +156,8 @@ impl QuillApp {
             sizes,
             move |this: &mut QuillApp, range, _window, cx| {
                 if more && range.end >= rows {
-                    let app = cx.entity();
-                    cx.defer(move |cx| {
-                        app.update(cx, |this, cx| this.qr_act(QrAction::MoreGifts, cx));
+                    this.defer_screen(cx, move |this, cx| {
+                        this.qr_act(QrAction::MoreGifts, cx);
                     });
                 }
                 range

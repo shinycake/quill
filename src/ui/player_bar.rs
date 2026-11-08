@@ -172,7 +172,7 @@ impl QuillApp {
         self.playback.player.chat = Some(chat);
         self.playback.player.meta = Some(self.track_meta_for(chat, id, kind));
         let duration = self.playback.track_duration().map_or(0.1, |d| d.max(0.1));
-        let offset = self.playback.active_position_secs().unwrap_or(0.0);
+        let offset = self.active_position_secs().unwrap_or(0.0);
         let slider = cx.new(|_| {
             SliderState::new()
                 .label(tr(keys::Q_AV_PLAYBACK_POSITION))
@@ -309,7 +309,7 @@ impl QuillApp {
         if self.playback.track_duration().is_none() {
             return;
         }
-        if self.playback.is_playing() {
+        if self.is_playing() {
             self.pause_active_playback();
         } else {
             self.resume_active_playback(cx);
@@ -329,7 +329,7 @@ impl QuillApp {
     /// Apply what the OS asked for (media keys, the Now Playing widget).
     pub(super) fn drain_media_commands(&mut self, cx: &mut Context<Self>) {
         for command in media_session::take_commands() {
-            let playing = self.playback.is_playing();
+            let playing = self.is_playing();
             match command {
                 Command::Play if !playing => self.toggle_active_playback(cx),
                 Command::Pause if playing => self.toggle_active_playback(cx),
@@ -348,7 +348,7 @@ impl QuillApp {
         let (Some(id), Some(duration), Some(position)) = (
             self.active_playback_id(),
             self.playback.track_duration(),
-            self.playback.active_position_secs(),
+            self.active_position_secs(),
         ) else {
             media_session::publish(None);
             return;
@@ -367,8 +367,8 @@ impl QuillApp {
             artist: meta.subtitle,
             duration_secs: duration,
             position_secs: position,
-            playing: self.playback.is_playing(),
-            rate: self.playback.speed,
+            playing: self.is_playing(),
+            rate: self.players.speed,
             can_next,
             can_previous,
         };
@@ -390,7 +390,7 @@ impl QuillApp {
     pub(super) fn player_bar(&mut self, cx: &mut Context<Self>) -> Option<AnyElement> {
         self.active_playback_id()?;
         self.playback.track_duration()?;
-        self.playback.active_position_secs()?;
+        self.active_position_secs()?;
         self.player_bar_body(cx)
     }
 
@@ -402,7 +402,7 @@ impl QuillApp {
     fn player_bar_body(&mut self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let id = self.active_playback_id()?;
         let duration = self.playback.track_duration()?;
-        let position = self.playback.active_position_secs()?;
+        let position = self.active_position_secs()?;
         let kind = self.active_playback_kind();
         let meta = match (&self.playback.player.meta, self.playback.player.chat) {
             (Some(meta), _) => meta.clone(),
@@ -416,7 +416,7 @@ impl QuillApp {
                 subtitle: String::new(),
             },
         };
-        let playing = self.playback.is_playing();
+        let playing = self.is_playing();
         let elapsed = self.playback.seek_preview_secs.unwrap_or(position);
         let time = format!(
             "{} / {}",
@@ -437,7 +437,7 @@ impl QuillApp {
         let music = kind == PlaybackKind::Audio;
         let (can_previous, can_next) = self.playlist_can_move();
         let (repeat, order) = (self.playback.player.repeat, self.playback.player.order);
-        let muted = self.playback.volume < 0.01;
+        let muted = self.players.volume < 0.01;
         // The shared trigger is white for the video overlay; the bar sits on
         // the theme surface.
         let speed_trigger = self

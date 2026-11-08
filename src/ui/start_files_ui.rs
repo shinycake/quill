@@ -224,7 +224,7 @@ crate::ui::shell::register_dialogs! {
         |app| !app.start_files.choosing.is_empty(),
         QuillApp::build_start_files_dialog,
     )
-    .closes(|app, window, cx| app.close_start_files(window, cx)),
+    .close(|app, window, cx| app.close_start_files(window, cx)),
 }
 
 #[cfg(test)]

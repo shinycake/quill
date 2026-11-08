@@ -837,5 +837,5 @@ crate::ui::shell::register_dialogs! {
         |app| app.dialogs.chat_appearance_dialog.is_some(),
         QuillApp::build_chat_appearance_dialog,
     )
-    .closes(|app, _, cx| app.close_chat_appearance_dialog(cx)),
+    .close(|app, _, cx| app.close_chat_appearance_dialog(cx)),
 }

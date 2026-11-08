@@ -1,38 +1,15 @@
-//! Notifications: OS clicks, sounds, mute and auto-delete menus, defaults.
+//! Notifications as the account on screen sees them: the mute, sound and
+//! auto-delete menus, the defaults boxes and their sliders. Delivery (OS
+//! clicks, sounds, Quill's notification windows) is the app's
+//! (`notify_delivery_state`).
 #![deny(clippy::indexing_slicing)]
 
 use super::notification_settings::SoundPickerTarget;
 use super::*;
 use quill::ids::ChatId;
 use quill::telegram::envelope::NotificationSettingsScope;
-use std::sync::Arc;
-use std::sync::Mutex;
-use std::sync::atomic::AtomicUsize;
 
 pub(crate) struct NotifyUi {
-    /// Phase 8.1: clicks on notifications of the account on screen, waiting
-    /// for the next render to open the chat. Each names the account it was
-    /// shown for; one whose account is no longer on screen goes back to
-    /// `background.clicks` instead of running here.
-    pub(super) notify_clicks: Arc<Mutex<Vec<quill::notify_accounts::ChatClick>>>,
-    /// Phase 8.1: in-flight OS notification workers; capped so a message
-    /// burst cannot stack threads.
-    pub(super) notify_inflight: Arc<AtomicUsize>,
-    /// The message each shown notification announces, by the account it
-    /// was shown for and the chat: an inline reply typed into it answers
-    /// that message (`quill::notify::plan_inline_reply`).
-    pub(super) reply_targets:
-        std::collections::HashMap<(quill::ids::AccountKey, ChatId), quill::ids::MessageId>,
-    /// Notifications waiting for their photo (`notifications::photo_preview`),
-    /// by the account they are for and the chat. A newer notification for
-    /// the chat, or its dismissal, removes the entry and the wait ends
-    /// without showing.
-    pub(super) preview_waits: std::collections::HashMap<(quill::ids::AccountKey, ChatId), u64>,
-    pub(super) next_preview_wait: u64,
-    pub(super) notification_sounds: super::audio::NotificationSounds,
-    /// Redraws the TDLib poll asked for, batched by urgency
-    /// (`notifications::PolledRedraw`).
-    pub(super) polled_redraw: super::notifications::PolledRedraw,
     /// tdesktop Mute submenu (1 hour / 8 hours / 2 days / Forever).
     pub(super) mute_menu_open: bool,
     /// The chat the Mute panel is for when it was opened from a chat row's
@@ -80,20 +57,11 @@ pub(crate) struct NotifyUi {
         (String, ChatId),
         gpui_kit::Entity<gpui_kit::component::slider::SliderState>,
     >,
-    /// Quill's own notification windows (`notify_windows`).
-    pub(super) windows: super::notify_windows::NotifyWindows,
 }
 
 impl NotifyUi {
-    pub(super) fn new(audio_output: &super::audio::SharedOutput) -> Self {
+    pub(super) fn new() -> Self {
         Self {
-            notify_clicks: Arc::new(Mutex::new(Vec::new())),
-            notify_inflight: Arc::new(AtomicUsize::new(0)),
-            reply_targets: std::collections::HashMap::new(),
-            preview_waits: std::collections::HashMap::new(),
-            next_preview_wait: 0,
-            notification_sounds: super::audio::NotificationSounds::new(audio_output.clone()),
-            polled_redraw: super::notifications::PolledRedraw::new(std::time::Instant::now()),
             mute_menu_open: false,
             mute_chat: None,
             mute_custom_open: false,
@@ -108,7 +76,8 @@ impl NotifyUi {
             volume_slider: None,
             scope_volume_sliders: std::collections::HashMap::new(),
             chat_volume_sliders: std::collections::HashMap::new(),
-            windows: super::notify_windows::NotifyWindows::new(),
         }
     }
 }
+
+impl super::on_screen::Farewell for NotifyUi {}

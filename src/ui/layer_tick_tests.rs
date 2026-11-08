@@ -361,11 +361,11 @@ pub(in crate::ui) fn open_stickers(
         // Stickers play on the clock the test moves, as the frame clock
         // ticks: a tick draws them only when their frame changed.
         view.read(cx)
-            .playback
+            .players
             .stickers
             .follow(cx.background_executor().clone());
         for file in STICKER_FILES {
-            view.read(cx).playback.stickers.set_fixture(
+            view.read(cx).players.stickers.set_fixture(
                 file,
                 Arc::new(|edge| DecodedFrames {
                     frames: (0..30u8)
@@ -387,7 +387,7 @@ pub(in crate::ui) fn open_stickers(
             window.render_frame(cx);
         });
         vcx.run_until_parked();
-        app.read_with(&vcx, |app, _| app.playback.stickers.settle());
+        app.read_with(&vcx, |app, _| app.players.stickers.settle());
         app.update(&mut vcx, |_, cx| cx.notify());
     }
     vcx.run_until_parked();

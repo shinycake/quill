@@ -54,7 +54,7 @@ impl QuillApp {
         let was = self.composer.read(cx).value().to_string();
         // The field takes the paste after this handler: compare once it has.
         let scope = self.window_scope_of(window);
-        cx.defer_in(window, move |this, window, cx| {
+        self.defer_screen_in(window, cx, move |this, window, cx| {
             this.in_window_scope(scope, cx, |this, cx| {
                 this.show_rich_paste_notice(&was, locked, window, cx);
             });

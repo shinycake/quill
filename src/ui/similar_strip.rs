@@ -12,7 +12,7 @@ use gpui_kit::component::button::*;
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
-use quill::ids::ChatId;
+use quill::ids::{AccountKey, ChatId};
 use quill::lang::{keys, tr};
 use quill::local_path::sandboxed_display_path;
 use quill::premium_limits::PremiumLimitKind;
@@ -46,7 +46,7 @@ pub(super) fn similar_channels_strip(
         return None;
     }
     let Some(tiles) = session.similar_strip_tiles(chat_id) else {
-        request_similar_chats(chat_id, cx);
+        request_similar_chats(session.account.clone(), chat_id, cx);
         return None;
     };
     if tiles.is_empty() {
@@ -176,10 +176,16 @@ pub(super) fn similar_channels_strip(
 
 /// Ask for the similar channels once (the driver skips a list that is
 /// loading or loaded).
-fn request_similar_chats(chat_id: ChatId, cx: &mut Context<QuillApp>) {
+fn request_similar_chats(account: AccountKey, chat_id: ChatId, cx: &mut Context<QuillApp>) {
     let weak = cx.weak_entity();
+    // screen-scope: drawing has no app handle to read the screen from, so
+    // the request carries the account of the session it was drawn from and
+    // is dropped unless that account's client is still the live one
     cx.defer(move |cx| {
         let _ = weak.update(cx, |this, cx| {
+            if this.session().map(|session| &session.account) != Some(&account) {
+                return;
+            }
             if let Some(live) = this.live.as_mut()
                 && matches!(live.driver.fetch_similar_chats(chat_id), Ok(Some(_)))
             {

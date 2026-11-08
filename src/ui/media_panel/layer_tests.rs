@@ -25,7 +25,7 @@ fn new_app(cx: &mut TestAppContext) -> (Entity<QuillApp>, VisualTestContext) {
     let demo = ScreenshotDemo::named("ready-emoji-status-account");
     let handle = cx.open_window(size(px(1100.), px(800.)), move |window, cx| {
         let view = cx.new(|cx| QuillApp::new_with_demo(window, cx, None, Some(demo)));
-        view.read(cx).playback.stickers.set_fixture(
+        view.read(cx).players.stickers.set_fixture(
             STATUS_FILE,
             Arc::new(|edge| DecodedFrames {
                 frames: (0..30u8)
@@ -68,7 +68,7 @@ fn custom_cells(app: &QuillApp) -> usize {
 
 fn pump_stickers(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) {
     app.update(vcx, |app, cx| {
-        app.playback.stickers.settle();
+        app.players.stickers.settle();
         cx.notify();
     });
 }

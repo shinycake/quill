@@ -42,7 +42,7 @@ impl QuillApp {
         // to whatever the window shows by then.
         let window_chat = self.windows.scope;
         let asked_in = self.send_slot();
-        cx.spawn(async move |this, cx| {
+        self.spawn_screen(cx, async move |this, cx| {
             if let (Ok(Ok(Some(paths))), Some(asked_in)) = (picker.await, asked_in) {
                 let _ = this.update(cx, |this, cx| {
                     this.in_window_scope(window_chat, cx, |this, cx| {

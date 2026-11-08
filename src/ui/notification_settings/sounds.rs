@@ -234,7 +234,7 @@ impl QuillApp {
             None => Some(crate::ui::audio::NotificationSound::DefaultTone),
         };
         if let Some(sound) = sound {
-            self.notify.notification_sounds.play(sound);
+            self.delivery.notification_sounds.play(sound);
         }
     }
 

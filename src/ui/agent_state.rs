@@ -30,28 +30,51 @@ pub(super) enum GrantTarget {
     Chat(i64),
 }
 
+/// The Agent access UI of the account on screen: the account Settings
+/// edits, the pending consent and the page. A field of `OnScreen`.
 pub(crate) struct AgentUi {
     /// The account Settings edits; `None` follows the active account.
     pub(super) picked: Option<AccountKey>,
     /// Set while the consent dialog for "All other chats" is open.
     pub(super) consent: Option<AllChatsConsent>,
+    /// The Agent access page's scroll, focus chat, filters and picker.
+    pub(super) page: super::settings_window::AgentPageUi,
+}
+
+impl AgentUi {
+    pub(super) fn new() -> Self {
+        Self {
+            picked: None,
+            consent: None,
+            page: super::settings_window::AgentPageUi::new(),
+        }
+    }
+}
+
+/// A consent box holds the old account's key; nothing to say.
+impl super::on_screen::Farewell for AgentUi {}
+
+/// Activity rows shown at first, and added by each "Show more".
+pub(super) const ACTIVITY_PAGE: usize = 50;
+
+/// The app's side of agent access: the task that wakes the UI for agent
+/// state and requests (agents drive whichever account is on screen), how
+/// many activity rows show, and a send handed to the agent path. A
+/// `QuillApp` field (`agent_bridge`).
+pub(crate) struct AgentBridge {
     /// How many activity rows Settings shows.
     pub(super) activity_shown: usize,
     /// A send the composer handed to the agent path while the UI driver
     /// injected input (`agent_driver_send`), until the task picks it up.
     pub(super) ui_send: Option<quill::agent::ui_driver::bridge::UiSend>,
-    /// The Agent access page's scroll, focus chat, filters and picker.
-    pub(super) page: super::settings_window::AgentPageUi,
 }
 
-/// Activity rows shown at first, and added by each "Show more".
-pub(super) const ACTIVITY_PAGE: usize = 50;
-
-impl AgentUi {
+impl AgentBridge {
     /// Starts the task that wakes the UI when agent state changes and
     /// raises the window for a new request.
     pub(super) fn new(window: &mut Window, cx: &mut Context<QuillApp>) -> Self {
-        QuillApp::spawn_main_in(window, cx, async move |app, cx| {
+        // screen-scope: the task wakes the UI for agent requests, and agents drive whichever account is on screen.
+        QuillApp::spawn_app_in(window, cx, async move |app, cx| {
             let mut announced = 0u64;
             let mut seen = quill::wake::AGENT.epoch();
             // Shorter while the UI driver forces the element tree, so it
@@ -98,11 +121,8 @@ impl AgentUi {
         })
         .detach();
         Self {
-            picked: None,
-            consent: None,
             activity_shown: ACTIVITY_PAGE,
             ui_send: None,
-            page: super::settings_window::AgentPageUi::new(),
         }
     }
 }

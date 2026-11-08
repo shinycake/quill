@@ -267,8 +267,13 @@ impl QuillApp {
             // The flag lives in this window's history: reset it in the
             // window that set it, not whichever one is in place later.
             let scope = self.windows.scope;
+            let screen = self.screen_epoch();
             cx.defer(move |cx| {
-                let _ = app.update(cx, |this, cx| this.finish_chrome_notify(scope, cx));
+                let _ = app.update(cx, |this, cx| {
+                    this.in_screen_scope(screen, cx, |this, cx| {
+                        this.finish_chrome_notify(scope, cx)
+                    })
+                });
             });
         }
     }
@@ -312,10 +317,10 @@ impl QuillApp {
         let patched_messages = !patches.is_empty();
         let mut changed = Vec::with_capacity(checked);
         for patch in patches {
-            let Some(row) = self.history.rows.get_mut(patch.ix) else {
+            let Some(row) = self.screen.history.rows.get_mut(patch.ix) else {
                 continue;
             };
-            self.history.row_stats.messages_cloned += patch.messages.len() as u64;
+            self.screen.history.row_stats.messages_cloned += patch.messages.len() as u64;
             for message in patch.messages {
                 if let Some(slot) = row.message_mut(message.id) {
                     *slot = message;

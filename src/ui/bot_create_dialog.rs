@@ -201,7 +201,7 @@ impl QuillApp {
         if owned_bots::username_problem(&typed).is_some() {
             return;
         }
-        cx.spawn(async move |this, cx| {
+        self.spawn_screen(cx, async move |this, cx| {
             cx.background_executor().timer(CHECK_DELAY).await;
             let _ = this.update(cx, |this, cx| this.check_bot_username(version, cx));
         })
@@ -232,7 +232,7 @@ impl QuillApp {
     }
 
     fn submit_bot_create(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(dialog) = self.dialogs.bot_create_dialog.as_mut() else {
+        let Some(dialog) = self.screen.dialogs.bot_create_dialog.as_mut() else {
             return;
         };
         if dialog.submitted {
@@ -267,7 +267,7 @@ impl QuillApp {
             return;
         }
         dialog.submitted = true;
-        Self::spawn_main_in(window, cx, async move |this, cx| {
+        self.spawn_screen_in(window, cx, async move |this, cx| {
             for _ in 0..200 {
                 cx.background_executor()
                     .timer(Duration::from_millis(150))
@@ -529,5 +529,5 @@ crate::ui::shell::register_dialogs! {
         |app| app.dialogs.bot_create_dialog.is_some(),
         QuillApp::build_bot_create_dialog,
     )
-    .closes(|app, _, cx| app.close_bot_create(cx)),
+    .close(|app, _, cx| app.close_bot_create(cx)),
 }

@@ -300,7 +300,8 @@ impl QuillApp {
         }
         match failure {
             None => {
-                self.connection
+                self.screen
+                    .connection
                     .set_note(self.send_started_note(scheduling, tr(keys::Q_CHAT_SENDING)));
             }
             Some(quill::connect::ConnectSendError::CaptionTooLong { limit })

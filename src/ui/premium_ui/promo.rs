@@ -82,7 +82,7 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut() {
             let _ = live.driver.maybe_fetch_premium_stickers();
         }
-        cx.spawn(async move |this, cx| {
+        self.spawn_screen(cx, async move |this, cx| {
             for _ in 0..10 {
                 cx.background_executor()
                     .timer(std::time::Duration::from_millis(600))
@@ -164,7 +164,7 @@ impl QuillApp {
             }
             return;
         }
-        cx.spawn(async move |this, cx| {
+        self.spawn_screen(cx, async move |this, cx| {
             for _ in 0..24 {
                 cx.background_executor()
                     .timer(std::time::Duration::from_millis(250))

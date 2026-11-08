@@ -322,7 +322,7 @@ impl QuillApp {
             multiple: false,
             prompt: Some(tr(keys::Q_OPS_CHOOSE_VIDEO_COVER).into()),
         });
-        cx.spawn(async move |this, cx| {
+        self.spawn_screen(cx, async move |this, cx| {
             if let Ok(Ok(Some(paths))) = picker.await
                 && let Some(path) = paths.first().cloned()
             {
@@ -543,5 +543,5 @@ crate::ui::shell::register_dialogs! {
         |app| app.composer_ui.send_box.price.is_some(),
         QuillApp::build_price_dialog,
     )
-    .closes(|app, _, cx| app.close_price_dialog(cx)),
+    .close(|app, _, cx| app.close_price_dialog(cx)),
 }

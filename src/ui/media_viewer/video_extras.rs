@@ -42,11 +42,11 @@ impl QuillApp {
             return;
         }
         self.viewer.orientation.rotate_cw();
-        if let Some(item) = self.viewer.state.current() {
+        if let Some(item) = self.screen.viewer.state.current() {
             store_turns(
-                &mut self.viewer.extra.rotations,
+                &mut self.screen.viewer.extra.rotations,
                 (item.chat_id.0, item.message_id.0),
-                self.viewer.orientation.turns,
+                self.screen.viewer.orientation.turns,
             );
         }
         cx.notify();
@@ -118,7 +118,7 @@ impl QuillApp {
         else {
             return false;
         };
-        self.connection.set_note(match self.live.as_mut() {
+        self.screen.connection.set_note(match self.live.as_mut() {
             Some(live) => match live.driver.get_message_link_at(chat_id, message_id, secs) {
                 Ok(_) => StatusNote::info(tr(keys::Q_AV_FETCHING_MESSAGE_LINK)),
                 Err(_) => StatusNote::error(tr(keys::Q_AV_COULD_NOT_GET_MESSAGE_LINK)),

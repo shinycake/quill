@@ -26,6 +26,8 @@ pub(crate) struct InlineMembersUi {
     pub(super) snapshot: RefCell<Option<MembersSnapshot>>,
 }
 
+impl crate::ui::on_screen::Farewell for InlineMembersUi {}
+
 impl InlineMembersUi {
     pub(super) fn new() -> Self {
         Self {

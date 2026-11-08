@@ -71,7 +71,7 @@ fn each_blocker_shows_its_reason_and_retry_and_never_the_phone_form(cx: &mut Tes
     ] {
         app.update(&mut vcx, |app, cx| {
             app.connection.status = ConnectUiStatus::Live;
-            app.auth_ui.demo_state = AuthorizationState::WaitTdlibParameters;
+            app.auth_demo.demo_state = AuthorizationState::WaitTdlibParameters;
             app.open_client(Err(blocker), cx);
         });
         assert!(reads(&mut vcx, failure.reason()), "{failure:?}");
@@ -90,7 +90,7 @@ fn a_database_tdlib_refused_shows_its_reason_and_retry(cx: &mut TestAppContext) 
     ] {
         app.update(&mut vcx, |app, cx| {
             app.connection.status = ConnectUiStatus::Live;
-            app.auth_ui.demo_state = AuthorizationState::StartupFailed(failure.clone());
+            app.auth_demo.demo_state = AuthorizationState::StartupFailed(failure.clone());
             cx.notify();
         });
         assert!(reads(&mut vcx, failure.reason()), "{failure:?}");
@@ -118,7 +118,7 @@ fn trying_again_leaves_the_card_for_a_new_connection(cx: &mut TestAppContext) {
         app.open_client(Err(ConnectBlocker::LockedStore), cx);
     });
     assert!(shown(&mut vcx, RETRY));
-    let generation = app.read_with(&vcx, |app, _| app.connection.generation);
+    let generation = app.read_with(&vcx, |app, _| app.connect.generation);
     vcx.update(|window, cx| {
         window.render_frame(cx);
         window.click(RETRY, cx);
@@ -130,7 +130,7 @@ fn trying_again_leaves_the_card_for_a_new_connection(cx: &mut TestAppContext) {
     );
     assert!(!shown(&mut vcx, RETRY));
     assert_eq!(
-        app.read_with(&vcx, |app, _| app.connection.generation),
+        app.read_with(&vcx, |app, _| app.connect.generation),
         generation + 1
     );
     vcx.run_until_parked();

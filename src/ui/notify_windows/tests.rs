@@ -55,14 +55,14 @@ fn the_count_limits_the_stack_and_the_rest_wait(cx: &mut TestAppContext) {
     let vcx = &mut vcx;
     let me = app.read_with(vcx, |app, _| app.notification_account(None));
     app.update(vcx, |app, cx| {
-        app.notify.windows.platform = NotifyPlatform::Windows;
+        app.delivery.windows.platform = NotifyPlatform::Windows;
         for chat in 1..=4 {
             app.show_custom_notification(&me, message(chat), None, None, false, false, cx);
         }
     });
     vcx.run_until_parked();
     app.read_with(vcx, |app, _| {
-        let windows = &app.notify.windows;
+        let windows = &app.delivery.windows;
         assert_eq!(windows.live(), 3, "three by default");
         assert_eq!(windows.queue.len(), 1);
         assert!(windows.hide_all.is_some(), "Hide all shows with a queue");
@@ -78,7 +78,7 @@ fn the_count_limits_the_stack_and_the_rest_wait(cx: &mut TestAppContext) {
         app.clear_custom_notifications(&me, ChatId(1), cx)
     });
     app.read_with(vcx, |app, _| {
-        let windows = &app.notify.windows;
+        let windows = &app.delivery.windows;
         assert_eq!(windows.live(), 3);
         assert!(windows.queue.is_empty());
         assert!(
@@ -95,7 +95,7 @@ fn the_count_limits_the_stack_and_the_rest_wait(cx: &mut TestAppContext) {
     });
     app.read_with(vcx, |app, _| {
         let live: Vec<_> = app
-            .notify
+            .delivery
             .windows
             .shown
             .iter()
@@ -111,15 +111,21 @@ fn a_click_opens_the_chat_and_hide_all_clears(cx: &mut TestAppContext) {
     let vcx = &mut vcx;
     let me = app.read_with(vcx, |app, _| app.notification_account(None));
     app.update(vcx, |app, cx| {
-        app.notify.windows.platform = NotifyPlatform::Windows;
+        app.delivery.windows.platform = NotifyPlatform::Windows;
         app.show_custom_notification(&me, message(7), None, None, false, true, cx);
         app.show_custom_notification(&me, message(8), None, None, false, true, cx);
     });
     app.update(vcx, |app, cx| {
-        let id = app.notify.windows.shown.first().map(|s| s.id).unwrap_or(0);
+        let id = app
+            .delivery
+            .windows
+            .shown
+            .first()
+            .map(|s| s.id)
+            .unwrap_or(0);
         app.notify_window_event(id, ViewEvent::Activate, cx);
         // Read before the next frame hands the click on.
-        let clicks = quill::locks::lock_or_recover(&app.notify.notify_clicks).clone();
+        let clicks = quill::locks::lock_or_recover(&app.delivery.notify_clicks).clone();
         assert_eq!(
             clicks,
             vec![quill::notify_accounts::ChatClick {
@@ -128,19 +134,19 @@ fn a_click_opens_the_chat_and_hide_all_clears(cx: &mut TestAppContext) {
                 action: NotificationAction::Open,
             }]
         );
-        assert_eq!(app.notify.windows.live(), 1);
+        assert_eq!(app.delivery.windows.live(), 1);
     });
     app.update(vcx, |app, cx| {
         app.notify_window_event(0, ViewEvent::HideAll, cx);
     });
     app.read_with(vcx, |app, _| {
-        assert_eq!(app.notify.windows.live(), 0);
-        assert!(app.notify.windows.queue.is_empty());
+        assert_eq!(app.delivery.windows.live(), 0);
+        assert!(app.delivery.windows.queue.is_empty());
     });
     app.update(vcx, |app, cx| app.close_all_notify_windows(cx));
     app.read_with(vcx, |app, _| {
-        assert!(app.notify.windows.shown.is_empty());
-        assert!(app.notify.windows.hide_all.is_none());
+        assert!(app.delivery.windows.shown.is_empty());
+        assert!(app.delivery.windows.hide_all.is_none());
     });
 }
 
@@ -152,7 +158,7 @@ fn a_queued_notification_shows_before_any_window_draws(cx: &mut TestAppContext) 
     let vcx = &mut vcx;
     let me = app.read_with(vcx, |app, _| app.notification_account(None));
     app.update(vcx, |app, cx| {
-        app.notify.windows.platform = NotifyPlatform::Windows;
+        app.delivery.windows.platform = NotifyPlatform::Windows;
         let drain = quill::notify_accounts::NotifyDrain {
             notifications: vec![quill::notify::QueuedNotification {
                 chat_id: ChatId(5),
@@ -168,9 +174,9 @@ fn a_queued_notification_shows_before_any_window_draws(cx: &mut TestAppContext) 
         };
         app.hand_out_notifications(drain, None, cx);
         // Still inside one update: no window has drawn since.
-        assert_eq!(app.notify.windows.live(), 1);
+        assert_eq!(app.delivery.windows.live(), 1);
         assert!(
-            app.notify
+            app.delivery
                 .windows
                 .shown
                 .iter()

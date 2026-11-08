@@ -108,11 +108,11 @@ fn the_box_copies_the_speaker_or_listener_link(cx: &mut TestAppContext) {
         vcx.read_from_clipboard().and_then(|item| item.text()),
         Some(SPEAKER.to_string())
     );
-    app.read_with(vcx, |app, _| assert!(app.group_call.share_copied));
+    app.read_with(vcx, |app, _| assert!(app.group_call_boxes.share_copied));
 
     // Unticked: the listener link; the box stays open.
     app.update_in(vcx, |app, _, cx| {
-        app.group_call.share_speaker = false;
+        app.group_call_boxes.share_speaker = false;
         app.copy_group_call_share_link(cx);
     });
     assert_eq!(
@@ -163,7 +163,7 @@ fn a_chat_gets_the_link_in_its_message_box(cx: &mut TestAppContext) {
                 }
             ))
         );
-        assert!(!app.group_call.share_open);
+        assert!(!app.group_call_boxes.share_open);
     });
 }
 
@@ -184,8 +184,8 @@ fn the_invite_row_shares_the_link_in_a_public_channel(cx: &mut TestAppContext) {
             Some(InviteRowAction::ShareLink)
         );
         app.group_call_invite_row_clicked(cx);
-        assert!(app.group_call.share_open);
-        assert!(!app.group_call.invite_open);
+        assert!(app.group_call_boxes.share_open);
+        assert!(!app.group_call_boxes.invite_open);
     });
 }
 

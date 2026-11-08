@@ -65,7 +65,7 @@ impl QuillApp {
         ) {
             ClickPlan::Ignore => return,
             ClickPlan::Active => {
-                if let Ok(mut clicks) = self.notify.notify_clicks.lock() {
+                if let Ok(mut clicks) = self.delivery.notify_clicks.lock() {
                     clicks.push(click);
                 }
                 self.drain_background_clicks(cx);
@@ -98,7 +98,7 @@ impl QuillApp {
             match plan_account_click(&click.account, click.action, active.as_ref(), &known) {
                 // Shown for the account on screen, or switched to it since.
                 ClickPlan::Active => {
-                    if let Ok(mut guard) = self.notify.notify_clicks.lock() {
+                    if let Ok(mut guard) = self.delivery.notify_clicks.lock() {
                         guard.push(click);
                     }
                 }
@@ -164,7 +164,7 @@ impl QuillApp {
                 ClickPlan::Active => {
                     // The Linux threads queue every click here; the account
                     // on screen runs its own the usual way.
-                    if let Ok(mut guard) = self.notify.notify_clicks.lock() {
+                    if let Ok(mut guard) = self.delivery.notify_clicks.lock() {
                         guard.push(click);
                     }
                     on_screen = true;

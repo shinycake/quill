@@ -70,12 +70,9 @@ impl QuillApp {
         ));
         match demo {
             VideoPlaybackDemo::VideoPip => {
-                let weak = cx.entity().downgrade();
                 let scope = self.windows.scope;
-                cx.defer(move |cx| {
-                    let _ = weak.update(cx, |this, cx| {
-                        this.in_window_scope(scope, cx, |this, cx| this.open_video_pip(cx))
-                    });
+                self.defer_screen(cx, move |this, cx| {
+                    this.in_window_scope(scope, cx, |this, cx| this.open_video_pip(cx));
                 });
             }
             VideoPlaybackDemo::Controls => {

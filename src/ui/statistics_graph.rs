@@ -17,19 +17,16 @@ use quill::state::{GraphFetch, Session};
 use quill::telegram::envelope::{StatisticalGraph, StatisticalValue};
 
 /// Ask once for an async graph; the driver skips one in flight.
-fn request_graph(chat_id: i64, token: String, cx: &mut Context<QuillApp>) {
-    let weak = cx.weak_entity();
-    cx.defer(move |cx| {
-        let _ = weak.update(cx, |this, cx| {
-            if let Some(live) = this.live.as_mut()
-                && matches!(
-                    live.driver.load_stat_graph(ChatId(chat_id), &token, 0),
-                    Ok(Some(_))
-                )
-            {
-                cx.notify();
-            }
-        });
+fn request_graph(app: &QuillApp, chat_id: i64, token: String, cx: &mut Context<QuillApp>) {
+    app.defer_screen(cx, move |this, cx| {
+        if let Some(live) = this.live.as_mut()
+            && matches!(
+                live.driver.load_stat_graph(ChatId(chat_id), &token, 0),
+                Ok(Some(_))
+            )
+        {
+            cx.notify();
+        }
     });
 }
 
@@ -90,7 +87,7 @@ impl QuillApp {
                         Some(json_data)
                     }
                     None => {
-                        request_graph(chat_id, token.clone(), cx);
+                        request_graph(self, chat_id, token.clone(), cx);
                         None
                     }
                     _ => None,
@@ -125,7 +122,7 @@ impl QuillApp {
                     zoom_token,
                 })) => (json_data, zoom_token),
                 None => {
-                    request_graph(chat_id, token.clone(), cx);
+                    request_graph(self, chat_id, token.clone(), cx);
                     return None;
                 }
                 _ => return None,

@@ -79,7 +79,7 @@ impl QuillApp {
         }
         match self.live.as_mut() {
             Some(live) => {
-                self.connection.set_note(
+                self.screen.connection.set_note(
                     match live
                         .driver
                         .set_fact_check(dialog.chat_id, dialog.message_id, &text)
@@ -203,5 +203,5 @@ crate::ui::shell::register_dialogs! {
         |app| app.message_ui.fact_check_dialog.is_some(),
         QuillApp::build_fact_check_dialog,
     )
-    .closes(|app, _, cx| app.close_fact_check(cx)),
+    .close(|app, _, cx| app.close_fact_check(cx)),
 }

@@ -63,6 +63,8 @@ pub(crate) struct AdminUi {
     pub(super) group_edit_box: Option<super::group_edit_box::GroupEditBox>,
 }
 
+impl crate::ui::on_screen::Farewell for AdminUi {}
+
 impl AdminUi {
     pub(super) fn new() -> Self {
         Self {

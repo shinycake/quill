@@ -167,7 +167,7 @@ impl QuillApp {
         if self.stories.stealth_tick.is_some() {
             return;
         }
-        self.stories.stealth_tick = Some(Self::spawn_main(cx, async move |this, cx| {
+        self.stories.stealth_tick = Some(self.spawn_screen(cx, async move |this, cx| {
             loop {
                 let into_second = std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
@@ -407,7 +407,7 @@ crate::ui::shell::register_dialogs! {
         |app| app.stories.stealth_box.is_some(),
         QuillApp::build_story_stealth_dialog,
     )
-    .closes(|app, _, cx| {
+    .close(|app, _, cx| {
             app.close_stealth_box();
             cx.notify();
         }),

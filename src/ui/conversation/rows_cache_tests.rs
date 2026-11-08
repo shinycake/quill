@@ -271,9 +271,9 @@ fn the_seek_slider_follows_a_position_tick_that_notifies_only_slices(cx: &mut Te
     };
     assert!(value(&app, vcx).is_some(), "the demo shows a seek slider");
     let target = app.update(vcx, |app, _| {
-        let at = app.playback.active_position_secs().unwrap_or(0.0) + 3.0;
-        let _ = app.playback.audio.seek(at, true);
-        app.playback.active_position_secs()
+        let at = app.active_position_secs().unwrap_or(0.0) + 3.0;
+        let _ = app.players.audio.seek(at, true);
+        app.active_position_secs()
     });
     let Some(target) = target else {
         panic!("the demo has a track position");

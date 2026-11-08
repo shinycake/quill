@@ -644,7 +644,7 @@ impl QuillApp {
                             this.set_media_pref(|prefs| prefs.autoplay_gifs = on, cx);
                             if !on {
                                 this.stop_animation_playback();
-                                this.playback.inline_videos.clear();
+                                this.players.inline_videos.clear();
                             }
                             cx.notify();
                         }),
@@ -665,7 +665,7 @@ impl QuillApp {
                         cx.listener(|this, &on, _, cx| {
                             this.set_media_pref(|prefs| prefs.autoplay_videos = on, cx);
                             if !on {
-                                this.playback.inline_videos.clear();
+                                this.players.inline_videos.clear();
                             }
                             cx.notify();
                         }),
@@ -938,6 +938,5 @@ crate::ui::shell::register_dialogs! {
         500,
         |app| app.session().is_some_and(|s| s.chat_list.archive_settings_open),
         QuillApp::build_archive_settings_dialog,
-    )
-    .follows_account(),
+    ),
 }

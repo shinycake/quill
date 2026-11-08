@@ -163,9 +163,11 @@ impl QuillApp {
                     true => None,
                     false => live.driver.session.open_topic,
                 };
-                self.history
-                    .scroll_memory
-                    .forget((thread.chat_id.0, topic, thread.thread_id));
+                self.screen.history.scroll_memory.forget((
+                    thread.chat_id.0,
+                    topic,
+                    thread.thread_id,
+                ));
             }
             let switch_to = live
                 .driver
@@ -195,7 +197,7 @@ impl QuillApp {
         }
         // "Jump to root" pages older replies until the root is in; the
         // history list scrolls there (`ScrollGoal::ThreadRoot`).
-        if self.history.scroll_goal == Some(ScrollGoal::ThreadRoot) {
+        if self.screen.history.scroll_goal == Some(ScrollGoal::ThreadRoot) {
             let complete = live
                 .driver
                 .session

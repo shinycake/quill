@@ -917,10 +917,13 @@ impl QuillApp {
                 self.select_listed_chat(chat_id, window, cx);
                 self.chat_list.open_at = None;
                 if let Some(live) = self.live.as_ref() {
-                    self.connection
+                    self.screen
+                        .connection
                         .set_note(chat_search_jump_note(&live.driver.session));
                 } else if let Some(session) = self.demo_session.as_ref() {
-                    self.connection.set_note(chat_search_jump_note(session));
+                    self.screen
+                        .connection
+                        .set_note(chat_search_jump_note(session));
                 }
             }
             GoToTarget::SameChat { message_id } => self.jump_to_pinned_message(message_id, cx),
@@ -933,14 +936,17 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         if let Some(live) = self.live.as_mut() {
-            self.connection
-                .set_note(match live.driver.jump_to_chat_search_message(message_id) {
+            self.screen.connection.set_note(
+                match live.driver.jump_to_chat_search_message(message_id) {
                     Ok(_) => chat_search_jump_note(&live.driver.session),
                     Err(_) => StatusNote::error(tr(keys::Q_CHAT_COULD_NOT_JUMP_TO_PINNED)),
-                });
+                },
+            );
         } else if let Some(session) = self.demo_session.as_mut() {
             let _ = session.begin_chat_search_jump(message_id);
-            self.connection.set_note(chat_search_jump_note(session));
+            self.screen
+                .connection
+                .set_note(chat_search_jump_note(session));
         }
         cx.notify();
     }

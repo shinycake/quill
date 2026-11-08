@@ -77,7 +77,7 @@ impl QuillApp {
             }
             DeepLinkUi::FolderInvite { link } => self.open_folder_invite(link, cx),
             DeepLinkUi::ConferenceCall { link } => {
-                self.calls.conference_link = Some(link);
+                self.call_boxes.conference_link = Some(link);
                 cx.notify();
             }
             DeepLinkUi::Background { name } => self.open_background_link(name, cx),
@@ -336,7 +336,7 @@ crate::ui::shell::register_dialogs! {
         |app| app.share.link_text.is_some(),
         QuillApp::build_deep_link_share_dialog,
     )
-    .closes(|app, _, cx| app.cancel_share_link(cx)),
+    .close(|app, _, cx| app.cancel_share_link(cx)),
 }
 
 #[cfg(test)]

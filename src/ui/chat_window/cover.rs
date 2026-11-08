@@ -85,10 +85,10 @@ impl WindowPlace {
 }
 
 impl ChatWindows {
-    /// Whether the active chat window hides the main window whole, as of
-    /// their last places.
-    fn main_covered(&self) -> bool {
-        let Some(main) = self.main_place else {
+    /// Whether the active chat window hides the main window (at
+    /// `main_place`) whole, as of their last places.
+    fn main_covered(&self, main_place: Option<WindowPlace>) -> bool {
+        let Some(main) = main_place else {
             return false;
         };
         self.open.iter().any(|open| {
@@ -100,12 +100,16 @@ impl ChatWindows {
     /// The chat windows the active window, the main one or a chat window,
     /// hides whole, as of their last places: their own content holds still
     /// too, as the main window's does ([`Self::main_covered`]).
-    fn covered_chat_windows(&self, main_active: bool) -> Vec<WindowId> {
+    fn covered_chat_windows(
+        &self,
+        main_place: Option<WindowPlace>,
+        main_active: bool,
+    ) -> Vec<WindowId> {
         if hover_activates() {
             return Vec::new();
         }
         let front = if main_active {
-            self.main_place
+            main_place
         } else {
             self.open.iter().find_map(|open| {
                 let slot = open.slot.borrow();
@@ -181,10 +185,10 @@ impl QuillApp {
     /// animations hold still for a chat window over it: only while it is
     /// not active itself (it is in front then).
     pub(in crate::ui) fn note_main_place(&mut self, window: &Window, main_active: bool) {
-        self.windows.main_place = WindowPlace::of(window, self.notify.windows.main_display);
+        self.main_window.place = WindowPlace::of(window, self.delivery.windows.main_display);
         self.frame
             .main_covered
-            .set(!main_active && self.windows.main_covered());
+            .set(!main_active && self.windows.main_covered(self.main_window.place));
     }
 
     /// `chat_id`'s window was activated or deactivated, moved, resized or
@@ -203,10 +207,10 @@ impl QuillApp {
         // may run after this one.
         let main_active = assume_active()
             || self
-                .windows
-                .main
+                .main_window
+                .handle
                 .is_some_and(|main| cx.active_window() == Some(main));
-        let covered = !main_active && self.windows.main_covered();
+        let covered = !main_active && self.windows.main_covered(self.main_window.place);
         let uncovered = self.frame.main_covered.replace(covered) && !covered;
         // The app came to the front through this window: the other windows'
         // content asks for ticks again once redrawn.
@@ -232,19 +236,19 @@ impl QuillApp {
     pub(in crate::ui) fn follow_windows(&self, cx: &mut App) -> bool {
         let active = self.frame.main_active.get() || self.windows.any_active();
         let covered = self.frame.main_covered.get();
-        let videos = &self.playback.inline_videos;
+        let videos = &self.players.inline_videos;
         if self.frame.window_active.replace(active) != active {
             videos.set_window_active(active);
         }
         videos.set_main_covered(covered, cx);
         let chats = self
             .windows
-            .covered_chat_windows(self.frame.main_active.get());
+            .covered_chat_windows(self.main_window.place, self.frame.main_active.get());
         // For the clips' frame requests (`request_video_frame`) and the
         // chat windows' redraws (`follow_app_unless_held`).
         let held: Vec<WindowId> = self
-            .windows
-            .main
+            .main_window
+            .handle
             .filter(|_| covered)
             .map(|main| main.window_id())
             .into_iter()

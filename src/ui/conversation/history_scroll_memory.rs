@@ -133,11 +133,11 @@ impl QuillApp {
         highlight_id: Option<MessageId>,
         cx: &mut Context<Self>,
     ) {
-        let rows = &self.history.rows;
+        let rows = &self.screen.history.rows;
         let row_of = |id: MessageId| rows.iter().position(|row| row.contains(id));
         let highlighted = highlight_id.filter(|id| row_of(*id).is_some());
         if highlighted.is_some() {
-            self.history.last_highlight = highlighted;
+            self.screen.history.last_highlight = highlighted;
         }
         let open = quill::state::scroll_open(
             self.history.scroll_memory.get(key),

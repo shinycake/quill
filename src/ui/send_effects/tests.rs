@@ -32,7 +32,7 @@ fn open_demo(cx: &mut TestAppContext) -> (Entity<QuillApp>, VisualTestContext) {
         let view = cx.new(|cx| QuillApp::new_with_demo(window, cx, None, Some(demo)));
         // Effects play on the clock the test moves.
         view.read(cx)
-            .playback
+            .players
             .stickers
             .follow(cx.background_executor().clone());
         *slot_in.borrow_mut() = Some(view.clone());

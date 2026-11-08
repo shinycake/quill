@@ -228,7 +228,8 @@ impl QuillApp {
         if !matches!(
             self.viewer.state.source(),
             ViewerSource::Profile | ViewerSource::Poll
-        ) && let (Some(item), Some(live)) = (self.viewer.state.current(), self.live.as_mut())
+        ) && let (Some(item), Some(live)) =
+            (self.screen.viewer.state.current(), self.live.as_mut())
         {
             let _ = live
                 .driver
@@ -303,12 +304,12 @@ impl QuillApp {
         if self.viewer_swipe(dx, dy, source, event.touch_phase, at, cx) {
             return;
         }
-        let action = self.viewer.wheel.feed(WheelInput {
+        let action = self.screen.viewer.wheel.feed(WheelInput {
             dx,
             dy,
             primary: event.modifiers.secondary(cx),
             source,
-            zoomed: self.viewer.zoom.is_zoomed(),
+            zoomed: self.screen.viewer.zoom.is_zoomed(),
             at,
         });
         match action {
@@ -338,13 +339,13 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) -> bool {
         let had_timeout = self.viewer.swipe.timeout_at().is_some();
-        let action = self.viewer.swipe.feed(SwipeInput {
+        let action = self.screen.viewer.swipe.feed(SwipeInput {
             dx,
             dy,
             source,
             at,
-            can_next: self.viewer.state.has_next(),
-            can_prev: self.viewer.state.has_prev(),
+            can_next: self.screen.viewer.state.has_next(),
+            can_prev: self.screen.viewer.state.has_prev(),
         });
         let mut step = match action {
             SwipeAction::None => None,
@@ -422,10 +423,10 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         self.viewer_note_activity(cx);
-        self.viewer.zoom.zoom_at(
+        self.screen.viewer.zoom.zoom_at(
             pinch_zoom_factor(event.delta),
             viewer_anchor(event.position, origin),
-            self.viewer.frame,
+            self.screen.viewer.frame,
         );
         cx.notify();
     }

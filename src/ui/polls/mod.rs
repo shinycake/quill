@@ -440,11 +440,12 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         if let Some(live) = self.live.as_mut() {
-            self.connection
-                .set_note(match live.driver.retract_poll_vote(chat_id, message_id) {
+            self.screen.connection.set_note(
+                match live.driver.retract_poll_vote(chat_id, message_id) {
                     Ok(_) => StatusNote::silent(tr(keys::Q_MEDIA_VOTE_RETRACTED)),
                     Err(_) => StatusNote::error(tr(keys::Q_MEDIA_COULD_NOT_RETRACT_THE_VOTE)),
-                });
+                },
+            );
         } else if let Some(session) = self.demo_session.as_mut()
             && let Some(message) = session
                 .histories
@@ -869,7 +870,7 @@ crate::ui::shell::register_dialogs! {
         |app| app.message_ui.poll_voters_dialog.is_some(),
         QuillApp::build_poll_voters_dialog,
     )
-    .closes(|app, _, cx| app.close_poll_voters_dialog(cx)),
+    .close(|app, _, cx| app.close_poll_voters_dialog(cx)),
 }
 
 mod demo;

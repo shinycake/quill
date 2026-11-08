@@ -314,7 +314,7 @@ impl QuillApp {
                 };
                 let chat = target.chat;
                 // `crl::on_main`: on the next turn, checked again.
-                self.history.pull.jump = Some(cx.spawn(async move |this, cx| {
+                self.history.pull.jump = Some(self.spawn_screen(cx, async move |this, cx| {
                     let _ = cx.update_window(handle, |_, _, cx| {
                         let _ = this.update(cx, |this, cx| {
                             this.in_window_scope(scope, cx, |this, cx| {
@@ -339,11 +339,9 @@ impl QuillApp {
         let Some((handle, scope)) = self.history.pull.window else {
             return;
         };
-        let Some(account) = self.started_on() else {
-            return;
-        };
         let started = Instant::now();
-        self.history.pull.jump = Some(cx.spawn(async move |this, cx| {
+        // `next` is a chat of the account the pull started on.
+        self.history.pull.jump = Some(self.spawn_screen(cx, async move |this, cx| {
             loop {
                 let waited = started.elapsed().as_millis() as u64;
                 let (history, pinned) = this
@@ -366,8 +364,7 @@ impl QuillApp {
             let _ = cx.update_window(handle, |_, window, cx| {
                 let _ = this.update(cx, |this, cx| {
                     this.in_window_scope(scope, cx, |this, cx| {
-                        // `next` is a chat of the account the pull started on.
-                        if this.history.pull.machine.jumping() && this.on_screen(&account) {
+                        if this.history.pull.machine.jumping() {
                             SLIDE.set(Some((next, None, Instant::now())));
                             this.select_listed_chat(next, window, cx);
                         }

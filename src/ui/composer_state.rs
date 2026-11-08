@@ -325,3 +325,16 @@ impl ComposerUi {
         }
     }
 }
+
+/// The video editor's preview is a file on disk: it goes with the editor
+/// (`close_video_editor`); the rest of the composer's state is the
+/// account's only app-side.
+impl super::on_screen::Farewell for ComposerUi {
+    fn farewell(
+        app: &mut super::app::QuillApp,
+        _: &mut gpui_kit::Window,
+        cx: &mut gpui_kit::Context<super::app::QuillApp>,
+    ) {
+        app.close_video_editor(cx);
+    }
+}

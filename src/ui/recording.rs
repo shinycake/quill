@@ -78,7 +78,7 @@ impl QuillApp {
         }
         let next = !matches!(self.record_mode(), RecordMode::Video);
         self.set_media_pref(|prefs| prefs.prefer_video_mode = next, cx);
-        self.connection.set_note(StatusNote::silent(format!(
+        self.screen.connection.set_note(StatusNote::silent(format!(
             "{} — {}",
             if next {
                 tr(keys::Q_MISC_VIDEO_NOTE_MODE)
@@ -211,11 +211,13 @@ impl QuillApp {
             return;
         }
         self.recording.locked = !self.recording.locked;
-        self.connection.set_note(if self.recording.locked {
-            StatusNote::silent(tr(keys::Q_MISC_RECORDING_LOCKED_ESC_WONT_CANCEL))
-        } else {
-            StatusNote::silent(tr(keys::Q_MISC_RECORDING_UNLOCKED))
-        });
+        self.screen
+            .connection
+            .set_note(if self.screen.recording.locked {
+                StatusNote::silent(tr(keys::Q_MISC_RECORDING_LOCKED_ESC_WONT_CANCEL))
+            } else {
+                StatusNote::silent(tr(keys::Q_MISC_RECORDING_UNLOCKED))
+            });
         cx.notify();
     }
 
@@ -261,21 +263,19 @@ impl QuillApp {
         };
         let seconds = f64::from(capture.elapsed_secs());
         let mut resumed_preview = false;
-        if let Some(clock) = self.recording.preview.as_mut() {
+        if let Some(clock) = self.screen.recording.preview.as_mut() {
             if clock.is_playing() {
                 clock.pause();
-                self.playback.audio.pause();
+                self.players.audio.pause();
                 cx.notify();
                 return;
             }
-            if !clock.finished()
-                && self.playback.audio.is_loaded()
-                && !self.playback.audio.is_ended()
+            if !clock.finished() && self.players.audio.is_loaded() && !self.players.audio.is_ended()
             {
                 let at = clock.elapsed_secs();
                 // The progress tick sleeps while the track is paused.
                 quill::wake::CHROME.poke();
-                if self.playback.audio.resume(at).is_ok() {
+                if self.players.audio.resume(at).is_ok() {
                     clock.resume();
                     resumed_preview = true;
                 }
@@ -306,7 +306,7 @@ impl QuillApp {
     /// The preview ran to its end: show it stopped, ready to play again.
     pub(super) fn check_record_preview(&mut self) {
         let ended = self.recording.preview.as_ref().is_some_and(|clock| {
-            clock.is_playing() && (clock.finished() || self.playback.audio.is_ended())
+            clock.is_playing() && (clock.finished() || self.players.audio.is_ended())
         });
         if ended {
             self.recording.preview = None;
@@ -317,11 +317,13 @@ impl QuillApp {
     /// Switch "Play once" for the voice message being recorded.
     pub(super) fn toggle_record_once(&mut self, cx: &mut Context<Self>) {
         self.recording.once = !self.recording.once;
-        self.connection.set_note(if self.recording.once {
-            StatusNote::info(tr(keys::RECORD_ONCE_ACTIVE_TOOLTIP))
-        } else {
-            StatusNote::silent(tr(keys::Q_MISC_PLAY_ONCE_OFF))
-        });
+        self.screen
+            .connection
+            .set_note(if self.screen.recording.once {
+                StatusNote::info(tr(keys::RECORD_ONCE_ACTIVE_TOOLTIP))
+            } else {
+                StatusNote::silent(tr(keys::Q_MISC_PLAY_ONCE_OFF))
+            });
         cx.notify();
     }
 

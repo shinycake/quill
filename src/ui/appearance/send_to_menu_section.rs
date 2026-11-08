@@ -20,6 +20,7 @@ impl QuillApp {
             .accessibility_label(tr(keys::Q_PREFS_PLACE_QUILL_IN_THE_SEND))
             .on_click(cx.listener(|_, &on, _, cx| {
                 // The shell writes or deletes a shortcut file: not on the UI thread.
+                // screen-scope: the Send To menu is the app's; its failure note goes to whichever account is on screen.
                 cx.spawn(async move |this, cx| {
                     let result = cx
                         .background_spawn(async move { quill::send_to_menu::set_enabled(on) })

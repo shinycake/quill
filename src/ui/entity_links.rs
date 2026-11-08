@@ -286,7 +286,8 @@ impl QuillApp {
         }
         if let Some(live) = self.live.as_mut() {
             let snapshot = ComposerSnapshot::capture(chat_id, view_generation, text);
-            self.connection
+            self.screen
+                .connection
                 .set_note(match live.driver.send_snapshot(&snapshot) {
                     Ok(_) => StatusNote::silent(tr(keys::Q_OPS_SENDING)),
                     Err(_) => StatusNote::error(tr(keys::Q_OPS_COULD_NOT_SEND_THE_COMMAND)),
@@ -763,7 +764,7 @@ crate::ui::shell::register_dialogs! {
         |app| app.message_ui.open_link_confirm.is_some(),
         QuillApp::build_open_link_dialog,
     )
-    .closes(|app, _, cx| {
+    .close(|app, _, cx| {
             app.message_ui.open_link_confirm = None;
             cx.notify();
         }),

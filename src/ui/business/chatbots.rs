@@ -54,7 +54,7 @@ impl QuillApp {
                 }
                 let text = input.read(cx).value().to_string();
                 let input = input.clone();
-                cx.spawn_in(window, async move |this, cx| {
+                this.spawn_screen_in(window, cx, async move |this, cx| {
                     cx.background_executor()
                         .timer(Duration::from_millis(400))
                         .await;
@@ -114,7 +114,7 @@ impl QuillApp {
 
     /// Wait for `getBusinessConnectedBot` while the screen is open.
     pub(super) fn business_bot_watch(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        cx.spawn_in(window, async move |this, cx| {
+        self.spawn_screen_in(window, cx, async move |this, cx| {
             for _ in 0..50 {
                 cx.background_executor()
                     .timer(Duration::from_millis(200))

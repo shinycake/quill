@@ -874,7 +874,7 @@ crate::ui::shell::register_dialogs! {
         |app| app.folders.editor.is_some(),
         QuillApp::build_folder_editor_dialog,
     )
-    .closes(|app, _, cx| {
+    .close(|app, _, cx| {
             app.folders.editor = None;
             cx.notify();
         }),
@@ -884,7 +884,7 @@ crate::ui::shell::register_dialogs! {
         |app| app.folders.delete_confirm.is_some(),
         QuillApp::build_folder_delete_dialog,
     )
-    .closes(|app, _, cx| {
+    .close(|app, _, cx| {
             app.folders.delete_confirm = None;
             cx.notify();
         }),

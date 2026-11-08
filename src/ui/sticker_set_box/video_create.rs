@@ -32,7 +32,7 @@ impl QuillApp {
         let worker = cx.background_spawn(async move {
             encode_sticker(&job.source, &job.edits, &job.info, kind, &cancel)
         });
-        cx.spawn_in(window, async move |this, cx| {
+        self.spawn_screen_in(window, cx, async move |this, cx| {
             let result = worker.await;
             let _ = this.update_in(cx, |this, window, cx| {
                 // The box moved on (closed, or another sticker): the

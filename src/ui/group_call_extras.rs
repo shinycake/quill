@@ -125,7 +125,7 @@ impl QuillApp {
             self.apply_ptt_action(action, cx);
         } else if let Some(deadline) = self.group_call.ptt.mute_deadline() {
             let wait = Duration::from_millis(deadline.saturating_sub(now));
-            cx.spawn(async move |this, cx| {
+            self.spawn_screen(cx, async move |this, cx| {
                 cx.background_executor().timer(wait).await;
                 let _ = this.update(cx, |this, cx| this.group_call_ptt_tick(cx));
             })
@@ -221,7 +221,7 @@ impl QuillApp {
     ) {
         use std::sync::atomic::Ordering;
         use std::sync::mpsc::RecvTimeoutError;
-        cx.spawn(async move |this, cx| {
+        self.spawn_screen(cx, async move |this, cx| {
             let mut rx = rx;
             while !stop.load(Ordering::Relaxed) {
                 let (back, edge) = cx
@@ -270,10 +270,13 @@ impl QuillApp {
             return;
         }
         self.group_call.global_ptt_polling = true;
-        cx.spawn(async move |this, cx| {
+        self.spawn_screen(cx, async move |this, cx| {
             cx.background_executor().timer(Duration::from_secs(2)).await;
-            let _ = this.update(cx, |this, cx| {
+            // The flag belongs to the app, so it clears even after a switch.
+            let _ = this.app().update(cx, |this, _| {
                 this.group_call.global_ptt_polling = false;
+            });
+            let _ = this.update(cx, |this, cx| {
                 if quill::calls::ptt_global::permission_granted() {
                     this.recheck_global_ptt(cx);
                 } else if matches!(

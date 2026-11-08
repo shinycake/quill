@@ -157,3 +157,6 @@ impl StickerSetBoxUi {
         self.pending_still = None;
     }
 }
+
+/// Nothing to say: its state is the account's only app-side.
+impl crate::ui::on_screen::Farewell for StickerSetBoxUi {}

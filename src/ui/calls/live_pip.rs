@@ -147,6 +147,7 @@ impl QuillApp {
         };
         // Window creation draws at once: let this update finish first.
         // window-scope: the live PiP is the app's (`group_call`), no chat window's.
+        // screen-scope: the live PiP belongs to the app and outlives an account switch; this opens or closes its window.
         cx.defer(move |cx| {
             let opened = open_pip_window(open, cx);
             let _ = weak.update(cx, |app, cx| {

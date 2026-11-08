@@ -38,7 +38,8 @@ impl QuillApp {
                 if let CallLinkStep::Offer { group_call_id } = step {
                     self.note_stream_join_intent(StreamJoinIntent::Call(group_call_id));
                 }
-                self.connection
+                self.screen
+                    .connection
                     .set_note(match step_note(step, live_stream) {
                         Some(note) => StatusNote::info(note),
                         None if matches!(step, CallLinkStep::Offer { .. }) => {
@@ -48,7 +49,7 @@ impl QuillApp {
                                 StatusNote::silent(tr(keys::Q_OPS_OPENING_THE_VOICE_CHAT))
                             }
                         }
-                        None => self.connection.note().clone(),
+                        None => self.screen.connection.note().clone(),
                     });
             }
             Err(_) => self.connection.set_note(StatusNote::info(BAD_LINK_NOTE)),
@@ -131,6 +132,5 @@ crate::ui::shell::register_dialogs! {
         2960,
         |app| app.session().is_some_and(|s| s.calls.call_link_confirm.is_some()),
         QuillApp::build_call_link_leave_dialog,
-    )
-    .follows_account(),
+    ),
 }

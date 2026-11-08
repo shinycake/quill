@@ -81,7 +81,7 @@ impl QuillApp {
     /// `background.clicks`, which runs it on its own account.
     pub(in crate::ui) fn take_on_screen_clicks(&mut self) -> Vec<ChatClick> {
         let queued: Vec<ChatClick> = self
-            .notify
+            .delivery
             .notify_clicks
             .lock_or_recover()
             .drain(..)
@@ -138,7 +138,7 @@ impl QuillApp {
         if open.is_empty() {
             return;
         }
-        if let Ok(mut guard) = self.notify.notify_clicks.lock() {
+        if let Ok(mut guard) = self.delivery.notify_clicks.lock() {
             guard.extend(open);
         }
         // A hidden (close-to-tray) or minimized window may never render
@@ -186,7 +186,7 @@ impl QuillApp {
             )
         });
         let message_id = self
-            .notify
+            .delivery
             .reply_targets
             .get(&(account.clone(), chat_id))
             .copied();

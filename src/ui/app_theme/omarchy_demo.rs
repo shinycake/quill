@@ -33,7 +33,7 @@ crate::ui::screenshot_demo::register_demos![
         |app, _, cx| {
             app.demo_omarchy(&quill::scratch::process_dir("quill-demo-omarchy"));
             app.appearance.follow_omarchy = true;
-            app.settings.appearance_applied = None;
+            app.preferences.appearance_applied = None;
             app.apply_appearance(cx);
             app.open_settings_on(quill::settings_catalog::Page::Appearance);
         }

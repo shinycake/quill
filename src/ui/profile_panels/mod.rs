@@ -378,7 +378,7 @@ impl QuillApp {
         // The user id is the account's own: a picker answered after a
         // switch opens nothing on the account switched to.
         let asked_on = self.session().map(|session| session.account.clone());
-        cx.spawn(async move |this, cx| {
+        self.spawn_screen(cx, async move |this, cx| {
             if let Ok(Ok(Some(paths))) = picker.await
                 && let Some(path) = paths.into_iter().next()
             {
@@ -414,7 +414,7 @@ crate::ui::shell::register_dialogs! {
         |app| app.dialogs.profile_dialog.is_some(),
         QuillApp::build_profile_panel_dialog,
     )
-    .closes(|app, _, cx| app.close_profile_dialog(cx)),
+    .close(|app, _, cx| app.close_profile_dialog(cx)),
 }
 
 mod about_text;

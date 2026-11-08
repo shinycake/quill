@@ -120,7 +120,7 @@ crate::ui::shell::register_dialogs! {
         |app| app.chat_list.archive_hint_open,
         QuillApp::build_archive_hint_dialog,
     )
-    .closes(|app, _, cx| {
+    .close(|app, _, cx| {
             app.chat_list.archive_hint_open = false;
             cx.notify();
         }),

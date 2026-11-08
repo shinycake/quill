@@ -71,7 +71,7 @@ fn ttl_of(app: &Entity<QuillApp>, vcx: &mut VisualTestContext, chat_id: ChatId) 
 fn move_ttl_slider(app: &Entity<QuillApp>, vcx: &mut VisualTestContext, index: usize) {
     app.update_in(vcx, |app, window, cx| {
         let Some(slider) = app
-            .settings
+            .preferences
             .index_sliders
             .get(StepSlider::AutoDelete)
             .cloned()
@@ -100,7 +100,9 @@ fn auto_delete_slider_saves_the_period_it_is_on(cx: &mut TestAppContext) {
     assert!(!shown(vcx, "ttl-disable"), "Off is a slider step");
     // No timer yet: the slider starts on Off.
     let start = app.read_with(vcx, |app, cx| {
-        app.settings.index_sliders.index(StepSlider::AutoDelete, cx)
+        app.preferences
+            .index_sliders
+            .index(StepSlider::AutoDelete, cx)
     });
     assert_eq!(start, Some(0));
 
@@ -116,7 +118,9 @@ fn auto_delete_slider_saves_the_period_it_is_on(cx: &mut TestAppContext) {
     app.update(vcx, |app, cx| app.open_ttl_picker(chat_id, cx));
     frames(vcx);
     let start = app.read_with(vcx, |app, cx| {
-        app.settings.index_sliders.index(StepSlider::AutoDelete, cx)
+        app.preferences
+            .index_sliders
+            .index(StepSlider::AutoDelete, cx)
     });
     assert_eq!(start, Some(3));
     move_ttl_slider(&app, vcx, 0);

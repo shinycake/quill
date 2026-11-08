@@ -71,6 +71,8 @@ pub(crate) struct EarnUi {
     pub(super) link_shown: Option<std::time::Instant>,
 }
 
+impl crate::ui::on_screen::Farewell for EarnUi {}
+
 impl EarnUi {
     pub(super) fn new(window: &mut Window, cx: &mut Context<QuillApp>) -> Self {
         Self {

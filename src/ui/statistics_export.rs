@@ -158,6 +158,7 @@ impl QuillApp {
         };
         let dir = quill::media_viewer::downloads_dir().unwrap_or_else(|| PathBuf::from("."));
         let picker = cx.prompt_for_new_path(&dir, Some(&name));
+        // screen-scope: the note reports a local file save to whichever account is on screen.
         cx.spawn(async move |this, cx| {
             let Ok(Ok(Some(dest))) = picker.await else {
                 return;

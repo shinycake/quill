@@ -497,5 +497,5 @@ crate::ui::shell::register_dialogs! {
         |app| app.paid_reaction.boxed.is_some(),
         QuillApp::build_paid_reaction_dialog,
     )
-    .closes(|app, _, cx| app.close_paid_box(cx)),
+    .close(|app, _, cx| app.close_paid_box(cx)),
 }

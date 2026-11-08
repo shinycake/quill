@@ -5,8 +5,7 @@ use super::app::QuillApp;
 use super::connect_ui::ConnectUiStatus;
 use super::screenshot_demo::ScreenshotDemo;
 use super::synthetic::SyntheticChat;
-use super::*;
-use gpui_kit::component::input::{InputEvent, InputState, TextareaState};
+use gpui_kit::component::input::{InputEvent, TextareaState};
 use gpui_kit::component::menu::AppMenuBar;
 use gpui_kit::component::*;
 use gpui_kit::*;
@@ -37,211 +36,6 @@ impl QuillApp {
         // a newline and Ctrl/Cmd+Enter sends.
         let chat_prefs = Self::load_chat_prefs();
         let submit_on_enter = chat_prefs.send_key_mode == quill::composer::SendKeyMode::Enter;
-        let composer = Self::new_composer_field(chat_prefs.send_key_mode, window, cx);
-        // Phase C2h: in-call group-chat composer for the voice-chat
-        // overlay (sendGroupCallMessage).
-        let group_call_composer = cx.new(|cx| {
-            TextareaState::new(window, cx)
-                .placeholder("Message the voice chat — Enter sends")
-                .auto_grow(1, 3)
-                .submit_on_enter(submit_on_enter)
-        });
-        let appearance_prefs = Self::load_appearance();
-        let accent_picker = Self::new_accent_picker(appearance_prefs.accent_rgb, window, cx);
-        let font_picker = Self::new_font_picker(&appearance_prefs.font_family, window, cx);
-        let emoji_search_input = cx.new(|cx| {
-            TextareaState::new(window, cx)
-                .placeholder("Search emoji")
-                .auto_grow(1, 1)
-        });
-        let reaction_search_input = cx.new(|cx| {
-            TextareaState::new(window, cx)
-                .placeholder("Search emoji")
-                .auto_grow(1, 1)
-        });
-        cx.subscribe(
-            &reaction_search_input,
-            |_this, _, event: &InputEvent, cx| {
-                if matches!(event, InputEvent::Change) {
-                    cx.notify();
-                }
-            },
-        )
-        .detach();
-        cx.subscribe(&emoji_search_input, |_this, _, event: &InputEvent, cx| {
-            // The panel's rows follow the query on the next render.
-            if matches!(event, InputEvent::Change) {
-                cx.notify();
-            }
-        })
-        .detach();
-        let dict_filter_input = cx.new(|cx| {
-            TextareaState::new(window, cx)
-                .placeholder("Filter languages")
-                .auto_grow(1, 1)
-                .submit_on_enter(false)
-        });
-        cx.subscribe(&dict_filter_input, |_this, _, event: &InputEvent, cx| {
-            if matches!(event, InputEvent::Change) {
-                cx.notify();
-            }
-        })
-        .detach();
-        let email_input = cx.new(|cx| {
-            TextareaState::new(window, cx)
-                .placeholder("Email address")
-                .auto_grow(1, 1)
-                .submit_on_enter(true)
-        });
-        let phone_input = cx.new(|cx| {
-            TextareaState::new(window, cx)
-                .placeholder("Phone (+country code)")
-                .auto_grow(1, 1)
-                .submit_on_enter(true)
-        });
-        // Group the digits as the user types or pastes.
-        cx.subscribe_in(
-            &phone_input,
-            window,
-            |this, _, event: &InputEvent, window, cx| {
-                if matches!(event, InputEvent::Change) {
-                    this.signin_phone_changed(window, cx);
-                }
-            },
-        )
-        .detach();
-        let code_input = cx.new(|cx| {
-            TextareaState::new(window, cx)
-                .placeholder("Verification code")
-                .auto_grow(1, 1)
-                .submit_on_enter(true)
-        });
-        let password_input = cx.new(|cx| {
-            InputState::new(window, cx)
-                .masked(true)
-                .placeholder("Two-step password")
-                .submit_on_enter(true)
-        });
-        let recovery_code_input = cx.new(|cx| {
-            TextareaState::new(window, cx)
-                .placeholder("Recovery code from email")
-                .auto_grow(1, 1)
-                .submit_on_enter(true)
-        });
-        let twofa = super::twofa_state::TwoStepUi::new(window, cx);
-        let search_input = cx.new(|cx| {
-            TextareaState::new(window, cx)
-                .placeholder("Search")
-                .auto_grow(1, 1)
-                .submit_on_enter(true)
-        });
-        let chat_search_input = Self::new_chat_search_field(window, cx);
-        let forward_search_input = Self::new_forward_search_field(window, cx);
-        let stories = super::stories_state::StoryUi::new(window, cx);
-        cx.subscribe_in(
-            &group_call_composer,
-            window,
-            |this, state, event: &InputEvent, window, cx| {
-                if let InputEvent::PressEnter { secondary, shift } = event {
-                    let marked = state.update(cx, |input, cx| input.marked_text_range(window, cx));
-                    if should_send_on_enter(
-                        quill::composer::enter_event_from_kit(*shift, *secondary, marked),
-                        this.chat_prefs.send_key_mode,
-                    ) {
-                        this.send_group_call_message(window, cx);
-                    }
-                }
-            },
-        )
-        .detach();
-        cx.subscribe_in(
-            &email_input,
-            window,
-            |this, state, event: &InputEvent, window, cx| {
-                if let InputEvent::PressEnter { secondary, shift } = event {
-                    let marked = state.update(cx, |input, cx| input.marked_text_range(window, cx));
-                    if should_send_on_enter(
-                        quill::composer::enter_event_from_kit(*shift, *secondary, marked),
-                        quill::composer::SendKeyMode::Enter,
-                    ) {
-                        this.submit_email(window, cx);
-                    }
-                }
-            },
-        )
-        .detach();
-        cx.subscribe_in(
-            &phone_input,
-            window,
-            |this, state, event: &InputEvent, window, cx| {
-                if let InputEvent::PressEnter { secondary, shift } = event {
-                    let marked = state.update(cx, |input, cx| input.marked_text_range(window, cx));
-                    if should_send_on_enter(
-                        quill::composer::enter_event_from_kit(*shift, *secondary, marked),
-                        quill::composer::SendKeyMode::Enter, // not a chat composer — the send-key setting does not apply
-                    ) {
-                        this.submit_phone(window, cx);
-                    }
-                }
-            },
-        )
-        .detach();
-        cx.subscribe_in(
-            &code_input,
-            window,
-            |this, state, event: &InputEvent, window, cx| {
-                if let InputEvent::PressEnter { secondary, shift } = event {
-                    let marked = state.update(cx, |input, cx| input.marked_text_range(window, cx));
-                    if should_send_on_enter(
-                        quill::composer::enter_event_from_kit(*shift, *secondary, marked),
-                        quill::composer::SendKeyMode::Enter, // not a chat composer — the send-key setting does not apply
-                    ) {
-                        this.submit_code(window, cx);
-                    }
-                }
-            },
-        )
-        .detach();
-        cx.subscribe_in(
-            &password_input,
-            window,
-            |this, state, event: &InputEvent, window, cx| {
-                if let InputEvent::PressEnter { secondary, shift } = event {
-                    let marked = state.update(cx, |input, cx| input.marked_text_range(window, cx));
-                    if should_send_on_enter(
-                        quill::composer::enter_event_from_kit(*shift, *secondary, marked),
-                        quill::composer::SendKeyMode::Enter, // not a chat composer — the send-key setting does not apply
-                    ) {
-                        this.submit_password(window, cx);
-                    }
-                }
-            },
-        )
-        .detach();
-        auth_recovery::subscribe_recovery_input(&recovery_code_input, window, cx);
-        cx.subscribe_in(
-            &search_input,
-            window,
-            |this, state, event: &InputEvent, window, cx| {
-                let text = state.read(cx).value().to_string();
-                match event {
-                    InputEvent::Change => this.sync_search_query(&text, cx),
-                    InputEvent::Focus if !this.search_is_open() => this.open_search_ui(window, cx),
-                    _ => {}
-                }
-                if let InputEvent::PressEnter { secondary, shift } = event {
-                    let marked = state.update(cx, |input, cx| input.marked_text_range(window, cx));
-                    if should_send_on_enter(
-                        quill::composer::enter_event_from_kit(*shift, *secondary, marked),
-                        quill::composer::SendKeyMode::Enter, // not a chat composer — the send-key setting does not apply
-                    ) {
-                        this.activate_first_search_result(window, cx);
-                    }
-                }
-            },
-        )
-        .detach();
-
         let demo_sink = Arc::new(MemorySink::new());
         let mut demo_session = None;
         let (connect_status, live, status_note, auth_demo) = match demo {
@@ -259,6 +53,53 @@ impl QuillApp {
                 AuthorizationState::WaitTdlibParameters,
             ),
         };
+        let screen = super::on_screen::OnScreen::new(
+            Default::default(),
+            &chat_prefs,
+            connect_status,
+            status_note,
+            window,
+            cx,
+        );
+        // Phase C2h: in-call group-chat composer for the voice-chat
+        // overlay (sendGroupCallMessage).
+        let group_call_composer = cx.new(|cx| {
+            TextareaState::new(window, cx)
+                .placeholder("Message the voice chat — Enter sends")
+                .auto_grow(1, 3)
+                .submit_on_enter(submit_on_enter)
+        });
+        let appearance_prefs = Self::load_appearance();
+        let accent_picker = Self::new_accent_picker(appearance_prefs.accent_rgb, window, cx);
+        let font_picker = Self::new_font_picker(&appearance_prefs.font_family, window, cx);
+        let dict_filter_input = cx.new(|cx| {
+            TextareaState::new(window, cx)
+                .placeholder("Filter languages")
+                .auto_grow(1, 1)
+                .submit_on_enter(false)
+        });
+        cx.subscribe(&dict_filter_input, |_this, _, event: &InputEvent, cx| {
+            if matches!(event, InputEvent::Change) {
+                cx.notify();
+            }
+        })
+        .detach();
+        cx.subscribe_in(
+            &group_call_composer,
+            window,
+            |this, state, event: &InputEvent, window, cx| {
+                if let InputEvent::PressEnter { secondary, shift } = event {
+                    let marked = state.update(cx, |input, cx| input.marked_text_range(window, cx));
+                    if should_send_on_enter(
+                        quill::composer::enter_event_from_kit(*shift, *secondary, marked),
+                        this.chat_prefs.send_key_mode,
+                    ) {
+                        this.send_group_call_message(window, cx);
+                    }
+                }
+            },
+        )
+        .detach();
 
         let pending_attachments = demo.map_or_else(Vec::new, |d| d.attachments());
 
@@ -276,92 +117,46 @@ impl QuillApp {
             (checker, info, Some(chosen))
         };
         let mut app = Self {
-            settings: super::settings_state::SettingsUi::new(cx, font_picker, accent_picker, demo),
+            screen,
+            players: super::players_state::PlayersUi::new(&audio_output),
+            delivery: super::notify_delivery_state::NotifyDelivery::new(&audio_output),
+            preferences: super::settings_state::PreferencesUi::new(
+                cx,
+                font_picker,
+                accent_picker,
+                demo,
+            ),
             chat,
-            composer,
             // kit Phase 7: in-window menu bar (menus installed by
             // `setup_app_menus` at startup).
             menu_bar: AppMenuBar::new(cx),
-            chat_list: super::chat_list_state::ChatListUi::new(window, cx),
-            stories,
-            shared_media_grid: super::shared_media_grid_state::SharedMediaGridUi::new(),
-            premium_preview: Default::default(),
             first_run: super::first_run_ui::initial_first_run(demo.is_some(), &credentials, cx),
-            history: super::history_state::HistoryUi::new(cx),
             frame: super::frame_state::FrameUi::new(cx),
             group_call: super::group_call_state::GroupCallUi::new(group_call_composer),
             screen_share: Default::default(),
-            composer_ui: Box::new(super::composer_state::ComposerUi::new()),
             composer_sends: Default::default(),
-            pickers: super::pickers_state::PickerUi::new(
-                window,
-                cx,
-                emoji_search_input,
-                reaction_search_input,
-            ),
-            sticker_box: super::sticker_set_box::state::StickerSetBoxUi::new(window, cx),
-            payments: super::payments_state::PaymentUi::new(window, cx),
-            earn: super::earn_state::EarnUi::new(window, cx),
             language: super::language_state::LanguageUi::new(demo.is_some(), cx),
-            common_groups: Default::default(),
-            auth_ui: super::auth_state::AuthUi::new(
-                window,
-                cx,
-                email_input,
-                phone_input,
-                code_input,
-                password_input,
-                recovery_code_input,
-                auth_demo,
-                demo,
-            ),
-            twofa,
+            auth_demo: super::auth_state::AuthDemo::new(auth_demo, demo),
             account: super::account_state::AccountUi::new(window, cx),
             credentials,
-            privacy: super::privacy_state::PrivacyState::new(window, cx),
-            search_ui: super::search_state::SearchUi::new(search_input, chat_search_input),
-            media_search: super::shared_media_search_state::SharedMediaSearchUi::new(window, cx),
-            location_ui: Default::default(),
-            share: super::share_state::ShareUi::new(window, cx, forward_search_input),
             start_files: super::start_files_state::StartFilesUi::new(window, cx),
-            ai_compose: super::ai_compose_state::AiComposeUi::new(window, cx),
             update_pill: Default::default(),
-            agent_ui: super::agent_state::AgentUi::new(window, cx),
+            agent_bridge: super::agent_state::AgentBridge::new(window, cx),
             takeover: super::agent_takeover_state::TakeoverUi::new(window, cx),
             focus_sidebar: cx.focus_handle(),
-            connection: super::connection_state::ConnectionUi::new(connect_status, status_note),
+            connect: super::connection_state::ConnectGeneration::new(),
             disk: super::disk_state::DiskUi::start(window, cx),
             live,
             demo_session,
             demo_ui: super::demo_state::DemoUi::new(demo_sink),
             calls: super::calls_state::CallUi::new(audio_output.clone()),
-            notify: super::notify_state::NotifyUi::new(&audio_output),
             background: super::background_accounts::BackgroundAccounts::new(),
-            message_ui: super::message_state::MessageUi::new(window, cx),
-            dialogs: super::dialogs_state::DialogUi::new(window, cx),
-            admin: super::admin_state::AdminUi::new(),
-            inline_members: super::inline_members_state::InlineMembersUi::new(),
             appearance: appearance_prefs,
             chat_prefs,
             spell: super::spell_state::SpellUi::new(spellchecker, spell_info, dict_filter_input),
-            playback: super::playback_state::PlaybackUi::new(&audio_output),
             slices: Default::default(),
-            recording: super::recording_state::RecordingUi::new(),
-            links: super::links_state::LinkUi::new(),
-            giveaway: super::giveaway_state::GiveawayUi::new(),
-            paid_messages: super::paid_messages_state::PaidMessagesUi::new(),
-            direct_messages: super::direct_messages_state::DirectMessagesUi::new(),
-            suggested_posts: super::suggested_posts_state::SuggestedPostsUi::new(),
-            gift_market: super::gift_market_state::GiftMarketUi::new(),
-            paid_reaction: super::paid_reaction_state::PaidReactionUi::new(),
             pending_deep_link: None,
-            viewer: super::viewer_state::ViewerUi::new(),
-            mini_apps: Default::default(),
-            folders: super::folders_state::FolderUi::new(),
-            windows: super::chat_window::ChatWindows::new(cx),
-            peer_qr: super::peer_qr::PeerQrUi::new(cx),
-            video_avatar: Default::default(),
-            profile_cover: Default::default(),
+            main_window: super::chat_window::MainWindow::new(cx),
         };
 
         if let Some(chosen) = spell_chosen {
@@ -632,6 +427,7 @@ impl QuillApp {
         if demo.is_none() {
             app.start_update_checks(cx);
         }
+        // screen-scope: the minute timer re-applies the appearance for whichever account is on screen.
         cx.spawn(async move |this, cx| {
             loop {
                 cx.background_executor()
@@ -652,12 +448,6 @@ impl QuillApp {
         })
         .detach();
         super::os_menus::install(demo.is_some(), window, cx);
-        super::history_a11y::install(&app.message_ui.history_focus, window, cx);
-        // The scroller notifies on every scroll: drives the floating date.
-        cx.observe(&app.history.scroller, |this, _, cx| {
-            this.note_history_scroll(cx);
-        })
-        .detach();
         app
     }
 }

@@ -69,7 +69,7 @@ impl QuillApp {
         if deadline != self.connection.toast_wake {
             self.connection.toast_wake = deadline;
             if let Some(deadline) = deadline {
-                cx.spawn(async move |this, cx| {
+                self.spawn_screen(cx, async move |this, cx| {
                     cx.background_executor()
                         .timer(deadline.saturating_duration_since(std::time::Instant::now()))
                         .await;

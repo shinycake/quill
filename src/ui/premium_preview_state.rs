@@ -12,6 +12,10 @@ pub(super) struct PremiumPreviewUi {
     pub(super) file_id: Cell<Option<i32>>,
 }
 
+/// The clip player is dropped with the value; the Premium box that shows
+/// it closes from `PaymentUi`'s farewell.
+impl crate::ui::on_screen::Farewell for PremiumPreviewUi {}
+
 impl PremiumPreviewUi {
     /// Drop the player (the preview closed or moved to another feature).
     pub(super) fn stop(&self) {

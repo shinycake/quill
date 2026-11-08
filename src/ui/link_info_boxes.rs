@@ -156,7 +156,7 @@ impl QuillApp {
         cx.notify();
     }
 
-    fn close_gift_code_box(&mut self, cx: &mut Context<Self>) {
+    pub(super) fn close_gift_code_box(&mut self, cx: &mut Context<Self>) {
         if let Some(session) = self.link_info_session_mut() {
             session.payments.gift_code = None;
         }
@@ -481,13 +481,12 @@ crate::ui::shell::register_dialogs! {
         |app| app.session().is_some_and(|s| s.payments.gift_code.is_some()),
         QuillApp::build_gift_code_dialog,
     )
-    .closes(|app, _, cx| app.close_gift_code_box(cx)),
+    .close(|app, _, cx| app.close_gift_code_box(cx)),
 
     /// `setlanguage` link: the pack's details and Apply Language.
     LanguageLink => DialogSpec::new(
         2920,
         |app| app.session().is_some_and(|s| s.settings.language_link.is_some()),
         QuillApp::build_language_link_dialog,
-    )
-    .follows_account(),
+    ),
 }

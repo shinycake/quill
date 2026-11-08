@@ -155,7 +155,8 @@ impl QuillApp {
         let send_key_mode = self.chat_prefs.send_key_mode;
         let generation = grants::generation();
         let before = window.a11y_tree_frame();
-        QuillApp::spawn_main_in(window, cx, async move |app, cx| {
+        // screen-scope: an agent's command drives whichever account is on screen when it runs.
+        QuillApp::spawn_app_in(window, cx, async move |app, cx| {
             // Held until the task ends: deferred refusals until then are
             // this command's (`guard::with_injecting`).
             let _open = open;
@@ -237,7 +238,7 @@ impl QuillApp {
                         Err(refusal) => Err(refusal),
                     });
                 refusals.extend(guard::take_refusals());
-                let send = app.update(cx, |app, _| app.agent_ui.ui_send.take());
+                let send = app.update(cx, |app, _| app.agent_bridge.ui_send.take());
                 match outcome {
                     Err(()) => {
                         pending.answer(UiReply::Refused(policy::window_closed()));

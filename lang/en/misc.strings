@@ -427,6 +427,7 @@
 "qll_misc_pause" = "Pause";
 "qll_misc_paused" = " · paused";
 "qll_misc_paused_2" = "Paused";
+"qll_misc_phone_country_code" = "Phone (+country code)";
 "qll_misc_photo" = "Photo";
 "qll_misc_photo_loaded_height_changed" = "Photo loaded (height changed).";
 "qll_misc_photo_pending" = "Photo pending…";
@@ -460,6 +461,8 @@
 "qll_misc_gpu_stopped_working_summary" = "The graphics card stopped responding. Start Quill again.";
 "qll_misc_gpu_stopped_working_again" = "The graphics card stopped responding a second time after Quill had recovered from the first.";
 "qll_misc_quill_could_not_open_a_gpu" = "Quill needs Vulkan graphics to draw its window, and none was found. Install the Vulkan driver for your graphics card, then start Quill again:\n\n- AMD or Intel: Mesa Vulkan drivers (mesa-vulkan-drivers on Debian and Ubuntu, vulkan-radeon or vulkan-intel on Arch and Fedora)\n- NVIDIA: the proprietary NVIDIA driver\n- No GPU or a virtual machine: the lavapipe software driver (mesa-vulkan-drivers, or vulkan-swrast on Arch)\n\nDetails: {detail}";
+"qll_misc_recovery_code_from_email" = "Recovery code from email";
+"qll_misc_verification_code" = "Verification code";
 "qll_misc_vulkan_no_loader" = "Quill draws its window with Vulkan graphics, and the Vulkan loader is not installed.";
 "qll_misc_vulkan_no_driver" = "Quill draws its window with Vulkan graphics, and no Vulkan driver is installed.";
 "qll_misc_vulkan_no_device" = "Quill draws its window with Vulkan graphics. A Vulkan driver is installed ({drivers}), but it shows no device that can draw the window.";

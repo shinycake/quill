@@ -195,7 +195,7 @@ impl QuillApp {
                 self.checklist_premium_toast(keys::TODO_MARK_PREMIUM, window, cx);
                 return;
             }
-            self.connection.set_note(
+            self.screen.connection.set_note(
                 match live
                     .driver
                     .toggle_checklist_task(chat_id, message_id, task_id)

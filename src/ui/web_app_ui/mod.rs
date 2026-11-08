@@ -235,6 +235,19 @@ impl MiniAppWindow {
 }
 
 /// Everything mini-app related on [`QuillApp`].
+/// The open app's `closeWebApp` goes to its own client, and its helper
+/// window closes; the launches still waiting for an answer are dropped
+/// with the value, and so is the 30 ms poll.
+impl crate::ui::on_screen::Farewell for MiniApps {
+    fn farewell(
+        app: &mut QuillApp,
+        _: &mut gpui_kit::Window,
+        cx: &mut gpui_kit::Context<QuillApp>,
+    ) {
+        app.close_mini_app_window(cx);
+    }
+}
+
 #[derive(Default)]
 pub(super) struct MiniApps {
     pub(super) window: Option<MiniAppWindow>,
@@ -963,5 +976,5 @@ crate::ui::shell::register_dialogs! {
         |app| app.mini_apps.confirm.is_some(),
         QuillApp::build_web_app_confirm_dialog,
     )
-    .closes(|app, _, cx| { app.mini_apps.confirm = None; cx.notify(); }),
+    .close(|app, _, cx| { app.mini_apps.confirm = None; cx.notify(); }),
 }

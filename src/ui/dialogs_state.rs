@@ -84,6 +84,18 @@ pub(crate) struct DialogUi {
     pub(super) disable_sharing: Option<quill::ids::ChatId>,
 }
 
+/// The Business page saves its edits through the old client before it
+/// goes (`close_business_saving`); the other boxes hold only flags.
+impl crate::ui::on_screen::Farewell for DialogUi {
+    fn farewell(
+        app: &mut QuillApp,
+        window: &mut gpui_kit::Window,
+        cx: &mut gpui_kit::Context<QuillApp>,
+    ) {
+        let _ = app.close_business_saving(false, window, cx);
+    }
+}
+
 impl DialogUi {
     pub(super) fn new(window: &mut Window, cx: &mut Context<QuillApp>) -> Self {
         // Phase C2i: comment field for the call-rating detail card.

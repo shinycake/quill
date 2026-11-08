@@ -101,6 +101,7 @@ impl QuillApp {
             return;
         }
         let mut code = self
+            .screen
             .auth_ui
             .recovery_code_input
             .read(cx)

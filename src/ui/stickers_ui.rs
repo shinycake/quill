@@ -367,14 +367,11 @@ impl QuillApp {
         }
         let session = self.session()?;
         if !session.stickers.stickers.greeting_loaded {
-            let weak = cx.weak_entity();
-            cx.defer(move |cx| {
-                let _ = weak.update(cx, |this, cx| {
-                    if let Some(live) = this.live.as_mut() {
-                        let _ = live.driver.fetch_greeting_stickers();
-                        cx.notify();
-                    }
-                });
+            self.defer_screen(cx, move |this, cx| {
+                if let Some(live) = this.live.as_mut() {
+                    let _ = live.driver.fetch_greeting_stickers();
+                    cx.notify();
+                }
             });
         }
         let sticker = greeting_pick(&session.stickers.stickers.greeting, chat.id.0)?.clone();
@@ -422,7 +419,8 @@ impl QuillApp {
 
     fn select_sticker_tab(&mut self, tab: StickerTab, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
-            self.connection
+            self.screen
+                .connection
                 .set_note(match live.driver.select_sticker_tab(tab) {
                     Ok(_) => StatusNote::silent(tr(keys::Q_LEFTOVERS_STICKERS)),
                     Err(_) => StatusNote::error(tr(keys::Q_MEDIA_COULD_NOT_LOAD_STICKER_TAB)),
@@ -435,7 +433,8 @@ impl QuillApp {
 
     fn more_trending_stickers(&mut self, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
-            self.connection
+            self.screen
+                .connection
                 .set_note(match live.driver.fetch_trending_stickers(true) {
                     Ok(_) => StatusNote::silent(tr(keys::Q_MEDIA_LOADING_MORE_TRENDING_STICKERS)),
                     Err(_) => StatusNote::error(tr(keys::Q_MEDIA_COULD_NOT_LOAD_MORE_TRENDING)),
@@ -460,7 +459,8 @@ impl QuillApp {
 
     fn clear_recent_stickers(&mut self, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
-            self.connection
+            self.screen
+                .connection
                 .set_note(match live.driver.clear_recent_stickers() {
                     Ok(_) => StatusNote::silent(tr(keys::Q_MEDIA_CLEARING_RECENT_STICKERS)),
                     Err(_) => StatusNote::error(tr(keys::Q_MEDIA_COULD_NOT_CLEAR_RECENT_STICKERS)),
@@ -477,7 +477,8 @@ impl QuillApp {
             .value()
             .to_string();
         if let Some(live) = self.live.as_mut() {
-            self.connection
+            self.screen
+                .connection
                 .set_note(match live.driver.search_sticker_picker(&query) {
                     Ok(_) => StatusNote::silent(tr(keys::Q_MEDIA_SEARCHING_STICKERS)),
                     Err(_) => StatusNote::error(tr(keys::Q_MEDIA_COULD_NOT_SEARCH_STICKERS)),
@@ -488,7 +489,8 @@ impl QuillApp {
 
     fn more_sticker_search_results(&mut self, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
-            self.connection
+            self.screen
+                .connection
                 .set_note(match live.driver.more_sticker_search_results() {
                     Ok(_) => StatusNote::silent(tr(keys::Q_MEDIA_LOADING_MORE_STICKERS)),
                     Err(_) => StatusNote::error(tr(keys::Q_MEDIA_COULD_NOT_LOAD_MORE_STICKERS)),
@@ -499,12 +501,13 @@ impl QuillApp {
 
     pub(super) fn install_sticker_set(&mut self, set_id: i64, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
-            self.connection
-                .set_note(match live.driver.manage_sticker_set(set_id, true, false) {
+            self.screen.connection.set_note(
+                match live.driver.manage_sticker_set(set_id, true, false) {
                     Ok(Some(_)) => StatusNote::silent(tr(keys::Q_MEDIA_INSTALLING_STICKER_SET)),
                     Ok(None) => StatusNote::silent(tr(keys::Q_MEDIA_STICKER_SET_UPDATE_ALREADY_IN)),
                     Err(_) => StatusNote::error(tr(keys::Q_MEDIA_COULD_NOT_INSTALL_STICKER_SET)),
-                });
+                },
+            );
         }
         cx.notify();
     }

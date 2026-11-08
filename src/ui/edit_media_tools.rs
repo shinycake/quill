@@ -236,12 +236,12 @@ impl QuillApp {
 
     /// Stage a picked cover; it goes out with the edit.
     pub(super) fn set_edit_cover(&mut self, path: &Path, cx: &mut Context<Self>) {
-        let Some(edit) = self.composer_ui.pending_edit_mut() else {
+        let Some(edit) = self.screen.composer_ui.pending_edit_mut() else {
             return;
         };
         match cover_send_path(path) {
             Some(cover) => {
-                self.connection.set_note(StatusNote::silent(tr_with(
+                self.screen.connection.set_note(StatusNote::silent(tr_with(
                     keys::Q_MISC_COVER_WILL_BE_SAVED_WITH,
                     &[("shown_name", &(shown_name(&cover)).to_string())],
                 )));

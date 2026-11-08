@@ -36,7 +36,7 @@ impl QuillApp {
             notification.chat_id,
         );
         // This notification replaces any older one still waiting.
-        self.notify.preview_waits.remove(&key);
+        self.delivery.preview_waits.remove(&key);
         let preview_path = preview.and_then(|file| self.preview_path(account.as_ref(), file));
         let waits = preview
             .filter(|file| preview_path.is_none() && self.request_preview(account.as_ref(), *file));
@@ -51,15 +51,17 @@ impl QuillApp {
             );
             return;
         };
-        self.notify.next_preview_wait += 1;
-        let id = self.notify.next_preview_wait;
-        self.notify.preview_waits.insert(key.clone(), id);
+        self.delivery.next_preview_wait += 1;
+        let id = self.delivery.next_preview_wait;
+        self.delivery.preview_waits.insert(key.clone(), id);
         let deadline = Instant::now() + PHOTO_WAIT;
         // `None` means the account on screen: a switch while waiting would
         // post this one under the other account.
         let on_screen = self.session().map(|session| session.account.clone());
         let mut waiting = Some((notification, photo));
-        Self::spawn_main(cx, async move |this, cx| {
+        // screen-scope: the wait names the notification's account and checks it
+        // against the account on screen itself before showing anything.
+        Self::spawn_app(cx, async move |this, cx| {
             loop {
                 cx.background_executor().timer(PHOTO_CHECK).await;
                 let done = this
@@ -69,16 +71,16 @@ impl QuillApp {
                             return false;
                         }
                         // Replaced or dismissed while waiting: never shown.
-                        if app.notify.preview_waits.get(&key) != Some(&id) {
+                        if app.delivery.preview_waits.get(&key) != Some(&id) {
                             return true;
                         }
                         if account.is_none()
                             && app.session().map(|session| session.account.clone()) != on_screen
                         {
-                            app.notify.preview_waits.remove(&key);
+                            app.delivery.preview_waits.remove(&key);
                             return true;
                         }
-                        app.notify.preview_waits.remove(&key);
+                        app.delivery.preview_waits.remove(&key);
                         let Some((mut notification, mut photo)) = waiting.take() else {
                             return true;
                         };

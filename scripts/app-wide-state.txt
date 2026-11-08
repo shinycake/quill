@@ -1,0 +1,38 @@
+# The `QuillApp` fields that are the process's, not the account on screen's
+# (docs/decisions/account-scoped-ui-state.md, docs/contributing/structure.md
+# "App state"). Checked by scripts/check-screen-state.py: a `QuillApp` field
+# is either one of the four infrastructure fields (`screen`, `live`,
+# `demo_session`, `credentials`) or listed here with the reason it survives
+# an account switch. The account's UI goes in `OnScreen` (ui/on_screen.rs).
+#
+#   <field> | <why it is the process's>
+
+players | the audio engine and the shared sticker, emoji and video players; one set for the process
+delivery | OS notification clicks, reply targets and sounds keyed by account; Quill's notification windows
+preferences | theme, accent and font pickers, sliders, keybindings, updates, what's new, emoji style: the app's settings values
+chat | the synthetic chat entity the demos render
+menu_bar | the application menu bar
+first_run | the first-run intro, shown once per install
+frame | the frame clock and window bookkeeping
+composer_sends | sends in flight, keyed by account
+language | the interface language
+auth_demo | the synthetic mode's authorization state, next to demo_session
+start_files | files handed to the app at start, waiting for a chat
+update_pill | the updater's title-bar pill
+agent_bridge | the agent wake task and activity counter; agents drive whichever account is on screen
+takeover | the agent takeover banner
+focus_sidebar | the sidebar's focus handle
+connect | the connection generation: which prepared connection may open
+disk | disk space watching, keyed by the account on screen
+demo_ui | the screenshot demos' sink and sequence
+calls | a call keeps running in the background account; its window and players are the call's (boxes: call_boxes)
+background | the accounts running in the background and the closing set
+account | the accounts list, lifecycle and passcode
+spell | the spellchecker and its dictionaries
+slices | cached child views
+appearance | the appearance preferences file
+chat_prefs | the chat preferences file
+group_call | a group call keeps running in the background account (boxes: group_call_boxes)
+screen_share | the share chooser of a call
+pending_deep_link | a link to open once an account is on screen
+main_window | the main window's handle and place, the cascade count, the key-scope interceptor

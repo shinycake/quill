@@ -121,3 +121,6 @@ impl ChatListUi {
         }
     }
 }
+
+/// Nothing to say: its state is the account's only app-side.
+impl super::on_screen::Farewell for ChatListUi {}

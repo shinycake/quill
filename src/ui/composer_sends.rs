@@ -468,7 +468,7 @@ impl QuillApp {
     /// about their files, unless another tray still holds the same file.
     pub(super) fn forget_tray_checks(&mut self, dropped: &[ComposerAttachment]) {
         let sends = &self.composer_sends;
-        self.composer_ui.send_box.forget(
+        self.screen.composer_ui.send_box.forget(
             dropped
                 .iter()
                 .map(|attachment| attachment.path.as_path())

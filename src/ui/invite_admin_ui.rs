@@ -118,7 +118,7 @@ impl QuillApp {
     }
 
     fn delete_revoked_link(&mut self, chat_id: ChatId, invite_link: &str, cx: &mut Context<Self>) {
-        self.connection.set_note(match self.live.as_mut() {
+        self.screen.connection.set_note(match self.live.as_mut() {
             Some(live) => match live
                 .driver
                 .delete_revoked_chat_invite_link(chat_id, invite_link)
@@ -148,7 +148,7 @@ impl QuillApp {
                 .show_cancel(true)
                 .on_ok(move |_, _, cx| {
                     let _ = app.update(cx, |this, cx| {
-                        this.connection.set_note(match this.live.as_mut() {
+                        this.screen.connection.set_note(match this.live.as_mut() {
                             Some(live) => {
                                 match live.driver.delete_all_revoked_chat_invite_links(chat_id) {
                                     Ok(_) => {

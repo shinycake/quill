@@ -62,7 +62,7 @@ impl QuillApp {
             match window {
                 Some(window) => window.request_attention(),
                 None => {
-                    if let Some(main) = self.windows.main {
+                    if let Some(main) = self.main_window.handle {
                         let _ = main.update(cx, |_, window, _| window.request_attention());
                     }
                 }
@@ -81,7 +81,7 @@ impl QuillApp {
         }
         // Parity slice: custom sounds whose downloads just completed.
         for path in drain.sound_plays {
-            self.notify
+            self.delivery
                 .notification_sounds
                 .play(NotificationSound::File(path));
         }

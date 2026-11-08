@@ -169,6 +169,7 @@ impl QuillApp {
         let theme = cx.theme();
         let (pin, dot, ground) = (theme.primary, theme.primary_foreground, theme.muted);
         let app = cx.entity().downgrade();
+        let screen = self.screen_epoch();
         let gestures = canvas(
             move |bounds, window, _| window.insert_hitbox(bounds, HitboxBehavior::Normal),
             move |bounds, hitbox, window, cx| {
@@ -180,7 +181,11 @@ impl QuillApp {
                 if measured != Some(want) {
                     let app = app.clone();
                     window.defer(cx, move |_, cx| {
-                        let _ = app.update(cx, |this, cx| this.location_map_measured(want, cx));
+                        let _ = app.update(cx, |this, cx| {
+                            this.in_screen_scope(screen, cx, |this, cx| {
+                                this.location_map_measured(want, cx)
+                            })
+                        });
                     });
                 }
                 let lift = if lifted { PIN_LIFT } else { 0. };

@@ -33,6 +33,9 @@ jobs:
       # docs/decisions/sweep-window-slot-scope.md: async work names its window.
       - name: window scope
         run: python3 scripts/check-window-scope.py
+      # docs/decisions/account-scoped-ui-state.md: the account's UI is OnScreen.
+      - name: screen state
+        run: python3 scripts/check-screen-state.py
       - name: hotspots
         if: github.event_name == 'pull_request'
         run: bash scripts/check-hotspots.sh ${{ github.event.pull_request.base.sha }}

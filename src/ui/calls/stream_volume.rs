@@ -108,7 +108,7 @@ pub(crate) fn intercept_live_story_volume_keys(cx: &mut Context<QuillApp>) {
 
 impl QuillApp {
     fn stream_volume_percent(&self) -> f32 {
-        (self.playback.volume * 100.0).round()
+        (self.players.volume * 100.0).round()
     }
 
     pub(crate) fn stream_volume_shown(&self, call_id: Option<i32>) -> bool {
@@ -179,7 +179,7 @@ impl QuillApp {
         if !self.stream_volume_shown(call_id) {
             return false;
         }
-        let next = ((self.playback.volume + step) / KEY_STEP).round() * KEY_STEP;
+        let next = ((self.players.volume + step) / KEY_STEP).round() * KEY_STEP;
         self.set_playback_volume(next.clamp(0.0, 1.0), cx);
         true
     }

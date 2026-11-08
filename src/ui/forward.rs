@@ -77,9 +77,9 @@ impl QuillApp {
             return;
         };
         self.drop_deleted_selection();
-        if let Some(existing) = self.share.pending_forward.as_mut()
+        if let Some(existing) = self.screen.share.pending_forward.as_mut()
             && existing.from_chat_id == chat_id
-            && self.share.forward_picker_open
+            && self.screen.share.forward_picker_open
         {
             existing.toggle(chat_id, message_id, pending);
             if existing.is_empty() {
@@ -114,7 +114,8 @@ impl QuillApp {
                     ForwardDraft::from_message(chat_id, message_id, pending);
             }
         }
-        self.connection
+        self.screen
+            .connection
             .set_note(match self.forward_draft().map(|d| d.count()) {
                 Some(1) => StatusNote::silent(tr(keys::Q_MISC_1_MESSAGE_SELECTED)),
                 Some(n) => StatusNote::silent(trn(keys::Q_MISC_MESSAGES_SELECTED, n)),

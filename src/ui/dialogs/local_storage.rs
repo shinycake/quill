@@ -341,7 +341,7 @@ impl QuillApp {
     /// Start the two limit sliders on what TDLib reports. They are made
     /// once per visit (`open_data_storage` drops them).
     pub(super) fn ensure_storage_sliders(&mut self, cx: &mut Context<Self>) {
-        let sliders = &self.settings.index_sliders;
+        let sliders = &self.preferences.index_sliders;
         if sliders.contains(StepSlider::StorageSize) && sliders.contains(StepSlider::StorageKeep) {
             return;
         }

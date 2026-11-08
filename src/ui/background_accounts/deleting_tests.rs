@@ -207,9 +207,9 @@ fn the_lock_screen_log_out_wipes_only_after_every_client_closed(cx: &mut TestApp
         app.begin_local_wipe(root.clone(), cx);
         assert!(app.background.wiping);
         // Nothing connects while the data is being wiped.
-        let generation = app.connection.generation;
+        let generation = app.connect.generation;
         app.start_connection(cx);
-        assert_eq!(app.connection.generation, generation);
+        assert_eq!(app.connect.generation, generation);
         generation
     });
     assert!(!config.exists(), "the passcode goes at once");
@@ -238,7 +238,7 @@ fn the_lock_screen_log_out_wipes_only_after_every_client_closed(cx: &mut TestApp
     );
     app.read_with(&vcx, |app, _| {
         assert!(!app.background.wiping);
-        assert!(app.connection.generation > generation, "connects afresh");
+        assert!(app.connect.generation > generation, "connects afresh");
         assert!(
             app.background.clients.is_empty(),
             "the restart was cancelled"

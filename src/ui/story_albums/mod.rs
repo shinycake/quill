@@ -42,19 +42,23 @@ impl QuillApp {
         self.stories.page = Some(StoryPage::new(chat_id, window, cx));
         if let Some(live) = self.live.as_mut() {
             if let Err(err) = live.driver.get_chat_story_albums(chat_id) {
-                self.connection.set_note(StatusNote::error(user_error_for(
-                    keys::Q_NOTES_FAILED_STORY_ALBUMS,
-                    &err,
-                )));
+                self.screen
+                    .connection
+                    .set_note(StatusNote::error(user_error_for(
+                        keys::Q_NOTES_FAILED_STORY_ALBUMS,
+                        &err,
+                    )));
             }
             if let Err(err) = live
                 .driver
                 .get_chat_posted_to_chat_page_stories(chat_id, 0, 50)
             {
-                self.connection.set_note(StatusNote::error(user_error_for(
-                    keys::Q_NOTES_FAILED_CHAT_PAGE_STORIES,
-                    &err,
-                )));
+                self.screen
+                    .connection
+                    .set_note(StatusNote::error(user_error_for(
+                        keys::Q_NOTES_FAILED_CHAT_PAGE_STORIES,
+                        &err,
+                    )));
             }
             if let Err(err) = live.driver.get_chat_archived_stories(chat_id, 0, 50) {
                 self.connection.set_note(StatusNote::error(user_error_for(
