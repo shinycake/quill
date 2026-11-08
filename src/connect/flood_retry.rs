@@ -77,6 +77,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         // 1:1 calls: what the engine reported between Telegram updates.
         changed |= self.pump_call_engine_reports();
         changed |= self.pump_call_media(now);
+        // Group calls: your own level and speaking state, and the
+        // connected transports' camera and mute.
+        changed |= self.pump_call_audio(now).unwrap_or(true);
+        self.pump_connected_group_calls();
         // Group calls: the "You are on mute" hint.
         changed |= self.tick_muted_speech_hint(now);
         self.watch_call_sound(now);
@@ -133,6 +137,8 @@ impl<S: JsonSender> ConnectDriver<S> {
         let levels = self.group_levels_deadline(now);
         // The muted-speech hint's next check while it listens.
         let hint = self.muted_hint_deadline(now);
+        // Your own level's next read while the tap is open.
+        let level = self.call_audio_deadline(now);
         let microphone = self.call_capture.until_reopen(now);
         let paid = self
             .session
@@ -148,10 +154,12 @@ impl<S: JsonSender> ConnectDriver<S> {
             .as_ref()
             .and_then(|live| live.pending_reaction.as_ref())
             .map(|pending| Duration::from_millis(pending.commit_at_ms.saturating_sub(now_ms)));
-        [retry, bot, levels, hint, microphone, paid, live_stars]
-            .into_iter()
-            .flatten()
-            .min()
+        [
+            retry, bot, levels, hint, level, microphone, paid, live_stars,
+        ]
+        .into_iter()
+        .flatten()
+        .min()
     }
 
     /// The "Couldn't load messages · Retry" action: clear the failure and

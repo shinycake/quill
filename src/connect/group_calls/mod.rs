@@ -83,6 +83,26 @@ impl<S: JsonSender> ConnectDriver<S> {
         Ok(())
     }
 
+    /// Per poll: keep each connected call's transport in step with what
+    /// changes without a Telegram update: the picked camera, the device
+    /// list, and a mute or camera switch the engine refused, which is
+    /// retried here. A call still connecting is driven by its join answer,
+    /// an update, so a failing connect is not retried every poll.
+    pub(crate) fn pump_connected_group_calls(&mut self) {
+        let connected = self.session.calls.group_call_ids().map(|id| {
+            id.filter(|id| {
+                self.session
+                    .calls
+                    .group_call(*id)
+                    .is_some_and(|call| call.transport_ready)
+            })
+        });
+        for group_call_id in connected.into_iter().flatten() {
+            // A send failure is retried by the next pump.
+            let _ = self.pump_one_group_call(group_call_id);
+        }
+    }
+
     fn pump_one_group_call(&mut self, group_call_id: i32) -> Result<(), ConnectSendError> {
         // Track feeds whose video went off end now, engine or not.
         self.sync_call_feeds(group_call_id);
