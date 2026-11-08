@@ -150,6 +150,89 @@ fn a_click_opens_the_chat_and_hide_all_clears(cx: &mut TestAppContext) {
     });
 }
 
+fn shown_id(app: &QuillApp, chat: i64) -> u64 {
+    app.delivery
+        .windows
+        .shown
+        .iter()
+        .find(|s| s.key.1 == ChatId(chat) && !s.unlinked)
+        .map(|s| s.id)
+        .unwrap_or(0)
+}
+
+fn fading(app: &QuillApp, id: u64) -> bool {
+    app.delivery
+        .windows
+        .shown
+        .iter()
+        .any(|s| s.id == id && s.popup.hiding)
+}
+
+/// A new message of the chat whose window has a reply being typed does
+/// not take that window away: the reply and its text stay.
+#[gpui_kit::test]
+fn a_new_message_keeps_the_window_being_replied_in(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    let me = app.read_with(vcx, |app, _| app.notification_account(None));
+    app.update(vcx, |app, cx| {
+        app.delivery.windows.platform = NotifyPlatform::Windows;
+        app.show_custom_notification(&me, message(7), None, None, false, true, cx);
+        let id = shown_id(app, 7);
+        app.notify_window_event(id, ViewEvent::ReplyOpened, cx);
+        app.show_custom_notification(&me, message(7), None, None, false, true, cx);
+        let replying = app.delivery.windows.shown.iter().find(|s| s.id == id);
+        assert!(
+            replying.is_some_and(|s| s.replying && !s.unlinked && !s.popup.hiding),
+            "the window being replied in stays up"
+        );
+        let live = app
+            .delivery
+            .windows
+            .shown
+            .iter()
+            .filter(|s| s.key.1 == ChatId(7) && !s.unlinked)
+            .count();
+        assert_eq!(live, 2, "the new message shows beside it");
+    });
+}
+
+/// Clicking one window while the pointer rests on it: that window goes
+/// without a leave event, so the others start hiding as if the pointer
+/// had left (tdesktop #28813). Before, the hover had cleared their timers
+/// and they stayed up until hovered and left.
+#[gpui_kit::test]
+fn a_window_clicked_under_the_pointer_lets_the_others_fade(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    let me = app.read_with(vcx, |app, _| app.notification_account(None));
+    app.update(vcx, |app, cx| {
+        app.delivery.windows.platform = NotifyPlatform::Windows;
+        app.show_custom_notification(&me, message(7), None, None, false, false, cx);
+        app.show_custom_notification(&me, message(8), None, None, false, false, cx);
+        let now = std::time::Instant::now();
+        let later = now + std::time::Duration::from_secs(600);
+        // The user was back at the computer: both are due later.
+        for shown in app.delivery.windows.shown.iter_mut() {
+            shown.waiting_for_input = false;
+            shown.hide_at = Some(later);
+        }
+        let (x, y) = (shown_id(app, 7), shown_id(app, 8));
+        app.notify_window_event(x, ViewEvent::Hover(true), cx);
+        app.notify_settle_hiding(later);
+        assert!(!fading(app, y), "nothing fades under the pointer");
+        app.notify_window_event(x, ViewEvent::Activate, cx);
+        assert_eq!(app.delivery.windows.hovered, None, "the hold went with it");
+        app.notify_settle_hiding(later);
+        assert!(fading(app, y), "the other window fades");
+        // Hovering it again stops the fade; leaving starts it again.
+        app.notify_window_event(y, ViewEvent::Hover(true), cx);
+        assert!(!fading(app, y));
+        app.notify_window_event(y, ViewEvent::Hover(false), cx);
+        assert!(fading(app, y));
+    });
+}
+
 /// A poll hands out what it queued itself: a hidden or minimized main
 /// window does not draw, so nothing may wait for its render.
 #[gpui_kit::test]
