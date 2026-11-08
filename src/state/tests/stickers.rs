@@ -279,3 +279,53 @@ fn gif_panel_downloads_stills_then_preview_loops_then_unpreviewed_clips() {
     session.settings.media_prefs.autoplay_gifs = false;
     assert_eq!(session.gif_panel_file_ids_to_download(), vec![FileId(12)]);
 }
+
+/// Round 7, 2c: "Attached Stickers" opens its box loading (set 0). A failed
+/// request fails that box instead of leaving it spinning, and only the
+/// request the box waits for may answer it.
+#[test]
+fn attached_sticker_sets_fail_the_box_and_drop_an_earlier_answer() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    let purpose = RequestPurpose::Stickers(StickersPurpose::GetAttachedStickerSets { file_id: 1 });
+    let ask = |session: &mut Session| {
+        session.stickers.sticker_set_view = Some(StickerSetView::loading(0));
+        let extra = session.request(purpose, None);
+        session.stickers.stickers.attached_request = Some(extra);
+        extra
+    };
+    let failed = ask(&mut session);
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"error","@extra":"{}","code":400,"message":"FILE_REFERENCE_EXPIRED"}}"#,
+            failed.0
+        ),
+    );
+    assert_eq!(
+        session
+            .stickers
+            .sticker_set_view
+            .as_ref()
+            .map(|v| v.stage.clone()),
+        Some(StickerSetViewStage::Failed)
+    );
+
+    let earlier = ask(&mut session);
+    let later = ask(&mut session);
+    let sets = |extra: RequestId| {
+        format!(
+            r#"{{"@type":"stickerSets","total_count":0,"sets":[],"@extra":"{}"}}"#,
+            extra.0
+        )
+    };
+    apply_json(&mut session, &seq, &sink, &sets(earlier));
+    assert_eq!(
+        session.stickers.stickers.attached_answer, None,
+        "an earlier ask's answer"
+    );
+    apply_json(&mut session, &seq, &sink, &sets(later));
+    assert_eq!(session.stickers.stickers.attached_answer, Some(None));
+}
