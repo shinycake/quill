@@ -1,6 +1,7 @@
 //! The viewer's Reply button: shown for a sent message of the open chat
 //! while it shows its composer, it closes the viewer and arms the composer's reply
-//! (needs the `demo-capture` feature for gpui-kit's test support).
+//! (needs the `demo-capture` feature for gpui-kit's test support). Show in
+//! Chat and View all act on the item's chat, not the one on screen.
 use crate::ui::app::QuillApp;
 use crate::ui::keybindings::bind_keys;
 use crate::ui::screenshot_demo::ScreenshotDemo;
@@ -125,4 +126,60 @@ fn a_chat_without_write_rights_offers_no_reply(cx: &mut TestAppContext) {
         !reply_button(vcx, 8903),
         "a reader of a channel can't reply"
     );
+}
+
+/// Another chat of the demo: the window shows it under a viewer of
+/// `CHAT`'s photo, as after back-to-viewer from Picture-in-Picture.
+const OTHER: ChatId = ChatId(12);
+
+/// The viewer shows `CHAT`'s photo `id` while the window shows `OTHER`.
+fn open_over_other_chat(app: &Entity<QuillApp>, vcx: &mut VisualTestContext, id: i64) {
+    add_photo(app, vcx, id, false);
+    open(app, vcx, id);
+    app.update_in(vcx, |app, _, cx| {
+        let session = app.demo_session.as_mut().expect("demo session");
+        assert!(session.chats.contains_key(&OTHER.0), "the demo has chat 12");
+        session.open_chat(OTHER);
+        cx.notify();
+    });
+    assert!(app.read_with(vcx, |app, _| app.viewer.state.is_open()));
+}
+
+#[gpui_kit::test]
+fn show_in_chat_opens_the_items_chat_at_its_message(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    open_over_other_chat(&app, vcx, 8904);
+    app.update_in(vcx, |app, window, cx| app.show_viewer_in_chat(window, cx));
+    vcx.run_until_parked();
+    app.read_with(vcx, |app, _| {
+        assert!(
+            !app.viewer.state.is_open(),
+            "Show in Chat closes the viewer"
+        );
+        assert_eq!(
+            app.open_chat_id(),
+            Some(CHAT),
+            "the photo's chat opens, not a jump in the chat on screen"
+        );
+    });
+}
+
+#[gpui_kit::test]
+fn view_all_is_only_for_the_open_chats_media(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    add_photo(&app, vcx, 8905, false);
+    open(&app, vcx, 8905);
+    assert!(
+        app.read_with(vcx, |app, _| app.viewer_can_view_all()),
+        "the open chat's photo offers View all"
+    );
+    app.update_in(vcx, |app, _, cx| app.close_media_viewer(cx));
+    open_over_other_chat(&app, vcx, 8906);
+    assert!(
+        !app.read_with(vcx, |app, _| app.viewer_can_view_all()),
+        "another chat's photo would open the wrong chat's gallery"
+    );
+    assert!(!reply_button(vcx, 8906), "nor Reply, as before");
 }
