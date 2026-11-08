@@ -242,3 +242,41 @@ fn opening_a_story_again_after_a_failure_waits_for_the_new_answer(cx: &mut TestA
         assert!(!waiting, "the open cleared the retry clock");
     });
 }
+
+/// What the viewer had open goes with every close, the bare release too
+/// (a deleted story, the passcode lock): the next viewer opens with no
+/// editor of the last story, so Save cannot send its ids.
+#[gpui_kit::test]
+fn a_release_drops_what_the_viewer_had_open(cx: &mut TestAppContext) {
+    let (app, mut vcx) = open_app(cx, "ready-story-viewer");
+    let vcx = &mut vcx;
+    app.update(vcx, |app, _| {
+        assert!(app.stories.viewer.is_open());
+        app.stories.with_viewer_ui(|open| {
+            open.privacy_edit = Some(crate::ui::story_albums::StoryPrivacyEdit {
+                chat_id: MAYA,
+                story_id: 5,
+                privacy: quill::story_composer::StoryPrivacy::Everyone,
+                selected_user_ids: Vec::new(),
+            });
+            open.share_open = true;
+            open.notice = Some("saved".into());
+        });
+        assert!(app.stories.viewer_ui().privacy_edit.is_some());
+        app.release_story_viewer();
+        // Nothing opens over a closed viewer.
+        app.stories.with_viewer_ui(|open| open.reply_open = true);
+        assert!(!app.stories.viewer_ui().reply_open);
+    });
+    app.update(vcx, |app, cx| {
+        app.open_story_viewer(ChatId(MAYA), 5, StoryOpenScope::Tray, cx);
+    });
+    frames(vcx);
+    app.read_with(vcx, |app, _| {
+        assert!(app.stories.viewer.is_open());
+        let open = app.stories.viewer_ui();
+        assert!(open.privacy_edit.is_none(), "the old story's editor");
+        assert!(!open.share_open);
+        assert!(open.notice.is_none());
+    });
+}

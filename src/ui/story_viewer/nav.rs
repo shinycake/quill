@@ -118,13 +118,23 @@ impl QuillApp {
         }
         // The user moved on: a press still waiting for its story is dropped.
         self.chat_list.pending_story_open = None;
-        self.stories.reaction_picker_open = false;
+        if let Some(open) = self.stories.viewer_ui_mut() {
+            open.reaction_picker_open = false;
+        }
         self.end_story_reply(cx);
-        self.stories.stats_open = false;
+        if let Some(open) = self.stories.viewer_ui_mut() {
+            open.stats_open = false;
+        }
         // B14: a new story starts playing (a Space pause is per story).
-        self.stories.pause.reset();
-        self.stories.share_open = false;
-        self.stories.notice = None;
+        if let Some(open) = self.stories.viewer_ui_mut() {
+            open.pause.reset();
+        }
+        if let Some(open) = self.stories.viewer_ui_mut() {
+            open.share_open = false;
+        }
+        if let Some(open) = self.stories.viewer_ui_mut() {
+            open.notice = None;
+        }
         self.stories.video.retry();
         self.stories.playback.start(Instant::now());
         self.sync_story_video(cx);

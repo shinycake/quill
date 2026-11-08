@@ -177,23 +177,31 @@ impl QuillApp {
         // Phase 9.5: the viewer cover editor / privacy editor sent a
         // management call — once `story_manage.pending` clears, close
         // the panel on success or leave it open showing the error.
-        if self.stories.cover_sent && self.session().is_some_and(|s| !s.stories.manage.pending) {
-            self.stories.cover_sent = false;
-            if self
+        if self.stories.viewer_ui().cover_sent
+            && self.session().is_some_and(|s| !s.stories.manage.pending)
+        {
+            let saved = self
                 .session()
-                .is_some_and(|s| s.stories.manage.error.is_none())
-            {
-                self.stories.cover = None;
-            }
+                .is_some_and(|s| s.stories.manage.error.is_none());
+            self.stories.with_viewer_ui(|open| {
+                open.cover_sent = false;
+                if saved {
+                    open.cover = None;
+                }
+            });
         }
-        if self.stories.privacy_sent && self.session().is_some_and(|s| !s.stories.manage.pending) {
-            self.stories.privacy_sent = false;
-            if self
+        if self.stories.viewer_ui().privacy_sent
+            && self.session().is_some_and(|s| !s.stories.manage.pending)
+        {
+            let saved = self
                 .session()
-                .is_some_and(|s| s.stories.manage.error.is_none())
-            {
-                self.stories.privacy_edit = None;
-            }
+                .is_some_and(|s| s.stories.manage.error.is_none());
+            self.stories.with_viewer_ui(|open| {
+                open.privacy_sent = false;
+                if saved {
+                    open.privacy_edit = None;
+                }
+            });
         }
         // Phase 9.2: a story that vanished from the cache while being
         // viewed was deleted (`updateStoryDeleted`) — close the viewer.
@@ -207,8 +215,12 @@ impl QuillApp {
         });
         if current_deleted {
             self.release_story_viewer();
-            self.stories.reaction_picker_open = false;
-            self.stories.reply_open = false;
+            if let Some(open) = self.stories.viewer_ui_mut() {
+                open.reaction_picker_open = false;
+            }
+            if let Some(open) = self.stories.viewer_ui_mut() {
+                open.reply_open = false;
+            }
             self.connection
                 .set_note(StatusNote::silent(tr(keys::Q_REST_STORY_DELETED)));
         }

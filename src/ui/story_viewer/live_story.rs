@@ -141,7 +141,7 @@ impl QuillApp {
             player.release_live(cx);
         }
         // The emoji panel the comment field opened goes with it.
-        if self.stories.reply_open {
+        if self.stories.viewer_ui().reply_open {
             self.end_story_reply(cx);
         }
         self.stories.live.reset();
@@ -588,10 +588,12 @@ impl QuillApp {
     /// (emoji only: tdesktop's video stream field takes no stickers or
     /// GIFs). Closing it lets the reply row go too.
     pub(super) fn toggle_live_emoji(&mut self, cx: &mut Context<Self>) {
-        self.stories.reply_open = true;
+        if let Some(open) = self.stories.viewer_ui_mut() {
+            open.reply_open = true;
+        }
         self.toggle_story_reply_panel(PanelTab::Emoji, cx);
         if !self.story_reply_panel_active() {
-            self.stories.reply_open = false;
+            self.stories.with_viewer_ui(|open| open.reply_open = false);
         }
     }
 }

@@ -55,12 +55,16 @@ impl QuillApp {
         story_id: i32,
         cx: &mut Context<Self>,
     ) {
-        if self.stories.cover.is_some() {
-            self.stories.cover = None;
+        if self.stories.viewer_ui().cover.is_some() {
+            if let Some(open) = self.stories.viewer_ui_mut() {
+                open.cover = None;
+            }
             cx.notify();
             return;
         }
-        self.stories.cover_sent = false;
+        if let Some(open) = self.stories.viewer_ui_mut() {
+            open.cover_sent = false;
+        }
         let source = self.story_video_path();
         let fallback_ms = self
             .stories
@@ -69,7 +73,7 @@ impl QuillApp {
             .and_then(|item| item.duration_secs)
             .map(|secs| i64::from(secs) * 1000);
         let serial = NEXT_SERIAL.fetch_add(1, Ordering::Relaxed);
-        self.stories.cover = Some(CoverPicker {
+        let value = Some(CoverPicker {
             chat_id,
             story_id,
             unreadable: source.is_none(),
@@ -84,6 +88,9 @@ impl QuillApp {
             focus: cx.focus_handle(),
             serial,
         });
+        if let Some(open) = self.stories.viewer_ui_mut() {
+            open.cover = value;
+        }
         cx.notify();
         let Some(source) = source else { return };
         self.spawn_scoped(cx, async move |this, cx| {
@@ -96,7 +103,11 @@ impl QuillApp {
             let duration_ms = probed.filter(|ms| *ms > 0).or(fallback_ms);
             let Some(duration_ms) = duration_ms else {
                 let _ = this.update(cx, |this, cx| {
-                    if let Some(cover) = this.stories.cover.as_mut().filter(|c| c.serial == serial)
+                    if let Some(cover) = this
+                        .stories
+                        .viewer_ui_mut()
+                        .and_then(|open| open.cover.as_mut())
+                        .filter(|c| c.serial == serial)
                     {
                         cover.unreadable = true;
                     }
@@ -105,7 +116,12 @@ impl QuillApp {
                 return;
             };
             let opened = this.update(cx, |this, cx| {
-                let Some(cover) = this.stories.cover.as_mut().filter(|c| c.serial == serial) else {
+                let Some(cover) = this
+                    .stories
+                    .viewer_ui_mut()
+                    .and_then(|open| open.cover.as_mut())
+                    .filter(|c| c.serial == serial)
+                else {
                     return false;
                 };
                 cover.duration_ms = Some(duration_ms);
@@ -132,7 +148,11 @@ impl QuillApp {
                     })
                     .await;
                 let alive = this.update(cx, |this, cx| {
-                    let Some(cover) = this.stories.cover.as_mut().filter(|c| c.serial == serial)
+                    let Some(cover) = this
+                        .stories
+                        .viewer_ui_mut()
+                        .and_then(|open| open.cover.as_mut())
+                        .filter(|c| c.serial == serial)
                     else {
                         return false;
                     };
@@ -153,7 +173,11 @@ impl QuillApp {
     /// Cut the preview for the chosen time; one cut runs at a time and the
     /// last wish is cut when it ends.
     fn cover_refresh_preview(&mut self, cx: &mut Context<Self>) {
-        let Some(cover) = self.stories.cover.as_mut() else {
+        let Some(cover) = self
+            .stories
+            .viewer_ui_mut()
+            .and_then(|open| open.cover.as_mut())
+        else {
             return;
         };
         let (Some(source), Some(_)) = (cover.source.clone(), cover.duration_ms) else {
@@ -175,7 +199,12 @@ impl QuillApp {
                 })
                 .await;
             let _ = this.update(cx, |this, cx| {
-                let Some(cover) = this.stories.cover.as_mut().filter(|c| c.serial == serial) else {
+                let Some(cover) = this
+                    .stories
+                    .viewer_ui_mut()
+                    .and_then(|open| open.cover.as_mut())
+                    .filter(|c| c.serial == serial)
+                else {
                     return;
                 };
                 cover.preview_job = None;
@@ -194,7 +223,11 @@ impl QuillApp {
 
     /// The handle goes to a position along the strip (0 to 1).
     fn cover_move_to(&mut self, fraction: f32, cx: &mut Context<Self>) {
-        let Some(cover) = self.stories.cover.as_mut() else {
+        let Some(cover) = self
+            .stories
+            .viewer_ui_mut()
+            .and_then(|open| open.cover.as_mut())
+        else {
             return;
         };
         let Some(duration) = cover.duration_ms else {
@@ -209,7 +242,11 @@ impl QuillApp {
     }
 
     fn cover_press(&mut self, x: f32, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(cover) = self.stories.cover.as_mut() else {
+        let Some(cover) = self
+            .stories
+            .viewer_ui_mut()
+            .and_then(|open| open.cover.as_mut())
+        else {
             return;
         };
         let Some(bounds) = cover.bounds.get() else {
@@ -222,7 +259,13 @@ impl QuillApp {
     }
 
     fn cover_drag(&mut self, x: f32, cx: &mut Context<Self>) {
-        let Some(cover) = self.stories.cover.as_ref().filter(|c| c.dragging) else {
+        let Some(cover) = self
+            .stories
+            .viewer_ui()
+            .cover
+            .as_ref()
+            .filter(|c| c.dragging)
+        else {
             return;
         };
         let Some(bounds) = cover.bounds.get() else {
@@ -233,13 +276,17 @@ impl QuillApp {
     }
 
     fn cover_release(&mut self) {
-        if let Some(cover) = self.stories.cover.as_mut() {
+        if let Some(cover) = self
+            .stories
+            .viewer_ui_mut()
+            .and_then(|open| open.cover.as_mut())
+        {
             cover.dragging = false;
         }
     }
 
     fn cover_key(&mut self, key: &str, shift: bool, cx: &mut Context<Self>) {
-        let Some(cover) = self.stories.cover.as_ref() else {
+        let Some(cover) = self.stories.viewer_ui().cover.as_ref() else {
             return;
         };
         let Some(duration) = cover.duration_ms else {
@@ -260,7 +307,7 @@ impl QuillApp {
     /// Phase 9.5: the cover picker panel — preview, frame strip, time and
     /// the Set / Cancel buttons.
     pub(in crate::ui) fn story_cover_editor(&self, cx: &mut Context<Self>) -> AnyElement {
-        let Some(cover) = self.stories.cover.as_ref() else {
+        let Some(cover) = self.stories.viewer_ui().cover.as_ref() else {
             return div().into_any_element();
         };
         // Review fix-up: shared `story_manage.pending` slot — no second
@@ -415,13 +462,15 @@ impl QuillApp {
                             .label(tr(keys::CANCEL))
                             .custom(chrome::ghost(cx))
                             .on_click(cx.listener(|this, _, _, cx| {
-                                this.stories.cover = None;
+                                if let Some(open) = this.stories.viewer_ui_mut() {
+                                    open.cover = None;
+                                }
                                 cx.notify();
                             })),
                     )
                     .child(
                         Button::new("story-cover-set")
-                            .label(if self.stories.cover_sent {
+                            .label(if self.stories.viewer_ui().cover_sent {
                                 tr(keys::Q_MEDIA_SAVING)
                             } else {
                                 tr(keys::Q_MEDIA_SET_2)
@@ -439,11 +488,12 @@ impl QuillApp {
     /// frame. The driver gates on `can_be_edited`; the tick closes the
     /// picker on success.
     pub(super) fn story_cover_save(&mut self, cx: &mut Context<Self>) {
-        if self.stories.cover_sent {
+        if self.stories.viewer_ui().cover_sent {
             return;
         }
         let Some((chat_id, story_id, at_ms)) = self
             .stories
+            .viewer_ui()
             .cover
             .as_ref()
             .map(|cover| (cover.chat_id, cover.story_id, cover.at_ms))
@@ -465,7 +515,11 @@ impl QuillApp {
                 .driver
                 .edit_story_cover(ChatId(chat_id), story_id, timestamp_secs(at_ms))
             {
-                Ok(_) => self.stories.cover_sent = true,
+                Ok(_) => {
+                    if let Some(open) = self.stories.viewer_ui_mut() {
+                        open.cover_sent = true;
+                    }
+                }
                 Err(_) => {
                     live.driver.session.stories.manage.error =
                         Some(tr(keys::Q_MEDIA_COULD_NOT_SEND_THE_COVER).into());

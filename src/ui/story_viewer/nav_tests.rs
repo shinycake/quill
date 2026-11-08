@@ -230,7 +230,9 @@ fn the_reply_media_panel_hides_the_neighbours(cx: &mut TestAppContext) {
     assert!(vcx.debug_bounds("story-sibling-right").is_some());
     let toggle = |app: &Entity<QuillApp>, vcx: &mut VisualTestContext| {
         app.update(vcx, |app, cx| {
-            app.stories.reply_open = true;
+            if let Some(open) = app.stories.viewer_ui_mut() {
+                open.reply_open = true;
+            }
             app.toggle_story_reply_panel(PanelTab::Emoji, cx);
         });
         frames(vcx);

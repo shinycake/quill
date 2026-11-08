@@ -36,7 +36,7 @@ impl QuillApp {
     /// The story the reply row is replying to.
     pub(in crate::ui) fn story_reply_target(&self) -> Option<(ChatId, i32)> {
         reply_target(
-            self.stories.reply_open,
+            self.stories.viewer_ui().reply_open,
             self.stories
                 .viewer
                 .current()
@@ -46,15 +46,18 @@ impl QuillApp {
 
     /// The emoji / sticker / GIF panel is open for the story reply.
     pub(in crate::ui) fn story_reply_panel_active(&self) -> bool {
-        picks_go_to_story(self.stories.reply_open, self.stories.reply_panel)
-            && self.pickers.media_panel.open
+        picks_go_to_story(
+            self.stories.viewer_ui().reply_open,
+            self.stories.viewer_ui().reply_panel,
+        ) && self.pickers.media_panel.open
             && self.pickers.media_panel.reaction.is_none()
             && self.pickers.media_panel.status.is_none()
     }
 
     /// A recording started from the story reply row is in progress.
     pub(in crate::ui) fn story_reply_recording_active(&self) -> bool {
-        self.stories.reply_open && self.recording.purpose() == Some(CaptureFor::StoryReply)
+        self.stories.viewer_ui().reply_open
+            && self.recording.purpose() == Some(CaptureFor::StoryReply)
     }
 
     /// The reply row is done (sent, closed, or the story changed): close
@@ -67,16 +70,24 @@ impl QuillApp {
         {
             self.cancel_recording(cx);
         }
-        self.stories.reply_open = false;
-        self.stories.reply_panel = false;
+        if let Some(open) = self.stories.viewer_ui_mut() {
+            open.reply_open = false;
+        }
+        if let Some(open) = self.stories.viewer_ui_mut() {
+            open.reply_panel = false;
+        }
     }
 
     pub(super) fn toggle_story_reply_panel(&mut self, tab: PanelTab, cx: &mut Context<Self>) {
         if self.story_reply_panel_active() && self.pickers.media_panel.tab == tab {
-            self.stories.reply_panel = false;
+            if let Some(open) = self.stories.viewer_ui_mut() {
+                open.reply_panel = false;
+            }
             self.close_media_panel(cx);
         } else {
-            self.stories.reply_panel = true;
+            if let Some(open) = self.stories.viewer_ui_mut() {
+                open.reply_panel = true;
+            }
             self.open_media_panel(tab, cx);
         }
     }
@@ -372,7 +383,9 @@ impl QuillApp {
             return;
         }
         if self.story_reply_panel_active() {
-            self.stories.reply_panel = false;
+            if let Some(open) = self.stories.viewer_ui_mut() {
+                open.reply_panel = false;
+            }
             self.close_media_panel(cx);
         }
         match self.record_mode() {

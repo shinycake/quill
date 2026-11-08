@@ -220,7 +220,7 @@ impl QuillApp {
             })
             .collect();
         // B14: press-and-hold on the media pauses until release.
-        let paused_chip = self.stories.pause.is_paused().then(|| {
+        let paused_chip = self.stories.viewer_ui().pause.is_paused().then(|| {
             div()
                 .absolute()
                 .left(px(8.))

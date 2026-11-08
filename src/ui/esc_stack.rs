@@ -139,7 +139,9 @@ pub(super) static ESC_LAYERS: &[EscLayer] = &[
         "story-reply-panel",
         |app| app.story_reply_panel_active(),
         |app, _, cx| {
-            app.stories.reply_panel = false;
+            if let Some(open) = app.stories.viewer_ui_mut() {
+                open.reply_panel = false;
+            }
             app.close_media_panel(cx);
         }
     ),

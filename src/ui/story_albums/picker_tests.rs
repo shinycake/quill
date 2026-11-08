@@ -13,14 +13,20 @@ use quill::ids::ChatId;
 use quill::story_album_picker::AlbumPickerTarget;
 
 fn new_app(cx: &mut TestAppContext) -> (Entity<QuillApp>, VisualTestContext) {
+    new_app_with(cx, "ready-chats")
+}
+
+fn new_app_with(
+    cx: &mut TestAppContext,
+    demo: &'static str,
+) -> (Entity<QuillApp>, VisualTestContext) {
     cx.update(gpui_kit::init);
     cx.update(bind_keys);
     let slot = std::rc::Rc::new(std::cell::RefCell::new(None));
     let slot_in = slot.clone();
     let handle = cx.open_window(size(px(1100.), px(700.)), move |window, cx| {
-        let view = cx.new(|cx| {
-            QuillApp::new_with_demo(window, cx, None, Some(ScreenshotDemo::named("ready-chats")))
-        });
+        let view = cx
+            .new(|cx| QuillApp::new_with_demo(window, cx, None, Some(ScreenshotDemo::named(demo))));
         *slot_in.borrow_mut() = Some(view.clone());
         let focus = view.focus_handle(cx);
         window.focus(&focus, cx);
@@ -92,10 +98,20 @@ fn the_grid_has_more_while_the_archive_is_not_fully_loaded(cx: &mut TestAppConte
 
 #[gpui_kit::test]
 fn the_cover_picker_opens_and_closes(cx: &mut TestAppContext) {
-    let (app, mut vcx) = new_app(cx);
+    let (app, mut vcx) = new_app_with(cx, "ready-story-cover-strip");
     let vcx = &mut vcx;
-    app.update_in(vcx, |app, _, cx| app.toggle_story_cover_edit(1, 2, cx));
-    assert!(app.read_with(vcx, |app, _| app.stories.cover.is_some()));
-    app.update_in(vcx, |app, _, cx| app.toggle_story_cover_edit(1, 2, cx));
-    assert!(app.read_with(vcx, |app, _| app.stories.cover.is_none()));
+    vcx.run_until_parked();
+    let open = |app: &Entity<QuillApp>, vcx: &mut VisualTestContext| {
+        app.read_with(vcx, |app, _| app.stories.viewer_ui().cover.is_some())
+    };
+    assert!(open(&app, vcx), "the demo opens it over the viewer");
+    app.update_in(vcx, |app, _, cx| app.toggle_story_cover_edit(13, 7, cx));
+    assert!(!open(&app, vcx));
+    app.update_in(vcx, |app, _, cx| app.toggle_story_cover_edit(13, 7, cx));
+    assert!(open(&app, vcx));
+    // It is the viewer's: it goes with it, and cannot open without it.
+    app.update_in(vcx, |app, _, cx| app.close_story_viewer(cx));
+    assert!(!open(&app, vcx));
+    app.update_in(vcx, |app, _, cx| app.toggle_story_cover_edit(13, 7, cx));
+    assert!(!open(&app, vcx));
 }

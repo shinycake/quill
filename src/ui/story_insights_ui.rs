@@ -33,10 +33,16 @@ impl QuillApp {
         let Some(item) = self.stories.viewer.current().cloned() else {
             return;
         };
-        self.stories.stats_open = !self.stories.stats_open;
-        if self.stories.stats_open {
-            self.stories.viewers_open = false;
-            self.stories.report_open = false;
+        if let Some(open) = self.stories.viewer_ui_mut() {
+            open.stats_open = !open.stats_open;
+        }
+        if self.stories.viewer_ui().stats_open {
+            if let Some(open) = self.stories.viewer_ui_mut() {
+                open.viewers_open = false;
+            }
+            if let Some(open) = self.stories.viewer_ui_mut() {
+                open.report_open = false;
+            }
             self.fetch_story_stats(&item.chat_id, item.story_id, cx);
         }
         cx.notify();
@@ -80,7 +86,7 @@ impl QuillApp {
         else {
             return;
         };
-        if !self.stories.stats_open
+        if !self.stories.viewer_ui().stats_open
             || (state.forwards_error.is_some() && !scrolled)
             || !load_due(
                 scrolled_near_end(&self.stories.stats_scroll),

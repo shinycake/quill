@@ -352,7 +352,7 @@ fn space_types_in_the_comment_field_and_does_not_pause(cx: &mut TestAppContext) 
         app.stories.live.input.read(cx).value().to_string()
     });
     assert_eq!(value, "a b");
-    assert!(!app.read_with(vcx, |app, _| app.stories.pause.is_paused()));
+    assert!(!app.read_with(vcx, |app, _| app.stories.viewer_ui().pause.is_paused()));
     // The placeholder goes once there is text.
     assert!(find(vcx, "live-story-placeholder").is_none());
 }
@@ -533,7 +533,10 @@ fn the_emoji_panel_closes_with_the_reply_row(cx: &mut TestAppContext) {
     frames(vcx);
     app.read_with(vcx, |app, _| {
         assert!(!app.story_reply_panel_active());
-        assert!(!app.stories.reply_open, "the reply row is not left open");
+        assert!(
+            !app.stories.viewer_ui().reply_open,
+            "the reply row is not left open"
+        );
     });
 }
 
@@ -656,7 +659,9 @@ fn a_stream_in_pip_leaves_the_header_of_another_story_alone(cx: &mut TestAppCont
     // The reply panel feeds the photo story's reply field, not the hidden
     // live comment field.
     app.update(vcx, |app, cx| {
-        app.stories.reply_open = true;
+        if let Some(open) = app.stories.viewer_ui_mut() {
+            open.reply_open = true;
+        }
         app.toggle_story_reply_panel(crate::ui::media_panel::PanelTab::Emoji, cx);
     });
     frames(vcx);

@@ -277,24 +277,24 @@ impl QuillApp {
     /// cover and privacy editors and the management status line.
     pub(in crate::ui) fn story_action_row(&self, cx: &mut Context<Self>) -> AnyElement {
         let mut column = div().flex().flex_col().gap_2().items_center();
-        if self.stories.reaction_picker_open {
+        if self.stories.viewer_ui().reaction_picker_open {
             column = column.child(self.story_reaction_picker(cx));
         }
-        if self.stories.viewers_open {
+        if self.stories.viewer_ui().viewers_open {
             column = column.child(self.story_viewers_panel(cx));
         }
-        if self.stories.stats_open {
+        if self.stories.viewer_ui().stats_open {
             column = column.child(self.story_stats_panel(cx));
         }
-        if self.stories.report_open {
+        if self.stories.viewer_ui().report_open {
             column = column.child(self.story_report_ui(cx));
         }
         // Phase 9.5: cover-frame editor row (video stories) + privacy
         // editor panel + the management status line (pending / error).
-        if self.stories.cover.is_some() {
+        if self.stories.viewer_ui().cover.is_some() {
             column = column.child(self.story_cover_editor(cx));
         }
-        if self.stories.privacy_edit.is_some() {
+        if self.stories.viewer_ui().privacy_edit.is_some() {
             column = column.child(self.story_privacy_panel(cx));
         }
         if let Some(status) = self.story_manage_status() {

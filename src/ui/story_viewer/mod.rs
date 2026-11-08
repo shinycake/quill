@@ -80,7 +80,9 @@ impl QuillApp {
                 keys::Q_MEDIA_DEMO_SETSTORYREACTION_RUNS_WITH_LIVE,
             )));
         }
-        self.stories.reaction_picker_open = false;
+        if let Some(open) = self.stories.viewer_ui_mut() {
+            open.reaction_picker_open = false;
+        }
         cx.notify();
     }
 
@@ -116,8 +118,10 @@ impl QuillApp {
     /// open on a live connection fetches `getStoryAvailableReactions`
     /// (`schema/td_api.tl:13802`).
     pub(super) fn toggle_story_reaction_picker(&mut self, cx: &mut Context<Self>) {
-        self.stories.reaction_picker_open = !self.stories.reaction_picker_open;
-        if self.stories.reaction_picker_open {
+        if let Some(open) = self.stories.viewer_ui_mut() {
+            open.reaction_picker_open = !open.reaction_picker_open;
+        }
+        if self.stories.viewer_ui().reaction_picker_open {
             if let Some(live) = self.live.as_mut() {
                 if live.driver.session.stories.available_reactions.is_none() {
                     match live.driver.get_story_available_reactions() {
@@ -158,7 +162,9 @@ impl QuillApp {
                 keys::Q_MEDIA_DEMO_STORY_REACTIONS_RUN_WITH,
             )));
         }
-        self.stories.reaction_picker_open = false;
+        if let Some(open) = self.stories.viewer_ui_mut() {
+            open.reaction_picker_open = false;
+        }
         cx.notify();
     }
 
@@ -230,7 +236,9 @@ impl QuillApp {
                 keys::Q_MEDIA_DEMO_STORY_REACTIONS_RUN_WITH,
             )));
         }
-        self.stories.reaction_picker_open = false;
+        if let Some(open) = self.stories.viewer_ui_mut() {
+            open.reaction_picker_open = false;
+        }
         cx.notify();
     }
 
@@ -322,10 +330,12 @@ impl QuillApp {
     /// Phase 9.2: toggle the reply row in the viewer (`story.can_be_replied`
     /// gates the button).
     pub(super) fn toggle_story_reply(&mut self, cx: &mut Context<Self>) {
-        if self.stories.reply_open {
+        if self.stories.viewer_ui().reply_open {
             self.end_story_reply(cx);
         } else {
-            self.stories.reply_open = true;
+            if let Some(open) = self.stories.viewer_ui_mut() {
+                open.reply_open = true;
+            }
         }
         cx.notify();
     }
@@ -382,7 +392,9 @@ impl QuillApp {
                 keys::Q_MEDIA_DEMO_DELETESTORY_RUNS_WITH_LIVE,
             )));
         }
-        self.stories.reaction_picker_open = false;
+        if let Some(open) = self.stories.viewer_ui_mut() {
+            open.reaction_picker_open = false;
+        }
         self.end_story_reply(cx);
         cx.notify();
     }
@@ -395,9 +407,13 @@ impl QuillApp {
         let Some(item) = self.stories.viewer.current().cloned() else {
             return;
         };
-        self.stories.viewers_open = !self.stories.viewers_open;
-        self.stories.report_open = false;
-        if self.stories.viewers_open {
+        if let Some(open) = self.stories.viewer_ui_mut() {
+            open.viewers_open = !open.viewers_open;
+        }
+        if let Some(open) = self.stories.viewer_ui_mut() {
+            open.report_open = false;
+        }
+        if self.stories.viewer_ui().viewers_open {
             // Phase 9.5 review: reset rows before the fresh page-1
             // fetch — `begin_story_viewers` keeps rows for the same
             // story, so reopening would otherwise duplicate them.
@@ -483,9 +499,13 @@ impl QuillApp {
         let Some(item) = self.stories.viewer.current().cloned() else {
             return;
         };
-        self.stories.report_open = !self.stories.report_open;
-        self.stories.viewers_open = false;
-        if self.stories.report_open {
+        if let Some(open) = self.stories.viewer_ui_mut() {
+            open.report_open = !open.report_open;
+        }
+        if let Some(open) = self.stories.viewer_ui_mut() {
+            open.viewers_open = false;
+        }
+        if self.stories.viewer_ui().report_open {
             self.send_story_report_step(&item, "", "", cx);
         } else {
             self.clear_terminal_story_report();
@@ -648,34 +668,25 @@ impl QuillApp {
         // passcode lock) must not leave the clip playing.
         self.stories.playback.stop();
         self.stories.video = Default::default();
+        // Everything the viewer had open over its story, as one value: a
+        // close that skips the rest of `close_story_viewer` ends it too.
+        self.stories.drop_viewer_ui();
     }
 
     /// Phase 9.1: close the story viewer; `closeStory` marks the current
-    /// story as no longer being viewed.
+    /// story as no longer being viewed. What the viewer had open (panels,
+    /// editors, the pause, the notice) goes with it in
+    /// `release_story_viewer`; this ends what other owners hold for it.
     pub(super) fn close_story_viewer(&mut self, cx: &mut Context<Self>) {
+        // The reply row's panel and recording are the media panel's and
+        // the recorder's: they read the viewer's state, so before it goes.
+        self.end_story_reply(cx);
         self.release_story_viewer();
         // A live story playing on in Picture-in-Picture stays joined.
         if self.stories.live.watching != self.live_pip_story() {
             self.leave_live_story_view(cx);
         }
-        self.stories.reaction_picker_open = false;
-        self.end_story_reply(cx);
-        self.stories.viewers_open = false;
-        self.stories.report_open = false;
-        self.stories.stats_open = false;
         self.clear_terminal_story_report();
-        // Phase 9.5: drop the cover / privacy editors with the viewer.
-        self.stories.cover = None;
-        self.stories.cover_sent = false;
-        self.stories.privacy_edit = None;
-        self.stories.privacy_sent = false;
-        // B14: the player and the clock went with the viewer; the rest of
-        // its extra state goes too.
-        self.stories.pause.reset();
-        self.stories.share_open = false;
-        self.stories.close_friends_edit = None;
-        self.stories.close_friends_saving = false;
-        self.stories.notice = None;
         cx.notify();
     }
 
@@ -686,16 +697,16 @@ impl QuillApp {
     /// into this same predicate when they land (they live on their own
     /// parity branch; not touched here).
     pub(super) fn story_playback_paused(&self) -> bool {
-        self.stories.reaction_picker_open
-            || self.stories.reply_open
-            || self.stories.pause.is_paused()
+        self.stories.viewer_ui().reaction_picker_open
+            || self.stories.viewer_ui().reply_open
+            || self.stories.viewer_ui().pause.is_paused()
             // A repost's press waits for its story's answer.
             || self
                 .chat_list
                 .pending_story_open
                 .is_some_and(|open| open.if_gone.is_some())
-            || self.stories.share_open
-            || self.stories.close_friends_edit.is_some()
+            || self.stories.viewer_ui().share_open
+            || self.stories.viewer_ui().close_friends_edit.is_some()
             || self.stories.stealth_box.is_some()
     }
 
