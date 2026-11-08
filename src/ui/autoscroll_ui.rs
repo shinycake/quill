@@ -8,6 +8,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
+use gpui_kit::TestSupportExt;
 use gpui_kit::component::*;
 use gpui_kit::gpui::{
     Modifiers, MouseMoveEvent, PlatformInput, Point, ScrollDelta, ScrollEvent, TouchPhase, point,
@@ -25,6 +26,33 @@ const MARK_SIZE: f32 = 27.;
 #[derive(Default)]
 pub(super) struct AutoscrollUi {
     active: Option<Active>,
+}
+
+/// What a window's root draws for the mode of the history it shows: the
+/// anchor mark, and a left or right press anywhere ending the mode
+/// (`ListWidget::mousePressEvent`). Built with the window's state in
+/// place; the main window and each chat window put it on their root,
+/// whose origin is the window's, as the anchor's is.
+pub(super) struct AutoscrollLayer {
+    mark: Option<AnyElement>,
+    active: bool,
+}
+
+impl AutoscrollLayer {
+    /// Add the layer to `root`. A press is handled with the pressed
+    /// window's state in place (its `scope_probe` runs first).
+    pub(super) fn on<E>(self, root: E, app: WeakEntity<QuillApp>) -> E
+    where
+        E: ParentElement + InteractiveElement + FluentBuilder,
+    {
+        let stop = move |_: &MouseDownEvent, _: &mut Window, cx: &mut App| {
+            let _ = app.update(cx, |app, cx| app.autoscroll_stop(cx));
+        };
+        root.children(self.mark).when(self.active, |this| {
+            this.on_mouse_down(MouseButton::Left, stop.clone())
+                .on_mouse_down(MouseButton::Right, stop)
+        })
+    }
 }
 
 struct Active {
@@ -138,9 +166,18 @@ impl QuillApp {
         Some((active.anchor, scroll_step(delta, elapsed)))
     }
 
+    /// The mark and the press that ends the mode, for the window whose
+    /// state is in place.
+    pub(super) fn autoscroll_layer(&self, cx: &mut Context<Self>) -> AutoscrollLayer {
+        AutoscrollLayer {
+            mark: self.autoscroll_mark(cx),
+            active: self.autoscroll_active(),
+        }
+    }
+
     /// The anchor mark: a ring with an arrow for each direction, the one
     /// being pulled towards drawn strong.
-    pub(super) fn autoscroll_mark(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+    fn autoscroll_mark(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let active = self.history.autoscroll.active.as_ref()?;
         let theme = cx.theme();
         let strong = theme.foreground;
@@ -185,6 +222,7 @@ impl QuillApp {
                             .bg(faint),
                     )
                 })
+                .test_support()
                 .into_any_element(),
         )
     }

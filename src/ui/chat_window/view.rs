@@ -184,12 +184,13 @@ impl Render for ChatWindowView {
             shell.sync_kit_dialogs_in(Some(chat_id), window, cx)
         });
         let dialog_open = self.shell.read(cx).dialog_open();
-        let body = app.update(cx, |app, cx| {
+        let (body, autoscroll) = app.update(cx, |app, cx| {
             app.release_viewer_key_probe(window, cx);
             app.viewer_follow_window_fullscreen(window);
             app.seed_history_width(f32::from(window.viewport_size().width));
             app.adopt_remote_draft(window, cx);
-            app.chat_window_body(chat_id, window, cx)
+            let body = app.chat_window_body(chat_id, window, cx);
+            (body, app.autoscroll_layer(cx))
         });
         let disk_bar = app.update(cx, |app, cx| {
             app.set_window_scope(outer);
@@ -212,7 +213,7 @@ impl Render for ChatWindowView {
                     .truncate()
                     .child(self.title_shown.clone()),
             );
-        div()
+        let root = div()
             .id("chat-window")
             .size_full()
             .relative()
@@ -250,7 +251,11 @@ impl Render for ChatWindowView {
                 app: self.owner.clone(),
                 target: Some(chat_id),
                 child: CacheScope::new(self.slot.borrow().images.clone(), body).into_any_element(),
-            })
+            });
+        // Middle-click autoscroll's mark and stop-on-press, as on the main
+        // window's root.
+        autoscroll
+            .on(root, self.owner.clone())
             .when(dialog_open, |this| {
                 // Kit dialog contents paint at priority 10; occlude the
                 // body right below them (as the main shell does).

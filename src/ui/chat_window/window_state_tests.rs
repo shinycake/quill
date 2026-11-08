@@ -1,5 +1,6 @@
 //! Per-window state that work outside a window's own frame reaches: the
-//! loop over every window and each composer's spelling.
+//! loop over every window, each composer's spelling, and the history's
+//! middle-click autoscroll in a chat window.
 #![cfg(feature = "demo-capture")]
 
 use crate::ui::app::QuillApp;
@@ -7,7 +8,10 @@ use crate::ui::screenshot_demo::ScreenshotDemo;
 use crate::ui::shell::QuillShell;
 use gpui_kit::component::Root;
 use gpui_kit::test::TestWindowExt;
-use gpui_kit::{AnyWindowHandle, AppContext, Entity, Focusable, TestAppContext, px, size};
+use gpui_kit::{
+    AnyWindowHandle, AppContext, Entity, Focusable, Modifiers, MouseButton, TestAppContext,
+    VisualTestContext, point, px, size,
+};
 use quill::ids::ChatId;
 use std::time::Duration;
 
@@ -123,4 +127,44 @@ fn each_windows_composer_keeps_its_own_spelling(cx: &mut TestAppContext) {
         "vbqzx",
         "the chat window's check landed in its own composer"
     );
+}
+
+fn autoscrolling(app: &Entity<QuillApp>, cx: &mut TestAppContext) -> bool {
+    app.update(cx, |app, cx| {
+        app.in_window_scope(Some(OTHER), cx, |app, _| app.autoscroll_active())
+    })
+    .expect("the chat window is open")
+}
+
+/// A chat window draws the autoscroll anchor, and a left press ends the
+/// mode there, as in the main window.
+#[gpui_kit::test]
+fn a_chat_window_marks_autoscroll_and_a_click_ends_it(cx: &mut TestAppContext) {
+    let (app, _, chat_window) = new_app(cx);
+    cx.update_window(chat_window, |_, window, cx| {
+        app.update(cx, |app, cx| {
+            app.in_window_scope(Some(OTHER), cx, |app, cx| {
+                app.autoscroll_press(point(px(200.), px(300.)), window, cx);
+            })
+        })
+    })
+    .expect("the chat window");
+    assert!(autoscrolling(&app, cx));
+    let center = cx
+        .update_window(chat_window, |_, window, cx| {
+            window.render_frame(cx);
+            assert!(
+                window.try_find("autoscroll-mark").is_some(),
+                "the mark shows"
+            );
+            let size = window.viewport_size();
+            point(size.width / 2., size.height / 2.)
+        })
+        .expect("the chat window");
+
+    let mut vcx = VisualTestContext::from_window(chat_window, cx);
+    vcx.simulate_mouse_down(center, MouseButton::Left, Modifiers::default());
+    vcx.simulate_mouse_up(center, MouseButton::Left, Modifiers::default());
+    vcx.run_until_parked();
+    assert!(!autoscrolling(&app, cx), "the click ended it");
 }
