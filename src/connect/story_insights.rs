@@ -37,6 +37,18 @@ impl<S: JsonSender> ConnectDriver<S> {
             chat_id,
             story_id,
         ) {
+            // Its answer is on the way: the insights wait for this story
+            // again (they may show another story opened since), so the
+            // answer lands (`insights_for`).
+            self.session.begin_story_insights(chat_id.0, story_id);
+            let forwards_pending = self.session.requests.has_purpose_for_story(
+                RequestPurpose::GetStoryPublicForwards,
+                chat_id,
+                story_id,
+            );
+            if forwards_pending && let Some(state) = self.session.stories.insights.as_mut() {
+                state.forwards_loading = true;
+            }
             return Ok(None);
         }
         self.session.clear_story_insights();
@@ -151,25 +163,24 @@ impl<S: JsonSender> ConnectDriver<S> {
         &mut self,
         offset: &str,
     ) -> Result<Option<RequestId>, ConnectSendError> {
-        let Some(query) = self
+        let Some((query, waiting)) = self
             .session
             .stories
             .search
             .as_ref()
-            .map(|search| search.query.clone())
+            .map(|search| (search.query.clone(), search.request))
         else {
             return Ok(None);
         };
-        if self
-            .session
-            .requests
-            .has_purpose(RequestPurpose::SearchPublicStories)
-        {
+        // Only this search's own page in flight holds the next one back; an
+        // earlier search's answer lands in nothing (`story_search_sent`).
+        if waiting.is_some_and(|id| self.session.requests.get(id).is_some()) {
             return Ok(None);
         }
         let extra = self
             .session
             .request(RequestPurpose::SearchPublicStories, None);
+        self.session.story_search_sent(extra);
         let json = match &query {
             StorySearchQuery::Tag(tag) => search_public_stories_by_tag(extra, 0, tag, offset, PAGE),
             StorySearchQuery::Location { address, .. } => {

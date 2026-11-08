@@ -201,8 +201,10 @@ impl Session {
                 }
             }
             StoriesPayload::FoundStories { found } => {
-                if pending.is_some_and(|p| p.purpose == RequestPurpose::SearchPublicStories) {
-                    self.accept_found_stories(found);
+                if let Some(pending) = pending
+                    && pending.purpose == RequestPurpose::SearchPublicStories
+                {
+                    self.accept_found_stories(pending, found);
                 }
             }
             StoriesPayload::ReportStoryResult(result) => {

@@ -80,7 +80,12 @@ impl Session {
                     .custom_emoji_fetch_failed(std::time::Instant::now());
             }
             Some(RequestPurpose::SearchPublicStories) => {
-                self.fail_story_search(format!("Could not search stories: {}", error_reason(err)));
+                if let Some(pending) = pending {
+                    self.fail_story_search(
+                        pending,
+                        format!("Could not search stories: {}", error_reason(err)),
+                    );
+                }
             }
             Some(RequestPurpose::ReportStory) => {
                 if let Some(pending) = pending {
