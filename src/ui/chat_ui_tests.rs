@@ -165,3 +165,62 @@ fn leaving_the_chat_drops_its_state(cx: &mut TestAppContext) {
     let made_for = app.read_with(&vcx, |app, _| app.chat_ui.chat());
     assert_eq!(made_for, None);
 }
+
+/// A forum's topics share the chat id: an edit opened in one topic does
+/// not stay in the next topic's composer, and the value is made for the
+/// topic shown.
+#[gpui_kit::test]
+fn another_forum_topic_drops_the_edit(cx: &mut TestAppContext) {
+    use crate::ui::demos::composer::{FORUM_CHAT, RELEASES_TOPIC};
+    use quill::composer::{ComposerEdit, ComposerEditKind};
+    cx.update(gpui_kit::init);
+    let slot = Rc::new(std::cell::RefCell::new(None));
+    let slot_in = slot.clone();
+    let handle = cx.open_window(size(px(1100.), px(800.)), move |window, cx| {
+        let view = cx.new(|cx| {
+            QuillApp::new_with_demo(
+                window,
+                cx,
+                None,
+                Some(ScreenshotDemo::named("ready-composer-bars")),
+            )
+        });
+        let shell = cx.new(|_| QuillShell::new(view.clone()));
+        *slot_in.borrow_mut() = Some(view);
+        Root::new(shell, window, cx)
+    });
+    let app = slot.borrow().clone().expect("the app view");
+    let mut vcx = VisualTestContext::from_window(handle.into(), cx);
+    let select = |app: &Entity<QuillApp>, vcx: &mut VisualTestContext, topic: i32| {
+        app.update(vcx, |app, cx| {
+            if let Some(session) = app.demo_session.as_mut() {
+                session.select_topic(FORUM_CHAT, topic);
+            }
+            cx.notify();
+        });
+        frames(vcx);
+    };
+    open(&app, &mut vcx, FORUM_CHAT);
+    select(&app, &mut vcx, 1);
+    app.update(&mut vcx, |app, cx| {
+        let edit = ComposerEdit {
+            chat_id: FORUM_CHAT,
+            message_id: MessageId(20),
+            kind: ComposerEditKind::Text,
+            scheduled: false,
+            caption_above: false,
+            media_edit: Default::default(),
+            link_preview: Default::default(),
+        };
+        app.chat_ui.enter_edit(edit, String::new(), None);
+        cx.notify();
+    });
+    frames(&mut vcx);
+    assert!(app.read_with(&vcx, |app, _| app.chat_ui.is_editing()));
+
+    select(&app, &mut vcx, RELEASES_TOPIC);
+    app.read_with(&vcx, |app, _| {
+        assert!(!app.chat_ui.is_editing(), "the edit was the other topic's");
+        assert_eq!(app.chat_ui.chat(), Some(FORUM_CHAT));
+    });
+}

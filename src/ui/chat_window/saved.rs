@@ -75,7 +75,10 @@ impl QuillApp {
             .iter()
             .map(|open| (open.chat_id, open.handle, open.view.clone()))
             .collect();
-        if !windows.is_empty() {
+        // A change still waiting for its timer is saved now too: the timer
+        // is the screen's and goes with it, so a window closed just before
+        // the switch would otherwise come back next time.
+        if !windows.is_empty() || self.windows.save_pending {
             self.save_chat_windows_now(cx);
         }
         for (chat_id, handle, view) in windows {
@@ -94,8 +97,11 @@ impl QuillApp {
             return;
         }
         self.windows.save_pending = true;
-        // screen-scope: the save reads the windows and the account on screen when it fires, so it saves whatever is current.
-        cx.spawn(async move |this, cx| {
+        // The screen's own timer: after a switch it does not run, so it
+        // cannot file the next account's (still empty) windows under that
+        // account before they are restored. The switch saves the old
+        // account's windows itself (`close_chat_windows_for_switch`).
+        self.spawn_screen(cx, async move |this, cx| {
             cx.background_executor()
                 .timer(std::time::Duration::from_millis(600))
                 .await;

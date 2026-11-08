@@ -17,7 +17,7 @@
 
 use super::app::QuillApp;
 use gpui_kit::*;
-use quill::composer::{ComposerEdit, ComposerReplyTo, DeleteConfirm};
+use quill::composer::{ComposerEdit, ComposerReplyTo, DeleteConfirm, DraftTopic};
 use quill::ids::{ChatId, MessageId};
 
 /// The composer while a message is edited: the edit, the normal draft and
@@ -39,6 +39,11 @@ pub(crate) struct ChatUi {
     /// The chat this value was made for; `None` before any chat showed.
     /// Only [`QuillApp::enter_chat_ui`] sets it.
     chat: Option<ChatId>,
+    /// The topic or thread of `chat` it was made for (the composer's draft
+    /// slot, `Session::open_draft_topic`). A forum's topics share the
+    /// chat id, so without it an edit opened in one topic stayed in the
+    /// next topic's composer.
+    topic: DraftTopic,
     /// M2: the rich editor is open — the composer textarea is interpreted
     /// as block markup (`quill::rich::markup_to_blocks`) and sends via
     /// `inputMessageRichMessage`. Opened via the ⛶ button (visible after
@@ -92,6 +97,15 @@ impl ChatUi {
     pub(super) fn for_chat(chat: Option<ChatId>) -> Self {
         Self {
             chat,
+            ..Self::default()
+        }
+    }
+
+    /// A fresh value for `topic` of `chat`.
+    fn for_topic(chat: ChatId, topic: DraftTopic) -> Self {
+        Self {
+            chat: Some(chat),
+            topic,
             ..Self::default()
         }
     }
@@ -210,7 +224,7 @@ impl QuillApp {
         if self.chat_ui.chat == Some(chat) {
             return;
         }
-        let mut next = ChatUi::for_chat(Some(chat));
+        let mut next = ChatUi::for_topic(chat, self.open_draft_topic(chat));
         let old = std::mem::take(&mut *self.screen.chat_ui);
         next.pending_reply = old.pending_reply.filter(|reply| reply.belongs_to(chat));
         next.edit_mode = old.edit_mode.filter(|mode| mode.edit.chat_id == chat);
@@ -222,18 +236,33 @@ impl QuillApp {
         *self.screen.chat_ui = ChatUi::for_chat(None);
     }
 
-    /// Frame upkeep: the value follows the chat the view shows, however
-    /// that chat changed (an upgrade to a supergroup, a link, another
-    /// device). A value made for no chat is adopted by the first chat it
-    /// sees; one made for another chat is replaced.
+    /// Frame upkeep: the value follows the chat and topic the view shows,
+    /// however they changed (an upgrade to a supergroup, a link, another
+    /// device, another forum topic or thread). A value made for no chat is
+    /// adopted by the first chat it sees; one made for another chat, or
+    /// another topic of the same chat, is replaced. On a topic change the
+    /// reply comes along (the new topic's draft restore decides it, as for
+    /// any slot change); an edit does not, since its message is the old
+    /// topic's.
     pub(super) fn sync_chat_ui(&mut self) {
-        let shown = self.session().and_then(|session| session.open_chat);
-        match (self.chat_ui.chat, shown) {
-            (None, Some(chat)) => self.screen.chat_ui.chat = Some(chat),
-            (Some(made_for), Some(chat)) if made_for != chat => {
-                *self.screen.chat_ui = ChatUi::for_chat(Some(chat));
+        let Some(chat) = self.session().and_then(|session| session.open_chat) else {
+            return;
+        };
+        let topic = self.open_draft_topic(chat);
+        match self.chat_ui.chat {
+            None => {
+                self.screen.chat_ui.chat = Some(chat);
+                self.screen.chat_ui.topic = topic;
             }
-            _ => {}
+            Some(made_for) if made_for != chat => {
+                *self.screen.chat_ui = ChatUi::for_topic(chat, topic);
+            }
+            Some(_) if self.chat_ui.topic != topic => {
+                let mut next = ChatUi::for_topic(chat, topic);
+                next.pending_reply = self.screen.chat_ui.pending_reply.take();
+                *self.screen.chat_ui = next;
+            }
+            Some(_) => {}
         }
     }
 }

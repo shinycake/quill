@@ -13,9 +13,13 @@ pub(crate) struct PlayersUi {
     /// Shared across every animated sticker in the history, the panel and
     /// the viewer (`sticker_player`).
     pub(super) stickers: std::rc::Rc<super::sticker_player::Player>,
-    /// Animated emoji playing in the history (`animated_emoji`).
-    pub(super) emoji_plays: std::cell::RefCell<quill::animated_emoji::EmojiPlays>,
-    /// Inline video players in history rows (`inline_players`).
+    /// Animated emoji playing in the history (`animated_emoji`), keyed by
+    /// chat and message ids, so filled for one account at a time.
+    pub(super) emoji_plays:
+        std::cell::RefCell<quill::ids::OwnedBy<quill::animated_emoji::EmojiPlays>>,
+    /// Inline video players in history rows (`inline_players`), keyed by
+    /// chat and message ids under the account they play for
+    /// (`InlineVideos::own`).
     pub(super) inline_videos: std::rc::Rc<super::inline_players::InlineVideos>,
     /// Animated profile photos (`userpic_videos`).
     pub(super) userpic_videos: std::rc::Rc<super::userpic_videos::UserpicVideos>,

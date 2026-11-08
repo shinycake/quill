@@ -69,6 +69,47 @@ impl<T> OfAccount<T> {
     }
 }
 
+/// An app-wide value that belongs to one account at a time: kept by ids
+/// that repeat across accounts (chat and message ids), so the account it
+/// was filled for is part of its key. Asked for under another account it
+/// starts over, whatever path changed the account on screen.
+#[derive(Debug, Default)]
+pub struct OwnedBy<T> {
+    owner: Option<AccountKey>,
+    value: T,
+}
+
+impl<T: Default> OwnedBy<T> {
+    /// The value for `owner`: the one kept when it is `owner`'s, else a
+    /// fresh one (what another account kept is dropped).
+    pub fn for_owner(&mut self, owner: &AccountKey) -> &mut T {
+        if self.owner.as_ref() != Some(owner) {
+            self.owner = Some(owner.clone());
+            self.value = T::default();
+        }
+        &mut self.value
+    }
+
+    /// The account the value was filled for.
+    pub fn owner(&self) -> Option<&AccountKey> {
+        self.owner.as_ref()
+    }
+
+    /// The value, for reading (and for changes that stay with whatever
+    /// owner it has: forgetting entries, clearing).
+    pub fn value_mut(&mut self) -> &mut T {
+        &mut self.value
+    }
+}
+
+impl<T> std::ops::Deref for OwnedBy<T> {
+    type Target = T;
+
+    fn deref(&self) -> &T {
+        &self.value
+    }
+}
+
 /// A chat of one account: chat ids are TDLib's, the same for a group two
 /// signed-in accounts share, so per-chat memory kept app-wide carries the
 /// account.

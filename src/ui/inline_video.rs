@@ -238,6 +238,9 @@ impl QuillApp {
     ) {
         let window = self.windows.scope;
         let videos = &self.players.inline_videos;
+        if let Some(session) = self.session() {
+            videos.own(&session.account);
+        }
         videos.frame_start(window, history_drawn, host, cx);
         if self.viewer.state.is_open() || self.stories.viewer.is_open() {
             videos.leave_window(window);

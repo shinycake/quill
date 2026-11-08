@@ -140,7 +140,7 @@ impl QuillApp {
     /// goes.
     pub(in crate::ui) fn stop_sticker_playback(&mut self) {
         self.players.stickers.stop();
-        self.players.emoji_plays.get_mut().clear();
+        self.players.emoji_plays.get_mut().value_mut().clear();
     }
 
     /// `window` let go of `chat` (`None`: the main window), or of all of it
@@ -166,7 +166,11 @@ impl QuillApp {
         if let Some(chat) = chat
             && !self.chat_shown_elsewhere(chat, window, cx)
         {
-            self.players.emoji_plays.get_mut().leave_chat(chat.0);
+            self.players
+                .emoji_plays
+                .get_mut()
+                .value_mut()
+                .leave_chat(chat.0);
         }
         match what {
             // On screen until the window draws again.

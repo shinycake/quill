@@ -86,6 +86,11 @@ pub fn no_frame(window: WindowState) -> String {
     }
 }
 
+/// The account on screen changed between two steps of one command.
+pub fn account_changed() -> String {
+    "The account on screen changed; the rest of the command did not run.".into()
+}
+
 /// The window closed before the command ran.
 pub fn window_closed() -> String {
     "Quill's window closed before the command ran.".into()

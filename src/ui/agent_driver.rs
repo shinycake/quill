@@ -154,6 +154,10 @@ impl QuillApp {
         window.set_a11y_forced(true);
         let send_key_mode = self.chat_prefs.send_key_mode;
         let generation = grants::generation();
+        // The account the command was asked of: a switch between its steps
+        // (a notification click during a glide) stops the rest, which was
+        // planned on this account's tree.
+        let screen = self.screen_epoch();
         let before = window.a11y_tree_frame();
         // screen-scope: an agent's command drives whichever account is on screen when it runs.
         QuillApp::spawn_app_in(window, cx, async move |app, cx| {
@@ -224,7 +228,7 @@ impl QuillApp {
                 let outcome = app
                     .update_in(cx, |app, window, _| {
                         (
-                            check_step(&pending, generation, &surface, app),
+                            check_step(&pending, generation, screen, &surface, app),
                             window.a11y_tree_frame(),
                         )
                     })
@@ -416,18 +420,23 @@ fn command_summary(command: &UiCommand, tree: &UiTree) -> String {
 }
 
 /// The checks before one step, in the update that injects it: the tool
-/// still waits, the switches and the grants are as they were, no screen
-/// reader took over, and the surface still takes input. Returns the
+/// still waits, the switches and the grants are as they were, the account
+/// on screen is the one the command was asked of, no screen reader took
+/// over, and the surface still takes input. Returns the
 /// surface to hold the next step to (a key that opened another granted
 /// chat moves it there).
 fn check_step(
     pending: &Pending,
     generation: u64,
+    screen: super::on_screen::ScreenEpoch,
     expected: &Surface,
     app: &QuillApp,
 ) -> Result<Surface, String> {
     if pending.cancelled() {
         return Err(policy::cancelled());
+    }
+    if app.screen_epoch() != screen {
+        return Err(policy::account_changed());
     }
     if let Some(refusal) = policy::switch_refusal() {
         return Err(refusal);
@@ -598,3 +607,8 @@ mod confirm_tests;
 #[cfg(feature = "demo-capture")]
 #[path = "agent_driver_hard_tests.rs"]
 mod hard_tests;
+
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+#[path = "agent_driver_switch_tests.rs"]
+mod switch_tests;
