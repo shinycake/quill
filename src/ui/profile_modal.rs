@@ -12,6 +12,7 @@
 use super::app::QuillApp;
 use super::chat_theme::bg_canvas;
 use super::motion::{Glide, ease_out_circ};
+use crate::ui::dismiss_layer::DismissLayer;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::*;
 use gpui_kit::component::*;
@@ -161,8 +162,6 @@ impl QuillApp {
             .bg(bg_canvas())
             .shadow_lg()
             .overflow_hidden()
-            // Clicks inside the card never reach the backdrop.
-            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
             .child(
                 div()
                     .flex()
@@ -194,25 +193,19 @@ impl QuillApp {
                     .child(content),
             );
         Some(
-            div()
-                .id("profile-modal")
-                .occlude()
-                .absolute()
-                .inset_0()
-                .flex()
-                .items_center()
-                .justify_center()
-                .bg(gpui_kit::black().opacity(0.45 * shown))
-                .on_mouse_down(
-                    MouseButton::Left,
-                    cx.listener(|this, _, _, cx| {
-                        this.close_profile_modal(cx);
-                        cx.stop_propagation();
-                    }),
-                )
-                .on_mouse_down(MouseButton::Right, |_, _, cx| cx.stop_propagation())
-                .child(card)
-                .into_any_element(),
+            DismissLayer::new(
+                "profile-modal",
+                cx.listener(|this, _, _, cx| this.close_profile_modal(cx)),
+            )
+            .layer(|layer| {
+                layer
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .bg(gpui_kit::black().opacity(0.45 * shown))
+            })
+            .content(card)
+            .into_any_element(),
         )
     }
 }

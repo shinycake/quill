@@ -21,6 +21,7 @@
 use super::app::QuillApp;
 use super::call_panel_devices::DeviceMenuTarget;
 use super::dialogs::rtmp_stream::{RtmpRows, rtmp_info_rows};
+use super::dismiss_layer::DismissLayer;
 use super::group_call_stream_layout::{StreamFacts, leave_stream_full};
 use super::video_player::controls::bar_disc;
 use crate::ui::status_note::StatusNote;
@@ -175,34 +176,34 @@ impl QuillApp {
             ),
         };
         Some(
-            div()
-                .id("group-call-stream-overlay")
-                .absolute()
-                .inset_0()
-                .bg(hsla(0., 0., 0., 0.5))
-                .flex()
-                .items_center()
-                .justify_center()
-                .on_click(cx.listener(|this, _, _, cx| this.close_stream_overlay(cx)))
-                .child(
-                    div()
-                        .id("group-call-stream-box")
-                        .debug_selector(|| "group-call-stream-box".into())
-                        .w(px(340.))
-                        .max_h(relative(0.9))
-                        .overflow_y_scroll()
-                        .rounded(px(12.))
-                        .bg(cx.theme().background)
-                        .text_color(cx.theme().foreground)
-                        .p(px(16.))
-                        .flex()
-                        .flex_col()
-                        .gap(px(10.))
-                        // Clicks inside the box stay in it.
-                        .on_click(|_, _, cx| cx.stop_propagation())
-                        .child(content),
-                )
-                .into_any_element(),
+            DismissLayer::new(
+                "group-call-stream-overlay",
+                cx.listener(|this, _, _, cx| this.close_stream_overlay(cx)),
+            )
+            .layer(|layer| {
+                layer
+                    .bg(hsla(0., 0., 0., 0.5))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+            })
+            .content(
+                div()
+                    .id("group-call-stream-box")
+                    .debug_selector(|| "group-call-stream-box".into())
+                    .w(px(340.))
+                    .max_h(relative(0.9))
+                    .overflow_y_scroll()
+                    .rounded(px(12.))
+                    .bg(cx.theme().background)
+                    .text_color(cx.theme().foreground)
+                    .p(px(16.))
+                    .flex()
+                    .flex_col()
+                    .gap(px(10.))
+                    .child(content),
+            )
+            .into_any_element(),
         )
     }
 

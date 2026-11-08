@@ -299,6 +299,7 @@ impl QuillApp {
             .items_center()
             .justify_center()
             .child(
+                // click-through-ok: the story panel over it occludes.
                 div()
                     .id("story-viewer-backdrop")
                     .occlude()

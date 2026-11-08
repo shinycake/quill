@@ -1,6 +1,7 @@
 //! Methods moved out of `message_actions.rs` to keep files under 1000 lines.
 
 use super::*;
+use crate::ui::dismiss_layer::DismissLayer;
 use crate::ui::menu_surface::MenuSurface;
 use quill::lang::{keys, tr, tr_with};
 
@@ -903,53 +904,33 @@ impl QuillApp {
         } else {
             panel = panel.children(stacked);
         }
-        div()
-            .id("message-menu-overlay")
-            .track_focus(&self.frame.context_menu_focus)
-            .occlude()
-            .absolute()
-            .top_0()
-            .left_0()
-            .right_0()
-            .bottom_0()
-            .child(
-                div()
-                    .id("message-menu-backdrop")
-                    .occlude()
-                    .absolute()
-                    .top_0()
-                    .left_0()
-                    .right_0()
-                    .bottom_0()
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.close_message_menu();
-                        cx.notify();
-                    })),
-            )
-            .child(
-                anchored()
-                    .position(menu.position)
-                    .snap_to_window_with_margin(px(8.))
-                    .child(
+        DismissLayer::new(
+            "message-menu-overlay",
+            cx.listener(|this, _, _, cx| {
+                this.close_message_menu();
+                cx.notify();
+            }),
+        )
+        .layer(|layer| layer.track_focus(&self.frame.context_menu_focus))
+        .anchored(
+            menu.position,
+            div()
+                .flex()
+                .flex_col()
+                .items_start()
+                .gap_1()
+                .when_some(strip, |this, strip| {
+                    this.child(
                         div()
-                            .flex()
-                            .flex_col()
-                            .items_start()
-                            .gap_1()
-                            .when_some(strip, |this, strip| {
-                                this.child(
-                                    div()
-                                        .id("message-menu-reactions")
-                                        .occlude()
-                                        .menu_surface(cx)
-                                        .rounded_xl()
-                                        .child(strip),
-                                )
-                            })
-                            .child(panel),
-                    ),
-            )
-            .focus_trap("message-menu-focus", &self.frame.context_menu_focus)
-            .into_any_element()
+                            .id("message-menu-reactions")
+                            .occlude()
+                            .menu_surface(cx)
+                            .rounded_xl()
+                            .child(strip),
+                    )
+                })
+                .child(panel),
+        )
+        .focus_trap("message-menu-focus", &self.frame.context_menu_focus)
     }
 }

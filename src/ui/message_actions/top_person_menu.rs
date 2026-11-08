@@ -5,6 +5,7 @@
 
 use super::chat_menu_submenus::{MENU_WIDTH, menu_row};
 use super::*;
+use crate::ui::dismiss_layer::DismissLayer;
 use crate::ui::menu_states::ChatMenuState;
 use crate::ui::menu_surface::MenuSurface;
 use gpui_kit::assets::IconName as Lucide;
@@ -44,43 +45,23 @@ impl QuillApp {
             .py_1()
             .menu_surface(cx)
             .children(rows);
-        div()
-            .id("chat-menu-overlay")
-            .track_focus(&self.frame.context_menu_focus)
-            .occlude()
-            .absolute()
-            .top_0()
-            .left_0()
-            .right_0()
-            .bottom_0()
-            .child(
-                div()
-                    .id("chat-menu-backdrop")
-                    .occlude()
-                    .absolute()
-                    .top_0()
-                    .left_0()
-                    .right_0()
-                    .bottom_0()
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.chat_list.menu = None;
-                        cx.notify();
-                    })),
-            )
-            .child(
-                anchored()
-                    .position(position)
-                    .snap_to_window_with_margin(px(8.))
-                    .child(
-                        div()
-                            .id("chat-menu-chat")
-                            .role(gpui_kit::Role::Group)
-                            .a11y_tag(quill::agent::ui_driver::redact::chat_tag(chat_id.0))
-                            .child(panel),
-                    ),
-            )
-            .focus_trap("chat-menu-focus", &self.frame.context_menu_focus)
-            .into_any_element()
+        DismissLayer::new(
+            "chat-menu-overlay",
+            cx.listener(|this, _, _, cx| {
+                this.chat_list.menu = None;
+                cx.notify();
+            }),
+        )
+        .layer(|layer| layer.track_focus(&self.frame.context_menu_focus))
+        .anchored(
+            position,
+            div()
+                .id("chat-menu-chat")
+                .role(gpui_kit::Role::Group)
+                .a11y_tag(quill::agent::ui_driver::redact::chat_tag(chat_id.0))
+                .child(panel),
+        )
+        .focus_trap("chat-menu-focus", &self.frame.context_menu_focus)
     }
 
     pub(in crate::ui) fn top_person_menu_overlay(

@@ -205,6 +205,8 @@ impl QuillApp {
         if forced {
             // tdesktop dims the box and a click shows the toast.
             groups = groups.relative().opacity(0.6).child(
+                // click-through-ok: covers the dimmed rows, which a click
+                // explains instead of toggling.
                 div()
                     .id("power-forced-overlay")
                     .absolute()

@@ -112,7 +112,6 @@ impl QuillApp {
             .rounded(at(radius))
             .bg(rgba(view.colors.glass))
             .overflow_hidden()
-            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
             .child(
                 div()
                     .w(at(width))

@@ -8,6 +8,7 @@
 //! chat list was).
 
 use super::super::app::QuillApp;
+use crate::ui::dismiss_layer::DismissLayer;
 use gpui_kit::TestSupportExt;
 
 use gpui_kit::prelude::FluentBuilder;
@@ -135,27 +136,14 @@ impl QuillApp {
                 let panel = self.media_panel(cx);
                 let panel = self.selector_panel(panel);
                 this.child(
-                    div()
-                        .id("reaction-selector-layer")
-                        .occlude()
-                        .absolute()
-                        .inset_0()
-                        .child(
-                            div()
-                                .id("reaction-selector-backdrop")
-                                .absolute()
-                                .inset_0()
-                                .on_click(cx.listener(|this, _, _, cx| {
-                                    this.close_media_panel(cx);
-                                })),
-                        )
-                        .child(
-                            anchored()
-                                .position(target.position)
-                                .snap_to_window_with_margin(px(8.))
-                                .child(panel),
-                        )
-                        .children(self.panel_painter()),
+                    DismissLayer::new(
+                        "reaction-selector-layer",
+                        cx.listener(|this, _, _, cx| {
+                            this.close_media_panel(cx);
+                        }),
+                    )
+                    .anchored(target.position, panel)
+                    .decorations(self.panel_painter()),
                 )
             })
             // MED4: Instant View reader overlay (above the menu).

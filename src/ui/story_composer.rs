@@ -2,8 +2,10 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
+use super::dismiss_layer::DismissLayer;
 use super::pressable::PressableDiv;
 use super::*;
+use gpui_kit::TestSupportExt;
 use gpui_kit::component::button::*;
 use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::input::Textarea;
@@ -708,186 +710,167 @@ impl QuillApp {
                 .into_any_element()
         });
 
-        div()
-            .id("story-composer-overlay")
-            .occlude()
-            .absolute()
-            .top_0()
-            .left_0()
-            .right_0()
-            .bottom_0()
-            .flex()
-            .items_center()
-            .justify_center()
-            .child(
-                div()
-                    .id("story-composer-backdrop")
-                    .occlude()
-                    .absolute()
-                    .top_0()
-                    .left_0()
-                    .right_0()
-                    .bottom_0()
-                    .bg(scrim())
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.close_story_composer(cx);
-                    })),
-            )
-            .child(
-                div()
-                    .id("story-composer-panel")
-                    .flex()
-                    .flex_col()
-                    .gap_2()
-                    .p_4()
-                    .max_w(px(480.))
-                    .max_h_full()
-                    // Phase 9.4: the options section outgrew the window —
-                    // scroll instead of clipping the Post button.
-                    .overflow_y_scroll()
-                    .rounded_lg()
-                    .bg(bg_canvas())
-                    .child(
+        DismissLayer::new(
+            "story-composer-overlay",
+            cx.listener(|this, _, _, cx| this.close_story_composer(cx)),
+        )
+        .layer(|layer| layer.flex().items_center().justify_center().bg(scrim()))
+        .content(
+            div()
+                .id("story-composer-panel")
+                .test_support()
+                .flex()
+                .flex_col()
+                .gap_2()
+                .p_4()
+                .max_w(px(480.))
+                .max_h_full()
+                // Phase 9.4: the options section outgrew the window —
+                // scroll instead of clipping the Post button.
+                .overflow_y_scroll()
+                .rounded_lg()
+                .bg(bg_canvas())
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .justify_between()
+                        .child(div().font_semibold().text_color(text_bright()).child(title))
+                        .child(
+                            div()
+                                .id("story-composer-close")
+                                .role(gpui_kit::Role::Button)
+                                .aria_label(tr(keys::Q_MEDIA_CLOSE_STORY_COMPOSER))
+                                .tab_index(0)
+                                .cursor_pointer()
+                                .pressable(cx.theme())
+                                .px_2()
+                                .py_1()
+                                .rounded_md()
+                                .text_color(text_bright())
+                                .child(tr(keys::CLOSE))
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.close_story_composer(cx);
+                                })),
+                        ),
+                )
+                .child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .items_center()
+                        .gap_2()
+                        .child(preview)
+                        .child(
+                            div()
+                                .w_full()
+                                .flex()
+                                .flex_col()
+                                .gap_1()
+                                .child(media_row)
+                                .child(
+                                    div()
+                                        .text_xs()
+                                        .text_color(text_muted())
+                                        .child(tr(keys::Q_MEDIA_CAPTION)),
+                                )
+                                .child(
+                                    Textarea::new(&self.stories.composer_caption)
+                                        .aria_label(tr(keys::Q_MEDIA_STORY_CAPTION))
+                                        .h(px(64.)),
+                                ),
+                        ),
+                )
+                // Phase 9.5: the "post as" picker (new posts and
+                // reposts only); privacy is hidden in edit mode and
+                // for channel/supergroup posts (server-ignored there
+                // — `postStory`, td_api.tl:13715).
+                .when_some(post_as, |this, picker| this.child(picker))
+                .when(show_privacy, |this| {
+                    this.child(
                         div()
-                            .flex()
-                            .items_center()
-                            .justify_between()
-                            .child(div().font_semibold().text_color(text_bright()).child(title))
-                            .child(
-                                div()
-                                    .id("story-composer-close")
-                                    .role(gpui_kit::Role::Button)
-                                    .aria_label(tr(keys::Q_MEDIA_CLOSE_STORY_COMPOSER))
-                                    .tab_index(0)
-                                    .cursor_pointer()
-                                    .pressable(cx.theme())
-                                    .px_2()
-                                    .py_1()
-                                    .rounded_md()
-                                    .text_color(text_bright())
-                                    .child(tr(keys::CLOSE))
-                                    .on_click(cx.listener(|this, _, _, cx| {
-                                        this.close_story_composer(cx);
-                                    })),
-                            ),
+                            .text_xs()
+                            .text_color(text_muted())
+                            .child(tr(keys::Q_MEDIA_WHO_CAN_SEE_IT)),
+                    )
+                    .child(privacy)
+                })
+                .when_some(users_picker.filter(|_| show_privacy), |this, picker| {
+                    this.child(picker)
+                })
+                // Phase 9.4: expiry, areas (link + suggested-reaction
+                // stickers), and the post-to-chat-page /
+                // protect-content toggles. Phase 9.5: expiry and the
+                // toggles have no `editStory` fields — hidden in edit
+                // mode; areas only apply when the media is replaced.
+                .when(!is_edit, |this| {
+                    this.child(
+                        div()
+                            .text_xs()
+                            .text_color(text_muted())
+                            .child(tr(keys::Q_MEDIA_EXPIRES_AFTER)),
+                    )
+                    .child(expiry)
+                })
+                .when(areas_editable, |this| {
+                    this.child(
+                        div()
+                            .text_xs()
+                            .text_color(text_muted())
+                            .child(tr(keys::Q_MEDIA_STORY_STICKERS)),
                     )
                     .child(
                         div()
-                            .flex()
-                            .flex_col()
-                            .items_center()
-                            .gap_2()
-                            .child(preview)
-                            .child(
-                                div()
-                                    .w_full()
-                                    .flex()
-                                    .flex_col()
-                                    .gap_1()
-                                    .child(media_row)
-                                    .child(
-                                        div()
-                                            .text_xs()
-                                            .text_color(text_muted())
-                                            .child(tr(keys::Q_MEDIA_CAPTION)),
-                                    )
-                                    .child(
-                                        Textarea::new(&self.stories.composer_caption)
-                                            .aria_label(tr(keys::Q_MEDIA_STORY_CAPTION))
-                                            .h(px(64.)),
-                                    ),
-                            ),
+                            .text_xs()
+                            .text_color(text_muted())
+                            .child(tr(keys::Q_MEDIA_LINK_STICKER_URL)),
                     )
-                    // Phase 9.5: the "post as" picker (new posts and
-                    // reposts only); privacy is hidden in edit mode and
-                    // for channel/supergroup posts (server-ignored there
-                    // — `postStory`, td_api.tl:13715).
-                    .when_some(post_as, |this, picker| this.child(picker))
-                    .when(show_privacy, |this| {
-                        this.child(
-                            div()
-                                .text_xs()
-                                .text_color(text_muted())
-                                .child(tr(keys::Q_MEDIA_WHO_CAN_SEE_IT)),
-                        )
-                        .child(privacy)
-                    })
-                    .when_some(users_picker.filter(|_| show_privacy), |this, picker| {
-                        this.child(picker)
-                    })
-                    // Phase 9.4: expiry, areas (link + suggested-reaction
-                    // stickers), and the post-to-chat-page /
-                    // protect-content toggles. Phase 9.5: expiry and the
-                    // toggles have no `editStory` fields — hidden in edit
-                    // mode; areas only apply when the media is replaced.
-                    .when(!is_edit, |this| {
-                        this.child(
-                            div()
-                                .text_xs()
-                                .text_color(text_muted())
-                                .child(tr(keys::Q_MEDIA_EXPIRES_AFTER)),
-                        )
-                        .child(expiry)
-                    })
-                    .when(areas_editable, |this| {
-                        this.child(
-                            div()
-                                .text_xs()
-                                .text_color(text_muted())
-                                .child(tr(keys::Q_MEDIA_STORY_STICKERS)),
-                        )
-                        .child(
-                            div()
-                                .text_xs()
-                                .text_color(text_muted())
-                                .child(tr(keys::Q_MEDIA_LINK_STICKER_URL)),
-                        )
-                        .child(
-                            Textarea::new(&self.stories.composer_link)
-                                .aria_label(tr(keys::Q_MEDIA_STORY_LINK))
-                                .h(px(32.)),
-                        )
-                        .child(
-                            div()
-                                .text_xs()
-                                .text_color(text_muted())
-                                .child(tr(keys::Q_MEDIA_REACTION_STICKERS_EMOJI_SPACE_SEPARATED)),
-                        )
-                        .child(
-                            Textarea::new(&self.stories.composer_reaction)
-                                .aria_label(tr(keys::Q_MEDIA_STORY_REACTION_EMOJI))
-                                .h(px(32.)),
-                        )
-                    })
-                    .when(!is_edit, |this| {
-                        this.child(
-                            div()
-                                .text_xs()
-                                .text_color(text_muted())
-                                .child(tr(keys::Q_MEDIA_OPTIONS)),
-                        )
-                        .child(toggles)
-                    })
-                    .when_some(status, |this, status| {
-                        this.child(div().text_sm().text_color(text_bright()).child(status))
-                    })
                     .child(
-                        Button::new("story-composer-post")
-                            // Phase 9.5: the button follows the composer mode.
-                            .label(if busy {
-                                tr(keys::Q_MEDIA_WORKING)
-                            } else if is_edit {
-                                tr(keys::Q_MEDIA_SAVE_STORY)
-                            } else if is_repost {
-                                tr(keys::Q_MEDIA_REPOST_STORY)
-                            } else {
-                                tr(keys::Q_MEDIA_POST_STORY)
-                            })
-                            .disabled(busy)
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.story_composer_post(cx);
-                            })),
-                    ),
-            )
+                        Textarea::new(&self.stories.composer_link)
+                            .aria_label(tr(keys::Q_MEDIA_STORY_LINK))
+                            .h(px(32.)),
+                    )
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(text_muted())
+                            .child(tr(keys::Q_MEDIA_REACTION_STICKERS_EMOJI_SPACE_SEPARATED)),
+                    )
+                    .child(
+                        Textarea::new(&self.stories.composer_reaction)
+                            .aria_label(tr(keys::Q_MEDIA_STORY_REACTION_EMOJI))
+                            .h(px(32.)),
+                    )
+                })
+                .when(!is_edit, |this| {
+                    this.child(
+                        div()
+                            .text_xs()
+                            .text_color(text_muted())
+                            .child(tr(keys::Q_MEDIA_OPTIONS)),
+                    )
+                    .child(toggles)
+                })
+                .when_some(status, |this, status| {
+                    this.child(div().text_sm().text_color(text_bright()).child(status))
+                })
+                .child(
+                    Button::new("story-composer-post")
+                        // Phase 9.5: the button follows the composer mode.
+                        .label(if busy {
+                            tr(keys::Q_MEDIA_WORKING)
+                        } else if is_edit {
+                            tr(keys::Q_MEDIA_SAVE_STORY)
+                        } else if is_repost {
+                            tr(keys::Q_MEDIA_REPOST_STORY)
+                        } else {
+                            tr(keys::Q_MEDIA_POST_STORY)
+                        })
+                        .disabled(busy)
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.story_composer_post(cx);
+                        })),
+                ),
+        )
     }
 }
