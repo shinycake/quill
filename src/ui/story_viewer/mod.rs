@@ -545,12 +545,15 @@ impl QuillApp {
             open.report_open = false;
             open.viewers_open = false;
         }
-        if let Some(live) = self.live.as_mut() {
-            live.driver.session.clear_story_report();
-            live.driver.session.clear_story_viewers();
-        } else if let Some(session) = self.demo_session.as_mut() {
+        let session = match self.live.as_mut() {
+            Some(live) => Some(&mut live.driver.session),
+            None => self.demo_session.as_deref_mut(),
+        };
+        if let Some(session) = session {
             session.clear_story_report();
             session.clear_story_viewers();
+            // A failed edit's line was about the story it edited.
+            session.stories.manage.error = None;
         }
     }
 

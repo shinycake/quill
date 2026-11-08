@@ -182,16 +182,28 @@ impl QuillApp {
         staged: Option<ChatAdminRights>,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let cached = self
+        let fetch = self
             .session()
-            .and_then(|session| session.groups.admin_rights.get(&(chat_id.0, user_id)))
-            .and_then(|fetch| match fetch {
-                AdminRightsFetch::Loaded(rights) => Some(*rights),
-                _ => None,
-            });
+            .and_then(|session| session.groups.admin_rights.get(&(chat_id.0, user_id)));
+        let cached = fetch.and_then(|fetch| match fetch {
+            AdminRightsFetch::Loaded(rights) => Some(*rights),
+            _ => None,
+        });
+        // A failed fetch says so (reopening the editor asks again); it is
+        // not drawn as still loading.
+        let failed = matches!(fetch, Some(AdminRightsFetch::Failed(_)));
         let rights = staged.or(cached);
         let mut panel = div().id("admin-rights-dialog").flex().flex_col().gap_3();
         match rights {
+            None if failed => {
+                panel = panel.child(
+                    div()
+                        .id("admin-rights-failed")
+                        .text_sm()
+                        .text_color(cx.theme().danger)
+                        .child(tr(keys::Q_PEOPLE_COULD_NOT_LOAD_ADMIN_RIGHTS)),
+                );
+            }
             None => {
                 panel = panel.child(
                     div()

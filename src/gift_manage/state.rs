@@ -37,6 +37,10 @@ pub struct SendGiftState {
     pub premium_options: Vec<PremiumGiftOption>,
     pub premium_loaded: bool,
     pub sending: bool,
+    /// The `sendGift` in flight (0: none): only its answer ends `sending`
+    /// and says "Gift sent." in this dialog, not one sent from a dialog
+    /// closed before it came.
+    pub sending_request: u64,
     pub error: Option<String>,
     pub done: Option<String>,
 }

@@ -342,15 +342,14 @@ impl<S: JsonSender> ConnectDriver<S> {
                 EnvelopePayload::Users(UsersPayload::CheckChatUsernameResult(result)) => owned
                     .envelope
                     .extra
-                    .and_then(|id| self.session.requests.purpose(id))
-                    .and_then(|purpose| {
+                    .and_then(|id| {
                         self.session
                             .users_state
                             .username_check_pending
                             .clone()
-                            .filter(|_| purpose == RequestPurpose::CheckUsername)
-                            .map(|username| (username, *result))
-                    }),
+                            .filter(|(pending, _)| *pending == id)
+                    })
+                    .map(|(_, username)| (username, *result)),
                 _ => None,
             };
         // MED4: capture the `getWebPageInstantView` answer before `apply`

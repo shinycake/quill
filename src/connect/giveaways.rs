@@ -102,7 +102,10 @@ impl<S: JsonSender> ConnectDriver<S> {
             RequestPurpose::LaunchPrepaidGiveaway,
             Some(crate::ids::ChatId(chat_id)),
         );
-        self.session.payments.giveaway.launch = GiveawayLaunch::Launching { chat_id };
+        self.session.payments.giveaway.launch = GiveawayLaunch::Launching {
+            chat_id,
+            request: extra.0,
+        };
         let json = launch_prepaid_giveaway(
             extra,
             giveaway_id,

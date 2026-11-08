@@ -102,6 +102,9 @@ pub struct ResaleBuy {
     pub for_craft: bool,
     /// The bought gift's id once `giftResaleResultOk` arrives.
     pub done: Option<String>,
+    /// The purchase in flight (0: none): only its answer applies here, not
+    /// one for a box closed before it came.
+    pub request: u64,
 }
 
 impl ResaleBuy {
@@ -116,6 +119,7 @@ impl ResaleBuy {
             price_changed: None,
             for_craft,
             done: None,
+            request: 0,
         }
     }
 
@@ -154,6 +158,8 @@ pub struct CraftSession {
     /// Suitable listings on sale (resale in craft mode).
     pub market: ResaleSearch,
     pub crafting: bool,
+    /// The craft in flight (0: none), whose answer this box shows.
+    pub craft_request: u64,
     pub result: Option<CraftResult>,
 }
 

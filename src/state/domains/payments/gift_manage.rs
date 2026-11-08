@@ -146,6 +146,10 @@ impl Session {
             PaymentsPurpose::DeleteGift => self.finish_gift_delete(),
             PaymentsPurpose::SendStarGift => {
                 hub.tx_loaded = false;
+                let request = pending.map_or(0, |p| p.id.0);
+                if request == 0 || manage.send.sending_request != request {
+                    return;
+                }
                 manage.send.sending = false;
                 manage.send.error = None;
                 manage.send.selected = None;
@@ -290,7 +294,14 @@ impl Session {
     }
 
     /// A failed gift management request: release the lock and say why.
-    pub(crate) fn apply_gift_manage_error(&mut self, err: &TdError, purpose: PaymentsPurpose) {
+    /// `request` is the failed request's id: a send fails only the dialog
+    /// that sent it.
+    pub(crate) fn apply_gift_manage_error(
+        &mut self,
+        err: &TdError,
+        purpose: PaymentsPurpose,
+        request: u64,
+    ) {
         let reason = error_reason(err);
         let manage = &mut self.payments.gifts_manage;
         match purpose {
@@ -315,6 +326,9 @@ impl Session {
             }
             PaymentsPurpose::GiftExportProbe => self.apply_gift_export_probe_error(err),
             PaymentsPurpose::SendStarGift => {
+                if request == 0 || manage.send.sending_request != request {
+                    return;
+                }
                 manage.send.sending = false;
                 manage.send.error = Some(format!(
                     "Couldn't send the gift: {reason}. The gift may be sold out."

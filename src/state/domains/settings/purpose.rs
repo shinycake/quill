@@ -136,8 +136,10 @@ pub enum SettingsPurpose {
     /// B13: `setGiftSettings`. Response is `ok`; applied optimistically.
     SetGiftSettings,
     /// B13: `setInactiveSessionTtl`. Response is `ok`; applied
-    /// optimistically.
-    SetInactiveSessionTtl,
+    /// optimistically, with the value it replaced to roll back to.
+    SetInactiveSessionTtl {
+        previous: Option<i32>,
+    },
     /// B13: `setOption(ignore_sensitive_content_restrictions)`. The truth
     /// arrives as `updateOption`.
     SetSensitiveContent,
@@ -325,7 +327,6 @@ flat_purposes!(Settings(SettingsPurpose) {
     GetSupportUser,
     GetNewChatPrivacy,
     SetGiftSettings,
-    SetInactiveSessionTtl,
     SetSensitiveContent,
     SetContactJoinedNotifications,
     GetNetworkStatistics,

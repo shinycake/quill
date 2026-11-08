@@ -129,7 +129,15 @@ impl Session {
                     let files: Vec<ParsedFile> = gift.files().cloned().collect();
                     self.remember_files(&files);
                 }
-                if let Some(craft) = self.payments.gift_market.craft.as_mut() {
+                // The box that sent this craft: one opened after it closed
+                // shows nothing of it.
+                if let Some(craft) = self
+                    .payments
+                    .gift_market
+                    .craft
+                    .as_mut()
+                    .filter(|craft| request != 0 && craft.craft_request == request)
+                {
                     craft.crafting = false;
                     craft.result = Some(result);
                 }
@@ -142,9 +150,14 @@ impl Session {
         market_purpose(pending) == Some(GiftMarketPurpose::BuyResale)
     }
 
-    pub(crate) fn apply_gift_market_purchase(&mut self, result: GiftPurchaseResult) {
+    /// The answer to the buy `request`, for the box that sent it only.
+    pub(crate) fn apply_gift_market_purchase(&mut self, result: GiftPurchaseResult, request: u64) {
         let market = &mut self.payments.gift_market;
-        let Some(buy) = market.buy.as_mut() else {
+        let Some(buy) = market
+            .buy
+            .as_mut()
+            .filter(|buy| request != 0 && buy.request == request)
+        else {
             return;
         };
         buy.sending = false;
@@ -215,7 +228,12 @@ impl Session {
                 market.toasts.push((title.into(), text));
             }
             Some(GiftMarketPurpose::Craft) => {
-                if let Some(craft) = market.craft.as_mut() {
+                let request = pending.map_or(0, |p| p.id.0);
+                if let Some(craft) = market
+                    .craft
+                    .as_mut()
+                    .filter(|craft| request != 0 && craft.craft_request == request)
+                {
                     craft.crafting = false;
                 }
             }
@@ -223,7 +241,14 @@ impl Session {
         }
     }
 
-    pub(crate) fn apply_gift_market_error(&mut self, err: &TdError, purpose: GiftMarketPurpose) {
+    /// `request` is the failed request's id: a buy or a craft fails only
+    /// the box that sent it.
+    pub(crate) fn apply_gift_market_error(
+        &mut self,
+        err: &TdError,
+        purpose: GiftMarketPurpose,
+        request: u64,
+    ) {
         let market = &mut self.payments.gift_market;
         let note = error_note(purpose, &error_reason(err));
         let low = err.earn_hint == Some(crate::earn::EarnErrorHint::BalanceTooLow);
@@ -242,9 +267,14 @@ impl Session {
                 }
             }
             GiftMarketPurpose::BuyResale => {
-                if let Some(buy) = market.buy.as_mut() {
-                    buy.sending = false;
-                }
+                let Some(buy) = market
+                    .buy
+                    .as_mut()
+                    .filter(|buy| request != 0 && buy.request == request)
+                else {
+                    return;
+                };
+                buy.sending = false;
                 if low {
                     market.balance_low = true;
                 } else {
@@ -271,9 +301,14 @@ impl Session {
                 market.notes.push(note);
             }
             GiftMarketPurpose::Craft => {
-                if let Some(craft) = market.craft.as_mut() {
-                    craft.crafting = false;
-                }
+                let Some(craft) = market
+                    .craft
+                    .as_mut()
+                    .filter(|craft| request != 0 && craft.craft_request == request)
+                else {
+                    return;
+                };
+                craft.crafting = false;
                 market.notes.push(note);
             }
             GiftMarketPurpose::OpenAuction

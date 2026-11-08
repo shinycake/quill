@@ -615,6 +615,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         );
         let send = &mut self.session.payments.gifts_manage.send;
         send.sending = true;
+        send.sending_request = extra.0;
         send.error = None;
         send.done = None;
         let json = rq::send_gift(

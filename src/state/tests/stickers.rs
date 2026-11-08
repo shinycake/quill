@@ -329,3 +329,33 @@ fn attached_sticker_sets_fail_the_box_and_drop_an_earlier_answer() {
     apply_json(&mut session, &seq, &sink, &sets(later));
     assert_eq!(session.stickers.stickers.attached_answer, Some(None));
 }
+
+/// A box already showing its set keeps it when a refetch fails (one sent
+/// after a rename, an add or a remove that took); only a load fails it.
+#[test]
+fn a_failed_refetch_keeps_the_shown_sticker_set() {
+    let (mut session, _sink) = session();
+    let ready = StickerSetViewStage::Ready {
+        title: "Cats".into(),
+        name: "cats".into(),
+        installed: true,
+        is_emoji: false,
+        is_owned: true,
+        stickers: Vec::new(),
+    };
+    let mut view = StickerSetView::loading(5);
+    view.stage = ready.clone();
+    session.stickers.sticker_set_view = Some(view);
+    session.fail_sticker_set_view(5);
+    let stage = |session: &Session| {
+        session
+            .stickers
+            .sticker_set_view
+            .as_ref()
+            .map(|v| v.stage.clone())
+    };
+    assert_eq!(stage(&session), Some(ready));
+    session.stickers.sticker_set_view = Some(StickerSetView::loading(5));
+    session.fail_sticker_set_view(5);
+    assert_eq!(stage(&session), Some(StickerSetViewStage::Failed));
+}

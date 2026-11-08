@@ -169,10 +169,21 @@ impl QuillApp {
             } => (true, tr(keys::Q_PEOPLE_SELECT_A_MEMBER_FIRST).to_string()),
             AdminDialogKind::EditRights { user_id, rights } => {
                 let Some(rights) = rights else {
+                    let failed = self.session().is_some_and(|session| {
+                        matches!(
+                            session
+                                .groups
+                                .admin_rights
+                                .get(&(dialog.chat_id.0, *user_id)),
+                            Some(AdminRightsFetch::Failed(_))
+                        )
+                    });
                     self.admin.admin_dialog = Some(dialog);
-                    self.connection.set_note(StatusNote::silent(tr(
-                        keys::Q_PEOPLE_RIGHTS_ARE_STILL_LOADING,
-                    )));
+                    self.connection.set_note(StatusNote::silent(tr(if failed {
+                        keys::Q_PEOPLE_COULD_NOT_LOAD_ADMIN_RIGHTS
+                    } else {
+                        keys::Q_PEOPLE_RIGHTS_ARE_STILL_LOADING
+                    })));
                     cx.notify();
                     return;
                 };

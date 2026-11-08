@@ -178,7 +178,7 @@ impl Session {
                 ));
             }
             Some(RequestPurpose::Payments(purpose)) if purpose.is_gift_manage() => {
-                self.apply_gift_manage_error(err, purpose)
+                self.apply_gift_manage_error(err, purpose, pending.map_or(0, |p| p.id.0))
             }
             Some(RequestPurpose::Payments(PaymentsPurpose::Grams(purpose))) => {
                 self.apply_grams_error(err, purpose, pending)
@@ -193,7 +193,7 @@ impl Session {
                 self.apply_suggested_post_error(err, purpose)
             }
             Some(RequestPurpose::Payments(PaymentsPurpose::GiftMarket(purpose))) => {
-                self.apply_gift_market_error(err, purpose)
+                self.apply_gift_market_error(err, purpose, pending.map_or(0, |p| p.id.0))
             }
             _ => {}
         }

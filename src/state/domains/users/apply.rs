@@ -243,12 +243,13 @@ impl Session {
                     self.users_state.contacts = None;
                     self.users_state.contacts_error = false;
                     let user_id = user_ids.first().copied().unwrap_or_default();
-                    self.users_state.new_contact_outcome = Some(if user_id != 0 {
+                    let outcome = if user_id != 0 {
                         self.users_state.user_chat_to_open = Some(user_id);
                         NewContactOutcome::Joined(user_id)
                     } else {
                         NewContactOutcome::NotJoined
-                    });
+                    };
+                    self.users_state.new_contact_outcome = pending.map(|p| (p.id, outcome));
                 } else if pending.map(|p| p.purpose) == Some(RequestPurpose::ImportContacts) {
                     self.users_state.contacts = None;
                     self.users_state.contacts_error = false;
