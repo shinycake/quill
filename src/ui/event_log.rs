@@ -177,7 +177,11 @@ impl QuillApp {
                     break;
                 }
             }
-            let _ = this.update(cx, |this, _| {
+            // Through the main window: when the chat window this started
+            // in has closed, `this` is gone, and the screen-wide flag would
+            // otherwise keep the page from ever polling again. A screen
+            // that is gone took the flag with it.
+            let _ = this.main().update(cx, |this, _| {
                 if this.admin.event_log_poll == Some(chat_id) {
                     this.admin.event_log_poll = None;
                 }
