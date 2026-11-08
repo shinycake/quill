@@ -29,10 +29,12 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        self.clear_typed_debounce();
+        // Already open on a query: a debounce still pending for it keeps
+        // its commit. Cleared, the legs stayed Searching with nothing sent.
         if self.session.search.search.open && !self.session.search.search.query.is_empty() {
             return Ok(None);
         }
+        self.clear_typed_debounce();
         if self.session.search.search.open
             && self.session.search.search.recents
             && matches!(
