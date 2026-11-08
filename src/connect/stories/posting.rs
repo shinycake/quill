@@ -13,7 +13,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         let extra = self.session.request(purpose, None);
         self.session
-            .begin_story_page_check(story_page_op_label(purpose));
+            .begin_story_page_check(story_page_op_label(purpose), extra);
         let json = get_close_friends_request(extra);
         self.send_story_page(purpose, extra, &json).map(Some)
     }
@@ -28,7 +28,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         let extra = self.session.request(purpose, None);
         self.session.stories.close_friends_pending = Some(user_ids.to_vec());
         self.session
-            .begin_story_page_op(story_page_op_label(purpose));
+            .begin_story_page_op(story_page_op_label(purpose), extra);
         let json = set_close_friends_request(extra, user_ids);
         let sent = self.send_story_page(purpose, extra, &json);
         if sent.is_err() {
@@ -50,7 +50,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         let purpose = RequestPurpose::SetChatActiveStoriesList;
         let extra = self.session.request(purpose, Some(chat_id));
         self.session
-            .begin_story_page_op(story_page_op_label(purpose));
+            .begin_story_page_op(story_page_op_label(purpose), extra);
         let json = set_chat_active_stories_list(extra, chat_id, archive);
         self.send_story_page(purpose, extra, &json)
     }
@@ -75,7 +75,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         let purpose = RequestPurpose::ToggleStoryIsPostedToChatPage;
         let extra = self.session.request_for_story(purpose, chat_id, story_id);
         self.session
-            .begin_story_page_op(story_page_op_label(purpose));
+            .begin_story_page_op(story_page_op_label(purpose), extra);
         let json = toggle_story_is_posted_to_chat_page(extra, chat_id, story_id, posted);
         self.send_story_page(purpose, extra, &json)
     }
@@ -401,15 +401,14 @@ impl<S: JsonSender> ConnectDriver<S> {
         let extra = self
             .session
             .request_for_story(RequestPurpose::EditStory, chat_id, story_id);
-        self.session.stories.manage.pending = true;
-        self.session.stories.manage.error = None;
+        self.session.stories.manage.start(extra, chat_id, story_id);
         match self.sender.send_json(&edit_story_request(
             extra, chat_id, story_id, content, areas, caption,
         )) {
             Ok(()) => Ok(extra),
             Err(err) => {
                 self.session.requests.take(extra);
-                self.session.stories.manage.pending = false;
+                self.session.stories.manage.settle(extra, None);
                 Err(err)
             }
         }
@@ -438,8 +437,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         let extra =
             self.session
                 .request_for_story(RequestPurpose::EditStoryCover, chat_id, story_id);
-        self.session.stories.manage.pending = true;
-        self.session.stories.manage.error = None;
+        self.session.stories.manage.start(extra, chat_id, story_id);
         match self.sender.send_json(&edit_story_cover_request(
             extra,
             chat_id,
@@ -449,7 +447,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             Ok(()) => Ok(extra),
             Err(err) => {
                 self.session.requests.take(extra);
-                self.session.stories.manage.pending = false;
+                self.session.stories.manage.settle(extra, None);
                 Err(err)
             }
         }
@@ -481,8 +479,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             chat_id,
             story_id,
         );
-        self.session.stories.manage.pending = true;
-        self.session.stories.manage.error = None;
+        self.session.stories.manage.start(extra, chat_id, story_id);
         match self.sender.send_json(&set_story_privacy_settings_request(
             extra,
             story_id,
@@ -491,7 +488,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             Ok(()) => Ok(extra),
             Err(err) => {
                 self.session.requests.take(extra);
-                self.session.stories.manage.pending = false;
+                self.session.stories.manage.settle(extra, None);
                 Err(err)
             }
         }

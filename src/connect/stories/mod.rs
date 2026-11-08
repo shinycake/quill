@@ -479,6 +479,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 self.session.stories.page_op = Some(StoryPageOp {
                     label: story_page_op_label(purpose),
                     state: StoryPageOpState::Failed("could not send".to_string()),
+                    request: Some(extra),
                 });
                 Err(err)
             }

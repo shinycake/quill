@@ -508,13 +508,15 @@ impl QuillApp {
     }
 
     /// Phase 9.5: one-line status for posted-story management —
-    /// pending spinner or the sanitized failure. `None` when idle.
+    /// pending spinner or the sanitized failure, of the story on screen
+    /// only. `None` when idle.
     pub(super) fn story_manage_status(&self) -> Option<String> {
-        let manage = self.session()?.stories.manage.clone();
-        if manage.pending {
+        let (chat_id, story_id) = self.stories.viewer.current()?.key();
+        let manage = &self.session()?.stories.manage;
+        if manage.pending_for(chat_id.0, story_id) {
             Some(tr(keys::Q_MEDIA_SAVING).into())
         } else {
-            manage.error
+            manage.error_for(chat_id.0, story_id).map(str::to_string)
         }
     }
 
@@ -666,9 +668,16 @@ impl QuillApp {
             );
         }
         let busy = self.stories.viewer_ui().privacy_sent;
-        // Review fix-up: shared `story_manage.pending` slot — no second
-        // op while one is in flight.
-        let manage_busy = self.session().is_some_and(|s| s.stories.manage.pending);
+        // No second call for this story while one is in flight.
+        let manage_busy = self
+            .stories
+            .viewer_ui()
+            .privacy_edit
+            .as_ref()
+            .is_some_and(|edit| {
+                self.session()
+                    .is_some_and(|s| s.stories.manage.pending_for(edit.chat_id, edit.story_id))
+            });
         panel = panel.child(
             div()
                 .flex()
@@ -716,16 +725,22 @@ impl QuillApp {
         // — management calls need live TDLib.
         if self.live.is_none() {
             if let Some(demo) = self.demo_session.as_mut() {
-                demo.stories.manage.error =
-                    Some(tr(keys::Q_MEDIA_DEMO_EDITING_RUNS_WITH_LIVE).into());
+                demo.stories.manage.fail_locally(
+                    edit.chat_id,
+                    edit.story_id,
+                    tr(keys::Q_MEDIA_DEMO_EDITING_RUNS_WITH_LIVE).into(),
+                );
             }
             cx.notify();
             return;
         }
         if edit.privacy == StoryPrivacy::SelectedUsers && edit.selected_user_ids.is_empty() {
             if let Some(live) = self.live.as_mut() {
-                live.driver.session.stories.manage.error =
-                    Some(tr(keys::Q_MEDIA_PICK_AT_LEAST_ONE_USER).into());
+                live.driver.session.stories.manage.fail_locally(
+                    edit.chat_id,
+                    edit.story_id,
+                    tr(keys::Q_MEDIA_PICK_AT_LEAST_ONE_USER).into(),
+                );
             }
             cx.notify();
             return;
@@ -743,8 +758,11 @@ impl QuillApp {
                     }
                 }
                 Err(_) => {
-                    live.driver.session.stories.manage.error =
-                        Some(tr(keys::Q_MEDIA_COULD_NOT_SEND_THE_PRIVACY).into());
+                    live.driver.session.stories.manage.fail_locally(
+                        edit.chat_id,
+                        edit.story_id,
+                        tr(keys::Q_MEDIA_COULD_NOT_SEND_THE_PRIVACY).into(),
+                    );
                 }
             }
         }

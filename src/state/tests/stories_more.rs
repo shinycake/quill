@@ -299,7 +299,7 @@ fn story_manage_state_transitions() {
     let seq = AtomicU64::new(0);
 
     let extra = session.request(RequestPurpose::EditStory, None);
-    session.stories.manage.pending = true;
+    session.stories.manage.start(extra, ChatId(11), 5);
     apply_json(
         &mut session,
         &seq,
@@ -310,7 +310,7 @@ fn story_manage_state_transitions() {
     assert_eq!(session.stories.manage.error, None);
 
     let extra = session.request(RequestPurpose::EditStoryCover, None);
-    session.stories.manage.pending = true;
+    session.stories.manage.start(extra, ChatId(11), 5);
     apply_json(
         &mut session,
         &seq,
@@ -586,9 +586,10 @@ fn b14_close_friends_load_and_save_round_trip() {
     assert!(session.stories.close_friends.is_none());
 
     let extra = session.request(RequestPurpose::GetCloseFriends, None);
-    session.begin_story_page_check(crate::story_page::story_page_op_label(
-        RequestPurpose::GetCloseFriends,
-    ));
+    session.begin_story_page_check(
+        crate::story_page::story_page_op_label(RequestPurpose::GetCloseFriends),
+        extra,
+    );
     apply_json(
         &mut session,
         &seq,
@@ -620,10 +621,11 @@ fn b14_close_friends_error_drops_staged_ids() {
     let seq = AtomicU64::new(0);
     session.stories.close_friends = Some(vec![31]);
     session.stories.close_friends_pending = Some(vec![31, 32]);
-    session.begin_story_page_op(crate::story_page::story_page_op_label(
-        RequestPurpose::SetCloseFriends,
-    ));
     let extra = session.request(RequestPurpose::SetCloseFriends, None);
+    session.begin_story_page_op(
+        crate::story_page::story_page_op_label(RequestPurpose::SetCloseFriends),
+        extra,
+    );
     apply_json(
         &mut session,
         &seq,
@@ -649,8 +651,8 @@ fn b14_hide_and_profile_ops_finish_on_ok() {
         RequestPurpose::SetChatActiveStoriesList,
         RequestPurpose::ToggleStoryIsPostedToChatPage,
     ] {
-        session.begin_story_page_op(crate::story_page::story_page_op_label(purpose));
         let extra = session.request(purpose, Some(ChatId(11)));
+        session.begin_story_page_op(crate::story_page::story_page_op_label(purpose), extra);
         apply_json(
             &mut session,
             &seq,
@@ -662,6 +664,75 @@ fn b14_hide_and_profile_ops_finish_on_ok() {
             Some(&crate::story_page::StoryPageOpState::Succeeded)
         );
     }
+}
+
+/// An answer to an earlier call of the same kind (Hide on the story left
+/// behind) neither fails nor finishes the call tracked now.
+#[test]
+fn a_stale_answer_does_not_settle_the_op_tracked_now() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    let purpose = RequestPurpose::SetChatActiveStoriesList;
+    let label = crate::story_page::story_page_op_label(purpose);
+    let first = session.request(purpose, Some(ChatId(11)));
+    session.begin_story_page_op(label.clone(), first);
+    let second = session.request(purpose, Some(ChatId(12)));
+    session.begin_story_page_op(label, second);
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"error","@extra":"{}","code":400,"message":"PEER_ID_INVALID"}}"#,
+            first.0
+        ),
+    );
+    assert_eq!(
+        session.stories.page_op.as_ref().map(|op| &op.state),
+        Some(&crate::story_page::StoryPageOpState::Sending)
+    );
+}
+
+/// A failed edit is about the story it edited, and only the answer to the
+/// call in flight settles the slot.
+#[test]
+fn a_story_edit_answer_settles_only_its_own_call_and_story() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    let first = session.request_for_story(RequestPurpose::EditStoryCover, ChatId(11), 5);
+    session.stories.manage.start(first, ChatId(11), 5);
+    let second = session.request_for_story(RequestPurpose::SetStoryPrivacySettings, ChatId(11), 6);
+    session.stories.manage.start(second, ChatId(11), 6);
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"error","@extra":"{}","code":400,"message":"STORY_ID_INVALID"}}"#,
+            first.0
+        ),
+    );
+    assert!(
+        session.stories.manage.pending_for(11, 6),
+        "story 6 still saving"
+    );
+    assert_eq!(session.stories.manage.error_for(11, 6), None);
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"error","@extra":"{}","code":400,"message":"PRIVACY_INVALID"}}"#,
+            second.0
+        ),
+    );
+    assert!(!session.stories.manage.pending);
+    assert!(session.stories.manage.error_for(11, 6).is_some());
+    assert_eq!(
+        session.stories.manage.error_for(11, 7),
+        None,
+        "never shown under another story"
+    );
 }
 
 #[test]
