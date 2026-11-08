@@ -57,7 +57,7 @@ impl QuillApp {
         cx.notify();
     }
 
-    fn cancel_call_link_leave(&mut self, cx: &mut Context<Self>) {
+    pub(super) fn cancel_call_link_leave(&mut self, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
             live.driver.cancel_call_link_leave();
         }

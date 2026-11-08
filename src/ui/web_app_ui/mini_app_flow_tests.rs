@@ -262,3 +262,35 @@ fn an_account_switch_closes_the_mini_app_and_what_waits(cx: &mut TestAppContext)
         assert!(!app.poll_mini_apps(cx), "nothing is left to wait for");
     });
 }
+
+/// The close confirm replaces the phone prompt in the helper, which then
+/// reports only the confirm's closing: the phone request is answered as
+/// cancelled at once, and the next one asks again instead of "busy".
+#[gpui_kit::test]
+fn a_popup_replaced_by_another_is_answered(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    app.update_in(&mut vcx, |app, _, cx| {
+        let received = open_window(app, cx);
+        app.handle_web_app_event(WebAppEvent::RequestPhone, cx);
+        prompt(&received);
+        app.with_window(|window| window.closing_confirmation = true);
+        let close = quill_webview_protocol::HelperEvent::Shell {
+            event: ShellEvent::Close { force: false },
+        };
+        app.handle_helper_event(close, cx);
+        let confirm = prompt(&received);
+        let (event, data) = reply(&received);
+        assert_eq!(event, "phone_requested");
+        assert_eq!(data["status"], "cancelled");
+        let open: Vec<String> = app
+            .mini_apps
+            .window
+            .as_ref()
+            .map(|window| window.popups.keys().cloned().collect())
+            .unwrap_or_default();
+        assert_eq!(open, std::slice::from_ref(&confirm.id));
+        answer(app, &confirm.id, "cancel", cx);
+        app.handle_web_app_event(WebAppEvent::RequestPhone, cx);
+        prompt(&received);
+    });
+}

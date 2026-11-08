@@ -153,7 +153,7 @@ impl QuillApp {
         cx.notify();
     }
 
-    fn close_giveaway_info(&mut self, cx: &mut Context<Self>) {
+    pub(super) fn close_giveaway_info(&mut self, cx: &mut Context<Self>) {
         if let Some(session) = self.giveaway_session_mut() {
             session.payments.giveaway.info = None;
         }

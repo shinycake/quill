@@ -40,12 +40,22 @@ impl GiveawayOptions {
 pub enum GiveawayLaunch {
     #[default]
     Idle,
-    /// `launchPrepaidGiveaway` is in flight for the boosted chat.
+    /// `launchPrepaidGiveaway` `request` is in flight for the boosted
+    /// chat. Only its answer ends it: a form opened since starts `Idle`,
+    /// and the old launch's answer does not land in it.
     Launching {
         chat_id: i64,
+        request: u64,
     },
     Launched,
     Failed(String),
+}
+
+impl GiveawayState {
+    /// Whether `request` is the launch in flight.
+    fn launching(&self, request: u64) -> bool {
+        matches!(self.launch, GiveawayLaunch::Launching { request: r, .. } if r != 0 && r == request)
+    }
 }
 
 /// The payments domain's giveaway state.
@@ -132,14 +142,17 @@ impl Session {
     /// `ok` for `launchPrepaidGiveaway`. The boost numbers are stale now,
     /// so the cached status goes and the boosts page asks again.
     pub(crate) fn apply_giveaway_ok(&mut self, pending: Option<&PendingRequest>) {
-        if pending.map(|p| p.purpose) != Some(RequestPurpose::LaunchPrepaidGiveaway) {
+        let Some(pending) = pending.filter(|p| p.purpose == RequestPurpose::LaunchPrepaidGiveaway)
+        else {
             return;
+        };
+        if let Some(chat_id) = pending.chat_id {
+            self.groups.chat_boost_status.remove(&chat_id.0);
+            self.groups.chat_boost_details.remove(&chat_id.0);
         }
-        if let GiveawayLaunch::Launching { chat_id } = self.payments.giveaway.launch {
-            self.groups.chat_boost_status.remove(&chat_id);
-            self.groups.chat_boost_details.remove(&chat_id);
+        if self.payments.giveaway.launching(pending.id.0) {
+            self.payments.giveaway.launch = GiveawayLaunch::Launched;
         }
-        self.payments.giveaway.launch = GiveawayLaunch::Launched;
     }
 
     /// A failed lookup, option fetch or launch keeps its dialog open with
@@ -163,7 +176,9 @@ impl Session {
                 state.options.stars_loading = false;
                 state.options.stars_error = Some(reason);
             }
-            Some(RequestPurpose::LaunchPrepaidGiveaway) => {
+            Some(RequestPurpose::LaunchPrepaidGiveaway)
+                if state.launching(pending.map_or(0, |p| p.id.0)) =>
+            {
                 state.launch =
                     GiveawayLaunch::Failed(format!("Couldn't start the giveaway: {reason}"));
             }

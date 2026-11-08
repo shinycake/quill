@@ -144,6 +144,7 @@ impl QuillApp {
         }
         self.mini_apps.generation += 1;
         let generation = self.mini_apps.generation;
+        // window-scope: the mini app is the screen's; a step aimed at a chat names its chat.
         let task = self.spawn_screen(cx, async move |this, cx| {
             loop {
                 cx.background_executor()
@@ -410,6 +411,32 @@ impl QuillApp {
                 self.set_status_note(note, cx);
             }
         }
+        self.answer_replaced_popups(cx);
+    }
+
+    /// The helper shows one popup at a time, so a newer one (the close
+    /// confirm over a write-access prompt) replaced the others, which never
+    /// get `popup_closed`: each is answered as dismissed, or its request
+    /// would wait unanswered and later ones get "busy".
+    fn answer_replaced_popups(&mut self, cx: &mut Context<Self>) {
+        let replaced: Vec<String> = self
+            .mini_apps
+            .window
+            .as_ref()
+            .map(|window| {
+                let newest = format!("p{}", window.popup_seq);
+                window
+                    .popups
+                    .keys()
+                    .filter(|id| **id != newest)
+                    .cloned()
+                    .collect()
+            })
+            .unwrap_or_default();
+        for id in replaced {
+            let button = String::new();
+            self.handle_shell_event(ShellEvent::PopupClosed { id, button }, cx);
+        }
     }
 
     /// A URL the page tried to leave the frame for.
@@ -499,9 +526,16 @@ impl QuillApp {
                         .and_then(|session| session.users.get(&bot_id))
                         .map(|user| user.username.clone())
                         .unwrap_or_default();
+                    let chat = self
+                        .mini_apps
+                        .window
+                        .as_ref()
+                        .and_then(|window| window.launch.chat_id)
+                        .map(ChatId);
                     if !username.is_empty() {
                         self.mini_apps.render_action = Some(RenderAction::SwitchInline {
                             query: format!("@{username} {query}"),
+                            chat,
                         });
                         self.close_mini_app_window(cx);
                         cx.activate(true);
@@ -756,11 +790,39 @@ impl QuillApp {
             return;
         };
         match action {
-            RenderAction::SwitchInline { query } => {
-                self.insert_switch_inline_query(&query, window, cx);
+            RenderAction::SwitchInline { query, chat } => {
+                self.switch_inline_into(chat, query, window, cx);
             }
             RenderAction::OpenBotChat { bot_id } => self.open_user_chat(bot_id, window, cx),
             RenderAction::OpenInvoice { slug } => self.open_mini_app_invoice(slug, window, cx),
+        }
+    }
+
+    /// The switch-inline text goes to the chat the app was opened from: its
+    /// chat window when one shows it, else the main window, which opens
+    /// that chat first. Nothing lands when the chat cannot be opened.
+    fn switch_inline_into(
+        &mut self,
+        chat: Option<ChatId>,
+        query: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(chat) = chat else {
+            self.insert_switch_inline_query(&query, window, cx);
+            return;
+        };
+        let text = query.clone();
+        if self.hand_to_chat_window(chat, cx, move |this, window, cx| {
+            this.insert_switch_inline_query(&text, window, cx);
+        }) {
+            return;
+        }
+        if self.open_chat_id() != Some(chat) {
+            self.select_listed_chat(chat, window, cx);
+        }
+        if self.open_chat_id() == Some(chat) {
+            self.insert_switch_inline_query(&query, window, cx);
         }
     }
 
@@ -772,3 +834,8 @@ impl QuillApp {
             .is_some_and(|window| window.launch.bot_user_id == bot_id)
     }
 }
+
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+#[path = "switch_inline_tests.rs"]
+mod switch_inline_tests;

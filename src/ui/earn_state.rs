@@ -71,7 +71,18 @@ pub(crate) struct EarnUi {
     pub(super) link_shown: Option<std::time::Instant>,
 }
 
-impl crate::ui::on_screen::Farewell for EarnUi {}
+/// The earn boxes (setup confirm, programs, join, link, revoke, the
+/// withdrawal) keep their state in the session's `payments.earn`, which
+/// goes to the background with the account: each closes here.
+impl crate::ui::on_screen::Farewell for EarnUi {
+    fn farewell(
+        app: &mut QuillApp,
+        window: &mut gpui_kit::Window,
+        cx: &mut gpui_kit::Context<QuillApp>,
+    ) {
+        app.close_earn_boxes(window, cx);
+    }
+}
 
 impl EarnUi {
     pub(super) fn new(window: &mut Window, cx: &mut Context<QuillApp>) -> Self {

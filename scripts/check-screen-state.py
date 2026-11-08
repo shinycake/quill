@@ -33,6 +33,12 @@ payloads of src/ui enums (round 7: an `Option<SchedulePicker>` whose
 target enum held a message id slipped past). Under a keyed map or set the
 chat check stands down; under a value keyed by its account, the account
 check does.
+
+A dialog whose `DialogSpec` predicate reads the `Session` is listed in
+scripts/session-dialogs.txt with the closer a farewell calls
+(scripts/session_dialogs.py; round 10: eight such boxes came back on
+switch-back).
+
 Run from the repository root:
 
     python3 scripts/check-screen-state.py [--root DIR]
@@ -41,6 +47,9 @@ Run from the repository root:
 import os
 import re
 import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import session_dialogs  # noqa: E402
 
 APP = "src/ui/app.rs"
 SCREEN = "src/ui/on_screen.rs"
@@ -424,11 +433,16 @@ def main():
     for problem in app_wide_field_problems(structs) + chat_scope_problems(structs):
         print(problem)
         failed = True
+    dialog_problems, session_backed = session_dialogs.problems()
+    for problem in dialog_problems:
+        print(problem)
+        failed = True
     if failed:
         sys.exit(1)
     print(
         f"screen state: OK ({len(fields)} QuillApp fields, {len(listed)} listed, "
-        f"{len(listed_fields(FIELD_LIST))} app-wide sub-fields justified)"
+        f"{len(listed_fields(FIELD_LIST))} app-wide sub-fields justified, "
+        f"{session_backed} session-held dialogs closed)"
     )
 
 

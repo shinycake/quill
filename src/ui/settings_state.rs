@@ -72,7 +72,8 @@ impl SettingsUi {
 }
 
 /// The stickers manager commits its reordering and removals through the
-/// old client when it closes (`close_stickers_manager`). The page shown
+/// old client when it closes (`close_stickers_manager`), and so do the
+/// masks and emoji set boxes, whose flags are the session's. The page shown
 /// is left as on a page change, so what it holds in app-wide state (the
 /// language box, the storage sliders, an armed push-to-talk capture)
 /// does not carry over to the next account.
@@ -84,6 +85,24 @@ impl super::on_screen::Farewell for SettingsUi {
     ) {
         if app.settings.sticker_settings_open {
             app.close_stickers_manager(cx);
+        }
+        // These boxes keep their open flags in the session, which goes to
+        // the background with the account.
+        let (masks, emoji, archive) = app.session().map_or((false, false, false), |session| {
+            (
+                session.stickers.masks.open,
+                session.stickers.emoji.open,
+                session.chat_list.archive_settings_open,
+            )
+        });
+        if masks {
+            app.close_mask_sets(cx);
+        }
+        if emoji {
+            app.close_emoji_sets(cx);
+        }
+        if archive {
+            app.set_archive_settings_open(false);
         }
         if let Some(page) = app.settings.page {
             app.leave_settings_page(page);

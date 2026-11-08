@@ -134,7 +134,9 @@ impl Session {
                 | RequestPurpose::SetDirectMessagesGroup
                 | RequestPurpose::LoadDirectMessagesChat
                 | RequestPurpose::SetGiftSettings
-                | RequestPurpose::SetInactiveSessionTtl
+                | RequestPurpose::Settings(SettingsPurpose::SetInactiveSessionTtl {
+                    ..
+                })
                 | RequestPurpose::SetSensitiveContent
                 | RequestPurpose::SetContactJoinedNotifications
                 | RequestPurpose::GetNetworkStatistics

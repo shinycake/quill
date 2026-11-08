@@ -17,7 +17,8 @@ impl QuillApp {
         + 'static,
         cx: &mut Context<Self>,
     ) {
-        self.run_off_ui_then(move || decode_file(&path, DecodeSize::FULL), done, cx);
+        // The editor it opens is drawn in the window that asked.
+        self.run_off_ui_scoped_then(move || decode_file(&path, DecodeSize::FULL), done, cx);
     }
 
     /// Run `work` on the background executor and hand its result to `done`

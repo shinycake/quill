@@ -204,3 +204,20 @@ fn next_turns_on_for_a_song_arriving_off_screen_while_paused(cx: &mut TestAppCon
     let _ = frames(vcx, 1);
     assert!(!next_disabled(vcx), "the new song is next");
 }
+
+/// A profile's saved-music track plays from a chat with music files, but
+/// those are not its neighbours: Previous and Next stay off, and its end
+/// does not start the chat's first song.
+#[gpui_kit::test]
+fn a_saved_track_has_no_neighbours_in_the_chat(cx: &mut TestAppContext) {
+    let (app, mut vcx) = open_app(cx);
+    let vcx = &mut vcx;
+    let saved = quill::state::playlist_message_id(quill::ids::FileId(5));
+    app.update(vcx, |app, _| {
+        app.playback.playing_audio = Some(saved);
+    });
+    assert_eq!(
+        app.read_with(vcx, |app, _| app.playlist_can_move()),
+        (false, false)
+    );
+}

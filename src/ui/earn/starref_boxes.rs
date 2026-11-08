@@ -113,6 +113,39 @@ fn opened_through(users: i64, app: &str) -> String {
 }
 
 impl QuillApp {
+    /// Close every earn box whose state is the session's (a switch).
+    pub(in crate::ui) fn close_earn_boxes(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(earn) = self.earn_state() else {
+            return;
+        };
+        let confirm = earn.setup.as_ref().is_some_and(|s| s.confirm.is_some());
+        let (programs, join, link, revoke, withdraw) = (
+            earn.programs_box.is_some(),
+            earn.join_box.is_some(),
+            earn.link_box.is_some(),
+            earn.revoke.is_some(),
+            earn.withdraw.is_some(),
+        );
+        if confirm {
+            self.close_setup_confirm(cx);
+        }
+        if programs {
+            self.close_programs_box(cx);
+        }
+        if join {
+            self.close_join_box(cx);
+        }
+        if link {
+            self.close_link_box(cx);
+        }
+        if revoke {
+            self.close_revoke(cx);
+        }
+        if withdraw {
+            self.cancel_withdraw(window, cx);
+        }
+    }
+
     fn close_setup_confirm(&mut self, cx: &mut Context<Self>) {
         if let Some(setup) = self.earn_mut().and_then(|e| e.setup.as_mut()) {
             setup.confirm = None;

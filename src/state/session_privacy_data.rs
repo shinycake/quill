@@ -144,7 +144,9 @@ impl Session {
             Some(RequestPurpose::HideCheckPasswordSuggestion) => {
                 self.settings.privacy_data.check_password_suggested = false;
             }
-            Some(RequestPurpose::SetInactiveSessionTtl) => self.settings.privacy_data.error = None,
+            Some(RequestPurpose::Settings(SettingsPurpose::SetInactiveSessionTtl { .. })) => {
+                self.settings.privacy_data.error = None;
+            }
             Some(RequestPurpose::AllowUnpaidMessages) => {
                 if let Some(user_id) = pending.and_then(|p| p.user_id) {
                     self.finish_unpaid_exception(user_id);
@@ -203,8 +205,10 @@ impl Session {
             RequestPurpose::SetGiftSettings => {
                 data.error = Some(sessions_error_line("change the gift settings", err));
             }
-            RequestPurpose::SetInactiveSessionTtl => {
-                data.inactive_session_ttl_days = None;
+            RequestPurpose::Settings(SettingsPurpose::SetInactiveSessionTtl { previous }) => {
+                // Back to what the server had: `None` reads as still
+                // loading, and nothing refetches it.
+                data.inactive_session_ttl_days = previous;
                 data.error = Some(sessions_error_line("change the session timeout", err));
             }
             RequestPurpose::SetSensitiveContent => {

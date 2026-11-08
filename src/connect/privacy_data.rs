@@ -111,9 +111,11 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() || !(1..=MAX_INACTIVE_SESSION_DAYS).contains(&days) {
             return Err(ConnectSendError::InvalidRequest);
         }
-        let extra = self
-            .session
-            .request(RequestPurpose::SetInactiveSessionTtl, None);
+        let previous = self.session.settings.privacy_data.inactive_session_ttl_days;
+        let extra = self.session.request(
+            RequestPurpose::Settings(SettingsPurpose::SetInactiveSessionTtl { previous }),
+            None,
+        );
         if let Err(err) = self
             .sender
             .send_json(&set_inactive_session_ttl(extra, days))

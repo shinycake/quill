@@ -230,9 +230,13 @@ impl Session {
         }
     }
 
+    /// The box's load failed. A refetch after an edit (a rename, an add,
+    /// a remove) that took is not a failed load: the box keeps what it
+    /// shows.
     pub(crate) fn fail_sticker_set_view(&mut self, set_id: i64) {
         if let Some(view) = self.stickers.sticker_set_view.as_mut()
             && view.set_id == set_id
+            && matches!(view.stage, StickerSetViewStage::Loading)
         {
             view.stage = StickerSetViewStage::Failed;
         }

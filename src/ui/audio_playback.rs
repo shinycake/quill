@@ -126,7 +126,7 @@ impl QuillApp {
         self.playback.track_length = None;
         quill::wake::CHROME.poke();
         self.playback.seek_slider = None;
-        self.playback.player.slider = None;
+        self.playback.player.sliders.clear();
         self.playback.seek_scrubbing = false;
         self.playback.seek_preview_secs = None;
         self.playback.seek_hover = None;
@@ -371,6 +371,7 @@ impl QuillApp {
         }
         self.playback.tick = true;
         self.playback.tick_shown = None;
+        // window-scope: the track is the screen's; the bar it moves is redrawn in every window.
         self.spawn_screen(cx, async move |this, cx| {
             let mut wait = Some(PLAYBACK_TICK);
             let mut seen = quill::wake::CHROME.epoch();
@@ -495,13 +496,14 @@ impl QuillApp {
                     state.set_value(value, window, cx);
                 });
             }
-            // The player bar's own slider follows the same position.
-            if let Some(bar) = self.playback.player.slider.as_ref()
-                && bar.read(cx).value() != SliderValue::Single(value)
-            {
-                bar.update(cx, |state, cx| {
-                    state.set_value(value, window, cx);
-                });
+            // The player bar's own sliders, one per window, follow the
+            // same position.
+            for bar in self.playback.player.sliders.values() {
+                if bar.read(cx).value() != SliderValue::Single(value) {
+                    bar.update(cx, |state, cx| {
+                        state.set_value(value, window, cx);
+                    });
+                }
             }
         }
     }

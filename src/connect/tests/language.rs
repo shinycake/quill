@@ -462,3 +462,40 @@ fn the_about_box_waits_for_the_saved_flags_and_saves_without_overwriting() {
     );
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// A client that ran in the background comes on screen: the pack it made
+/// for the choice saved at its start is dropped, and it follows the choice
+/// saved since, so the interface does not go back to the old pack.
+#[test]
+fn a_client_coming_on_screen_follows_the_choice_saved_now() {
+    let mut f = Fixture::new();
+    let german = LanguageChoice {
+        pack_id: "de".into(),
+        plural_code: "de".into(),
+        name: "German".into(),
+        native_name: "Deutsch".into(),
+        ..Default::default()
+    };
+    save_choice(&f.dir, &german).unwrap();
+    f.driver.send_language_options().unwrap();
+    let extra = f.strings_extra("de");
+    f.feed(strings(&extra, "lng_languages", "Sprache"));
+    assert!(f.driver.session.settings.language.ready.is_some());
+
+    let french = LanguageChoice {
+        pack_id: "fr".into(),
+        plural_code: "fr".into(),
+        name: "French".into(),
+        native_name: "Francais".into(),
+        ..Default::default()
+    };
+    save_choice(&f.dir, &french).unwrap();
+    f.driver.adopt_saved_language().unwrap();
+    let language = &f.driver.session.settings.language;
+    assert!(language.ready.is_none(), "the old pack is not installed");
+    assert!(!language.reload);
+    assert_eq!(
+        language.switching.as_ref().map(|s| s.info.id.as_str()),
+        Some("fr")
+    );
+}

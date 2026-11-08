@@ -204,8 +204,9 @@ impl<S: JsonSender> ConnectDriver<S> {
         });
         if let Some(buy) = self.session.payments.gift_market.buy.as_mut() {
             buy.sending = result.is_ok();
-            if result.is_ok() {
+            if let Ok(extra) = &result {
                 buy.price_changed = None;
+                buy.request = extra.0;
             }
         }
         result
@@ -454,10 +455,11 @@ impl<S: JsonSender> ConnectDriver<S> {
         let result = self.send_market(GiftMarketPurpose::Craft, |extra| {
             rq::craft_gift(extra, &ids)
         });
-        if result.is_ok()
+        if let Ok(extra) = &result
             && let Some(craft) = self.session.payments.gift_market.craft.as_mut()
         {
             craft.crafting = true;
+            craft.craft_request = extra.0;
         }
         result
     }

@@ -135,8 +135,10 @@ enum PopupPurpose {
 /// Something only a render (with the `Window`) can do.
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum RenderAction {
-    /// `web_app_switch_inline_query` into the current chat's composer.
-    SwitchInline { query: String },
+    /// `web_app_switch_inline_query` into the composer of the chat the app
+    /// was opened from (tdesktop `switchInlineQuery(thread, ..)`), wherever
+    /// it shows; the main window's open chat when the launch has none.
+    SwitchInline { query: String, chat: Option<ChatId> },
     /// The menu's "Open bot".
     OpenBotChat { bot_id: i64 },
     /// `web_app_open_invoice`: the checkout for the slug.

@@ -89,6 +89,11 @@ pub(crate) struct GroupCallScreen {
     pub(super) stream_joining: Option<i32>,
     /// Gives up on a join that neither lands nor fails.
     pub(super) stream_join_timeout: Option<Task<()>>,
+    /// The call the boxes above and [`GroupCallBoxes`]' invite and share
+    /// boxes were opened for (`sync_group_call_boxes`): another call, or
+    /// none, closes them, so a rename typed for one call cannot rename the
+    /// next.
+    pub(super) boxes_call: Option<i32>,
 }
 
 impl GroupCallScreen {
@@ -129,6 +134,7 @@ impl GroupCallScreen {
             stream_join: None,
             stream_joining: None,
             stream_join_timeout: None,
+            boxes_call: None,
         }
     }
 }
@@ -160,6 +166,44 @@ pub(crate) struct GroupCallBoxes {
     pub(super) share_copied: bool,
 }
 
+impl QuillApp {
+    /// The video chat's boxes belong to the call they were opened for: when
+    /// the tracked call changes or ends, the rename and Settings boxes, the
+    /// invite picker, the share box and the pin go. A share box whose
+    /// listener link failed is closed too: it is drawn only once the links
+    /// are in, and an undrawn box still took the stream window's keys and
+    /// Esc. Runs at every main frame and every call window frame.
+    pub(super) fn sync_group_call_boxes(&mut self) {
+        let call = self
+            .session()
+            .and_then(|session| session.calls.active_group_call.as_ref())
+            .map(|call| {
+                (
+                    call.id,
+                    call.share_links.generating,
+                    call.share_links.ready(),
+                )
+            });
+        let id = call.map(|(id, _, _)| id);
+        let before = self.group_call_screen.boxes_call;
+        self.group_call_screen.boxes_call = id;
+        // Nothing recorded yet: nothing was opened for another call.
+        if before.is_some() && before != id {
+            self.group_call_screen.title_dialog = None;
+            self.group_call_screen.settings_open = false;
+            self.group_call_screen.pin = Default::default();
+            self.group_call_boxes.invite_open = false;
+            self.group_call_boxes.share_open = false;
+            self.group_call_boxes.share_copied = false;
+        }
+        if self.group_call_boxes.share_open
+            && call.is_some_and(|(_, generating, ready)| !generating && !ready)
+        {
+            self.group_call_boxes.share_open = false;
+        }
+    }
+}
+
 impl GroupCallBoxes {
     pub(super) fn new() -> Self {
         Self {
@@ -174,8 +218,23 @@ impl GroupCallBoxes {
     }
 }
 
-/// Flags and a pending request id: nothing to say.
-impl super::on_screen::Farewell for GroupCallBoxes {}
+/// The RTMP box keeps its process in the session (`calls.rtmp_start`),
+/// which goes to the background with the account: it ends here, or it
+/// would come back on switch-back with the stream key hidden again.
+impl super::on_screen::Farewell for GroupCallBoxes {
+    fn farewell(
+        app: &mut QuillApp,
+        _: &mut gpui_kit::Window,
+        cx: &mut gpui_kit::Context<QuillApp>,
+    ) {
+        if app
+            .session()
+            .is_some_and(|session| session.calls.rtmp_start.is_some())
+        {
+            app.close_rtmp_start(cx);
+        }
+    }
+}
 
 impl GroupCallUi {
     pub(super) fn new() -> Self {

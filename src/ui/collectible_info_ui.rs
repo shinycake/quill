@@ -72,7 +72,7 @@ impl QuillApp {
         cx.notify();
     }
 
-    fn close_collectible_info(&mut self, cx: &mut Context<Self>) {
+    pub(super) fn close_collectible_info(&mut self, cx: &mut Context<Self>) {
         if let Some(hub) = self.session_hub_mut() {
             hub.collectible = None;
         }

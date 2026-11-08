@@ -48,7 +48,7 @@ impl QuillApp {
         }
         cx.notify();
     }
-    fn close_emoji_sets(&mut self, cx: &mut Context<Self>) {
+    pub(super) fn close_emoji_sets(&mut self, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
             live.driver.session.stickers.emoji.open = false;
         } else if let Some(session) = self.demo_session.as_mut() {

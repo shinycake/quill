@@ -31,6 +31,9 @@ pub(crate) struct ChatWindowView {
     bounds_seen: Option<Bounds<Pixels>>,
     /// The window's bookkeeping ran (the app knows the window is gone).
     closed: bool,
+    /// This window is kept out of screen capture (a secret chat, or its
+    /// viewer showing a secret chat's media): each window has its own.
+    capture_blocked: bool,
     _observe: Subscription,
     /// The window's activation, bounds and display (`cover`).
     _placed: [Subscription; 3],
@@ -65,6 +68,7 @@ impl ChatWindowView {
             title_shown: String::new(),
             bounds_seen: None,
             closed: false,
+            capture_blocked: false,
             _observe: observe,
             _placed: placed,
         }
@@ -114,6 +118,12 @@ impl ChatWindowView {
     #[cfg(test)]
     pub(super) fn is_closed(&self) -> bool {
         self.closed
+    }
+
+    /// Whether this window is kept out of screen capture.
+    #[cfg(test)]
+    pub(super) fn is_capture_blocked(&self) -> bool {
+        self.capture_blocked
     }
 
     /// Close the window from inside it (title bar close, Cmd/Ctrl+W).
@@ -184,7 +194,7 @@ impl Render for ChatWindowView {
             shell.sync_kit_dialogs_in(Some(chat_id), window, cx)
         });
         let dialog_open = self.shell.read(cx).dialog_open();
-        let (body, autoscroll) = app.update(cx, |app, cx| {
+        let (body, autoscroll, capture_blocked) = app.update(cx, |app, cx| {
             app.release_viewer_key_probe(window, cx);
             app.viewer_follow_window_fullscreen(window);
             app.seed_history_width(f32::from(window.viewport_size().width));
@@ -194,8 +204,13 @@ impl Render for ChatWindowView {
                 app.per_window_upkeep(window, cx);
             }
             let body = app.chat_window_body(chat_id, window, cx);
-            (body, app.autoscroll_layer(cx))
+            let capture_blocked = app.capture_block_wanted();
+            (body, app.autoscroll_layer(cx), capture_blocked)
         });
+        if capture_blocked != self.capture_blocked {
+            super::super::capture_block::apply_sharing(window, capture_blocked);
+            self.capture_blocked = capture_blocked;
+        }
         let disk_bar = app.update(cx, |app, cx| {
             app.set_window_scope(outer);
             app.frame.tick_view.set(outer_tick);
@@ -249,6 +264,9 @@ impl Render for ChatWindowView {
             // Window-wide text selection, as in the main window.
             .child(gpui_kit::base::TextSelectionLayer)
             .child(scope_probe(self.owner.clone(), Some(chat_id)))
+            // Input here keeps the user online and the auto-lock away, as
+            // input in the main window does.
+            .child(crate::ui::presence::input_probe())
             .child(title_bar)
             .children(disk_bar)
             .child(WindowScope {

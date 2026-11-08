@@ -43,6 +43,7 @@ impl QuillApp {
     /// Open or close the group call window with the tracked group call.
     pub(super) fn sync_group_call_window(&mut self, cx: &mut Context<Self>) {
         self.sync_global_ptt(cx);
+        self.sync_group_call_boxes();
         let call = self
             .session()
             .and_then(|s| s.calls.active_group_call.as_ref())
@@ -360,6 +361,9 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> (AnyElement, bool, Option<String>) {
+        // The boxes drawn here are this call's (a hidden main window runs
+        // no frame upkeep).
+        self.sync_group_call_boxes();
         if let Some(facts) = self.group_call_stream_facts() {
             let body = self.group_call_stream_body(&facts, stream_full, window, cx);
             let title = facts.chat.map(|(_, name)| name).unwrap_or_default();

@@ -154,7 +154,7 @@ fn inactive_session_ttl_comes_from_sessions_and_is_set_optimistically() {
         f.1.session.settings.privacy_data.inactive_session_ttl_days,
         Some(30)
     );
-    // A refusal drops the optimistic value and reports it.
+    // A refusal puts the server's value back and reports it.
     ingest(
         &mut f,
         &format!(
@@ -164,7 +164,7 @@ fn inactive_session_ttl_comes_from_sessions_and_is_set_optimistically() {
     );
     assert_eq!(
         f.1.session.settings.privacy_data.inactive_session_ttl_days,
-        None
+        Some(180)
     );
     assert!(f.1.session.settings.privacy_data.error.is_some());
     cleanup(f);

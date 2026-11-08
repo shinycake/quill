@@ -396,6 +396,36 @@ fn craft_loads_both_lists_and_crafts() {
     assert_eq!(craft.result, Some(CraftResult::Fail));
 }
 
+/// A craft box opened after the one that crafted closed shows nothing of
+/// the old craft's answer, and keeps its own guard.
+#[test]
+fn a_craft_answer_belongs_to_the_box_that_sent_it() {
+    let mut f = Fixture::new();
+    f.driver
+        .open_gift_craft(CraftGift::parse_received(&received(1)).unwrap())
+        .unwrap();
+    f.answer(
+        "getGiftsForCrafting",
+        json!({"@type": "giftsForCrafting", "total_count": 1, "gifts": [received(2)],
+            "next_offset": ""}),
+    );
+    if let Some(craft) = f.driver.session.payments.gift_market.craft.as_mut() {
+        let second = craft.candidates[0].clone();
+        assert!(craft.add(second));
+    }
+    f.driver.craft_gift().unwrap();
+    let old = f.last("craftGift");
+    f.driver
+        .open_gift_craft(CraftGift::parse_received(&received(3)).unwrap())
+        .unwrap();
+    let mut answer = json!({"@type": "craftGiftResultFail"});
+    answer["@extra"] = old["@extra"].clone();
+    f.ingest(&answer.to_string());
+    let craft = f.driver.session.payments.gift_market.craft.clone().unwrap();
+    assert_eq!(craft.result, None, "the old craft's answer");
+    assert_eq!(craft.slots[0].received_gift_id, "r3");
+}
+
 #[test]
 fn craft_buys_a_listing_into_a_slot() {
     let mut f = Fixture::new();

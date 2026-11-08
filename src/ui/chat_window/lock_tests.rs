@@ -13,13 +13,16 @@ use quill::ids::ChatId;
 const OTHER: ChatId = ChatId(12);
 
 fn new_app(cx: &mut TestAppContext) -> (Entity<QuillApp>, AnyWindowHandle) {
+    new_app_on(cx, "ready-chats")
+}
+
+fn new_app_on(cx: &mut TestAppContext, demo: &'static str) -> (Entity<QuillApp>, AnyWindowHandle) {
     cx.update(gpui_kit::init);
     let slot = std::rc::Rc::new(std::cell::RefCell::new(None));
     let slot_in = slot.clone();
     let handle = cx.open_window(size(px(1100.), px(700.)), move |window, cx| {
-        let view = cx.new(|cx| {
-            QuillApp::new_with_demo(window, cx, None, Some(ScreenshotDemo::named("ready-chats")))
-        });
+        let view = cx
+            .new(|cx| QuillApp::new_with_demo(window, cx, None, Some(ScreenshotDemo::named(demo))));
         let focus = view.focus_handle(cx);
         window.focus(&focus, cx);
         let shell = cx.new(|_| QuillShell::new(view.clone()));
@@ -191,4 +194,56 @@ fn unlocking_empties_every_windows_field(cx: &mut TestAppContext) {
         "",
         "emptied at its next frame"
     );
+}
+
+/// The lock reaches every window's media viewer: a chat window's viewer is
+/// not back, showing its media, once the lock opens.
+#[gpui_kit::test]
+fn locking_closes_a_chat_windows_media_viewer(cx: &mut TestAppContext) {
+    let (app, main) = new_app_on(cx, "ready-video-inline");
+    let _chat_window = open_chat_window(&app, main, cx);
+    let opened = app.update(cx, |app, cx| {
+        app.in_window_scope(Some(OTHER), cx, |app, cx| {
+            app.open_media_viewer(ChatId(11), quill::ids::MessageId(204), cx);
+            app.viewer.state.is_open()
+        })
+    });
+    assert_eq!(opened, Some(true), "the chat window's viewer opened");
+    lock(&app, cx);
+    cx.run_until_parked();
+    let open = app.update(cx, |app, cx| {
+        app.in_window_scope(Some(OTHER), cx, |app, _| app.viewer.state.is_open())
+    });
+    assert_eq!(open, Some(false));
+}
+
+/// A Touch ID answer that comes back after the chat window that asked
+/// closed still ends the wait: the lock can be opened again.
+#[gpui_kit::test]
+fn a_system_unlock_answered_after_its_window_closed_ends_the_wait(cx: &mut TestAppContext) {
+    let (app, main) = new_app(cx);
+    let chat_window = open_chat_window(&app, main, cx);
+    lock(&app, cx);
+    cx.run_until_parked();
+    let (answer, receiver) = std::sync::mpsc::channel();
+    let _ = answer.send(false);
+    cx.update_window(chat_window, |_, window, cx| {
+        app.update(cx, |app, cx| {
+            app.in_window_scope(Some(OTHER), cx, |app, cx| {
+                app.account.passcode.busy = true;
+                let master = quill::passcode::MasterKey::from_bytes([7; 32]);
+                app.spawn_system_unlock_wait(receiver, master, window, cx);
+            });
+        });
+        window.remove_window();
+    })
+    .expect("the chat window");
+    cx.run_until_parked();
+    app.read_with(cx, |app, _| {
+        assert!(
+            !app.account.passcode.busy,
+            "the lock takes a passcode again"
+        );
+        assert!(app.account.passcode.locked);
+    });
 }

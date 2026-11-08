@@ -46,6 +46,8 @@ mod tests;
 mod upkeep_tests;
 mod view;
 #[cfg(test)]
+mod window_owner_tests;
+#[cfg(test)]
 mod window_state_tests;
 
 use super::app::QuillApp;

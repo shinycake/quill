@@ -14,6 +14,8 @@ pub struct AddContactDialog {
     /// New Contact box (`user_id == 0`): the first name of the import in
     /// flight or answered.
     pub(crate) sent_name: Option<String>,
+    /// New Contact box: the import it sent, whose answer it applies.
+    pub(crate) sent_request: Option<quill::ids::RequestId>,
     /// New Contact box: the phone is not on Telegram (tdesktop's
     /// `_retrying` state).
     pub(crate) not_joined: bool,
@@ -70,6 +72,7 @@ impl AddContactDialog {
             first_name_input,
             last_name_input,
             sent_name: None,
+            sent_request: None,
             not_joined: false,
         }
     }
