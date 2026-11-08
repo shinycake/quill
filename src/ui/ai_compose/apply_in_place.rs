@@ -107,11 +107,10 @@ impl QuillApp {
         cx.defer(move |cx| {
             let _ = handle.update(cx, |_, window, cx| {
                 let _ = app.update(cx, |app, cx| {
-                    if app.screen_epoch() != screen {
-                        return;
-                    }
-                    app.in_window_of(window, cx, |app, window, cx| {
-                        app.apply_ai_in_place_answer(&asked, &text, &entities, window, cx)
+                    app.in_screen_scope(screen, cx, |app, cx| {
+                        app.in_window_of(window, cx, |app, window, cx| {
+                            app.apply_ai_in_place_answer(&asked, &text, &entities, window, cx)
+                        })
                     });
                 });
             });
