@@ -9,7 +9,6 @@ use gpui_kit::component::input::{InputEvent, TextareaState};
 use gpui_kit::component::menu::AppMenuBar;
 use gpui_kit::component::*;
 use gpui_kit::*;
-use quill::composer::should_send_on_enter;
 use quill::credentials::TelegramCredentials;
 use quill::diagnostics::MemorySink;
 use quill::telegram::envelope::AuthorizationState;
@@ -35,7 +34,6 @@ impl QuillApp {
         // Enter submits only in Enter mode; in CtrlEnter mode it inserts
         // a newline and Ctrl/Cmd+Enter sends.
         let chat_prefs = Self::load_chat_prefs();
-        let submit_on_enter = chat_prefs.send_key_mode == quill::composer::SendKeyMode::Enter;
         let demo_sink = Arc::new(MemorySink::new());
         let mut demo_session = None;
         let (connect_status, live, status_note, auth_demo) = match demo {
@@ -61,14 +59,6 @@ impl QuillApp {
             window,
             cx,
         );
-        // Phase C2h: in-call group-chat composer for the voice-chat
-        // overlay (sendGroupCallMessage).
-        let group_call_composer = cx.new(|cx| {
-            TextareaState::new(window, cx)
-                .placeholder("Message the voice chat — Enter sends")
-                .auto_grow(1, 3)
-                .submit_on_enter(submit_on_enter)
-        });
         let appearance_prefs = Self::load_appearance();
         let accent_picker = Self::new_accent_picker(appearance_prefs.accent_rgb, window, cx);
         let font_picker = Self::new_font_picker(&appearance_prefs.font_family, window, cx);
@@ -84,23 +74,6 @@ impl QuillApp {
             }
         })
         .detach();
-        cx.subscribe_in(
-            &group_call_composer,
-            window,
-            |this, state, event: &InputEvent, window, cx| {
-                if let InputEvent::PressEnter { secondary, shift } = event {
-                    let marked = state.update(cx, |input, cx| input.marked_text_range(window, cx));
-                    if should_send_on_enter(
-                        quill::composer::enter_event_from_kit(*shift, *secondary, marked),
-                        this.chat_prefs.send_key_mode,
-                    ) {
-                        this.send_group_call_message(window, cx);
-                    }
-                }
-            },
-        )
-        .detach();
-
         let pending_attachments = demo.map_or_else(Vec::new, |d| d.attachments());
 
         let audio_output = super::audio::SharedOutput::default();
@@ -132,7 +105,7 @@ impl QuillApp {
             menu_bar: AppMenuBar::new(cx),
             first_run: super::first_run_ui::initial_first_run(demo.is_some(), &credentials, cx),
             frame: super::frame_state::FrameUi::new(cx),
-            group_call: super::group_call_state::GroupCallUi::new(group_call_composer),
+            group_call: super::group_call_state::GroupCallUi::new(),
             screen_share: Default::default(),
             composer_sends: Default::default(),
             language: super::language_state::LanguageUi::new(demo.is_some(), cx),

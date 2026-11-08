@@ -198,17 +198,21 @@ impl super::app::QuillApp {
                             cx.notify();
                             return false;
                         }
-                        // A client still on screen closes first; when it is
-                        // this account's, wait for that close too.
+                        // A client still on screen closes first, and its
+                        // screen's goodbyes (deferred to the end of this
+                        // update) run before the new client is put there:
+                        // the loop comes round again for the open, which
+                        // also waits for that close when it is this
+                        // account's.
                         if this.live.is_some() {
                             this.screen_leaves_later(cx);
                         }
                         if let Some(old) = this.take_live() {
-                            let same = Some(&old.driver.session.account) == account.as_ref();
                             this.close_live_later(old, false, cx);
-                            if same {
-                                return true;
-                            }
+                            return true;
+                        }
+                        if this.goodbyes_due() {
+                            return true;
                         }
                         let Some(prepared) = prepared.take() else {
                             return false;

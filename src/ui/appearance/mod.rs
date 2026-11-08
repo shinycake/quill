@@ -256,7 +256,7 @@ impl QuillApp {
         self.composer.update(cx, |input, cx| {
             input.set_submit_on_enter(submit, cx);
         });
-        self.group_call.composer.update(cx, |input, cx| {
+        self.group_call_screen.composer.update(cx, |input, cx| {
             input.set_submit_on_enter(submit, cx);
         });
         cx.notify();

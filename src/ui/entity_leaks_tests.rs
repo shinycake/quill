@@ -738,7 +738,7 @@ fn closing_the_call_window_lets_go_of_what_it_made(cx: &mut TestAppContext) {
                     if let Some(session) = app.demo_session.as_mut() {
                         session.calls.active_call = CALL.with(|slot| slot.borrow().clone());
                     }
-                    app.calls.window_closed_by_user = None;
+                    app.call_screen.window_closed_by_user = None;
                     app.sync_call_window(cx);
                 })
             },
@@ -774,7 +774,7 @@ fn closing_the_live_stream_window_lets_go_of_what_it_made(cx: &mut TestAppContex
                         &sink,
                         &app.demo_ui.seq,
                     );
-                    app.group_call.window_closed_by_user = None;
+                    app.group_call_screen.window_closed_by_user = None;
                     cx.notify();
                 })
             },

@@ -17,18 +17,18 @@ use quill::lang::{keys, tr};
 
 impl QuillApp {
     pub(super) fn open_group_call_settings(&mut self, cx: &mut Context<Self>) {
-        self.group_call.settings_open = true;
+        self.group_call_screen.settings_open = true;
         cx.notify();
     }
 
     pub(super) fn close_group_call_settings(&mut self, cx: &mut Context<Self>) {
-        self.group_call.settings_open = false;
+        self.group_call_screen.settings_open = false;
         cx.notify();
     }
 
     /// The Settings box over the voice chat window, while open.
     pub(super) fn group_call_settings_overlay(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        if !self.group_call.settings_open {
+        if !self.group_call_screen.settings_open {
             return None;
         }
         let noise_row = self.noise_suppression_row(cx);

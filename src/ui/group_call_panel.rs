@@ -486,7 +486,7 @@ impl QuillApp {
         heading: SharedString,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
-        let dialog = self.group_call.title_dialog.as_ref()?;
+        let dialog = self.group_call_screen.title_dialog.as_ref()?;
         Some(
             div()
                 .absolute()

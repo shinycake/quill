@@ -107,9 +107,9 @@ impl QuillApp {
         ) {
             return;
         }
-        self.account.lifecycle.open = true;
-        self.account.lifecycle.confirm_delete = false;
-        self.account.lifecycle.confirm_logout = false;
+        self.account_boxes.lifecycle.open = true;
+        self.account_boxes.lifecycle.confirm_delete = false;
+        self.account_boxes.lifecycle.confirm_logout = false;
         self.close_all_notify_windows(cx);
         if let Some(live) = self.live.as_mut() {
             let _ = live.driver.get_account_ttl();
@@ -122,12 +122,12 @@ impl QuillApp {
     /// Slice A9: close the dialog and clear its inputs — the password
     /// must not linger after the dialog is gone (the A2 rule).
     pub(crate) fn close_account_lifecycle(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.account.lifecycle.open = false;
-        self.account.lifecycle.confirm_delete = false;
-        self.account.lifecycle.confirm_logout = false;
+        self.account_boxes.lifecycle.open = false;
+        self.account_boxes.lifecycle.confirm_delete = false;
+        self.account_boxes.lifecycle.confirm_logout = false;
         for input in [
-            &self.account.lifecycle.reason,
-            &self.account.lifecycle.password,
+            &self.account_boxes.lifecycle.reason,
+            &self.account_boxes.lifecycle.password,
         ] {
             input.update(cx, |input, cx| input.set_value("", window, cx));
         }
@@ -226,21 +226,27 @@ impl QuillApp {
     /// this returns (the A2 rule).
     pub(crate) fn submit_delete_account(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let reason = self
-            .account
+            .account_boxes
             .lifecycle
             .reason
             .read(cx)
             .value()
             .trim()
             .to_string();
-        let mut password = self.account.lifecycle.password.read(cx).value().to_string();
+        let mut password = self
+            .account_boxes
+            .lifecycle
+            .password
+            .read(cx)
+            .value()
+            .to_string();
         for input in [
-            &self.account.lifecycle.reason,
-            &self.account.lifecycle.password,
+            &self.account_boxes.lifecycle.reason,
+            &self.account_boxes.lifecycle.password,
         ] {
             input.update(cx, |input, cx| input.set_value("", window, cx));
         }
-        self.account.lifecycle.confirm_delete = false;
+        self.account_boxes.lifecycle.confirm_delete = false;
         if let Some(live) = self.live.as_mut() {
             let _ = live.driver.delete_account(&reason, &password);
         }
@@ -268,8 +274,8 @@ impl QuillApp {
             cx.notify();
             return;
         }
-        self.account.lifecycle.confirm_logout = false;
-        self.account.lifecycle.open = false;
+        self.account_boxes.lifecycle.confirm_logout = false;
+        self.account_boxes.lifecycle.open = false;
         cx.notify();
     }
 
@@ -474,7 +480,7 @@ impl QuillApp {
                     .child(tr(keys::Q_PREFS_REASON)),
             )
             .child(
-                Textarea::new(&self.account.lifecycle.reason)
+                Textarea::new(&self.account_boxes.lifecycle.reason)
                     .aria_label(tr(keys::Q_PREFS_REASON_FOR_DELETING_ACCOUNT))
                     .h(px(40.)),
             )
@@ -494,7 +500,7 @@ impl QuillApp {
                         .child(tr(keys::Q_PREFS_TWO_STEP_VERIFICATION_PASSWORD)),
                 )
                 .child(
-                    Textarea::new(&self.account.lifecycle.password)
+                    Textarea::new(&self.account_boxes.lifecycle.password)
                         .aria_label(tr(keys::Q_PREFS_TWO_STEP_VERIFICATION_PASSWORD))
                         .h(px(40.)),
                 )
@@ -512,7 +518,7 @@ impl QuillApp {
                     .child(tr(keys::Q_PREFS_CHECKING_TWO_STEP_VERIFICATION_STATUS)),
             );
         }
-        if self.account.lifecycle.confirm_delete {
+        if self.account_boxes.lifecycle.confirm_delete {
             body = body.child(self.account_delete_confirm_banner(mutating, cx));
         } else {
             body = body.child(
@@ -520,7 +526,7 @@ impl QuillApp {
                     .label(tr(keys::Q_PREFS_PERMANENTLY_DELETE_ACCOUNT))
                     .danger()
                     .on_click(cx.listener(|this, _, _, cx| {
-                        this.account.lifecycle.confirm_delete = true;
+                        this.account_boxes.lifecycle.confirm_delete = true;
                         cx.notify();
                     })),
             );
@@ -564,7 +570,7 @@ impl QuillApp {
                             .label(tr(keys::CANCEL))
                             .ghost()
                             .on_click(cx.listener(|this, _, _, cx| {
-                                this.account.lifecycle.confirm_delete = false;
+                                this.account_boxes.lifecycle.confirm_delete = false;
                                 cx.notify();
                             })),
                     )
@@ -604,7 +610,7 @@ impl QuillApp {
                     .text_color(cx.theme().muted_foreground)
                     .child(tr(keys::Q_PREFS_SIGN_OUT_OF_THIS_TELEGRAM)),
             );
-        if self.account.lifecycle.confirm_logout {
+        if self.account_boxes.lifecycle.confirm_logout {
             body = body.child(self.account_logout_confirm_banner(cx));
         } else {
             body = body.child(
@@ -612,7 +618,7 @@ impl QuillApp {
                     .label(tr(keys::Q_PREFS_LOG_OUT))
                     .danger()
                     .on_click(cx.listener(|this, _, _, cx| {
-                        this.account.lifecycle.confirm_logout = true;
+                        this.account_boxes.lifecycle.confirm_logout = true;
                         cx.notify();
                     })),
             );
@@ -657,7 +663,7 @@ impl QuillApp {
                             .label(tr(keys::CANCEL))
                             .ghost()
                             .on_click(cx.listener(|this, _, _, cx| {
-                                this.account.lifecycle.confirm_logout = false;
+                                this.account_boxes.lifecycle.confirm_logout = false;
                                 cx.notify();
                             })),
                     )
@@ -677,7 +683,7 @@ crate::ui::shell::register_dialogs! {
     /// Slice A9: account lifecycle (delete account + self-destruct TTL).
     AccountLifecycle => DialogSpec::new(
         6700,
-        |app| app.account.lifecycle.open,
+        |app| app.account_boxes.lifecycle.open,
         QuillApp::build_account_lifecycle_dialog,
     )
     .close(|app, window, cx| app.close_account_lifecycle(window, cx)),

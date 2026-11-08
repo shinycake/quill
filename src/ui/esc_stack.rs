@@ -99,12 +99,12 @@ pub(super) static ESC_LAYERS: &[EscLayer] = &[
     ),
     layer!(
         "group-call-settings",
-        |app| app.group_call.settings_open,
+        |app| app.group_call_screen.settings_open,
         |app, _, cx| app.close_group_call_settings(cx)
     ),
     layer!(
         "group-call-title",
-        |app| app.group_call.title_dialog.is_some(),
+        |app| app.group_call_screen.title_dialog.is_some(),
         |app, _, cx| app.close_group_call_title_dialog(cx)
     ),
     // Phase 9.7: the chat story page paints above the story composer.
@@ -522,7 +522,7 @@ mod dispatch_tests {
                     Some(crate::ui::story_page::StoryPage::new(ChatId(1), window, cx));
             }),
             ("group-call-title", |app, window, cx| {
-                app.group_call.title_dialog = Some(
+                app.group_call_screen.title_dialog = Some(
                     crate::ui::dialogs::group_call::GroupCallTitleDialog::new(window, cx, "x"),
                 );
             }),

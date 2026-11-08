@@ -115,6 +115,10 @@ on_screen_fields! {
     /// A client was put on this screen (`QuillApp::put_on_screen`): it
     /// must be replaced before that client leaves.
     client_filled: bool,
+    /// The client left with no window at hand (`screen_leaves_later`):
+    /// this screen's goodbyes and its replacement are still to run, and no
+    /// client may be put on it before they have.
+    goodbyes_due: bool,
     ;
     /// Mini apps: the helper window, its launch and the open box
     /// (`ui/web_app_ui.rs`, `DialogKind::WebAppConfirm`). First: its
@@ -205,6 +209,12 @@ on_screen_fields! {
     call_boxes: super::calls_state::CallBoxes,
     /// The boxes around a video chat: start, invite, share link (`ui/group_call_state.rs`).
     group_call_boxes: super::group_call_state::GroupCallBoxes,
+    /// The 1:1 call's closed window, end time and sound marks, by this account's call ids (`ui/calls_state.rs`).
+    call_screen: super::calls_state::CallScreen,
+    /// The video chat's rename and Settings boxes, composer, pin and pending join (`ui/group_call_state.rs`).
+    group_call_screen: super::group_call_state::GroupCallScreen,
+    /// Delete Account, Log Out, the frozen-account and age boxes (`ui/account_state.rs`).
+    account_boxes: super::account_state::AccountBoxes,
     /// Sign-in: inputs, registration, terms, recovery and the QR code (`ui/auth_state.rs`).
     auth_ui: super::auth_state::AuthUi,
     /// Agent access: the account Settings edits, the consent box and the page (`ui/agent_state.rs`).
@@ -300,6 +310,7 @@ impl OnScreen {
         Self {
             epoch,
             client_filled: false,
+            goodbyes_due: false,
             mini_apps: Default::default(),
             history,
             recording: super::recording_state::RecordingUi::new(),
@@ -349,6 +360,13 @@ impl OnScreen {
             call_boxes: super::calls_state::CallBoxes::new(),
             translate: Default::default(),
             group_call_boxes: super::group_call_state::GroupCallBoxes::new(),
+            call_screen: Default::default(),
+            group_call_screen: super::group_call_state::GroupCallScreen::new(
+                chat_prefs.send_key_mode,
+                window,
+                cx,
+            ),
+            account_boxes: super::account_state::AccountBoxes::new(window, cx),
             auth_ui: super::auth_state::AuthUi::new(window, cx),
             agent_ui: super::agent_state::AgentUi::new(),
             connection: super::connection_state::ConnectionUi::new(connect_status, status_note),
@@ -398,7 +416,10 @@ impl QuillApp {
         // after (`adopt_live`, `start_connection`); a fresh default would
         // show the synthetic pane for a frame.
         let status = self.connection.status.clone();
-        self.screen = OnScreen::new(epoch, &self.chat_prefs, status, String::new(), window, cx);
+        // So is the status line's note: a restart set "Connecting" before
+        // the deferred replacement runs (`screen_leaves_later`).
+        let note = self.connection.note().text().to_string();
+        self.screen = OnScreen::new(epoch, &self.chat_prefs, status, note, window, cx);
         cx.notify();
     }
 
@@ -415,14 +436,43 @@ impl QuillApp {
         let Some(handle) = self.main_window.handle else {
             return;
         };
+        self.screen.goodbyes_due = true;
         let app = cx.entity().downgrade();
         // screen-scope: the goodbyes of the screen that just left; its
         // epoch has already moved, and no client is on screen yet.
         cx.defer(move |cx| {
-            let _ = handle.update(cx, |_, window, cx| {
-                let _ = app.update(cx, |this, cx| this.end_account_surfaces(window, cx));
+            let said = handle.update(cx, |_, window, cx| {
+                let _ = app.update(cx, |this, cx| this.say_due_goodbyes(window, cx));
             });
+            // The window went meanwhile: the old UI stays, as without one.
+            if said.is_err() {
+                let _ = app.update(cx, |this, _| this.screen.goodbyes_due = false);
+            }
         });
+    }
+
+    /// The deferred half of [`Self::screen_leaves_later`]. The goodbyes
+    /// go through `self.live`, so they run only while no client is on
+    /// screen: had one been put there first (`put_on_screen` refuses that
+    /// in debug builds), the old screen's draft flush and closes would go
+    /// to it with the old account's ids, so only the old UI is dropped.
+    fn say_due_goodbyes(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if !self.screen.goodbyes_due {
+            return;
+        }
+        if self.live.is_none() {
+            self.end_account_surfaces(window, cx);
+            return;
+        }
+        self.close_main_window_dialogs(window, cx);
+        self.replace_screen(window, cx);
+        self.screen.client_filled = true;
+    }
+
+    /// The old screen's goodbyes are still to run (`screen_leaves_later`):
+    /// a client must wait for them before it is put on screen.
+    pub(in crate::ui) fn goodbyes_due(&self) -> bool {
+        self.screen.goodbyes_due
     }
 
     /// The client leaves the screen, for the background or the closing set.
@@ -441,6 +491,10 @@ impl QuillApp {
     /// are its from the next frame. The only place `self.live` is filled.
     pub(in crate::ui) fn put_on_screen(&mut self, live: LiveConnect) {
         debug_assert!(self.live.is_none(), "a client is already on screen");
+        debug_assert!(
+            !self.screen.goodbyes_due,
+            "a client is put on screen before the last one's goodbyes ran"
+        );
         self.screen.client_filled = true;
         self.live = Some(live);
     }
@@ -505,3 +559,8 @@ mod tests;
 #[cfg(feature = "demo-capture")]
 #[path = "on_screen_switch_tests.rs"]
 mod switch_tests;
+
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+#[path = "on_screen_app_wide_tests.rs"]
+mod app_wide_tests;

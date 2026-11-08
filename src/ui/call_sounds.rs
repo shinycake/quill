@@ -192,7 +192,7 @@ impl super::app::QuillApp {
         );
         let enabled = session.settings.inapp_sounds_enabled;
         let background_ring = self.background_ring_audible();
-        let marks = &mut self.calls.sound_marks;
+        let marks = &mut self.screen.call_screen.sound_marks;
         let sounds = &mut self.calls.sounds;
         sounds.set_enabled(enabled);
         match (call, summary) {

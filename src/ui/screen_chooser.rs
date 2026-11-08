@@ -222,10 +222,13 @@ impl QuillApp {
             let _ = handle.update(cx, |_, window, _| window.activate_window());
             return true;
         }
-        if self.screen_share.opening {
+        // Listing on this screen already. One started on an earlier screen
+        // does not count: its continuation was dropped with that screen
+        // and will never put the flag back.
+        if self.screen_share.opening == Some(self.screen_epoch()) {
             return true;
         }
-        self.screen_share.opening = true;
+        self.screen_share.opening = Some(self.screen_epoch());
         self.screen_share.generation = self.screen_share.generation.wrapping_add(1);
         let generation = self.screen_share.generation;
         self.spawn_screen(cx, async move |this, cx| {
@@ -268,7 +271,7 @@ impl QuillApp {
         if generation != self.screen_share.generation {
             return false;
         }
-        self.screen_share.opening = false;
+        self.screen_share.opening = None;
         let sources = match sources {
             Ok(sources) => sources,
             Err(err) => {
@@ -355,7 +358,7 @@ impl QuillApp {
     fn screen_chooser_closed(&mut self, cx: &mut Context<Self>) {
         let share = &mut self.screen_share;
         share.window = None;
-        share.opening = false;
+        share.opening = None;
         share.for_call = None;
         share.sources.clear();
         share.selected = None;

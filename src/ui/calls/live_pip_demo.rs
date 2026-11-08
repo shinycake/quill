@@ -37,7 +37,7 @@ impl QuillApp {
         };
         // As after the stream window's PiP button: the window stays
         // closed while the PiP plays its player.
-        self.group_call.window_closed_by_user = Some(CALL);
+        self.group_call_screen.window_closed_by_user = Some(CALL);
         let player = VideoPlayer::live(feed.sink.clone(), Purpose::Live { tile: false }, cx);
         self.group_call.stream.player = Some(player.clone());
         self.group_call.stream.demo_feed = Some(feed);

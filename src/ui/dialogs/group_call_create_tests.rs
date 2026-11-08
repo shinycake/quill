@@ -117,7 +117,7 @@ fn join_noted(
     app: &Entity<QuillApp>,
     vcx: &mut VisualTestContext,
 ) -> Option<Option<MessageSender>> {
-    app.read_with(vcx, |app, _| match app.group_call.stream.pending_join {
+    app.read_with(vcx, |app, _| match app.group_call_screen.stream_join {
         Some((StreamJoinIntent::Created { chat, join_as }, _)) if chat == CHANNEL => Some(join_as),
         _ => None,
     })
@@ -171,9 +171,9 @@ fn in_other_call(app: &Entity<QuillApp>, vcx: &mut VisualTestContext, joined: bo
         }
         if !joined {
             // The join went out and waits for its answer.
-            app.group_call.stream.joining = Some(OTHER_CALL);
+            app.group_call_screen.stream_joining = Some(OTHER_CALL);
         }
-        app.group_call.window_closed_by_user = Some(OTHER_CALL);
+        app.group_call_screen.window_closed_by_user = Some(OTHER_CALL);
     });
 }
 
@@ -466,7 +466,10 @@ fn a_join_still_in_flight_counts_as_being_in_that_call(cx: &mut TestAppContext) 
     // `leaveGroupCall` and the transport teardown), not dropped quietly.
     assert!(!other_call_tracked(&app, &mut main));
     assert!(
-        app.read_with(&main, |app, _| app.group_call.stream.joining.is_none()),
+        app.read_with(&main, |app, _| app
+            .group_call_screen
+            .stream_joining
+            .is_none()),
         "no join of the old call is awaited any more"
     );
 }
@@ -481,7 +484,7 @@ fn a_call_only_looked_at_is_dropped_without_leaving_it(cx: &mut TestAppContext) 
             session.calls.active_group_call = Some(ActiveGroupCall::fresh(OTHER_CALL));
         }
         // Its own window is not part of this test.
-        app.group_call.window_closed_by_user = Some(OTHER_CALL);
+        app.group_call_screen.window_closed_by_user = Some(OTHER_CALL);
     });
     begin(&app, &mut main, CreateKind::Now);
     assert!(

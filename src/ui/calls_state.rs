@@ -33,15 +33,41 @@ pub(crate) struct CallUi {
     pub(super) window: Option<AnyWindowHandle>,
     pub(super) window_opening: bool,
     pub(super) window_raised: bool,
+    pub(super) sounds: super::call_sounds::CallSounds,
+}
+
+/// What the account on screen remembers about its 1:1 call: the call
+/// whose window you closed, when the window's call ended, and which
+/// sounds that call already played. TDLib numbers calls per client from 1,
+/// so kept app-wide these would match the next account's call of the same
+/// id: its window would stay shut and its chimes would be skipped. The
+/// call itself does not outlive the screen (`retire_live_to_background`
+/// closes a client in a call). A field of `OnScreen`.
+#[derive(Default)]
+pub(crate) struct CallScreen {
     pub(super) window_closed_by_user: Option<i32>,
     pub(super) ended_at: Option<(i32, std::time::Instant)>,
-    pub(super) sounds: super::call_sounds::CallSounds,
     pub(super) sound_marks: super::call_sounds::SoundMarks,
 }
 
-/// The boxes the account on screen opens around calls. The call itself
-/// ([`CallUi`]) is the app's: it goes on in the background account, as
-/// tdesktop's call panel belongs to the session. A field of `OnScreen`.
+/// Ids and marks of the account's own calls are dropped with the screen;
+/// the call window follows the session on screen and closes on the next
+/// sync. The screen share chooser and its privacy box name a call of this
+/// account (`ScreenFor::Private` holds its id), which ends with the
+/// switch, so they close here.
+impl super::on_screen::Farewell for CallScreen {
+    fn farewell(
+        app: &mut super::app::QuillApp,
+        _window: &mut Window,
+        cx: &mut Context<super::app::QuillApp>,
+    ) {
+        app.close_screen_chooser(cx);
+        app.screen_share.privacy_for = None;
+    }
+}
+
+/// The boxes the account on screen opens around calls. A field of
+/// `OnScreen`.
 pub(crate) struct CallBoxes {
     /// Phase C2i: pending "call again" / profile-call confirmation when
     /// the confirm-before-calling pref is on: `(user_id, is_video)`.
@@ -105,10 +131,7 @@ impl CallUi {
             window: None,
             window_opening: false,
             window_raised: false,
-            window_closed_by_user: None,
-            ended_at: None,
             sounds: super::call_sounds::CallSounds::new(audio_output),
-            sound_marks: Default::default(),
         }
     }
 }

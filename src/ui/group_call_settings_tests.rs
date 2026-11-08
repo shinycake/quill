@@ -80,7 +80,7 @@ fn the_call_window_settings_box_opens_and_escape_closes_it(cx: &mut TestAppConte
             app.dismiss_topmost_layer(window, cx),
             "Escape closes the box"
         );
-        assert!(!app.group_call.settings_open);
+        assert!(!app.group_call_screen.settings_open);
         assert!(app.group_call_settings_overlay(cx).is_none());
     });
 }

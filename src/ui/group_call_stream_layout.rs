@@ -116,13 +116,6 @@ pub(crate) struct StreamWindow {
     hide_armed: bool,
     /// The open window was sized for this layout.
     pub(super) window_is_stream: bool,
-    /// The stream you asked to watch, until it is tracked, with the call
-    /// tracked when you asked (another call taking its place drops it).
-    pub(super) pending_join: Option<(StreamJoinIntent, Option<i32>)>,
-    /// The call whose join was sent (the Join button waits).
-    pub(super) joining: Option<i32>,
-    /// Gives up on a join that neither lands nor fails.
-    join_timeout: Option<Task<()>>,
     pub(super) overlay: Option<StreamOverlay>,
     /// The Stream Key was revealed after its warning.
     pub(super) key_shown: bool,
@@ -150,8 +143,6 @@ impl StreamWindow {
         self.demo_feed = None;
         self.overlay = None;
         self.key_shown = false;
-        self.joining = None;
-        self.join_timeout = None;
         self.volume = None;
     }
 }
@@ -267,9 +258,9 @@ impl QuillApp {
             .session()
             .and_then(|s| s.calls.active_group_call.as_ref())
             .map(|call| call.id);
-        self.group_call.stream.pending_join = Some((intent, tracked));
+        self.group_call_screen.stream_join = Some((intent, tracked));
         // Asking again brings a window you closed back.
-        self.group_call.window_closed_by_user = None;
+        self.group_call_screen.window_closed_by_user = None;
     }
 
     /// Join the tracked stream from its window: the Join button, or the
@@ -277,8 +268,8 @@ impl QuillApp {
     pub(super) fn join_stream(&mut self, id: i32, cx: &mut Context<Self>) {
         self.dismiss_group_call_error(cx);
         if self.send_group_call_join() {
-            self.group_call.stream.joining = Some(id);
-            self.group_call.stream.join_timeout =
+            self.group_call_screen.stream_joining = Some(id);
+            self.group_call_screen.stream_join_timeout =
                 Some(self.spawn_screen(cx, async move |this, cx| {
                     cx.background_executor().timer(JOIN_TIMEOUT).await;
                     let _ = this.update(cx, |app, cx| app.stream_join_ended(id, cx));
@@ -291,8 +282,8 @@ impl QuillApp {
 
     /// The join was not sent or did not land: stop waiting and say so.
     fn stream_join_failed(&mut self) {
-        self.group_call.stream.joining = None;
-        self.group_call.stream.join_timeout = None;
+        self.group_call_screen.stream_joining = None;
+        self.group_call_screen.stream_join_timeout = None;
         let reason = tr(keys::Q_OPS_STREAM_JOIN_FAILED).to_string();
         if let Some(live) = self.live.as_mut() {
             live.driver.session.calls.group_call_error = Some(reason);
@@ -304,7 +295,7 @@ impl QuillApp {
     /// The join on its way landed or failed: stop waiting, and say so when
     /// it failed. Run with the window sync, outside the draw.
     pub(super) fn settle_stream_join(&mut self) {
-        let Some(joining) = self.group_call.stream.joining else {
+        let Some(joining) = self.group_call_screen.stream_joining else {
             return;
         };
         let Some(facts) = self.group_call_stream_facts() else {
@@ -313,8 +304,8 @@ impl QuillApp {
         if joining != facts.id {
             self.stream_join_failed();
         } else if facts.joined {
-            self.group_call.stream.joining = None;
-            self.group_call.stream.join_timeout = None;
+            self.group_call_screen.stream_joining = None;
+            self.group_call_screen.stream_join_timeout = None;
         } else if facts.transport_failed {
             // The connect failed without a join error.
             self.stream_join_failed();
@@ -322,15 +313,15 @@ impl QuillApp {
             .session()
             .is_some_and(|s| s.calls.group_call_error.is_some())
         {
-            self.group_call.stream.joining = None;
-            self.group_call.stream.join_timeout = None;
+            self.group_call_screen.stream_joining = None;
+            self.group_call_screen.stream_join_timeout = None;
         }
     }
 
     /// The join of `id` timed out, or the window saw it end: unless it
     /// landed, the Join button comes back with the failure.
     pub(super) fn stream_join_ended(&mut self, id: i32, cx: &mut Context<Self>) {
-        if self.group_call.stream.joining != Some(id) {
+        if self.group_call_screen.stream_joining != Some(id) {
             return;
         }
         let joined = self
@@ -338,8 +329,8 @@ impl QuillApp {
             .and_then(|s| s.calls.active_group_call.as_ref())
             .is_some_and(|call| call.id == id && call.is_joined);
         if joined {
-            self.group_call.stream.joining = None;
-            self.group_call.stream.join_timeout = None;
+            self.group_call_screen.stream_joining = None;
+            self.group_call_screen.stream_join_timeout = None;
         } else {
             self.stream_join_failed();
         }
@@ -349,7 +340,7 @@ impl QuillApp {
     /// Run the join you asked for once its call is tracked. Any other
     /// unjoined stream waits for its Join button.
     pub(super) fn consume_stream_join_intent(&mut self, cx: &mut Context<Self>) {
-        let Some((intent, tracked_then)) = self.group_call.stream.pending_join else {
+        let Some((intent, tracked_then)) = self.group_call_screen.stream_join else {
             return;
         };
         let Some(call) = self
@@ -363,12 +354,12 @@ impl QuillApp {
             // Another call took the place of the one tracked when you
             // asked: the wish is stale and must not join much later.
             if tracked_then != Some(call.id) {
-                self.group_call.stream.pending_join = None;
+                self.group_call_screen.stream_join = None;
             }
             return;
         }
         let (id, stream, joined) = (call.id, uses_stream_layout(call), call.is_joined);
-        self.group_call.stream.pending_join = None;
+        self.group_call_screen.stream_join = None;
         if joined {
             return;
         }
@@ -700,7 +691,7 @@ impl QuillApp {
         let stream = &self.group_call.stream;
         if stream.overlay.is_some()
             || self.group_call_boxes.share_open
-            || self.group_call.title_dialog.is_some()
+            || self.group_call_screen.title_dialog.is_some()
         {
             return false;
         }
@@ -741,7 +732,7 @@ impl QuillApp {
         let error = self
             .session()
             .and_then(|s| s.calls.group_call_error.clone());
-        let joining = self.group_call.stream.joining == Some(facts.id);
+        let joining = self.group_call_screen.stream_joining == Some(facts.id);
         let id = facts.id;
         let button = Button::new("group-call-stream-join")
             .label(tr(keys::GROUP_CALL_JOIN))

@@ -608,23 +608,23 @@ impl QuillApp {
             .map(|c| c.title.clone())
             .unwrap_or_default();
         let dialog = GroupCallTitleDialog::new(window, cx, &current);
-        self.group_call.title_dialog = Some(dialog);
+        self.group_call_screen.title_dialog = Some(dialog);
         cx.notify();
     }
 
     pub(super) fn close_group_call_title_dialog(&mut self, cx: &mut Context<Self>) {
-        self.group_call.title_dialog = None;
+        self.group_call_screen.title_dialog = None;
         cx.notify();
     }
 
     pub(super) fn save_group_call_title(&mut self, cx: &mut Context<Self>) {
         let title = self
-            .group_call
+            .group_call_screen
             .title_dialog
             .as_ref()
             .map(|d| d.title_input.read(cx).value().to_string())
             .unwrap_or_default();
-        self.group_call.title_dialog = None;
+        self.group_call_screen.title_dialog = None;
         if let Some(live) = self.live.as_mut() {
             self.screen
                 .connection
@@ -779,7 +779,7 @@ impl QuillApp {
     /// surfaces via `group_call_error`.
     pub(super) fn send_group_call_message(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let text = quill::composer::send_text_on_enter(
-            self.group_call.composer.read(cx).value().to_string(),
+            self.group_call_screen.composer.read(cx).value().to_string(),
             self.chat_prefs.send_key_mode,
         );
         if text.trim().is_empty() {
@@ -788,7 +788,7 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut() {
             match live.driver.send_group_call_message(text) {
                 Ok(_) => {
-                    self.group_call.composer.update(cx, |input, cx| {
+                    self.group_call_screen.composer.update(cx, |input, cx| {
                         input.set_value("", window, cx);
                     });
                 }
