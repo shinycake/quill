@@ -891,6 +891,7 @@ impl Render for QuillApp {
 
 mod frame_upkeep;
 mod status_toast;
+mod window_upkeep;
 #[cfg(test)]
 pub(in crate::ui) use status_toast::pin_toasts_for_tests;
 #[allow(unused_imports)]

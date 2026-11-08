@@ -216,16 +216,16 @@ impl QuillApp {
         let layout = self
             .session()
             .map_or(quill::state::ForumColumn::Hidden, |s| {
-                s.forum_column(width, self.chat_list.forum_chats_peek)
+                s.forum_column(width, self.history.forum_chats_peek)
             });
-        if self.chat_list.forum_chats_peek
+        if self.history.forum_chats_peek
             && self
                 .session()
                 .is_some_and(|s| s.forum_column(width, false) == quill::state::ForumColumn::Hidden)
         {
-            self.chat_list.forum_chats_peek = false;
+            self.history.forum_chats_peek = false;
         }
-        self.chat_list.forum_column_shown = layout != quill::state::ForumColumn::Hidden;
+        self.history.forum_column_shown = layout != quill::state::ForumColumn::Hidden;
         layout
     }
 
@@ -294,7 +294,7 @@ impl QuillApp {
                                 .tooltip(tr(keys::Q_PEOPLE_SHOW_CHATS))
                                 .accessibility_label(tr(keys::Q_PEOPLE_SHOW_CHATS))
                                 .on_click(cx.listener(|this, _, _, cx| {
-                                    this.chat_list.forum_chats_peek = true;
+                                    this.history.forum_chats_peek = true;
                                     cx.notify();
                                 })),
                         )

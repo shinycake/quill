@@ -71,6 +71,15 @@ impl<S: JsonSender> ConnectDriver<S> {
         if content.rich().is_some_and(|rich| rich.input().is_none()) {
             return Ok(DraftSaveOutcome::Skipped);
         }
+        // One save waits at a time: another slot's (a chat window's, typed
+        // within this quiet window) goes out now instead of being replaced.
+        if self
+            .pending_draft
+            .as_ref()
+            .is_some_and(|pending| (pending.chat_id, pending.topic) != (chat_id, topic))
+        {
+            self.settle_pending_draft()?;
+        }
         let terms = self.draft_suggestion(chat_id, topic);
         let stored = content.to_store(reply_to.is_some() || terms.is_some());
         let reply_to = stored.as_ref().and(reply_to);
@@ -206,6 +215,28 @@ impl<S: JsonSender> ConnectDriver<S> {
     pub fn cancel_pending_draft(&mut self) {
         self.pending_draft = None;
         self.draft_clock = DraftSaveClock::idle();
+    }
+
+    /// [`Self::cancel_pending_draft`] when the waiting save is `chat_id`'s
+    /// (a send there, its draft dropped): another chat's waiting save, a
+    /// chat window's, still goes.
+    pub fn cancel_pending_draft_of(&mut self, chat_id: ChatId) {
+        if self
+            .pending_draft
+            .as_ref()
+            .is_none_or(|pending| pending.chat_id == chat_id)
+        {
+            self.cancel_pending_draft();
+        }
+    }
+
+    /// The waiting save goes out now and the next slot starts a quiet
+    /// window of its own: the main window's chat changes, or another slot
+    /// is typed in. Dropping it would lose text typed in a chat window.
+    pub(crate) fn settle_pending_draft(&mut self) -> Result<(), ConnectSendError> {
+        let flushed = self.flush_pending_draft();
+        self.draft_clock = DraftSaveClock::idle();
+        flushed.map(|_| ())
     }
 
     /// The suggest bar's terms a chat draft carries (only the chat slot

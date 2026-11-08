@@ -425,3 +425,46 @@ fn a_new_pin_in_a_window_chat_refetches_its_pinned_list() {
         "the pin refetches the window chat's list"
     );
 }
+
+/// One debounced draft save waits at a time. Text typed in Bob's window
+/// and then in the main window's Alice within the quiet second both
+/// reach TDLib, and a send in Alice keeps Bob's waiting save.
+#[test]
+fn a_chat_windows_waiting_draft_survives_typing_and_sends_elsewhere() {
+    let mut h = Harness::two_chats();
+    h.driver.select_chat(ALICE).unwrap();
+    h.driver.open_chat_window(BOB).unwrap();
+    let bob = h.driver.with_window_chat(BOB, |driver| {
+        driver.note_composer_draft(BOB, "for bob", None, 1_000, true)
+    });
+    assert!(matches!(bob, Ok(DraftSaveOutcome::Debounced { .. })));
+    let alice = h
+        .driver
+        .note_composer_draft(ALICE, "for alice", None, 1_100, true)
+        .unwrap();
+    let DraftSaveOutcome::Debounced { token, .. } = alice else {
+        panic!("Alice's save waits its quiet second");
+    };
+    let bobs = h.sent("setChatDraftMessage", BOB);
+    assert_eq!(
+        bobs.len(),
+        1,
+        "Bob's draft went out when Alice was typed in"
+    );
+    assert_eq!(
+        bobs[0]["draft_message"]["content"]["text"]["text"],
+        "for bob"
+    );
+
+    let bob = h.driver.with_window_chat(BOB, |driver| {
+        driver.note_composer_draft(BOB, "for bob, again", None, 1_200, true)
+    });
+    assert!(matches!(bob, Ok(DraftSaveOutcome::Debounced { .. })));
+    // Bob's keystroke sent Alice's waiting save; its timer finds nothing.
+    assert_eq!(h.sent("setChatDraftMessage", ALICE).len(), 1);
+    assert!(h.driver.commit_debounced_draft(token).unwrap().is_none());
+    // A send in Alice drops only Alice's waiting save.
+    h.driver.cancel_pending_draft_of(ALICE);
+    assert!(h.driver.flush_pending_draft().unwrap().is_some());
+    assert_eq!(h.sent("setChatDraftMessage", BOB).len(), 2);
+}

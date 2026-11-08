@@ -14,8 +14,9 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::actions::{
-    AiComposeApply, ArchiveOpenChat, JustSend, RecordRoundMessage, ReopenClosedWindow,
-    ScheduleSend, SendSilently, ShowAdminLog, ShowScheduledMessages, ToggleLinkPreview,
+    AiComposeApply, ArchiveOpenChat, CancelSearch, JustSend, RecordRoundMessage,
+    ReopenClosedWindow, ScheduleSend, SendSilently, ShowAdminLog, ShowScheduledMessages,
+    ToggleLinkPreview,
 };
 use super::app::QuillApp;
 use gpui_kit::*;
@@ -284,6 +285,8 @@ pub(super) trait CommandActions: InteractiveElement + Sized {
             toggle_link_preview_by_key
         );
         let el = window_command!(el, owner, chat_id, ShowAdminLog, admin_log_by_key);
+        // Escape closes the topmost of the window's own layers.
+        let el = window_command!(el, owner, chat_id, CancelSearch, dismiss_window_layer);
         window_command!(
             el,
             owner,

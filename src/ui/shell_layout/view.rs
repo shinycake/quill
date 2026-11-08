@@ -44,7 +44,7 @@ impl QuillApp {
             list_width: f32::from(self.frame.sidebar_width),
             chat_open: session.is_some_and(|s| s.open_chat.is_some()),
             forum: session.map_or(ForumColumn::Hidden, |s| {
-                s.forum_column(width, self.chat_list.forum_chats_peek)
+                s.forum_column(width, self.history.forum_chats_peek)
             }),
             topic_open: session.is_some_and(|s| s.open_topic.is_some()),
             panels: side_panels_width(self.drawn_panels()),

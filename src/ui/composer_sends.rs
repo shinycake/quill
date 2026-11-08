@@ -46,9 +46,19 @@ pub(crate) struct PendingSend {
     /// The link preview choice (tdesktop keeps it in the draft as
     /// `WebPageDraft`).
     pub(super) preview: LinkPreviewChoice,
-    /// The text of a Send pressed while a photo edit was rendering: it
-    /// goes out when the last one lands.
-    pub(super) held_send: Option<String>,
+    /// The text of a Send pressed while a photo edit was rendering, with
+    /// that send's one-time options: it goes out when the last one lands.
+    pub(super) held_send: Option<(String, SendOnce)>,
+}
+
+/// The options a single send carries and the next does not: "Send without
+/// sound" and "Send with Effect" (`ComposerUi::send_silent_once`,
+/// `send_effect_once`). A send that waits (a paid-message confirm, a photo
+/// edit still rendering) keeps its own copy, so it goes out with them.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(super) struct SendOnce {
+    pub(super) silent: bool,
+    pub(super) effect: i64,
 }
 
 impl PendingSend {
@@ -318,6 +328,29 @@ fn session_ended(prev: &AuthorizationState, now: &AuthorizationState) -> bool {
 }
 
 impl QuillApp {
+    /// The one-time options of the send being made now.
+    pub(super) fn send_once(&self) -> SendOnce {
+        SendOnce {
+            silent: self.composer_ui.send_silent_once,
+            effect: self.composer_ui.send_effect_once,
+        }
+    }
+
+    /// Run a send that waited with the one-time options it was made with.
+    pub(super) fn with_send_once<R>(
+        &mut self,
+        once: SendOnce,
+        f: impl FnOnce(&mut Self) -> R,
+    ) -> R {
+        let outer = self.send_once();
+        self.composer_ui.send_silent_once = once.silent;
+        self.composer_ui.send_effect_once = once.effect;
+        let result = f(self);
+        self.composer_ui.send_silent_once = outer.silent;
+        self.composer_ui.send_effect_once = outer.effect;
+        result
+    }
+
     /// The slot the composer on screen sends from: the account on screen,
     /// the open chat (the window's own while a chat window is in scope)
     /// and its topic.

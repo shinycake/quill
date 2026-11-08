@@ -139,29 +139,56 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        let open = super::chat_window::ChatOpen::new(chat_id);
+        let open = if thread_switch {
+            open.thread_switch(None)
+        } else {
+            open
+        };
+        self.select_chat_request(open, window, cx);
+    }
+
+    /// Show `open`'s chat in the window it belongs to
+    /// (`route_chat_open`), landing on what the request carries. Returns
+    /// whether the window in place opened it.
+    pub(super) fn select_chat_request(
+        &mut self,
+        open: super::chat_window::ChatOpen,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
         // An agent driving the window opens granted chats only.
-        if !self.agent_may_open(chat_id) {
-            return;
+        if !self.agent_may_open(open.chat_id) {
+            return false;
         }
-        // A chat with a window of its own shows there (Telegram Desktop
-        // `showHistoryInDifferentWindow`); the main window stays put. A
-        // chat chosen from inside a chat window shows in the main window.
-        if !thread_switch && self.routed_to_chat_window(chat_id, cx) {
-            return;
-        }
-        if self.routed_to_main_window(chat_id, thread_switch, cx) {
-            return;
-        }
+        let Some(open) = self.route_chat_open(open, cx) else {
+            return false;
+        };
+        let super::chat_window::ChatOpen {
+            chat_id,
+            thread_switch,
+            thread,
+            open_at,
+            reply,
+            topic,
+        } = open;
         self.flush_leaving_draft(cx);
         // A reply aimed at this chat from another one survives the draft
         // restore below ("Reply in Another Chat").
-        let carried_reply = self
-            .chat_ui
-            .reply()
-            .cloned()
+        // It rides in the request from another window, or waits in this
+        // window's composer.
+        let carried_reply = reply
+            .or_else(|| self.chat_ui.reply().cloned())
             .filter(|reply| reply.target_chat == Some(chat_id));
+        // A thread resolved in a chat window moves here with its chat.
+        if let Some(thread) = thread
+            && let Some(live) = self.live.as_mut()
+        {
+            live.driver.session.threads.thread = Some(thread);
+            live.driver.session.view_generation.bump();
+        }
         // Choosing a chat from the list ends the peek at it.
-        self.chat_list.forum_chats_peek = false;
+        self.history.forum_chats_peek = false;
         // A chat opened from anywhere (a link, a notification) shows over
         // Settings' place.
         self.close_settings();
@@ -190,7 +217,6 @@ impl QuillApp {
                 session.stickers.stickers.close();
             }
         }
-        let open_at = self.chat_list.open_at.take();
         // The open chat chosen again, with no reply thread or topic over
         // its history to leave.
         let reselect = !thread_switch
@@ -239,7 +265,11 @@ impl QuillApp {
                 None => self.close_info_panel(cx),
             }
         }
+        if let Some(topic) = topic {
+            self.select_topic_ui(topic, cx);
+        }
         cx.notify();
+        true
     }
 
     /// Slice G10: open the communities hub dialog (side-menu entry).

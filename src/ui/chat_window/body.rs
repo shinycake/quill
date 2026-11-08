@@ -26,9 +26,6 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        self.sync_composer_placeholder(window, cx);
-        // The main window's frame upkeep syncs only its own composer.
-        self.sync_emoji_words(cx);
         // The window's lock field: focus while locked, empty once unlocked.
         self.passcode_frame(window, cx);
         if self.account.passcode.locked {

@@ -613,7 +613,7 @@ impl QuillApp {
                     // Phase 5.1: opening a forum supergroup shows its topics;
                     // with the topic column on screen the pane only asks for
                     // a choice.
-                    if self.chat_list.forum_column_shown {
+                    if self.history.forum_column_shown {
                         pane_placeholder(
                             tr(keys::Q_CHAT_CHOOSE_A_TOPIC),
                             tr(keys::Q_CHAT_PICK_A_TOPIC_FROM_THE),

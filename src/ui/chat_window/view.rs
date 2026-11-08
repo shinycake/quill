@@ -188,7 +188,11 @@ impl Render for ChatWindowView {
             app.release_viewer_key_probe(window, cx);
             app.viewer_follow_window_fullscreen(window);
             app.seed_history_width(f32::from(window.viewport_size().width));
-            app.adopt_remote_draft(window, cx);
+            // The window's half of the frame upkeep, with its state in
+            // place (a window whose view is gone runs none of it).
+            if app.windows.scope == Some(chat_id) {
+                app.per_window_upkeep(window, cx);
+            }
             let body = app.chat_window_body(chat_id, window, cx);
             (body, app.autoscroll_layer(cx))
         });

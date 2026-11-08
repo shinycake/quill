@@ -364,6 +364,14 @@ impl QuillApp {
         if !self.agent_may_open(chat_id) {
             return;
         }
+        // A chat with a window of its own shows there; one asked for inside
+        // a chat window shows in the main window.
+        if self
+            .route_chat_open(crate::ui::chat_window::ChatOpen::new(chat_id), cx)
+            .is_none()
+        {
+            return;
+        }
         let (text, reply, now_ms) = self.leaving_draft_parts(cx);
         let open = self.chat_open_at(chat_id, None);
         if let Some(live) = self.live.as_mut() {
@@ -408,6 +416,10 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         if !self.agent_may_open(chat_id) {
+            return;
+        }
+        let open = crate::ui::chat_window::ChatOpen::new(chat_id).at(message_id);
+        if self.route_chat_open(open, cx).is_none() {
             return;
         }
         let (text, reply, now_ms) = self.leaving_draft_parts(cx);

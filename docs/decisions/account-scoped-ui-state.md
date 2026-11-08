@@ -1217,3 +1217,85 @@ Every fix has a deterministic driver or state test
 `connect/tests/refused_requests.rs`, and additions to the proxy,
 invite, gift, saved, stats, story-insights, boost, group-type and
 inline-members tests).
+
+### Phase 10 (area B: the messaging UI's per-window upkeep and routing)
+
+Round 10 of the review, area B, on `claude/sm-review10-b`. The account
+level held. What was left was the window level: upkeep that only the
+main window's frame ran, state every window shared because `swap_slot`
+did not swap it, and chat opens that skipped the window routing or lost
+their context on the way.
+
+- **Per-window upkeep.** `per_window_upkeep`
+  (`app_render/window_upkeep.rs`) holds every frame step that keeps one
+  window's chat, composer and history in step: the thread advance, gone
+  reply and edit targets, `sync_chat_ui`, the history holds, the inline
+  return, the pending draft restore, the remote draft, the placeholder,
+  the `:` suggestions, emoji words, the AI composer answer, the
+  slow-mode, self-destruct and live-location ticks, and the pending link
+  click. The main window runs it from `frame_upkeep` and a chat window
+  from its render, with that window's state in place. Before, a chat
+  window ran three of these. Its link clicks did nothing, a topic switch
+  kept the old topic's text and reply and saved them as the new topic's
+  draft, comments stayed on "Opening the thread", AI answers were dropped
+  and the countdowns froze. `poll_every_window` runs the translation pump
+  and Saved Messages' loads in every window from the poll loop, and the
+  translation scan is kept by chat. The history holds read every slot,
+  so a window's frame does not drop the main window's claims.
+- **The guard.** `check-window-scope.py` checks `frame_upkeep` and
+  `flush_notifications`. A call there to a method that touches
+  per-window state (the same transitive test the async rule uses) fails
+  unless it carries `// main-only: <why>`. The steps left there say why:
+  notification delivery, deep links, stories, mini apps, the main
+  window's boxes, the AI compose box (it carries its window), the one
+  composer link preview the session keeps, and the reply target fetch.
+- **One router.** `route_chat_open` (`chat_window/routing.rs`) decides
+  where a `ChatOpen` goes: the chat's own window, the main window
+  (deferred, from a chat window), or the window in place when it already
+  shows the chat. The request carries what the open lands on: the
+  message (`open_at`, which replaces `ChatListUi::open_at`), a reply
+  aimed at the chat from another one, a forum topic, and a comment
+  thread resolved in a chat window, which moves into the main window's
+  view with its discussion group. `select_chat_with`, the search and
+  header opens (`select_search_chat`, `select_search_message`), "Go to
+  message", "Reply in Another Chat" and the topic chip all go through
+  it. Before, a "Forwarded from" or external reply header in a chat
+  window re-pointed that window at another chat, and in the main window
+  it opened a chat that had its own window a second time.
+- **Per-window motion.** `FrameUi::surfaces` (bars, corner buttons and
+  the corner lift, toasts) and `FrameUi::motion` (history reveal,
+  selection fades) are swapped with the slot. With one corner-lift
+  `Glide`, a window scrolled up and a window at the bottom flipped its
+  target at every draw and kept each other on a 60 fps tick. Not
+  measured in a live build: the tests do not animate
+  (`surface_reveal::animate` is off under `cfg(test)`), so the test
+  asserts that each window keeps its own glide.
+- **Dialog scope.** `QuillShell::sync_kit_dialogs_in` puts its host's
+  state in place for the flags and the close, and the kit dialog's
+  builder does the same when the kit layer builds it later. Before, a
+  pointer move into a chat window left its scope in place, and the main
+  shell closed its own dialog (whose flag lives in the main window's
+  `MessageUi`) until the next main-window input.
+- **Smaller items.**
+  - Escape in a chat window runs `dismiss_window_layer`, which closes
+    the topmost of the layers a chat window draws (`WINDOW_LAYERS`), not
+    the main window's pages and panels.
+  - The driver's debounced draft: a note for another slot sends the
+    waiting one first, the main window's chat switch and a thread switch
+    send it instead of dropping it, and a send cancels only its own
+    chat's save (`cancel_pending_draft_of`). The driver still keeps one
+    waiting save; this keeps a chat window's from being lost.
+  - A forward's answer shows in the window that shows its source chat,
+    and clears only that forward's selection, picker and bar.
+  - The forum peek and "topic column shown" are per window
+    (`HistoryUi`).
+  - Silent and effect options ride with a held send (`SendOnce`, kept
+    by the paid-message confirm and the photo-edit hold).
+  - The text-limit count lands in the memo of the window that asked
+    (`spawn_scoped`).
+- **Skipped.** The folder spec cache (finding 5) and the reply target
+  fetch for chat windows are area A's. Force reply still arms the main
+  window's composer. The comment-thread handoff has no UI test: the demo
+  session has no live client, so `advance_thread` does nothing there.
+  The held send's options are tested through `with_send_once`, not
+  through a live paid-message confirm.
