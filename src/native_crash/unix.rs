@@ -51,6 +51,9 @@ static INSTALLED: AtomicBool = AtomicBool::new(false);
 /// `SIGNALS` order; zero is `SIG_DFL`.
 static OLD_HANDLER: [AtomicUsize; SIGNALS.len()] = [const { AtomicUsize::new(0) }; SIGNALS.len()];
 static OLD_FLAGS: [AtomicI32; SIGNALS.len()] = [const { AtomicI32::new(0) }; SIGNALS.len()];
+/// The executable's Mach-O header address, recorded at install.
+#[cfg(target_os = "macos")]
+static LOAD_ADDRESS: AtomicUsize = AtomicUsize::new(0);
 /// Text written after the signal line: version, OS, pid.
 static HEADER: OnceLock<Box<[u8]>> = OnceLock::new();
 
@@ -76,6 +79,8 @@ pub(super) fn install(dir: &Path) {
     );
     let _ = HEADER.set(header.into_bytes().into_boxed_slice());
     warm_up_backtrace();
+    #[cfg(target_os = "macos")]
+    LOAD_ADDRESS.store(executable_load_address(), Ordering::SeqCst);
     CRASH_FD.store(file.into_raw_fd(), Ordering::SeqCst);
     ensure_alt_stack();
     for (index, signal) in SIGNALS.into_iter().enumerate() {
@@ -92,6 +97,17 @@ fn warm_up_backtrace() {
 
 #[cfg(not(any(target_os = "macos", all(target_os = "linux", target_env = "gnu"))))]
 fn warm_up_backtrace() {}
+
+/// Image 0 is the main executable.
+#[cfg(target_os = "macos")]
+fn executable_load_address() -> usize {
+    unsafe extern "C" {
+        // <mach-o/dyld.h>
+        fn _dyld_get_image_header(image_index: u32) -> *const libc::c_void;
+    }
+    // SAFETY: a plain dyld query; image 0 always exists.
+    unsafe { _dyld_get_image_header(0) as usize }
+}
 
 /// Keep the alternate stack the thread already has: Rust's runtime sets one
 /// up on the main thread, with a guard page below it, for its own
@@ -153,7 +169,7 @@ extern "C" fn on_signal(signal: c_int, info: *mut libc::siginfo_t, context: *mut
     } else {
         let fd = CRASH_FD.load(Ordering::SeqCst);
         if fd >= 0 {
-            write_report(fd, signal, fault_address(info));
+            write_report(fd, signal, fault_address(info), context);
         }
         REPORT_DONE.store(true, Ordering::SeqCst);
     }
@@ -258,7 +274,7 @@ fn signal_name(signal: c_int) -> &'static [u8] {
     }
 }
 
-fn write_report(fd: c_int, signal: c_int, address: u64) {
+fn write_report(fd: c_int, signal: c_int, address: u64, context: *mut libc::c_void) {
     write_all(fd, b"Quill closed because of a native crash.\nsignal: ");
     write_all(fd, signal_name(signal));
     write_all(fd, b" (");
@@ -274,12 +290,38 @@ fn write_report(fd: c_int, signal: c_int, address: u64) {
         write_all(fd, header);
     }
     write_all(fd, b"\nbacktrace:\n");
-    write_backtrace(fd);
+    write_backtrace(fd, context);
     write_all(fd, b"\nend of report\n");
 }
 
-#[cfg(any(target_os = "macos", all(target_os = "linux", target_env = "gnu")))]
-fn write_backtrace(fd: c_int) {
+/// macOS: walked from the interrupted registers, since `backtrace` run on
+/// the alternate stack can return no frames (`interrupted_stack`).
+#[cfg(target_os = "macos")]
+fn write_backtrace(fd: c_int, context: *mut libc::c_void) {
+    let mut frames = [std::ptr::null_mut(); MAX_FRAMES];
+    let mut count = super::interrupted_stack::collect(context, &mut frames);
+    if count == 0 {
+        // SAFETY: `frames` holds MAX_FRAMES pointers and that is the size passed.
+        count =
+            unsafe { libc::backtrace(frames.as_mut_ptr(), MAX_FRAMES as c_int) }.max(0) as usize;
+    }
+    write_load_address(fd);
+    // SAFETY: the first `count` entries were just filled in; the symbol
+    // writer only reads them and writes to `fd`.
+    unsafe { libc::backtrace_symbols_fd(frames.as_ptr(), count as c_int, fd) };
+}
+
+/// Where the executable was loaded, so a frame `backtrace_symbols_fd` could
+/// not name still symbolicates (`atos -l <address>`).
+#[cfg(target_os = "macos")]
+fn write_load_address(fd: c_int) {
+    write_all(fd, b"load address: 0x");
+    write_hex(fd, LOAD_ADDRESS.load(Ordering::SeqCst) as u64);
+    write_all(fd, b"\n");
+}
+
+#[cfg(all(target_os = "linux", target_env = "gnu"))]
+fn write_backtrace(fd: c_int, _context: *mut libc::c_void) {
     let mut frames = [std::ptr::null_mut(); MAX_FRAMES];
     // SAFETY: `frames` holds MAX_FRAMES pointers and that is the size passed.
     let count = unsafe { libc::backtrace(frames.as_mut_ptr(), MAX_FRAMES as c_int) };
@@ -289,7 +331,7 @@ fn write_backtrace(fd: c_int) {
 }
 
 #[cfg(not(any(target_os = "macos", all(target_os = "linux", target_env = "gnu"))))]
-fn write_backtrace(fd: c_int) {
+fn write_backtrace(fd: c_int, _context: *mut libc::c_void) {
     write_all(fd, b"(no backtrace on this libc)\n");
 }
 
