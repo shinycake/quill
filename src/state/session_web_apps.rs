@@ -17,7 +17,7 @@ impl Session {
             BotsPayload::WebAppInfo { launch_id, url } => {
                 if let Some(RequestPurpose::Bots(BotsPurpose::OpenWebApp { bot_user_id })) = purpose
                 {
-                    self.finish_web_app_open(bot_user_id, launch_id, url);
+                    self.finish_web_app_open(pending, bot_user_id, launch_id, url);
                 }
             }
             BotsPayload::WebAppUrl { url } => {
@@ -26,14 +26,14 @@ impl Session {
                     | RequestPurpose::Bots(BotsPurpose::GetWebAppLinkUrl { bot_user_id }),
                 ) = purpose
                 {
-                    self.finish_web_app_open(bot_user_id, 0, url);
+                    self.finish_web_app_open(pending, bot_user_id, 0, url);
                 }
             }
             BotsPayload::MainWebApp { url } => {
                 if let Some(RequestPurpose::Bots(BotsPurpose::GetMainWebApp { bot_user_id })) =
                     purpose
                 {
-                    self.finish_web_app_open(bot_user_id, 0, url);
+                    self.finish_web_app_open(pending, bot_user_id, 0, url);
                 }
             }
             BotsPayload::FoundWebApp(app) => {
@@ -71,8 +71,14 @@ impl Session {
         }
     }
 
-    fn finish_web_app_open(&mut self, bot_user_id: i64, launch_id: i64, url: String) {
-        let pending = self.bots.web_apps.pending.take();
+    fn finish_web_app_open(
+        &mut self,
+        request: Option<&PendingRequest>,
+        bot_user_id: i64,
+        launch_id: i64,
+        url: String,
+    ) {
+        let pending = self.take_web_app_pending(request);
         let (chat_id, source) = match pending {
             Some(p) if p.bot_user_id == bot_user_id => (p.chat_id, p.source),
             _ => (None, crate::web_app::LaunchSource::MenuButton),
@@ -91,6 +97,14 @@ impl Session {
                 url,
             }
         });
+    }
+
+    /// The context of the open call that `request` answers.
+    fn take_web_app_pending(&mut self, request: Option<&PendingRequest>) -> Option<WebAppPending> {
+        let id = request?.id;
+        let pending = &mut self.bots.web_apps.pending;
+        let index = pending.iter().position(|p| p.request == id)?;
+        Some(pending.remove(index))
     }
 
     /// `getGrossingWebAppBots` returns `foundUsers`, which the envelope
@@ -142,7 +156,7 @@ impl Session {
             | RequestPurpose::Bots(BotsPurpose::GetWebAppUrl { bot_user_id })
             | RequestPurpose::Bots(BotsPurpose::GetMainWebApp { bot_user_id })
             | RequestPurpose::Bots(BotsPurpose::GetWebAppLinkUrl { bot_user_id }) => {
-                self.bots.web_apps.pending = None;
+                let _ = self.take_web_app_pending(pending);
                 self.bots.web_apps.open_result = Some(WebAppOpenResult::Failed {
                     bot_user_id,
                     message: web_app_error_text(err),

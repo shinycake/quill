@@ -38,6 +38,12 @@ pub(crate) struct HistoryUi {
     /// The forum topic column is on screen in this window this frame, so
     /// the conversation shows a hint instead of repeating the topic list.
     pub(super) forum_column_shown: bool,
+    /// Scroll state of this window's topic tab strip (`subsection_tabs`):
+    /// each window scrolls and reveals its own selected tab.
+    pub(super) topic_tabs_scroll: gpui_kit::ScrollHandle,
+    /// What the selected topic tab was last scrolled into view for.
+    pub(super) topic_tabs_revealed: std::cell::Cell<Option<super::folder_tabs_fit::RevealKey>>,
+    pub(super) topic_tabs_column_scroll: gpui_kit::ScrollHandle,
     /// Messages whose row's bottom edge was inside the viewport at the last
     /// paint (tdesktop `HistoryInner` reads an unread message once its
     /// bottom is shown), not the list's overdraw. Reported as
@@ -205,6 +211,9 @@ impl HistoryUi {
             painted_ids: Default::default(),
             forum_chats_peek: false,
             forum_column_shown: false,
+            topic_tabs_scroll: gpui_kit::ScrollHandle::new(),
+            topic_tabs_revealed: std::cell::Cell::new(None),
+            topic_tabs_column_scroll: gpui_kit::ScrollHandle::new(),
             seen: Default::default(),
             on_screen: Default::default(),
             reported_visible: None,

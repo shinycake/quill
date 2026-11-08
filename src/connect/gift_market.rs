@@ -7,7 +7,7 @@ use super::*;
 use crate::gift_market::{
     CraftGift, CraftSession, GiftMarketPurpose, ResaleBuy, ResaleFilter, ResaleSearch,
 };
-use crate::ids::{ChatId, RequestId};
+use crate::ids::RequestId;
 use crate::local_time::now_unix;
 use crate::marketplace::GiftPrice;
 use crate::state::{PaymentsPurpose, RequestPurpose};
@@ -138,7 +138,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     pub fn start_gift_resale_buy(
         &mut self,
         name: &str,
-        chat_id: Option<ChatId>,
+        recipient: Option<crate::gift_manage::GiftRecipient>,
         for_craft: bool,
     ) -> Result<(), ConnectSendError> {
         let market = &self.session.payments.gift_market;
@@ -154,11 +154,10 @@ impl<S: JsonSender> ConnectDriver<S> {
             .session
             .my_user_id
             .ok_or(ConnectSendError::InvalidRequest)?;
-        let recipient = match chat_id.filter(|_| !for_craft) {
-            Some(chat_id) => self
-                .session
-                .gift_recipient(chat_id)
-                .ok_or(ConnectSendError::InvalidRequest)?,
+        // The send box's recipient (a contact, a group member, a channel),
+        // never the chat that happens to be open.
+        let recipient = match recipient.filter(|r| !for_craft && !r.is_self) {
+            Some(recipient) => recipient,
             None => crate::gift_manage::GiftRecipient {
                 sender: MessageSender::User { user_id: me },
                 name: String::new(),

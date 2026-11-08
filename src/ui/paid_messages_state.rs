@@ -45,6 +45,9 @@ pub(crate) struct DirectMessagesBox {
     pub(super) price: PriceSlider,
     /// The slider was moved: the price is a deliberate choice.
     pub(super) touched: bool,
+    /// The slider starts from the channel's price, not the default shown
+    /// while that price was still being fetched.
+    pub(super) seeded: bool,
 }
 
 pub(crate) struct PaidMessagesUi {

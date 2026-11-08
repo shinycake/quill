@@ -1420,3 +1420,84 @@ sites missed.
     hover preview, and the next move over a bar resets it.
   - A mini app's switch-inline still waits for the main window's next
     frame when that window is hidden.
+
+### Phase 11 (area C, part 2)
+
+Round 11 of the review, area C, findings 21 to 40, on
+`claude/sm-review11-c2`. Part 1 (`claude/sm-review11-c1`) took the
+lock, the chat-window entry points, the GIF, video chat boxes and the
+PTT slider; nothing here overlaps it.
+
+- **An answer lands where its request came from.**
+  - Off-UI work (`run_off_ui_then`) now resumes with `spawn_screen`, so
+    a result never finishes on another account's screen. The profile
+    photo crop resumes with `run_off_ui_scoped_then`, in its window.
+  - The resale gift buy goes to the recipient the Send Gift box picked
+    (`start_gift_resale_buy(name, recipient, for_craft)`), not to the
+    chat open behind it. Opening the market copies the recipient only
+    while the send box is open.
+  - A 3-D Secure step closes the checkout only when it came from the
+    checkout on screen (`PaymentVerification::closes_checkout`). A
+    receipt fetch no longer overwrites the open checkout's invoice.
+  - Mini app launches keep a list of pending contexts keyed by request
+    (`WebAppPending::request`), so two overlapping launches each open
+    with their own bot and source. A launch whose send fails drops its
+    entry, and a new mini app window closes the old one first.
+  - New Contact ignores a second Create while its import is in flight
+    and clears the request after any answer.
+  - The bot-create poll waits until it gets an answer or the box closes,
+    instead of giving up after 200 tries.
+- **A member change refetches the lists that show it.** A
+  `setChatMemberStatus` or tag success marks the chat's member list
+  stale and drops its administrator list and the user's cached rights;
+  `updateChatMember` marks it stale too (`mark_member_list_stale`). The
+  poll refetches the administrators of a stale chat with none cached.
+- **Per-window state moved to the slot; screen state moved off it.**
+  - The topic strip's scroll and reveal moved from `FolderUi` to
+    `HistoryUi`, so each window keeps its own.
+  - The sticker and masks manager moved from `PickerUi` (per window) to
+    `SettingsUi`, because the session has one manager and its close runs
+    as the main window.
+  - A set's video pick carries its window. Its editor opens there
+    (`hand_to_chat_window`), and the pick is dropped if the window
+    closed. Closing the viewed sticker set closes its box in every
+    window.
+  - The location picker remembers the window that opened it and closes
+    with that window.
+- **A box or line belongs to what it was opened for.**
+  - New Topic from a chat window reopens the manage box for that
+    window's forum instead of editing the main window's.
+  - The revoked-links disclosure is keyed by chat. The Promote picker
+    shows Recent until a search is actually sent.
+  - Closing the profile modal gives the info column back to what it
+    showed before. Opening another chat drops the modal and its saved
+    column.
+  - The Direct Messages price box takes the price when it arrives,
+    instead of keeping the 0 it was opened with.
+  - The 1:1 call window's close reads the call it shows now. Before, a
+    window reused for a second call kept the first call's id, so
+    closing it opened it again at the next sync.
+- **Playback and the viewer.** A saved track's title opens its owner's
+  playlist, and its row counts as playing from any chat. Closing the
+  viewer drops a pending seek. A main-window viewer stop drops only the
+  main window's play intent. Closing the forward picker drops its
+  timestamp.
+- **Lines that outlive their box.** Reopening 2FA clears its last error
+  (unless a request is in flight), the Account box clears its error,
+  and the emoji sets box clears "Could not update emoji packs". A
+  supergroup's Appearance box shows "Loading your emoji packs" only
+  until the list answers (`EmojiPanel::installed_loaded`), then "You
+  have no emoji packs".
+- **Animated userpics follow the account.** `UserpicVideos::own` drops
+  the failed list and the slots when the account on screen changes, so
+  one account's failures do not hide another's clips.
+- **Not done, or not tested.**
+  - The bot-create poll and the Promote picker's Recent fallback have no
+    tests; both need a live driver.
+  - A 3-D Secure page from a checkout that was replaced still opens
+    (only the checkout stays); tdesktop opens it too.
+  - Mini apps still have one `open_result` slot; a second answer before
+    the first is drawn replaces it.
+  - The `group_call.ptt_delay_slider` entry in
+    `scripts/app-wide-fields.txt` belongs to part 1, which moved the
+    slider to `SettingsUi`.

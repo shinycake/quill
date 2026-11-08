@@ -589,18 +589,19 @@ impl Session {
         {
             self.commit_viewed(chat_id);
         }
-        // Phase D3b: `setChatMemberStatus` confirmed — the member
-        // change itself arrives as `updateChatMember`. Invalidate
-        // the cached admin list so the panel refetches instead of
-        // showing stale data.
-        if matches!(
-            pending.map(|p| p.purpose),
-            Some(RequestPurpose::Groups(
-                GroupsPurpose::SetChatMemberStatus { .. }
-            ))
-        ) && let Some(chat_id) = pending.and_then(|p| p.chat_id)
+        // Phase D3b: `setChatMemberStatus` confirmed. TDLib sends
+        // `updateChatMember` to bots only (td_api.tl), so the change
+        // is ours to apply: the cached admin list and the member's
+        // rights are dropped and the chat is marked stale, which the
+        // poll turns into a refetch of what is on screen. Without the
+        // mark the lists drew "Loading…" with nothing in flight.
+        if let Some(RequestPurpose::Groups(GroupsPurpose::SetChatMemberStatus { user_id, .. })) =
+            pending.map(|p| p.purpose)
+            && let Some(chat_id) = pending.and_then(|p| p.chat_id)
         {
             self.groups.admin_lists.remove(&chat_id.0);
+            self.groups.admin_rights.remove(&(chat_id.0, user_id));
+            self.groups.mark_member_list_stale(chat_id.0);
             // Slice G1: restrict/ban/unban change the member
             // lists too — drop all cached pages for this chat.
             if matches!(
@@ -634,6 +635,7 @@ impl Session {
                 .supergroup_members
                 .retain(|(id, _), _| *id != chat_id.0);
             self.groups.basic_group_members.remove(&chat_id.0);
+            self.groups.mark_member_list_stale(chat_id.0);
         }
         if pending.map(|p| p.purpose) == Some(RequestPurpose::LeaveBeforeDelete)
             && let Some(chat_id) = pending.and_then(|p| p.chat_id)

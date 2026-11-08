@@ -104,12 +104,8 @@ impl<S: JsonSender> ConnectDriver<S> {
         let extra = self
             .session
             .request(RequestPurpose::GetPaymentReceipt, Some(chat_id));
-        self.session.payments.request = Some(PaymentRequest {
-            invoice: InputInvoice::Message {
-                chat_id,
-                message_id,
-            },
-        });
+        // A receipt is no checkout: `payments.request` stays the open
+        // checkout's invoice, which `shows` and `checkout_sending` read.
         let json = get_payment_receipt(extra, chat_id, message_id);
         self.send_json_request(extra, &json)
     }

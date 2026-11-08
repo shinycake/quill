@@ -22,8 +22,11 @@ impl QuillApp {
     }
 
     /// Run `work` on the background executor and hand its result to `done`
-    /// on the UI thread. A panic in `work` is not caught here: wrap
-    /// third-party decoders (the image_decode entry points already do).
+    /// on the UI thread, as the main window of the account on screen now:
+    /// after a switch `done` does not run, since whatever it would hand
+    /// the result to (a driver, a box) is the other account's by then. A
+    /// panic in `work` is not caught here: wrap third-party decoders (the
+    /// image_decode entry points already do).
     pub(super) fn run_off_ui_then<T: Send + 'static>(
         &mut self,
         work: impl FnOnce() -> T + Send + 'static,
@@ -31,7 +34,7 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         let task = cx.background_spawn(async move { work() });
-        cx.spawn(async move |this, cx| {
+        self.spawn_screen(cx, async move |this, cx| {
             let result = task.await;
             let _ = this.update(cx, |this, cx| done(this, result, cx));
         })

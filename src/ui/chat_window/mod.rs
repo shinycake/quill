@@ -549,6 +549,7 @@ impl QuillApp {
             self.set_window_scope(None);
         }
         self.end_recording_of_window(chat_id, cx);
+        self.close_location_picker_of_window(chat_id, cx);
         self.windows.open.retain(|open| open.chat_id != chat_id);
         // Its activation goes with it: GPUI drops the window before the
         // platform reports it inactive, so its observer never runs, and a

@@ -251,6 +251,9 @@ impl QuillApp {
     pub(in crate::ui) fn close_media_viewer(&mut self, cx: &mut Context<Self>) {
         self.viewer_leave_video_fullscreen();
         self.stop_viewer_video();
+        // A timestamp link's start belongs to this open: a clip that never
+        // played here must not start there the next time it opens.
+        self.viewer.pending_seek = None;
         self.viewer.extra.saved_toast = None;
         // Reopening the same item starts with its caption collapsed.
         self.viewer.extra.caption = Default::default();

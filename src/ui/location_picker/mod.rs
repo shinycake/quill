@@ -78,6 +78,7 @@ impl QuillApp {
             })
             .and_then(|iso| country::country_center(&iso));
         self.location_ui.reset();
+        self.location_ui.opened_in = self.windows.scope;
         self.location_ui.map_focus = Some(cx.focus_handle().tab_stop(true));
         if let Some(live) = self.live.as_mut() {
             if live.driver.open_location_picker(chat_id, country).is_err() {
@@ -103,6 +104,19 @@ impl QuillApp {
         }
         self.location_ui.reset();
         cx.notify();
+    }
+
+    /// `chat`'s window closed: a picker opened there goes with it, instead
+    /// of coming back in the main window for a chat it does not show, with
+    /// its locate and search tasks gone.
+    pub(in crate::ui) fn close_location_picker_of_window(
+        &mut self,
+        chat: quill::ids::ChatId,
+        cx: &mut Context<Self>,
+    ) {
+        if self.location_ui.opened_in == Some(chat) && self.location_picker_open() {
+            self.close_location_picker(cx);
+        }
     }
 
     fn locate_for_picker(&mut self, cx: &mut Context<Self>) {

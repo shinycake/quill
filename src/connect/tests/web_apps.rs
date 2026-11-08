@@ -95,7 +95,7 @@ fn open_web_app_sends_theme_and_keeps_the_launch_context() {
             .bots
             .web_apps
             .pending
-            .as_ref()
+            .first()
             .map(|p| p.bot_user_id),
         Some(42)
     );
@@ -114,7 +114,7 @@ fn open_web_app_sends_theme_and_keeps_the_launch_context() {
             url: "https://bot.example/app?tgWebAppData=x".into(),
         })
     );
-    assert!(h.driver.session.bots.web_apps.pending.is_none());
+    assert!(h.driver.session.bots.web_apps.pending.is_empty());
 }
 
 #[test]
@@ -137,7 +137,40 @@ fn a_refused_open_reports_a_failure_and_clears_the_context() {
             ..
         })
     ));
-    assert!(h.driver.session.bots.web_apps.pending.is_none());
+    assert!(h.driver.session.bots.web_apps.pending.is_empty());
+}
+
+/// Two keyboard-button launches before either answers (a double click):
+/// each answer keeps its own source and chat; the first answer does not
+/// take the second launch's context.
+#[test]
+fn overlapping_launches_keep_their_own_context() {
+    let mut h = Harness::ready();
+    let theme = ThemeParams::light_default();
+    let first = h
+        .driver
+        .get_web_app_url(ChatId(5), 42, "https://bot.example/a", "Open", &theme)
+        .expect("sent");
+    let second = h
+        .driver
+        .get_web_app_url(ChatId(5), 42, "https://bot.example/a", "Open", &theme)
+        .expect("sent");
+    assert_eq!(h.driver.session.bots.web_apps.pending.len(), 2);
+    for extra in [first, second] {
+        h.ingest(&format!(
+            r#"{{"@type":"webAppUrl","@extra":"{}","url":"https://bot.example/a?x","require_same_origin":false}}"#,
+            extra.as_extra()
+        ));
+        let Some(WebAppOpenResult::Opened {
+            source, chat_id, ..
+        }) = h.driver.session.bots.web_apps.open_result.take()
+        else {
+            panic!("not opened");
+        };
+        assert!(source.allows_data_send(), "still the keyboard button");
+        assert_eq!(chat_id, Some(5));
+    }
+    assert!(h.driver.session.bots.web_apps.pending.is_empty());
 }
 
 #[test]
@@ -395,7 +428,7 @@ fn named_app_links_search_first() {
             .bots
             .web_apps
             .pending
-            .as_ref()
+            .first()
             .map(|p| p.source.clone()),
         Some(LaunchSource::Link {
             short_name: "shop".into()

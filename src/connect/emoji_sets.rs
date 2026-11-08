@@ -346,6 +346,11 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(ConnectSendError::InvalidRequest);
         }
         self.session.stickers.emoji.open = true;
+        // "Could not update emoji packs" was the last box's; a change
+        // still in flight sets it again if it fails.
+        if self.session.stickers.emoji.mutating_set.is_none() {
+            self.session.stickers.emoji.mutation_failed = false;
+        }
         self.select_emoji_set_tab(EmojiSetTab::Installed)
     }
 

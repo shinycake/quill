@@ -14,7 +14,7 @@ players.builds_watched | whether the engine's build watcher is installed, once p
 players.stickers * | the shared sticker player: decoders, frame pump and fixtures keyed by file, not by account; `leave_chat` drops a chat's plays
 players.inline_videos | the shared inline video players; their owner is checked each frame (`InlineVideos::own`)
 players.inline_videos.state | cleared by `InlineVideos::own` when the account on screen changes
-players.userpic_videos * | animated profile photos keyed by local file path; files are per account folder
+players.userpic_videos * | animated profile photos keyed by local file path (files are per account folder); `UserpicVideos::own` drops the failed list and slots when the account on screen changes
 players.speed | the playback speed preference
 players.volume | the playback volume preference
 players.unmuted_volume | the volume to come back to after unmute

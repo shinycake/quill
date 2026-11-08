@@ -231,6 +231,9 @@ impl State {
 #[derive(Default)]
 pub(super) struct UserpicVideos {
     state: RefCell<State>,
+    /// The account the players and the failed clips are for: file ids are
+    /// per TDLib client, so another account's id can name another file.
+    owner: RefCell<Option<quill::ids::AccountKey>>,
 }
 
 /// Mark `window` covered or not.
@@ -262,6 +265,42 @@ impl UserpicVideos {
     fn with<R>(&self, f: impl FnOnce(&mut State) -> R) -> Option<R> {
         let mut state = self.state.try_borrow_mut().ok()?;
         Some(f(&mut state))
+    }
+
+    /// The account on screen plays its clips from here on: another
+    /// account's players and its failed file ids go. Called at the start of
+    /// every main-window frame.
+    pub(super) fn own(&self, account: &quill::ids::AccountKey) {
+        let Ok(mut owner) = self.owner.try_borrow_mut() else {
+            return;
+        };
+        if owner.as_ref() == Some(account) {
+            return;
+        }
+        let first = owner.is_none();
+        *owner = Some(account.clone());
+        drop(owner);
+        if first {
+            return;
+        }
+        let dropped = self.with(|state| {
+            state.failed.clear();
+            std::mem::take(&mut state.slots)
+        });
+        drop(dropped);
+    }
+
+    /// Whether `clip` failed for the account on screen (tests).
+    #[cfg(test)]
+    pub(super) fn has_failed(&self, clip: FileId) -> bool {
+        self.with(|state| state.failed.contains(&clip))
+            .unwrap_or(false)
+    }
+
+    /// Mark `clip` failed (tests).
+    #[cfg(test)]
+    pub(super) fn mark_failed(&self, clip: FileId) {
+        self.with(|state| state.failed.insert(clip));
     }
 
     /// Start a pass of `surface` (its list renders): the slots whose rows
@@ -697,8 +736,24 @@ impl std::fmt::Debug for UserpicFrame {
 
 #[cfg(test)]
 mod tests {
-    use super::{Admit, MAX_AWAKE, admit, decode_edge, survives};
+    use super::{Admit, MAX_AWAKE, UserpicVideos, admit, decode_edge, survives};
+    use quill::ids::{AccountKey, FileId};
     use std::time::{Duration, Instant};
+
+    /// A clip that failed on one account is tried again on another: file
+    /// ids are per client.
+    #[test]
+    fn a_failed_clip_is_the_accounts_that_saw_it_fail() {
+        let videos = UserpicVideos::default();
+        let a = AccountKey::primary();
+        let b = AccountKey("second".into());
+        videos.own(&a);
+        videos.mark_failed(FileId(5));
+        videos.own(&a);
+        assert!(videos.has_failed(FileId(5)), "same account keeps it");
+        videos.own(&b);
+        assert!(!videos.has_failed(FileId(5)), "another account tries again");
+    }
 
     #[test]
     fn userpics_decode_at_their_size_in_device_pixels() {

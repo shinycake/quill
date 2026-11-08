@@ -32,6 +32,11 @@ pub(crate) struct SettingsUi {
     /// Holds focus inside the settings window, so Esc steps back.
     pub(super) focus: FocusHandle,
     pub(super) sticker_settings_open: bool,
+    /// The stickers and masks manager boxes: removals, dragged order and
+    /// scroll. The session has one manager, so its edits are the screen's,
+    /// not the window's that opened it (the masks box opens from a chat
+    /// window's photo editor): the close commits them from any window.
+    pub(super) sticker_manager: super::stickers_manager::StickersManagerUi,
     pub(super) storage_scroll: super::dialogs::data_storage::StorageScroll,
     /// Slice S4: the Data & Storage per-network editor — the network
     /// being edited plus its draft settings (saved or discarded
@@ -61,6 +66,7 @@ impl SettingsUi {
             sub_scroll: ScrollHandle::new(),
             focus: cx.focus_handle(),
             sticker_settings_open: false,
+            sticker_manager: Default::default(),
             storage_scroll: super::dialogs::data_storage::StorageScroll::new(),
             data_storage_editor: None,
             storage_confirm: None,

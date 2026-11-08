@@ -55,7 +55,14 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.admin.forum_manage_dialog.is_none() {
+        // The box open for another forum (the main window's, say) is not
+        // this one: the topic is made or renamed in the forum asked for.
+        if self
+            .admin
+            .forum_manage_dialog
+            .as_ref()
+            .is_none_or(|dialog| dialog.chat_id != chat_id)
+        {
             self.open_forum_manage_dialog(chat_id, window, cx);
         }
         self.begin_topic_editor(topic_id, window, cx);

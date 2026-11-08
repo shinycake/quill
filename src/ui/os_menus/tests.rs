@@ -134,6 +134,28 @@ fn window_menu_add_contact_opens_the_new_contact_box(cx: &mut TestAppContext) {
     vcx.run_until_parked();
 }
 
+/// A second Create while the box's import is out keeps the request the
+/// box waits for, so its answer is still applied.
+#[gpui_kit::test]
+fn a_second_create_keeps_the_import_in_flight(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    vcx.dispatch_action(WindowMenuAddContact);
+    vcx.run_until_parked();
+    app.update_in(&mut vcx, |app, window, cx| {
+        let dialog = app.dialogs.add_contact_dialog.as_mut().unwrap();
+        let (first, phone) = (dialog.first_name_input.clone(), dialog.phone_input.clone());
+        dialog.sent_request = Some(quill::ids::RequestId(41));
+        first.update(cx, |input, cx| input.set_value("Ada", window, cx));
+        phone.update(cx, |input, cx| {
+            input.set_value("+1 555 010 0199", window, cx)
+        });
+        app.submit_new_contact(window, cx);
+        let dialog = app.dialogs.add_contact_dialog.as_ref().unwrap();
+        assert_eq!(dialog.sent_request, Some(quill::ids::RequestId(41)));
+    });
+    vcx.run_until_parked();
+}
+
 #[gpui_kit::test]
 fn window_menu_new_group_opens_the_create_group_box(cx: &mut TestAppContext) {
     let (app, mut vcx) = new_app(cx);

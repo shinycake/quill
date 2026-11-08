@@ -9,6 +9,9 @@ use std::collections::HashMap;
 /// `getWebAppLinkUrl`): what the answer is for.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WebAppPending {
+    /// The open call this is for: a second launch before the first
+    /// answers keeps its own context.
+    pub request: crate::ids::RequestId,
     pub bot_user_id: i64,
     pub chat_id: Option<i64>,
     pub source: LaunchSource,
@@ -56,8 +59,8 @@ pub struct CustomRequestReply {
 /// Everything mini-app related on the session.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct WebApps {
-    /// The open call in flight.
-    pub pending: Option<WebAppPending>,
+    /// The open calls in flight, each with what its answer is for.
+    pub pending: Vec<WebAppPending>,
     /// One-shot: the open call's answer.
     pub open_result: Option<WebAppOpenResult>,
     /// `updateAttachmentMenuBots`: the bots in the attachment menu.

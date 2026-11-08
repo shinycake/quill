@@ -5,6 +5,14 @@ use crate::state::*;
 use crate::telegram::envelope::{ParsedBoostFeatures, ParsedBoostStatus};
 
 impl GroupsState {
+    /// `chat`'s member and admin caches were dropped: the UI refetches
+    /// what it shows of them (`member_list_stale`, drained by the poll).
+    pub(crate) fn mark_member_list_stale(&mut self, chat: i64) {
+        if !self.member_list_stale.contains(&chat) {
+            self.member_list_stale.push(chat);
+        }
+    }
+
     /// The query the member list `key` was asked with ("" for one asked
     /// before queries were kept, or filled elsewhere).
     pub fn member_query(&self, key: (i64, MemberListFilter)) -> &str {
@@ -299,9 +307,10 @@ pub struct GroupsState {
     /// for basic groups — keyed by chat id.
     /// Reset when a new add starts; cleared when the dialog closes.
     pub add_members_failed: HashMap<i64, i32>,
-    /// Slice G1 fix-up: chat ids whose member-list caches were dropped by
-    /// an `updateChatMember` while a member dialog may be open. One-shot;
-    /// the UI drains it and refetches the open dialog's page.
+    /// Slice G1 fix-up: chat ids whose member-list or admin caches were
+    /// dropped (an `updateChatMember`, or our own moderation's `ok`) while
+    /// a member dialog or the Administrators page may be open. One-shot;
+    /// the UI drains it and refetches what it shows.
     pub member_list_stale: Vec<i64>,
     /// Slice G1: last member-action failure for the member-management
     /// dialog (`setChatMemberTag` / `setChatMemberStatus`), keyed by

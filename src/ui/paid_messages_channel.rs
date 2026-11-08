@@ -7,7 +7,7 @@
 use super::app::QuillApp;
 use super::chat_theme::{danger, text_muted};
 use super::paid_messages_privacy::price_slider;
-use super::paid_messages_state::DirectMessagesBox;
+use super::paid_messages_state::{DirectMessagesBox, PriceSlider};
 use super::pressable::action_row;
 use super::shell::{DialogKind, QuillShell};
 use crate::ui::status_note::StatusNote;
@@ -115,21 +115,40 @@ impl QuillApp {
             // The price of an enabled group may not have arrived yet.
             let _ = live.driver.fetch_direct_messages_price(chat_id);
         }
-        let price = state.price.unwrap_or(DEFAULT_CHANNEL_PRICE).clamp(0, max);
-        let steps = price_steps(price, 0, max);
-        let slider = price_slider(cx, steps, price, |this, price| {
-            if let Some(boxed) = this.paid_messages.direct.as_mut() {
-                boxed.price.price = price;
-                boxed.touched = true;
-            }
-        });
+        let seeded = state.price.is_some();
+        let price = state.price.unwrap_or(DEFAULT_CHANNEL_PRICE);
+        let slider = direct_messages_slider(cx, price, max);
         self.paid_messages.direct = Some(DirectMessagesBox {
             chat_id: chat_id.0,
             enabled: state.enabled,
             price: slider,
             touched: false,
+            seeded,
         });
         cx.notify();
+    }
+
+    /// The channel's price arrived after the box opened on the default:
+    /// the slider moves to it, unless the owner already moved it.
+    pub(super) fn seed_direct_messages_price(&mut self, cx: &mut Context<Self>) {
+        let Some(boxed) = self.paid_messages.direct.as_ref() else {
+            return;
+        };
+        if boxed.seeded || boxed.touched {
+            return;
+        }
+        let Some(session) = self.session() else {
+            return;
+        };
+        let Some(price) = direct_state(session, ChatId(boxed.chat_id)).and_then(|s| s.price) else {
+            return;
+        };
+        let max = session.payments.paid_messages.max();
+        let slider = direct_messages_slider(cx, price, max);
+        if let Some(boxed) = self.paid_messages.direct.as_mut() {
+            boxed.price = slider;
+            boxed.seeded = true;
+        }
     }
 
     fn close_direct_messages(&mut self, cx: &mut Context<Self>) {
@@ -172,6 +191,7 @@ impl QuillApp {
                 this.close_direct_messages(cx);
             });
         app.update(cx, |this, cx| {
+            this.seed_direct_messages_price(cx);
             let (Some(session), Some(boxed)) = (this.session(), this.paid_messages.direct.as_ref())
             else {
                 return dialog.overlay(true).on_close(on_close);
@@ -362,4 +382,15 @@ crate::ui::shell::register_dialogs! {
         QuillApp::build_direct_messages_dialog,
     )
     .close(|app, _, cx| app.close_direct_messages(cx)),
+}
+
+/// The box's price slider, starting at `price`.
+fn direct_messages_slider(cx: &mut Context<QuillApp>, price: i64, max: i64) -> PriceSlider {
+    let price = price.clamp(0, max);
+    price_slider(cx, price_steps(price, 0, max), price, |this, price| {
+        if let Some(boxed) = this.paid_messages.direct.as_mut() {
+            boxed.price.price = price;
+            boxed.touched = true;
+        }
+    })
 }

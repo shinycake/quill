@@ -231,22 +231,7 @@ impl QuillApp {
     /// shut if you closed it, and lingers briefly on "call ended".
     pub(super) fn sync_call_window(&mut self, cx: &mut Context<Self>) {
         self.close_stale_call_add_people();
-        let (call_id, incoming, ended, busy) = match self.session() {
-            Some(session) => match (&session.calls.active_call, &session.calls.summary) {
-                (Some(call), _) => (
-                    Some(call.id),
-                    matches!(call.state, CallState::Pending { .. }) && !call.is_outgoing,
-                    false,
-                    false,
-                ),
-                (None, Some(summary)) => (Some(summary.call_id), false, true, summary.busy),
-                _ => match super::call_conference_ui::ringing_invite_key(session) {
-                    Some(key) => (Some(key), true, false, false),
-                    None => (None, false, false, false),
-                },
-            },
-            None => (None, false, false, false),
-        };
+        let (call_id, incoming, ended, busy) = self.call_window_target();
         // The window's call, and when it ended.
         if ended {
             if self
@@ -293,6 +278,28 @@ impl QuillApp {
         }
     }
 
+    /// The call the 1:1 window shows: the active call, its ended summary,
+    /// or a ringing conference invite; with whether it rings in, has ended,
+    /// and the other side was busy.
+    fn call_window_target(&self) -> (Option<i32>, bool, bool, bool) {
+        match self.session() {
+            Some(session) => match (&session.calls.active_call, &session.calls.summary) {
+                (Some(call), _) => (
+                    Some(call.id),
+                    matches!(call.state, CallState::Pending { .. }) && !call.is_outgoing,
+                    false,
+                    false,
+                ),
+                (None, Some(summary)) => (Some(summary.call_id), false, true, summary.busy),
+                _ => match super::call_conference_ui::ringing_invite_key(session) {
+                    Some(key) => (Some(key), true, false, false),
+                    None => (None, false, false, false),
+                },
+            },
+            None => (None, false, false, false),
+        }
+    }
+
     fn open_call_window(&mut self, call_id: i32, cx: &mut Context<Self>) {
         if self.calls.window_opening {
             return;
@@ -325,7 +332,10 @@ impl QuillApp {
                     window.on_window_should_close(cx, move |_, cx| {
                         let _ = weak.update(cx, |app, cx| {
                             app.calls.forget_window();
-                            app.call_screen.window_closed_by_user = Some(call_id);
+                            // The window is reused for later calls: it
+                            // closes on the one it shows now.
+                            let (shown, ..) = app.call_window_target();
+                            app.call_screen.window_closed_by_user = shown.or(Some(call_id));
                             cx.notify();
                         });
                         true

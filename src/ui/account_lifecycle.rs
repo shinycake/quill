@@ -111,6 +111,11 @@ impl QuillApp {
         self.account_boxes.lifecycle.confirm_delete = false;
         self.account_boxes.lifecycle.confirm_logout = false;
         self.close_all_notify_windows(cx);
+        // A failure line is the last open's: a cached TTL skips the fetch
+        // that would clear it.
+        if let Some(session) = self.session_mut() {
+            session.settings.account_error = None;
+        }
         if let Some(live) = self.live.as_mut() {
             let _ = live.driver.get_account_ttl();
             let _ = live.driver.get_default_auto_delete();

@@ -587,6 +587,7 @@ fn a_still_decoding_behind_a_later_animated_pick_opens_no_editor(cx: &mut TestAp
             pick,
             file_id: still.file_id,
             emoji: None,
+            window: None,
         });
     });
     choose(&app, vcx, pick, &animated);
@@ -643,6 +644,7 @@ fn a_chosen_video_still_downloading_opens_the_editor_when_it_arrives(cx: &mut Te
             pick,
             file_id,
             emoji: Some("🎉".into()),
+            window: None,
         });
         cx.notify();
     });

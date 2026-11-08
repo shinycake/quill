@@ -74,6 +74,9 @@ pub(crate) struct PendingVideo {
     pub pick: PickExisting,
     pub file_id: FileId,
     pub emoji: Option<String>,
+    /// The chat window the pick was made in (`None`: the main window):
+    /// the editor opens there, in that window's composer state.
+    pub window: Option<quill::ids::ChatId>,
 }
 
 /// The "Add an Existing Sticker" / "Adapt from a Sticker" chooser.

@@ -69,8 +69,10 @@ impl QuillApp {
         false
     }
 
-    /// Each frame: the chosen video's download finished, so the editor
-    /// opens on it (the poll has no window to do this).
+    /// Each main-window frame: the chosen video's download finished, so
+    /// the editor opens on it (the poll has no window to do this), in the
+    /// window the pick was made in. A pick whose chat window closed is
+    /// dropped with it.
     pub(in crate::ui) fn sticker_box_frame_upkeep(
         &mut self,
         window: &mut Window,
@@ -79,17 +81,27 @@ impl QuillApp {
         let Some(pending) = self.sticker_box.pending_video.clone() else {
             return;
         };
+        if let Some(chat) = pending.window
+            && !self.windows.open_windows().any(|(open, _)| open == chat)
+        {
+            self.sticker_box.pending_video = None;
+            return;
+        }
         let Some(path) = self.local_media_path(pending.file_id) else {
             return;
         };
         self.sticker_box.pending_video = None;
-        self.open_set_video_editor(
-            pending.pick.set_id,
-            pending.pick.kind,
-            PathBuf::from(path),
-            pending.emoji,
-            window,
-            cx,
-        );
+        let path = PathBuf::from(path);
+        let host = pending.window;
+        let super::state::PendingVideo { pick, emoji, .. } = pending;
+        let open = move |app: &mut Self, window: &mut Window, cx: &mut Context<Self>| {
+            app.open_set_video_editor(pick.set_id, pick.kind, path, emoji, window, cx);
+        };
+        match host {
+            Some(chat) => {
+                let _ = self.hand_to_chat_window(chat, cx, open);
+            }
+            None => open(self, window, cx),
+        }
     }
 }

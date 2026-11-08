@@ -16,7 +16,6 @@ use gpui_kit::*;
 use quill::gift_market::{
     AttributeId, AttributeKind, ResaleFilter, ResaleSort, listing_price, resale_count_label,
 };
-use quill::ids::ChatId;
 use quill::lang::{keys, tr};
 use quill::local_path::sandboxed_display_path;
 use quill::premium_hub::group_digits;
@@ -89,9 +88,13 @@ impl QuillApp {
         };
         if opened {
             if self.gift_market.stack.is_empty() {
+                // Only an open send box names a recipient (its recipient
+                // stays in the session after it closes).
                 self.gift_market.recipient = self
                     .session()
-                    .and_then(|s| s.payments.gifts_manage.send.recipient.clone());
+                    .map(|s| &s.payments.gifts_manage.send)
+                    .filter(|send| send.open)
+                    .and_then(|send| send.recipient.clone());
             }
             self.gift_market.push(MarketBox::Resale);
         } else {
@@ -140,25 +143,15 @@ impl QuillApp {
         cx.notify();
     }
 
-    /// The chat the market buys for: the send box's chat, or none for the
-    /// user.
-    fn market_recipient_chat(&self) -> Option<ChatId> {
-        let recipient = self.gift_market.recipient.as_ref()?;
-        if recipient.is_self {
-            return None;
-        }
-        self.session().and_then(|s| s.open_chat)
-    }
-
     pub(super) fn pick_resale_listing(&mut self, name: String, cx: &mut Context<Self>) {
-        let chat = self.market_recipient_chat();
+        // The send box's recipient, or none for yourself.
+        let recipient = self.gift_market.recipient.clone();
         let started = match self.live.as_mut() {
             Some(live) => live
                 .driver
-                .start_gift_resale_buy(&name, chat, false)
+                .start_gift_resale_buy(&name, recipient, false)
                 .is_ok(),
             None => {
-                let recipient = self.gift_market.recipient.clone();
                 let me = self.session().and_then(|s| s.my_user_id).unwrap_or(0);
                 self.gift_market_mut().is_some_and(|market| {
                     let listing = market
