@@ -511,10 +511,17 @@ impl QuillApp {
             self.account.passcode.system_unlock_key.is_some();
         self.account.passcode.lock_error = None;
         self.account.passcode.logout_confirm = false;
-        // tdesktop closes the media viewer and call panels when it locks.
-        self.viewer.state.close();
-        self.viewer.hdr.reset();
+        // tdesktop closes the media viewer and call panels when it locks:
+        // every window's viewer, so its video stops and leaves full screen.
+        self.in_every_window(cx, |app, cx| {
+            if app.viewer.state.is_open() {
+                app.close_media_viewer(cx);
+            }
+        });
         self.release_story_viewer();
+        // The mini app is a helper window the lock screen does not cover;
+        // tdesktop closes such windows on lock (`closeAdditionalWindows`).
+        self.close_mini_app_window(cx);
         self.close_context_menus(cx);
         // Notification windows on screen show senders and text (tdesktop
         // redraws them hidden on lock).
