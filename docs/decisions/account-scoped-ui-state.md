@@ -1133,3 +1133,87 @@ state in place, or ran for the main window only.
   autoscroll lock, and popups left after a logout were not changed. The
   inline progress test covers `in_every_window` only, because the
   progress needs a live client and the demo has none.
+
+### Phase 10 (area A: core answers and chat windows)
+
+Round 10 of the review, area A, on `claude/sm-review10-a`. This covers
+the core modules only (`src/state`, `src/connect`, `src/telegram`). All
+seventeen findings held up when checked in code. Two shapes were fixed
+at the root.
+
+**Post-reducer work covers every shown chat, or carries the window that
+asked.**
+
+- **Jumps.** The date jump and the jump to the next mention or
+  reaction no longer use `open_chat`. Their answers make a `ViewJump`
+  holding the asking window (`PendingRequest::window`), the chat and
+  the message. `ingest` runs it with `run_view_jump`, which uses the
+  new `in_view_of(window, ..)`. That returns `None` when the window has
+  closed. It also does nothing if the window has since moved to
+  another chat. `date_jump_pending` now records its chat and is part
+  of `SessionView`, so each window keeps its own.
+- **Reply strips.** `reply_fetch_candidates` and
+  `reply_story_candidates` go over `chats_shown()`. A reply in a chat
+  window now fetches its original.
+
+**One-slot answers match by request id or by key.** Each one keeps the
+id of the request it is waiting for. An answer or error with any other
+id is dropped. The previous rule was "the latest request of this
+purpose", or "the box is open".
+
+- Proxy pings: `proxy_ping_requests` per slot.
+- Join requests: `join_request_latest`. The `has_purpose` dedupe is
+  gone, so a new query is sent at once.
+- Send gift: `SendGiftState::request`.
+- Saved Messages tag search: `SavedTagSearch::request`. A second tag
+  is sent at once. The first tag's page is dropped.
+- Member "more" pages: `member_more_bases` maps each page to the query
+  it extends.
+- Boost slots: kept only while `boost_intent` names the chat. A boost
+  pressed while slots are loading takes over that request.
+- Folder invite links: `folder_invite_request` covers check and add.
+  "Done" and errors from an earlier link no longer land in the dialog
+  of a later one.
+- Statistics forwards, for posts and stories: reopening while the
+  statistics request is out asks for the forwards again, unless they
+  are loaded or already requested.
+
+**Folder edits read the current spec.** `folder_specs_stale` marks a
+spec stale on `updateChatFolders`, on a folder's edit answer, and on
+"add to folder". Code that edits a folder gets the spec through
+`fresh_spec`. Removals queue per folder and wait while an edit is in
+flight. They refetch a stale spec and send one edit per folder.
+Before, a second removal wrote back a chat the first had just removed.
+A failed spec fetch drops that folder's queued removals and shows
+"Could not remove the chat from the folder". It does not ask again.
+
+**Error arms end loading and roll back.**
+
+- A failed public-link revoke clears the revoke and the public-chats
+  fetch, and shows "Could not revoke the link".
+- A failed similar-bots load removes its `Loading` entry.
+- A topic mute and a poll vote carry a `RequestRollback`
+  (`ForumTopicMute`, `PollVote`). `restore_optimistic` puts the
+  previous value back, but only while the shown value is still the
+  optimistic one. A later update is never overwritten.
+
+**Sticker sets back off.** A failed `getStickerSet` marks
+`failed_set_id`, and `selected_needs_load` skips it. Before, every
+`ingest` sent the request again. Picking the set again clears the mark.
+
+**Chat-list paging resumes.** A failed `loadChats` page that is not a
+404 sets `chats_retry` or `archive_retry`. The wait starts at 1 s and
+doubles up to 300 s. `chat_list_tick` in `poll_ticks` sends the page
+again once the wait is over, and a page that goes through clears the
+retry. A failed main-list page also starts the archive, so the archive
+no longer waits for a main list that might never end. A send that
+fails at once releases its request.
+
+**Not done.** Message-story candidates still look at `open_chat` only.
+The cost is a missing story preview in a chat window's reply strip.
+Every fix has a deterministic driver or state test
+(`connect/tests/chat_window_jumps.rs`,
+`connect/tests/chat_list/folder_removals.rs`,
+`connect/tests/refused_requests.rs`, and additions to the proxy,
+invite, gift, saved, stats, story-insights, boost, group-type and
+inline-members tests).
