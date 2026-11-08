@@ -266,8 +266,12 @@ impl QuillApp {
         input.read(cx).value().to_string()
     }
 
-    /// Run a slow passcode operation (PBKDF2) off the UI thread.
-    fn run_passcode_job<T: Send + 'static>(
+    /// Run a slow passcode operation (PBKDF2) off the UI thread. `done`
+    /// runs in the window that started it, with that window's state in
+    /// place: a wrong passcode empties and refocuses the lock field it was
+    /// typed in (a chat window's is in its slot). If that window closed
+    /// meanwhile, only `busy` is cleared.
+    pub(in crate::ui) fn run_passcode_job<T: Send + 'static>(
         &mut self,
         job: impl FnOnce() -> T + Send + 'static,
         done: impl FnOnce(&mut Self, T, &mut Window, &mut Context<Self>) + 'static,
@@ -279,11 +283,17 @@ impl QuillApp {
         let task = cx.background_executor().spawn(async move { job() });
         cx.spawn_in(window, async move |this, cx| {
             let out = task.await;
-            let _ = this.update_in(cx, |this, window, cx| {
+            let ran = this.update_in(cx, |this, window, cx| {
                 this.account.passcode.busy = false;
-                done(this, out, window, cx);
+                this.in_window_of(window, cx, |this, window, cx| done(this, out, window, cx));
                 cx.notify();
             });
+            if ran.is_err() {
+                let _ = this.update(cx, |this, cx| {
+                    this.account.passcode.busy = false;
+                    cx.notify();
+                });
+            }
         })
         .detach();
         cx.notify();
@@ -527,6 +537,8 @@ impl QuillApp {
             .lock
             .input
             .update(cx, |input, cx| input.set_value("", window, cx));
+        // The other windows' fields empty at their next frame.
+        self.clear_lock_fields();
         if self.account.passcode.system_unlock {
             self.account.passcode.system_unlock_key = global_unlock().key();
         }
@@ -568,26 +580,37 @@ impl QuillApp {
                 passcode::unlock(&root, &global_unlock(), &typed, passcode::unix_ms_now())
                     .map(|_| ())
             },
-            |this, result, window, cx| match result {
-                Ok(()) => this.unlock_done(window, cx),
-                Err(PasscodeError::Wrong) => {
-                    this.account
-                        .passcode
-                        .lock
-                        .input
-                        .update(cx, |input, cx| input.set_value("", window, cx));
-                    this.lock_failed(PasscodeError::Wrong.to_string(), cx);
-                }
-                Err(err @ PasscodeError::Flood { retry_in_ms }) => {
-                    this.account.passcode.flood_until =
-                        Some(Instant::now() + Duration::from_millis(retry_in_ms));
-                    this.lock_failed(error_text(&err), cx);
-                }
-                Err(err) => this.lock_failed(err.to_string(), cx),
-            },
+            Self::unlock_answered,
             window,
             cx,
         );
+    }
+
+    /// The lock screen's passcode was checked, with the state of the
+    /// window it was typed in in place (`run_passcode_job`).
+    pub(in crate::ui) fn unlock_answered(
+        &mut self,
+        result: Result<(), PasscodeError>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        match result {
+            Ok(()) => self.unlock_done(window, cx),
+            Err(PasscodeError::Wrong) => {
+                self.account
+                    .passcode
+                    .lock
+                    .input
+                    .update(cx, |input, cx| input.set_value("", window, cx));
+                self.lock_failed(PasscodeError::Wrong.to_string(), cx);
+            }
+            Err(err @ PasscodeError::Flood { retry_in_ms }) => {
+                self.account.passcode.flood_until =
+                    Some(Instant::now() + Duration::from_millis(retry_in_ms));
+                self.lock_failed(error_text(&err), cx);
+            }
+            Err(err) => self.lock_failed(err.to_string(), cx),
+        }
     }
 
     /// Touch ID / system password on the lock screen.
@@ -765,8 +788,9 @@ impl QuillApp {
 
     /// Per-frame work for the lock screen (focus, shake clock).
     pub(crate) fn passcode_frame(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.account.passcode.locked {
-            self.account.passcode.lock.frame(window, cx);
+        let locked = self.account.passcode.locked;
+        self.account.passcode.lock.frame(locked, window, cx);
+        if locked {
             if std::mem::take(&mut self.account.passcode.suggest_system_unlock) {
                 self.unlock_with_system(window, cx);
             }

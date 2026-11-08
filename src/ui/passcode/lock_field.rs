@@ -16,8 +16,8 @@ use gpui_kit::component::input::{InputEvent, InputState};
 use gpui_kit::*;
 use quill::lang::{keys, tr};
 
-/// What the window does with its field at its next frame on the lock
-/// screen (`QuillApp::passcode_frame`).
+/// What the window does with its field at its next frame
+/// (`QuillApp::passcode_frame`).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 enum FieldTask {
     #[default]
@@ -27,6 +27,8 @@ enum FieldTask {
     /// Empty and focus it: the lock just started. Text typed in this
     /// window during an earlier lock that another window unlocked goes.
     Reset,
+    /// Empty it: another window unlocked, and what was typed here goes.
+    Clear,
 }
 
 pub(crate) struct LockField {
@@ -71,6 +73,11 @@ impl LockField {
         self.task = FieldTask::Reset;
     }
 
+    /// The app unlocked: empty the field at its window's next frame.
+    pub(crate) fn clear(&mut self) {
+        self.task = FieldTask::Clear;
+    }
+
     /// Focus the field at its window's next frame (unless a reset waits).
     pub(crate) fn refocus(&mut self) {
         if self.task == FieldTask::None {
@@ -78,17 +85,20 @@ impl LockField {
         }
     }
 
-    /// Run what waits, with the field's own window drawing.
-    pub(crate) fn frame(&mut self, window: &mut Window, cx: &mut App) {
+    /// Run what waits, with the field's own window drawing. Unlocked,
+    /// only a clear runs: the field is not on screen to take the focus.
+    pub(crate) fn frame(&mut self, locked: bool, window: &mut Window, cx: &mut App) {
         let task = std::mem::take(&mut self.task);
-        if task == FieldTask::None {
+        if task == FieldTask::None || (!locked && task != FieldTask::Clear) {
             return;
         }
         self.input.update(cx, |input, cx| {
-            if task == FieldTask::Reset && !input.value().is_empty() {
+            if matches!(task, FieldTask::Reset | FieldTask::Clear) && !input.value().is_empty() {
                 input.set_value("", window, cx);
             }
-            input.focus(window, cx);
+            if locked {
+                input.focus(window, cx);
+            }
         });
     }
 }

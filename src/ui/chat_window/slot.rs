@@ -263,6 +263,17 @@ impl QuillApp {
         }
     }
 
+    /// The app unlocked: every chat window slot's passcode field empties
+    /// at its window's next frame (the one in place is emptied by the
+    /// unlock itself).
+    pub(in crate::ui) fn clear_lock_fields(&mut self) {
+        for slot in self.windows.slots() {
+            if let Ok(mut slot) = slot.try_borrow_mut() {
+                slot.lock_field.clear();
+            }
+        }
+    }
+
     /// Take the Picture-in-Picture links `pick` chooses from every
     /// window's viewer: the one in place and each chat window slot's. A
     /// PiP opened from a chat window keeps its link in that window's
