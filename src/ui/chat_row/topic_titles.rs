@@ -133,9 +133,11 @@ fn on_jump(
         if event.modifiers().secondary(cx) {
             this.open_chat_in_new_window(chat_id, window, cx);
         } else {
-            this.select_listed_chat(chat_id, window, cx);
-            this.select_topic_ui(topic_id, cx);
-            this.focus_clicked_chat(chat_id, window, cx);
+            // The topic opens in whichever window shows the forum.
+            let open = crate::ui::chat_window::ChatOpen::new(chat_id).in_topic(topic_id);
+            if this.select_chat_request(open, window, cx) {
+                this.focus_clicked_chat(chat_id, window, cx);
+            }
         }
     })
 }

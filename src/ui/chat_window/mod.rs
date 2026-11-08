@@ -36,6 +36,7 @@ mod cover;
 #[cfg(test)]
 mod lock_tests;
 mod recording;
+mod routing;
 mod saved;
 mod scoped;
 mod slot;
@@ -51,6 +52,7 @@ use gpui_kit::*;
 use quill::ids::ChatId;
 use quill::lang::{keys, tr};
 use quill::state::ChatSummary;
+pub(in crate::ui) use routing::ChatOpen;
 pub(in crate::ui) use scoped::ScopedApp;
 pub(in crate::ui) use slot::scope_probe;
 use view::ChatWindowView;
@@ -496,43 +498,6 @@ impl QuillApp {
     /// request was taken over.
     pub(super) fn routed_to_chat_window(&self, chat_id: ChatId, cx: &mut App) -> bool {
         self.windows.activate(chat_id, cx)
-    }
-
-    /// A chat chosen from inside a chat window (a link, a search hit, a
-    /// mention) opens in the main window, as Telegram Desktop hands a
-    /// non-primary window's navigation to the primary one. Returns
-    /// whether the request was taken over (`false` in the main window).
-    pub(super) fn routed_to_main_window(
-        &mut self,
-        chat_id: ChatId,
-        thread_switch: bool,
-        cx: &mut Context<Self>,
-    ) -> bool {
-        let Some(from) = self.windows.scope else {
-            return false;
-        };
-        if from == chat_id {
-            // The window shows it already.
-            return true;
-        }
-        let Some(main) = self.main_window.handle else {
-            return false;
-        };
-        let owner = cx.entity();
-        let screen = self.screen_epoch();
-        // window-scope: `in_screen_scope` puts the main window's state in place.
-        cx.defer(move |cx| {
-            let _ = main.update(cx, |_, window, cx| {
-                owner.update(cx, |app, cx| {
-                    app.in_screen_scope(screen, cx, |app, cx| {
-                        app.select_chat_with(chat_id, thread_switch, window, cx);
-                    });
-                });
-                cx.activate(true);
-                window.activate_window();
-            });
-        });
-        true
     }
 
     /// "Reopen closed window" (`SavedWindows::reopenLastClosed`): the chat

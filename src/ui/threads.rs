@@ -152,6 +152,7 @@ impl QuillApp {
     /// window): move to the thread's chat once TDLib resolved it, request
     /// the first page, and keep paging while "jump to root" is pending.
     pub(super) fn advance_thread(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let in_chat_window = self.windows.scope.is_some();
         let Some(live) = self.live.as_mut() else {
             return;
         };
@@ -178,6 +179,13 @@ impl QuillApp {
                 .filter(|thread| thread.needs_chat_switch)
                 .map(|thread| thread.chat_id);
             match switch_to {
+                // A chat window keeps its own chat: the thread moves to the
+                // main window's view with its discussion group.
+                Some(chat_id) if in_chat_window => {
+                    let thread = live.driver.session.close_thread();
+                    let open = super::chat_window::ChatOpen::new(chat_id).thread_switch(thread);
+                    self.select_chat_request(open, window, cx);
+                }
                 Some(chat_id) => self.select_chat_with(chat_id, true, window, cx),
                 None => {
                     let _ = live.driver.start_thread_in_open_chat();

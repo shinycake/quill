@@ -914,10 +914,11 @@ impl QuillApp {
                 message_id,
             } => {
                 // The chat opens at the message: its first history load is
-                // the window around it.
-                self.chat_list.open_at = Some(message_id);
-                self.select_listed_chat(chat_id, window, cx);
-                self.chat_list.open_at = None;
+                // the window around it, in whichever window shows the chat.
+                let open = crate::ui::chat_window::ChatOpen::new(chat_id).at(message_id);
+                if !self.select_chat_request(open, window, cx) {
+                    return;
+                }
                 if let Some(live) = self.live.as_ref() {
                     self.screen
                         .connection

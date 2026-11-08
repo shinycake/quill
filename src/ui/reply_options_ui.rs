@@ -205,10 +205,14 @@ impl QuillApp {
         self.share
             .search_input
             .update(cx, |input, cx| input.set_value("", window, cx));
-        self.chat_ui.set_reply(Some(reply.into_chat(dest)));
-        self.select_listed_chat(dest, window, cx);
-        self.composer
-            .update(cx, |input, cx| input.focus(window, cx));
+        // The reply leaves this composer and rides with the open to the
+        // window that shows `dest`.
+        self.chat_ui.set_reply(None);
+        let open = crate::ui::chat_window::ChatOpen::new(dest).with_reply(reply.into_chat(dest));
+        if self.select_chat_request(open, window, cx) {
+            self.composer
+                .update(cx, |input, cx| input.focus(window, cx));
+        }
         self.connection.set_note(StatusNote::silent(tr(
             keys::Q_OPS_REPLYING_FROM_ANOTHER_CHAT,
         )));
