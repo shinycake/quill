@@ -178,6 +178,38 @@ impl QuillApp {
         true
     }
 
+    /// Work aimed at `chat` when a chat window shows it: run `f` at the end
+    /// of this update in that window, with its `Window` and its state in
+    /// place, and bring it forward. `false`, without running `f`, when no
+    /// chat window shows `chat`.
+    pub(in crate::ui) fn hand_to_chat_window(
+        &mut self,
+        chat: ChatId,
+        cx: &mut Context<Self>,
+        f: impl FnOnce(&mut Self, &mut Window, &mut Context<Self>) + 'static,
+    ) -> bool {
+        let Some(handle) = self
+            .windows
+            .open_windows()
+            .find_map(|(open, handle)| (open == chat).then_some(handle))
+        else {
+            return false;
+        };
+        let screen = self.screen_epoch();
+        let app = cx.weak_entity();
+        cx.defer(move |cx| {
+            let _ = handle.update(cx, |_, window, cx| {
+                window.activate_window();
+                let _ = app.update(cx, |this, cx| {
+                    this.in_screen_scope(screen, cx, |this, cx| {
+                        this.in_window_scope(Some(chat), cx, |this, cx| f(this, window, cx));
+                    });
+                });
+            });
+        });
+        true
+    }
+
     pub(in crate::ui) fn defer_screen(
         &self,
         cx: &mut Context<Self>,
