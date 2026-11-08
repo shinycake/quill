@@ -855,3 +855,105 @@ Section 6 built, on `claude/sm-chat-scope`.
   terminal `updateCall` as before. An error puts the call back with its
   sound running. `hang_up_for_close` still hangs up at once, because the
   client is going and no answer will come back.
+
+### Phase 6 (the parts left inside app-wide structs)
+
+Round 6 of the review, on `claude/sm-review6`. Phase 2 checked only the
+names of `QuillApp`'s fields. A struct listed as the process's could
+still hold the account on screen's state, and five did. The reason given
+for `calls` and `group_call` ("a call keeps running in the background
+account") was wrong: `retire_live_to_background` closes a client that is
+in a call, so no call outlives its screen. That made the call ids in
+those structs the screen's.
+
+- **Account.** The Account dialog (log out, delete, with the password
+  typed), the frozen-account notice and age verification moved from
+  `account` to a new screen field, `account_boxes: AccountBoxes`. Before,
+  a Delete Account box armed on A came back over B, and its last button
+  deleted B. The accounts list and the passcode lock stay app-wide: the
+  registry and the lock are the process's, and the list's remove confirm
+  is keyed by `AccountKey`.
+- **Calls.** `window_closed_by_user`, `ended_at` and the sound marks moved
+  from `calls` to `call_screen: CallScreen`. Call ids repeat across
+  clients: B's call 1 never opened its window if you had closed A's call
+  1. The window, its players and the sound output stay app-wide. They
+  follow the session on screen and close when the next account tracks no
+  call. `CallScreen`'s goodbye closes the share chooser and drops its
+  permission box.
+- **Video chat.** The title box, Settings, the in-call composer (and its
+  Enter subscription, out of `app_demo.rs`), the window you closed, the
+  tile pin, the stream join you asked for and the join on its way moved
+  to `group_call_screen: GroupCallScreen`. A join pending at the switch
+  could fire on B's call of the same id, as A's join-as peer, and the
+  Join button could wait forever on a timeout task dropped with the old
+  screen.
+- **Share chooser.** `screen_share.opening` was a bool that only the
+  listing's continuation reset. A switch dropped that continuation, and
+  Share Screen did nothing until restart. It is now
+  `Option<ScreenEpoch>`: a listing asked by another screen never blocks.
+- **Checkout.** A checkout opened while an earlier payment was in flight
+  took that payment's answer: the new form showed as paid, and "Media
+  Unlocked" named the new message. tdesktop keeps one process per invoice
+  (`payments_checkout_process.cpp`, `Processes`). Quill now ties each
+  answer to the request that sent it. `form_request` is the
+  `getPaymentForm` the open checkout waits for, so an earlier checkout's
+  form is dropped. `paying: Vec<PaymentInFlight>` holds each
+  `sendPaymentForm` with its invoice and form, so the answer unlocks the
+  media of the payment that was made. It touches the open checkout only
+  when that checkout shows the same invoice (`shows`). `sending` and
+  `checkout_closed` are gone, and so is `settle_closed_checkout`. A mini
+  app's invoice watch reads `is_paying` and `shows` for its own invoice.
+- **Chat-window save.** `schedule_chat_windows_save` was a plain
+  `cx.spawn`, exempted with a wrong reason. A switch inside its 600 ms
+  could write B's list as empty before B's restore. It runs through
+  `spawn_screen` now, and the switch saves whenever a save was pending.
+  No deterministic test: saves need a live client, and the demos never
+  write the file.
+- **Deferred goodbyes.** `screen_leaves_later` followed by `put_on_screen`
+  in one update relied on the connection generation to keep A's goodbyes
+  off B's client. Now `screen_leaves_later` sets `goodbyes_due`. The
+  connect loop waits a turn while it is set, `put_on_screen` asserts it
+  is clear, and `say_due_goodbyes` drops only the UI if a client got
+  there first. `replace_screen` carries the status note, so the restart's
+  "Connecting" stays.
+- **Log out refused.** A `logOut` error left the session in
+  `CloseRequested` with nothing listening. `auth.logout_request` matches
+  the answer, the error puts the shutdown phase back to `Running`, and the
+  notification pump shows the failure.
+- **Agent commands.** A multi-step command captures the screen epoch, and
+  `check_step` stops the rest with `policy::account_changed()` once it
+  moves. The steps were planned on the old account's tree.
+- **`ChatUi` by topic.** It carries the topic too. In the same chat,
+  another topic gets a fresh value. A pending reply carries over, as a
+  reply carried into another chat already does, but the edit is dropped:
+  it belonged to a message of the old topic.
+- **Owner keys for caches.** `players.emoji_plays` is
+  `OwnedBy<EmojiPlays>` (`src/ids.rs`), which resets when the account
+  asking differs. `InlineVideos` records its owner and clears its players
+  when the account on screen changes. Both were keyed by raw
+  `(chat, message)`.
+- **Sponsored views.** The ads painted carry the chat painted, and the
+  next frame reports only the open chat's.
+- **Guard.** `scripts/check-screen-state.py` now walks every field of a
+  listed struct, and of the `src/ui` structs it holds, through multi-line
+  types and `Box`, `Rc` and `RefCell`. Each field is keyed by its owner
+  (`AccountKey`, `OfAccount`, `AccountChat`, `ConversationKey`,
+  `OwnedBy`) or listed in `scripts/app-wide-fields.txt` with its reason
+  (188 entries; `name *` covers a struct with no account ids inside). The
+  chat-level check walks nested structs too, and counts a raw `i64`,
+  `MessageKey` and `ChatMessage` as chat ids. Twelve new hits are listed
+  in `view-state-not-chat.txt` with reasons; `MessageUi.rendered_sponsored`
+  was a real one (above). `MessageUi.menu_ui` is walked now. Its
+  `report_open` and `sticker_set_open` are bools for dialogs whose target
+  is in the session (the report flow carries its chat) or a set id, so
+  they pass. A flag holds no id, so no type check can see it.
+- **On the old tree.** The new script on 6496ce4d6, with that tree's
+  lists, fails with 469 lines. They include every field this round moved:
+  `account.lifecycle`, `freeze_info_open`, `age_verify_open`,
+  `age_verify_started`, `calls.window_closed_by_user`, `ended_at`,
+  `sound_marks`, `group_call.title_dialog`, `settings_open`, `composer`,
+  `window_closed_by_user`, `pin`, `stream.pending_join`,
+  `stream.joining`, `screen_share.opening`, `players.emoji_plays` and
+  `inline_videos`, plus the chat-level hits above. Findings 4 and 5 are
+  outside what a field check can see. One is a reducer matching answers
+  by purpose; the other is a continuation carrying an exemption comment.

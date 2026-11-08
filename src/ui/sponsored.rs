@@ -385,7 +385,7 @@ impl QuillApp {
             self.message_ui
                 .rendered_sponsored
                 .borrow_mut()
-                .push(ad.message_id);
+                .push((chat_id, ad.message_id));
             list = list.child(sponsored_message_row(
                 chat_id,
                 &ad,
@@ -411,6 +411,16 @@ impl QuillApp {
         let Some(chat_id) = self.session().and_then(|s| s.open_chat) else {
             return;
         };
+        // Painted in another chat (it changed between the paint and this
+        // frame): those ads were not seen here.
+        let shown: Vec<i64> = shown
+            .into_iter()
+            .filter(|(chat, _)| *chat == chat_id)
+            .map(|(_, id)| id)
+            .collect();
+        if shown.is_empty() {
+            return;
+        }
         if let Some(live) = self.live.as_mut() {
             let _ = live.driver.view_sponsored_messages(chat_id, &shown);
         }

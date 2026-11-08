@@ -1,0 +1,199 @@
+# The fields inside the app-wide structs of scripts/app-wide-state.txt, one
+# by one, with the reason each is the process's and not the account on
+# screen's (docs/decisions/account-scoped-ui-state.md, round 6). Checked by
+# scripts/check-screen-state.py: a field inside a listed struct (and inside
+# the src/ui structs it holds) is either keyed by its account (`AccountKey`,
+# `OfAccount`, `AccountChat`, `ConversationKey`, `OwnedBy`) or listed here.
+# A name with `*` after it covers the struct it holds as well; use it only
+# where nothing inside names an account's ids.
+#
+#   <struct.field[.field]> [*] | <why it is the process's>
+
+players.audio * | the audio engine: one output device, track and clock for the process; the track is the playback queue's, which is the screen's (PlaybackUi)
+players.builds_watched | whether the engine's build watcher is installed, once per process
+players.stickers * | the shared sticker player: decoders, frame pump and fixtures keyed by file, not by account; `leave_chat` drops a chat's plays
+players.inline_videos | the shared inline video players; their owner is checked each frame (`InlineVideos::own`)
+players.inline_videos.state | cleared by `InlineVideos::own` when the account on screen changes
+players.userpic_videos * | animated profile photos keyed by local file path; files are per account folder
+players.speed | the playback speed preference
+players.volume | the playback volume preference
+players.unmuted_volume | the volume to come back to after unmute
+delivery.notify_clicks | OS notification clicks; each `ChatClick` names its account
+delivery.notify_inflight | how many notification previews are being built, for the process
+delivery.next_preview_wait | the delay before the next preview build, for the process
+delivery.notification_sounds * | the notification sound output device and player
+delivery.polled_redraw * | when the poll loop last redrew: timing, no ids
+delivery.windows * | Quill's notification windows; the queue is keyed by `(AccountKey, ChatId)` and each shown popup by its key
+preferences.keybinding_capture | the keybinding being recorded in Settings: a key name
+preferences.keybinding_error | the conflict message of that recording
+preferences.keybinding_focus | the focus handle of the recording field
+preferences.keybindings_applied | whether the keymap was installed, once per process
+preferences.appearance_applied | the theme, accent and font last applied to the windows
+preferences.app_theme * | the app theme: custom themes, palettes, the theme editor, Omarchy; files on disk, not per account
+preferences.system_accent | the OS accent color
+preferences.system_accent_probed | whether the OS accent was read
+preferences.font_picker | the font family picker entity
+preferences.accent_picker | the accent color picker entity
+preferences.index_sliders * | slider entities of the app settings, keyed by setting
+preferences.translate * | the translation preferences file
+preferences.update_state | the updater's state, for the install
+preferences.update_banner_dismissed | the update banner was dismissed, for the run
+preferences.whats_new * | the What's New window and its release notes, for the install
+preferences.advanced * | Settings > Advanced: debug codes, test environment, disk-backed demo; values of the install
+preferences.emoji_style * | the emoji set and its download, an app-wide asset
+frame.animation_demand | how many animations want frames: a count, for the frame clock
+frame.row_fx | the row fade map; keys are row view ids, cleared with the views
+frame.animation_targets | the views that asked for an animation frame
+frame.still_ticks | per-view still ticks, keyed by view entity
+frame.window_views | the views of chat windows, by entity
+frame.animation_sound | an animation is playing a sound this frame
+frame.own_window_tick | the window ticks on its own clock
+frame.window_active | the window is active
+frame.main_active | the main window is active
+frame.main_covered | the main window is covered
+frame.viewer_cover | the media viewer covers the window, for the frame clock
+frame.window_title_shown | the title last given to the OS window
+frame.title_badge | the unread badge image cache, by count
+frame.media_roots_frame | the media folders read this frame, rebuilt every frame
+frame.frame_started | when this frame began
+frame.tick_view | the view that drives the frame tick
+frame.frame_clock_running | the frame clock runs
+frame.clock_timing | the display refresh timing
+frame.main_refresh | the main window's refresh interval
+frame.layers_drawn | which layers drew this frame, reset each frame
+frame.motion * | reveal and selection motion: glides and per-row check fades of the frame drawn; nothing acts on them, and the selection fades clear when selection mode ends
+frame.sidebar_width | the sidebar's width, a window preference
+frame.sidebar * | the sidebar's dock and peek glides
+frame.main_width | the main column's width, a window preference
+frame.panels * | the right column's slide: the panels the last frame drew, kept while they slide out
+frame.surfaces * | fade-out presences of bars, toasts and corners: what the last frame drew, kept for its exit animation; nothing acts on them
+frame.window_state_save_pending | the window place save is due, for the main window
+frame.capture_blocked | screen capture protection is on, for the process
+frame.capture_notice_dismissed | its notice was dismissed, for the run
+frame.context_menu_focus | the context menu's focus handle, one menu at a time
+frame.context_menu_items * | focus handles and keys of the open menu's items, rebuilt with every menu
+frame.context_menu_was_open | the menu was open last frame
+frame.context_menu_previous_focus | the focus to give back when the menu closes
+frame.layer_focus * | weak focus handles of the open layer, restored when it closes
+frame.draft_timer * | the one debounced draft timer: a token the driver on screen ignores unless it issued it (`commit_debounced_draft`)
+language.open | the language box: languages are the app's
+language.writes * | language file write counters
+language.recent | recently picked languages
+auth_demo.demo_state | the synthetic mode's authorization state, next to demo_session
+auth_demo.demo_inputs | the synthetic mode shows its inputs
+start_files.choosing | files handed to the app at start, waiting for a chat on whichever account
+start_files.search | the chat search field of that chooser
+update_pill.from | the update pill's glide start
+update_pill.to | the update pill's glide end
+update_pill.since | when that glide began
+update_pill.downloading | the update is downloading
+update_pill.ready | the update is ready, and since when
+agent_bridge.activity_shown | how many agent activity events were shown
+agent_bridge.ui_send | the channel agents send UI commands on; a command stops when the screen's epoch changes (`agent_driver.rs`)
+takeover.wake_at | when the takeover banner next redraws
+connect.generation | which prepared connection may open
+connect.closed_noted | the generation whose close was noted
+disk.state | the disk space level, for the data folder
+disk.free | the free space last read
+disk.floors | the floors for that level
+disk.confirming | the space warning is being confirmed
+disk.waited | how long the disk has been short
+disk.unwritable | the data folder cannot be written
+disk.screen_refused | the on-screen client was refused for space; `disk.on_screen` names it
+disk.held_for_call | the on-screen client is held open for its call; checked at every reading against `disk.on_screen`
+disk.full_notices | how many full-disk notices were shown
+disk.cache_folder | the cache folder measured
+disk.database_bytes | the database size measured
+disk.main_window | the window the space notice opens on
+disk.start_refused | a client start was refused for space; retried for every account
+demo_ui.call_devices | the screenshot demos' call devices
+demo_ui.selected_devices | the screenshot demos' chosen devices
+demo_ui.selected_camera | the screenshot demos' chosen camera
+demo_ui.group_feeds | the screenshot demos' video chat feeds
+demo_ui.group_stage | the screenshot demos' stage view
+demo_ui.seq | the screenshot demos' sequence
+demo_ui.sink | the screenshot demos' sink
+calls.remote_player | the call window's remote video; the call ends with the client (`retire_live_to_background` closes a client in a call) and the window sync drops it
+calls.local_player | the call window's own camera; dropped the same way
+calls.notify_clicks | Accept/Decline from OS call notifications; each pick names its account
+calls.tick_active | the call window's tick runs
+calls.panel_view | the call window's view
+calls.window | the call window, opened and closed by the sync with the session on screen
+calls.window_opening | that window is opening
+calls.window_raised | that window was raised
+calls.sounds * | the call sound output and the loop playing; what a call has already played is the screen's (`call_screen.sound_marks`)
+background.clients | the accounts running in the background, each with its key
+background.screen_preparing | how many screen clients are being prepared
+background.generation | which background start may land
+background.polling | the background poll runs
+background.clicks | account clicks from the tray and notifications, each with its key
+background.pending_open | the account to open once its client is ready, by key
+background.notify_from_all | the "notify from all accounts" setting
+background.attention | the dock attention for background accounts
+background.ringing | a background account's ring, with its key
+background.closing | the clients closing, by key
+background.quit_close | the quit subscription that closes them
+background.wiping | the data wipe runs, for every account
+background.swept | the stale folders were swept, once per run
+background.secrets | the keychain access for deletes
+background.test_root | the data root of tests
+account.accounts * | the Accounts list: the registry of every account, its add box and error; the remove confirm is keyed by `AccountKey`
+account.passcode * | the local passcode and lock screen: one lock for the whole app, over every account
+spell.checker | the spellchecker engine
+spell.info * | the engine kind and dictionaries: languages, not accounts
+spell.dict_manager * | the dictionary manager box and its download
+spell.dict_filter_input | that box's filter field
+spell.misspellings | the misspellings of `checked_text`, recomputed whenever the text checked changes
+spell.checked_text | the text last checked, compared by value
+spell.task | the running check
+spell.engine_builder | builds the engine
+spell.engine_task | the engine build
+slices.sidebar | cached child views of the sidebar: entities that render from the app, holding no state of their own
+slices.window * | the same for the conversation, composer and panel, with measured heights
+slices.viewer | the same for the media viewer
+slices.viewer_chrome | the same for its chrome
+slices.story | the same for the story viewer
+slices.app_only | the same for app-only overlays
+slices.main_views | the main window's child view ids
+slices.image_cache | the bounded image cache, keyed by image source
+slices.idle_trim | the idle cache trim task
+slices.scope | the view being drawn
+slices.a11y_active | the screen reader is on
+group_call.window | the video chat window, opened and closed by the sync with the session on screen; the call ends with the client (`retire_live_to_background`)
+group_call.window_opening | that window is opening
+group_call.chat_shown | the window's chat column is open, a layout preference
+group_call.ptt | push-to-talk key settings
+group_call.ptt_clock | the push-to-talk clock
+group_call.ptt_capture | the push-to-talk key is being recorded
+group_call.ptt_delay_slider | the push-to-talk delay slider
+group_call.global_ptt | the OS-wide push-to-talk listener
+group_call.global_ptt_polling | it is polled
+group_call.global_ptt_listener_stop | its stop flag
+group_call.window_visible | the window is visible
+group_call.level_anim | the own voice level animation
+group_call.level_seen | the level last drawn
+group_call.row_levels | participant voice level animations by source id; pruned to the call's participants every sync
+group_call.panel_scroll | the window's participant list scroll
+group_call.rows_place * | where the participant rows sit in the window
+group_call.players | tile players by `LiveKey`; the sync drops every one whose call is not the call shown
+group_call.tile_overlays | tile control fades by `LiveKey`, pruned with the players
+group_call.stage_volume | the stage tile's volume popover
+group_call.stream * | the stream window's player, photo, controls and overlay; `clear` runs when the call shown is no stream; the join wait is the screen's (`group_call_screen.stream_joining`)
+group_call.live_pip | the live picture-in-picture link
+screen_share.window | the share chooser window, closed by the screen's goodbye (`CallScreen`)
+screen_share.opening | the chooser's listing, tagged with the screen that asked: another screen's never blocks
+screen_share.for_call | which call the chooser shares to: one or the video chat, of the client on screen; cleared when the chooser closes
+screen_share.sources | the windows and screens listed
+screen_share.selected | the source picked
+screen_share.with_audio | share sound with it
+screen_share.generation | which listing may land
+screen_share.privacy_for | the screen recording permission box's call; cleared by the screen's goodbye
+screen_share.backend | the capture backend
+screen_share.demo_active | the screenshot demos' shared source
+screen_share.demo_active_audio | the screenshot demos' shared sound
+screen_share.demo_system_audio | the screenshot demos' system sound
+main_window.handle | the main window's handle
+main_window.place | the main window's place
+main_window.cascade | the chat window cascade count
+main_window.dialogs_closed | the main window's dialogs were closed this switch
+main_window._key_scope | the key-scope interceptor

@@ -2,11 +2,13 @@
 # swaps in) that name one chat's ids but are not the chat's UI state
 # (docs/decisions/account-scoped-ui-state.md, section 9). Checked by
 # scripts/check-screen-state.py: in `ComposerUi`, `MessageUi`, `HistoryUi`,
-# `PickerUi`, `ShareUi` and `ViewerUi`, a field whose type holds a
-# `ChatId`, `MessageId`, `DeleteConfirm`, `ComposerReplyTo` or
-# `ComposerEdit` (outside a keyed map or set) is listed here with its
-# reason, or it goes in `ChatUi` (ui/chat_ui_state.rs), which is replaced
-# whole when the chat shown changes.
+# `PickerUi`, `ShareUi` and `ViewerUi`, and in the src/ui structs they hold
+# (`MessageUi.a11y`, `HistoryUi.pull`), a field whose type holds a
+# `ChatId`, `MessageId`, `MessageKey`, `ChatMessage`, `DeleteConfirm`,
+# `ComposerReplyTo`, `ComposerEdit` or a raw `i64` (TDLib's ids; outside a
+# keyed map or set) is listed here with its reason, or it goes in `ChatUi`
+# (ui/chat_ui_state.rs), which is replaced whole when the chat shown
+# changes. A nested field is named by its path.
 #
 #   <Struct>.<field> | <why it may outlive the chat it names>
 
@@ -24,3 +26,15 @@ HistoryUi.live_location_tick_chat | marks a running tick task, as slow_mode_tick
 ShareUi.forward_bar_dest | the chat a forward waits in; kept across chats on purpose (dismiss_forward_for_chat)
 ViewerUi.video | the media viewer's clip, which outlives a chat change (the viewer is the screen's)
 ViewerUi.pending_seek | a media-timestamp link's seek for the viewer's clip, as ViewerUi.video
+ComposerUi.send_effect_once | an effect id, not a chat's: set and cleared around one synchronous send
+ComposerUi.suggest.stickers_dismissed | carries its chat and text: another chat never matches
+MessageUi.a11y.announce_first | carries its chat; read against the chat viewed
+MessageUi.rendered_sponsored | each ad carries the chat painted; the next frame reports only the open chat's
+HistoryUi.key | the chat and topic the scroller last synced for: the check that resets it on a change
+HistoryUi.row_hover.under | the row under the pointer, rebuilt by every paint and move
+HistoryUi.row_hover.painted | the rows' hitboxes, rebuilt by every paint
+HistoryUi.stream_reveal.draft_id | the bot draft being revealed: another draft starts over
+HistoryUi.pull.next_chat | the pull gesture's next chat; `pull_sync` resets it when the chat or topic shown changes
+HistoryUi.pull.window | the window and chat-window scope of that gesture, read by its jump, which `pull_sync` drops
+ViewerUi.extra.share_at | the media viewer's "Share at" forward, as ViewerUi.video
+ViewerUi.extra.caption.key | carries its chat and message: the caption built for another never matches
