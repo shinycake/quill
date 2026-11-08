@@ -316,6 +316,9 @@ impl QuillApp {
                 div()
                     .id("story-viewer-panel")
                     .debug_selector(|| "story-viewer-panel".into())
+                    // The backdrop behind closes the viewer on click: a
+                    // click on the story or its buttons must stop here.
+                    .occlude()
                     .flex()
                     .flex_col()
                     .items_center()

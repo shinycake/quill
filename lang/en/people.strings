@@ -489,7 +489,6 @@
 "qll_people_no_camera_picture" = "No camera picture";
 "qll_people_no_chats_loaded_yet" = "No chats loaded yet.";
 "qll_people_no_contacts_yet" = "No contacts yet.";
-"qll_people_no_eligible_contacts" = "No eligible contacts.";
 "qll_people_no_invite_links" = "No invite links.";
 "qll_people_no_members" = "No members";
 "qll_people_no_members_found" = "No members found.";
@@ -608,8 +607,6 @@
 "qll_people_similar_channels" = "Similar channels";
 "qll_people_some_reactions" = "Some reactions";
 "qll_people_sorry_this_link_is_taken" = "Sorry, this link is taken. But it's available for purchase. ";
-"qll_people_start_a_secret_chat_with" = "Start a secret chat with:";
-"qll_people_start_secret_chat_with" = "Start secret chat with {name}";
 "qll_people_statistics" = "Statistics";
 "qll_people_stickers" = "Stickers";
 "qll_people_subscribers" = "Subscribers";

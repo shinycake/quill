@@ -4,7 +4,6 @@
 use super::app::QuillApp;
 use super::chat_row::initials_avatar;
 use super::chat_row::{chat_avatar, compact_count};
-use super::pressable::PressableDiv;
 use super::pressable::action_row;
 use super::profile_panels::{CopyAction, copy_menu};
 use super::*;
@@ -19,7 +18,7 @@ use gpui_kit::*;
 use quill::ids::ChatId;
 use quill::lang::{keys, tr, tr_with};
 use quill::local_path::sandboxed_display_path;
-use quill::state::{ContactRow, InfoPanelTarget, SupergroupMembersFetch};
+use quill::state::{InfoPanelTarget, SupergroupMembersFetch};
 use quill::state::{ProfileChatsKind, Session};
 use quill::telegram::envelope::ChatKind;
 use std::path::PathBuf;
@@ -58,102 +57,6 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         self.open_info_panel_target(InfoPanelTarget::User(user_id), window, cx);
-    }
-
-    /// Phase S1: "New secret chat" contact picker — eligible contacts
-    /// (non-bot, not self, via `can_start_secret_chat_with`) rendered in
-    /// the contacts-list style; picking one calls
-    /// `start_secret_chat_for_user` and closes the picker.
-    pub(super) fn new_secret_picker_panel(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let rows: Vec<ContactRow> = self
-            .session()
-            .map(|s| {
-                s.contact_rows()
-                    .into_iter()
-                    .filter(|row| Self::can_start_secret_chat_with(s, row.user_id))
-                    .collect()
-            })
-            .unwrap_or_default();
-        let mut panel = div()
-            .id("new-secret-picker")
-            .flex()
-            .flex_col()
-            .gap_1()
-            .p_2()
-            .rounded_md()
-            .border_1()
-            .border_color(cx.theme().border)
-            .child(
-                div()
-                    .text_xs()
-                    .font_semibold()
-                    .text_color(cx.theme().muted_foreground)
-                    .child(tr(keys::Q_PEOPLE_START_A_SECRET_CHAT_WITH)),
-            );
-        if rows.is_empty() {
-            panel = panel.child(
-                div()
-                    .text_xs()
-                    .text_color(cx.theme().muted_foreground)
-                    .child(tr(keys::Q_PEOPLE_NO_ELIGIBLE_CONTACTS)),
-            );
-        }
-        for row in rows {
-            let user_id = row.user_id;
-            let name = row.name.clone();
-            let status = row.status_text.clone();
-            let photo = self
-                .session()
-                .and_then(|s| s.user_photo_path(user_id))
-                .and_then(|path| sandboxed_display_path(path, &self.media_display_roots()));
-            panel = panel.child(
-                div()
-                    .id(("new-secret-contact", user_id as u64))
-                    .px_2()
-                    .py_2()
-                    .rounded_md()
-                    .role(gpui_kit::Role::Button)
-                    .aria_label(tr_with(
-                        keys::Q_PEOPLE_START_SECRET_CHAT_WITH,
-                        &[("name", &name.to_string())],
-                    ))
-                    .tab_index(0)
-                    .cursor_pointer()
-                    .pressable(cx.theme())
-                    .bg(cx.theme().sidebar)
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        this.share.new_secret_picker_open = false;
-                        this.start_secret_chat_for_user(user_id, cx);
-                    }))
-                    .child(
-                        div()
-                            .flex()
-                            .items_center()
-                            .gap_2()
-                            .child(chat_avatar(&name, photo.as_deref(), 32.))
-                            .child(
-                                div()
-                                    .flex()
-                                    .flex_col()
-                                    .min_w_0()
-                                    .child(
-                                        div()
-                                            .font_medium()
-                                            .text_sm()
-                                            .truncate()
-                                            .child(super::bidi_line::name_line(name)),
-                                    )
-                                    .child(
-                                        div()
-                                            .text_xs()
-                                            .text_color(cx.theme().muted_foreground)
-                                            .child(status),
-                                    ),
-                            ),
-                    ),
-            );
-        }
-        panel
     }
 
     /// Open an info panel: set the target, then fetch its data on the live

@@ -35,8 +35,6 @@ pub(crate) struct ShareUi {
     pub(super) link_text: Option<String>,
     /// The attach menu's Contact / Location panel.
     pub(super) content_dialog: Option<ShareContentDialog>,
-    /// Phase S1: "New secret chat" contact-picker overlay (sidebar).
-    pub(super) new_secret_picker_open: bool,
 }
 
 impl ShareUi {
@@ -64,7 +62,6 @@ impl ShareUi {
             forward_result: None,
             link_text: None,
             content_dialog: None,
-            new_secret_picker_open: false,
         }
     }
 }

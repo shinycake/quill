@@ -200,6 +200,21 @@ fn media_roots_cover_tdlib_database_caches() {
     assert!(roots.contains(&h.driver.tdlib_files().to_path_buf()));
 }
 
+/// TDLib keeps story photos and clips in `<database>/stories`
+/// (`FileType::VideoStory` is a secure-dir type). A downloaded story clip
+/// must pass the display sandbox, or the viewer never opens its player.
+#[test]
+fn media_roots_cover_downloaded_stories() {
+    let h = Harness::ready();
+    let roots = h.driver.tdlib_media_roots();
+    let stories = h.driver.paths.tdlib_database.join("stories");
+    std::fs::create_dir_all(&stories).unwrap();
+    let clip = stories.join("5150154155750328346.mp4");
+    std::fs::write(&clip, b"\0\0\0\x18ftypmp42").unwrap();
+    let shown = crate::local_path::sandboxed_display_path(clip.to_str().unwrap(), &roots);
+    assert!(shown.is_some(), "story clip under the database dir plays");
+}
+
 /// TDLib announces `updateInstalledStickerSets` (custom emoji) while it
 /// loads the list the panel asked for. Refreshing the catalog must not
 /// leave the panel without its custom emoji packs.

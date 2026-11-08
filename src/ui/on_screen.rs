@@ -151,6 +151,8 @@ on_screen_fields! {
     sticker_box: super::sticker_set_box::state::StickerSetBoxUi,
     /// Forwarding and the share box (`ui/share_state.rs`).
     share: super::share_state::ShareUi,
+    /// The main menu popover (`ui/main_menu_grid.rs`).
+    main_menu: super::main_menu_grid::MainMenuUi,
     /// Message menu, selection, links and per-message toggles in the history (`ui/message_state.rs`).
     message_ui: super::message_state::MessageUi,
     /// Mute, sound and auto-delete menus and the notification boxes (`ui/notify_state.rs`).
@@ -330,6 +332,7 @@ impl OnScreen {
             search_ui: super::search_state::SearchUi::new(search_input, chat_search_input),
             sticker_box: super::sticker_set_box::state::StickerSetBoxUi::new(window, cx),
             share: super::share_state::ShareUi::new(window, cx, forward_search_input),
+            main_menu: super::main_menu_grid::MainMenuUi::new(window, cx),
             message_ui,
             notify: super::notify_state::NotifyUi::new(),
             folders: super::folders_state::FolderUi::new(),

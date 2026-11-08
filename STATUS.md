@@ -487,7 +487,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Group/channel info panel with description and member/subscriber count (src/ui/mod.rs:8280) <!-- parity:groups-info-panel -->
 - [x] Full member and subscriber count with digit grouping ("12,345 subscribers") in the chat header and profile cover, as in tdesktop (the info members block has it since #985) <!-- parity:groups-count-decimal -->
 - [x] Create new group via `createNewBasicGroupChat` (title + member picker, sidebar "New group") (src/ui/mod.rs) <!-- parity:groups-create-group -->
-- [x] Create new supergroup/channel via `createNewSupergroupChat` (title + description only — no forum toggle, no member picker; `is_forum` is sent false and the schema takes no member IDs, so members are added after creation from the member dialog; sidebar "New supergroup" / "New channel") (src/ui/mod.rs) <!-- parity:groups-create-channel -->
+- [x] Create new supergroup/channel via `createNewSupergroupChat` (title + description only — no forum toggle, no member picker; `is_forum` is sent false and the schema takes no member IDs, so members are added after creation from the member dialog; main menu "New Group" / "New Channel"; the separate "New supergroup" entry left the menu in the 2026-11 grid redesign, as tdesktop has none) (src/ui/mod.rs) <!-- parity:groups-create-channel -->
 - [x] Convert supergroup to broadcast group — one-way (`toggleSupergroupIsBroadcastGroup`, no reverse in schema :15221 or Telegram X; owner-only, destructive confirm) (src/ui/mod.rs) <!-- parity:groups-convert-broadcast -->
 - [x] Add members via contact picker — `addChatMember` (basic groups) / `addChatMembers` (supergroups/channels), privacy failures surfaced from `failedToAddMembers` (src/connect.rs, src/ui/mod.rs) <!-- parity:groups-add-members -->
 - [x] Browse/search real member lists — `getBasicGroupFullInfo` (basic groups) and `getSupergroupMembers` with All/Admins/Restricted/Banned tabs + server-side search; first 200 members only (offset 0 / limit 200, no load-more) (src/ui/mod.rs) <!-- parity:groups-member-list -->
@@ -593,7 +593,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 ### Secret chats
 
 - [x] Start secret chat from a contact's profile (non-bot, non-self) via createNewSecretChat (src/telegram/requests.rs:751, src/ui/mod.rs:4432) <!-- parity:secret-start -->
-- [x] "🔒 New secret chat" sidebar entry with an eligible-contact picker (non-bot, non-self) reusing createNewSecretChat (src/ui/mod.rs) <!-- parity:secret-new-from-menu -->
+- [x] New secret chat from a contact's profile menu reusing createNewSecretChat (the main menu entry and its contact picker left in the 2026-11 grid redesign, as tdesktop has none) (src/ui/profile_panels/more_menu.rs) <!-- parity:secret-new-from-menu -->
 - [x] Secret-chat state lifecycle: pending → ready → closed rendered from updateSecretChat / getSecretChat (src/telegram/envelope.rs:767, src/state.rs:3587) <!-- parity:secret-state-lifecycle -->
 - [x] 🔒 secret-chat badge in chat list and header state rows ("Secret chat closed", "Loading secret chat…") (src/ui/mod.rs:17394, src/ui/mod.rs:2339) <!-- parity:secret-badge -->
 - [x] "Close this secret chat?" confirm dialog (closing is permanent, no new messages) wired to closeSecretChat (src/ui/mod.rs:14295) <!-- parity:secret-close -->

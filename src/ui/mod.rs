@@ -424,6 +424,7 @@ mod link_info_boxes;
 mod live_location_tick;
 mod location_picker;
 mod main_menu_extras;
+mod main_menu_grid;
 mod marketplace;
 mod masks_ui;
 mod media_panel;

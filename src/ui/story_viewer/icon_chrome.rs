@@ -97,6 +97,7 @@ impl QuillApp {
             };
             row = row.child(
                 icon_button("story-pause", icon, label, chrome::ghost(cx))
+                    .debug_selector(|| "story-pause".into())
                     .on_click(cx.listener(|this, _, _, cx| this.toggle_story_pause(cx))),
             );
             let entries = self.story_viewer_menu_entries();

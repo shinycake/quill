@@ -9,7 +9,8 @@
 //! a Premium account, `stealth-free` for a free one, `stealth-cooldown`
 //! while it cools down, and `stealth-on` shows the toast that stealth
 //! mode is already on. `stealth-tile-menu` opens Leo's story tile menu
-//! with View Anonymously.
+//! with View Anonymously. `video` turns Leo's story into a video story
+//! whose clip is local, so the player opens and plays it.
 #![deny(clippy::indexing_slicing)]
 
 use crate::ui::app::QuillApp;
@@ -25,7 +26,7 @@ use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
 /// Leo's single story: the tray tap the demo replays.
-const LEO: i64 = 105;
+pub(super) const LEO: i64 = 105;
 /// The showcase tray's stories: (poster, story, picture, caption).
 const STORIES: [(i64, i32, &str, &str); 5] = [
     (MAYA, 5, "p1.jpg", "Trailhead at six"),
@@ -70,6 +71,9 @@ impl QuillApp {
             if let Some(owned) = copy_and_parse(&json, &self.demo_ui.seq, &sink) {
                 session.apply(owned);
             }
+        }
+        if variant == "video" {
+            apply_video_story(session, &sink, &self.demo_ui.seq, true);
         }
         match variant.as_str() {
             "gone" => {
@@ -120,6 +124,34 @@ impl QuillApp {
             }
             _ => self.open_story_viewer(ChatId(LEO), 3, StoryOpenScope::Tray, cx),
         }
+    }
+}
+
+/// Turn Leo's story into a 12 s video story with a thumbnail under it,
+/// shaped like TDLib's `storyContentVideo`. `local` says whether the clip
+/// is already downloaded; when not, the viewer waits on it.
+pub(super) fn apply_video_story(
+    session: &mut quill::state::Session,
+    sink: &Arc<dyn DiagnosticSink>,
+    seq: &std::sync::atomic::AtomicU64,
+    local: bool,
+) {
+    let fixtures = demo_media_allowlist();
+    let still = fixtures.join("showcase").join("p3.jpg");
+    let clip = fixtures.join("demo-clip-12s.mp4");
+    let thumb = demo_file_json(7190, &still.to_string_lossy(), true);
+    let clip = if local {
+        demo_file_json(7191, &clip.to_string_lossy(), true)
+    } else {
+        demo_file_json(7191, "", false)
+    };
+    let flags = story_flags(true, false);
+    let now = quill::local_time::now_unix();
+    let json = format!(
+        r#"{{"@type":"updateStory","story":{{"@type":"story","id":3,"poster_chat_id":{LEO},"date":{now},{flags}"content":{{"@type":"storyContentVideo","video":{{"@type":"storyVideo","duration":12.0,"width":640,"height":360,"has_stickers":false,"is_animation":false,"minithumbnail":null,"thumbnail":{{"@type":"thumbnail","format":{{"@type":"thumbnailFormatJpeg"}},"width":1100,"height":740,"file":{thumb}}},"preload_prefix_size":0,"cover_frame_timestamp":0.0,"video":{clip}}},"alternative_video":null}},"caption":{{"@type":"formattedText","text":"Ridge at golden hour","entities":[]}}}}}}"#
+    );
+    if let Some(owned) = copy_and_parse(&json, seq, sink) {
+        session.apply(owned);
     }
 }
 

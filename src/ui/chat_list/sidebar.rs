@@ -150,9 +150,6 @@ impl QuillApp {
             self.story_compact_stack(cx)
         };
         list = list.child(self.sidebar_search_field(story_stack, cx));
-        if self.share.new_secret_picker_open {
-            list = list.child(self.new_secret_picker_panel(cx));
-        }
         if self.search_is_open() {
             return list.child(self.search_results(focus_visible, window, cx));
         }
