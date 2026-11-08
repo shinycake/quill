@@ -15,6 +15,7 @@
 use super::app::QuillApp;
 use super::shell::{DialogKind, QuillShell};
 use super::*;
+use crate::ui::dismiss_layer::DismissLayer;
 use crate::ui::menu_surface::MenuSurface;
 use crate::ui::status_note::StatusNote;
 use gpui_kit::component::button::*;
@@ -520,104 +521,87 @@ impl QuillApp {
             )
         });
         Some(
-            div()
-                .id("link-popup-overlay")
-                .occlude()
-                .absolute()
-                .inset_0()
-                .child(
-                    div()
-                        .id("link-popup-backdrop")
-                        .absolute()
-                        .inset_0()
-                        .on_click(cx.listener(|this, _, _, cx| {
-                            this.message_ui.link_popup = None;
-                            cx.notify();
-                        })),
-                )
-                .child(
-                    anchored()
-                        .position(popup.position)
-                        .snap_to_window_with_margin(px(8.))
-                        .child(
+            DismissLayer::new(
+                "link-popup-overlay",
+                cx.listener(|this, _, _, cx| {
+                    this.message_ui.link_popup = None;
+                    cx.notify();
+                }),
+            )
+            .anchored(
+                popup.position,
+                div()
+                    .id("link-popup-panel")
+                    .occlude()
+                    .min_w(px(180.))
+                    .px_1()
+                    .py_1()
+                    .menu_surface(cx)
+                    .when(!card_title.is_empty(), |panel| {
+                        panel.child(
                             div()
-                                .id("link-popup-panel")
-                                .occlude()
-                                .min_w(px(180.))
-                                .px_1()
-                                .py_1()
-                                .menu_surface(cx)
-                                .when(!card_title.is_empty(), |panel| {
-                                    panel.child(
-                                        div()
-                                            .id("link-popup-card-title")
-                                            .px_3()
-                                            .py_1p5()
-                                            .text_sm()
-                                            .font_weight(FontWeight::SEMIBOLD)
-                                            .text_color(text_menu())
-                                            .child(card_title.clone()),
-                                    )
-                                })
-                                .child(
-                                    div()
-                                        .id("link-popup-copy")
-                                        .flex()
-                                        .items_center()
-                                        .gap_3()
-                                        .px_3()
-                                        .py_1p5()
-                                        .rounded_md()
-                                        .cursor_pointer()
-                                        .text_sm()
-                                        .text_color(text_menu())
-                                        .hover(|style| style.bg(row_hover))
-                                        .role(gpui_kit::Role::MenuItem)
-                                        .aria_label(label)
-                                        .child(
-                                            Icon::new(gpui_kit::assets::IconName::Copy)
-                                                .size(px(16.)),
-                                        )
-                                        .child(label)
-                                        .on_click(cx.listener(move |this, _, _, cx| {
-                                            this.message_ui.link_popup = None;
-                                            if ton_address.is_some() {
-                                                this.copy_ton_address(text.clone(), cx);
-                                            } else {
-                                                this.copy_entity_text(text.clone(), cx);
-                                            }
-                                        })),
-                                )
-                                .when_some(explorer_row, |panel, row| panel.child(row))
-                                .when_some(send_row, |panel, row| panel.child(row))
-                                .children(card_actions.into_iter().enumerate().map(
-                                    |(index, action)| {
-                                        let url = action.url;
-                                        let label: SharedString = action.text.into();
-                                        div()
-                                            .id(("link-popup-card-action", index))
-                                            .flex()
-                                            .items_center()
-                                            .gap_3()
-                                            .px_3()
-                                            .py_1p5()
-                                            .rounded_md()
-                                            .cursor_pointer()
-                                            .text_sm()
-                                            .text_color(text_menu())
-                                            .hover(|style| style.bg(row_hover))
-                                            .role(gpui_kit::Role::MenuItem)
-                                            .aria_label(label.clone())
-                                            .child(label)
-                                            .on_click(cx.listener(move |this, _, _, cx| {
-                                                this.message_ui.link_popup = None;
-                                                this.open_link(&url, cx);
-                                            }))
-                                    },
-                                )),
-                        ),
-                )
-                .into_any_element(),
+                                .id("link-popup-card-title")
+                                .px_3()
+                                .py_1p5()
+                                .text_sm()
+                                .font_weight(FontWeight::SEMIBOLD)
+                                .text_color(text_menu())
+                                .child(card_title.clone()),
+                        )
+                    })
+                    .child(
+                        div()
+                            .id("link-popup-copy")
+                            .flex()
+                            .items_center()
+                            .gap_3()
+                            .px_3()
+                            .py_1p5()
+                            .rounded_md()
+                            .cursor_pointer()
+                            .text_sm()
+                            .text_color(text_menu())
+                            .hover(|style| style.bg(row_hover))
+                            .role(gpui_kit::Role::MenuItem)
+                            .aria_label(label)
+                            .child(Icon::new(gpui_kit::assets::IconName::Copy).size(px(16.)))
+                            .child(label)
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.message_ui.link_popup = None;
+                                if ton_address.is_some() {
+                                    this.copy_ton_address(text.clone(), cx);
+                                } else {
+                                    this.copy_entity_text(text.clone(), cx);
+                                }
+                            })),
+                    )
+                    .when_some(explorer_row, |panel, row| panel.child(row))
+                    .when_some(send_row, |panel, row| panel.child(row))
+                    .children(card_actions.into_iter().enumerate().map(|(index, action)| {
+                        let url = action.url;
+                        let label: SharedString = action.text.into();
+                        div()
+                            .id(("link-popup-card-action", index))
+                            .flex()
+                            .items_center()
+                            .gap_3()
+                            .px_3()
+                            .py_1p5()
+                            .rounded_md()
+                            .cursor_pointer()
+                            .text_sm()
+                            .text_color(text_menu())
+                            .hover(|style| style.bg(row_hover))
+                            .role(gpui_kit::Role::MenuItem)
+                            .aria_label(label.clone())
+                            .child(label)
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.message_ui.link_popup = None;
+                                this.open_link(&url, cx);
+                            }))
+                    })),
+            )
+            .into_any_element(),
         )
     }
 

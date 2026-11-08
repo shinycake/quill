@@ -9,7 +9,9 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
+use super::dismiss_layer::DismissLayer;
 use crate::ui::app_theme::call_chrome;
+use gpui_kit::TestSupportExt;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::{Icon, Sizable};
 use gpui_kit::prelude::FluentBuilder;
@@ -156,6 +158,7 @@ pub(super) fn with_corner<V: 'static>(
         .child(
             div()
                 .id(id)
+                .test_support()
                 .absolute()
                 .top(px(-2.))
                 .right(px(4.))
@@ -187,8 +190,8 @@ pub(super) fn with_corner<V: 'static>(
         .into_any_element()
 }
 
-/// The menu over the button row, with a transparent backdrop that closes
-/// it on an outside click.
+/// The menu over the button row, on a transparent layer that closes it
+/// on an outside click (the controls under it take none).
 pub(super) fn menu_overlay<V: 'static>(
     sections: Vec<DeviceSection>,
     cx: &mut Context<V>,
@@ -198,6 +201,7 @@ pub(super) fn menu_overlay<V: 'static>(
     let on_pick = Rc::new(on_pick);
     let mut menu = div()
         .id("call-device-menu")
+        .test_support()
         .w(px(300.))
         .max_h(px(320.))
         .overflow_y_scroll()
@@ -209,9 +213,7 @@ pub(super) fn menu_overlay<V: 'static>(
         .shadow_lg()
         .flex()
         .flex_col()
-        .text_color(white())
-        // A press inside the menu is not an outside click.
-        .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation());
+        .text_color(white());
     for section in sections {
         menu = menu.child(
             div()
@@ -270,21 +272,20 @@ pub(super) fn menu_overlay<V: 'static>(
             );
         }
     }
-    div()
-        .id("call-device-backdrop")
-        .absolute()
-        .inset_0()
-        .flex()
-        .flex_col()
-        .justify_end()
-        .items_center()
-        .pb(px(104.))
-        .on_mouse_down(
-            MouseButton::Left,
-            cx.listener(move |this, _, window, cx| on_close(this, window, cx)),
-        )
-        .child(menu)
-        .into_any_element()
+    DismissLayer::new(
+        "call-device-backdrop",
+        cx.listener(move |this, _, window, cx| on_close(this, window, cx)),
+    )
+    .layer(|layer| {
+        layer
+            .flex()
+            .flex_col()
+            .justify_end()
+            .items_center()
+            .pb(px(104.))
+    })
+    .content(menu)
+    .into_any_element()
 }
 
 #[cfg(test)]

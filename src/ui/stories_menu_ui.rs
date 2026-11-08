@@ -5,10 +5,10 @@
 use super::app::QuillApp;
 use super::context_menu_keys::context_menu_item;
 use super::*;
+use crate::ui::dismiss_layer::DismissLayer;
 use crate::ui::menu_surface::MenuSurface;
 use crate::ui::status_note::StatusNote;
 use gpui_kit::assets::IconName;
-use gpui_kit::component::*;
 use gpui_kit::*;
 use quill::ids::ChatId;
 use quill::lang::{keys, tr};
@@ -169,44 +169,23 @@ impl QuillApp {
             .py_1()
             .menu_surface(cx)
             .children(rows);
-        div()
-            .id("story-menu-overlay")
-            .track_focus(&self.frame.context_menu_focus)
-            .occlude()
-            .absolute()
-            .top_0()
-            .left_0()
-            .right_0()
-            .bottom_0()
-            .child(
-                div()
-                    .id("story-menu-backdrop")
-                    .occlude()
-                    .absolute()
-                    .top_0()
-                    .left_0()
-                    .right_0()
-                    .bottom_0()
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.chat_list.global.story_menu = None;
-                        cx.notify();
-                    })),
-            )
-            .child(
-                anchored()
-                    .position(position)
-                    .snap_to_window_with_margin(px(8.))
-                    .child(
-                        // The menu of a chat's stories is cut with that
-                        // chat's row by the UI driver.
-                        div()
-                            .id("story-menu-chat")
-                            .role(gpui_kit::Role::Group)
-                            .a11y_tag(quill::agent::ui_driver::redact::chat_tag(chat_id))
-                            .child(panel),
-                    ),
-            )
-            .focus_trap("story-menu-focus", &self.frame.context_menu_focus)
-            .into_any_element()
+        DismissLayer::new(
+            "story-menu-overlay",
+            cx.listener(|this, _, _, cx| {
+                this.chat_list.global.story_menu = None;
+                cx.notify();
+            }),
+        )
+        .layer(|layer| layer.track_focus(&self.frame.context_menu_focus))
+        .anchored(
+            position, // The menu of a chat's stories is cut with that
+            // chat's row by the UI driver.
+            div()
+                .id("story-menu-chat")
+                .role(gpui_kit::Role::Group)
+                .a11y_tag(quill::agent::ui_driver::redact::chat_tag(chat_id))
+                .child(panel),
+        )
+        .focus_trap("story-menu-focus", &self.frame.context_menu_focus)
     }
 }

@@ -11,6 +11,7 @@ use super::chat_row::chat_row_height;
 use super::context_menu_keys::context_menu_item;
 use super::pressable::PressableDiv;
 use super::*;
+use crate::ui::dismiss_layer::DismissLayer;
 use crate::ui::menu_surface::MenuSurface;
 use crate::ui::status_note::StatusNote;
 use gpui_kit::assets::IconName;
@@ -331,42 +332,22 @@ impl QuillApp {
             .py_1()
             .menu_surface(cx)
             .children(rows);
-        div()
-            .id("archive-menu-overlay")
-            .track_focus(&self.frame.context_menu_focus)
-            .occlude()
-            .absolute()
-            .top_0()
-            .left_0()
-            .right_0()
-            .bottom_0()
-            .child(
-                div()
-                    .id("archive-menu-backdrop")
-                    .occlude()
-                    .absolute()
-                    .top_0()
-                    .left_0()
-                    .right_0()
-                    .bottom_0()
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.chat_list.archive_menu = None;
-                        cx.notify();
-                    })),
-            )
-            .child(
-                anchored()
-                    .position(position)
-                    .snap_to_window_with_margin(px(8.))
-                    .child(
-                        div()
-                            .id("archive-menu-region")
-                            .role(gpui_kit::Role::Group)
-                            .a11y_tag(quill::agent::ui_driver::redact::REGION_MENU)
-                            .child(panel),
-                    ),
-            )
-            .focus_trap("archive-menu-focus", &self.frame.context_menu_focus)
-            .into_any_element()
+        DismissLayer::new(
+            "archive-menu-overlay",
+            cx.listener(|this, _, _, cx| {
+                this.chat_list.archive_menu = None;
+                cx.notify();
+            }),
+        )
+        .layer(|layer| layer.track_focus(&self.frame.context_menu_focus))
+        .anchored(
+            position,
+            div()
+                .id("archive-menu-region")
+                .role(gpui_kit::Role::Group)
+                .a11y_tag(quill::agent::ui_driver::redact::REGION_MENU)
+                .child(panel),
+        )
+        .focus_trap("archive-menu-focus", &self.frame.context_menu_focus)
     }
 }

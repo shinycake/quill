@@ -187,6 +187,8 @@ impl QuillApp {
                     .child(title),
             )
             .child(body);
+        // click-through-ok: a press catcher for the long-press peek; any
+        // release closes it, inside the preview too.
         div()
             .id("chat-preview-overlay")
             .occlude()

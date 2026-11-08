@@ -33,6 +33,9 @@ jobs:
       # docs/decisions/sweep-window-slot-scope.md: async work names its window.
       - name: window scope
         run: python3 scripts/check-window-scope.py
+      # src/ui/dismiss_layer.rs: click-to-dismiss layers never pass clicks through.
+      - name: click through
+        run: python3 scripts/check-click-through.py
       - name: hotspots
         if: github.event_name == 'pull_request'
         run: bash scripts/check-hotspots.sh ${{ github.event.pull_request.base.sha }}
