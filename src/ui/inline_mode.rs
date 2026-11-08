@@ -112,6 +112,7 @@ impl QuillApp {
             }
             self.chat_ui.inline_results_open = false;
             self.chat_ui.inline_query_armed = None;
+            self.chat_ui.inline_query_waiting = false;
             return;
         };
         // TGX: the first inline use in a secret chat shows the privacy
@@ -136,6 +137,8 @@ impl QuillApp {
         };
         if username_changed {
             self.resolve_inline_bot(username);
+            // The query goes out once the bot is known (`progress_inline_mode`).
+            self.chat_ui.inline_query_waiting = true;
             self.chat_ui.inline_query_armed = None;
             self.chat_ui.inline_results_open = true;
             self.chat_ui.inline_results_selected = 0;
@@ -163,15 +166,28 @@ impl QuillApp {
     }
 
     /// Bots slice: event-driven progress for the inline flow. Called from
-    /// `poll_live` after session updates land — covers the two cases no
-    /// composer keystroke can reach: (1) `searchPublicChat` resolved the
-    /// bot while the user sat on the trigger text, so the debounced
-    /// `getInlineQueryResults` was never armed; (2) an older in-flight
-    /// query's response landed and the newest query still needs sending.
-    /// Idempotent: `maybe_dispatch_inline_query` no-ops when the slot is
-    /// fresh or a debounce timer is already armed for this trigger.
+    /// `poll_live` after session updates land, for every window's composer
+    /// (each with its state in place). Covers the two cases no composer
+    /// keystroke can reach: (1) the bot was resolved while the user sat on
+    /// the trigger text, so the debounced `getInlineQueryResults` was never
+    /// armed; (2) an older in-flight query's response landed and the
+    /// newest query still needs sending. Only a window that waits for one
+    /// of these (`ChatUi::inline_query_waiting`) sends: two windows with
+    /// different queries share the session's one results slot, and would
+    /// otherwise replace each other's query at every answer.
     pub(super) fn progress_inline_mode(&mut self, cx: &mut Context<Self>) {
         if self.live.is_none() {
+            return;
+        }
+        self.in_every_window(cx, |this, cx| this.progress_inline_mode_here(cx));
+    }
+
+    /// [`Self::progress_inline_mode`] for the window whose state is in
+    /// place.
+    fn progress_inline_mode_here(&mut self, cx: &mut Context<Self>) {
+        // A page that landed may still not fill the panel.
+        self.load_more_inline_results_if_needed(cx);
+        if !std::mem::take(&mut self.chat_ui.inline_query_waiting) {
             return;
         }
         let text = self.composer.read(cx).value().to_string();
@@ -190,11 +206,16 @@ impl QuillApp {
                 _ => false,
             });
         if !resolved_same {
+            // Still resolving this bot: wait for the next batch.
+            self.chat_ui.inline_query_waiting = self
+                .session()
+                .and_then(|s| s.bots.inline_bot_resolve.as_ref())
+                .is_some_and(|r| {
+                    matches!(r, InlineBotResolve::Resolving { username: u, .. } if u == username)
+                });
             return;
         }
         self.maybe_dispatch_inline_query(username, query, cx);
-        // A page that landed may still not fill the panel.
-        self.load_more_inline_results_if_needed(cx);
     }
 
     /// Resolve `@username`: local user-cache hit short-circuits (no
@@ -319,12 +340,12 @@ impl QuillApp {
                 let Some(live) = this.live.as_mut() else {
                     return;
                 };
-                if live
-                    .driver
-                    .inline_query(user_id, chat_id, &query, "")
-                    .is_err()
-                {
-                    this.chat_ui.inline_results_open = false;
+                match live.driver.inline_query(user_id, chat_id, &query, "") {
+                    Ok(Some(_)) => {}
+                    // An older query of this chat and bot is in flight:
+                    // this one goes out when it answers.
+                    Ok(None) => this.chat_ui.inline_query_waiting = true,
+                    Err(_) => this.chat_ui.inline_results_open = false,
                 }
                 cx.notify();
             })
