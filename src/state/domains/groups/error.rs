@@ -425,7 +425,12 @@ impl Session {
                 }
             }
             Some(RequestPurpose::Groups(GroupsPurpose::GetSupergroupMembers { filter })) => {
-                if let Some(chat_id) = pending.and_then(|p| p.chat_id) {
+                if let Some(pending) = pending
+                    && let Some(chat_id) = pending.chat_id
+                    && self
+                        .groups
+                        .is_latest_member_request((chat_id.0, filter), pending)
+                {
                     self.groups.supergroup_members.insert(
                         (chat_id.0, filter),
                         SupergroupMembersFetch::Failed(call_request_error_line(
