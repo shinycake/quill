@@ -62,7 +62,7 @@ impl QuillApp {
             self.checklist_premium_toast(keys::TODO_CREATE_PREMIUM, window, cx);
             return;
         }
-        self.composer_ui.checklist_dialog = Some(ChecklistDialog::new(None, window, cx));
+        self.chat_ui.checklist_dialog = Some(ChecklistDialog::new(None, window, cx));
         cx.notify();
     }
 
@@ -78,7 +78,7 @@ impl QuillApp {
             self.checklist_premium_toast(keys::TODO_ADD_PREMIUM, window, cx);
             return;
         }
-        self.composer_ui.checklist_dialog = Some(ChecklistDialog::new(
+        self.chat_ui.checklist_dialog = Some(ChecklistDialog::new(
             Some((chat_id, message_id)),
             window,
             cx,
@@ -87,7 +87,7 @@ impl QuillApp {
     }
 
     pub(super) fn close_checklist_dialog(&mut self, cx: &mut Context<Self>) {
-        self.composer_ui.checklist_dialog = None;
+        self.chat_ui.checklist_dialog = None;
         cx.notify();
     }
 
@@ -107,7 +107,7 @@ impl QuillApp {
 
     /// Create the checklist (or add the typed tasks) through the driver.
     pub(super) fn submit_checklist_dialog(&mut self, cx: &mut Context<Self>) {
-        let Some(dialog) = self.composer_ui.checklist_dialog.as_ref() else {
+        let Some(dialog) = self.chat_ui.checklist_dialog.as_ref() else {
             return;
         };
         let add_to = dialog.add_to;
@@ -120,7 +120,7 @@ impl QuillApp {
                 .and_then(|list| validate_added_tasks(&list, &draft.tasks).err()),
         };
         if let Some(reason) = error {
-            if let Some(dialog) = self.composer_ui.checklist_dialog.as_mut() {
+            if let Some(dialog) = self.chat_ui.checklist_dialog.as_mut() {
                 dialog.error = Some(reason);
             }
             cx.notify();
@@ -133,7 +133,7 @@ impl QuillApp {
                     .add_checklist_tasks(chat_id, message_id, &draft.tasks);
                 match result {
                     Ok(_) => {
-                        self.composer_ui.checklist_dialog = None;
+                        self.chat_ui.checklist_dialog = None;
                         self.connection
                             .set_note(StatusNote::silent(tr(keys::Q_MEDIA_ADDING_TASKS)));
                     }
@@ -143,7 +143,7 @@ impl QuillApp {
                 }
             } else {
                 self.apply_demo_checklist_tasks(chat_id, message_id, &draft.tasks);
-                self.composer_ui.checklist_dialog = None;
+                self.chat_ui.checklist_dialog = None;
                 self.connection
                     .set_note(StatusNote::silent(tr(keys::Q_MEDIA_TASKS_ADDED_DEMO)));
             }
@@ -163,7 +163,7 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut() {
             match live.driver.send_checklist_draft(chat_id, &draft, reply_to) {
                 Ok(_) => {
-                    self.composer_ui.checklist_dialog = None;
+                    self.chat_ui.checklist_dialog = None;
                     self.chat_ui.set_reply(None);
                     self.connection
                         .set_note(StatusNote::silent(tr(keys::Q_MEDIA_SENDING_CHECKLIST)));
@@ -173,7 +173,7 @@ impl QuillApp {
                 ))),
             }
         } else {
-            self.composer_ui.checklist_dialog = None;
+            self.chat_ui.checklist_dialog = None;
             self.connection.set_note(StatusNote::info(tr(
                 keys::Q_MEDIA_CHECKLISTS_NEED_A_LIVE_CONNECTION,
             )));
@@ -290,7 +290,7 @@ impl QuillApp {
     /// The checklist composer / "Add Tasks" panel above the composer
     /// (tdesktop `EditTodoListBox`).
     pub(super) fn checklist_dialog_panel(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        self.composer_ui.checklist_dialog.as_ref()?;
+        self.chat_ui.checklist_dialog.as_ref()?;
         self.checklist_dialog_panel_body(cx)
     }
 
@@ -300,7 +300,7 @@ impl QuillApp {
     /// The outer function repeats this body's first check; keep the two in step.
     #[inline(never)]
     fn checklist_dialog_panel_body(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let dialog = self.composer_ui.checklist_dialog.as_ref()?;
+        let dialog = self.chat_ui.checklist_dialog.as_ref()?;
         let adding = dialog.add_to.is_some();
         let remaining = match dialog.add_to {
             Some((chat_id, message_id)) => self
@@ -342,7 +342,7 @@ impl QuillApp {
                         .ghost()
                         .tooltip(tr(keys::Q_MEDIA_REMOVE_TASK))
                         .on_click(cx.listener(move |this, _, _, cx| {
-                            if let Some(dialog) = this.composer_ui.checklist_dialog.as_mut()
+                            if let Some(dialog) = this.chat_ui.checklist_dialog.as_mut()
                                 && index < dialog.task_inputs.len()
                             {
                                 dialog.task_inputs.remove(index);
@@ -361,7 +361,7 @@ impl QuillApp {
                         .label(tr(keys::Q_MEDIA_ADD_A_TASK))
                         .ghost()
                         .on_click(cx.listener(|this, _, window, cx| {
-                            if let Some(dialog) = this.composer_ui.checklist_dialog.as_mut() {
+                            if let Some(dialog) = this.chat_ui.checklist_dialog.as_mut() {
                                 dialog.push_task_row(window, cx);
                             }
                             cx.notify();
@@ -395,7 +395,7 @@ impl QuillApp {
                         .checked(dialog.others_can_add_tasks)
                         .label(tr(keys::TODO_CREATE_ALLOW_ADD))
                         .on_click(cx.listener(|this, &on, _, cx| {
-                            if let Some(dialog) = this.composer_ui.checklist_dialog.as_mut() {
+                            if let Some(dialog) = this.chat_ui.checklist_dialog.as_mut() {
                                 dialog.others_can_add_tasks = on;
                             }
                             cx.notify();
@@ -406,7 +406,7 @@ impl QuillApp {
                         .checked(dialog.others_can_mark_tasks_as_done)
                         .label(tr(keys::TODO_CREATE_ALLOW_MARK))
                         .on_click(cx.listener(|this, &on, _, cx| {
-                            if let Some(dialog) = this.composer_ui.checklist_dialog.as_mut() {
+                            if let Some(dialog) = this.chat_ui.checklist_dialog.as_mut() {
                                 dialog.others_can_mark_tasks_as_done = on;
                             }
                             cx.notify();
@@ -428,7 +428,7 @@ impl QuillApp {
     /// Cancel and Create (or Add), pinned under the checklist box.
     pub(super) fn checklist_box_footer(&self, cx: &mut Context<Self>) -> AnyElement {
         let adding = self
-            .composer_ui
+            .chat_ui
             .checklist_dialog
             .as_ref()
             .is_some_and(|dialog| dialog.add_to.is_some());

@@ -30,7 +30,7 @@ fn search(app: &QuillApp, host: CountryHost, cx: &gpui_kit::App) -> String {
         CountryHost::Payment => app.payments.dialog.as_ref().unwrap().country_box.as_ref(),
         CountryHost::PaymentCard => app.card_form().unwrap().country_box.as_ref(),
         CountryHost::Poll => app
-            .composer_ui
+            .chat_ui
             .poll_dialog
             .as_ref()
             .unwrap()
@@ -92,11 +92,7 @@ fn the_poll_takes_several_countries_up_to_the_limit(cx: &mut TestAppContext) {
             session.payments.poll_countries_max = Some(2);
         }
         app.open_poll_dialog(window, cx);
-        app.composer_ui
-            .poll_dialog
-            .as_mut()
-            .unwrap()
-            .limit_by_country = true;
+        app.chat_ui.poll_dialog.as_mut().unwrap().limit_by_country = true;
         app.open_country_box(CountryHost::Poll, window, cx);
 
         app.country_box_click(CountryHost::Poll, "US", window, cx);
@@ -105,14 +101,14 @@ fn the_poll_takes_several_countries_up_to_the_limit(cx: &mut TestAppContext) {
         app.country_box_click(CountryHost::Poll, "FR", window, cx);
         assert!(app.connection.status_note().contains("up to 2 countries"));
         // Nothing is kept until Save.
-        let dialog = app.composer_ui.poll_dialog.as_ref().unwrap();
+        let dialog = app.chat_ui.poll_dialog.as_ref().unwrap();
         assert!(dialog.country_codes.is_empty());
 
         app.country_box_remove(CountryHost::Poll, "US", cx);
         app.country_box_click(CountryHost::Poll, "FR", window, cx);
         app.country_box_save(CountryHost::Poll, cx);
 
-        let dialog = app.composer_ui.poll_dialog.as_ref().unwrap();
+        let dialog = app.chat_ui.poll_dialog.as_ref().unwrap();
         assert!(dialog.country_box.is_none());
         assert_eq!(dialog.country_codes, ["GB", "FR"]);
         assert!(dialog.is_dirty(cx));
@@ -123,13 +119,13 @@ fn the_poll_takes_several_countries_up_to_the_limit(cx: &mut TestAppContext) {
         app.open_country_box(CountryHost::Poll, window, cx);
         app.country_box_click(CountryHost::Poll, "GB", window, cx);
         app.close_country_box(CountryHost::Poll, cx);
-        let dialog = app.composer_ui.poll_dialog.as_ref().unwrap();
+        let dialog = app.chat_ui.poll_dialog.as_ref().unwrap();
         assert_eq!(dialog.country_codes, ["GB", "FR"]);
     });
 }
 
 fn dialog_codes(app: &QuillApp) -> Vec<String> {
-    app.composer_ui
+    app.chat_ui
         .poll_dialog
         .as_ref()
         .map(|dialog| dialog.country_codes.clone())
@@ -187,16 +183,19 @@ fn the_limit_switch_is_for_channels_and_off_forgets_the_countries(cx: &mut TestA
     // The demo chat is a group: no switch.
     app.update_in(&mut vcx, |app, window, cx| app.open_poll_dialog(window, cx));
     assert!(!shown(&mut vcx));
-    // A channel shows it (the dialog opens again after the chat change).
-    app.update_in(&mut vcx, |app, window, cx| {
+    // A channel shows it. The box goes with the chat change (it is the
+    // chat's, `ChatUi`), so it opens again once the channel is shown.
+    app.update_in(&mut vcx, |app, _, cx| {
         if let Some(session) = app.demo_session.as_mut() {
             super::demo::open_demo_channel(session);
         }
-        app.open_poll_dialog(window, cx);
+        cx.notify();
     });
+    let _ = shown(&mut vcx);
+    app.update_in(&mut vcx, |app, window, cx| app.open_poll_dialog(window, cx));
     assert!(shown(&mut vcx));
     app.update_in(&mut vcx, |app, window, cx| {
-        let dialog = app.composer_ui.poll_dialog.as_mut().unwrap();
+        let dialog = app.chat_ui.poll_dialog.as_mut().unwrap();
         dialog.limit_by_country = true;
         dialog.country_codes = vec!["US".into()];
         assert_eq!(dialog.draft(cx).country_codes, ["US"]);
@@ -209,7 +208,7 @@ fn the_limit_switch_is_for_channels_and_off_forgets_the_countries(cx: &mut TestA
                 .contains("at least one country")
         );
         // Off: no codes reach the draft.
-        let dialog = app.composer_ui.poll_dialog.as_mut().unwrap();
+        let dialog = app.chat_ui.poll_dialog.as_mut().unwrap();
         dialog.country_codes = vec!["US".into()];
         dialog.limit_by_country = false;
         assert!(dialog.draft(cx).country_codes.is_empty());

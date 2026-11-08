@@ -77,9 +77,17 @@ impl QuillApp {
     }
 
     pub(in crate::ui) fn ai_compose_button(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let shown_at = self.ai_compose.button_shown_at?;
+        // Decided for the composer in place as the button draws: a chat
+        // window's field, not the main window's the upkeep looked at.
+        if !self.ai_compose_button_wanted(cx) {
+            return None;
+        }
+        // The sparkle's blink follows the main window's field.
+        let elapsed = match (self.windows.scope, self.ai_compose.button_shown_at) {
+            (None, Some(shown_at)) => shown_at.elapsed(),
+            _ => BLINK,
+        };
         let reduce_motion = cx.reduce_motion();
-        let elapsed = shown_at.elapsed();
         if !reduce_motion && elapsed < BLINK {
             self.request_animation_tick(60, cx);
         }

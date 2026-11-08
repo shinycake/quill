@@ -376,7 +376,8 @@ impl QuillApp {
                 }
             }
             (MessageContent::Video(video), SeekTarget::Video) => {
-                self.viewer.pending_seek = Some((target_id, clamp_seek(seconds, video.duration)));
+                let key = ChatMessage::new(chat_id, target_id);
+                self.viewer.pending_seek = Some((key, clamp_seek(seconds, video.duration)));
                 self.open_media_viewer(chat_id, target_id, cx);
             }
             (_, SeekTarget::Web(url)) => self.open_link(&url, cx),

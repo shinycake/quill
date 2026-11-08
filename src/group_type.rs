@@ -31,6 +31,9 @@ pub enum LinkProblem {
     Invalid,
     /// `USERNAME_OCCUPIED`.
     Occupied,
+    /// `checkChatUsername` failed (FLOOD_WAIT, a server error): no
+    /// verdict, so Save checks again.
+    CheckFailed,
 }
 
 impl LinkProblem {
@@ -41,6 +44,7 @@ impl LinkProblem {
             Self::TooShort => keys::CREATE_CHANNEL_LINK_TOO_SHORT,
             Self::Invalid => keys::CREATE_CHANNEL_LINK_INVALID,
             Self::Occupied => keys::CREATE_CHANNEL_LINK_OCCUPIED,
+            Self::CheckFailed => keys::Q_GROUP_TYPE_LINK_CHECK_FAILED,
         }
     }
 }

@@ -2,7 +2,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use gpui_kit::*;
-use quill::ids::MessageId;
+use quill::ids::{ChatMessage, MessageId};
 use quill::media_viewer::MediaViewer;
 use quill::media_viewer::SwipeNav;
 use quill::media_viewer::ViewerZoom;
@@ -78,7 +78,9 @@ pub(crate) struct ViewerUi {
     pub(super) open_gen: u64,
     /// A media-timestamp link opened this message's video; the viewer
     /// starts it at the given second once the clip is ready.
-    pub(super) pending_seek: Option<(MessageId, f64)>,
+    /// Keyed by chat and message: a bare id matched a later clip of
+    /// another chat with the same id.
+    pub(super) pending_seek: Option<(ChatMessage, f64)>,
     /// Last mouse movement over the viewer (controls auto-hide clock).
     pub(super) last_activity: std::time::Instant,
     /// Toolbar, arrows and caption are faded out (after the idle wait).

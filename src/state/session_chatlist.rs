@@ -191,6 +191,12 @@ impl Session {
         }
         // ... and the Saved Messages sublist / tag filter.
         self.threads.saved.close_views();
+        // Opening Saved Messages again asks again for a first page or tags
+        // that failed while online (FLOOD_WAIT, a server error), which no
+        // reconnect follows.
+        if previous != Some(chat_id) && self.is_saved_messages(chat_id) {
+            self.threads.saved.retry_when_online = false;
+        }
         // ... and any comment thread that lives elsewhere.
         let left_thread_chat = self
             .threads

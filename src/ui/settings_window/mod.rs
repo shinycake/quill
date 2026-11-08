@@ -117,6 +117,11 @@ impl QuillApp {
             }
             Page::Devices => self.fetch_sessions(),
             Page::Connection => self.fetch_proxy_list(),
+            Page::DataStorage => self.forget_storage_sliders(),
+            // A box left from another account's visit (a switch leaves no
+            // page) goes: the next render makes a fresh one, which asks
+            // this account's TDLib for its packs.
+            Page::Language => self.leave_language_settings(),
             Page::System => quill::link_handler::read_now(),
             _ => {}
         }
@@ -129,8 +134,13 @@ impl QuillApp {
             Page::Devices => self.leave_devices(),
             Page::DataStorage => self.leave_data_storage(),
             Page::AgentAccess => self.leave_agent_page(),
-            // The test lives with its section, as in tdesktop.
-            Page::Calls => self.call_boxes.mic_test = Default::default(),
+            // The test lives with its section, as in tdesktop. So does an
+            // armed "Press a key": left armed, it ate the next key typed
+            // anywhere and bound push-to-talk to it.
+            Page::Calls => {
+                self.call_boxes.mic_test = Default::default();
+                self.group_call.ptt_capture = false;
+            }
             _ => {}
         }
     }

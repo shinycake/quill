@@ -20,7 +20,7 @@ const BOX_WIDTH: f32 = 380.;
 impl QuillApp {
     fn poll_box_title(&self) -> &'static str {
         let quiz = self
-            .composer_ui
+            .chat_ui
             .poll_dialog
             .as_ref()
             .is_some_and(|dialog| dialog.is_quiz);
@@ -71,7 +71,7 @@ impl QuillApp {
                 move |content, window, cx| {
                     let escape_app = body_app.clone();
                     let body = body_app.update(cx, |this, cx| {
-                        let question = this.composer_ui.poll_dialog.as_mut().and_then(|dialog| {
+                        let question = this.chat_ui.poll_dialog.as_mut().and_then(|dialog| {
                             std::mem::take(&mut dialog.focus_question)
                                 .then(|| dialog.question_input.clone())
                         });
@@ -136,7 +136,7 @@ impl QuillApp {
 }
 
 fn keep_editing(this: &mut QuillApp, _: &mut Window, cx: &mut Context<QuillApp>) {
-    if let Some(dialog) = this.composer_ui.poll_dialog.as_mut() {
+    if let Some(dialog) = this.chat_ui.poll_dialog.as_mut() {
         dialog.confirming_discard = false;
     }
     cx.notify();
@@ -145,20 +145,20 @@ fn keep_editing(this: &mut QuillApp, _: &mut Window, cx: &mut Context<QuillApp>)
 crate::ui::shell::register_dialogs! {
     PollDiscard => DialogSpec::new(
         2935,
-        |app| app.composer_ui.poll_dialog.as_ref().is_some_and(|d| d.confirming_discard),
+        |app| app.chat_ui.poll_dialog.as_ref().is_some_and(|d| d.confirming_discard),
         QuillApp::build_poll_discard_dialog,
     )
     .close(|app, _, cx| {
-            app.composer_ui.poll_dialog = None;
+            app.chat_ui.poll_dialog = None;
             cx.notify();
         }),
     PollCreate => DialogSpec::new(
         2936,
-        |app| app.composer_ui.poll_dialog.is_some(),
+        |app| app.chat_ui.poll_dialog.is_some(),
         QuillApp::build_poll_create_dialog,
     )
     .close(|app, _, cx| {
-            app.composer_ui.poll_dialog = None;
+            app.chat_ui.poll_dialog = None;
             cx.notify();
         }),
 }

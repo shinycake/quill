@@ -376,6 +376,39 @@ fn a_failed_first_page_is_asked_again_once_back_online() {
     assert!(session.threads.saved.retry_when_online);
 }
 
+/// Round 8, 2e: a server error arrives while already online, so no
+/// reconnect follows it. Opening Saved Messages again asks again; opening
+/// another chat does not.
+#[test]
+fn a_failure_while_online_is_asked_again_on_the_next_open() {
+    let (mut session, sink, seq) = saved_session();
+    session.connection = ConnectionState::Ready;
+    session.open_chat(ChatId(ME));
+    session.threads.saved.topics_requested = true;
+    let page = session.request(RequestPurpose::LoadSavedMessagesTopics, None);
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"error","@extra":"{}","code":429,"message":"FLOOD_WAIT_3"}}"#,
+            page.0
+        ),
+    );
+    assert!(session.threads.saved.retry_when_online);
+    session.open_chat(ChatId(ME + 1));
+    assert!(session.threads.saved.retry_when_online, "another chat");
+    session.open_chat(ChatId(ME));
+    assert!(
+        !session.threads.saved.retry_when_online,
+        "Saved Messages again"
+    );
+    assert!(
+        !session.threads.saved.topics_requested,
+        "the pump sends the page"
+    );
+}
+
 #[test]
 fn delete_sublist_history_removes_the_row_and_leaves_the_sublist() {
     let (mut session, sink, seq) = saved_session();

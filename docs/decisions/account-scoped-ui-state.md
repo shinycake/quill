@@ -1018,3 +1018,60 @@ late answer nothing handled.
   not fit in a few lines. Moving the files into a swept work folder would
   fit. No deterministic test for the event-log reset: it needs a chat
   window whose poll timer fires after the window closes.
+
+### Phase 8 (per-window state held screen-wide, and errors that left no state)
+
+Round 8 of the review, on `claude/sm-review8`. The account and screen
+structure held. Four kinds of gap were left: per-window state kept
+screen-wide, per-chat boxes outside `ChatUi`, per-account state behind
+app-wide allowlist entries, and error arms that ended in no state.
+
+- **Poll and checklist boxes.** `poll_dialog` and `checklist_dialog`
+  moved from `ComposerUi` to `ChatUi`. A new poll or checklist took its
+  chat at Create from the chat shown, so a notification click under the
+  open box posted it to the other chat, with that chat's reply. The two
+  `view-state-not-chat.txt` entries that excused them were false and
+  are gone.
+- **Picture-in-Picture from a chat window.** The link stays in the slot
+  of the window whose viewer opened it. `take_video_pips` walks the
+  viewer in place and every chat window slot, and the lock, the
+  deletion check, one sound at a time, a logout and opening another PiP
+  use it. Before, a chat window's PiP played over the lock screen and
+  next to another sound. Back to the viewer runs in the window that
+  opened it.
+- **Settings pages on a switch.** The Settings farewell now leaves the
+  page shown, as a page change does. The storage limit sliders are
+  dropped on every arrival on and leave of Data and Storage and rebuilt
+  from the account shown. Before, account B showed A's limits, and a
+  drag wrote A's other limit into B's TDLib. The language box is made
+  fresh on arrival, so it asks the account shown for its packs. An
+  armed push-to-talk capture goes with the Calls page; left armed, it
+  ate the next key typed anywhere and bound it. The reason on
+  `preferences.index_sliders *` is corrected.
+- **AI compose in chat windows.** The open box and the apply-in-place
+  request carry the window they came from (`window`). The close check
+  reads that window's chat, an apply-in-place answer rewrites that
+  window's composer, and the button is decided for the composer it is
+  drawn under. Before, a box opened in a chat window closed at the next
+  main frame.
+- **Saved Messages retry.** Opening Saved Messages again clears
+  `retry_when_online`. A server error comes while online, so the wait
+  for a reconnect could last the session.
+- **Global search.** `open_search` keeps a pending debounce when search
+  is already open on a query. It cleared it, which left the legs
+  Searching with nothing sent.
+- **Group Type link check.** A failed `checkChatUsername` records
+  `check_failed` for its chat and text. The line says the check failed
+  (`LinkProblem::CheckFailed`), and Save asks again. Before, the box said
+  "Checking..." with nothing in flight and Save was refused.
+- **Venue bot.** A failed lookup is `VenueBot::Failed`: no places in that
+  picker, and the next picker asks again. It was latched `Missing` for
+  the session.
+- **Leftovers.** A fresh in-chat search starts with an empty field.
+  `viewer.pending_seek` is keyed by chat and message, and the message
+  menu's timecode reply checks the voice note's chat.
+- **Not done.** The tests use `sound_starts` for the chat window's PiP.
+  A test that locks with a chat window open does not settle in the
+  test harness, PiP or not: `run_until_parked` after the lock never
+  returns. That was not traced and needs a look on its own. It may be a
+  test-only redraw loop or a real one.

@@ -101,7 +101,7 @@ impl QuillApp {
                 .and_then(|d| d.card_form.as_mut())
                 .map(|form| &mut form.country_box),
             CountryHost::Poll => self
-                .composer_ui
+                .chat_ui
                 .poll_dialog
                 .as_mut()
                 .map(|d| &mut d.country_box),
@@ -142,7 +142,7 @@ impl QuillApp {
             CountryHost::Poll => {
                 let max = self.poll_countries_max();
                 let chosen = self
-                    .composer_ui
+                    .chat_ui
                     .poll_dialog
                     .as_ref()
                     .map(|d| d.country_codes.clone())
@@ -169,7 +169,7 @@ impl QuillApp {
                     .as_ref()
                     .is_some_and(|form| form.country_box.is_some())
         }) || self
-            .composer_ui
+            .chat_ui
             .poll_dialog
             .as_ref()
             .is_some_and(|dialog| dialog.country_box.is_some())
@@ -231,7 +231,7 @@ impl QuillApp {
             .and_then(|slot| slot.as_ref())
             .map(|country_box| country_box.selection.chosen().to_vec());
         if let (Some(chosen), CountryHost::Poll) = (chosen, host)
-            && let Some(dialog) = self.composer_ui.poll_dialog.as_mut()
+            && let Some(dialog) = self.chat_ui.poll_dialog.as_mut()
         {
             dialog.country_codes = chosen;
         }
@@ -313,12 +313,7 @@ impl QuillApp {
         let country_box = match host {
             CountryHost::Payment => self.payments.dialog.as_ref()?.country_box.as_ref()?,
             CountryHost::PaymentCard => self.card_form()?.country_box.as_ref()?,
-            CountryHost::Poll => self
-                .composer_ui
-                .poll_dialog
-                .as_ref()?
-                .country_box
-                .as_ref()?,
+            CountryHost::Poll => self.chat_ui.poll_dialog.as_ref()?.country_box.as_ref()?,
         };
         let countries = self.country_box_countries();
         let query = country_box.search.read(cx).value().to_string();

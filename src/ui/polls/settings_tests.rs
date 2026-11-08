@@ -27,7 +27,7 @@ fn new_app(cx: &mut TestAppContext) -> (Entity<QuillApp>, VisualTestContext) {
 }
 
 fn dialog(app: &QuillApp) -> &crate::ui::dialogs::poll::PollDialog {
-    app.composer_ui.poll_dialog.as_ref().unwrap()
+    app.chat_ui.poll_dialog.as_ref().unwrap()
 }
 
 fn open(app: &Entity<QuillApp>, vcx: &mut VisualTestContext, lock: QuizLock) {
@@ -115,7 +115,7 @@ fn several_answers_can_be_right_only_with_multiple_answers(cx: &mut TestAppConte
     let (app, mut vcx) = new_app(cx);
     open(&app, &mut vcx, QuizLock::Free);
     app.update(&mut vcx, |app, _| {
-        let dialog = app.composer_ui.poll_dialog.as_mut().unwrap();
+        let dialog = app.chat_ui.poll_dialog.as_mut().unwrap();
         dialog.set_quiz(true);
         dialog.set_correct_row(0, true);
         dialog.set_correct_row(2, true);
@@ -148,7 +148,7 @@ fn limit_duration_shows_the_ends_row_and_sends_the_period(cx: &mut TestAppContex
         assert!(window.try_find("poll-toggle-hide-results").is_some());
     });
     app.update(&mut vcx, |app, cx| {
-        let dialog = app.composer_ui.poll_dialog.as_mut().unwrap();
+        let dialog = app.chat_ui.poll_dialog.as_mut().unwrap();
         assert_eq!(dialog.close, PollClose::Period(POLL_DEFAULT_PERIOD_SECS));
         dialog.hide_results_until_closes = true;
         let draft = dialog.draft(cx);
@@ -168,7 +168,7 @@ fn a_custom_deadline_is_picked_in_its_own_box(cx: &mut TestAppContext) {
     let (app, mut vcx) = new_app(cx);
     open(&app, &mut vcx, QuizLock::Free);
     app.update_in(&mut vcx, |app, window, cx| {
-        app.composer_ui.poll_dialog.as_mut().unwrap().limit_duration = true;
+        app.chat_ui.poll_dialog.as_mut().unwrap().limit_duration = true;
         app.open_poll_deadline_box(window, cx);
         assert!(app.poll_deadline_box_open());
     });
@@ -195,7 +195,7 @@ fn cancelling_the_deadline_box_keeps_the_choice(cx: &mut TestAppContext) {
     let (app, mut vcx) = new_app(cx);
     open(&app, &mut vcx, QuizLock::Free);
     app.update_in(&mut vcx, |app, window, cx| {
-        let dialog = app.composer_ui.poll_dialog.as_mut().unwrap();
+        let dialog = app.chat_ui.poll_dialog.as_mut().unwrap();
         dialog.limit_duration = true;
         dialog.close = PollClose::Period(3 * 3600);
         app.open_poll_deadline_box(window, cx);

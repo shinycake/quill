@@ -166,3 +166,38 @@ fn the_daily_limit_offers_increase_limit(cx: &mut TestAppContext) {
         "Increase Limit leaves the box"
     );
 }
+
+/// Round 8, 2d: the box opened over a chat window's composer belongs to
+/// that window. The main window's frames, which never show that chat,
+/// leave it open.
+#[gpui_kit::test]
+fn a_box_opened_in_a_chat_window_survives_the_main_windows_frames(cx: &mut TestAppContext) {
+    let (app, mut main) = open_main(cx);
+    let chat = app
+        .read_with(&main, |app, _| app.session().and_then(|s| s.open_chat))
+        .expect("the demo opens a chat");
+    app.update_in(&mut main, |app, window, cx| {
+        app.open_chat_in_new_window(chat, window, cx)
+    });
+    main.run_until_parked();
+    let main_id = main.update(|window, _| window.window_handle().window_id());
+    let other = cx
+        .windows()
+        .into_iter()
+        .find(|handle| handle.window_id() != main_id)
+        .expect("the chat window");
+    cx.update_window(other, |_, window, cx| {
+        app.update(cx, |app, cx| {
+            app.in_window_of(window, cx, |app, window, cx| {
+                app.set_composer_markup(DRAFT, window, cx);
+                app.open_ai_compose(window, cx);
+            });
+        });
+    })
+    .expect("the chat window is open");
+    frames(&mut main);
+    let open = app.read_with(&main, |app, _| {
+        app.ai_compose.open.as_ref().map(|open| open.chat_id)
+    });
+    assert_eq!(open, Some(chat), "the main window's frames keep it");
+}

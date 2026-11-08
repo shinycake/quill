@@ -16,7 +16,7 @@ use super::*;
 use crate::ui::status_note::StatusNote;
 use crate::ui::video_player::VideoPlayer;
 use crate::ui::video_player::controls::pip::{PipHooks, PipOpen, PipWindow, open_pip_window};
-use quill::ids::AccountKey;
+use quill::ids::{AccountKey, ChatId};
 use quill::lang::{keys, tr};
 use quill::media_viewer::pip::reopen::{ClipRef, reopen_index};
 use std::rc::Rc;
@@ -62,7 +62,7 @@ impl QuillApp {
         let dimensions = item
             .natural_size
             .and_then(|(w, h)| Some((u32::try_from(w).ok()?, u32::try_from(h).ok()?)));
-        self.close_video_pip(cx);
+        self.close_every_video_pip(cx);
         // One sound at a time: a live PiP goes too.
         self.close_live_pip(cx);
         self.close_media_viewer(cx);
@@ -73,9 +73,9 @@ impl QuillApp {
         };
         let account = self.session().map(|session| session.account.clone());
         let weak = cx.entity().downgrade();
-        let hooks = pip_hooks(weak.clone());
         // The link belongs to the viewer of the window that opened it.
         let scope = self.windows.scope;
+        let hooks = pip_hooks(weak.clone(), scope);
         let screen = self.screen_epoch();
         // Window creation draws at once: let this update finish first.
         cx.defer(move |cx| {
@@ -139,17 +139,16 @@ impl QuillApp {
     /// stops. Runs without the main window drawing (it may be minimized
     /// or hidden to the tray).
     pub(in crate::ui) fn close_video_pip(&mut self, cx: &mut App) {
-        let Some(link) = self.viewer.pip.take() else {
-            return;
-        };
-        // Not from inside this update: the window's view may be the one
-        // that asked.
-        cx.defer(move |cx| {
-            let view = link.window.view.clone();
-            let _ = link.window.window.update(cx, |_, window, cx| {
-                let _ = view.update(cx, |pip, cx| pip.close(window, cx));
-            });
-        });
+        if let Some(link) = self.viewer.pip.take() {
+            close_pip_window(link, cx);
+        }
+    }
+
+    /// Close Picture-in-Picture whichever window's viewer opened it.
+    pub(in crate::ui) fn close_every_video_pip(&mut self, cx: &mut App) {
+        for link in self.take_video_pips(cx, |_, _, _| true) {
+            close_pip_window(link, cx);
+        }
     }
 
     /// Another sound starts (a viewer clip, a story, a voice message or
@@ -157,7 +156,7 @@ impl QuillApp {
     /// plays at a time, so Picture-in-Picture closes (tdesktop
     /// `startStreamingPlayer` drops `_pip`).
     pub(in crate::ui) fn sound_starts(&mut self, cx: &mut App) {
-        self.close_video_pip(cx);
+        self.close_every_video_pip(cx);
         self.close_live_pip(cx);
     }
 
@@ -176,13 +175,9 @@ impl QuillApp {
         account: &AccountKey,
         cx: &mut Context<Self>,
     ) {
-        if self
-            .viewer
-            .pip
-            .as_ref()
-            .is_some_and(|link| link.account.as_ref() == Some(account))
-        {
-            self.close_video_pip(cx);
+        let ended = self.take_video_pips(cx, |_, link, _| link.account.as_ref() == Some(account));
+        for link in ended {
+            close_pip_window(link, cx);
         }
         self.live_pip_account_ended(account, cx);
     }
@@ -194,28 +189,29 @@ impl QuillApp {
     pub(in crate::ui) fn check_video_pip(&mut self, cx: &mut Context<Self>) {
         // The live PiP's checks (`calls::live_pip`) run with the file's.
         self.check_live_pip(cx);
-        let Some(link) = self.viewer.pip.as_ref() else {
-            return;
-        };
         // Closed: released, or let go of its player on the way out.
-        let closed = link
-            .window
-            .view
-            .upgrade()
-            .is_none_or(|view| view.read(cx).player().is_none());
-        if closed {
-            self.viewer.pip = None;
-            return;
+        self.take_video_pips(cx, |_, link, cx| {
+            link.window
+                .view
+                .upgrade()
+                .is_none_or(|view| view.read(cx).player().is_none())
+        });
+        let locked = self.account.passcode.locked;
+        let ended =
+            self.take_video_pips(cx, |app, link, _| locked || app.pip_message_deleted(link));
+        for link in ended {
+            close_pip_window(link, cx);
         }
+    }
+
+    /// The clip's message was really deleted (a tombstone), not only
+    /// paged out of the loaded history.
+    fn pip_message_deleted(&self, link: &PipLink) -> bool {
         let (chat, message) = (link.item.chat_id, link.clip.message_id);
-        let deleted = self
-            .session()
+        self.session()
             .filter(|session| Some(&session.account) == link.account.as_ref())
             .and_then(|session| session.histories.get(&chat.0))
-            .is_some_and(|history| history.is_tombstone(message));
-        if self.account.passcode.locked || deleted {
-            self.close_video_pip(cx);
-        }
+            .is_some_and(|history| history.is_tombstone(message))
     }
 
     /// The viewer is opening `item`: when Picture-in-Picture plays that
@@ -337,8 +333,23 @@ impl QuillApp {
     }
 }
 
-/// What the window tells the app (each deferred by the window).
-fn pip_hooks(app: WeakEntity<QuillApp>) -> PipHooks {
+/// Close a Picture-in-Picture window whose link was taken.
+fn close_pip_window(link: PipLink, cx: &mut App) {
+    // Not from inside this update: the window's view may be the one
+    // that asked.
+    cx.defer(move |cx| {
+        let view = link.window.view.clone();
+        let _ = link.window.window.update(cx, |_, window, cx| {
+            let _ = view.update(cx, |pip, cx| pip.close(window, cx));
+        });
+    });
+}
+
+/// What the window tells the app (each deferred by the window). `scope`
+/// is the window whose viewer opened it (`None`: the main window): its
+/// link sits in that window's slot, and "back to the viewer" reopens
+/// that window's viewer.
+fn pip_hooks(app: WeakEntity<QuillApp>, scope: Option<ChatId>) -> PipHooks {
     let closed = app.clone();
     let enlarge = app.clone();
     PipHooks {
@@ -349,7 +360,9 @@ fn pip_hooks(app: WeakEntity<QuillApp>) -> PipHooks {
             });
         }),
         enlarge: Rc::new(move |cx| {
-            let _ = enlarge.update(cx, |app, cx| app.pip_enlarge_requested(cx));
+            let _ = enlarge.update(cx, |app, cx| {
+                app.in_window_scope(scope, cx, |app, cx| app.pip_enlarge_requested(cx))
+            });
         }),
         volume: Rc::new(move |volume, cx| {
             let _ = app.update(cx, |app, cx| app.pip_volume(volume, cx));

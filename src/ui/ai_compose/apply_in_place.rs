@@ -56,6 +56,7 @@ impl QuillApp {
         self.ai_compose.apply_in_place = Some(ApplyInPlace {
             token,
             chat_id,
+            window: self.windows.scope,
             selection,
             cursor: selected.end,
         });
@@ -87,10 +88,49 @@ impl QuillApp {
                 return;
             }
         };
+        // The composer that asked: a chat window's is rewritten in that
+        // window, with its state in place.
+        let Some(scope) = asked.window else {
+            self.apply_ai_in_place_answer(&asked, &text, &entities, window, cx);
+            return;
+        };
+        let handle = self
+            .windows
+            .open_windows()
+            .find(|(chat, _)| *chat == scope)
+            .map(|(_, handle)| handle);
+        let Some(handle) = handle else {
+            return;
+        };
+        let app = cx.weak_entity();
+        let screen = self.screen_epoch();
+        cx.defer(move |cx| {
+            let _ = handle.update(cx, |_, window, cx| {
+                let _ = app.update(cx, |app, cx| {
+                    app.in_screen_scope(screen, cx, |app, cx| {
+                        app.in_window_of(window, cx, |app, window, cx| {
+                            app.apply_ai_in_place_answer(&asked, &text, &entities, window, cx)
+                        })
+                    });
+                });
+            });
+        });
+    }
+
+    /// Rewrite the composer in place with the answer, while it still
+    /// shows the chat that asked.
+    fn apply_ai_in_place_answer(
+        &mut self,
+        asked: &ApplyInPlace,
+        text: &str,
+        entities: &[quill::text::TextEntity],
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         if self.session().and_then(|s| s.open_chat) != Some(asked.chat_id) {
             return;
         }
-        let replacement = ComposerDoc::from_entities(&text, &entities);
+        let replacement = ComposerDoc::from_entities(text, entities);
         let field = self.composer.read(cx).value();
         let range = match &asked.selection {
             Some(range) => {

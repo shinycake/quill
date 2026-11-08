@@ -35,8 +35,9 @@ pub struct SavedMessagesState {
     /// The first `loadSavedMessagesTopics` was sent.
     pub topics_requested: bool,
     /// The first sublist page or the tags failed: the pump asks again once
-    /// the connection is back (`updateConnectionState` ready), not on
-    /// every poll pass.
+    /// the connection is back (`updateConnectionState` ready) or Saved
+    /// Messages is opened again (`Session::open_chat`), not on every poll
+    /// pass.
     pub retry_when_online: bool,
     /// Tags of all Saved Messages (`saved_messages_topic_id` 0).
     pub tags: Vec<SavedMessagesTag>,

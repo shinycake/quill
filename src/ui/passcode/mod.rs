@@ -525,8 +525,8 @@ impl QuillApp {
         self.close_all_notify_windows(cx);
         // tdesktop drops Picture-in-Picture on lock (`passcodeLockChanges`
         // in `switchToPip`); this runs with the main window minimized or
-        // hidden too.
-        self.close_video_pip(cx);
+        // hidden too. A chat window's viewer keeps its own link.
+        self.close_every_video_pip(cx);
         cx.notify();
     }
 

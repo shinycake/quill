@@ -38,18 +38,18 @@ impl QuillApp {
     ) {
         let now = WallClock::of(cx).now();
         let max = self.poll_close_max_secs();
-        let Some(close) = self.composer_ui.poll_dialog.as_ref().map(|d| d.close) else {
+        let Some(close) = self.chat_ui.poll_dialog.as_ref().map(|d| d.close) else {
             return;
         };
         let picker = new_date_time_picker(window, cx, deadline_start(close, now), max);
-        if let Some(dialog) = self.composer_ui.poll_dialog.as_mut() {
+        if let Some(dialog) = self.chat_ui.poll_dialog.as_mut() {
             dialog.deadline_box = Some(DeadlineBox { picker });
         }
         cx.notify();
     }
 
     pub(in crate::ui) fn close_poll_deadline_box(&mut self, cx: &mut Context<Self>) {
-        if let Some(dialog) = self.composer_ui.poll_dialog.as_mut() {
+        if let Some(dialog) = self.chat_ui.poll_dialog.as_mut() {
             dialog.deadline_box = None;
         }
         cx.notify();
@@ -57,7 +57,7 @@ impl QuillApp {
 
     /// A deadline box is up (Esc closes it before the poll box).
     pub(in crate::ui) fn poll_deadline_box_open(&self) -> bool {
-        self.composer_ui
+        self.chat_ui
             .poll_dialog
             .as_ref()
             .is_some_and(|dialog| dialog.deadline_box.is_some())
@@ -66,7 +66,7 @@ impl QuillApp {
     /// "Set Deadline": take the picked moment, or say it already passed.
     pub(in crate::ui) fn set_poll_deadline(&mut self, cx: &mut Context<Self>) {
         let picked = self
-            .composer_ui
+            .chat_ui
             .poll_dialog
             .as_ref()
             .and_then(|dialog| dialog.deadline_box.as_ref())
@@ -77,7 +77,7 @@ impl QuillApp {
         };
         match deadline_choice(picked, WallClock::of(cx).now(), max) {
             Some(date) => {
-                if let Some(dialog) = self.composer_ui.poll_dialog.as_mut() {
+                if let Some(dialog) = self.chat_ui.poll_dialog.as_mut() {
                     dialog.close = PollClose::Date(date);
                     dialog.deadline_box = None;
                 }
@@ -92,12 +92,7 @@ impl QuillApp {
 
     /// The poll's panel while its deadline box is open.
     pub(in crate::ui) fn poll_deadline_panel(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let deadline = self
-            .composer_ui
-            .poll_dialog
-            .as_ref()?
-            .deadline_box
-            .as_ref()?;
+        let deadline = self.chat_ui.poll_dialog.as_ref()?.deadline_box.as_ref()?;
         Some(
             div()
                 .id("poll-dialog")

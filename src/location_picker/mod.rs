@@ -77,6 +77,9 @@ enum VenueBot {
     Resolving,
     Found(i64),
     Missing,
+    /// The lookup failed (FLOOD_WAIT, a server error): no venues in this
+    /// picker, and the next picker asks again.
+    Failed,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -118,6 +121,9 @@ impl LocationSharing {
     /// Open the picker for `chat_id`; `country` is the system country's
     /// centre, where the map starts without a previous fix.
     pub fn open(&mut self, chat_id: ChatId, country: Option<GeoPoint>) {
+        if self.venue_bot == VenueBot::Failed {
+            self.venue_bot = VenueBot::Unknown;
+        }
         self.picker = Some(LocationPicker::open(
             chat_id,
             self.last_exact,
@@ -170,7 +176,9 @@ impl LocationSharing {
                     });
                 }
                 VenueBot::Resolving => {}
-                VenueBot::Unknown | VenueBot::Missing => picker.venues_failed(generation),
+                VenueBot::Unknown | VenueBot::Missing | VenueBot::Failed => {
+                    picker.venues_failed(generation)
+                }
             }
         }
         if let Some(key) = picker.tile_to_request() {
@@ -246,8 +254,11 @@ impl LocationSharing {
         }
     }
 
+    /// The lookup failed: not a missing bot, so the next picker asks
+    /// again instead of showing no venues for the session.
     pub fn venue_bot_failed(&mut self) {
-        self.venue_bot_resolved(None);
+        self.venue_bot = VenueBot::Failed;
+        self.fail_current_venues();
     }
 
     pub fn venues_answered(&mut self, generation: u64, venues: Vec<Venue>) {

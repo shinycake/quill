@@ -25,6 +25,7 @@ use super::super::composer_state::ComposerUi;
 use super::super::glyph_sweep;
 use super::super::history_state::HistoryUi;
 use super::super::image_budget::{BoundedImageCache, WindowDraw};
+use super::super::media_viewer::PipLink;
 use super::super::message_state::MessageUi;
 use super::super::pickers_state::PickerUi;
 use super::super::share_state::ShareUi;
@@ -225,6 +226,40 @@ impl QuillApp {
         let result = f(self, cx);
         self.set_window_scope(outer);
         Some(result)
+    }
+
+    /// Take the Picture-in-Picture links `pick` chooses from every
+    /// window's viewer: the one in place and each chat window slot's. A
+    /// PiP opened from a chat window keeps its link in that window's
+    /// slot, so the app's checks (the lock, a deletion, one sound at a
+    /// time, a logout) look in every slot, whichever window is in place.
+    pub(in crate::ui) fn take_video_pips(
+        &mut self,
+        cx: &App,
+        pick: impl Fn(&Self, &PipLink, &App) -> bool,
+    ) -> Vec<PipLink> {
+        let mut taken = Vec::new();
+        if self
+            .viewer
+            .pip
+            .as_ref()
+            .is_some_and(|link| pick(self, link, cx))
+        {
+            taken.extend(self.viewer.pip.take());
+        }
+        let slots: Vec<SharedSlot> = self.windows.slots().collect();
+        for slot in slots {
+            let picked = slot.try_borrow().is_ok_and(|slot| {
+                slot.viewer
+                    .pip
+                    .as_ref()
+                    .is_some_and(|link| pick(self, link, cx))
+            });
+            if picked && let Ok(mut slot) = slot.try_borrow_mut() {
+                taken.extend(slot.viewer.pip.take());
+            }
+        }
+        taken
     }
 
     /// What each frame of `chat`'s window starts with, whether its view
