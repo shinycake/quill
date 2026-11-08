@@ -50,3 +50,36 @@ fn a_dissolve_runs_and_ends_in_a_pane_without_rows(cx: &mut TestAppContext) {
     let (running, _) = app.read_with(vcx, |app, _| app.vanishing_state_for_test());
     assert_eq!(running, 0, "a finished dissolve is dropped without rows");
 }
+
+/// Round 7, 2g: a dissolve is matched by chat and message. Message ids
+/// repeat across channels and supergroups: a row of another chat with the
+/// same id is not cut away.
+#[gpui_kit::test]
+fn a_dissolve_is_its_own_chats(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx, "ready-chats");
+    let vcx = &mut vcx;
+    open_group(&app, vcx);
+    quill::power_saving::set(0);
+    quill::power_saving::set_force_all(false);
+    quill::power_saving::set_os_reduce_motion(false);
+    app.update(vcx, |app, _| {
+        app.begin_vanish(ChatId(GROUP), &[MessageId(202)]);
+        app.paint_vanishing_for_test();
+    });
+    apply(
+        &app,
+        vcx,
+        &[
+            r#"{"@type":"updateDeleteMessages","chat_id":31,"message_ids":[202],"is_permanent":true,"from_cache":false}"#,
+        ],
+    );
+    frames(vcx);
+    app.read_with(vcx, |app, _| {
+        assert!(app.vanish_progress(ChatId(GROUP), MessageId(202)).is_some());
+        assert!(
+            app.vanish_progress(ChatId(GROUP + 1), MessageId(202))
+                .is_none(),
+            "another chat's message 202 is not the one deleted"
+        );
+    });
+}

@@ -210,7 +210,7 @@ impl QuillApp {
                 let right = quill::chat_wide::has_right_layout(message.is_outgoing, look.wide);
                 let vanishing = inputs
                     .vanishing
-                    .then(|| self.vanish_progress(row_msg))
+                    .then(|| self.vanish_progress(row_chat, row_msg))
                     .flatten();
                 let highlighted = inputs.highlighted;
                 let failed = message.failed();
@@ -337,7 +337,7 @@ impl QuillApp {
                     .children(selection_overlay)
                     .into_any_element();
                 match vanishing {
-                    Some(t) => self.ghost_row(row_msg, t, element),
+                    Some(t) => self.ghost_row(row_chat, row_msg, t, element),
                     None => element,
                 }
             }
