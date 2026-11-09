@@ -90,6 +90,7 @@ pub mod fast_buttons;
 pub mod fd_limit;
 pub mod ffi_path;
 pub mod file_prefs;
+pub mod first_load;
 pub mod folder_archive;
 pub mod folder_icons;
 pub mod folder_limits;

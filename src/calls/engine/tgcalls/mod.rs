@@ -37,7 +37,9 @@ static LIBRARY: OnceLock<Result<Loader, String>> = OnceLock::new();
 
 fn library() -> Result<&'static Loader, EngineError> {
     LIBRARY
-        .get_or_init(|| Loader::load_default().map_err(|err| err.to_string()))
+        .get_or_init(|| {
+            Loader::load_default_after(crate::first_load::settle).map_err(|err| err.to_string())
+        })
         .as_ref()
         .map_err(|err| {
             crate::advanced::debug_mode::call_log(&format!("[call] tgcalls: {err}"));

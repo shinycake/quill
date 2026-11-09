@@ -248,6 +248,9 @@ ashpd = { version = "0.14", optional = true, default-features = false, features 
 gpui_wgpu = { package = "gpui-pre-wgpu", version = "=0.3.11", optional = true, default-features = false }
 
 [target.'cfg(target_os = "macos")'.dependencies]
+# The libraries a bundled library links to (src/first_load.rs). Already in the
+# tree through `backtrace`.
+object = { version = "0.40", default-features = false, features = ["read_core", "macho"] }
 # Security keys over IOKit HID (src/webauthn/ctap2/hid_macos.rs).
 core-foundation-sys = "0.8"
 # Code-signature checks of a staged update (src/update_install/macos).

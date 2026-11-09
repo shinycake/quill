@@ -82,6 +82,7 @@ fn load_library(path: &Path) -> Result<libloading::Library, libloading::Error> {
     }
     #[cfg(not(windows))]
     {
+        crate::first_load::settle(path);
         // SAFETY: only the owner-configured or bundled library is loaded.
         unsafe { libloading::Library::new(path) }
     }

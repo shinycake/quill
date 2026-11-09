@@ -7305,6 +7305,7 @@ dependencies = [
  "objc2-media-player",
  "objc2-screen-capture-kit",
  "objc2-user-notifications",
+ "object",
  "ogg",
  "opus-decoder",
  "p256",

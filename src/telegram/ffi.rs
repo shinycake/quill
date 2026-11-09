@@ -94,6 +94,7 @@ pub struct TdJson {
 
 impl TdJson {
     pub fn load_from(path: &Path) -> Result<Self, TdJsonError> {
+        crate::first_load::settle(path);
         // SAFETY: loading tdjson runs its initializers, which only set up
         // TDLib's own static state; the path is the bundled or configured tdjson.
         let library = unsafe { Library::new(path) }.map_err(|_| TdJsonError::Load)?;
