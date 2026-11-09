@@ -228,6 +228,7 @@ pub(super) fn caption_above_media(content: &MessageContent) -> bool {
         MessageContent::Photo(photo) => photo.show_caption_above_media,
         MessageContent::Video(video) => video.show_caption_above_media,
         MessageContent::Animation(animation) => animation.show_caption_above_media,
+        MessageContent::Widget(widget) => widget.show_caption_above_media,
         _ => false,
     }
 }

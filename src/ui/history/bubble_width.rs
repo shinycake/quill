@@ -148,6 +148,7 @@ pub(in crate::ui) fn caption_parts(content: &MessageContent) -> (&str, &[TextEnt
         MessageContent::Document(document) => (&document.caption, &document.caption_entities),
         MessageContent::VoiceNote(note) => (&note.caption, &note.caption_entities),
         MessageContent::Audio(audio) => (&audio.caption, &audio.caption_entities),
+        MessageContent::Widget(widget) => (&widget.caption, &widget.caption_entities),
         _ => ("", &[]),
     }
 }

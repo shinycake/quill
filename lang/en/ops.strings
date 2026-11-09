@@ -1049,6 +1049,7 @@
 "lng_in_dlg_file" = "File";
 "lng_in_dlg_poll" = "Poll";
 "lng_in_dlg_audio" = "Voice message";
+"lng_in_dlg_widget" = "Widget";
 "lng_duration_and_size" = "{duration}, {size}";
 "lng_date_and_duration" = "{date}, {duration}";
 "qll_ops_gif" = "GIF";

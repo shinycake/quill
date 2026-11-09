@@ -196,6 +196,7 @@ impl QuillApp {
             for json in [
                 r#"{"@type":"updateNewMessage","message":{"id":110,"chat_id":11,"is_outgoing":false,"content":{"@type":"messageFutureFeature"}}}"#,
                 r#"{"@type":"updateNewMessage","message":{"id":111,"chat_id":11,"is_outgoing":false,"content":{"@type":"messageExpiredPhoto"}}}"#,
+                r#"{"@type":"updateNewMessage","message":{"id":112,"chat_id":11,"is_outgoing":false,"date":1700000000,"content":{"@type":"messageWidget","width":320,"height":180,"html":"<p>hi</p>","public_data":"","chat_data":"","widget_id":"7","caption":{"@type":"formattedText","text":"Today's scoreboard","entities":[]},"show_caption_above_media":false,"is_copy":false,"can_send_queries":true,"can_send_background_queries":false}}}"#,
             ] {
                 if let Some(message) =
                     quill::telegram::client::copy_and_parse(json, &self.demo_ui.seq, &sink)

@@ -27,6 +27,35 @@ fn b1_message_game_parsed() {
 }
 
 #[test]
+fn a_widget_message_keeps_its_caption_and_size() {
+    // `messageWidget` (TDLib 1.8.70): the HTML and the widget data are not
+    // kept, only what the placeholder card and the caption need.
+    let env = parse_envelope(
+        r#"{"@type":"updateNewMessage","message":{"id":9,"chat_id":21,"is_outgoing":false,"content":{"@type":"messageWidget","width":320,"height":180,"html":"<p>hi</p>","public_data":"{}","chat_data":"","widget_id":"7","caption":{"@type":"formattedText","text":"Scores","entities":[{"@type":"textEntity","offset":0,"length":6,"type":{"@type":"textEntityTypeBold"}}]},"show_caption_above_media":true,"is_copy":false,"can_send_queries":true,"can_send_background_queries":false}}}"#,
+    )
+    .unwrap();
+    let EnvelopePayload::Messages(MessagesPayload::UpdateNewMessage(message)) = env.payload else {
+        panic!("{:?}", env.payload)
+    };
+    let MessageContent::Widget(widget) = &message.content else {
+        panic!("expected Widget, got {:?}", message.content)
+    };
+    assert_eq!((widget.width, widget.height), (320, 180));
+    assert_eq!(widget.caption, "Scores");
+    assert_eq!(widget.caption_entities.len(), 1);
+    assert!(widget.show_caption_above_media);
+    assert_eq!(message.content.preview(), "Scores");
+    let bare = MessageContent::Widget(WidgetContent {
+        width: 0,
+        height: 0,
+        caption: String::new(),
+        caption_entities: Vec::new(),
+        show_caption_above_media: false,
+    });
+    assert_eq!(bare.preview(), "Widget");
+}
+
+#[test]
 fn a_fact_check_keeps_its_entities_and_country() {
     // `factCheck text:formattedText country_code:string` (TDLib 1.8.68,
     // schema line 3418) on `message.fact_check` (line 3475).

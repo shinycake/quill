@@ -294,6 +294,8 @@ impl ComposerEdit {
             | MessageContent::RichMessage(_)
             // B1: games are not editable.
             | MessageContent::Game(_)
+            // Widgets are edited by their bot (`editMessageWidgetData`).
+            | MessageContent::Widget(_)
             // Slice P1: invoices and payment notices are not editable.
             | MessageContent::Invoice(_)
             | MessageContent::PaymentSuccessful(_)

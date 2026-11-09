@@ -269,6 +269,7 @@ pub(in crate::ui) fn session_history_row(
         MessageContent::Document(doc) => !doc.caption.is_empty(),
         MessageContent::Video(video) => !video.caption.is_empty(),
         MessageContent::Animation(animation) => !animation.caption.is_empty(),
+        MessageContent::Widget(widget) => !widget.caption.is_empty(),
         _ => false,
     };
     // A picture, video or GIF with nothing else in its bubble stands on its
@@ -562,6 +563,17 @@ pub(in crate::ui) fn session_history_row(
         // Slice G9: the join-from-community service row renders no extra
         // media either (the name ships in the centered row text).
         | MessageContent::ChatJoinFromCommunity { .. } => None,
+        // Quill has no widget runtime (Telegram Desktop's is `tgw/`): a
+        // card names the widget, the caption renders as usual.
+        MessageContent::Widget(_) => Some(
+            div().id(("widget-card", message.id.0 as u64))
+                .flex().flex_col().gap_1().p_3()
+                .role(Role::Label)
+                .aria_label(tr(keys::Q_CHAT_WIDGET_NOT_SUPPORTED))
+                .child(div().font_semibold().child(tr(keys::IN_DLG_WIDGET)))
+                .child(div().text_sm().opacity(0.8).child(tr(keys::Q_CHAT_WIDGET_NOT_SUPPORTED)))
+                .into_any_element(),
+        ),
         MessageContent::Unsupported { .. } => Some(
             div().id(("unsupported-update-card", message.id.0 as u64))
                 .flex().flex_col().gap_2().p_3()
@@ -642,6 +654,7 @@ pub(in crate::ui) fn session_history_row(
         MessageContent::Video(video) => quill::text::last_line_is_rtl(&video.caption),
         MessageContent::VoiceNote(note) => quill::text::last_line_is_rtl(&note.caption),
         MessageContent::Audio(audio) => quill::text::last_line_is_rtl(&audio.caption),
+        MessageContent::Widget(widget) => quill::text::last_line_is_rtl(&widget.caption),
         _ => false,
     };
     let reserve_footer = tail_empty && message.date > 0 && !ends_rtl;
