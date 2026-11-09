@@ -2,12 +2,15 @@
 //! `twlite::to_json`) into tiny-skia's shapes, paints and transforms.
 use serde_json::Value;
 use tiny_skia::{
-    Color, FillRule, GradientStop, LineCap, LineJoin, LinearGradient, Path, PathBuilder, Point, RadialGradient,
-    Rect, Shader, SpreadMode, Stroke, StrokeDash, SweepGradient, Transform,
+    Color, FillRule, GradientStop, LineCap, LineJoin, LinearGradient, Path, PathBuilder, Point,
+    RadialGradient, Rect, Shader, SpreadMode, Stroke, StrokeDash, SweepGradient, Transform,
 };
 
 pub fn num(value: &Value, key: &str) -> f32 {
-    value.get(key).and_then(Value::as_f64).map_or(0.0, |v| v as f32)
+    value
+        .get(key)
+        .and_then(Value::as_f64)
+        .map_or(0.0, |v| v as f32)
 }
 
 pub fn int(value: &Value, key: &str) -> i64 {
@@ -22,7 +25,12 @@ pub fn floats(value: &Value, key: &str) -> Vec<f32> {
     value
         .get(key)
         .and_then(Value::as_array)
-        .map(|items| items.iter().map(|v| v.as_f64().unwrap_or(0.0) as f32).collect())
+        .map(|items| {
+            items
+                .iter()
+                .map(|v| v.as_f64().unwrap_or(0.0) as f32)
+                .collect()
+        })
         .unwrap_or_default()
 }
 
@@ -56,7 +64,14 @@ pub fn matrix(value: &Value, key: &str) -> Transform {
     if m.len() < 6 {
         return Transform::identity();
     }
-    Transform::from_row(at(&m, 0), at(&m, 1), at(&m, 2), at(&m, 3), at(&m, 4), at(&m, 5))
+    Transform::from_row(
+        at(&m, 0),
+        at(&m, 1),
+        at(&m, 2),
+        at(&m, 3),
+        at(&m, 4),
+        at(&m, 5),
+    )
 }
 
 /// "s": offset, ARGB pairs.
@@ -69,7 +84,10 @@ pub fn stops(value: &Value, key: &str) -> Vec<GradientStop> {
         .0
         .iter()
         .map(|[offset, color]| {
-            GradientStop::new(offset.as_f64().unwrap_or(0.0).clamp(0.0, 1.0) as f32, argb(color.as_u64().unwrap_or(0)))
+            GradientStop::new(
+                offset.as_f64().unwrap_or(0.0).clamp(0.0, 1.0) as f32,
+                argb(color.as_u64().unwrap_or(0)),
+            )
         })
         .collect()
 }
@@ -101,7 +119,14 @@ pub fn path(value: &Value) -> Option<Path> {
             }
             3 => {
                 let p = take(6);
-                builder.cubic_to(at(&p, 0), at(&p, 1), at(&p, 2), at(&p, 3), at(&p, 4), at(&p, 5));
+                builder.cubic_to(
+                    at(&p, 0),
+                    at(&p, 1),
+                    at(&p, 2),
+                    at(&p, 3),
+                    at(&p, 4),
+                    at(&p, 5),
+                );
             }
             4 => builder.close(),
             _ => return None,
@@ -111,7 +136,11 @@ pub fn path(value: &Value) -> Option<Path> {
 }
 
 pub fn fill_rule(value: &Value) -> FillRule {
-    if flag(value, "e") { FillRule::EvenOdd } else { FillRule::Winding }
+    if flag(value, "e") {
+        FillRule::EvenOdd
+    } else {
+        FillRule::Winding
+    }
 }
 
 /// A rectangle with CSS corner radii ("q": tlx, tly, trx, try, brx, bry, blx, bly).
@@ -122,7 +151,12 @@ pub fn rounded(rect: Rect, radii: &[f32]) -> Option<Path> {
     let (x, y, w, h) = (rect.x(), rect.y(), rect.width(), rect.height());
     // CSS scales all radii down together when adjacent ones overlap.
     let mut f: f32 = 1.0;
-    let pairs = [(at(radii, 0) + at(radii, 2), w), (at(radii, 6) + at(radii, 4), w), (at(radii, 1) + at(radii, 7), h), (at(radii, 3) + at(radii, 5), h)];
+    let pairs = [
+        (at(radii, 0) + at(radii, 2), w),
+        (at(radii, 6) + at(radii, 4), w),
+        (at(radii, 1) + at(radii, 7), h),
+        (at(radii, 3) + at(radii, 5), h),
+    ];
     for (sum, side) in pairs {
         if sum > side && sum > 0.0 {
             f = f.min(side / sum);
@@ -134,26 +168,70 @@ pub fn rounded(rect: Rect, radii: &[f32]) -> Option<Path> {
     let mut p = PathBuilder::new();
     p.move_to(x + r(0), y);
     p.line_to(x + w - r(2), y);
-    p.cubic_to(x + w - r(2) * (1.0 - K), y, x + w, y + r(3) * (1.0 - K), x + w, y + r(3));
+    p.cubic_to(
+        x + w - r(2) * (1.0 - K),
+        y,
+        x + w,
+        y + r(3) * (1.0 - K),
+        x + w,
+        y + r(3),
+    );
     p.line_to(x + w, y + h - r(5));
-    p.cubic_to(x + w, y + h - r(5) * (1.0 - K), x + w - r(4) * (1.0 - K), y + h, x + w - r(4), y + h);
+    p.cubic_to(
+        x + w,
+        y + h - r(5) * (1.0 - K),
+        x + w - r(4) * (1.0 - K),
+        y + h,
+        x + w - r(4),
+        y + h,
+    );
     p.line_to(x + r(6), y + h);
-    p.cubic_to(x + r(6) * (1.0 - K), y + h, x, y + h - r(7) * (1.0 - K), x, y + h - r(7));
+    p.cubic_to(
+        x + r(6) * (1.0 - K),
+        y + h,
+        x,
+        y + h - r(7) * (1.0 - K),
+        x,
+        y + h - r(7),
+    );
     p.line_to(x, y + r(1));
-    p.cubic_to(x, y + r(1) * (1.0 - K), x + r(0) * (1.0 - K), y, x + r(0), y);
+    p.cubic_to(
+        x,
+        y + r(1) * (1.0 - K),
+        x + r(0) * (1.0 - K),
+        y,
+        x + r(0),
+        y,
+    );
     p.close();
     p.finish()
 }
 
 /// `rect` grown by `by` on every side (shrunk for a negative `by`), radii with it.
 pub fn inflate(rect: Rect, radii: &[f32], by: f32) -> Option<(Rect, Vec<f32>)> {
-    let grown = Rect::from_ltrb(rect.left() - by, rect.top() - by, rect.right() + by, rect.bottom() + by)?;
-    let radii = radii.iter().map(|r| if *r > 0.0 { (r + by).max(0.0) } else { 0.0 }).collect();
+    let grown = Rect::from_ltrb(
+        rect.left() - by,
+        rect.top() - by,
+        rect.right() + by,
+        rect.bottom() + by,
+    )?;
+    let radii = radii
+        .iter()
+        .map(|r| if *r > 0.0 { (r + by).max(0.0) } else { 0.0 })
+        .collect();
     Some((grown, radii))
 }
 
 /// A line style: width, "lc" cap, "lj" join, "ml" miter, "d" dashes, "do" offset.
-pub fn stroke(value: &Value, width: f32, cap: &str, join: &str, miter: &str, dashes: &str, offset: &str) -> Stroke {
+pub fn stroke(
+    value: &Value,
+    width: f32,
+    cap: &str,
+    join: &str,
+    miter: &str,
+    dashes: &str,
+    offset: &str,
+) -> Stroke {
     let dash = floats(value, dashes);
     Stroke {
         width: width.max(0.0),
@@ -171,7 +249,11 @@ pub fn stroke(value: &Value, width: f32, cap: &str, join: &str, miter: &str, das
         dash: if dash.is_empty() {
             None
         } else {
-            let even = if dash.len() % 2 == 1 { [dash.clone(), dash].concat() } else { dash };
+            let even = if dash.len() % 2 == 1 {
+                [dash.clone(), dash].concat()
+            } else {
+                dash
+            };
             StrokeDash::new(even, num(value, offset))
         },
     }
@@ -182,13 +264,27 @@ pub fn stroke(value: &Value, width: f32, cap: &str, join: &str, miter: &str, das
 pub fn box_gradient(kind: i64, a: &[f32], stops: Vec<GradientStop>) -> Option<Shader<'static>> {
     let (ax, ay, bx, by) = (at(a, 0), at(a, 1), at(a, 2), at(a, 3));
     match kind {
-        6 => LinearGradient::new(Point::from_xy(ax, ay), Point::from_xy(bx, by), stops, SpreadMode::Pad, Transform::identity()),
+        6 => LinearGradient::new(
+            Point::from_xy(ax, ay),
+            Point::from_xy(bx, by),
+            stops,
+            SpreadMode::Pad,
+            Transform::identity(),
+        ),
         7 => {
             let (rx, ry) = (bx.max(0.01), by.max(0.01));
             let squash = Transform::from_translate(ax, ay)
                 .pre_scale(1.0, ry / rx)
                 .pre_translate(-ax, -ay);
-            RadialGradient::new(Point::from_xy(ax, ay), 0.0, Point::from_xy(ax, ay), rx, stops, SpreadMode::Pad, squash)
+            RadialGradient::new(
+                Point::from_xy(ax, ay),
+                0.0,
+                Point::from_xy(ax, ay),
+                rx,
+                stops,
+                SpreadMode::Pad,
+                squash,
+            )
         }
         8 => SweepGradient::new(
             Point::from_xy(ax, ay),
@@ -205,10 +301,32 @@ pub fn box_gradient(kind: i64, a: &[f32], stops: Vec<GradientStop>) -> Option<Sh
 /// An SVG path's gradient: `kind` 1 linear (x1, y1 → x2, y2), 2 radial
 /// (centre x1, y1, radius r, focus fx, fy).
 pub fn path_gradient(kind: i64, g: &[f32], stops: Vec<GradientStop>) -> Option<Shader<'static>> {
-    let (x1, y1, x2, y2, r, fx, fy) = (at(g, 0), at(g, 1), at(g, 2), at(g, 3), at(g, 4), at(g, 5), at(g, 6));
+    let (x1, y1, x2, y2, r, fx, fy) = (
+        at(g, 0),
+        at(g, 1),
+        at(g, 2),
+        at(g, 3),
+        at(g, 4),
+        at(g, 5),
+        at(g, 6),
+    );
     match kind {
-        1 => LinearGradient::new(Point::from_xy(x1, y1), Point::from_xy(x2, y2), stops, SpreadMode::Pad, Transform::identity()),
-        2 => RadialGradient::new(Point::from_xy(fx, fy), 0.0, Point::from_xy(x1, y1), r.max(0.01), stops, SpreadMode::Pad, Transform::identity()),
+        1 => LinearGradient::new(
+            Point::from_xy(x1, y1),
+            Point::from_xy(x2, y2),
+            stops,
+            SpreadMode::Pad,
+            Transform::identity(),
+        ),
+        2 => RadialGradient::new(
+            Point::from_xy(fx, fy),
+            0.0,
+            Point::from_xy(x1, y1),
+            r.max(0.01),
+            stops,
+            SpreadMode::Pad,
+            Transform::identity(),
+        ),
         _ => None,
     }
 }
@@ -244,7 +362,8 @@ mod tests {
 
     #[test]
     fn paths_read_every_op_and_refuse_unknown_ones() {
-        let p = json!({"o": [0, 1, 2, 3, 4], "v": [0, 0, 10, 0, 12, 4, 10, 10, 6, 12, 2, 12, 0, 10]});
+        let p =
+            json!({"o": [0, 1, 2, 3, 4], "v": [0, 0, 10, 0, 12, 4, 10, 10, 6, 12, 2, 12, 0, 10]});
         let built = path(&p).unwrap();
         assert_eq!(built.bounds().right(), 12.0);
         assert!(path(&json!({"o": [0, 9], "v": [0, 0]})).is_none());

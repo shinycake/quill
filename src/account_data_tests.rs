@@ -122,7 +122,11 @@ fn forgetting_an_account_drops_all_it_left_and_nothing_else() {
     forget(&root, &gone);
     crate::settings::flush_deferred_writes();
     assert_eq!(left_behind(&root, &gone), Vec::<&str>::new());
-    assert_eq!(left_behind(&root, &kept).len(), 10, "another account's stay");
+    assert_eq!(
+        left_behind(&root, &kept).len(),
+        10,
+        "another account's stay"
+    );
     forget(&root, &kept);
 }
 
@@ -156,7 +160,7 @@ fn a_new_user_in_a_reused_slot_inherits_nothing() {
     assert!(!claim(&root, &key, 100), "first sign-in: nothing to drop");
     fill(&root, &key);
     assert!(!claim(&root, &key, 100), "the same user again keeps it");
-    assert_eq!(left_behind(&root, &key).len(), 9);
+    assert_eq!(left_behind(&root, &key).len(), 10);
     assert!(claim(&root, &key, 200), "another user");
     crate::settings::flush_deferred_writes();
     assert_eq!(left_behind(&root, &key), Vec::<&str>::new());

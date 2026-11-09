@@ -4,8 +4,8 @@
 //! first widget, shared by all.
 use super::ffi::FontMetrics;
 use cosmic_text::{
-    Attrs, Buffer, CacheKey, CacheKeyFlags, Command, Family, FeatureTag, FontFeatures, FontSystem, Metrics,
-    Shaping, Style, SwashCache, SwashContent, Weight, Wrap,
+    Attrs, Buffer, CacheKey, CacheKeyFlags, Command, Family, FeatureTag, FontFeatures, FontSystem,
+    Metrics, Shaping, Style, SwashCache, SwashContent, Weight, Wrap,
 };
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
@@ -22,10 +22,11 @@ fn first_present(fonts: &FontSystem, candidates: &[&str]) -> Option<String> {
     candidates
         .iter()
         .find(|name| {
-            fonts
-                .db()
-                .faces()
-                .any(|face| face.families.iter().any(|(family, _)| family.eq_ignore_ascii_case(name)))
+            fonts.db().faces().any(|face| {
+                face.families
+                    .iter()
+                    .any(|(family, _)| family.eq_ignore_ascii_case(name))
+            })
         })
         .map(|name| (*name).to_owned())
 }
@@ -36,15 +37,9 @@ fn system() -> &'static Mutex<System> {
         let mut fonts = FontSystem::new();
         // The generic families as each OS's own interface text, as browsers
         // pick them; fontdb's defaults (Arial, Times New Roman) otherwise.
-        let sans = first_present(
-            &fonts,
-            quill::message_widget::SANS_FONTS,
-        );
+        let sans = first_present(&fonts, quill::message_widget::SANS_FONTS);
         let serif = first_present(&fonts, quill::message_widget::SERIF_FONTS);
-        let mono = first_present(
-            &fonts,
-            quill::message_widget::MONO_FONTS,
-        );
+        let mono = first_present(&fonts, quill::message_widget::MONO_FONTS);
         let db = fonts.db_mut();
         if let Some(sans) = sans {
             db.set_sans_serif_family(sans);
@@ -89,9 +84,8 @@ impl FamilyName {
 
 fn generic(name: &str) -> Option<FamilyName> {
     Some(match name.to_ascii_lowercase().as_str() {
-        "sans-serif" | "system-ui" | "-apple-system" | "blinkmacsystemfont" | "ui-sans-serif" | "ui-rounded" => {
-            FamilyName::SansSerif
-        }
+        "sans-serif" | "system-ui" | "-apple-system" | "blinkmacsystemfont" | "ui-sans-serif"
+        | "ui-rounded" => FamilyName::SansSerif,
         "serif" | "ui-serif" => FamilyName::Serif,
         "monospace" | "ui-monospace" => FamilyName::Monospace,
         "cursive" => FamilyName::Cursive,
@@ -113,10 +107,11 @@ fn resolve(system: &mut System, families: &str) -> FamilyName {
         let key = name.to_ascii_lowercase();
         let fonts = &system.fonts;
         let present = *system.known.entry(key).or_insert_with(|| {
-            fonts
-                .db()
-                .faces()
-                .any(|face| face.families.iter().any(|(family, _)| family.eq_ignore_ascii_case(name)))
+            fonts.db().faces().any(|face| {
+                face.families
+                    .iter()
+                    .any(|(family, _)| family.eq_ignore_ascii_case(name))
+            })
         });
         if present {
             return FamilyName::Named(name.to_owned());
@@ -154,7 +149,11 @@ impl Face {
         Attrs::new()
             .family(self.family.family())
             .weight(Weight(self.weight))
-            .style(if self.italic { Style::Italic } else { Style::Normal })
+            .style(if self.italic {
+                Style::Italic
+            } else {
+                Style::Normal
+            })
             .font_features(self.features.clone())
     }
 }
@@ -200,11 +199,22 @@ fn shape(fonts: &mut FontSystem, face: &Face, text: &str) -> Buffer {
 
 impl Fonts {
     /// A font for the renderer: its handle (> 0) and metrics.
-    pub fn create(&mut self, families: &str, size: f32, weight: i32, italic: bool, spec: &str) -> (i32, FontMetrics) {
+    pub fn create(
+        &mut self,
+        families: &str,
+        size: f32,
+        weight: i32,
+        italic: bool,
+        spec: &str,
+    ) -> (i32, FontMetrics) {
         let mut system = quill::locks::lock_or_recover(system());
         let face = Face {
             family: resolve(&mut system, families),
-            size: if size.is_finite() { size.clamp(1.0, 512.0) } else { 16.0 },
+            size: if size.is_finite() {
+                size.clamp(1.0, 512.0)
+            } else {
+                16.0
+            },
             weight: u16::try_from(weight.clamp(1, 1000)).unwrap_or(400),
             italic,
             features: features(spec),
@@ -233,7 +243,10 @@ impl Fonts {
         };
         let mut system = quill::locks::lock_or_recover(system());
         let buffer = shape(&mut system.fonts, face, text);
-        let width = buffer.layout_runs().map(|run| run.line_w).fold(0.0, f32::max);
+        let width = buffer
+            .layout_runs()
+            .map(|run| run.line_w)
+            .fold(0.0, f32::max);
         if self.widths.len() >= WIDTH_CACHE {
             self.widths.clear();
         }
@@ -255,11 +268,20 @@ impl Fonts {
                 let x = glyph.x + glyph.font_size * glyph.x_offset;
                 let y = glyph.y - glyph.font_size * glyph.y_offset;
                 let flags = glyph.cache_key_flags | CacheKeyFlags::DISABLE_HINTING;
-                let (key, _, _) =
-                    CacheKey::new(glyph.font_id, glyph.glyph_id, glyph.font_size, (0.0, 0.0), glyph.font_weight, flags);
+                let (key, _, _) = CacheKey::new(
+                    glyph.font_id,
+                    glyph.glyph_id,
+                    glyph.font_size,
+                    (0.0, 0.0),
+                    glyph.font_weight,
+                    flags,
+                );
                 let commands = system.glyphs.get_outline_commands(&mut system.fonts, key);
                 match commands {
-                    Some(commands) if !commands.is_empty() && !is_color(&mut system.fonts, glyph.font_id, glyph.font_weight) => {
+                    Some(commands)
+                        if !commands.is_empty()
+                            && !is_color(&mut system.fonts, glyph.font_id, glyph.font_weight) =>
+                    {
                         append(&mut path, commands, x, y);
                     }
                     _ => {
@@ -271,7 +293,8 @@ impl Fonts {
                             glyph.font_weight,
                             flags,
                         );
-                        if let Some(image) = system.glyphs.get_image_uncached(&mut system.fonts, key)
+                        if let Some(image) =
+                            system.glyphs.get_image_uncached(&mut system.fonts, key)
                             && let Some(glyph_image) = color_glyph(image, x * scale, y * scale)
                         {
                             color.push(glyph_image);
@@ -305,7 +328,11 @@ fn color_glyph(image: cosmic_text::SwashImage, x: f32, y: f32) -> Option<ColorGl
         SwashContent::Color => image.data,
         // An outline drawn as a mask: a glyph of a color font without
         // color; black, as text with no color of its own.
-        SwashContent::Mask => image.data.iter().flat_map(|alpha| [0, 0, 0, *alpha]).collect(),
+        SwashContent::Mask => image
+            .data
+            .iter()
+            .flat_map(|alpha| [0, 0, 0, *alpha])
+            .collect(),
         SwashContent::SubpixelMask => return None,
     };
     Some(ColorGlyph {
@@ -324,7 +351,9 @@ fn append(path: &mut PathBuilder, commands: &[Command], x: f32, y: f32) {
             Command::MoveTo(p) => path.move_to(x + p.x, y - p.y),
             Command::LineTo(p) => path.line_to(x + p.x, y - p.y),
             Command::QuadTo(c, p) => path.quad_to(x + c.x, y - c.y, x + p.x, y - p.y),
-            Command::CurveTo(a, b, p) => path.cubic_to(x + a.x, y - a.y, x + b.x, y - b.y, x + p.x, y - p.y),
+            Command::CurveTo(a, b, p) => {
+                path.cubic_to(x + a.x, y - a.y, x + b.x, y - b.y, x + p.x, y - p.y)
+            }
             Command::Close => path.close(),
         }
     }
@@ -332,7 +361,10 @@ fn append(path: &mut PathBuilder, commands: &[Command], x: f32, y: f32) {
 
 fn metrics(fonts: &mut FontSystem, face: &Face) -> FontMetrics {
     let buffer = shape(fonts, face, "0");
-    let zero = buffer.layout_runs().next().and_then(|run| run.glyphs.first().cloned());
+    let zero = buffer
+        .layout_runs()
+        .next()
+        .and_then(|run| run.glyphs.first().cloned());
     let zero_width = zero.as_ref().map_or(face.size * 0.5, |glyph| glyph.w);
     let font = zero.and_then(|glyph| fonts.get_font(glyph.font_id, glyph.font_weight));
     let Some(font) = font else {
@@ -358,10 +390,18 @@ fn metrics(fonts: &mut FontSystem, face: &Face) -> FontMetrics {
         ascent,
         descent,
         height: ascent + descent + m.leading.max(0.0),
-        x_height: if m.x_height > 0.0 { m.x_height } else { face.size * 0.5 },
+        x_height: if m.x_height > 0.0 {
+            m.x_height
+        } else {
+            face.size * 0.5
+        },
         zero_width,
         em_ascent,
-        em_descent: if total > 0.0 { face.size - em_ascent } else { 0.0 },
+        em_descent: if total > 0.0 {
+            face.size - em_ascent
+        } else {
+            0.0
+        },
     }
 }
 
@@ -372,8 +412,14 @@ mod tests {
     #[test]
     fn css_family_lists_resolve_generics_and_skip_unknown_names() {
         let mut system = quill::locks::lock_or_recover(system());
-        assert_eq!(resolve(&mut system, "\"No Such Font 42\", serif"), FamilyName::Serif);
-        assert_eq!(resolve(&mut system, "-apple-system, sans-serif"), FamilyName::SansSerif);
+        assert_eq!(
+            resolve(&mut system, "\"No Such Font 42\", serif"),
+            FamilyName::Serif
+        );
+        assert_eq!(
+            resolve(&mut system, "-apple-system, sans-serif"),
+            FamilyName::SansSerif
+        );
         assert_eq!(resolve(&mut system, ""), FamilyName::SansSerif);
     }
 
@@ -386,7 +432,12 @@ mod tests {
         let one = fonts.width(font, "Quill");
         assert!(one > 0.0);
         assert!(fonts.width(font, "Quill Quill") > one);
-        assert!(fonts.shape(font, "Quill", 2.0).and_then(|shaped| shaped.outline).is_some());
+        assert!(
+            fonts
+                .shape(font, "Quill", 2.0)
+                .and_then(|shaped| shaped.outline)
+                .is_some()
+        );
         fonts.delete(font);
         assert_eq!(fonts.width(font, "Quill"), 0.0);
     }

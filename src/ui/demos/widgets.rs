@@ -17,16 +17,34 @@ register_demos![
 
 /// The demo's widgets: (message id, outgoing, caption, html).
 const WIDGETS: [(i64, bool, &str, &str); 3] = [
-    (120, false, "Tabs", include_str!("../../../third_party/widgets/sandbox/corpus/compat/tabs.html")),
-    (121, true, "Weekly numbers", include_str!("../../../third_party/widgets/sandbox/corpus/compat/canvas-bar-chart.html")),
-    (122, false, "", include_str!("../../../third_party/widgets/sandbox/corpus/compat/dark-mode.html")),
+    (
+        120,
+        false,
+        "Tabs",
+        include_str!("../../../third_party/widgets/sandbox/corpus/compat/tabs.html"),
+    ),
+    (
+        121,
+        true,
+        "Weekly numbers",
+        include_str!("../../../third_party/widgets/sandbox/corpus/compat/canvas-bar-chart.html"),
+    ),
+    (
+        122,
+        false,
+        "",
+        include_str!("../../../third_party/widgets/sandbox/corpus/compat/dark-mode.html"),
+    ),
 ];
 
 impl QuillApp {
     fn demo_ready_widgets(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {
-        let Some(session) = self.demo_session.as_mut() else { return };
+        let Some(session) = self.demo_session.as_mut() else {
+            return;
+        };
         self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
-        let sink: std::sync::Arc<dyn quill::diagnostics::DiagnosticSink> = self.demo_ui.sink.clone();
+        let sink: std::sync::Arc<dyn quill::diagnostics::DiagnosticSink> =
+            self.demo_ui.sink.clone();
         for (id, outgoing, caption, html) in WIDGETS {
             let json = serde_json::json!({
                 "@type": "updateNewMessage",
@@ -42,11 +60,14 @@ impl QuillApp {
                 },
             })
             .to_string();
-            if let Some(message) = quill::telegram::client::copy_and_parse(&json, &self.demo_ui.seq, &sink) {
+            if let Some(message) =
+                quill::telegram::client::copy_and_parse(&json, &self.demo_ui.seq, &sink)
+            {
                 session.apply(message);
             }
         }
         session.open_chat(ChatId(11));
-        self.connection.set_note(StatusNote::silent("screenshot demo — message widgets"));
+        self.connection
+            .set_note(StatusNote::silent("screenshot demo — message widgets"));
     }
 }

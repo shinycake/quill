@@ -48,20 +48,33 @@ pub enum Input {
         button: i32,
     },
     /// `action` 0 enter/move, 1 leave.
-    Hover { action: i32, x: f64, y: f64, modifiers: i32 },
+    Hover {
+        action: i32,
+        x: f64,
+        y: f64,
+        modifiers: i32,
+    },
 }
 
 enum Inbox {
     Native(String),
     Visible(bool),
-    Theme { theme: String, background: [u8; 3] },
+    Theme {
+        theme: String,
+        background: [u8; 3],
+    },
     Data(String),
     Width(f64),
-    Respond { token: u64, outcome: Result<String, i32> },
+    Respond {
+        token: u64,
+        outcome: Result<String, i32>,
+    },
     Input(Input),
     Tick(f64),
     Trim,
-    Selection { clear: bool },
+    Selection {
+        clear: bool,
+    },
     Stop,
 }
 
@@ -79,7 +92,10 @@ pub enum RuntimeEvent {
     /// `openLink` (`telegram` false) or `openTelegramLink`, after a press.
     Link { telegram: bool, url: String },
     /// Its storage area after a commit.
-    Storage { area: String, values: BTreeMap<String, String> },
+    Storage {
+        area: String,
+        values: BTreeMap<String, String>,
+    },
     /// What it claims of the press in progress: `hold` = a long press is its own.
     Gesture { hold: bool },
     /// A query for the bot; answer with [`Runtime::respond`].
@@ -197,7 +213,11 @@ impl Drop for Runtime {
 /// first call in the process.
 pub fn clock_ms() -> f64 {
     static START: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
-    START.get_or_init(std::time::Instant::now).elapsed().as_secs_f64() * 1000.0
+    START
+        .get_or_init(std::time::Instant::now)
+        .elapsed()
+        .as_secs_f64()
+        * 1000.0
 }
 
 #[cfg(test)]

@@ -21,7 +21,11 @@ fn rgb(pixmap: &Pixmap, x: u32, y: u32) -> (u8, u8, u8) {
 fn a_box_fills_at_device_scale_over_the_bubble() {
     let frame = painted(json!([{"k": 0, "r": [5, 5, 5, 5], "c": RED}]), None, None);
     assert_eq!(rgb(&frame, 15, 15), (255, 0, 0));
-    assert_eq!(rgb(&frame, 25, 25), (255, 255, 255), "10 CSS px is 20 device px");
+    assert_eq!(
+        rgb(&frame, 25, 25),
+        (255, 255, 255),
+        "10 CSS px is 20 device px"
+    );
 }
 
 #[test]
@@ -57,7 +61,10 @@ fn group_opacity_blends_once_and_moves_with_its_matrix() {
     );
     let (r, g, b) = rgb(&frame, 25, 5);
     assert_eq!(r, 255);
-    assert!((120..=135).contains(&g) && g == b, "half red over white: {g}");
+    assert!(
+        (120..=135).contains(&g) && g == b,
+        "half red over white: {g}"
+    );
     assert_eq!(rgb(&frame, 5, 5), (255, 255, 255));
 }
 
@@ -66,8 +73,16 @@ fn damage_repaints_only_its_rects() {
     let first = painted(json!([{"k": 0, "r": [0, 0, 20, 20], "c": RED}]), None, None);
     let damage = [Rect::from_xywh(0.0, 0.0, 5.0, 5.0).unwrap()];
     let second = painted(json!([]), Some(&damage), Some(first));
-    assert_eq!(rgb(&second, 4, 4), (255, 255, 255), "inside the damage: cleared");
-    assert_eq!(rgb(&second, 30, 30), (255, 0, 0), "outside: the last frame stays");
+    assert_eq!(
+        rgb(&second, 4, 4),
+        (255, 255, 255),
+        "inside the damage: cleared"
+    );
+    assert_eq!(
+        rgb(&second, 30, 30),
+        (255, 0, 0),
+        "outside: the last frame stays"
+    );
     let untouched = painted(json!([]), Some(&[]), Some(second.clone()));
     assert_eq!(untouched.data(), second.data());
 }

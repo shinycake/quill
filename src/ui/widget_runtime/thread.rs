@@ -42,7 +42,12 @@ struct Told {
     height: f32,
 }
 
-pub(super) fn run(launch: Launch, inbox: Sender<Inbox>, rx: Receiver<Inbox>, outbox: Arc<Mutex<Outbox>>) {
+pub(super) fn run(
+    launch: Launch,
+    inbox: Sender<Inbox>,
+    rx: Receiver<Inbox>,
+    outbox: Arc<Mutex<Outbox>>,
+) {
     let resources = Arc::new(Mutex::new(Resources::default()));
     let events = Shared {
         events: Box::new(move |json| {
@@ -141,7 +146,9 @@ fn apply(
         }
         Inbox::Data(data) => native.set_data(&data),
         Inbox::Width(width) => native.set_width(width),
-        Inbox::Respond { token, outcome } => native.respond(token, outcome.as_deref().map_err(|code| *code)),
+        Inbox::Respond { token, outcome } => {
+            native.respond(token, outcome.as_deref().map_err(|code| *code))
+        }
         Inbox::Input(Input::Pointer {
             action,
             x,
@@ -149,7 +156,12 @@ fn apply(
             modifiers,
             button,
         }) => native.pointer(action, x, y, button == 0, modifiers, button),
-        Inbox::Input(Input::Hover { action, x, y, modifiers }) => {
+        Inbox::Input(Input::Hover {
+            action,
+            x,
+            y,
+            modifiers,
+        }) => {
             native.hover(action, x, y, modifiers);
             canvas.hovered = true;
         }
@@ -176,7 +188,13 @@ fn events(json: &str, told: &mut Told) -> Vec<RuntimeEvent> {
     let Ok(event) = serde_json::from_str::<Value>(json) else {
         return Vec::new();
     };
-    let text = |key: &str| event.get(key).and_then(Value::as_str).unwrap_or("").to_owned();
+    let text = |key: &str| {
+        event
+            .get(key)
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_owned()
+    };
     let mut out = Vec::new();
     match event.get("type").and_then(Value::as_str).unwrap_or("") {
         "change" => {
@@ -197,8 +215,14 @@ fn events(json: &str, told: &mut Told) -> Vec<RuntimeEvent> {
             }
         }
         "action" => match event.get("kind").and_then(Value::as_str) {
-            Some("openLink") => out.push(RuntimeEvent::Link { telegram: false, url: text("url") }),
-            Some("openTelegramLink") => out.push(RuntimeEvent::Link { telegram: true, url: text("url") }),
+            Some("openLink") => out.push(RuntimeEvent::Link {
+                telegram: false,
+                url: text("url"),
+            }),
+            Some("openTelegramLink") => out.push(RuntimeEvent::Link {
+                telegram: true,
+                url: text("url"),
+            }),
             // Haptics do nothing on a desktop; `ready` needs nothing.
             _ => {}
         },
@@ -228,19 +252,29 @@ fn events(json: &str, told: &mut Told) -> Vec<RuntimeEvent> {
             }
         }
         "copy" => out.push(RuntimeEvent::Copy(text("text"))),
-        "watch" => out.push(RuntimeEvent::Watch(event.get("on").and_then(Value::as_bool).unwrap_or(false))),
+        "watch" => out.push(RuntimeEvent::Watch(
+            event.get("on").and_then(Value::as_bool).unwrap_or(false),
+        )),
         _ => {}
     }
     out
 }
 
 /// Paints the document if it changed; the frame to show, if any.
-pub(super) fn paint_frame(native: &mut Native, resources: &Mutex<Resources>, canvas: &mut Canvas) -> Option<Frame> {
+pub(super) fn paint_frame(
+    native: &mut Native,
+    resources: &Mutex<Resources>,
+    canvas: &mut Canvas,
+) -> Option<Frame> {
     let json = native.paint()?;
     let frame: Value = serde_json::from_str(&json).ok()?;
     let width = u32::try_from(frame.get("w")?.as_u64()?).ok()?;
     let height = u32::try_from(frame.get("h")?.as_u64()?).ok()?;
-    let dpr = frame.get("dpr").and_then(Value::as_f64).unwrap_or(1.0).max(0.25) as f32;
+    let dpr = frame
+        .get("dpr")
+        .and_then(Value::as_f64)
+        .unwrap_or(1.0)
+        .max(0.25) as f32;
     let list = frame.get("list")?.as_array()?;
     let fits = canvas
         .pixmap
@@ -257,7 +291,11 @@ pub(super) fn paint_frame(native: &mut Native, resources: &Mutex<Resources>, can
             rects
                 .iter()
                 .filter_map(|r| {
-                    let r: Vec<f32> = r.as_array()?.iter().map(|v| v.as_f64().unwrap_or(0.0) as f32).collect();
+                    let r: Vec<f32> = r
+                        .as_array()?
+                        .iter()
+                        .map(|v| v.as_f64().unwrap_or(0.0) as f32)
+                        .collect();
                     Rect::from_xywh(*r.first()?, *r.get(1)?, *r.get(2)?, *r.get(3)?)
                 })
                 .collect()
@@ -271,7 +309,14 @@ pub(super) fn paint_frame(native: &mut Native, resources: &Mutex<Resources>, can
     let [r, g, b] = canvas.background;
     {
         let resources = quill::locks::lock_or_recover(resources);
-        paint::paint(&resources, list, dpr, damage.as_deref(), Color::from_rgba8(r, g, b, 255), pixmap);
+        paint::paint(
+            &resources,
+            list,
+            dpr,
+            damage.as_deref(),
+            Color::from_rgba8(r, g, b, 255),
+            pixmap,
+        );
     }
     // Opaque over the bubble, so premultiplied is straight: only the
     // channel order changes for GPUI (BGRA).
@@ -281,7 +326,9 @@ pub(super) fn paint_frame(native: &mut Native, resources: &Mutex<Resources>, can
     }
     let buffer = image::RgbaImage::from_raw(width, height, bgra)?;
     Some(Frame {
-        image: Arc::new(RenderImage::new(SmallVec::from_buf([image::Frame::new(buffer)]))),
+        image: Arc::new(RenderImage::new(SmallVec::from_buf([image::Frame::new(
+            buffer,
+        )]))),
         width: width as f32 / dpr,
         height: height as f32 / dpr,
     })

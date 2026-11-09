@@ -16,8 +16,8 @@ use quill::ids::ChatId;
 use quill::lang::{keys, tr_with};
 use quill::message_widget::storage;
 use quill::message_widget::{
-    Lifecycle, MAX_CRASHES, PoolEntry, QueryOutcome, WidgetAnswer, WidgetKey, capacity, card_width, initial_height,
-    victim,
+    Lifecycle, MAX_CRASHES, PoolEntry, QueryOutcome, WidgetAnswer, WidgetKey, capacity, card_width,
+    initial_height, victim,
 };
 
 use quill::telegram::envelope::{ChatKind, MessageContent, WidgetContent};
@@ -49,7 +49,10 @@ impl QuillApp {
 
     fn widget_dir(&self) -> Option<std::path::PathBuf> {
         let root = quill::settings::safe_app_root()?;
-        Some(quill::account_data::widget_dir(&root, &self.web_app_account()))
+        Some(quill::account_data::widget_dir(
+            &root,
+            &self.web_app_account(),
+        ))
     }
 
     /// A history pass of the window being built begins: its widget rows
@@ -110,7 +113,9 @@ impl QuillApp {
             }
         }
         for (key, width) in seen {
-            let Some((content, outgoing)) = self.widget_message(key) else { continue };
+            let Some((content, outgoing)) = self.widget_message(key) else {
+                continue;
+            };
             let identity = Identity {
                 html: content.html.clone(),
                 is_copy: content.is_copy,
@@ -121,7 +126,10 @@ impl QuillApp {
             let has_id = content.widget_id != 0;
             let theme = self.widget_theme(outgoing, cx);
             let entry = self.widgets.entries.entry(key).or_insert_with(|| {
-                let stored = dir.as_deref().map(|dir| storage::load(dir, key)).unwrap_or_default();
+                let stored = dir
+                    .as_deref()
+                    .map(|dir| storage::load(dir, key))
+                    .unwrap_or_default();
                 let height = initial_height(fixed_height, stored.height);
                 WidgetEntry::new(stored, height)
             });
@@ -150,7 +158,10 @@ impl QuillApp {
                 }
                 runtime.set_theme(theme.0.clone(), theme.1);
             }
-            if came_back && has_id && let Poll::Due(at) = entry.poll {
+            if came_back
+                && has_id
+                && let Poll::Due(at) = entry.poll
+            {
                 entry.poll = Poll::Due(at.min(Instant::now()));
             }
             let restart = match &entry.lifecycle {
@@ -175,10 +186,15 @@ impl QuillApp {
     fn sync_widget_data(&mut self) {
         let keys: Vec<WidgetKey> = self.widgets.entries.keys().copied().collect();
         for key in keys {
-            let Some(data) = self.widget_message(key).map(|(content, _)| content.clone()) else { continue };
-            let Some(entry) = self.widgets.entries.get_mut(&key) else { continue };
+            let Some(data) = self.widget_message(key).map(|(content, _)| content.clone()) else {
+                continue;
+            };
+            let Some(entry) = self.widgets.entries.get_mut(&key) else {
+                continue;
+            };
             let public = entry.polled.clone().unwrap_or(data.public_data);
-            let json = serde_json::json!({"chatData": data.chat_data, "publicData": public}).to_string();
+            let json =
+                serde_json::json!({"chatData": data.chat_data, "publicData": public}).to_string();
             if entry.data != json {
                 if let Some(runtime) = &entry.runtime {
                     runtime.set_data(json.clone());
@@ -198,11 +214,21 @@ impl QuillApp {
             .map(|(key, _)| *key)
             .collect();
         waiting.sort();
-        let visible = self.widgets.entries.values().filter(|entry| entry.visible).count();
+        let visible = self
+            .widgets
+            .entries
+            .values()
+            .filter(|entry| entry.visible)
+            .count();
         let limit = capacity(visible);
         for key in waiting {
             loop {
-                let live = self.widgets.entries.values().filter(|e| e.lifecycle.is_live()).count();
+                let live = self
+                    .widgets
+                    .entries
+                    .values()
+                    .filter(|e| e.lifecycle.is_live())
+                    .count();
                 if live < limit {
                     break;
                 }
@@ -223,7 +249,12 @@ impl QuillApp {
                     entry.lifecycle = Lifecycle::Released;
                 }
             }
-            let live = self.widgets.entries.values().filter(|e| e.lifecycle.is_live()).count();
+            let live = self
+                .widgets
+                .entries
+                .values()
+                .filter(|e| e.lifecycle.is_live())
+                .count();
             if live >= limit {
                 continue;
             }
@@ -232,21 +263,37 @@ impl QuillApp {
     }
 
     fn start_widget(&mut self, key: WidgetKey, cx: &mut Context<Self>) {
-        let Some((content, outgoing)) = self.widget_message(key) else { return };
+        let Some((content, outgoing)) = self.widget_message(key) else {
+            return;
+        };
         let content = content.clone();
         let (theme, background) = self.widget_theme(outgoing, cx);
-        let chat_type = self.session().and_then(|s| s.chats.get(&key.chat_id.0)).map(|chat| match chat.kind {
-            ChatKind::Private { .. } | ChatKind::Secret { .. } => "private",
-            ChatKind::BasicGroup { .. } => "group",
-            ChatKind::Supergroup { is_channel: true, .. } => "channel",
-            ChatKind::Supergroup { .. } => "supergroup",
-            ChatKind::Unknown => "",
-        });
+        let chat_type = self
+            .session()
+            .and_then(|s| s.chats.get(&key.chat_id.0))
+            .map(|chat| match chat.kind {
+                ChatKind::Private { .. } | ChatKind::Secret { .. } => "private",
+                ChatKind::BasicGroup { .. } => "group",
+                ChatKind::Supergroup {
+                    is_channel: true, ..
+                } => "channel",
+                ChatKind::Supergroup { .. } => "supergroup",
+                ChatKind::Unknown => "",
+            });
         let session_area = self.widgets.session.get(&key).cloned().unwrap_or_default();
-        let Some(entry) = self.widgets.entries.get_mut(&key) else { return };
+        // A frame with device pixels the window shows; 2× until one drew.
+        let scale = self.widgets.scale;
+        let dpr = if scale > 0.0 {
+            scale.clamp(1.0, 4.0)
+        } else {
+            2.0
+        };
+        let Some(entry) = self.widgets.entries.get_mut(&key) else {
+            return;
+        };
         let options = serde_json::json!({
             "width": entry.width.max(1.0),
-            "dpr": 2.0,
+            "dpr": dpr,
             "maxHeight": quill::message_widget::MAX_HEIGHT,
             "visible": entry.visible,
             "locale": quill::lang::current_pack_id(),
@@ -294,8 +341,12 @@ impl QuillApp {
         let mut views = Vec::new();
         let mut all = false;
         for key in keys {
-            let Some(entry) = self.widgets.entries.get_mut(&key) else { continue };
-            let Some(runtime) = &entry.runtime else { continue };
+            let Some(entry) = self.widgets.entries.get_mut(&key) else {
+                continue;
+            };
+            let Some(runtime) = &entry.runtime else {
+                continue;
+            };
             let out = runtime.take();
             let mut changed = false;
             if let Some(frame) = out.frame {
@@ -309,7 +360,10 @@ impl QuillApp {
             }
             for event in out.events {
                 // Height and lifecycle move the rows: the whole history redraws.
-                all |= matches!(event, RuntimeEvent::Height(_) | RuntimeEvent::Stopped(_) | RuntimeEvent::Failed(_));
+                all |= matches!(
+                    event,
+                    RuntimeEvent::Height(_) | RuntimeEvent::Stopped(_) | RuntimeEvent::Failed(_)
+                );
                 self.widget_event(key, event, cx);
             }
             if changed && let Some(entry) = self.widgets.entries.get(&key) {
@@ -354,8 +408,14 @@ impl QuillApp {
                     };
                 }
             }
-            RuntimeEvent::Link { telegram: true, url } => self.open_link(&url, cx),
-            RuntimeEvent::Link { telegram: false, url } => {
+            RuntimeEvent::Link {
+                telegram: true,
+                url,
+            } => self.open_link(&url, cx),
+            RuntimeEvent::Link {
+                telegram: false,
+                url,
+            } => {
                 // A widget's link always asks first, as in Telegram Desktop.
                 self.message_ui.open_link_confirm = Some(super::entity_links::OpenLinkConfirm {
                     shown: url.clone(),
@@ -383,10 +443,23 @@ impl QuillApp {
                 let sent = self
                     .live
                     .as_mut()
-                    .map(|live| live.driver.send_widget_query(key, token, data.as_bytes()).is_ok())
+                    .map(|live| {
+                        live.driver
+                            .send_widget_query(key, token, data.as_bytes())
+                            .is_ok()
+                    })
                     .unwrap_or(false);
-                if !sent && let Some(runtime) = self.widgets.entries.get(&key).and_then(|e| e.runtime.as_ref()) {
-                    runtime.respond(token, Err(quill::message_widget::QueryFailure::Failed.code()));
+                if !sent
+                    && let Some(runtime) = self
+                        .widgets
+                        .entries
+                        .get(&key)
+                        .and_then(|e| e.runtime.as_ref())
+                {
+                    runtime.respond(
+                        token,
+                        Err(quill::message_widget::QueryFailure::Failed.code()),
+                    );
                 }
             }
             RuntimeEvent::Copy(text) => self.copy_widget_text(text, cx),
@@ -396,7 +469,9 @@ impl QuillApp {
                 }
             }
             RuntimeEvent::Watch(on) => {
-                let has_id = self.widget_message(key).is_some_and(|(content, _)| content.widget_id != 0);
+                let has_id = self
+                    .widget_message(key)
+                    .is_some_and(|(content, _)| content.widget_id != 0);
                 if let Some(entry) = self.widgets.entries.get_mut(&key) {
                     entry.poll = match (on && has_id, entry.poll) {
                         (false, _) => Poll::Off,
@@ -415,8 +490,10 @@ impl QuillApp {
             return;
         }
         cx.write_to_clipboard(ClipboardItem::new_string(text.clone()));
-        self.connection
-            .set_note(StatusNote::info(tr_with(keys::TGW_COPIED, &[("text", &text)])));
+        self.connection.set_note(StatusNote::info(tr_with(
+            keys::TGW_COPIED,
+            &[("text", &text)],
+        )));
         cx.notify();
     }
 
@@ -430,11 +507,24 @@ impl QuillApp {
     }
 
     /// TDLib's answers to the widgets' queries and polls.
-    pub(super) fn land_widget_answers(&mut self, answers: Vec<WidgetAnswer>, cx: &mut Context<Self>) {
+    pub(super) fn land_widget_answers(
+        &mut self,
+        answers: Vec<WidgetAnswer>,
+        cx: &mut Context<Self>,
+    ) {
         for answer in answers {
             match answer {
-                WidgetAnswer::Query { key, token, outcome } => {
-                    if let Some(runtime) = self.widgets.entries.get(&key).and_then(|e| e.runtime.as_ref()) {
+                WidgetAnswer::Query {
+                    key,
+                    token,
+                    outcome,
+                } => {
+                    if let Some(runtime) = self
+                        .widgets
+                        .entries
+                        .get(&key)
+                        .and_then(|e| e.runtime.as_ref())
+                    {
                         runtime.respond(
                             token,
                             match outcome {
@@ -445,7 +535,9 @@ impl QuillApp {
                     }
                 }
                 WidgetAnswer::PublicData { key, data } => {
-                    let Some(entry) = self.widgets.entries.get_mut(&key) else { continue };
+                    let Some(entry) = self.widgets.entries.get_mut(&key) else {
+                        continue;
+                    };
                     let period = match data {
                         Some((data, period)) => {
                             entry.polled = Some(data);
@@ -500,7 +592,12 @@ impl QuillApp {
             self.widgets.poll_timer = None;
             return;
         };
-        if self.widgets.poll_timer.as_ref().is_some_and(|(at, _)| *at <= next) {
+        if self
+            .widgets
+            .poll_timer
+            .as_ref()
+            .is_some_and(|(at, _)| *at <= next)
+        {
             return;
         }
         let wait = next.saturating_duration_since(now);
@@ -546,8 +643,16 @@ impl QuillApp {
     pub(super) fn widget_theme(&self, outgoing: bool, cx: &App) -> (String, [u8; 3]) {
         use super::chat_theme as t;
         let look = self.bubble_look(cx);
-        let bg = if outgoing { look.outgoing_fill() } else { t::bg_bubble_incoming() };
-        let text: Rgba = if outgoing { look.outgoing_text().into() } else { t::text_primary() };
+        let bg = if outgoing {
+            look.outgoing_fill()
+        } else {
+            t::bg_bubble_incoming()
+        };
+        let text: Rgba = if outgoing {
+            look.outgoing_text().into()
+        } else {
+            t::text_primary()
+        };
         let flat = |c: Rgba, alpha: f32| -> Rgba {
             let a = c.a * alpha;
             Rgba {
@@ -564,7 +669,12 @@ impl QuillApp {
         let (hint, accent, button, button_text) = if outgoing {
             (flat(text, 0.7), text, text, bg)
         } else {
-            (t::text_muted(), t::accent(), t::accent_strong(), t::text_on_fill())
+            (
+                t::text_muted(),
+                t::accent(),
+                t::accent_strong(),
+                t::text_on_fill(),
+            )
         };
         let luminance = |c: Rgba| 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b;
         let dark = luminance(bg) < 0.45;

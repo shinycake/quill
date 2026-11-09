@@ -37,12 +37,19 @@ impl<S: JsonSender> ConnectDriver<S> {
 
     /// Poll an on-screen widget's public data (`getWidgetPublicData`); one
     /// poll per widget at a time.
-    pub fn poll_widget_public_data(&mut self, key: WidgetKey) -> Result<Option<RequestId>, ConnectSendError> {
+    pub fn poll_widget_public_data(
+        &mut self,
+        key: WidgetKey,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
         if !self.widget_request_allowed(key) {
             return Err(ConnectSendError::InvalidRequest);
         }
         let purpose = RequestPurpose::Bots(BotsPurpose::GetWidgetPublicData);
-        if self.session.requests.has_purpose_for_message(purpose, key.chat_id, key.message_id) {
+        if self
+            .session
+            .requests
+            .has_purpose_for_message(purpose, key.chat_id, key.message_id)
+        {
             return Ok(None);
         }
         let extra = self

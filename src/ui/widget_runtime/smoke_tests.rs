@@ -52,7 +52,9 @@ fn first_frame(name: &str) -> (u32, u32, Vec<u8>) {
 
 /// Pixels that are not the bubble.
 fn drawn(rgba: &[u8]) -> usize {
-    rgba.as_chunks::<4>().0.iter()
+    rgba.as_chunks::<4>()
+        .0
+        .iter()
         .filter(|px| px[..3] != BACKGROUND)
         .count()
 }
@@ -75,7 +77,10 @@ fn a_canvas_chart_draws_its_bars() {
         .0
         .iter()
         .filter(|px| {
-            let (max, min) = (px[..3].iter().max().copied().unwrap_or(0), px[..3].iter().min().copied().unwrap_or(0));
+            let (max, min) = (
+                px[..3].iter().max().copied().unwrap_or(0),
+                px[..3].iter().min().copied().unwrap_or(0),
+            );
             max.saturating_sub(min) > 80
         })
         .count();

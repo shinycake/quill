@@ -8,8 +8,8 @@ use super::images::Images;
 use serde_json::Value;
 use std::collections::HashMap;
 use tiny_skia::{
-    BlendMode, FillRule, FilterQuality, LinearGradient, Mask, Paint, Path, PathBuilder, Pattern, Pixmap,
-    PixmapPaint, Point, RadialGradient, Rect, Shader, SpreadMode, SweepGradient, Transform,
+    BlendMode, FillRule, FilterQuality, LinearGradient, Mask, Paint, Path, PathBuilder, Pattern,
+    Pixmap, PixmapPaint, Point, RadialGradient, Rect, Shader, SpreadMode, SweepGradient, Transform,
 };
 
 /// The most pixels one canvas holds (4096 × 4096).
@@ -24,11 +24,37 @@ pub struct Canvases {
 fn blend(code: i64) -> BlendMode {
     use BlendMode::*;
     const MODES: [BlendMode; 26] = [
-        SourceOver, SourceIn, SourceOut, SourceAtop, DestinationOver, DestinationIn, DestinationOut, DestinationAtop,
-        Plus, Source, Xor, Multiply, Screen, Overlay, Darken, Lighten, ColorDodge, ColorBurn, HardLight, SoftLight,
-        Difference, Exclusion, Hue, Saturation, Color, Luminosity,
+        SourceOver,
+        SourceIn,
+        SourceOut,
+        SourceAtop,
+        DestinationOver,
+        DestinationIn,
+        DestinationOut,
+        DestinationAtop,
+        Plus,
+        Source,
+        Xor,
+        Multiply,
+        Screen,
+        Overlay,
+        Darken,
+        Lighten,
+        ColorDodge,
+        ColorBurn,
+        HardLight,
+        SoftLight,
+        Difference,
+        Exclusion,
+        Hue,
+        Saturation,
+        Color,
+        Luminosity,
     ];
-    usize::try_from(code).ok().and_then(|i| MODES.get(i).copied()).unwrap_or(SourceOver)
+    usize::try_from(code)
+        .ok()
+        .and_then(|i| MODES.get(i).copied())
+        .unwrap_or(SourceOver)
 }
 
 /// The paint of an op: "pk" 0 solid "c", 1 linear, 2 radial, 3 conic ("pa", "s"), in user space.
@@ -77,7 +103,9 @@ fn clips(op: &Value, width: u32, height: u32) -> Option<Option<Mask>> {
             return None;
         };
         match &mut mask {
-            Some(mask) => mask.intersect_path(&path, g::fill_rule(clip), true, Transform::identity()),
+            Some(mask) => {
+                mask.intersect_path(&path, g::fill_rule(clip), true, Transform::identity())
+            }
             None => {
                 let mut fresh = Mask::new(width, height)?;
                 fresh.fill_path(&path, g::fill_rule(clip), true, Transform::identity());
@@ -98,7 +126,15 @@ impl Canvases {
     }
 
     /// Runs one batch on canvas `id` (`width` × `height` px).
-    pub fn run(&mut self, id: i32, width: i32, height: i32, ops: &str, fonts: &Fonts, images: &Images) {
+    pub fn run(
+        &mut self,
+        id: i32,
+        width: i32,
+        height: i32,
+        ops: &str,
+        fonts: &Fonts,
+        images: &Images,
+    ) {
         let (Ok(width), Ok(height)) = (u32::try_from(width), u32::try_from(height)) else {
             return;
         };
@@ -121,10 +157,14 @@ impl Canvases {
             .get(&id)
             .is_some_and(|canvas| canvas.width() == width && canvas.height() == height);
         if !fits {
-            let Some(fresh) = Pixmap::new(width, height) else { return };
+            let Some(fresh) = Pixmap::new(width, height) else {
+                return;
+            };
             self.canvases.insert(id, fresh);
         }
-        let Some(canvas) = self.canvases.get_mut(&id) else { return };
+        let Some(canvas) = self.canvases.get_mut(&id) else {
+            return;
+        };
         for op in &ops {
             run_op(canvas, op, fonts, images, &sources);
         }
@@ -145,8 +185,12 @@ impl Canvases {
         for row in 0..h {
             for col in 0..w {
                 let (cx, cy) = (x + col as i32, y + row as i32);
-                let (Ok(cx), Ok(cy)) = (u32::try_from(cx), u32::try_from(cy)) else { continue };
-                let Some(px) = canvas.pixel(cx, cy) else { continue };
+                let (Ok(cx), Ok(cy)) = (u32::try_from(cx), u32::try_from(cy)) else {
+                    continue;
+                };
+                let Some(px) = canvas.pixel(cx, cy) else {
+                    continue;
+                };
                 let c = px.demultiply();
                 let i = (row * w + col) * 4;
                 if let Some(slot) = out.get_mut(i..i + 4) {
@@ -158,14 +202,26 @@ impl Canvases {
     }
 }
 
-fn run_op(canvas: &mut Pixmap, op: &Value, fonts: &Fonts, images: &Images, sources: &HashMap<i32, Pixmap>) {
+fn run_op(
+    canvas: &mut Pixmap,
+    op: &Value,
+    fonts: &Fonts,
+    images: &Images,
+    sources: &HashMap<i32, Pixmap>,
+) {
     let (width, height) = (canvas.width(), canvas.height());
     match g::int(op, "k") {
         0 => canvas.fill(tiny_skia::Color::TRANSPARENT),
         6 => put_image(canvas, op),
         kind => {
-            let Some(clip) = clips(op, width, height) else { return };
-            let mode = if kind == 3 { BlendMode::Clear } else { blend(g::int(op, "cm")) };
+            let Some(clip) = clips(op, width, height) else {
+                return;
+            };
+            let mode = if kind == 3 {
+                BlendMode::Clear
+            } else {
+                blend(g::int(op, "cm"))
+            };
             match clip {
                 // tiny-skia changes pixels outside a mask for blends other
                 // than over: draw unclipped on a copy, then take the copy's
@@ -175,7 +231,16 @@ fn run_op(canvas: &mut Pixmap, op: &Value, fonts: &Fonts, images: &Images, sourc
                     draw_op(&mut drawn, op, kind, mode, fonts, images, sources, None);
                     effects::take_masked(canvas, &drawn, &mask);
                 }
-                clip => draw_op(canvas, op, kind, mode, fonts, images, sources, clip.as_ref()),
+                clip => draw_op(
+                    canvas,
+                    op,
+                    kind,
+                    mode,
+                    fonts,
+                    images,
+                    sources,
+                    clip.as_ref(),
+                ),
             }
         }
     }
@@ -199,7 +264,11 @@ fn draw_op(
         blend_mode: mode,
         ..Paint::default()
     };
-    let alpha = op.get("a").and_then(Value::as_f64).map_or(1.0, |a| a as f32).clamp(0.0, 1.0);
+    let alpha = op
+        .get("a")
+        .and_then(Value::as_f64)
+        .map_or(1.0, |a| a as f32)
+        .clamp(0.0, 1.0);
     match kind {
         1 | 2 => {
             let Some(path) = g::path(op) else { return };
@@ -210,7 +279,10 @@ fn draw_op(
             if kind == 1 {
                 shadow(canvas, op, &path, Transform::identity(), None, clip);
                 canvas.fill_path(&path, &paint, g::fill_rule(op), Transform::identity(), clip);
-            } else if let Some(user) = matrix.invert().and_then(|inverse| path.clone().transform(inverse)) {
+            } else if let Some(user) = matrix
+                .invert()
+                .and_then(|inverse| path.clone().transform(inverse))
+            {
                 let stroke = g::stroke(op, g::num(op, "lw"), "lc", "lj", "ml", "d", "do");
                 shadow(canvas, op, &user, matrix, Some(&stroke), clip);
                 canvas.stroke_path(&user, &paint, &stroke, matrix, clip);
@@ -218,22 +290,46 @@ fn draw_op(
         }
         3 => {
             let Some(path) = g::path(op) else { return };
-            canvas.fill_path(&path, &paint, FillRule::Winding, Transform::identity(), clip);
+            canvas.fill_path(
+                &path,
+                &paint,
+                FillRule::Winding,
+                Transform::identity(),
+                clip,
+            );
         }
         4 => text(canvas, op, fonts, matrix, alpha, paint, clip),
-        5 => image(canvas, op, images, sources, matrix, alpha, paint.blend_mode, clip),
+        5 => image(
+            canvas,
+            op,
+            images,
+            sources,
+            matrix,
+            alpha,
+            paint.blend_mode,
+            clip,
+        ),
         _ => {}
     }
 }
 
 /// The op's shadow ("shc" color, "sh" x, y, blur) of `path`, under it.
-fn shadow(canvas: &mut Pixmap, op: &Value, path: &Path, transform: Transform, stroke: Option<&tiny_skia::Stroke>, clip: Option<&Mask>) {
+fn shadow(
+    canvas: &mut Pixmap,
+    op: &Value,
+    path: &Path,
+    transform: Transform,
+    stroke: Option<&tiny_skia::Stroke>,
+    clip: Option<&Mask>,
+) {
     let color = g::color(op, "shc");
     if color.alpha() <= 0.0 {
         return;
     }
     let s = g::floats(op, "sh");
-    let Some(mut layer) = Pixmap::new(canvas.width(), canvas.height()) else { return };
+    let Some(mut layer) = Pixmap::new(canvas.width(), canvas.height()) else {
+        return;
+    };
     let mut paint = Paint::default();
     paint.set_color(color);
     paint.anti_alias = true;
@@ -243,11 +339,26 @@ fn shadow(canvas: &mut Pixmap, op: &Value, path: &Path, transform: Transform, st
         None => layer.fill_path(path, &paint, g::fill_rule(op), moved, None),
     }
     effects::blur(&mut layer, at(&s, 2) / 2.0);
-    canvas.draw_pixmap(0, 0, layer.as_ref(), &PixmapPaint::default(), Transform::identity(), clip);
+    canvas.draw_pixmap(
+        0,
+        0,
+        layer.as_ref(),
+        &PixmapPaint::default(),
+        Transform::identity(),
+        clip,
+    );
 }
 
 #[allow(clippy::too_many_arguments)]
-fn text(canvas: &mut Pixmap, op: &Value, fonts: &Fonts, matrix: Transform, alpha: f32, mut paint: Paint<'static>, clip: Option<&Mask>) {
+fn text(
+    canvas: &mut Pixmap,
+    op: &Value,
+    fonts: &Fonts,
+    matrix: Transform,
+    alpha: f32,
+    mut paint: Paint<'static>,
+    clip: Option<&Mask>,
+) {
     let text = op.get("t").and_then(Value::as_str).unwrap_or("");
     let tp = g::floats(op, "tp");
     let place = matrix
@@ -255,7 +366,9 @@ fn text(canvas: &mut Pixmap, op: &Value, fonts: &Fonts, matrix: Transform, alpha
         .pre_scale(if at(&tp, 2) > 0.0 { at(&tp, 2) } else { 1.0 }, 1.0)
         .pre_translate(at(&tp, 3), 0.0);
     let device = (place.sx * place.sx + place.ky * place.ky).sqrt().max(0.01);
-    let Some(shaped) = fonts.shape(g::int(op, "f") as i32, text, device) else { return };
+    let Some(shaped) = fonts.shape(g::int(op, "f") as i32, text, device) else {
+        return;
+    };
     let Some(mut shader) = shader(op) else { return };
     shader.apply_opacity(alpha);
     // The paint is in user space; the glyphs are placed after it.
@@ -273,7 +386,14 @@ fn text(canvas: &mut Pixmap, op: &Value, fonts: &Fonts, matrix: Transform, alpha
     }
     let glyphs = place.pre_scale(1.0 / device, 1.0 / device);
     for glyph in &shaped.color {
-        super::paint::draw_rgba(Some(canvas), &glyph.rgba, glyph.width, glyph.height, glyphs.pre_translate(glyph.left, glyph.top), clip);
+        super::paint::draw_rgba(
+            Some(canvas),
+            &glyph.rgba,
+            glyph.width,
+            glyph.height,
+            glyphs.pre_translate(glyph.left, glyph.top),
+            clip,
+        );
     }
 }
 
@@ -302,26 +422,45 @@ fn image(
     if sw <= 0.0 || sh <= 0.0 {
         return;
     }
-    let Some(dst) = Rect::from_xywh(dx, dy, dw, dh) else { return };
+    let Some(dst) = Rect::from_xywh(dx, dy, dw, dh) else {
+        return;
+    };
     let place = Transform::from_translate(dx, dy)
         .pre_scale(dw / sw, dh / sh)
         .pre_translate(-sx, -sy);
-    let quality = if g::flag(op, "ns") { FilterQuality::Nearest } else { FilterQuality::Bilinear };
+    let quality = if g::flag(op, "ns") {
+        FilterQuality::Nearest
+    } else {
+        FilterQuality::Bilinear
+    };
     let paint = Paint {
         shader: Pattern::new(source.as_ref(), SpreadMode::Pad, quality, alpha, place),
         blend_mode,
         anti_alias: true,
         ..Paint::default()
     };
-    canvas.fill_path(&PathBuilder::from_rect(dst), &paint, FillRule::Winding, matrix, clip);
+    canvas.fill_path(
+        &PathBuilder::from_rect(dst),
+        &paint,
+        FillRule::Winding,
+        matrix,
+        clip,
+    );
 }
 
 /// putImageData: straight RGBA ("px", base64) at ("x", "y"), replacing.
 fn put_image(canvas: &mut Pixmap, op: &Value) {
     use base64::Engine;
-    let Some(px) = op.get("px").and_then(Value::as_str) else { return };
-    let Ok(rgba) = base64::engine::general_purpose::STANDARD.decode(px) else { return };
-    let (Ok(w), Ok(h)) = (u32::try_from(g::int(op, "w")), u32::try_from(g::int(op, "h"))) else {
+    let Some(px) = op.get("px").and_then(Value::as_str) else {
+        return;
+    };
+    let Ok(rgba) = base64::engine::general_purpose::STANDARD.decode(px) else {
+        return;
+    };
+    let (Ok(w), Ok(h)) = (
+        u32::try_from(g::int(op, "w")),
+        u32::try_from(g::int(op, "h")),
+    ) else {
         return;
     };
     let (x, y) = (g::num(op, "x") as i64, g::num(op, "y") as i64);
@@ -336,7 +475,10 @@ fn put_image(canvas: &mut Pixmap, op: &Value) {
             }
             let from = ((row * i64::from(w) + col) * 4) as usize;
             let to = ((cy * width + cx) * 4) as usize;
-            let (Some(src), Some(dst)) = (rgba.get(from..from + 4), data.get_mut(to..to + 4)) else { continue };
+            let (Some(src), Some(dst)) = (rgba.get(from..from + 4), data.get_mut(to..to + 4))
+            else {
+                continue;
+            };
             let mut px = [0u8; 4];
             px.copy_from_slice(src);
             super::images::premultiply(&mut px);
