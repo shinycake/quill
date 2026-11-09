@@ -1,10 +1,3 @@
-// Modified by the Quill project (2026) from gpui-pre-windows 0.3.9 (Apache-2.0):
-// the vsync thread skips idle windows and sleeps while all are idle; a lost
-// GPU device or a failed DirectX start no longer panics, and recovery sends
-// to windows without holding the window list. Sends go through `gpui_message`.
-// The file pickers free each path string and skip items without a file system
-// path.
-// See third_party/gpui-pre-windows/QUILL-CHANGES.md.
 use std::{
     cell::{Cell, RefCell},
     ffi::{OsStr, OsString},
@@ -21,6 +14,7 @@ use anyhow::{Context as _, Result, anyhow};
 use futures::channel::oneshot::Receiver;
 use gpui_util::{ResultExt, get_powershell, new_std_command};
 use itertools::Itertools;
+use parking_lot::RwLock;
 use smallvec::SmallVec;
 use windows::{
     UI::ViewManagement::UISettings,
@@ -42,38 +36,23 @@ use windows::{
     core::*,
 };
 
-use crate::{window_list::WindowList, *};
+use crate::*;
 use gpui::*;
 
-impl<W: Clone> WindowList<W> {
-    /// Quill: a copy of the list as it is now. The vsync thread takes one on every tick, so up to
-    /// four windows are copied without a heap allocation, as before the list had a lock of its own.
-    pub(crate) fn snapshot(&self) -> SmallVec<[W; 4]> {
-        self.collect()
-    }
-}
-
-#[derive(Clone)]
 struct TrackedWindow {
     handle: SafeHwnd,
     frame_signal: Arc<PlatformFrameSignal>,
-    /// Quill: set by the window's `WM_DESTROY`.
-    destroyed: Arc<AtomicBool>,
 }
 
 impl TrackedWindow {
     fn as_raw(&self) -> HWND {
         self.handle.as_raw()
     }
-
-    fn is_destroyed(&self) -> bool {
-        self.destroyed.load(Ordering::Relaxed)
-    }
 }
 
 pub struct WindowsPlatform {
     inner: Rc<WindowsPlatformInner>,
-    raw_window_handles: Arc<WindowList<TrackedWindow>>,
+    raw_window_handles: Arc<RwLock<SmallVec<[TrackedWindow; 4]>>>,
     /// The windowing mode to start in, applied when `run` starts. Windowed when unset.
     initial_windowing: RefCell<Option<WindowingRequest>>,
     /// Set to stop the current `VSyncProvider` thread, which runs while windowed.
@@ -85,7 +64,6 @@ pub struct WindowsPlatform {
     background_executor: BackgroundExecutor,
     foreground_executor: ForegroundExecutor,
     text_system: Arc<dyn PlatformTextSystem>,
-    direct_write_text_system: Option<Arc<DirectWriteTextSystem>>,
     drop_target_helper: Option<IDropTargetHelper>,
     /// Flag to instruct the `VSyncProvider` thread to invalidate the directx devices
     /// as resizing them has failed, causing us to have lost at least the render target.
@@ -101,9 +79,9 @@ pub struct WindowsPlatform {
 
 struct WindowsPlatformInner {
     state: WindowsPlatformState,
-    raw_window_handles: std::sync::Weak<WindowList<TrackedWindow>>,
+    raw_window_handles: std::sync::Weak<RwLock<SmallVec<[TrackedWindow; 4]>>>,
     // The below members will never change throughout the entire lifecycle of the app.
-    validation_number: ValidationNumber,
+    validation_number: usize,
     main_receiver: PriorityQueueReceiver<RunnableVariant>,
     dispatcher: Arc<WindowsDispatcher>,
 }
@@ -121,21 +99,12 @@ pub(crate) struct WindowsPlatformState {
     pub(crate) draw_coordinator: Rc<DrawCoordinator>,
     directx_devices: RefCell<Option<DirectXDevices>>,
     low_power_mode_enabled: Cell<bool>,
-    /// Quill: why the platform has no GPU (DirectX failed at launch, or a lost device could not
-    /// be recreated), reported by `open_window` so the app can show it.
-    gpu_error: RefCell<Option<String>>,
-    /// Quill: which vsync thread is current. Each start and stop moves it on, and the platform
-    /// ignores device messages from a thread it has stopped (see `VsyncGeneration`).
-    vsync_generation: Cell<VsyncGeneration>,
 }
 
 #[derive(Default)]
 struct PlatformCallbacks {
     open_urls: Cell<Option<Box<dyn FnMut(Vec<String>)>>>,
     quit: Cell<Option<Box<dyn FnMut() -> bool>>>,
-    quit_request: Cell<Option<Box<dyn FnMut() -> QuitAnswer>>>,
-    /// `quit_request` was registered; an empty slot then means it runs.
-    quit_request_set: Cell<bool>,
     reopen: Cell<Option<Box<dyn FnMut()>>>,
     app_menu_action: Cell<Option<Box<dyn FnMut(&dyn Action)>>>,
     will_open_app_menu: Cell<Option<Box<dyn FnMut()>>>,
@@ -159,20 +128,10 @@ impl WindowsPlatformState {
             current_cursor: Cell::new(current_cursor),
             cursor_visible: Arc::new(AtomicBool::new(true)),
             draw_coordinator: Rc::new(DrawCoordinator::new()),
-            gpu_error: RefCell::new(None),
-            vsync_generation: Cell::new(VsyncGeneration::default()),
             directx_devices: RefCell::new(directx_devices),
             low_power_mode_enabled: Cell::new(false),
             menus: RefCell::new(Vec::new()),
         }
-    }
-}
-
-impl WindowsPlatformState {
-    fn next_vsync_generation(&self) -> VsyncGeneration {
-        let next = self.vsync_generation.get().next();
-        self.vsync_generation.set(next);
-        next
     }
 }
 
@@ -227,29 +186,20 @@ impl WindowsPlatform {
             OleInitialize(None).context("unable to initialize Windows OLE")?;
         }
         // A platform that can become windowed needs the real text system from the start: the app
-        // keeps the one it's created with. It gets DirectX devices when it becomes windowed.
-        let (text_system, direct_write_text_system) = if !headless {
-            let dw_text_system = Arc::new(
-                DirectWriteTextSystem::new(None).context("Error creating DirectWriteTextSystem")?,
-            );
-            (
-                dw_text_system.clone() as Arc<dyn PlatformTextSystem>,
-                Some(dw_text_system),
-            )
+        // keeps the one it's created with.
+        let text_system: Arc<dyn PlatformTextSystem> = if !headless {
+            Arc::new(DirectWriteTextSystem::new().context("Error creating DirectWriteTextSystem")?)
         } else {
-            (
-                Arc::new(gpui::NoopTextSystem::new()) as Arc<dyn PlatformTextSystem>,
-                None,
-            )
+            Arc::new(gpui::NoopTextSystem::new())
         };
 
         let (main_sender, main_receiver) = PriorityQueueReceiver::new();
-        let validation_number = ValidationNumber::new(if usize::BITS == 64 {
+        let validation_number = if usize::BITS == 64 {
             rand::random::<u64>() as usize
         } else {
             rand::random::<u32>() as usize
-        });
-        let raw_window_handles = Arc::new(WindowList::new());
+        };
+        let raw_window_handles = Arc::new(RwLock::new(SmallVec::new()));
 
         register_platform_window_class();
         let mut context = PlatformWindowCreateContext {
@@ -328,7 +278,6 @@ impl WindowsPlatform {
             background_executor,
             foreground_executor,
             text_system,
-            direct_write_text_system,
             suspend_resume_notification: RefCell::new(None),
             power_saving_notification: RefCell::new(None),
             disable_direct_composition,
@@ -345,12 +294,12 @@ impl WindowsPlatform {
     }
 
     #[inline]
-    fn post_message(&self, message: GpuiMessage) {
+    fn post_message(&self, message: u32, wparam: WPARAM, lparam: LPARAM) {
         self.raw_window_handles
-            .snapshot()
+            .read()
             .iter()
             .for_each(|handle| unsafe {
-                message.post(handle.as_raw()).log_err();
+                PostMessageW(Some(handle.as_raw()), message, wparam, lparam).log_err();
             });
     }
 
@@ -426,50 +375,10 @@ impl WindowsPlatform {
             return None;
         }
         self.raw_window_handles
+            .read()
+            .iter()
             .find(|hwnd| hwnd.as_raw() == active_window_hwnd)
             .map(|hwnd| hwnd.as_raw())
-    }
-
-    fn hand_over_recovered_devices(&self, window: HWND, created_with: &ID3D11Device) {
-        let Some(current) = self.inner.state.directx_devices.borrow().clone() else {
-            return;
-        };
-        if current.device == *created_with {
-            return;
-        }
-        let device_lost = self.inner.validation_number.message(
-            WM_GPUI_GPU_DEVICE_LOST,
-            &current as *const DirectXDevices as isize,
-        );
-        // SAFETY: `window` belongs to this thread, so the send runs its handler before returning,
-        // while `current` is alive.
-        unsafe {
-            device_lost.send(window);
-        }
-    }
-
-    /// Quill: a window built on a removed device fails to open, and the vsync thread can't
-    /// recover while this thread waits for it (recovery sends to the platform window). So make
-    /// new devices here. The vsync thread still recovers the open windows from its own check.
-    fn replace_removed_devices(&self) -> Result<()> {
-        let removed = self
-            .inner
-            .state
-            .directx_devices
-            .borrow()
-            .as_ref()
-            .is_some_and(|devices| check_device_lost(&devices.device));
-        if !removed {
-            return Ok(());
-        }
-        let devices = try_to_recover_from_device_lost(|| {
-            DirectXDevices::new().context("Recreating DirectX devices to open a window")
-        })?;
-        if let Some(text_system) = &self.direct_write_text_system {
-            text_system.handle_gpu_lost(&devices)?;
-        }
-        *self.inner.state.directx_devices.borrow_mut() = Some(devices);
-        Ok(())
     }
 
     fn is_windowed(&self) -> bool {
@@ -478,10 +387,10 @@ impl WindowsPlatform {
 
     /// Connects in the initial windowing mode, before the app finishes launching.
     ///
-    /// Starts headless if this process can't show windows, for example when started over SSH.
+    /// # Panics
     ///
-    /// Quill: if DirectX can't be initialized, stays headless and keeps the error, which
-    /// `open_window` returns, instead of panicking (upstream panics here).
+    /// Panics if DirectX can't be initialized, since the app can't start. Starts headless if this
+    /// process can't show windows, for example when started over SSH.
     fn connect_initially(&self) {
         let request = self
             .initial_windowing
@@ -495,164 +404,85 @@ impl WindowsPlatform {
             log::info!("starting headless: {error:#}");
             return;
         }
-        if let Err(error) = self.attach_gpu() {
-            log::error!("failed to initialize DirectX: {error:#}");
-            *self.inner.state.gpu_error.borrow_mut() =
-                Some(format!("failed to initialize DirectX: {error:#}"));
-        }
+        self.attach_gpu()
+            .unwrap_or_else(|error| panic!("failed to initialize DirectX: {error:#}"));
     }
 
     /// Creates the DirectX devices that windows draw with, and starts vsync.
     fn attach_gpu(&self) -> Result<()> {
         let devices = DirectXDevices::new().context("Creating DirectX devices")?;
-        if let Some(text_system) = &self.direct_write_text_system {
-            text_system.handle_gpu_lost(&devices)?;
-        }
         *self.inner.state.directx_devices.borrow_mut() = Some(devices);
-        if let Err(error) = self.begin_vsync_thread() {
-            self.detach_gpu();
-            return Err(error);
-        }
-        self.inner.state.gpu_error.borrow_mut().take();
+        self.begin_vsync_thread();
         Ok(())
     }
 
     /// Stops vsync and releases the DirectX devices. No window may be open.
     fn detach_gpu(&self) {
-        self.inner.state.next_vsync_generation();
         if let Some(stop) = self.vsync_stop.borrow_mut().take() {
             // Not joined: the thread can be sending this thread a message. It exits after its
             // next vsync, and drops its reference to the devices then.
             stop.store(true, Ordering::Release);
-            // Quill: it may be asleep with every window parked; wake it so it exits.
-            FRAME_GATE.wake();
-        }
-        if let Some(text_system) = &self.direct_write_text_system {
-            text_system.release_gpu();
         }
         self.inner.state.directx_devices.borrow_mut().take();
     }
 
-    /// Quill: returns the spawn error (upstream unwraps it), which `attach_gpu` reports.
-    fn begin_vsync_thread(&self) -> Result<()> {
+    fn begin_vsync_thread(&self) {
         let Some(directx_devices) = self.inner.state.directx_devices.borrow().clone() else {
-            return Ok(());
+            return;
         };
-        let Some(direct_write_text_system) = &self.direct_write_text_system else {
-            return Ok(());
-        };
-        let generation = self.inner.state.next_vsync_generation();
         let stop = Arc::new(AtomicBool::new(false));
         *self.vsync_stop.borrow_mut() = Some(stop.clone());
         let mut directx_device = directx_devices;
         let platform_window: SafeHwnd = self.handle.into();
         let validation_number = self.inner.validation_number;
         let all_windows = Arc::downgrade(&self.raw_window_handles);
-        let text_system = Arc::downgrade(direct_write_text_system);
         let invalidate_devices = self.invalidate_devices.clone();
 
-        // Quill: read the idle-frames kill switch at startup.
-        if !idle_frames_enabled() {
-            log::info!("{IDLE_FRAMES_ENV} is off: windows will get vsync frames even when idle");
-        }
         std::thread::Builder::new()
             .name("VSyncProvider".to_owned())
             .spawn(move || {
-                // Quill: a panic would end vsync and leave every window frozen. Handle it like
-                // a device that can't be recreated: the platform closes the windows. The guard
-                // tells Quill's panic hook the panic is caught, so it is not filed as a crash.
-                let vsync = panic_guard::guarded(|| {
-                    let vsync_provider = VSyncProvider::new();
-                    loop {
-                        // Quill: sleep while every window's frames are parked
-                        // (see `FrameGate`), with no timeout, until one unparks
-                        // or this thread must stop or check its device.
-                        if !FRAME_GATE.wait_for_frames(&all_windows, TrackedWindow::as_raw, || {
-                            stop.load(Ordering::Acquire)
-                                || invalidate_devices.load(Ordering::Acquire)
-                        }) {
-                            break;
-                        }
-                        let signal_source = vsync_provider.wait_for_vsync();
-                        let signal_at = PlatformFrameSignal::capture(scheduler::Instant::now);
-                        if stop.load(Ordering::Acquire) {
-                            break;
-                        }
-                        if check_device_lost(&directx_device.device)
-                            || invalidate_devices.fetch_and(false, Ordering::Acquire)
-                        {
-                            // Quill: retry with backoff, then close the windows and stop
-                            // vsync instead of panicking (upstream panics here).
-                            let recovery = recover_from_gpu_device_lost(
-                                generation,
-                                &mut directx_device,
-                                platform_window.as_raw(),
-                                validation_number,
-                                &all_windows,
-                                &text_system,
-                            );
-                            if let Ok(Recovery::Superseded) = recovery {
-                                break;
-                            }
-                            if let Err(err) = recovery {
-                                log::error!(
-                                    "DirectX device lost and could not be recreated, closing all \
-                                 windows: {err:#}"
-                                );
-                                // Quill: the platform drops the dead devices, so it reports
-                                // itself headless until it is windowed again, then closes
-                                // the windows.
-                                // SAFETY: PostMessageW only queues the message.
-                                unsafe {
-                                    validation_number
-                                        .message(WM_GPUI_GPU_DEVICE_GONE, generation.raw())
-                                        .post(platform_window.as_raw())
-                                        .log_err();
-                                }
-                                break;
-                            }
-                        }
-                        let Some(all_windows) = all_windows.upgrade() else {
-                            break;
-                        };
-                        // Quill: skip parked windows. The parked set is read
-                        // before the window list (lock order).
-                        let parked = FRAME_GATE.parked_windows();
-                        for hwnd in all_windows.snapshot() {
-                            if parked.contains(hwnd.as_raw()) {
-                                continue;
-                            }
-                            unsafe {
-                                if let Some(signal_at) = signal_at {
-                                    if IsWindowVisible(hwnd.as_raw()).as_bool()
-                                        && !IsIconic(hwnd.as_raw()).as_bool()
-                                    {
-                                        hwnd.frame_signal.record(signal_at, signal_source);
-                                    } else {
-                                        // Hidden windows may not consume WM_PAINT until shown again.
-                                        hwnd.frame_signal.take();
-                                    }
-                                }
-                                RedrawWindow(Some(hwnd.as_raw()), None, None, RDW_INVALIDATE)
-                                    .ok()
-                                    .log_err();
-                            }
+                let vsync_provider = VSyncProvider::new();
+                loop {
+                    let signal_source = vsync_provider.wait_for_vsync();
+                    let signal_at = PlatformFrameSignal::capture(scheduler::Instant::now);
+                    if stop.load(Ordering::Acquire) {
+                        break;
+                    }
+                    if check_device_lost(&directx_device.device)
+                        || invalidate_devices.fetch_and(false, Ordering::Acquire)
+                    {
+                        if let Err(err) = handle_gpu_device_lost(
+                            &mut directx_device,
+                            platform_window.as_raw(),
+                            validation_number,
+                            &all_windows,
+                        ) {
+                            panic!("Device lost: {err}");
                         }
                     }
-                });
-                if vsync.is_err() {
-                    log::error!("the vsync thread panicked, closing all windows");
-                    // SAFETY: PostMessageW only queues the message.
-                    unsafe {
-                        validation_number
-                            .message(WM_GPUI_GPU_DEVICE_GONE, generation.raw())
-                            .post(platform_window.as_raw())
-                            .log_err();
+                    let Some(all_windows) = all_windows.upgrade() else {
+                        break;
+                    };
+                    for hwnd in all_windows.read().iter() {
+                        unsafe {
+                            if let Some(signal_at) = signal_at {
+                                if IsWindowVisible(hwnd.as_raw()).as_bool()
+                                    && !IsIconic(hwnd.as_raw()).as_bool()
+                                {
+                                    hwnd.frame_signal.record(signal_at, signal_source);
+                                } else {
+                                    // Hidden windows may not consume WM_PAINT until shown again.
+                                    hwnd.frame_signal.take();
+                                }
+                            }
+                            RedrawWindow(Some(hwnd.as_raw()), None, None, RDW_INVALIDATE)
+                                .ok()
+                                .log_err();
+                        }
                     }
                 }
             })
-            .context("Starting the vsync thread")?;
-        Ok(())
+            .unwrap();
     }
 }
 
@@ -865,11 +695,15 @@ impl Platform for WindowsPlatform {
 
     fn hide(&self) {}
 
-    // Quill: Windows has no "hide others"; a no-op instead of upstream's `unimplemented!()`.
-    fn hide_other_apps(&self) {}
+    // todo(windows)
+    fn hide_other_apps(&self) {
+        unimplemented!()
+    }
 
-    // Quill: see `hide_other_apps`.
-    fn unhide_other_apps(&self) {}
+    // todo(windows)
+    fn unhide_other_apps(&self) {
+        unimplemented!()
+    }
 
     fn displays(&self) -> Vec<Rc<dyn PlatformDisplay>> {
         WindowsDisplay::displays()
@@ -911,34 +745,14 @@ impl Platform for WindowsPlatform {
         options: WindowParams,
     ) -> Result<Box<dyn PlatformWindow>> {
         if !self.is_windowed() {
-            // Quill: say why when the platform has no GPU.
-            if let Some(error) = self.inner.state.gpu_error.borrow().as_ref() {
-                return Err(anyhow!("{error}"));
-            }
             return Err(anyhow!("cannot open windows while headless"));
         }
-        self.replace_removed_devices()?;
-        let creation_info = self.generate_creation_info();
-        let created_with = creation_info.directx_devices.device.clone();
-        let window = WindowsWindow::new(handle, options, creation_info)?;
+        let window = WindowsWindow::new(handle, options, self.generate_creation_info())?;
         let handle = window.get_raw_handle();
-        self.raw_window_handles.push(TrackedWindow {
+        self.raw_window_handles.write().push(TrackedWindow {
             handle: handle.into(),
             frame_signal: window.state.frame_signal.clone(),
-            destroyed: window.state.destroyed.clone(),
         });
-        // Quill: device-loss recovery hands the new devices to the windows listed after the
-        // platform got them. One made from the old devices that joined later missed them.
-        self.hand_over_recovered_devices(handle, &created_with);
-        // Quill: a new window starts with frames running; wake the vsync
-        // thread if every other window is parked. One created hidden starts
-        // parked (it gets no WM_PAINT until shown, so nothing would park it,
-        // and showing it resumes it).
-        if window.visibility() == WindowVisibility::Visible {
-            FRAME_GATE.unpark(handle);
-        } else {
-            window.park_frames();
-        }
 
         Ok(Box::new(window))
     }
@@ -1029,12 +843,6 @@ impl Platform for WindowsPlatform {
 
     fn on_quit(&self, callback: Box<dyn FnMut() -> bool>) {
         self.inner.state.callbacks.quit.set(Some(callback));
-    }
-
-    fn on_quit_request(&self, callback: Box<dyn FnMut() -> QuitAnswer>) {
-        let callbacks = &self.inner.state.callbacks;
-        callbacks.quit_request.set(Some(callback));
-        callbacks.quit_request_set.set(true);
     }
 
     fn on_reopen(&self, callback: Box<dyn FnMut()>) {
@@ -1180,10 +988,11 @@ impl Platform for WindowsPlatform {
     fn set_cursor_style(&self, style: CursorStyle) {
         let hcursor = load_cursor(style);
         if self.inner.state.current_cursor.get().map(|c| c.0) != hcursor.map(|c| c.0) {
-            self.post_message(self.inner.validation_number.message(
+            self.post_message(
                 WM_GPUI_CURSOR_STYLE_CHANGED,
-                hcursor.map_or(0, |c| c.0 as isize),
-            ));
+                WPARAM(self.inner.validation_number),
+                LPARAM(hcursor.map_or(0, |c| c.0 as isize)),
+            );
             self.inner.state.current_cursor.set(hcursor);
         }
     }
@@ -1198,7 +1007,7 @@ impl Platform for WindowsPlatform {
             return;
         }
 
-        for handle in self.raw_window_handles.snapshot() {
+        for handle in self.raw_window_handles.read().iter() {
             let Some(window) = window_from_hwnd(handle.as_raw()) else {
                 continue;
             };
@@ -1324,11 +1133,13 @@ impl Platform for WindowsPlatform {
 
     fn perform_dock_menu_action(&self, action: usize) {
         unsafe {
-            self.inner
-                .validation_number
-                .message(WM_GPUI_DOCK_MENU_ACTION, action as isize)
-                .post(self.handle)
-                .log_err();
+            PostMessageW(
+                Some(self.handle),
+                WM_GPUI_DOCK_MENU_ACTION,
+                WPARAM(self.inner.validation_number),
+                LPARAM(action as isize),
+            )
+            .log_err();
         }
     }
 
@@ -1363,6 +1174,8 @@ impl WindowsPlatformInner {
     fn window_from_hwnd(&self, hwnd: HWND) -> Option<Rc<WindowsWindowInner>> {
         self.raw_window_handles
             .upgrade()?
+            .read()
+            .iter()
             .find(|window| window.as_raw() == hwnd)
             .and_then(|window| window_from_hwnd(window.as_raw()))
     }
@@ -1397,11 +1210,17 @@ impl WindowsPlatformInner {
         lparam: LPARAM,
     ) -> LRESULT {
         let handled = match msg {
+            WM_GPUI_CLOSE_ONE_WINDOW
+            | WM_GPUI_TASK_DISPATCHED_ON_MAIN_THREAD
+            | WM_GPUI_DOCK_MENU_ACTION
+            | WM_GPUI_KEYBOARD_LAYOUT_CHANGED
+            | WM_GPUI_DISPLAYS_CHANGED
+            | WM_GPUI_GPU_DEVICE_LOST => self.handle_gpui_events(msg, wparam, lparam),
             WM_POWERBROADCAST => self.handle_power_broadcast(wparam, lparam),
             WM_DISPLAYCHANGE => self.handle_display_change(handle),
-            WM_QUERYENDSESSION => self.handle_query_end_session(handle, lparam),
+            WM_QUERYENDSESSION => Some(1),
             WM_ENDSESSION if wparam.0 != 0 => self.handle_end_session(),
-            _ => self.handle_gpui_events(msg, wparam, lparam),
+            _ => None,
         };
         if let Some(result) = handled {
             LRESULT(result)
@@ -1411,9 +1230,8 @@ impl WindowsPlatformInner {
     }
 
     fn handle_gpui_events(&self, message: u32, wparam: WPARAM, lparam: LPARAM) -> Option<isize> {
-        let message = GpuiMessageId::from_raw(message)?;
-        if !self.validation_number.accepts(wparam.0) {
-            log::error!("Wrong validation number while processing message: {message:?}");
+        if wparam.0 != self.validation_number {
+            log::error!("Wrong validation number while processing message: {message}");
             return None;
         }
         match message {
@@ -1425,10 +1243,8 @@ impl WindowsPlatformInner {
             WM_GPUI_DOCK_MENU_ACTION => self.handle_dock_action_event(lparam.0 as _),
             WM_GPUI_KEYBOARD_LAYOUT_CHANGED => self.handle_keyboard_layout_change(),
             WM_GPUI_DISPLAYS_CHANGED => self.handle_displays_changed(),
-            WM_GPUI_QUIT_REQUEST_LATER => self.handle_quit_request_later(lparam),
             WM_GPUI_GPU_DEVICE_LOST => self.handle_device_lost(lparam),
-            WM_GPUI_GPU_DEVICE_GONE => self.handle_device_gone(lparam),
-            _ => None,
+            _ => unreachable!(),
         }
     }
 
@@ -1436,10 +1252,13 @@ impl WindowsPlatformInner {
         // Broadcasts can be delivered while the app is mid-update, e.g. inside a
         // COM call, so report the change from the message loop instead.
         unsafe {
-            self.validation_number
-                .message(WM_GPUI_DISPLAYS_CHANGED, 0)
-                .post(handle)
-                .log_err();
+            PostMessageW(
+                Some(handle),
+                WM_GPUI_DISPLAYS_CHANGED,
+                WPARAM(self.validation_number),
+                LPARAM(0),
+            )
+            .log_err();
         }
         Some(0)
     }
@@ -1449,60 +1268,6 @@ impl WindowsPlatformInner {
             |callbacks| &callbacks.displays_changed,
             |callback| callback(),
         );
-        Some(0)
-    }
-
-    fn handle_query_end_session(&self, handle: HWND, lparam: LPARAM) -> Option<isize> {
-        // A critical end of session happens whatever this answers, so
-        // nothing is asked.
-        if lparam.0 as u32 & ENDSESSION_CRITICAL != 0 {
-            return Some(1);
-        }
-        match self.ask_quit_request() {
-            QuitAnswer::Allow => Some(1),
-            QuitAnswer::Refuse => Some(0),
-            QuitAnswer::Later => {
-                self.ask_quit_request_later(handle, 1);
-                Some(0)
-            }
-        }
-    }
-
-    fn ask_quit_request(&self) -> QuitAnswer {
-        if !self.state.callbacks.quit_request_set.get() {
-            return QuitAnswer::Allow;
-        }
-        let mut answer = QuitAnswer::Later;
-        self.with_callback(
-            |callbacks| &callbacks.quit_request,
-            |callback| answer = callback(),
-        );
-        answer
-    }
-
-    // Broadcasts can arrive while the app is mid-update, so the app is
-    // asked from the message loop, at most `QUIT_ASKS_AGAIN` times
-    // (`QuitAnswer::step`); the message carries how many asks it had. The
-    // end of the session is refused meanwhile.
-    fn ask_quit_request_later(&self, handle: HWND, asked: u32) {
-        unsafe {
-            self.validation_number
-                .message(WM_GPUI_QUIT_REQUEST_LATER, asked as isize)
-                .post(handle)
-                .log_err();
-        }
-    }
-
-    // A quit the app allows now ends it, and a shutdown that waits on it
-    // goes on.
-    fn handle_quit_request_later(&self, lparam: LPARAM) -> Option<isize> {
-        let asked = u32::try_from(lparam.0).unwrap_or(QUIT_ASKS_AGAIN);
-        match self.ask_quit_request().step(asked) {
-            QuitStep::Settled(true) => unsafe { PostQuitMessage(0) },
-            QuitStep::Settled(false) => {}
-            QuitStep::AskAgain(asked) => self
-                .ask_quit_request_later(self.dispatcher.platform_window_handle.as_raw(), asked),
-        }
         Some(0)
     }
 
@@ -1529,13 +1294,14 @@ impl WindowsPlatformInner {
             log::error!("Failed to upgrade raw window handles");
             return false;
         };
-        let removal = all_windows.remove(|handle| handle.as_raw() == target_window);
-        // Quill: a window that isn't tracked is logged instead of upstream's `unwrap`.
-        if !removal.was_listed {
-            log::error!("closing a window that isn't in the window list");
-        }
-        FRAME_GATE.forget(target_window);
-        removal.now_empty
+        let mut lock = all_windows.write();
+        let index = lock
+            .iter()
+            .position(|handle| handle.as_raw() == target_window)
+            .unwrap();
+        lock.remove(index);
+
+        lock.is_empty()
     }
 
     #[inline]
@@ -1570,11 +1336,12 @@ impl WindowsPlatformInner {
                     }
                     // Allow the main loop to process other gpui events before going back into `run_foreground_task`
                     unsafe {
-                        if let Err(_) = self
-                            .validation_number
-                            .message(WM_GPUI_TASK_DISPATCHED_ON_MAIN_THREAD, 0)
-                            .post(self.dispatcher.platform_window_handle.as_raw())
-                        {
+                        if let Err(_) = PostMessageW(
+                            Some(self.dispatcher.platform_window_handle.as_raw()),
+                            WM_GPUI_TASK_DISPATCHED_ON_MAIN_THREAD,
+                            WPARAM(self.validation_number),
+                            LPARAM(0),
+                        ) {
                             self.dispatcher.wake_posted.store(false, Ordering::Release);
                         };
                     }
@@ -1654,49 +1421,16 @@ impl WindowsPlatformInner {
         Some(1)
     }
 
-    /// Quill: the vsync thread could not recreate the GPU device and has stopped. Drop the dead
-    /// devices so `is_windowed` reports false and `open_window` says why; a later
-    /// `request_windowing(Windowed)` attaches fresh devices. The broadcast runs here because no
-    /// window can open past this point and each window's `WM_DESTROY` runs on this thread, so
-    /// the list can't change under it.
-    fn handle_device_gone(&self, lparam: LPARAM) -> Option<isize> {
-        if !self.is_current_vsync(VsyncGeneration::from_raw(lparam.0)) {
-            return Some(0);
-        }
-        self.state.directx_devices.borrow_mut().take();
-        *self.state.gpu_error.borrow_mut() =
-            Some("the GPU device was lost and could not be recreated".to_owned());
-        destroy_all_windows_after_device_lost(&self.raw_window_handles, self.validation_number);
-        Some(0)
-    }
-
-    /// Quill: answers `HANDED_OVER` only when the devices come from the current vsync thread, which
-    /// then hands them to the windows.
     fn handle_device_lost(&self, lparam: LPARAM) -> Option<isize> {
-        // SAFETY: only `handle_gpu_device_lost` sends this message to the platform window, with
-        // `SendMessageW` and a pointer to a `RecoveredDevices` it keeps alive until the call returns.
-        let recovered = unsafe { &*(lparam.0 as *const RecoveredDevices) };
-        if !self.is_current_vsync(recovered.generation) {
-            return Some(0);
-        }
+        let directx_devices = lparam.0 as *const DirectXDevices;
+        let directx_devices = unsafe { &*directx_devices };
         let mut current = self.state.directx_devices.borrow_mut();
         // The platform may have switched to headless while the device was being recovered.
-        if current.is_none() {
-            return Some(0);
+        if current.is_some() {
+            *current = Some(directx_devices.clone());
         }
-        *current = Some(recovered.devices.clone());
-        Some(HANDED_OVER)
-    }
 
-    /// Quill: a stopped vsync thread can still post `WM_GPUI_GPU_DEVICE_GONE` or send recovered
-    /// devices, because `detach_gpu` does not join it. Those must not touch the devices of the
-    /// thread started since.
-    fn is_current_vsync(&self, generation: VsyncGeneration) -> bool {
-        let current = generation == self.state.vsync_generation.get();
-        if !current {
-            log::info!("ignoring a device message from a stopped vsync thread");
-        }
-        current
+        Some(0)
     }
 }
 
@@ -1721,8 +1455,6 @@ impl Drop for WindowsPlatform {
     fn drop(&mut self) {
         if let Some(stop) = self.vsync_stop.borrow_mut().take() {
             stop.store(true, Ordering::Release);
-            // Quill: wake it if it sleeps with every window parked.
-            FRAME_GATE.wake();
         }
         unsafe {
             if let Some(notification) = self.suspend_resume_notification.borrow_mut().take() {
@@ -1746,7 +1478,7 @@ pub(crate) struct WindowCreationInfo {
     pub(crate) current_cursor: Option<HCURSOR>,
     pub(crate) cursor_visible: Arc<AtomicBool>,
     pub(crate) drop_target_helper: IDropTargetHelper,
-    pub(crate) validation_number: ValidationNumber,
+    pub(crate) validation_number: usize,
     pub(crate) main_receiver: PriorityQueueReceiver<RunnableVariant>,
     pub(crate) platform_window_handle: HWND,
     pub(crate) disable_direct_composition: bool,
@@ -1760,8 +1492,8 @@ pub(crate) struct WindowCreationInfo {
 
 struct PlatformWindowCreateContext {
     inner: Option<Result<Rc<WindowsPlatformInner>>>,
-    raw_window_handles: std::sync::Weak<WindowList<TrackedWindow>>,
-    validation_number: ValidationNumber,
+    raw_window_handles: std::sync::Weak<RwLock<SmallVec<[TrackedWindow; 4]>>>,
+    validation_number: usize,
     main_sender: Option<PriorityQueueSender<RunnableVariant>>,
     main_receiver: Option<PriorityQueueReceiver<RunnableVariant>>,
     directx_devices: Option<DirectXDevices>,
@@ -1887,32 +1619,13 @@ fn file_open_dialog(
     }
 
     let mut paths = Vec::with_capacity(file_count as usize);
-    let mut skipped = None;
     for i in 0..file_count {
         let item = unsafe { results.GetItemAt(i)? };
-        // An item with no file system path (a phone, a library) is skipped,
-        // not the whole selection.
-        match file_system_path(&item) {
-            Ok(path) => paths.push(path),
-            Err(error) => skipped = Some(error),
-        }
+        let path = unsafe { item.GetDisplayName(SIGDN_FILESYSPATH)?.to_string()? };
+        paths.push(PathBuf::from(path));
     }
 
-    match skipped {
-        Some(error) if paths.is_empty() => Err(error),
-        _ => Ok(Some(paths)),
-    }
-}
-
-fn file_system_path(item: &IShellItem) -> Result<PathBuf> {
-    // SAFETY: `GetDisplayName` returns a NUL-terminated string allocated
-    // with CoTaskMemAlloc; it is copied out before being freed once here.
-    unsafe {
-        let pwstr = item.GetDisplayName(SIGDN_FILESYSPATH)?;
-        let path = PathBuf::from(OsString::from_wide(pwstr.as_wide()));
-        CoTaskMemFree(Some(pwstr.0 as _));
-        Ok(path)
-    }
+    Ok(Some(paths))
 }
 
 fn file_save_dialog(
@@ -1961,7 +1674,13 @@ fn file_save_dialog(
         }
     }
     let shell_item = unsafe { dialog.GetResult()? };
-    Ok(Some(file_system_path(&shell_item)?))
+    let file_path_string = unsafe {
+        let pwstr = shell_item.GetDisplayName(SIGDN_FILESYSPATH)?;
+        let string = pwstr.to_string()?;
+        CoTaskMemFree(Some(pwstr.0 as _));
+        string
+    };
+    Ok(Some(PathBuf::from(file_path_string)))
 }
 
 fn load_icon() -> Result<HICON> {
@@ -2040,83 +1759,12 @@ fn is_window_station_visible() -> bool {
     result.is_ok() && flags.dwFlags & WSF_VISIBLE as u32 != 0
 }
 
-/// Quill: waits before each extra round of device recreation after a device loss. Each round
-/// already makes several quick attempts (`try_to_recover_from_device_lost`); a driver update
-/// or reset can take longer than those, so later rounds wait longer.
-const DEVICE_LOST_RETRY_BACKOFF: [std::time::Duration; 3] = [
-    std::time::Duration::from_millis(500),
-    std::time::Duration::from_secs(2),
-    std::time::Duration::from_secs(5),
-];
-
-/// Quill: `handle_gpu_device_lost`, retried with `DEVICE_LOST_RETRY_BACKOFF`. Returns the last
-/// error when every round failed.
-fn recover_from_gpu_device_lost(
-    generation: VsyncGeneration,
-    directx_devices: &mut DirectXDevices,
-    platform_window: HWND,
-    validation_number: ValidationNumber,
-    all_windows: &std::sync::Weak<WindowList<TrackedWindow>>,
-    text_system: &std::sync::Weak<DirectWriteTextSystem>,
-) -> Result<Recovery> {
-    let mut result = handle_gpu_device_lost(
-        generation,
-        directx_devices,
-        platform_window,
-        validation_number,
-        all_windows,
-        text_system,
-    );
-    for delay in DEVICE_LOST_RETRY_BACKOFF {
-        let Err(err) = &result else {
-            break;
-        };
-        log::warn!("DirectX device recovery failed, retrying in {delay:?}: {err:#}");
-        std::thread::sleep(delay);
-        result = handle_gpu_device_lost(
-            generation,
-            directx_devices,
-            platform_window,
-            validation_number,
-            all_windows,
-            text_system,
-        );
-    }
-    result
-}
-
-/// Quill: asks every window to destroy itself once the GPU device is gone for good. Posted, not
-/// sent, so each window handles it on its own thread outside any draw, and `DestroyWindow`
-/// (not `WM_CLOSE`) so an app that hides windows on close still releases them.
-fn destroy_all_windows_after_device_lost(
-    all_windows: &std::sync::Weak<WindowList<TrackedWindow>>,
-    validation_number: ValidationNumber,
-) {
-    let Some(all_windows) = all_windows.upgrade() else {
-        return;
-    };
-    let destroy = validation_number.message(WM_GPUI_DESTROY_AFTER_DEVICE_LOST, 0);
-    // A destroyed window stays listed until its posted `WM_GPUI_CLOSE_ONE_WINDOW` arrives, and a
-    // message posted to it fails.
-    for window in all_windows.snapshot() {
-        if window.is_destroyed() {
-            continue;
-        }
-        // SAFETY: PostMessageW only queues the message.
-        unsafe {
-            destroy.post(window.as_raw()).log_err();
-        }
-    }
-}
-
 fn handle_gpu_device_lost(
-    generation: VsyncGeneration,
     directx_devices: &mut DirectXDevices,
     platform_window: HWND,
-    validation_number: ValidationNumber,
-    all_windows: &std::sync::Weak<WindowList<TrackedWindow>>,
-    text_system: &std::sync::Weak<DirectWriteTextSystem>,
-) -> Result<Recovery> {
+    validation_number: usize,
+    all_windows: &std::sync::Weak<RwLock<SmallVec<[TrackedWindow; 4]>>>,
+) -> Result<()> {
     // Here we wait a bit to ensure the system has time to recover from the device lost state.
     // If we don't wait, the final drawing result will be blank.
     std::thread::sleep(std::time::Duration::from_millis(350));
@@ -2126,84 +1774,40 @@ fn handle_gpu_device_lost(
     })?;
     log::info!("DirectX devices successfully recreated.");
 
-    let recovered = RecoveredDevices {
-        generation,
-        devices: &*directx_devices,
-    };
-    let device_lost = validation_number.message(
-        WM_GPUI_GPU_DEVICE_LOST,
-        &recovered as *const RecoveredDevices as isize,
-    );
-    // SAFETY: the message points at `recovered`, which outlives this synchronous call.
-    if unsafe { device_lost.send(platform_window) }.0 != HANDED_OVER {
-        log::info!("the platform took no devices from this vsync thread, stopping it");
-        return Ok(Recovery::Superseded);
+    let lparam = LPARAM(directx_devices as *const _ as _);
+    unsafe {
+        SendMessageW(
+            platform_window,
+            WM_GPUI_GPU_DEVICE_LOST,
+            Some(WPARAM(validation_number)),
+            Some(lparam),
+        );
     }
 
-    if let Some(text_system) = text_system.upgrade() {
-        text_system.handle_gpu_lost(&directx_devices)?;
-    }
     if let Some(all_windows) = all_windows.upgrade() {
-        let device_lost = validation_number.message(
-            WM_GPUI_GPU_DEVICE_LOST,
-            &*directx_devices as *const DirectXDevices as isize,
-        );
-        for window in all_windows.snapshot() {
-            // SAFETY: the message points at `directx_devices`, which outlives this synchronous
-            // call. A handle that is gone only makes the call fail.
+        for window in all_windows.read().iter() {
             unsafe {
-                device_lost.send(window.as_raw());
+                SendMessageW(
+                    window.as_raw(),
+                    WM_GPUI_GPU_DEVICE_LOST,
+                    Some(WPARAM(validation_number)),
+                    Some(lparam),
+                );
             }
         }
         std::thread::sleep(std::time::Duration::from_millis(200));
-        let force_update = validation_number.message(WM_GPUI_FORCE_UPDATE_WINDOW, 0);
-        for window in all_windows.snapshot() {
-            // SAFETY: the message carries no pointer. A handle that is gone only makes the call
-            // fail.
+        for window in all_windows.read().iter() {
             unsafe {
-                force_update.send(window.as_raw());
+                SendMessageW(
+                    window.as_raw(),
+                    WM_GPUI_FORCE_UPDATE_WINDOW,
+                    Some(WPARAM(validation_number)),
+                    None,
+                );
             }
         }
     }
-    Ok(Recovery::HandedOver)
-}
-
-/// Quill: the platform window's answer to `WM_GPUI_GPU_DEVICE_LOST` when it took the devices.
-const HANDED_OVER: isize = 1;
-
-/// Quill: what the vsync thread sends the platform window with `WM_GPUI_GPU_DEVICE_LOST`.
-struct RecoveredDevices<'a> {
-    generation: VsyncGeneration,
-    devices: &'a DirectXDevices,
-}
-
-/// Quill: how a device-loss recovery that recreated the devices ended.
-enum Recovery {
-    /// The platform and the windows have the new devices.
-    HandedOver,
-    /// The platform has stopped this vsync thread since it started; it ends without touching
-    /// the windows.
-    Superseded,
-}
-
-/// Quill: which vsync thread a device message comes from. Carried in `lparam` of
-/// `WM_GPUI_GPU_DEVICE_GONE` and in `RecoveredDevices`, because `wparam` holds the
-/// validation number.
-#[derive(Clone, Copy, Default, PartialEq, Eq)]
-struct VsyncGeneration(usize);
-
-impl VsyncGeneration {
-    fn next(self) -> Self {
-        Self(self.0.wrapping_add(1))
-    }
-
-    fn raw(self) -> isize {
-        self.0 as isize
-    }
-
-    fn from_raw(raw: isize) -> Self {
-        Self(raw as usize)
-    }
+    Ok(())
 }
 
 const PLATFORM_WINDOW_CLASS_NAME: PCWSTR = w!("Zed::PlatformWindow");
@@ -2326,15 +1930,6 @@ mod tests {
     use super::{encode_restart_arguments, username_and_password};
 
     #[test]
-    fn copying_up_to_four_windows_takes_no_heap() {
-        let windows = crate::window_list::WindowList::new();
-        (1..=4).for_each(|window| windows.push(window));
-        assert!(!windows.snapshot().spilled());
-        windows.push(5);
-        assert!(windows.snapshot().spilled());
-    }
-
-    #[test]
     fn test_read_credential_with_username() {
         assert_eq!(
             round_trip_credential(Some("alice"), b"secret"),
@@ -2427,41 +2022,5 @@ mod tests {
                 vec![12],
             )),
         );
-    }
-}
-
-#[cfg(test)]
-mod file_picker_tests {
-    use super::file_system_path;
-    use windows::Win32::System::Com::{COINIT_APARTMENTTHREADED, CoInitializeEx, CoUninitialize};
-    use windows::Win32::UI::Shell::{IShellItem, SHCreateItemFromParsingName};
-    use windows::core::HSTRING;
-
-    /// What a picked item hands back is the file's exact path, with names
-    /// outside ASCII and outside the BMP intact.
-    #[test]
-    fn a_picked_file_gives_back_its_exact_path() {
-        // SAFETY: the shell item calls below need an apartment on this
-        // thread; a second initialization is harmless.
-        let com = unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED) };
-        let dir = std::env::temp_dir().join(format!("quill-picker-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let file = dir.join("שלום 🎉 report.pdf");
-        std::fs::write(&file, b"x").unwrap();
-        // The runner's temp folder can be an 8.3 short name; the picker
-        // reports the long one.
-        let file = dunce::canonicalize(&file).unwrap();
-
-        // SAFETY: the name is a valid HSTRING and no bind context is passed.
-        let item: IShellItem =
-            unsafe { SHCreateItemFromParsingName(&HSTRING::from(file.as_path()), None) }.unwrap();
-        let picked = file_system_path(&item).unwrap();
-
-        assert_eq!(picked, file);
-        let _ = std::fs::remove_dir_all(&dir);
-        if com.is_ok() {
-            // SAFETY: matches the successful `CoInitializeEx` above.
-            unsafe { CoUninitialize() };
-        }
     }
 }
