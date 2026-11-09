@@ -236,8 +236,7 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut()
             && let Err(err) = live.driver.fetch_joined_communities()
         {
-            self.connection
-                .set_note(StatusNote::error(user_error(&err)));
+            self.set_note(StatusNote::error(user_error(&err)));
         }
         self.show_community_box(CommunityBox::Pick { chat_id }, cx);
     }
@@ -332,8 +331,7 @@ impl QuillApp {
                 .driver
                 .add_community_chat(community_id, chat_id, hidden)
         {
-            self.connection
-                .set_note(StatusNote::error(user_error(&err)));
+            self.set_note(StatusNote::error(user_error(&err)));
         }
         cx.notify();
     }
@@ -367,8 +365,7 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut()
             && let Err(err) = live.driver.remove_community_chat(community_id, chat_id)
         {
-            self.connection
-                .set_note(StatusNote::error(user_error(&err)));
+            self.set_note(StatusNote::error(user_error(&err)));
         }
         cx.notify();
     }
@@ -385,8 +382,7 @@ impl QuillApp {
                 .driver
                 .toggle_community_chats_collapsed(community_id, collapsed)
         {
-            self.connection
-                .set_note(StatusNote::error(user_error(&err)));
+            self.set_note(StatusNote::error(user_error(&err)));
         }
         cx.notify();
     }
@@ -422,12 +418,10 @@ impl QuillApp {
                     name,
                 });
             }
-            ban::BanStart::Refused => self
-                .connection
-                .set_note(StatusNote::error(tr(keys::Q_COMMUNITY_BAN_UNAVAILABLE))),
-            ban::BanStart::Failed(err) => self
-                .connection
-                .set_note(StatusNote::error(user_error(&err))),
+            ban::BanStart::Refused => {
+                self.set_note(StatusNote::error(tr(keys::Q_COMMUNITY_BAN_UNAVAILABLE)))
+            }
+            ban::BanStart::Failed(err) => self.set_note(StatusNote::error(user_error(&err))),
         }
         cx.notify();
     }

@@ -72,8 +72,7 @@ impl QuillApp {
                         return;
                     }
                     if !quill::profile_forms::is_profile_photo_file(&path) {
-                        this.connection
-                            .set_note(StatusNote::silent(tr(keys::Q_PEOPLE_CHOOSE_A_JPEG_PNG_OR)));
+                        this.set_note(StatusNote::silent(tr(keys::Q_PEOPLE_CHOOSE_A_JPEG_PNG_OR)));
                     } else if let Some(CommunityBox::Create { draft, .. }) =
                         this.admin.community.flow.open.as_mut()
                     {
@@ -99,8 +98,7 @@ impl QuillApp {
         let (chat_id, draft) = (*chat_id, draft.clone());
         if draft.name.read(cx).value().trim().is_empty() {
             draft.name.update(cx, |name, cx| name.focus(window, cx));
-            self.connection
-                .set_note(StatusNote::error(tr(keys::Q_PEOPLE_NAME_CANNOT_BE_EMPTY)));
+            self.set_note(StatusNote::error(tr(keys::Q_PEOPLE_NAME_CANNOT_BE_EMPTY)));
             cx.notify();
             return;
         }
@@ -131,7 +129,7 @@ impl QuillApp {
             .as_ref()
             .map(|path| path.to_string_lossy().into_owned());
         let Some(live) = self.live.as_mut() else {
-            self.connection.set_note(StatusNote::info(tr(
+            self.set_note(StatusNote::info(tr(
                 keys::Q_PEOPLE_CREATING_COMMUNITIES_NEEDS_A_LIVE,
             )));
             cx.notify();
@@ -146,9 +144,7 @@ impl QuillApp {
             // The box waits for the answer: it closes on `Created` and
             // stays on a refusal, as tdesktop's does.
             Ok(_) => {}
-            Err(err) => self
-                .connection
-                .set_note(StatusNote::error(user_error(&err))),
+            Err(err) => self.set_note(StatusNote::error(user_error(&err))),
         }
         cx.notify();
     }

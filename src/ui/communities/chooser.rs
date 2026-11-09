@@ -34,8 +34,7 @@ impl QuillApp {
                 .fetch_suitable_community_chats()
                 .and_then(|_| live.driver.fetch_owned_bots())
         {
-            self.connection
-                .set_note(StatusNote::error(user_error(&err)));
+            self.set_note(StatusNote::error(user_error(&err)));
         }
         let search =
             cx.new(|cx| InputState::new(window, cx).placeholder(tr(keys::Q_OPS_SEARCH_CHATS)));
@@ -192,8 +191,7 @@ impl QuillApp {
                             if let Some(live) = this.live.as_mut()
                                 && let Err(err) = live.driver.ensure_private_chat(chat_id)
                             {
-                                this.connection
-                                    .set_note(StatusNote::error(user_error(&err)));
+                                this.set_note(StatusNote::error(user_error(&err)));
                             }
                             this.choose_community_visibility(
                                 community_id,
