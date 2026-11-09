@@ -2,7 +2,7 @@ use std::{
     cell::{RefCell, RefMut},
     hash::Hash,
     os::{
-        fd::{AsRawFd, BorrowedFd, FromRawFd as _, RawFd},
+        fd::{AsRawFd, BorrowedFd, FromRawFd as _, OwnedFd, RawFd},
         unix::net::UnixStream,
     },
     path::PathBuf,
@@ -633,6 +633,40 @@ impl WaylandClientStatePtr {
         }
     }
 
+    /// Quill: run `f` on `surface_id`'s window from the event loop at `at`,
+    /// outside the draw that asked for it (a GPU recovery step). Returns
+    /// whether the timer is armed.
+    pub fn run_for_window_at(
+        &self,
+        surface_id: &ObjectId,
+        at: Instant,
+        f: impl FnOnce(WaylandWindowStatePtr) + 'static,
+    ) -> bool {
+        let client = self.get_client();
+        let state = client.borrow();
+        let surface_id = surface_id.clone();
+        let this = self.clone();
+        let mut f = Some(f);
+        if let Err(err) =
+            state
+                .loop_handle
+                .insert_source(Timer::from_deadline(at), move |_, _, _| {
+                    let Some(client) = this.0.upgrade() else {
+                        return TimeoutAction::Drop;
+                    };
+                    let window = get_window(&mut client.borrow_mut(), &surface_id);
+                    if let (Some(window), Some(f)) = (window, f.take()) {
+                        f(window);
+                    }
+                    TimeoutAction::Drop
+                })
+        {
+            log::error!("cannot schedule a GPU recovery step: {err}");
+            return false;
+        }
+        true
+    }
+
     /// Queue a retry tick for `surface_id` one refresh interval from now. An immediate
     /// retry would spin against the frame-rate throttle that deferred the draw in the
     /// first place.
@@ -1035,7 +1069,7 @@ impl WaylandConnection {
         })?;
 
         let compositor_gpu = detect_compositor_gpu();
-        let gpu_context = Rc::new(RefCell::new(None));
+        let gpu_context = GpuContext::default();
 
         let (frame_ping, frame_ping_source) =
             calloop::ping::make_ping().context("failed to create Wayland frame ping")?;
@@ -2065,10 +2099,6 @@ impl Dispatch<wl_keyboard::WlKeyboard, ()> for WaylandClientStatePtr {
                 size,
                 ..
             } => {
-                if format != wl_keyboard::KeymapFormat::XkbV1 {
-                    log::error!("Received keymap format {:?}, expected XkbV1", format);
-                    return;
-                }
                 let xkb_context = match new_xkb_context() {
                     Ok(context) => context,
                     Err(error) => {
@@ -2076,17 +2106,18 @@ impl Dispatch<wl_keyboard::WlKeyboard, ()> for WaylandClientStatePtr {
                         return;
                     }
                 };
-                let keymap = unsafe {
-                    xkb::Keymap::new_from_fd(
-                        &xkb_context,
-                        fd,
-                        size as usize,
-                        XKB_KEYMAP_FORMAT_TEXT_V1,
-                        KEYMAP_COMPILE_NO_FLAGS,
-                    )
-                    .log_err()
-                    .flatten()
-                    .expect("Failed to create keymap")
+                let received = if format == wl_keyboard::KeymapFormat::XkbV1 {
+                    compile_keymap(&xkb_context, fd, size)
+                } else {
+                    log::error!("Received keymap format {:?}, expected XkbV1", format);
+                    None
+                };
+                let Some(keymap) =
+                    keymap_to_use(received, state.keymap_state.is_some(), || {
+                        default_keymap(&xkb_context)
+                    })
+                else {
+                    return;
                 };
                 state.keymap_state = Some(xkb::State::new(&keymap));
                 state.compose_state = get_xkb_compose_state(&xkb_context);
@@ -2130,13 +2161,17 @@ impl Dispatch<wl_keyboard::WlKeyboard, ()> for WaylandClientStatePtr {
             } => {
                 let focused_window = state.keyboard_focused_window.clone();
 
-                let keymap_state = state.keymap_state.as_mut().unwrap();
-                let old_layout =
-                    keymap_state.serialize_layout(xkbcommon::xkb::STATE_LAYOUT_EFFECTIVE);
-                keymap_state.update_mask(mods_depressed, mods_latched, mods_locked, 0, 0, group);
-                state.modifiers = modifiers_from_xkb(keymap_state);
-                let keymap_state = state.keymap_state.as_mut().unwrap();
-                state.capslock = capslock_from_xkb(keymap_state);
+                let Some(update) = update_modifiers(
+                    state.keymap_state.as_mut(),
+                    [mods_depressed, mods_latched, mods_locked],
+                    group,
+                ) else {
+                    log::warn!("modifiers arrived before a usable keymap, dropped");
+                    return;
+                };
+                let old_layout = update.old_layout;
+                state.modifiers = update.modifiers;
+                state.capslock = update.capslock;
 
                 let input = PlatformInput::ModifiersChanged(ModifiersChangedEvent {
                     modifiers: state.modifiers,
@@ -2175,7 +2210,10 @@ impl Dispatch<wl_keyboard::WlKeyboard, ()> for WaylandClientStatePtr {
                     return;
                 };
 
-                let keymap_state = state.keymap_state.as_ref().unwrap();
+                let Some(keymap_state) = state.keymap_state.as_ref() else {
+                    log::warn!("a key arrived before a usable keymap, dropped");
+                    return;
+                };
                 let keycode = Keycode::from(key + MIN_KEYCODE);
                 let keysym = keymap_state.key_get_one_sym(keycode);
 
@@ -2925,7 +2963,13 @@ impl Dispatch<wl_data_device::WlDataDevice, ()> for WaylandClientStatePtr {
                     const ACTIONS: DndAction = DndAction::Copy;
                     data_offer.set_actions(ACTIONS, ACTIONS);
 
-                    let pipe = Pipe::new().unwrap();
+                    let pipe = match Pipe::new() {
+                        Ok(pipe) => pipe,
+                        Err(err) => {
+                            log::error!("cannot read the dropped files, no pipe: {err:?}");
+                            return;
+                        }
+                    };
                     data_offer.receive(FILE_LIST_MIME_TYPE.to_string(), unsafe {
                         BorrowedFd::borrow_raw(pipe.write.as_raw_fd())
                     });
@@ -3212,11 +3256,180 @@ impl Dispatch<XdgDialogV1, ()> for WaylandClientStatePtr {
     }
 }
 
+/// Quill: the compositor's keymap, or None when the file holds less than
+/// `size` bytes or xkb cannot parse it (the caller keeps the keymap it had).
+/// Read rather than mapped: touching a mapping past the end of a file
+/// shorter than `size` raises SIGBUS.
+fn compile_keymap(context: &xkb::Context, fd: OwnedFd, size: u32) -> Option<xkb::Keymap> {
+    use std::os::unix::fs::FileExt as _;
+    /// Far above any real keymap (tens of KiB); refuses a size that would
+    /// only allocate.
+    const MAX_KEYMAP: u64 = 16 << 20;
+    let file = std::fs::File::from(fd);
+    let length = file.metadata().log_err()?.len();
+    if u64::from(size) > length.min(MAX_KEYMAP) {
+        log::error!("the compositor's keymap is {length} bytes, not the {size} it said");
+        return None;
+    }
+    let mut text = vec![0; size as usize];
+    file.read_exact_at(&mut text, 0).log_err()?;
+    // The text ends with a NUL.
+    if let Some(end) = text.iter().position(|byte| *byte == 0) {
+        text.truncate(end);
+    }
+    let text = String::from_utf8(text).log_err()?;
+    xkb::Keymap::new_from_string(
+        context,
+        text,
+        XKB_KEYMAP_FORMAT_TEXT_V1,
+        KEYMAP_COMPILE_NO_FLAGS,
+    )
+}
+
+/// Quill: the keymap to install after a `wl_keyboard.keymap` event that
+/// brought `received`. Without one the previous keymap stays; with none
+/// yet, the default one, so typing still works.
+fn keymap_to_use(
+    received: Option<xkb::Keymap>,
+    have_one: bool,
+    default: impl FnOnce() -> Option<xkb::Keymap>,
+) -> Option<xkb::Keymap> {
+    if received.is_some() {
+        return received;
+    }
+    if have_one {
+        log::error!("no usable keymap from the compositor, keeping the previous one");
+        return None;
+    }
+    log::error!("no usable keymap from the compositor, using the default one");
+    default()
+}
+
+/// Quill: the keymap libxkbcommon builds from the system's rules (US
+/// unless `XKB_DEFAULT_*` says otherwise), else a US keymap built in, for
+/// a system without xkeyboard-config.
+fn default_keymap(context: &xkb::Context) -> Option<xkb::Keymap> {
+    let system = xkb::Context::new(xkb::CONTEXT_NO_FLAGS);
+    xkb::Keymap::new_from_names(&system, "", "", "", "", None, KEYMAP_COMPILE_NO_FLAGS)
+        .or_else(|| built_in_keymap(context))
+}
+
+fn built_in_keymap(context: &xkb::Context) -> Option<xkb::Keymap> {
+    xkb::Keymap::new_from_string(
+        context,
+        include_str!("default_keymap.xkb").to_owned(),
+        XKB_KEYMAP_FORMAT_TEXT_V1,
+        KEYMAP_COMPILE_NO_FLAGS,
+    )
+}
+
+struct ModifierUpdate {
+    modifiers: Modifiers,
+    capslock: Capslock,
+    old_layout: u32,
+}
+
+/// Quill: applies a `wl_keyboard.modifiers` event; None without a keymap
+/// (the compositor sent none, or one xkb could not parse).
+fn update_modifiers(
+    keymap_state: Option<&mut xkb::State>,
+    [depressed, latched, locked]: [u32; 3],
+    group: u32,
+) -> Option<ModifierUpdate> {
+    let keymap_state = keymap_state?;
+    let old_layout = keymap_state.serialize_layout(xkbcommon::xkb::STATE_LAYOUT_EFFECTIVE);
+    keymap_state.update_mask(depressed, latched, locked, 0, 0, group);
+    Some(ModifierUpdate {
+        modifiers: modifiers_from_xkb(keymap_state),
+        capslock: capslock_from_xkb(keymap_state),
+        old_layout,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use std::cell::Cell;
 
     use super::*;
+
+    /// A compositor whose first keymap xkb refuses (or that sent
+    /// `no_keymap`): keys still type, with the default keymap.
+    #[test]
+    fn without_a_usable_first_keymap_keys_type_with_the_default() {
+        let context = new_xkb_context().unwrap();
+        let keymap = keymap_to_use(None, false, || built_in_keymap(&context))
+            .expect("the default keymap");
+        let state = xkb::State::new(&keymap);
+        // Evdev keycode 30 (+8) is the A key.
+        assert_eq!(state.key_get_utf8(Keycode::new(38)), "a");
+        assert!(keymap_to_use(None, true, || built_in_keymap(&context)).is_none());
+    }
+
+    #[test]
+    fn keyboard_events_without_a_keymap_are_dropped() {
+        assert!(update_modifiers(None, [1, 0, 0], 0).is_none());
+    }
+
+    #[test]
+    fn modifiers_apply_once_a_keymap_is_loaded() {
+        let context = xkb::Context::new(xkb::CONTEXT_NO_FLAGS);
+        let keymap =
+            xkb::Keymap::new_from_names(&context, "", "", "us", "", None, KEYMAP_COMPILE_NO_FLAGS)
+                .expect("us keymap");
+        let mut state = xkb::State::new(&keymap);
+        let shift = 1 << keymap.mod_get_index(xkb::MOD_NAME_SHIFT);
+        let update = update_modifiers(Some(&mut state), [shift, 0, 0], 0).expect("a keymap");
+        assert!(update.modifiers.shift);
+        assert!(!update.modifiers.control);
+    }
+
+    fn keymap_file(name: &str, text: &[u8]) -> OwnedFd {
+        let path = std::env::temp_dir().join(format!("quill-{name}-{}", std::process::id()));
+        std::fs::write(&path, text).unwrap();
+        let file = std::fs::File::open(&path).unwrap();
+        std::fs::remove_file(&path).unwrap();
+        OwnedFd::from(file)
+    }
+
+    fn us_keymap_text() -> Vec<u8> {
+        let context = xkb::Context::new(xkb::CONTEXT_NO_FLAGS);
+        let keymap =
+            xkb::Keymap::new_from_names(&context, "", "", "us", "", None, KEYMAP_COMPILE_NO_FLAGS)
+                .expect("us keymap");
+        let mut text = keymap.get_as_string(XKB_KEYMAP_FORMAT_TEXT_V1).into_bytes();
+        text.push(0);
+        text
+    }
+
+    #[test]
+    fn the_compositors_keymap_compiles() {
+        let text = us_keymap_text();
+        let context = new_xkb_context().unwrap();
+        let fd = keymap_file("keymap", &text);
+        assert!(compile_keymap(&context, fd, text.len() as u32).is_some());
+    }
+
+    /// A compositor that says the keymap is longer than the file it sent:
+    /// mapping that length and parsing it raised SIGBUS past the file's end.
+    #[test]
+    fn a_keymap_shorter_than_its_size_is_refused() {
+        let text = us_keymap_text();
+        let half = text.get(..text.len() / 2).unwrap();
+        let context = new_xkb_context().unwrap();
+        let fd = keymap_file("short-keymap", half);
+        assert!(compile_keymap(&context, fd, (text.len() + (1 << 20)) as u32).is_none());
+    }
+
+    #[test]
+    fn a_keymap_xkb_cannot_parse_is_refused() {
+        let path = std::env::temp_dir().join(format!("quill-bad-keymap-{}", std::process::id()));
+        let text = b"xkb_keymap { this is not a keymap };";
+        std::fs::write(&path, text).unwrap();
+        let file = std::fs::File::open(&path).unwrap();
+        std::fs::remove_file(&path).unwrap();
+        let context = new_xkb_context().unwrap();
+        assert!(compile_keymap(&context, OwnedFd::from(file), text.len() as u32).is_none());
+    }
 
     #[test]
     fn rejects_required_globals_below_supported_versions() {
