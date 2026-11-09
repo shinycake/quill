@@ -169,6 +169,10 @@ impl Render for ChatWindowView {
             return div().size_full().into_any_element();
         }
         if app.read(cx).account.passcode.is_locked() {
+            // The lock draws no history: this window's widgets go off
+            // screen, so they stop running and polling (round 18 C #8), as
+            // the main window's do.
+            app.update(cx, |app, _| app.widgets_left_window(Some(chat_id)));
             return self.render_locked(&app, window, cx);
         }
         if self.title_shown != title {

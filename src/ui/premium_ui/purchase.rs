@@ -43,20 +43,20 @@ impl QuillApp {
                     hub.auto_start = Some((username.to_lowercase(), start_ref.clone()));
                 }
                 self.close_premium(cx);
-                if let Some(live) = self.live.as_mut() {
-                    let sent = live.driver.resolve_deep_link(DeepLinkAction::OpenUsername {
-                        domain: username,
-                        start_param: Some(start_ref),
-                        post: None,
-                        story_id: None,
-                    });
-                    if sent.is_err() {
-                        live.driver.session.payments.hub.auto_start = None;
-                        self.set_status_note(
-                            StatusNote::error(tr(keys::Q_MONEY_COULDNT_REACH_TELEGRAM_TRY_AGAIN)),
-                            cx,
-                        );
+                let sent = self.resolve_deep_link_here(DeepLinkAction::OpenUsername {
+                    domain: username,
+                    start_param: Some(start_ref),
+                    post: None,
+                    story_id: None,
+                });
+                if sent == Some(false) {
+                    if let Some(hub) = self.hub_mut() {
+                        hub.auto_start = None;
                     }
+                    self.set_status_note(
+                        StatusNote::error(tr(keys::Q_MONEY_COULDNT_REACH_TELEGRAM_TRY_AGAIN)),
+                        cx,
+                    );
                 }
             }
             PremiumPurchaseRoute::Invoice { slug } => {

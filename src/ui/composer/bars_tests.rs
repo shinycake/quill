@@ -337,7 +337,7 @@ fn the_bar_handler_for_a_media_reply_offers_another_chat(cx: &mut TestAppContext
     reply_to_ada(&app, vcx);
     let clicks = app.update(vcx, |app, cx| app.bar_clicks(BarKind::Edit, None, cx));
     vcx.update(|window, cx| (clicks.run)(BarAction::ReplyElsewhere, window, cx));
-    assert!(app.read_with(vcx, |app, _| app.share.reply_elsewhere_open));
+    assert!(app.read_with(vcx, |app, _| app.share.forward.reply_chooser_open()));
 }
 
 fn supergroup_status(app: &Entity<QuillApp>, cx: &mut VisualTestContext, status: &str) {

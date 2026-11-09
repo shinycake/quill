@@ -68,18 +68,19 @@ pub const MONO_FONTS: &[&str] = &[
 /// Where one widget's runtime is. Every stage has a way out: off screen a
 /// running widget is released (keeping its last frame) or kept, back on
 /// screen a released or stopped one starts again, and new content starts
-/// over from `Idle`.
+/// over from `Idle`. `R` is the runtime the live stages hold (the UI's
+/// sandbox handle), so a runtime exists exactly while the widget is live.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Lifecycle {
+pub enum Lifecycle<R = ()> {
     /// Never on screen yet: nothing runs and nothing was drawn.
     Idle,
     /// On screen, waiting for one of the [`MAX_LIVE`] sandboxes.
     Waiting,
     /// The sandbox boots and runs the widget's scripts; its first frame has
     /// not come yet.
-    Loading,
+    Loading(R),
     /// Running; its frames show.
-    Running,
+    Running(R),
     /// Released off screen to stay within [`MAX_LIVE`]: its last frame stays
     /// and it starts again when it comes back.
     Released,
@@ -92,15 +93,32 @@ pub enum Lifecycle {
     Failed { reason: String },
 }
 
-impl Lifecycle {
+impl<R> Lifecycle<R> {
     /// A runtime exists for it now.
     pub fn is_live(&self) -> bool {
-        matches!(self, Self::Loading | Self::Running)
+        self.runtime().is_some()
+    }
+
+    /// The runtime of a live widget.
+    pub fn runtime(&self) -> Option<&R> {
+        match self {
+            Self::Loading(runtime) | Self::Running(runtime) => Some(runtime),
+            _ => None,
+        }
     }
 
     /// The bubble shows "Widget stopped".
     pub fn is_stopped(&self) -> bool {
         matches!(self, Self::Stopped { .. } | Self::Failed { .. })
+    }
+
+    /// Its first frame came: a loading runtime runs. Every other stage
+    /// stays.
+    pub fn started(self) -> Self {
+        match self {
+            Self::Loading(runtime) => Self::Running(runtime),
+            other => other,
+        }
     }
 }
 

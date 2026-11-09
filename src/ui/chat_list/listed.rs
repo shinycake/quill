@@ -67,12 +67,26 @@ impl QuillApp {
     /// it was made in, so changing the view ends it (tdesktop
     /// `changeOpenedFolder` clears the selection). Every place that moves
     /// the folder tab or the category goes through here.
+    /// A pinned drag belongs to the view too: it reorders the list on
+    /// screen, so another view ends it unsaved (round 18 B #4).
     pub(in crate::ui) fn set_chat_list_view(&mut self, filter: ChatListFilter, tab: Option<i32>) {
         if self.chat_list.filter != filter || self.folders.tab != tab {
             self.chat_list.selected.clear();
+            self.chat_list.pin_reorder = None;
         }
         self.chat_list.filter = filter;
         self.folders.tab = tab;
+    }
+
+    /// The view shows the pinned list `archived` names, in its own order,
+    /// so its pinned rows can be dragged: the unfiltered main list with no
+    /// folder tab, or the archive (TGX `ChatsAdapter`).
+    pub(in crate::ui) fn pinned_list_shown(&self, archived: bool) -> bool {
+        if archived {
+            self.chat_list.filter == ChatListFilter::Archived
+        } else {
+            self.chat_list.filter == ChatListFilter::All && self.folders.tab.is_none()
+        }
     }
 
     /// The checked chats among `listed`. The one definition of what is

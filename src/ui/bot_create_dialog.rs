@@ -330,14 +330,12 @@ impl QuillApp {
                 );
             }
             // tdesktop opens the new bot's chat and toasts.
-            if let Some(live) = self.live.as_mut() {
-                let _ = live.driver.resolve_deep_link(DeepLinkAction::OpenUsername {
-                    domain: full.to_string(),
-                    start_param: None,
-                    post: None,
-                    story_id: None,
-                });
-            }
+            let _ = self.resolve_deep_link_here(DeepLinkAction::OpenUsername {
+                domain: full.to_string(),
+                start_param: None,
+                post: None,
+                story_id: None,
+            });
             self.set_note(StatusNote::silent(tr_with(
                 keys::Q_MEDIA_CREATED_WILL_MANAGE_THIS_BOT,
                 &[("name", name), ("manager", &manager.to_string())],

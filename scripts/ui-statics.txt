@@ -23,6 +23,7 @@ src/ui/send_fly.rs SOURCE,TARGET,ORIGIN | the one flight's ends, drawn only in i
 src/ui/sticker_player/display.rs DISPLAYS | keyed by window scope
 src/ui/emoji_effect.rs ANCHORS,ACTIVE | keyed by chat and message; a chat shows in one window
 src/ui/emoji_effect.rs NEXT_HEAD | an id counter
+src/ui/widgets_state.rs LAST_QUERY | an id counter: widget query tokens unique across account switches
 src/ui/vanish.rs PAINTED | keyed by chat and message; a chat shows in one window
 src/ui/pull_next_ui.rs SLIDE | names its chat; a chat shows in one window
 src/ui/premium_sticker_effect.rs SEEN,PLAYED | keyed by chat and message; a chat shows in one window

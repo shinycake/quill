@@ -10,7 +10,7 @@ use super::app::QuillApp;
 use super::owned_image::OwnedImage;
 use super::status_note::StatusNote;
 use super::widget_runtime::{Launch, Runtime, RuntimeEvent, WIDGETS};
-use super::widgets_state::{Identity, Poll, WidgetEntry};
+use super::widgets_state::{Identity, Poll, PresenceChange, Showing, WidgetEntry, WidgetStorage};
 use gpui_kit::*;
 use quill::ids::ChatId;
 use quill::lang::{keys, tr_with};
@@ -48,8 +48,12 @@ impl QuillApp {
     }
 
     fn widget_dir(&self) -> Option<std::path::PathBuf> {
-        // No account, no folder: never `widgets/default`.
+        // No account, no folder: never `widgets/default`. A logged-out
+        // account's folder is gone and stays gone.
         self.session()?;
+        if self.widgets.storage == WidgetStorage::Forgotten {
+            return None;
+        }
         let root = quill::settings::safe_app_root()?;
         Some(quill::account_data::widget_dir(
             &root,
@@ -90,20 +94,22 @@ impl QuillApp {
             .insert(key, width);
     }
 
-    /// A frame of the window `window` (`None`: the main one) starts: its
-    /// animating widgets take one display frame each, and ask for the next.
-    /// Each widget ticks in the window it is drawn in, once a frame.
+    /// A frame of the window `window` (`None`: the main one) starts: the
+    /// animating widgets it owns take one display frame each, and ask for
+    /// the next. Each widget ticks in its owner's frames, once a frame; its
+    /// frames redraw every window that shows it ([`Self::land_widgets`]).
     pub(super) fn widgets_frame_start(&self, window: Option<ChatId>, cx: &mut Context<Self>) {
         let mut views = Vec::new();
         for entry in self.widgets.entries.values() {
-            if entry.window != window || !entry.visible || !entry.wants_frames {
+            if entry.presence.owner() != Some(window) || !entry.wants_frames {
                 continue;
             }
-            if let Some(runtime) = &entry.runtime {
+            if let Some(runtime) = entry.lifecycle.runtime() {
                 runtime.tick(super::widget_runtime::clock_ms());
-                views.push(entry.view);
+                views.extend(entry.presence.views());
             }
         }
+        views.sort_unstable();
         views.dedup();
         for view in views {
             self.request_animation_tick_for(view, 60, cx);
@@ -132,8 +138,8 @@ impl QuillApp {
             .widgets
             .entries
             .iter()
-            .filter(|(_, entry)| !entry.visible)
-            .map(|(key, entry)| (entry.hidden_at, *key))
+            .filter(|(_, entry)| !entry.presence.is_shown())
+            .map(|(key, entry)| (entry.presence.hidden_since(), *key))
             .collect();
         let Some(excess) = hidden.len().checked_sub(Self::KEEP_HIDDEN) else {
             return;
@@ -156,64 +162,58 @@ impl QuillApp {
         }
     }
 
-    /// The widgets `keys` went off screen: they stop drawing and drop
-    /// what they can rebuild.
-    fn hide_widgets(&mut self, keys: Vec<WidgetKey>) {
-        for key in keys {
-            self.widgets.clock = self.widgets.clock.saturating_add(1);
-            let clock = self.widgets.clock;
-            if let Some(entry) = self.widgets.entries.get_mut(&key) {
-                entry.visible = false;
-                entry.hidden_at = clock;
-                entry.wants_frames = false;
-                if let Some(runtime) = &entry.runtime {
+    /// `window` (`None`: the main one) stopped drawing the widget `key`:
+    /// another window that draws it takes it over at its width, or it goes
+    /// off screen, stops drawing and drops what it can rebuild.
+    fn widget_left(&mut self, key: WidgetKey, window: Option<ChatId>) {
+        let clock = self.widgets.clock.saturating_add(1);
+        let Some(entry) = self.widgets.entries.get_mut(&key) else {
+            return;
+        };
+        let change = entry.presence.leave(window, clock);
+        match change {
+            PresenceChange::Hid => {
+                if let Some(runtime) = entry.lifecycle.runtime() {
                     runtime.set_visible(false);
                     runtime.trim();
                 }
             }
+            PresenceChange::Width(width) => {
+                if let Some(runtime) = entry.lifecycle.runtime() {
+                    runtime.set_width(f64::from(width));
+                }
+            }
+            PresenceChange::Same | PresenceChange::CameBack => {}
         }
-        self.prune_hidden_widgets();
+        if change == PresenceChange::Hid {
+            self.widgets.clock = clock;
+        }
     }
 
     /// The window `window` (`None`: the main one) closed or shows no
-    /// history: its widgets are off screen now, not at the next pass of
+    /// history: it draws none of its widgets now, not at the next pass of
     /// some other window.
     pub(super) fn widgets_left_window(&mut self, window: Option<ChatId>) {
-        if !self
-            .widgets
-            .entries
-            .values()
-            .any(|entry| entry.window == window && entry.visible)
         {
-            return;
-        }
-        // Others' last passes: a widget one of them showed stays on, theirs.
-        let shown_elsewhere = {
             let mut passes = self.widgets.passes.borrow_mut();
             passes.seen.remove(&window);
             passes.views.remove(&window);
             passes.queued.remove(&window);
-            passes
-                .seen
-                .iter()
-                .flat_map(|(other, keys)| keys.keys().map(move |key| (*key, *other)))
-                .map(|(key, other)| (key, (other, passes.views.get(&other).copied().flatten())))
-                .collect::<std::collections::HashMap<_, _>>()
-        };
-        let mut hidden = Vec::new();
-        for (key, entry) in &mut self.widgets.entries {
-            if entry.window != window || !entry.visible {
-                continue;
-            }
-            match shown_elsewhere.get(key) {
-                Some((other, view)) => {
-                    entry.window = *other;
-                    entry.view = view.or(entry.view);
-                }
-                None => hidden.push(*key),
-            }
         }
-        self.hide_widgets(hidden);
+        let left: Vec<WidgetKey> = self
+            .widgets
+            .entries
+            .iter()
+            .filter(|(_, entry)| entry.presence.drawn_in(window))
+            .map(|(key, _)| *key)
+            .collect();
+        if left.is_empty() {
+            return;
+        }
+        for key in left {
+            self.widget_left(key, window);
+        }
+        self.prune_hidden_widgets();
     }
 
     /// The pass of `window` was drawn: what it showed is on screen, what it
@@ -228,13 +228,17 @@ impl QuillApp {
         // Only a stopped widget starting again changes what the rows show.
         let mut redraw = false;
         let dir = self.widget_dir();
-        let mut hidden = Vec::new();
-        for (key, entry) in &mut self.widgets.entries {
-            if entry.window == window && entry.visible && !seen.contains_key(key) {
-                hidden.push(*key);
-            }
+        let left: Vec<WidgetKey> = self
+            .widgets
+            .entries
+            .iter()
+            .filter(|(key, entry)| entry.presence.drawn_in(window) && !seen.contains_key(*key))
+            .map(|(key, _)| *key)
+            .collect();
+        for key in left {
+            self.widget_left(key, window);
         }
-        self.hide_widgets(hidden);
+        self.prune_hidden_widgets();
         for (key, width) in seen {
             let Some((content, outgoing)) = self.widget_message(key) else {
                 continue;
@@ -256,31 +260,31 @@ impl QuillApp {
                 let height = initial_height(fixed_height, stored.height);
                 WidgetEntry::new(stored, height)
             });
-            entry.window = window;
-            entry.view = view.or(entry.view);
             if entry.identity.as_ref() != Some(&identity) {
                 // New content: start over.
-                entry.runtime = None;
                 entry.lifecycle = Lifecycle::Idle;
                 entry.crashes = 0;
                 entry.polled = None;
                 entry.identity = Some(identity);
             }
-            let came_back = !entry.visible;
-            entry.visible = true;
-            entry.hidden_at = 0;
-            if (entry.width - width).abs() > 0.5 {
-                entry.width = width;
-                if let Some(runtime) = &entry.runtime {
-                    runtime.set_width(f64::from(width));
-                }
+            let change = entry.presence.show(window, Showing { width, view });
+            let came_back = change == PresenceChange::CameBack;
+            if came_back {
+                // Its links ask from the window that shows it now.
+                entry.input_window = window;
             }
-            if let Some(runtime) = &entry.runtime {
+            if let PresenceChange::Width(width) = change
+                && let Some(runtime) = entry.lifecycle.runtime()
+            {
+                runtime.set_width(f64::from(width));
+            }
+            if let Some(runtime) = entry.lifecycle.runtime() {
                 if came_back {
                     runtime.set_visible(true);
                 }
-                // Each set re-sanitises the widget's CSS: only changes go.
-                if entry.theme.as_ref() != Some(&theme) {
+                // Each set re-sanitises the widget's CSS: only changes go,
+                // and only from the owner, so two windows never trade it.
+                if entry.presence.owner() == Some(window) && entry.theme.as_ref() != Some(&theme) {
                     runtime.set_theme(theme.0.clone(), theme.1);
                     entry.theme = Some(theme.clone());
                 }
@@ -294,7 +298,7 @@ impl QuillApp {
             let restart = match &entry.lifecycle {
                 Lifecycle::Idle | Lifecycle::Waiting | Lifecycle::Released => true,
                 Lifecycle::Stopped { .. } => came_back && entry.crashes < MAX_CRASHES,
-                Lifecycle::Loading | Lifecycle::Running | Lifecycle::Failed { .. } => false,
+                Lifecycle::Loading(_) | Lifecycle::Running(_) | Lifecycle::Failed { .. } => false,
             };
             if restart {
                 redraw |= entry.lifecycle.is_stopped();
@@ -323,7 +327,7 @@ impl QuillApp {
             let json =
                 serde_json::json!({"chatData": data.chat_data, "publicData": public}).to_string();
             if entry.data != json {
-                if let Some(runtime) = &entry.runtime {
+                if let Some(runtime) = entry.lifecycle.runtime() {
                     runtime.set_data(json.clone());
                 }
                 entry.data = json;
@@ -337,7 +341,9 @@ impl QuillApp {
             .widgets
             .entries
             .iter()
-            .filter(|(_, entry)| entry.lifecycle == Lifecycle::Waiting && entry.visible)
+            .filter(|(_, entry)| {
+                matches!(entry.lifecycle, Lifecycle::Waiting) && entry.presence.is_shown()
+            })
             .map(|(key, _)| *key)
             .collect();
         waiting.sort();
@@ -345,7 +351,7 @@ impl QuillApp {
             .widgets
             .entries
             .values()
-            .filter(|entry| entry.visible)
+            .filter(|entry| entry.presence.is_shown())
             .count();
         let limit = capacity(visible);
         for key in waiting {
@@ -366,13 +372,12 @@ impl QuillApp {
                     .map(|(key, e)| PoolEntry {
                         key: *key,
                         live: e.lifecycle.is_live(),
-                        visible: e.visible,
-                        hidden_at: e.hidden_at,
+                        visible: e.presence.is_shown(),
+                        hidden_at: e.presence.hidden_since(),
                     })
                     .collect();
                 let Some(out) = victim(&pool) else { break };
                 if let Some(entry) = self.widgets.entries.get_mut(&out) {
-                    entry.runtime = None;
                     entry.lifecycle = Lifecycle::Released;
                 }
             }
@@ -390,6 +395,10 @@ impl QuillApp {
     }
 
     fn start_widget(&mut self, key: WidgetKey, cx: &mut Context<Self>) {
+        // A logged-out account's widgets wait for the screen to go.
+        if self.widgets.storage == WidgetStorage::Forgotten {
+            return;
+        }
         let Some((content, outgoing)) = self.widget_message(key) else {
             return;
         };
@@ -419,10 +428,10 @@ impl QuillApp {
             return;
         };
         let options = serde_json::json!({
-            "width": entry.width.max(1.0),
+            "width": entry.presence.width().max(1.0),
             "dpr": dpr,
             "maxHeight": quill::message_widget::MAX_HEIGHT,
-            "visible": entry.visible,
+            "visible": entry.presence.is_shown(),
             "locale": quill::lang::current_pack_id(),
             "theme": serde_json::from_str::<serde_json::Value>(&theme).unwrap_or_default(),
             "storage": {"local": entry.stored.local, "session": session_area},
@@ -437,23 +446,23 @@ impl QuillApp {
         });
         entry.queries.clear();
         entry.theme = Some((theme, background));
-        entry.runtime = Some(Runtime::start(Launch {
+        entry.lifecycle = Lifecycle::Loading(Runtime::start(Launch {
             html: content.html,
             options: options.to_string(),
             background,
         }));
-        entry.lifecycle = Lifecycle::Loading;
         self.watch_widget_runtimes(cx);
     }
 
     /// The loop that takes what the runtimes left whenever one pokes [`WIDGETS`].
+    /// It is held, not detached: it ends with the screen that owns it.
     fn watch_widget_runtimes(&mut self, cx: &mut Context<Self>) {
-        if std::mem::replace(&mut self.widgets.landing, true) {
+        if self.widgets.lander.is_some() {
             return;
         }
         let mut seen = WIDGETS.epoch();
-        // window-scope: frames land on entries, each naming its window and view.
-        self.spawn_screen(cx, async move |this, cx| {
+        // window-scope: frames land on entries, each naming the windows that draw it.
+        let lander = self.spawn_screen(cx, async move |this, cx| {
             loop {
                 WIDGETS.wait_since(seen).await;
                 seen = WIDGETS.epoch();
@@ -461,8 +470,8 @@ impl QuillApp {
                     break;
                 }
             }
-        })
-        .detach();
+        });
+        self.widgets.lander = Some(lander);
     }
 
     fn land_widgets(&mut self, cx: &mut Context<Self>) {
@@ -473,7 +482,7 @@ impl QuillApp {
             let Some(entry) = self.widgets.entries.get_mut(&key) else {
                 continue;
             };
-            let Some(runtime) = &entry.runtime else {
+            let Some(runtime) = entry.lifecycle.runtime() else {
                 continue;
             };
             let out = runtime.take();
@@ -483,19 +492,29 @@ impl QuillApp {
                 changed = true;
             }
             if entry.wants_frames != out.wants_frames || entry.cursor != out.cursor {
-                entry.wants_frames = out.wants_frames && entry.visible;
+                entry.wants_frames = out.wants_frames;
                 entry.cursor = out.cursor;
                 changed = true;
             }
+            // Off screen nothing redraws for it (round 18 C #2, #3): its
+            // views list is empty, and its rows are not drawn.
+            let shown = entry.presence.is_shown();
             for event in out.events {
                 // Height and lifecycle move the rows: the whole history redraws.
-                all |= matches!(
-                    event,
-                    RuntimeEvent::Height(_) | RuntimeEvent::Stopped(_) | RuntimeEvent::Failed(_)
-                );
-                // The widget's own window answers it: its link box, its
-                // chat's theme (`None` once that window has gone).
-                let window = self.widgets.entries.get(&key).and_then(|e| e.window);
+                all |= shown
+                    && matches!(
+                        event,
+                        RuntimeEvent::Height(_)
+                            | RuntimeEvent::Stopped(_)
+                            | RuntimeEvent::Failed(_)
+                    );
+                // The window it was pressed in answers it: its link box,
+                // its toast (the owner until a press).
+                let window = self
+                    .widgets
+                    .entries
+                    .get(&key)
+                    .and_then(WidgetEntry::asking_window);
                 let mut event = Some(event);
                 self.in_window_scope(window, cx, |this, cx| {
                     if let Some(event) = event.take() {
@@ -507,7 +526,8 @@ impl QuillApp {
                 }
             }
             if changed && let Some(entry) = self.widgets.entries.get(&key) {
-                views.push(entry.view);
+                // Every window that draws it shows the new frame.
+                views.extend(entry.presence.views());
             }
         }
         if all {
@@ -524,7 +544,8 @@ impl QuillApp {
         match event {
             RuntimeEvent::Started => {
                 if let Some(entry) = self.widgets.entries.get_mut(&key) {
-                    entry.lifecycle = Lifecycle::Running;
+                    entry.lifecycle =
+                        std::mem::replace(&mut entry.lifecycle, Lifecycle::Idle).started();
                     entry.crashes = 0;
                 }
             }
@@ -538,7 +559,6 @@ impl QuillApp {
             }
             RuntimeEvent::Stopped(reason) | RuntimeEvent::Failed(reason) => {
                 if let Some(entry) = self.widgets.entries.get_mut(&key) {
-                    entry.runtime = None;
                     entry.wants_frames = false;
                     entry.crashes = entry.crashes.saturating_add(1);
                     entry.lifecycle = if entry.frame.is_some() {
@@ -552,8 +572,12 @@ impl QuillApp {
                 telegram: true,
                 url,
             } => {
-                // The widget's window asked: what the link opens shows there.
-                let window = self.widgets.entries.get(&key).and_then(|e| e.window);
+                // The window it was pressed in asked: what the link opens shows there.
+                let window = self
+                    .widgets
+                    .entries
+                    .get(&key)
+                    .and_then(WidgetEntry::asking_window);
                 self.as_asked_by(window, |this| this.open_link(&url, cx));
             }
             RuntimeEvent::Link {
@@ -584,8 +608,7 @@ impl QuillApp {
                 }
             }
             RuntimeEvent::Request { token, data } => {
-                self.widgets.last_query = self.widgets.last_query.wrapping_add(1);
-                let ours = self.widgets.last_query;
+                let ours = super::widgets_state::next_query_token();
                 let Some(entry) = self.widgets.entries.get_mut(&key) else {
                     return;
                 };
@@ -702,7 +725,7 @@ impl QuillApp {
         let Some(theirs) = entry.queries.remove(&token) else {
             return;
         };
-        if let Some(runtime) = &entry.runtime {
+        if let Some(runtime) = entry.lifecycle.runtime() {
             runtime.respond(theirs, outcome);
         }
     }
@@ -714,7 +737,7 @@ impl QuillApp {
             .widgets
             .entries
             .iter()
-            .filter(|(_, e)| e.visible && matches!(e.poll, Poll::Due(at) if at <= now))
+            .filter(|(_, e)| e.presence.is_shown() && matches!(e.poll, Poll::Due(at) if at <= now))
             .map(|(key, _)| *key)
             .collect();
         for key in due {
@@ -734,7 +757,7 @@ impl QuillApp {
             .widgets
             .entries
             .values()
-            .filter(|e| e.visible)
+            .filter(|e| e.presence.is_shown())
             .filter_map(|e| match e.poll {
                 Poll::Due(at) => Some(at),
                 _ => None,
@@ -780,17 +803,17 @@ impl QuillApp {
     /// Writes the storage of every widget that changed.
     /// `account` logged out and its widget folder went: what its widgets
     /// still had to write goes nowhere (the account's goodbye would write it
-    /// back), and `sessionStorage` goes with them.
+    /// back), and `sessionStorage` goes with them. The runtimes go too: a
+    /// live one would report storage or a height and write the folder back.
     pub(super) fn forget_widget_storage(&mut self, account: &quill::ids::AccountKey) {
         if self.web_app_account() != account.to_string() {
             return;
         }
-        for entry in self.widgets.entries.values_mut() {
-            entry.unsaved = false;
-            entry.stored = Default::default();
-        }
+        self.widgets.storage = WidgetStorage::Forgotten;
+        self.widgets.entries.clear();
         self.widgets.session.clear();
         self.widgets.save_timer = None;
+        self.widgets.poll_timer = None;
     }
 
     pub(super) fn save_widget_storage(&mut self) {

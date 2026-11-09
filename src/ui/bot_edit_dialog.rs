@@ -263,14 +263,12 @@ impl QuillApp {
             return;
         };
         self.close_bot_edit(cx);
-        if let Some(live) = self.live.as_mut() {
-            let _ = live.driver.resolve_deep_link(DeepLinkAction::OpenUsername {
-                domain: owned_bots::BOT_MANAGER_USERNAME.to_string(),
-                start_param: Some(screen.start_parameter(&username)),
-                post: None,
-                story_id: None,
-            });
-        }
+        let _ = self.resolve_deep_link_here(DeepLinkAction::OpenUsername {
+            domain: owned_bots::BOT_MANAGER_USERNAME.to_string(),
+            start_param: Some(screen.start_parameter(&username)),
+            post: None,
+            story_id: None,
+        });
     }
 
     pub(super) fn build_bot_edit_dialog(
