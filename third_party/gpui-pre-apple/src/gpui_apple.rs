@@ -13,13 +13,7 @@ pub mod metal_renderer;
 pub mod process_info;
 
 #[cfg(feature = "font-kit")]
-pub mod glyph_cache;
-#[cfg(feature = "font-kit")]
-pub mod line_cache;
-#[cfg(feature = "font-kit")]
 mod open_type;
-#[cfg(feature = "font-kit")]
-mod sized_fonts;
 #[cfg(feature = "font-kit")]
 mod text_system;
 
