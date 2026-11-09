@@ -9,3 +9,17 @@ src/ui/business/hours.rs 492 read
 src/ui/business/intro_view.rs 108 read
 src/ui/business/location.rs 148 read
 src/ui/business/messages.rs 472 read
+src/ui/background_accounts/switch.rs 104 read
+src/ui/battery_watch.rs 137 read
+src/ui/bidi_line.rs 381 read
+src/ui/boost_box_ui.rs 531 read
+src/ui/boosts_overview.rs 208 read
+src/ui/bot_about.rs 67 read
+src/ui/bot_create_dialog.rs 536 read
+src/ui/bot_edit_dialog.rs 476 read
+src/ui/bot_pending.rs 103 read
+src/ui/bot_permissions.rs 119 read
+src/ui/bot_stream.rs 251 read
+src/ui/bot_verify_dialog.rs 452 read
+src/ui/bot_verify_icon.rs 67 read
+src/ui/bots.rs 885 read
