@@ -190,3 +190,16 @@ src/state/session.rs 121 read
 src/state/session_apply.rs 194 read
 src/state/session_apply_chats.rs 748 read
 src/state/session_apply_error.rs 286 read
+src/state/session_apply_messages.rs 553 read
+src/state/session_apply_ok.rs 831 read
+src/state/session_apply_queries.rs 201 read
+src/state/session_apply_users.rs 76 read
+src/state/session_attach_icons.rs 41 read
+src/state/session_boost_settings.rs 57 read
+src/state/session_calls.rs 659 read
+src/state/session_chat_caps.rs 996 read
+src/state/session_chat_look.rs 144 read
+src/state/session_chat_search.rs 202 read
+src/state/session_chatlist.rs 452 read
+src/state/session_stories.rs 300 read
+src/state/session_subsection_tabs.rs 513 read
