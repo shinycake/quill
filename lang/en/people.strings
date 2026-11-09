@@ -180,8 +180,6 @@
 "qll_people_1_topic" = "1 topic";
 "qll_people_a_title_that_members_will" = "A title that members will see instead of 'Admin'. Empty removes it.";
 "qll_people_abort" = "Abort";
-"qll_people_abort_recovery_email_setup" = "Abort recovery email setup";
-"qll_people_aborting_email_setup" = "aborting email setup…";
 "qll_people_about_copied" = "Description copied to clipboard";
 "qll_people_action_failed" = "action failed";
 "qll_people_activate" = "Activate";

@@ -269,6 +269,16 @@ fn locking_quill_closes_the_live_pip(cx: &mut TestAppContext) {
     });
     settle(main);
     assert!(!live_pip_open(&app, main));
+    app.read_with(main, |app, _| {
+        assert_eq!(
+            app.group_call_screen.window_closed_by_user, None,
+            "the lock closed the PiP, not the user"
+        );
+        assert!(
+            app.group_call.window.is_some(),
+            "the stream window comes back under the lock"
+        );
+    });
 }
 
 #[gpui_kit::test]

@@ -88,6 +88,19 @@ fn webview_salt(dir: &Path) -> Option<String> {
 /// for it outside TDLib's database, so nobody who signs in next under the
 /// same key inherits it. Safe to run more than once.
 pub fn forget(app_root: &Path, key: &AccountKey) {
+    forget_after_helper(app_root, key, None);
+}
+
+/// [`forget`], with the account's web view data removed only once the mini
+/// app helper that has it open is gone (`helper_gone` hears, or
+/// disconnects, when it exited or was killed). While it runs, WebView2
+/// keeps its files locked (the delete fails partway) and WebKitGTK writes
+/// them back, so the next sign-in under this key would find them.
+pub fn forget_after_helper(
+    app_root: &Path,
+    key: &AccountKey,
+    helper_gone: Option<std::sync::mpsc::Receiver<()>>,
+) {
     let account = key.0.as_str();
     // The app-wide stores are this process's, kept under its own app root
     // (a test may name another root, with stores of its own).
@@ -101,7 +114,21 @@ pub fn forget(app_root: &Path, key: &AccountKey) {
     }
     let paths = AccountPaths::for_root(app_root, key);
     forget_folder_data(&paths);
-    let _ = std::fs::remove_dir_all(webview_dir(app_root, account));
+    let dir = webview_dir(app_root, account);
+    let Some(helper_gone) = helper_gone else {
+        let _ = std::fs::remove_dir_all(dir);
+        return;
+    };
+    let later = dir.clone();
+    let spawned = std::thread::Builder::new()
+        .name("quill-webview-forget".into())
+        .spawn(move || {
+            let _ = helper_gone.recv();
+            let _ = std::fs::remove_dir_all(later);
+        });
+    if spawned.is_err() {
+        let _ = std::fs::remove_dir_all(dir);
+    }
 }
 
 /// The account's own data inside its folder. Its device preferences stay.

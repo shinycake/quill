@@ -684,6 +684,9 @@ impl QuillApp {
     /// ends with it (`leave_story_item`): a reply being recorded is
     /// cancelled, not left to be sent as a message to the open chat.
     pub(super) fn release_story_viewer(&mut self, cx: &mut Context<Self>) {
+        if self.stories.viewer.is_open() {
+            self.clear_story_fields(cx);
+        }
         self.leave_story_item(cx);
         if let Some(item) = self.stories.viewer.current().cloned()
             && let Some(live) = self.live.as_mut()

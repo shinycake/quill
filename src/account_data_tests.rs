@@ -122,6 +122,26 @@ fn forgetting_an_account_drops_all_it_left_and_nothing_else() {
     forget(&root, &kept);
 }
 
+/// A log-out while the account's mini app helper runs keeps its web view
+/// data until the helper is gone (it has the files open); the rest goes now.
+#[test]
+fn the_web_view_data_waits_for_the_mini_app_helper() {
+    let _serial = crate::locks::lock_or_recover(&SERIAL);
+    let root = root();
+    let key = AccountKey::new("account-936").unwrap();
+    fill(&root, &key);
+    let (helper_alive, helper_gone) = std::sync::mpsc::sync_channel::<()>(1);
+    forget_after_helper(&root, &key, Some(helper_gone));
+    crate::settings::flush_deferred_writes();
+    assert_eq!(
+        left_behind(&root, &key),
+        vec!["mini app storage"],
+        "only the web view data waits"
+    );
+    drop(helper_alive);
+    forget(&root, &key);
+}
+
 /// A different Telegram user in a slot drops what the last one left, as
 /// when the app quit before a log-out finished; the same user keeps it.
 #[test]

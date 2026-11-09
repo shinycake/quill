@@ -2697,3 +2697,99 @@ updated `premium_ui/preview_tests.rs`.
   window closed (2). The guard covers their window choice.
 - The invite preview hand-over (6) has no test of its own.
 - The speech trial toast's move has no test.
+
+### Phase 14 (area C)
+
+Round 14 of the review, area C (the rest of `src/ui`), on
+`claude/sm-review14-c`. The numbers are the review's finding numbers.
+Area B took 14 and 19 (a `spawn_screen` task's `open_box`, the shared
+seam). The other twenty were fixed.
+
+- **A job's mark lives with the job, not its box (1).** `PasscodeUi::busy`
+  and `lock_after_job` became one value, `PasscodeJob` (`Idle`, `Running`,
+  `RunningThenLock`). `close_passcode` no longer touches it, so Esc or
+  "Lock now" during a Turn off leaves the lock waiting for the answer.
+  The two baseline lines for `PasscodeUi::busy` are gone.
+- **The lock's owner-less deferrals now name their owner (2, 6).**
+  - `adopt_live` clears `deferred_connect`, and `resume_after_unlock`
+    connects only when the screen has no client. So the unlock no longer
+    closes the account adopted from the lock card's Answer, and the call
+    answered there keeps going.
+  - An unlock intent keeps the account and the window that asked
+    (`asking_window`). It runs as that window, and it is dropped when
+    another account is on screen at the unlock.
+- **Calls under the lock (3, 4, 5, 21, 22).**
+  - The stream's Leave/End box is not refused.
+  - A stream PiP the lock closes clears `window_closed_by_user`, so the
+    stream window comes back.
+  - The background ring sounds over an older call's summary.
+  - The lock stops every window's inline clips.
+  - Answering from the lock card dismisses the OS notification.
+  - Details are in lock-is-a-render-state.md.
+- **Drafts are compared with what they were built from (7, 8).**
+  - Each Business draft (greeting, away, hours, location, start page)
+    keeps `base`, the saved value it was made from. Leaving saves only
+    when the draft differs from `base`, not from the server's value now.
+    An untouched screen writes nothing, even when the full info arrived
+    or changed after it was built. Chatbots already worked this way.
+  - The story reply and live comment fields empty when the viewer moves
+    to another story or closes (`clear_story_fields`). A restart of the
+    same story keeps them.
+- **Session pages opened by a box close with it (9, 16).**
+  - `drop_invite_link_pages` removes another admin's links, a link's
+    join requests and its members (and the UI's details and revoked
+    marks). It runs for the chat when the Group Settings box closes, and
+    for every chat in `AdminUi`'s farewell.
+  - `GiftMarketUi`'s farewell stops following the auction on the old
+    account's driver.
+- **A box shows where it was asked (10, 11).**
+  - "Abort recovery email setup" is an inline `TwofaConfirm` inside the
+    2FA box. `GroupConfirmAction::AbortRecoveryEmailSetup` is gone.
+  - A same-forum topic edit calls `open_box(ForumManage)`, so the box
+    moves to the chat window that asked.
+- **Late answers check that they still apply (12, 13, 18).**
+  - A pending profile gallery (`PendingGallery`) records its window, the
+    chat that window showed, and its viewer open count. It opens only in
+    that window, unlocked, with no viewer opened since, on the same chat.
+  - A parked inline round video is dropped on a chat change
+    (`enter_chat_ui` and `sync_chat_ui`) and at resume when its window shows another chat.
+  - A set image that lands after the sticker set box moved to another set
+    opens no editor, and its written PNG is removed (`sticker_box_shows`).
+- **Holds and lists (15, 20).**
+  - A parked voice note or song holds its chat's history while the next
+    track downloads.
+  - The shared-media list tabs reset scroll and "asked" per page
+    (`list_scroll(tab, PageKey)`), as the grid tabs did.
+- **Log-out and the mini app (17).** `close_mini_app_for_forget` closes
+  the account's mini app with `reap_after_notice`. Then
+  `account_data::forget_after_helper` removes the web view folder only
+  once the helper is gone, on a thread that waits for the notice.
+- **Tests.**
+  - `closing_the_passcode_box_keeps_a_lock_waiting_for_the_job`
+  - `under_the_lock_only_the_leave_box_opens`
+  - `locking_quill_closes_the_live_pip` (extended)
+  - `an_older_call_summary_does_not_silence_another_accounts_ring`
+  - `an_unlock_intent_runs_as_its_window_and_only_for_its_account`
+  - `locking_stops_a_chat_windows_round_video`
+  - `an_untouched_screen_never_overwrites_a_newer_saved_value`
+  - `a_reply_draft_does_not_follow_into_the_next_story`
+  - `another_admins_links_close_with_the_group_settings_box`
+  - `aborting_the_recovery_email_asks_inside_the_2fa_box`
+  - `new_topic_for_the_main_windows_forum_opens_in_the_chat_window`
+  - `the_group_avatar_opens_its_photos_newest_first` (extended with the
+    late gallery)
+  - `another_chat_drops_a_round_video_waiting_to_play`
+  - `the_next_song_downloading_keeps_its_chats_history`
+  - `a_set_image_that_lands_after_the_box_moved_on_opens_nothing`
+  - `a_list_tab_starts_over_on_another_chats_page`
+  - `the_web_view_data_waits_for_the_mini_app_helper`
+  - None of them waits on time.
+- **Not tested.**
+  - The `deferred_connect` skip (it needs a live client to adopt).
+  - The gift auction farewell (it needs a live driver).
+  - The OS notification dismissal on answer.
+  - The web view folder's removal after the helper exits (only the wait
+    before it is tested).
+- **Not done.** The Business screens still show the empty state until the
+  full info arrives. Nothing is written from it now, but the screen is not
+  rebuilt when the info lands.

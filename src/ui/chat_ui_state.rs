@@ -242,8 +242,8 @@ impl QuillApp {
     /// What other owners still hold for the chat left is ended here too:
     /// the forward selection (`ShareUi`), the auto-delete picker of the
     /// chat left (`NotifyUi`, not per window: one open for a chat another
-    /// window shows stays) and a recording (`RecordingUi`, which owes
-    /// TDLib and disk a cancel).
+    /// window shows stays), a recording (`RecordingUi`, which owes TDLib
+    /// and disk a cancel), and an inline clip parked to play.
     pub(super) fn enter_chat_ui(&mut self, chat: ChatId, cx: &mut Context<Self>) {
         // Phase B4: the TTL picker belongs to the chat it was opened for.
         self.close_ttl_picker_of_left_chat(Some(chat));
@@ -253,6 +253,9 @@ impl QuillApp {
             return;
         }
         self.profile_modal_leaves_chat(cx);
+        if let Some(left) = self.chat_ui.chat {
+            self.drop_inline_play_intent_in_chat(self.windows.scope, left);
+        }
         let mut next = ChatUi::for_topic(chat, self.open_draft_topic(chat));
         let old = std::mem::take(&mut *self.screen.chat_ui);
         next.pending_reply = old.pending_reply.filter(|reply| reply.belongs_to(chat));
@@ -294,6 +297,7 @@ impl QuillApp {
             }
             Some(made_for) if made_for != chat => {
                 *self.screen.chat_ui = ChatUi::for_topic(chat, topic);
+                self.drop_inline_play_intent_in_chat(self.windows.scope, made_for);
             }
             Some(_) if self.chat_ui.topic != topic => {
                 let mut next = ChatUi::for_topic(chat, topic);

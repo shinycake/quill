@@ -29,6 +29,7 @@ impl QuillApp {
         let saved = self.my_business().start_page.unwrap_or_default();
         let (title_max, message_max) = self.business_start_page_limits();
         StartPageDraft {
+            base: saved.clone(),
             title: super::limited_input(
                 window,
                 cx,
@@ -306,7 +307,7 @@ impl QuillApp {
 
     /// Save of the start page (when it is left).
     pub(super) fn save_business_start_page(&mut self, cx: &mut Context<Self>) -> Leave {
-        let Some((title, message, sticker)) = self
+        let Some((title, message, sticker, saved)) = self
             .dialogs
             .business_dialog
             .as_ref()
@@ -316,12 +317,12 @@ impl QuillApp {
                     p.title.read(cx).value().trim().to_string(),
                     p.message.read(cx).value().trim().to_string(),
                     p.sticker.clone(),
+                    p.base.clone(),
                 )
             })
         else {
             return Leave::Go(None);
         };
-        let saved = self.my_business().start_page.unwrap_or_default();
         let same_sticker =
             sticker.as_ref().map(|s| s.file_id) == saved.sticker.as_ref().map(|s| s.file_id);
         if title == saved.title && message == saved.message && same_sticker {

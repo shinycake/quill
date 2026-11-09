@@ -180,6 +180,16 @@ impl Drop for MiniAppWindow {
 }
 
 impl MiniAppWindow {
+    /// Close it as `Drop` does, and hear when the helper is gone.
+    fn close_with_notice(mut self) -> Option<std::sync::mpsc::Receiver<()>> {
+        let _ = self.writer.send(encode(&HostCommand::Close).into_bytes());
+        let child = self.child.take()?;
+        Some(quill::child_reap::reap_after_notice(
+            child,
+            Duration::from_millis(200),
+        ))
+    }
+
     fn send(&mut self, command: &HostCommand) {
         if self.writer.send(encode(command).into_bytes()) == helper_pipe::Sent::Queued
             || self.wedged

@@ -178,8 +178,6 @@ PanelMotion::opening
 ParsedFile::uploading
 ParsedGroupCall::loaded_all_participants
 ParsedSession::is_password_pending
-PasscodeUi::busy
-PasscodeUi::busy+error
 PasswordBox::sending
 PasswordBox::sending+error
 PaymentsState::form_loading

@@ -300,6 +300,25 @@ fn the_settings_box_opens_and_esc_closes_it(cx: &mut TestAppContext) {
     );
 }
 
+#[gpui_kit::test]
+fn under_the_lock_only_the_leave_box_opens(cx: &mut TestAppContext) {
+    let (app, _main, mut call) = open_stream(cx, StreamState::Live);
+    let call = &mut call;
+    app.update(call, |app, cx| {
+        app.account.passcode.enabled = true;
+        app.lock_by_passcode(cx);
+        app.open_stream_overlay(super::StreamOverlay::Settings, cx);
+        assert!(app.group_call.stream.overlay.is_none(), "Settings waits");
+        app.open_stream_overlay(super::StreamOverlay::Leave { end: false }, cx);
+    });
+    frames(call);
+    assert_eq!(
+        app.read_with(call, |app, _| app.group_call.stream.overlay),
+        Some(super::StreamOverlay::Leave { end: false }),
+        "a manager can still leave or end the stream"
+    );
+}
+
 /// The stream's feed, made a manual one; returns its source.
 fn manual_feed(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> LiveSource {
     let feed = DemoFeed::manual();

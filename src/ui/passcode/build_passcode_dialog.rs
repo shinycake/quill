@@ -70,7 +70,7 @@ impl QuillApp {
     pub(super) fn passcode_body(&mut self, cx: &mut Context<Self>) -> Div {
         let muted = cx.theme().muted_foreground;
         let ui = &self.account.passcode;
-        let busy = ui.busy;
+        let busy = ui.job.is_running();
         let mut body = div().flex().flex_col().gap_3().w_full();
         if let Some(error) = ui.error.clone() {
             body = body.child(
@@ -155,7 +155,7 @@ impl QuillApp {
         label: &'static str,
         danger_action: bool,
     ) -> Div {
-        let busy = self.account.passcode.busy;
+        let busy = self.account.passcode.job.is_running();
         let mut submit = Button::new("passcode-submit")
             .label(if busy {
                 tr(keys::Q_PREFS_WORKING)

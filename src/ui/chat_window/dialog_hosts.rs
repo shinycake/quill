@@ -103,8 +103,14 @@ impl QuillApp {
     /// the last press; such a site carries its window instead
     /// (`scripts/dialog_hosts.py`).
     pub(in crate::ui) fn open_box(&mut self, kind: DialogKind) {
-        let here = self.asking_window().unwrap_or(self.windows.last_press);
+        let here = self.asking_window_or_last_press();
         self.windows.open_box_in(kind, here);
+    }
+
+    /// The window of the action running now, or the window of the last
+    /// press where no window asked ([`Asker::Nobody`]).
+    pub(in crate::ui) fn asking_window_or_last_press(&self) -> Option<ChatId> {
+        self.asking_window().unwrap_or(self.windows.last_press)
     }
 
     /// Run `f`, the part of a flow that runs away from the window that

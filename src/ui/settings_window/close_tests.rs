@@ -252,3 +252,48 @@ fn the_password_check_on_the_page_and_in_the_2fa_box_has_a_field_each(cx: &mut T
     let drawn = frames_over(vcx, 60);
     assert!(drawn.is_empty(), "drawn while nothing changes: {drawn:?}");
 }
+
+/// "Abort recovery email setup" asks inside the 2FA box: a separate
+/// confirm box opened under it and showed only once the 2FA box closed.
+#[gpui_kit::test]
+fn aborting_the_recovery_email_asks_inside_the_2fa_box(cx: &mut TestAppContext) {
+    let (app, main) = new_app(cx);
+    let mut vcx = VisualTestContext::from_window(main, cx);
+    let vcx = &mut vcx;
+    app.update(vcx, |app, cx| {
+        app.demo_settings(Page::Account);
+        app.show_settings_page(Page::Privacy, cx);
+        app.open_twofa(cx);
+        if let Some(session) = app.demo_session.as_mut() {
+            session.auth_state.password_state = Some(PasswordState {
+                has_password: true,
+                password_hint: String::new(),
+                has_recovery_email_address: false,
+                has_passport_data: false,
+                pending_email_pattern: Some("a***@example.com".into()),
+                pending_email_code_length: 6,
+                login_email_address_pattern: String::new(),
+                pending_reset_date: 0,
+            });
+        }
+        cx.notify();
+    });
+    frames(vcx);
+    let trigger = format!(
+        "twofa-confirm-open-{}",
+        quill::lang::tr(quill::lang::keys::Q_PREFS_ABORT_RECOVERY_EMAIL_SETUP)
+    );
+    vcx.update(|window, cx| window.click(gpui_kit::SharedString::from(trigger), cx));
+    frames(vcx);
+    app.read_with(vcx, |app, _| {
+        assert_eq!(
+            app.twofa.confirm,
+            Some(crate::ui::dialogs::TwofaConfirm::AbortRecoveryEmail)
+        );
+        assert!(app.admin.group_confirm_dialog.is_none(), "no box under it");
+    });
+    assert!(
+        vcx.update(|window, _| window.find_all("twofa-confirm-yes").len()) == 1,
+        "the question shows in the 2FA box"
+    );
+}

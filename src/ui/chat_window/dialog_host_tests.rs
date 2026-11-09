@@ -137,6 +137,38 @@ fn new_topic_in_a_chat_window_opens_there(cx: &mut TestAppContext) {
     });
 }
 
+/// The same forum's manage box open in the main window: New Topic in the
+/// chat window for that forum moves the box there too.
+#[gpui_kit::test]
+fn new_topic_for_the_main_windows_forum_opens_in_the_chat_window(cx: &mut TestAppContext) {
+    let h = new_app(cx);
+    let chat_window = h.open_in_new_window(OTHER, cx);
+    cx.update_window(h.main, |_, window, cx| {
+        h.app.update(cx, |app, cx| {
+            app.windows.last_press = None;
+            app.set_window_scope(None);
+            app.open_forum_manage_dialog(OTHER, window, cx);
+        });
+    })
+    .unwrap();
+    draw(h.main, cx);
+    assert_eq!(shown(&h.shell, cx), Some(DialogKind::ForumManage));
+    cx.update_window(chat_window, |_, window, cx| {
+        h.app.update(cx, |app, cx| {
+            app.windows.last_press = Some(OTHER);
+            app.in_window_scope(Some(OTHER), cx, |app, cx| {
+                app.open_forum_topic_editor(OTHER, None, window, cx);
+            });
+        });
+    })
+    .unwrap();
+    draw(h.main, cx);
+    draw(chat_window, cx);
+    assert_eq!(shown(&h.shell, cx), None, "the main window's box left it");
+    let in_chat_window = chat_window_shell(&h, cx);
+    assert_eq!(shown(&in_chat_window, cx), Some(DialogKind::ForumManage));
+}
+
 /// Finding 47, the other half: a Create Bot box whose chat window closes
 /// does not move to the main window.
 #[gpui_kit::test]

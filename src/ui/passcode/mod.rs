@@ -37,6 +37,24 @@ pub(crate) enum PasscodeView {
     Remove,
 }
 
+/// A slow passcode job (PBKDF2, the system prompt). It belongs to the job,
+/// not to the box: closing the box leaves it running, so a lock asked
+/// meanwhile still waits for the answer (a Turn off cannot land under it).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub(crate) enum PasscodeJob {
+    #[default]
+    Idle,
+    Running,
+    /// A lock was asked while it ran: it lands with the answer.
+    RunningThenLock,
+}
+
+impl PasscodeJob {
+    pub(crate) fn is_running(self) -> bool {
+        self != Self::Idle
+    }
+}
+
 /// How long the wrong-passcode shake runs.
 const SHAKE_MS: u64 = 420;
 
@@ -62,7 +80,7 @@ pub(crate) struct PasscodeUi {
     pub(crate) custom_time: Entity<InputState>,
     pub(crate) error: Option<String>,
     pub(crate) lock_error: Option<String>,
-    pub(crate) busy: bool,
+    pub(crate) job: PasscodeJob,
     pub(crate) autolock_secs: u32,
     pub(crate) system_unlock: bool,
     pub(crate) logout_confirm: bool,
@@ -78,9 +96,6 @@ pub(crate) struct PasscodeUi {
     pub(crate) demo: bool,
     /// What was asked while locked and runs at the unlock (`unlock_intents`).
     pub(in crate::ui) unlock_intents: UnlockIntents,
-    /// A lock asked while a passcode job ran: it lands with the job's
-    /// answer (`run_passcode_job`), so a Turn off cannot finish under it.
-    pub(in crate::ui) lock_after_job: bool,
 }
 
 impl PasscodeUi {
@@ -147,7 +162,7 @@ impl PasscodeUi {
             custom_time,
             error: None,
             lock_error: None,
-            busy: false,
+            job: PasscodeJob::Idle,
             autolock_secs: config
                 .as_ref()
                 .map_or(passcode::DEFAULT_AUTOLOCK_SECS, |c| c.autolock_secs),
@@ -159,7 +174,6 @@ impl PasscodeUi {
             system_unlock_key: None,
             demo: false,
             unlock_intents: UnlockIntents::default(),
-            lock_after_job: false,
         }
     }
 
@@ -247,7 +261,6 @@ impl QuillApp {
         self.account.passcode.open = false;
         self.account.passcode.view = PasscodeView::Status;
         self.account.passcode.error = None;
-        self.account.passcode.busy = false;
         self.clear_passcode_fields(window, cx);
         cx.notify();
     }
@@ -281,7 +294,7 @@ impl QuillApp {
 
     /// Enter in any of the form fields.
     pub(crate) fn submit_passcode_form(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.account.passcode.busy || !self.account.passcode.open {
+        if self.account.passcode.job.is_running() || !self.account.passcode.open {
             return;
         }
         match self.account.passcode.view {
@@ -300,7 +313,7 @@ impl QuillApp {
     /// runs in the window that started it, with that window's state in
     /// place: a wrong passcode empties and refocuses the lock field it was
     /// typed in (a chat window's is in its slot). If that window closed
-    /// meanwhile, only `busy` is cleared.
+    /// meanwhile, only the job ends.
     pub(in crate::ui) fn run_passcode_job<T: Send + 'static>(
         &mut self,
         job: impl FnOnce() -> T + Send + 'static,
@@ -308,7 +321,7 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.account.passcode.busy = true;
+        self.account.passcode.job = PasscodeJob::Running;
         self.account.passcode.error = None;
         let task = cx.background_executor().spawn(async move { job() });
         // screen-scope: the passcode is one lock over every account; only its window matters.
@@ -317,15 +330,15 @@ impl QuillApp {
         cx.spawn_in(window, async move |this, cx| {
             let out = task.await;
             let ran = this.update_in(cx, |this, window, cx| {
-                this.account.passcode.busy = false;
+                let job = std::mem::take(&mut this.account.passcode.job);
                 this.in_window_of(window, cx, |this, window, cx| done(this, out, window, cx));
-                this.lock_held_for_job(cx);
+                this.lock_held_for_job(job, cx);
                 cx.notify();
             });
             if ran.is_err() {
                 let _ = this.update(cx, |this, cx| {
-                    this.account.passcode.busy = false;
-                    this.lock_held_for_job(cx);
+                    let job = std::mem::take(&mut this.account.passcode.job);
+                    this.lock_held_for_job(job, cx);
                     cx.notify();
                 });
             }
@@ -533,8 +546,8 @@ impl QuillApp {
         // A Turn off or Change in flight would land under the lock: Turn
         // off would leave Quill locked with no passcode to unlock it. The
         // lock waits for the job's answer.
-        if self.account.passcode.busy {
-            self.account.passcode.lock_after_job = true;
+        if self.account.passcode.job.is_running() {
+            self.account.passcode.job = PasscodeJob::RunningThenLock;
             return;
         }
         let state = global_unlock();
@@ -584,7 +597,7 @@ impl QuillApp {
 
     /// Submit on the lock screen.
     pub(crate) fn submit_unlock(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if !self.account.passcode.is_locked() || self.account.passcode.busy {
+        if !self.account.passcode.is_locked() || self.account.passcode.job.is_running() {
             return;
         }
         let typed = self.read_field(&self.account.passcode.lock.input, cx);
@@ -644,10 +657,10 @@ impl QuillApp {
             self.lock_failed(tr(keys::Q_PREFS_ENTER_YOUR_PASSCODE_ONCE_BEFORE).into(), cx);
             return;
         };
-        if self.account.passcode.busy {
+        if self.account.passcode.job.is_running() {
             return;
         }
-        self.account.passcode.busy = true;
+        self.account.passcode.job = PasscodeJob::Running;
         let receiver = super::system_unlock::authenticate(tr(keys::Q_PREFS_UNLOCK_QUILL));
         self.spawn_system_unlock_wait(receiver, master, window, cx);
     }
@@ -822,8 +835,8 @@ impl QuillApp {
                     .label(tr(keys::PASSCODE_SUBMIT))
                     .primary()
                     .w_full()
-                    .loading(ui.busy)
-                    .disabled(ui.busy || waiting)
+                    .loading(ui.job.is_running())
+                    .disabled(ui.job.is_running() || waiting)
                     .on_click(cx.listener(|this, _, window, cx| this.submit_unlock(window, cx))),
             );
         if system {
@@ -831,7 +844,7 @@ impl QuillApp {
                 Button::new("lock-system-unlock")
                     .label(super::system_unlock::label())
                     .ghost()
-                    .disabled(ui.busy)
+                    .disabled(ui.job.is_running())
                     .on_click(
                         cx.listener(|this, _, window, cx| this.unlock_with_system(window, cx)),
                     ),

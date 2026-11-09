@@ -109,6 +109,32 @@ fn another_chat_drops_what_was_open_for_the_last(cx: &mut TestAppContext) {
     assert_eq!(made_for, Some(other));
 }
 
+/// A round video clicked before its file was local is parked to play;
+/// leaving the chat drops it, so it does not start with sound on return.
+#[gpui_kit::test]
+fn another_chat_drops_a_round_video_waiting_to_play(cx: &mut TestAppContext) {
+    use crate::ui::play_intent::{PlayIntent, PlayTarget};
+    let (app, mut vcx) = new_app(cx);
+    let other = other_chat(&app, &mut vcx);
+    open(&app, &mut vcx, CHAT);
+    app.update(&mut vcx, |app, _| {
+        app.playback.intent = Some(PlayIntent {
+            file: quill::ids::FileId(9001),
+            target: PlayTarget::Inline {
+                chat: CHAT,
+                message: MessageId(5),
+                demand: crate::ui::inline_players::Demand::Sound,
+                window: None,
+            },
+        });
+    });
+    open(&app, &mut vcx, other);
+    assert!(
+        app.read_with(&vcx, |app, _| app.playback.intent.is_none()),
+        "the click was for the chat left"
+    );
+}
+
 #[gpui_kit::test]
 fn choosing_the_open_chat_again_keeps_its_bars(cx: &mut TestAppContext) {
     let (app, mut vcx) = new_app(cx);

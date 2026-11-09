@@ -83,6 +83,11 @@ impl Asked {
         self.0.set(Some(loaded));
         scrolled || fresh
     }
+
+    /// Another list: its first length asks again.
+    pub(super) fn reset(&self) {
+        self.0.set(None);
+    }
 }
 
 /// Wrap `body` (a list inside a scroll region tracked by a handle) so that

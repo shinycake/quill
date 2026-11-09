@@ -60,6 +60,16 @@ impl PlayTarget {
 
     /// The chat window the target was asked for in (`None`: the main
     /// window), for the targets that play in a window's own state.
+    /// The chat of a parked voice note or song: the player bar's chat
+    /// while the next track downloads, so its history stays whole and the
+    /// playlist can go on (`sync_history_holds`).
+    pub(super) const fn player_chat(&self) -> Option<ChatId> {
+        match self {
+            Self::Voice { chat, .. } | Self::Audio { chat, .. } => Some(*chat),
+            Self::Gif { .. } | Self::Inline { .. } | Self::Viewer { .. } => None,
+        }
+    }
+
     pub(super) const fn window(&self) -> Option<ChatId> {
         match self {
             Self::Gif { window, .. }
@@ -192,6 +202,23 @@ impl QuillApp {
             .take_if(|intent| intent.target.window() == Some(chat));
     }
 
+    /// The window `window` (`None`: the main window) left `chat`: a round
+    /// video or GIF parked there would start with sound when the user
+    /// comes back, long after the click. tdesktop drops the play request
+    /// with the chat's history widget.
+    pub(super) fn drop_inline_play_intent_in_chat(&mut self, window: Option<ChatId>, chat: ChatId) {
+        self.playback.intent.take_if(|intent| {
+            matches!(intent.target, PlayTarget::Inline { chat: parked, window: asked, .. }
+                if parked == chat && asked == window)
+        });
+    }
+
+    /// The chat `window` shows (`None`: the main window): a chat window
+    /// shows its own chat.
+    fn chat_shown_in(&self, window: Option<ChatId>) -> Option<ChatId> {
+        window.or_else(|| self.open_chat_id())
+    }
+
     /// Drop the target waiting on `file` (its download failed or stopped).
     pub(super) fn drop_play_intent_for(&mut self, file: FileId) {
         self.playback.intent.take_if(|intent| intent.file == file);
@@ -230,7 +257,12 @@ impl QuillApp {
                 message,
                 demand,
                 window,
-            } => self.play_inline_on_demand(window, chat, message, file, demand, cx),
+            } => {
+                // Its window moved on to another chat meanwhile.
+                if self.chat_shown_in(window) == Some(chat) {
+                    self.play_inline_on_demand(window, chat, message, file, demand, cx);
+                }
+            }
             PlayTarget::Viewer {
                 chat,
                 message,

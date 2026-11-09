@@ -2,7 +2,8 @@
 //! view shows them, so closed-chat pruning (`state::history_prune`) keeps
 //! them whole: the source of a pending forward, the chat a reply bar points
 //! at ("Reply in Another Chat" replies to a message of a chat that is no
-//! longer shown), the chat of the track in the player bar, and the chats
+//! longer shown), the chat of the track in the player bar (and of the next
+//! one while it downloads, after the last one stopped), and the chats
 //! whose side tables something open reads: the group the info panel shows,
 //! the chat of an ad being reported, and the chat whose member lists a
 //! management box reads (they go with the chat's history otherwise, and
@@ -26,6 +27,12 @@ impl QuillApp {
             .chain(self.chat_ui.reply().map(|reply| reply.chat_id))
             .chain(self.windows.slot_history_holds())
             .chain(self.playback.player.chat)
+            .chain(
+                self.playback
+                    .intent
+                    .as_ref()
+                    .and_then(|intent| intent.target.player_chat()),
+            )
             .chain(self.member_list_readers())
             .chain(self.session().into_iter().flat_map(|session| {
                 [session.info_panel_chat(), session.sponsored_report_chat()]
