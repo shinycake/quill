@@ -23,6 +23,8 @@ pub struct ThreadsState {
     /// Subsection tabs: supergroup ids with `supergroup.has_forum_tabs`
     /// (schema 1.8.67, line 2746), from `updateSupergroup` / `getSupergroup`.
     pub forum_tabs_supergroups: HashSet<i64>,
+    /// Supergroup ids with `supergroup.has_forum_sidebar` (schema 1.8.70).
+    pub forum_sidebar_supergroups: HashSet<i64>,
     /// Forum chats whose topic list the chat list already asked for (rows
     /// list recent topic titles), so a failed answer is not asked again
     /// every poll.
@@ -48,6 +50,7 @@ impl ThreadsState {
             forum_topic_icons: Vec::new(),
             saved: SavedMessagesState::default(),
             forum_tabs_supergroups: HashSet::new(),
+            forum_sidebar_supergroups: HashSet::new(),
             forum_row_asked: HashSet::new(),
             forum_topics_failed: HashSet::new(),
             thread: None,

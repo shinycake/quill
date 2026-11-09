@@ -27,14 +27,28 @@ fn sponsored_messages_toggle_request() {
 
 #[test]
 fn forum_toggle_sends_tabs_only_when_enabling() {
-    let on = parse(&toggle_supergroup_is_forum(RequestId(1), 42, true, true));
+    let on = parse(&toggle_supergroup_is_forum(
+        RequestId(1),
+        42,
+        true,
+        true,
+        true,
+    ));
     assert_eq!(on["@type"], "toggleSupergroupIsForum");
     assert_eq!(on["supergroup_id"], 42);
     assert_eq!(on["is_forum"], true);
     assert_eq!(on["has_forum_tabs"], true);
-    let off = parse(&toggle_supergroup_is_forum(RequestId(2), 42, false, true));
+    assert_eq!(on["has_forum_sidebar"], true);
+    let off = parse(&toggle_supergroup_is_forum(
+        RequestId(2),
+        42,
+        false,
+        true,
+        true,
+    ));
     assert_eq!(off["is_forum"], false);
     assert_eq!(off["has_forum_tabs"], false);
+    assert_eq!(off["has_forum_sidebar"], false);
 }
 
 #[test]

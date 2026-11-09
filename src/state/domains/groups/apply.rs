@@ -734,6 +734,7 @@ impl Session {
                 boost_level,
                 is_forum,
                 has_forum_tabs,
+                has_forum_sidebar,
                 has_automatic_translation,
                 username,
                 usernames,
@@ -788,6 +789,7 @@ impl Session {
                     .supergroup_verification
                     .insert(supergroup_id, verification);
                 self.set_supergroup_forum_tabs(supergroup_id, has_forum_tabs);
+                self.set_supergroup_forum_sidebar(supergroup_id, has_forum_sidebar);
                 self.set_supergroup_auto_translate(supergroup_id, has_automatic_translation);
                 self.apply_update_supergroup(
                     supergroup_id,
@@ -814,6 +816,7 @@ impl Session {
                 supergroup_id,
                 is_forum,
                 has_forum_tabs,
+                has_forum_sidebar,
                 has_automatic_translation,
                 username,
                 status,
@@ -853,6 +856,7 @@ impl Session {
                     .supergroup_join_to_send
                     .insert(supergroup_id, join_to_send_messages);
                 self.set_supergroup_forum_tabs(supergroup_id, has_forum_tabs);
+                self.set_supergroup_forum_sidebar(supergroup_id, has_forum_sidebar);
                 self.set_supergroup_auto_translate(supergroup_id, has_automatic_translation);
                 self.apply_supergroup(
                     supergroup_id,

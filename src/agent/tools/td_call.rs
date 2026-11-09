@@ -241,7 +241,7 @@ fn run(args: &Value) -> Result<ToolOutput, ToolError> {
     let schema = td_schema::get();
     let entry = schema.functions.get(&method).ok_or_else(|| {
         ToolError::new(format!(
-            "TDLib has no method {method} (Quill is built with TDLib 1.8.69). Check the name and case in the TDLib API reference."
+            "TDLib has no method {method} (Quill is built with TDLib 1.8.70). Check the name and case in the TDLib API reference."
         ))
     })?;
     let shape = Shape {
