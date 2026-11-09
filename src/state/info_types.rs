@@ -93,16 +93,40 @@ impl ProfilePhoto {
     }
 }
 
+/// The next page of a loaded photo list.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum PhotoPage {
+    /// No page is out.
+    #[default]
+    Idle,
+    /// This request asks for the next page; only its answer extends the list.
+    Asking(RequestId),
+}
+
+impl PhotoPage {
+    pub fn asking(self) -> bool {
+        matches!(self, PhotoPage::Asking(_))
+    }
+
+    /// `request` is the page this list waits for.
+    pub fn answers(self, request: RequestId) -> bool {
+        self == PhotoPage::Asking(request)
+    }
+}
+
 /// B10: fetch state of a user's profile photos (`getUserProfilePhotos`).
 /// `photos` grows a page at a time; `total_count` is the server's count.
+/// Each stage names the request it waits for, so an answer to a fetch that
+/// was dropped (the user's photo changed meanwhile) never lands.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ProfilePhotosFetch {
-    Loading,
+    /// The first page is out as this request.
+    Loading(RequestId),
     Loaded {
         total_count: i32,
         photos: Vec<ProfilePhoto>,
-        /// The next page (`offset` = `photos.len()`) is in flight.
-        loading_more: bool,
+        /// The next page (`offset` = `photos.len()`).
+        next_page: PhotoPage,
     },
     Failed(String),
 }
@@ -126,15 +150,17 @@ pub struct ChatPhotoChange {
 
 /// Fetch state of a chat's photo history (`searchChatMessages` with
 /// `searchMessagesFilterChatPhoto`), newest first.
+/// Like [`ProfilePhotosFetch`], each stage names the request it waits for.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ChatPhotosFetch {
-    Loading,
+    /// The first page is out as this request.
+    Loading(RequestId),
     Loaded {
         total_count: i32,
         changes: Vec<ChatPhotoChange>,
         /// `foundChatMessages.next_from_message_id`; 0 when nothing is left.
         next_from_message_id: MessageId,
-        loading_more: bool,
+        next_page: PhotoPage,
     },
     Failed(String),
 }

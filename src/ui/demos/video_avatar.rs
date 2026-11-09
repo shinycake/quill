@@ -12,7 +12,7 @@ use crate::ui::status_note::StatusNote;
 use gpui_kit::*;
 use quill::diagnostics::{DiagnosticSink, MemorySink};
 use quill::ids::ChatId;
-use quill::state::{InfoPanelTarget, RequestPurpose, Session};
+use quill::state::{ChatPhotosFetch, InfoPanelTarget, ProfilePhotosFetch, RequestPurpose, Session};
 use quill::telegram::client::copy_and_parse;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -100,10 +100,16 @@ fn apply_group(session: &mut Session, sink: &Arc<MemorySink>, seq: &AtomicU64) {
             )
         })
         .collect::<Vec<_>>();
+    apply_all(session, sink, seq, &std::mem::take(&mut jsons));
+    // The history page lands only as the fetch the gallery waits for.
     let extra = session.request(
         RequestPurpose::GetChatPhotoHistory,
         Some(ChatId(VIDEO_GROUP)),
     );
+    session
+        .users_state
+        .chat_photo_history
+        .insert(VIDEO_GROUP, ChatPhotosFetch::Loading(extra));
     jsons.push(format!(
         r#"{{"@type":"foundChatMessages","@extra":"{}","total_count":{},"next_from_message_id":0,"messages":[{}]}}"#,
         extra.0,
@@ -133,7 +139,12 @@ fn apply_user(session: &mut Session, sink: &Arc<MemorySink>, seq: &AtomicU64) {
         extra.0,
         chat_photo_json(9413, STILL, 9430, true),
     ));
+    apply_all(session, sink, seq, &std::mem::take(&mut jsons));
     let extra = session.request_for_user(RequestPurpose::GetUserProfilePhotos, VIDEO_USER);
+    session
+        .users_state
+        .user_profile_photos
+        .insert(VIDEO_USER, ProfilePhotosFetch::Loading(extra));
     jsons.push(format!(
         r#"{{"@type":"chatPhotos","@extra":"{}","total_count":2,"photos":[{},{}]}}"#,
         extra.0,

@@ -212,7 +212,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         if matches!(
             self.session.users_state.user_profile_photos.get(&user_id),
-            Some(ProfilePhotosFetch::Loading | ProfilePhotosFetch::Loaded { .. })
+            Some(ProfilePhotosFetch::Loading(_) | ProfilePhotosFetch::Loaded { .. })
         ) {
             return Ok(None);
         }
@@ -222,7 +222,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.session
             .users_state
             .user_profile_photos
-            .insert(user_id, ProfilePhotosFetch::Loading);
+            .insert(user_id, ProfilePhotosFetch::Loading(extra));
         let json = get_user_profile_photos(extra, user_id, 0, PROFILE_PHOTOS_LIMIT);
         match self.send_json_request(extra, &json) {
             Ok(extra) => Ok(Some(extra)),
