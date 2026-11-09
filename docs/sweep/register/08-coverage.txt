@@ -34,3 +34,17 @@ src/ui/call_conference_ui.rs 414 read
 src/ui/call_device_prefs_ui.rs 94 read
 src/ui/call_link_ui.rs 137 read
 src/ui/call_panel.rs 1000 read
+src/ui/audio/tempo.rs 350 read
+src/ui/audio_playback.rs 797 read
+src/ui/auth_recovery.rs 231 read
+src/ui/auth_registration.rs 133 read
+src/ui/auth_state.rs 170 read
+src/ui/auth_ui.rs 234 read
+src/ui/autoscroll_ui.rs 267 read
+src/ui/background_accounts/account_row.rs 149 read
+src/ui/background_accounts/calls.rs 385 read
+src/ui/background_accounts/chrome.rs 65 read
+src/ui/background_accounts/clicks.rs 230 read
+src/ui/background_accounts/closing.rs 212 read
+src/ui/background_accounts/deleting.rs 343 read
+src/ui/background_accounts/mod.rs 595 read
