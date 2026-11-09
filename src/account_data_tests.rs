@@ -62,6 +62,7 @@ fn fill(root: &Path, key: &AccountKey) {
     .unwrap();
     std::fs::write(paths.root.join("launch-lines.bin"), b"QLL1").unwrap();
     std::fs::create_dir_all(webview_dir(root, account).join("bot-77")).unwrap();
+    std::fs::create_dir_all(widget_dir(root, account)).unwrap();
 }
 
 fn left_behind(root: &Path, key: &AccountKey) -> Vec<&'static str> {
@@ -101,6 +102,9 @@ fn left_behind(root: &Path, key: &AccountKey) -> Vec<&'static str> {
     if webview_dir(root, account).exists() {
         left.push("mini app storage");
     }
+    if widget_dir(root, account).exists() {
+        left.push("widget storage");
+    }
     left
 }
 
@@ -114,11 +118,11 @@ fn forgetting_an_account_drops_all_it_left_and_nothing_else() {
     let kept = AccountKey::new("account-932").unwrap();
     fill(&root, &gone);
     fill(&root, &kept);
-    assert_eq!(left_behind(&root, &gone).len(), 9, "the test filled all");
+    assert_eq!(left_behind(&root, &gone).len(), 10, "the test filled all");
     forget(&root, &gone);
     crate::settings::flush_deferred_writes();
     assert_eq!(left_behind(&root, &gone), Vec::<&str>::new());
-    assert_eq!(left_behind(&root, &kept).len(), 9, "another account's stay");
+    assert_eq!(left_behind(&root, &kept).len(), 10, "another account's stay");
     forget(&root, &kept);
 }
 

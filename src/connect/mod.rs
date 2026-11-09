@@ -106,6 +106,7 @@ mod subsection_tabs;
 mod suggested_posts;
 mod threads;
 mod ticks;
+mod widgets;
 mod ton_wallet;
 mod translate;
 mod types;

@@ -167,6 +167,14 @@ pub enum BotsPurpose {
     CreateBot {
         generation: u64,
     },
+    /// `getWidgetQueryAnswer` for a widget's request `token`; the message
+    /// rides the pending request (`request_for_message`). The answer or the
+    /// failure lands in `bots.widget_answers`.
+    GetWidgetQueryAnswer {
+        token: u64,
+    },
+    /// `getWidgetPublicData` for an on-screen widget that asked to poll.
+    GetWidgetPublicData,
 }
 
 flat_purposes!(Bots(BotsPurpose) {
