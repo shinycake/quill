@@ -153,11 +153,7 @@ pub(crate) struct PreferencesUi {
     /// `system_accent` was read at least once.
     pub(super) system_accent_probed: bool,
     /// Settings → Appearance: the searchable font family list.
-    pub(super) font_picker: Entity<
-        gpui_kit::component::select::SelectState<
-            gpui_kit::component::select::SearchableVec<SharedString>,
-        >,
-    >,
+    pub(super) font_picker: super::appearance_power::FontPicker,
     /// Settings → Appearance: the custom accent color field (kit
     /// `ColorSelect`), tdesktop's "custom" accent circle. Holds the last
     /// custom color; choosing one sets `appearance.accent_rgb`.
@@ -182,11 +178,7 @@ pub(crate) struct PreferencesUi {
 impl PreferencesUi {
     pub(super) fn new(
         cx: &mut Context<QuillApp>,
-        font_picker: Entity<
-            gpui_kit::component::select::SelectState<
-                gpui_kit::component::select::SearchableVec<SharedString>,
-            >,
-        >,
+        font_picker: super::appearance_power::FontPicker,
         accent_picker: Entity<gpui_kit::component::color_picker::ColorPickerState>,
         demo: Option<ScreenshotDemo>,
     ) -> Self {

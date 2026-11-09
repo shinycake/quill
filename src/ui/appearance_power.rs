@@ -6,7 +6,7 @@
 use super::QuillApp;
 use crate::ui::status_note::StatusNote;
 use gpui_kit::component::IndexPath;
-use gpui_kit::component::select::{SearchableVec, Select, SelectEvent, SelectState};
+use gpui_kit::component::select::{SearchableVec, Select, SelectEvent, SelectItem, SelectState};
 use gpui_kit::component::theme::{ActiveTheme, Theme, installed_font_names};
 use gpui_kit::*;
 use quill::lang::{keys, tr};
@@ -15,6 +15,43 @@ use std::sync::OnceLock;
 
 /// The first entry of the font list: the platform default (`lng_font_default`).
 const DEFAULT_LABEL: &str = "Default";
+
+/// One row of the font family list, drawn in its own typeface the way
+/// tdesktop's `ChooseFontBox` previews each family. `None` is the platform
+/// default.
+#[derive(Debug, Clone)]
+pub(in crate::ui) struct FontChoice {
+    family: Option<SharedString>,
+}
+
+/// Settings → Appearance: the searchable font family list.
+pub(in crate::ui) type FontPicker = Entity<SelectState<SearchableVec<FontChoice>>>;
+
+impl SelectItem for FontChoice {
+    type Value = Option<SharedString>;
+
+    fn title(&self) -> SharedString {
+        self.family
+            .clone()
+            .unwrap_or_else(|| SharedString::from(DEFAULT_LABEL))
+    }
+
+    fn render(&self, _: &mut Window, cx: &mut App) -> impl IntoElement {
+        let face = match &self.family {
+            Some(family) => family.clone(),
+            None => SharedString::from(interface_font("", cx)),
+        };
+        div()
+            .min_w_0()
+            .truncate()
+            .font_family(face)
+            .child(self.title())
+    }
+
+    fn value(&self) -> &Option<SharedString> {
+        &self.family
+    }
+}
 
 /// Installed font families, from the kit's list (enumerated once per run).
 fn installed_fonts(cx: &App) -> &'static [String] {
@@ -104,14 +141,12 @@ impl QuillApp {
         stored: &str,
         window: &mut Window,
         cx: &mut Context<Self>,
-    ) -> Entity<SelectState<SearchableVec<SharedString>>> {
+    ) -> FontPicker {
         let installed = installed_fonts(cx);
-        let mut items: Vec<SharedString> = vec![DEFAULT_LABEL.into()];
-        items.extend(
-            installed
-                .iter()
-                .map(|name| SharedString::from(name.clone())),
-        );
+        let mut items = vec![FontChoice { family: None }];
+        items.extend(installed.iter().map(|name| FontChoice {
+            family: Some(SharedString::from(name.clone())),
+        }));
         let selected = quill::font_choice::resolve(stored, installed)
             .and_then(|name| installed.iter().position(|n| n == name))
             .map_or(0, |ix| ix + 1);
@@ -126,12 +161,12 @@ impl QuillApp {
         });
         cx.subscribe(
             &picker,
-            |this, _, event: &SelectEvent<SearchableVec<SharedString>>, cx| {
+            |this, _, event: &SelectEvent<SearchableVec<FontChoice>>, cx| {
                 let SelectEvent::Confirm(value) = event;
-                let family = match value {
-                    Some(name) if name.as_ref() != DEFAULT_LABEL => name.to_string(),
-                    _ => String::new(),
-                };
+                let family = value
+                    .clone()
+                    .flatten()
+                    .map_or_else(String::new, |name| name.to_string());
                 this.set_appearance(cx, |a| a.font_family = family);
             },
         )
