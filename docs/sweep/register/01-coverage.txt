@@ -56,3 +56,14 @@ src/agent/cli/connect.rs	494	read
 src/agent/cli/describe.rs	61	read
 src/agent/cli/files.rs	92	read
 src/agent/cli/flags.rs	714	read
+src/agent/tools/td_redact.rs	220	read
+src/agent/tools/td_request.rs	259	read
+src/agent/tools/td_schema.rs	89	read
+src/agent/tools/ui.rs	748	read
+src/agent/tools/ui_shot.rs	278	read
+src/agent/tools/write/change.rs	277	read
+src/agent/tools/write/common.rs	657	read
+src/agent/tools/write/manage.rs	345	read
+src/agent/tools/write/mod.rs	159	read
+src/agent/tools/write/send.rs	535	read
+src/agent/ui_driver/bridge.rs	474	read
