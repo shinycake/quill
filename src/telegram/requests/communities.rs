@@ -30,6 +30,16 @@ pub fn get_suitable_community_chats(extra: RequestId) -> String {
     .to_string()
 }
 
+/// `getOwnedBots = Users;` — the bots the person owns, which "Add a Chat
+/// to Community" offers (tdesktop `bots.getAdminedBots`).
+pub fn get_owned_bots(extra: RequestId) -> String {
+    json!({
+        "@type": "getOwnedBots",
+        "@extra": extra.as_extra(),
+    })
+    .to_string()
+}
+
 /// `getJoinedCommunities = Communities;`
 pub fn get_joined_communities(extra: RequestId) -> String {
     json!({

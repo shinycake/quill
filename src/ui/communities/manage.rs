@@ -53,7 +53,7 @@ impl QuillApp {
                                         cx,
                                     );
                                 }))
-                                .child(super::row::community_avatar(&name, 40., cx))
+                                .child(self.community_userpic(community_id, 40., cx))
                                 .child(
                                     div()
                                         .flex()

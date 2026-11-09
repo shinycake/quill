@@ -18,6 +18,7 @@ fn community_updates_parsed() {
                     id: 42,
                     have_access: true,
                     name: "Rustaceans".to_string(),
+                    photo: None,
                     date: 1759000000,
                     is_owner: true,
                     can_change_info: true,

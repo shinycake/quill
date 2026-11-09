@@ -377,11 +377,7 @@ pub fn render_community_info_panel(
         .items_center()
         .gap_3()
         .p_4()
-        .child(crate::ui::communities::community_avatar_centered(
-            &community.name,
-            72.,
-            cx,
-        ))
+        .child(app.community_userpic_centered(community_id, 72., cx))
         .child(
             div()
                 .text_lg()

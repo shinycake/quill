@@ -86,11 +86,26 @@ pub enum CommunityOutcome {
         community_id: i64,
         reason: String,
     },
+    /// `createCommunity` answered with the new community, made around
+    /// `chat_id`.
+    Created {
+        community_id: i64,
+        chat_id: Option<i64>,
+    },
+    CreateFailed {
+        reason: String,
+    },
 }
 
 pub struct CommunitiesState {
     /// `getJoinedCommunities`.
     pub joined: Fetch<Vec<i64>>,
+    /// `getOwnedBots`: the user ids of the bots the person owns.
+    pub owned_bots: Fetch<Vec<i64>>,
+    /// The picture for the community our `createCommunity` (the request
+    /// id) is making; one create goes at a time, so a newer one replaces
+    /// it.
+    pub new_community_photo: Option<(RequestId, String)>,
     /// `getCommunityAddChatRequests`, by community id.
     pub add_chat_requests: HashMap<i64, Fetch<AddChatRequestList>>,
     /// `getCommunityMemberChats`, by community and member.
@@ -114,6 +129,8 @@ impl CommunitiesState {
     pub(crate) fn new() -> Self {
         Self {
             joined: Fetch::Idle,
+            owned_bots: Fetch::Idle,
+            new_community_photo: None,
             add_chat_requests: HashMap::new(),
             member_chats: HashMap::new(),
             notification_sends: HashMap::new(),

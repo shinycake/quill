@@ -37,9 +37,13 @@ impl CommunityBox {
         match self {
             Self::Pick { .. } => DialogKind::CommunityPick,
             Self::ChooseChat { .. } => DialogKind::CommunityChooseChat,
-            Self::Visibility { .. } => DialogKind::CommunityVisibility,
+            Self::Visibility { .. } | Self::CreateVisibility { .. } => {
+                DialogKind::CommunityVisibility
+            }
+            Self::Create { .. } => DialogKind::CommunityIdentity,
             Self::Requests { .. } => DialogKind::CommunityRequests,
             Self::HiddenChat { .. } => DialogKind::CommunityHiddenChat,
+            Self::MuteFor { .. } => DialogKind::CommunityMuteFor,
             Self::ConfirmAdd { .. }
             | Self::ConfirmRemove { .. }
             | Self::ConfirmJoin { .. }
@@ -88,7 +92,7 @@ impl QuillApp {
                     cx,
                 );
             }))
-            .child(super::row::community_avatar(&name, 40., cx))
+            .child(self.community_userpic(community_id, 40., cx))
             .child(
                 div()
                     .flex()
@@ -158,11 +162,7 @@ impl QuillApp {
                     )
                     .text_color(cx.theme().primary)
                     .on_click(cx.listener(move |this, _, window, cx| {
-                        this.admin.community.flow.open = None;
-                        this.open_create_community_dialog(window, cx);
-                        if let Some(create) = this.admin.community.create_dialog.as_mut() {
-                            create.chat_id = Some(chat_id);
-                        }
+                        this.open_new_community(chat_id, window, cx);
                     })),
                 );
             if !joined.is_empty() {
@@ -216,18 +216,28 @@ impl QuillApp {
         let ok_app = app.clone();
         app.update(cx, |this, cx| {
             let dialog = dialog.overlay(true).w(px(BOX_WIDTH));
-            let Some(CommunityBox::Visibility {
-                community_id,
-                chat_id,
-                hidden,
-                ..
-            }) = this.admin.community.flow.open
-            else {
-                return dialog.on_close(on_close);
+            let session = this.session();
+            let (hidden, busy, confirm) = match &this.admin.community.flow.open {
+                Some(CommunityBox::Visibility {
+                    community_id,
+                    chat_id,
+                    hidden,
+                    ..
+                }) => (
+                    *hidden,
+                    session.is_some_and(|s| s.community_add_in_flight(*community_id, *chat_id)),
+                    tr(keys::COMMUNITY_ADD_TO),
+                ),
+                Some(CommunityBox::CreateVisibility { hidden, .. }) => (
+                    *hidden,
+                    session.is_some_and(|s| {
+                        s.requests
+                            .has_purpose(quill::state::RequestPurpose::CreateCommunity)
+                    }),
+                    tr(keys::CREATE_GROUP_CREATE),
+                ),
+                _ => return dialog.on_close(on_close),
             };
-            let busy = this
-                .session()
-                .is_some_and(|s| s.community_add_in_flight(community_id, chat_id));
             let muted = cx.theme().muted_foreground;
             let option = |label: Key, about: Key| {
                 div()
@@ -253,8 +263,10 @@ impl QuillApp {
                             keys::COMMUNITY_VISIBILITY_HIDDEN_ABOUT,
                         )))
                         .on_click(cx.listener(|this, &ix: &usize, _, cx| {
-                            if let Some(CommunityBox::Visibility { hidden, .. }) =
-                                this.admin.community.flow.open.as_mut()
+                            if let Some(
+                                CommunityBox::Visibility { hidden, .. }
+                                | CommunityBox::CreateVisibility { hidden, .. },
+                            ) = this.admin.community.flow.open.as_mut()
                             {
                                 *hidden = ix == 1;
                             }
@@ -281,7 +293,7 @@ impl QuillApp {
                 )
                 .child(
                     Button::new("community-visibility-add")
-                        .label(tr(keys::COMMUNITY_ADD_TO))
+                        .label(confirm)
                         .primary()
                         .loading(busy)
                         .disabled(busy)
@@ -520,7 +532,10 @@ crate::ui::shell::register_dialogs! {
     /// "Chat visibility": Visible or Hidden, chosen once.
     CommunityVisibility => DialogSpec::new(
         5412,
-        |app| matches!(app.admin.community.flow.open, Some(CommunityBox::Visibility { .. })),
+        |app| matches!(
+            app.admin.community.flow.open,
+            Some(CommunityBox::Visibility { .. } | CommunityBox::CreateVisibility { .. })
+        ),
         QuillApp::build_community_visibility_dialog,
     )
     .close(|app, _, cx| app.flush_and_close_community_box(cx)),

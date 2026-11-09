@@ -8,15 +8,11 @@
 use super::*;
 use crate::ui::chat_list_keys::ListRow;
 use crate::ui::chat_row::{CHAT_ROW_AVATAR, chat_row_height};
-use crate::ui::context_menu_keys::context_menu_item;
-use crate::ui::dismiss_layer::DismissLayer;
-use crate::ui::menu_surface::MenuSurface;
 use crate::ui::pressable::PressableDiv;
-use gpui_kit::assets::IconName;
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use quill::lang::trn_with;
-use quill::telegram::envelope::{ChatNotificationSettings, MUTE_FOREVER};
+use quill::local_path::sandboxed_display_path;
 
 /// Strip to the left of the userpic the cards peek into (`kPeek`).
 const PEEK: f32 = 0.3;
@@ -25,7 +21,7 @@ const PIVOT_Y: f32 = 0.75;
 /// The gap carved around each shape (`kGap`).
 const GAP: f32 = 0.02;
 /// The userpic's corner radius (`ForumUserpicRadiusMultiplier`).
-const ROUNDING: f32 = 0.3;
+pub(super) const ROUNDING: f32 = 0.3;
 
 /// One card behind the userpic: scale, corner share, angle, opacity
 /// (`kCard1*`, `kCard2*`).
@@ -160,10 +156,40 @@ fn initials_tile(name: &str, size: f32) -> AnyElement {
         .into_any_element()
 }
 
+/// The community photo on the same rounded square, decoded at the drawn
+/// size as chat avatars are.
+pub(super) fn photo_tile(path: &std::path::Path, size: f32) -> AnyElement {
+    img(crate::ui::image_budget::sized_image(
+        crate::ui::image_budget::SizedSource::Path(std::sync::Arc::from(path)),
+        px(size),
+    ))
+    .size(px(size))
+    .flex_none()
+    .rounded(px(size * ROUNDING))
+    .object_fit(ObjectFit::Cover)
+    .into_any_element()
+}
+
 /// A community's picture on `surface`: `size` square plus the peek strip
-/// on its left. TDLib's `community.photo` is not read yet, so the
-/// userpic is the name's initials.
-fn community_avatar_on(name: &str, size: f32, surface: Hsla, cx: &App) -> AnyElement {
+/// on its left. The userpic is `community.photo` once downloaded, the
+/// name's initials until then (tdesktop's empty userpic).
+fn community_avatar_on(
+    name: &str,
+    photo: Option<&std::path::Path>,
+    size: f32,
+    surface: Hsla,
+    cx: &App,
+) -> AnyElement {
+    let tile = match photo {
+        Some(path) => photo_tile(path, size),
+        None => initials_tile(name, size),
+    };
+    with_cards(tile, size, surface, cx)
+}
+
+/// `tile`, a `size` rounded square, with the two cards peeking out on
+/// its left (`PaintCommunityUserpicEffect`).
+pub(super) fn with_cards(tile: AnyElement, size: f32, surface: Hsla, cx: &App) -> AnyElement {
     let color = cx.theme().muted_foreground;
     let peek = size * PEEK;
     div()
@@ -183,27 +209,59 @@ fn community_avatar_on(name: &str, size: f32, surface: Hsla, cx: &App) -> AnyEle
             .left_0()
             .size_full(),
         )
-        .child(
-            div()
-                .absolute()
-                .top_0()
-                .left(px(peek))
-                .child(initials_tile(name, size)),
+        .child(div().absolute().top_0().left(px(peek)).child(tile))
+        .into_any_element()
+}
+
+impl QuillApp {
+    /// The downloaded `community.photo`, inside the media roots.
+    fn community_photo(&self, community_id: i64) -> Option<std::path::PathBuf> {
+        let roots = self.media_display_roots();
+        self.session()
+            .and_then(|s| s.community_photo_path(community_id))
+            .and_then(|path| sandboxed_display_path(path, &roots))
+    }
+
+    fn community_userpic_on(
+        &self,
+        community_id: i64,
+        size: f32,
+        surface: Hsla,
+        cx: &App,
+    ) -> AnyElement {
+        let photo = self.community_photo(community_id);
+        community_avatar_on(
+            &self.community_name(community_id),
+            photo.as_deref(),
+            size,
+            surface,
+            cx,
         )
-        .into_any_element()
-}
+    }
 
-pub(in crate::ui) fn community_avatar(name: &str, size: f32, cx: &App) -> AnyElement {
-    community_avatar_on(name, size, cx.theme().background, cx)
-}
+    /// The community's picture on the window background.
+    pub(in crate::ui) fn community_userpic(
+        &self,
+        community_id: i64,
+        size: f32,
+        cx: &App,
+    ) -> AnyElement {
+        self.community_userpic_on(community_id, size, cx.theme().background, cx)
+    }
 
-/// The same, with an empty strip on the right as wide as the peek, so a
-/// centered picture centers on the userpic.
-pub(in crate::ui) fn community_avatar_centered(name: &str, size: f32, cx: &App) -> AnyElement {
-    div()
-        .pr(px(size * PEEK))
-        .child(community_avatar(name, size, cx))
-        .into_any_element()
+    /// The same, with an empty strip on the right as wide as the peek, so
+    /// a centered picture centers on the userpic.
+    pub(in crate::ui) fn community_userpic_centered(
+        &self,
+        community_id: i64,
+        size: f32,
+        cx: &App,
+    ) -> AnyElement {
+        div()
+            .pr(px(size * PEEK))
+            .child(self.community_userpic(community_id, size, cx))
+            .into_any_element()
+    }
 }
 
 /// `ComposeFolderListEntryText`: the joined chats' names, unread ones in
@@ -249,6 +307,16 @@ fn names_line(summary: &CommunityRowSummary, cx: &App) -> AnyElement {
         .text_color(muted)
         .child(crate::ui::bidi_line::one_line(text, highlights, Vec::new()))
         .into_any_element()
+}
+
+/// The row's date: its newest chat's last message (`_chatsListDate`),
+/// in the chat rows' format.
+fn row_date(date: i32) -> Option<String> {
+    (date > 0).then(|| {
+        let now = quill::local_time::civil_local(quill::local_time::now_unix());
+        let date = quill::local_time::civil_local(i64::from(date));
+        quill::local_time::chat_list_stamp(&date, &now)
+    })
 }
 
 /// The unread-chats counter, grey when every unread chat is muted.
@@ -298,7 +366,7 @@ fn mention_badge() -> AnyElement {
 }
 
 impl QuillApp {
-    fn community_row_summary(&self, community_id: i64) -> Option<CommunityRowSummary> {
+    pub(super) fn community_row_summary(&self, community_id: i64) -> Option<CommunityRowSummary> {
         self.listed_community_rows()
             .into_iter()
             .find(|row| row.community_id == community_id)
@@ -336,7 +404,8 @@ impl QuillApp {
             .on_mouse_down(
                 MouseButton::Right,
                 cx.listener(move |this, event: &MouseDownEvent, _, cx| {
-                    this.admin.community.flow.row_menu = Some((community_id, event.position));
+                    this.admin.community.flow.row_menu =
+                        Some(RowMenu::at(community_id, event.position));
                     cx.notify();
                 }),
             )
@@ -348,8 +417,8 @@ impl QuillApp {
                     .child(
                         div()
                             .ml(px(-CHAT_ROW_AVATAR * PEEK))
-                            .child(community_avatar_on(
-                                &summary.name,
+                            .child(self.community_userpic_on(
+                                community_id,
                                 CHAT_ROW_AVATAR,
                                 cx.theme().sidebar,
                                 cx,
@@ -364,10 +433,26 @@ impl QuillApp {
                             .flex_1()
                             .child(
                                 div()
-                                    .font_semibold()
-                                    .min_w_0()
-                                    .truncate()
-                                    .child(summary.name.clone()),
+                                    .flex()
+                                    .items_center()
+                                    .gap_2()
+                                    .child(
+                                        div()
+                                            .flex_1()
+                                            .font_semibold()
+                                            .min_w_0()
+                                            .truncate()
+                                            .child(summary.name.clone()),
+                                    )
+                                    .when_some(row_date(summary.date), |line, stamp| {
+                                        line.child(
+                                            div()
+                                                .flex_none()
+                                                .text_xs()
+                                                .text_color(cx.theme().muted_foreground)
+                                                .child(stamp),
+                                        )
+                                    }),
                             )
                             .child(
                                 div()
@@ -384,165 +469,5 @@ impl QuillApp {
             )
             .map(|row| self.chat_list_nav_row(row, ListRow::Community(community_id), false, cx))
             .into_any_element()
-    }
-
-    /// Mute forever or unmute the community, which its chats follow
-    /// while they keep their defaults.
-    fn toggle_community_muted(&mut self, community_id: i64, cx: &mut Context<Self>) {
-        let current = self
-            .session()
-            .and_then(|s| s.community_notification_settings(community_id))
-            .unwrap_or_default();
-        let settings = ChatNotificationSettings {
-            use_default_mute_for: false,
-            mute_for: if current.is_muted() { 0 } else { MUTE_FOREVER },
-            ..current
-        };
-        if let Some(live) = self.live.as_mut()
-            && let Err(err) = live
-                .driver
-                .set_community_notification_settings(community_id, settings)
-        {
-            self.connection
-                .set_note(StatusNote::error(user_error(&err)));
-        }
-        cx.notify();
-    }
-
-    /// "Mark as read" for every chat the row stands for.
-    fn mark_community_read(&mut self, community_id: i64, cx: &mut Context<Self>) {
-        let Some(summary) = self.community_row_summary(community_id) else {
-            return;
-        };
-        if let Some(live) = self.live.as_mut() {
-            let failed = summary
-                .member_chat_ids
-                .iter()
-                .filter_map(|chat_id| {
-                    live.driver
-                        .mark_chat_as_read(quill::ids::ChatId(*chat_id))
-                        .err()
-                })
-                .last();
-            if let Some(err) = failed {
-                self.connection
-                    .set_note(StatusNote::error(user_error(&err)));
-            }
-        }
-        cx.notify();
-    }
-
-    /// The row's right-click menu, in tdesktop's order for a community
-    /// entry: View community info, Ungroup, Mute / Unmute, Mark as read.
-    pub(in crate::ui) fn community_row_menu_overlay(
-        &self,
-        community_id: i64,
-        position: Point<Pixels>,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let muted = self
-            .session()
-            .and_then(|s| s.community_notification_settings(community_id))
-            .is_some_and(|settings| settings.is_muted());
-        let any_unread = self
-            .community_row_summary(community_id)
-            .is_some_and(|summary| summary.unread_chats > 0);
-        let item = |id: &'static str,
-                    icon: IconName,
-                    label: &'static str,
-                    on_click: Box<dyn Fn(&mut QuillApp, &mut Window, &mut Context<QuillApp>)>,
-                    cx: &mut Context<QuillApp>| {
-            context_menu_item(
-                id,
-                icon,
-                label,
-                text_menu().into(),
-                true,
-                &self.frame.menu.items,
-                cx,
-            )
-            .on_click(cx.listener(move |this, _, window, cx| {
-                this.admin.community.flow.row_menu = None;
-                on_click(this, window, cx);
-                cx.notify();
-            }))
-            .into_any_element()
-        };
-        let mut rows: Vec<AnyElement> = vec![
-            item(
-                "community-menu-info",
-                IconName::Info,
-                tr(keys::CONTEXT_VIEW_COMMUNITY),
-                Box::new(move |this, window, cx| {
-                    this.open_info_panel_target(
-                        quill::state::InfoPanelTarget::Community(community_id),
-                        window,
-                        cx,
-                    );
-                }),
-                cx,
-            ),
-            item(
-                "community-menu-ungroup",
-                IconName::ChevronsUpDown,
-                tr(keys::COMMUNITY_UNGROUP),
-                Box::new(move |this, _, cx| {
-                    this.show_community_box(CommunityBox::Ungroup { community_id }, cx);
-                }),
-                cx,
-            ),
-            item(
-                "community-menu-mute",
-                if muted {
-                    IconName::Bell
-                } else {
-                    IconName::BellOff
-                },
-                if muted {
-                    tr(keys::MUTE_MENU_UNMUTE)
-                } else {
-                    tr(keys::MUTE_MENU_MUTE)
-                },
-                Box::new(move |this, _, cx| this.toggle_community_muted(community_id, cx)),
-                cx,
-            ),
-        ];
-        if any_unread {
-            rows.push(item(
-                "community-menu-read",
-                IconName::CircleCheck,
-                tr(keys::CONTEXT_MARK_READ),
-                Box::new(move |this, _, cx| this.mark_community_read(community_id, cx)),
-                cx,
-            ));
-        }
-        let panel = div()
-            .id("community-menu-panel")
-            .role(Role::Group)
-            .occlude()
-            .flex()
-            .flex_col()
-            .min_w(px(200.))
-            .px_1()
-            .py_1()
-            .menu_surface(cx)
-            .children(rows);
-        DismissLayer::new(
-            "community-menu-overlay",
-            cx.listener(|this, _, _, cx| {
-                this.admin.community.flow.row_menu = None;
-                cx.notify();
-            }),
-        )
-        .layer(|layer| layer.track_focus(&self.frame.menu.focus))
-        .anchored(
-            position,
-            div()
-                .id("community-menu-region")
-                .role(Role::Group)
-                .a11y_tag(quill::agent::ui_driver::redact::REGION_MENU)
-                .child(panel),
-        )
-        .focus_trap("community-menu-focus", &self.frame.menu.focus)
     }
 }

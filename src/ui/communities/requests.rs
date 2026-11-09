@@ -10,6 +10,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::*;
+use crate::ui::scroll_load::{load_due, loading_row, scrolled_near_end, watch_scroll};
 use crate::ui::shell::{DialogKind, QuillShell};
 use gpui_kit::component::button::*;
 use gpui_kit::component::dialog::Dialog;
@@ -51,6 +52,8 @@ impl QuillApp {
             self.connection
                 .set_note(StatusNote::error(user_error(&err)));
         }
+        self.admin.community.flow.requests_scroll = ScrollHandle::new();
+        self.admin.community.flow.requests_asked = Default::default();
         self.show_community_box(
             CommunityBox::Requests {
                 community_id,
@@ -359,6 +362,42 @@ impl QuillApp {
             .into_any_element()
     }
 
+    /// The next page of requests (`getCommunityAddChatRequests` from the
+    /// last `next_offset`), once the list is scrolled near its end or does
+    /// not fill the box, as tdesktop's list loads more on scroll. A failed
+    /// page is asked again only on a scroll.
+    fn community_requests_more(&mut self, cx: &mut Context<Self>, scrolled: bool) {
+        let Some(CommunityBox::Requests { community_id, .. }) = self.admin.community.flow.open
+        else {
+            return;
+        };
+        let Some(session) = self.session() else {
+            return;
+        };
+        let fetch = session.communities.add_chat_requests(community_id);
+        let loaded = fetch.data().map_or(0, |list| list.requests.len());
+        let has_more = fetch.data().is_some_and(|list| list.next_offset.is_some())
+            && (scrolled || fetch.error().is_none());
+        let flow = &self.admin.community.flow;
+        if !load_due(
+            scrolled_near_end(&flow.requests_scroll),
+            has_more,
+            fetch.is_loading(),
+        ) || !flow.requests_asked.allow(loaded, scrolled)
+        {
+            return;
+        }
+        if let Some(live) = self.live.as_mut()
+            && let Err(err) = live
+                .driver
+                .fetch_community_add_chat_requests(community_id, false)
+        {
+            self.connection
+                .set_note(StatusNote::error(user_error(&err)));
+        }
+        cx.notify();
+    }
+
     fn build_community_requests_dialog(
         app: &Entity<QuillApp>,
         shell: &Entity<QuillShell>,
@@ -387,9 +426,6 @@ impl QuillApp {
                 .map(|list| list.requests.clone())
                 .unwrap_or_default();
             let loading = fetch.is_some_and(|f| f.is_loading());
-            let more = fetch
-                .and_then(|f| f.data())
-                .is_some_and(|list| list.next_offset.is_some());
             let error = fetch.and_then(|f| f.error()).map(str::to_owned);
             let count = session
                 .and_then(|s| s.groups.community_full_infos.get(&community_id))
@@ -436,7 +472,8 @@ impl QuillApp {
                 .flex()
                 .flex_col()
                 .max_h(px(360.))
-                .overflow_y_scroll();
+                .overflow_y_scroll()
+                .track_scroll(&this.admin.community.flow.requests_scroll);
             for request in &requests {
                 list = list.child(this.community_request_row(
                     community_id,
@@ -455,27 +492,13 @@ impl QuillApp {
                         .child(gpui_kit::component::spinner::Spinner::new()),
                 );
             }
-            if more && !loading {
-                list = list.child(
-                    Button::new("community-requests-more")
-                        .label(tr(keys::Q_OPS_LOAD_MORE))
-                        .ghost()
-                        .on_click(cx.listener(move |this, _, _, cx| {
-                            if let Some(live) = this.live.as_mut()
-                                && let Err(err) = live
-                                    .driver
-                                    .fetch_community_add_chat_requests(community_id, false)
-                            {
-                                this.connection
-                                    .set_note(StatusNote::error(user_error(&err)));
-                            }
-                            cx.notify();
-                        })),
-                );
+            if loading && !requests.is_empty() {
+                list = list.child(loading_row("community-requests-loading", cx));
             }
             if let Some(error) = error {
                 list = list.child(div().text_sm().text_color(cx.theme().danger).child(error));
             }
+            let list = list.on_scroll(watch_scroll(cx, Self::community_requests_more));
             body = body.child(list).children(undo_bar);
             let has_requests = !requests.is_empty();
             let footer = div()

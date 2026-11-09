@@ -96,3 +96,4 @@
 "lng_community_chat_remove_bot" = "Remove Bot";
 "lng_profile_join_group" = "Join Group";
 "lng_context_view_community" = "View community info";
+"lng_community_created" = "Community created.";

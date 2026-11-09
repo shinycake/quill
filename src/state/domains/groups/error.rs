@@ -58,6 +58,16 @@ impl Session {
                     self.fail_owner_lookup(chat_id.0, err);
                 }
             }
+            // tdesktop toasts a refused create; the box stays, and the
+            // photo waiting for the community goes.
+            Some(RequestPurpose::CreateCommunity) => {
+                self.communities.new_community_photo = None;
+                self.communities
+                    .outcomes
+                    .push_back(crate::state::CommunityOutcome::CreateFailed {
+                        reason: error_reason(err),
+                    });
+            }
             // TDLib 1.8.68 community management: surface refusals
             // ("Have not enough rights", a missing community) in the
             // status note.

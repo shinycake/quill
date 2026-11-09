@@ -10,7 +10,7 @@ use crate::state::{CommunitiesPurpose, CommunityMember, ProfileChatsKind, Reques
 use crate::telegram::envelope::ChatNotificationSettings;
 use crate::telegram::requests::{
     add_community_chat, get_community_add_chat_requests, get_community_member_chats,
-    get_joined_communities, process_community_add_chat_request,
+    get_joined_communities, get_owned_bots, process_community_add_chat_request,
     process_community_add_chat_requests, remove_community_chat,
     set_community_notification_settings, toggle_community_are_chats_collapsed,
     toggle_community_member_is_banned,
@@ -76,6 +76,74 @@ impl<S: JsonSender> ConnectDriver<S> {
             Err(err) => {
                 let stale = self.session.communities.joined.take_data();
                 self.session.communities.joined = stale.map_or(Fetch::Idle, Fetch::Ready);
+                Err(err)
+            }
+        }
+    }
+
+    /// `createCommunity` from the identity box, with the picture chosen
+    /// there: it goes up with `setCommunityPhoto` once the community
+    /// exists (tdesktop uploads it in `create`'s done handler).
+    pub fn create_community_with_photo(
+        &mut self,
+        chat_id: crate::ids::ChatId,
+        name: &str,
+        is_chat_hidden: bool,
+        photo: Option<String>,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        let sent = self.create_community(chat_id, name, is_chat_hidden)?;
+        if let Some(extra) = sent {
+            self.session.communities.new_community_photo = photo.map(|path| (extra, path));
+        }
+        Ok(sent)
+    }
+
+    /// The community `communityId` names, when it answers our own
+    /// `createCommunity` (`extra`).
+    pub(super) fn created_community(
+        &self,
+        extra: Option<RequestId>,
+        community_id: i64,
+    ) -> Option<(i64, RequestId)> {
+        let extra = extra?;
+        (self.session.requests.purpose(extra) == Some(RequestPurpose::CreateCommunity))
+            .then_some((community_id, extra))
+    }
+
+    /// A community we created exists: load its full info, and set the
+    /// picture its identity box chose. `let _`: the community is already
+    /// in the model, and a failed send must not fail the ingest.
+    pub(super) fn community_created(&mut self, community_id: i64, extra: RequestId) {
+        let _ = self.get_community_full_info(community_id);
+        let photo = self
+            .session
+            .communities
+            .new_community_photo
+            .take_if(|(asked, _)| *asked == extra);
+        if let Some((_, path)) = photo {
+            let _ = self.set_community_photo(community_id, Some(&path));
+        }
+    }
+
+    /// `getOwnedBots` for the "Add a Chat to Community" picker, asked
+    /// again each time it opens; the last list stays while the new one
+    /// loads.
+    pub fn fetch_owned_bots(&mut self) -> Result<Option<RequestId>, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        if self.session.communities.owned_bots.is_loading() {
+            return Ok(None);
+        }
+        let purpose = RequestPurpose::Communities(CommunitiesPurpose::GetOwnedBots);
+        let extra = self.session.request(purpose, None);
+        let stale = self.session.communities.owned_bots.take_data();
+        self.session.communities.owned_bots = Fetch::Loading { stale };
+        match self.send_json_request(extra, &get_owned_bots(extra)) {
+            Ok(extra) => Ok(Some(extra)),
+            Err(err) => {
+                let stale = self.session.communities.owned_bots.take_data();
+                self.session.communities.owned_bots = stale.map_or(Fetch::Idle, Fetch::Ready);
                 Err(err)
             }
         }

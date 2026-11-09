@@ -433,7 +433,11 @@ impl QuillApp {
 
     /// The submenu that is open, by hover or by key.
     fn open_submenu(&self) -> Option<ChatMenuSubmenu> {
-        self.chat_list.menu.as_ref().and_then(|menu| menu.submenu)
+        match (&self.chat_list.menu, &self.admin.community.flow.row_menu) {
+            (Some(menu), _) => menu.submenu,
+            (None, Some(menu)) => menu.submenu,
+            (None, None) => None,
+        }
     }
 
     /// Up, Down, Left, Right, Escape and Enter where a submenu is involved.

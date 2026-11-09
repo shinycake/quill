@@ -173,3 +173,86 @@ fn undo_drops_the_answer_and_a_new_answer_replaces_it(cx: &mut TestAppContext) {
     frames(&mut vcx);
     assert_eq!(pending_undo(&app, &mut vcx), Some(69));
 }
+
+fn open_box(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> &'static str {
+    app.read_with(vcx, |app, _| match &app.admin.community.flow.open {
+        Some(CommunityBox::Create { .. }) => "create",
+        Some(CommunityBox::CreateVisibility { .. }) => "create-visibility",
+        Some(CommunityBox::Pick { .. }) => "pick",
+        Some(CommunityBox::MuteFor { .. }) => "mute-for",
+        Some(_) => "other",
+        None => "none",
+    })
+}
+
+#[gpui_kit::test]
+fn create_community_asks_a_name_then_the_visibility_and_comes_back(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    frames(&mut vcx);
+    app.update_in(&mut vcx, |app, window, cx| {
+        app.open_new_community(OWN_CHANNEL, window, cx)
+    });
+    frames(&mut vcx);
+    app.update_in(&mut vcx, |app, window, cx| {
+        app.submit_new_community_identity(window, cx)
+    });
+    frames(&mut vcx);
+    assert_eq!(open_box(&app, &mut vcx), "create", "an empty name stays");
+    app.update_in(&mut vcx, |app, window, cx| {
+        if let Some(CommunityBox::Create { draft, .. }) = &app.admin.community.flow.open {
+            draft
+                .name
+                .update(cx, |name, cx| name.set_value("Field Guild", window, cx));
+        }
+        app.submit_new_community_identity(window, cx)
+    });
+    frames(&mut vcx);
+    assert_eq!(open_box(&app, &mut vcx), "create-visibility");
+    app.update_in(&mut vcx, |app, window, cx| {
+        app.community_visibility_back(window, cx)
+    });
+    frames(&mut vcx);
+    let name = app.read_with(&vcx, |app, cx| match &app.admin.community.flow.open {
+        Some(CommunityBox::Create { draft, .. }) => draft.name.read(cx).value().to_string(),
+        _ => String::new(),
+    });
+    assert_eq!(name, "Field Guild", "Cancel keeps the typed name");
+}
+
+#[gpui_kit::test]
+fn the_row_menu_mute_submenu_opens_and_leads_to_mute_for(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    frames(&mut vcx);
+    app.update(&mut vcx, |app, cx| {
+        app.admin.community.flow.row_menu = Some(super::RowMenu::at(
+            RUSTACEANS,
+            gpui_kit::point(px(100.), px(100.)),
+        ));
+        app.open_chat_submenu(crate::ui::menu_states::ChatMenuSubmenu::Mute, cx);
+    });
+    frames(&mut vcx);
+    let submenu = app.read_with(&vcx, |app, _| {
+        app.admin
+            .community
+            .flow
+            .row_menu
+            .and_then(|menu| menu.submenu)
+    });
+    assert_eq!(submenu, Some(crate::ui::menu_states::ChatMenuSubmenu::Mute));
+    app.update(&mut vcx, |app, cx| app.close_chat_submenu(cx));
+    let submenu = app.read_with(&vcx, |app, _| {
+        app.admin
+            .community
+            .flow
+            .row_menu
+            .and_then(|menu| menu.submenu)
+    });
+    assert_eq!(submenu, None, "Left or Escape folds the submenu only");
+    app.update_in(&mut vcx, |app, window, cx| {
+        app.open_community_mute_for(RUSTACEANS, window, cx)
+    });
+    frames(&mut vcx);
+    assert_eq!(open_box(&app, &mut vcx), "mute-for");
+    let shown = app.read_with(&vcx, |app, cx| app.community_mute_for_value(cx));
+    assert_eq!(shown, 8 * 60 * 60, "the fields open on tdesktop's 8 hours");
+}

@@ -89,6 +89,10 @@ impl QuillApp {
         which: ChatMenuSubmenu,
         cx: &mut Context<Self>,
     ) {
+        // The collapsed community row's menu has the same Mute submenu.
+        if self.open_community_submenu(which, cx) {
+            return;
+        }
         if let Some(menu) = self.chat_list.menu.as_mut()
             && menu.submenu != Some(which)
         {
@@ -99,6 +103,9 @@ impl QuillApp {
 
     /// Closes the open submenu only; the menu stays.
     pub(in crate::ui) fn close_chat_submenu(&mut self, cx: &mut Context<Self>) {
+        if self.close_community_submenu(cx) {
+            return;
+        }
         if let Some(menu) = self.chat_list.menu.as_mut()
             && menu.submenu.take().is_some()
         {

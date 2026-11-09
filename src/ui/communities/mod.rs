@@ -15,16 +15,18 @@
 mod ban;
 mod boxes;
 mod chooser;
+mod create;
 mod demo;
 #[cfg(test)]
 #[cfg(feature = "demo-capture")]
 mod flow_tests;
 mod info;
 mod manage;
+mod mute_for;
 mod outcomes;
 mod requests;
 mod row;
-pub(in crate::ui) use row::community_avatar_centered;
+mod row_menu;
 #[cfg(test)]
 mod tests;
 
@@ -41,6 +43,7 @@ use quill::state::{CommunityChatKind, CommunityMember};
 use std::time::Instant;
 
 pub(crate) use requests::UndoAction;
+pub(crate) use row_menu::RowMenu;
 
 pub(crate) enum CommunityBox {
     /// tdesktop `ShowAddToCommunityBox`: a chat picks its community —
@@ -53,6 +56,16 @@ pub(crate) enum CommunityBox {
         search: Entity<InputState>,
         /// Redraws the list as the search changes.
         _typed: Subscription,
+    },
+    /// tdesktop `CommunityIdentityBox`: a new community's photo and name,
+    /// made around the chat that asked (`createCommunity`).
+    Create { chat_id: i64, draft: NewCommunity },
+    /// `ChooseVisibilityBox` for the new community's first chat; its
+    /// confirm creates the community.
+    CreateVisibility {
+        chat_id: i64,
+        draft: NewCommunity,
+        hidden: bool,
     },
     /// `ChooseVisibilityBox`: Visible or Hidden, chosen once.
     Visibility {
@@ -93,6 +106,9 @@ pub(crate) enum CommunityBox {
     ConfirmJoin { chat_id: i64 },
     /// "Ungroup Chats" from the collapsed row's menu.
     Ungroup { community_id: i64 },
+    /// "Mute for..." from the row menu's Mute submenu (tdesktop
+    /// `MuteBox`): days, hours and minutes.
+    MuteFor { community_id: i64 },
     /// `BanFromCommunityWithWarning`: the member owns chats in the
     /// community, which the ban removes.
     BanWarning {
@@ -101,6 +117,15 @@ pub(crate) enum CommunityBox {
         name: String,
         owned_chat_ids: Vec<i64>,
     },
+}
+
+/// What the identity box holds while the visibility box asks.
+#[derive(Clone)]
+pub(crate) struct NewCommunity {
+    pub(crate) name: Entity<InputState>,
+    /// The chosen picture, sent with `setCommunityPhoto` once the
+    /// community exists, as tdesktop uploads it after `create`.
+    pub(crate) photo: Option<std::path::PathBuf>,
 }
 
 /// Where Cancel on the visibility box returns.
@@ -125,7 +150,10 @@ pub(crate) struct CommunitiesUi {
     /// "Create a New Chat" from this community's chooser: the new chat
     /// goes to the visibility box once made.
     pub(crate) awaiting_new_chat: Option<i64>,
-    pub(crate) row_menu: Option<(i64, Point<Pixels>)>,
+    pub(crate) row_menu: Option<RowMenu>,
+    /// The pending requests list, which pages on scroll.
+    pub(crate) requests_scroll: ScrollHandle,
+    pub(crate) requests_asked: crate::ui::scroll_load::Asked,
 }
 
 /// "1,200 members" / "5,300 subscribers" under a community chat.
@@ -227,6 +255,11 @@ impl QuillApp {
     ) {
         let back = match &self.admin.community.flow.open {
             Some(CommunityBox::Visibility { back, .. }) => *back,
+            Some(CommunityBox::CreateVisibility { chat_id, draft, .. }) => {
+                let (chat_id, draft) = (*chat_id, draft.clone());
+                self.show_community_box(CommunityBox::Create { chat_id, draft }, cx);
+                return;
+            }
             _ => None,
         };
         match back {
@@ -243,6 +276,10 @@ impl QuillApp {
     /// "Add to Community" on the visibility box: add at once when the
     /// person can change the list, else confirm the request first.
     pub(super) fn submit_community_visibility(&mut self, cx: &mut Context<Self>) {
+        if let Some(CommunityBox::CreateVisibility { .. }) = self.admin.community.flow.open {
+            self.submit_new_community(cx);
+            return;
+        }
         let Some(CommunityBox::Visibility {
             community_id,
             chat_id,

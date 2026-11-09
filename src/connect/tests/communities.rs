@@ -486,3 +486,98 @@ fn collapsed_communities_get_their_full_info_once() {
     rig.driver.sync_collapsed_communities().unwrap();
     assert_eq!(rig.sent_count(), before);
 }
+
+#[test]
+fn owned_bots_are_asked_of_tdlib_once_at_a_time() {
+    let mut rig = Rig::new();
+    let extra = rig.driver.fetch_owned_bots().unwrap().expect("sent");
+    assert_eq!(rig.last()["@type"], "getOwnedBots");
+    assert_eq!(rig.driver.fetch_owned_bots().unwrap(), None);
+    rig.ingest(&format!(
+        r#"{{"@type":"users","total_count":1,"user_ids":[77],"@extra":"{}"}}"#,
+        extra.0
+    ));
+    assert_eq!(
+        rig.driver.session.communities.owned_bots.data().cloned(),
+        Some(vec![77])
+    );
+}
+
+#[test]
+fn a_created_community_gets_the_photo_its_box_chose() {
+    let mut rig = Rig::new();
+    rig.ingest(
+        r#"{"@type":"updateNewChat","chat":{"id":-1007,"title":"Field Notes","type":{"@type":"chatTypeSupergroup","supergroup_id":7,"is_channel":true},"unread_count":0}}"#,
+    );
+    let extra = rig
+        .driver
+        .create_community_with_photo(
+            crate::ids::ChatId(-1007),
+            "Notes",
+            true,
+            Some("/photos/notes.jpg".into()),
+        )
+        .unwrap()
+        .expect("sent");
+    let v = rig.last();
+    assert_eq!(v["@type"], "createCommunity");
+    assert_eq!(v["is_chat_hidden"], true);
+    rig.ingest(
+        r#"{"@type":"updateCommunity","community":{"@type":"community","id":44,"have_access":true,"name":"Notes","date":1,"status":{"@type":"communityMemberStatusCreator"},"permissions":{"@type":"communityPermissions","can_edit_chat_list":false},"are_chats_collapsed":false}}"#,
+    );
+    rig.ingest(&format!(
+        r#"{{"@type":"communityId","id":44,"@extra":"{}"}}"#,
+        extra.0
+    ));
+    let sent: Vec<Value> = rig
+        .recorder
+        .snapshot()
+        .iter()
+        .map(|json| serde_json::from_str(json).unwrap())
+        .collect();
+    let photo = sent
+        .iter()
+        .find(|v| v["@type"] == "setCommunityPhoto")
+        .expect("photo sent");
+    assert_eq!(photo["community_id"], 44);
+    assert_eq!(photo["photo"]["photo"]["path"], "/photos/notes.jpg");
+    assert!(sent.iter().any(|v| v["@type"] == "getCommunityFullInfo"));
+    assert!(rig.driver.session.communities.new_community_photo.is_none());
+    assert_eq!(
+        rig.outcome(),
+        Some(CommunityOutcome::Created {
+            community_id: 44,
+            chat_id: Some(-1007),
+        })
+    );
+}
+
+#[test]
+fn a_refused_create_reports_and_sets_no_photo() {
+    let mut rig = Rig::new();
+    rig.ingest(
+        r#"{"@type":"updateNewChat","chat":{"id":-1007,"title":"Field Notes","type":{"@type":"chatTypeSupergroup","supergroup_id":7,"is_channel":true},"unread_count":0}}"#,
+    );
+    let extra = rig
+        .driver
+        .create_community_with_photo(
+            crate::ids::ChatId(-1007),
+            "Notes",
+            false,
+            Some("/photos/notes.jpg".into()),
+        )
+        .unwrap()
+        .expect("sent");
+    rig.error(extra, "CHANNELS_TOO_MUCH");
+    assert!(matches!(
+        rig.outcome(),
+        Some(CommunityOutcome::CreateFailed { .. })
+    ));
+    assert!(rig.driver.session.communities.new_community_photo.is_none());
+    assert!(
+        !rig.recorder
+            .snapshot()
+            .iter()
+            .any(|json| json.contains("setCommunityPhoto"))
+    );
+}

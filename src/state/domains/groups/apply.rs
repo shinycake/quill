@@ -134,11 +134,25 @@ impl Session {
             // Slice (communities backend core): `communityId` (schema 1.8.67,
             // line 2264) is the `createCommunity` response — the driver
             // chains it into `getCommunityFullInfo`; nothing to reduce.
-            GroupsPayload::CommunityId { .. } => {}
+            GroupsPayload::CommunityId { id } => {
+                if let Some(pending) = pending
+                    && pending.purpose == RequestPurpose::CreateCommunity
+                {
+                    self.communities
+                        .outcomes
+                        .push_back(CommunityOutcome::Created {
+                            community_id: id,
+                            chat_id: pending.chat_id.map(|chat| chat.0),
+                        });
+                }
+            }
             // Slice (communities backend core): `updateCommunity` (schema
             // 1.8.67, line 10726) — create-on-first-sight, like chat
             // ingestion; the update carries the full object.
             GroupsPayload::UpdateCommunity { community } => {
+                if let Some(photo) = &community.photo {
+                    self.remember_files(std::slice::from_ref(photo));
+                }
                 self.groups.communities.insert(community.id, community);
             }
             // Slice (communities backend core): `updateCommunityFullInfo`

@@ -29,7 +29,10 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         if let Some(live) = self.live.as_mut()
-            && let Err(err) = live.driver.fetch_suitable_community_chats()
+            && let Err(err) = live
+                .driver
+                .fetch_suitable_community_chats()
+                .and_then(|_| live.driver.fetch_owned_bots())
         {
             self.connection
                 .set_note(StatusNote::error(user_error(&err)));
@@ -52,7 +55,8 @@ impl QuillApp {
     }
 
     /// The chats the box offers, by title, filtered by `query`: the
-    /// suitable chats, then owned bots that are in no community.
+    /// suitable chats, then the owned bots (`getOwnedBots`) that are in
+    /// no community. A bot's chat is its user id.
     pub(crate) fn community_candidates(&self, query: &str) -> (Vec<Candidate>, bool) {
         let Some(session) = self.session() else {
             return (Vec::new(), false);
@@ -78,11 +82,15 @@ impl QuillApp {
             })
             .collect();
         chats.sort_by_key(|c| c.title.to_lowercase());
-        let mut bots: Vec<Candidate> = session
-            .users
-            .values()
-            .filter(|user| user.is_bot && user.can_be_edited)
-            .filter(|user| session.chats.contains_key(&user.id))
+        let owned_bots: &[i64] = session
+            .communities
+            .owned_bots
+            .data()
+            .map_or(&[], Vec::as_slice);
+        let mut bots: Vec<Candidate> = owned_bots
+            .iter()
+            .filter_map(|id| session.users.get(id))
+            .filter(|user| user.is_bot)
             .filter(|user| session.chat_community_id(user.id).is_none())
             .map(|user| Candidate {
                 chat_id: user.id,
@@ -179,6 +187,14 @@ impl QuillApp {
                         .aria_label(candidate.title.clone())
                         .hover(|row| row.bg(cx.theme().list_hover))
                         .on_click(cx.listener(move |this, _, _, cx| {
+                            // An owned bot may have no chat yet; TDLib
+                            // adds chats, so make it before the add.
+                            if let Some(live) = this.live.as_mut()
+                                && let Err(err) = live.driver.ensure_private_chat(chat_id)
+                            {
+                                this.connection
+                                    .set_note(StatusNote::error(user_error(&err)));
+                            }
                             this.choose_community_visibility(
                                 community_id,
                                 chat_id,

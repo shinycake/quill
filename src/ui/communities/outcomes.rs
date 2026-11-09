@@ -102,6 +102,16 @@ impl QuillApp {
             CommunityOutcome::ProcessFailed { error, .. } => {
                 StatusNote::error(self.community_error_text(&error, None))
             }
+            CommunityOutcome::Created { chat_id, .. } => {
+                if let Some(CommunityBox::CreateVisibility { chat_id: asked, .. }) =
+                    &self.admin.community.flow.open
+                    && Some(*asked) == chat_id
+                {
+                    self.admin.community.flow.open = None;
+                }
+                StatusNote::info(tr(keys::COMMUNITY_CREATED))
+            }
+            CommunityOutcome::CreateFailed { reason } => StatusNote::error(reason),
             CommunityOutcome::MemberBanned { member, .. } => StatusNote::info(tr_with(
                 keys::COMMUNITY_BAN_DONE,
                 &[("user", &self.community_member_name(member))],

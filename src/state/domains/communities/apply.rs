@@ -61,6 +61,23 @@ impl Session {
         }
     }
 
+    /// The `users` answer to our `getOwnedBots`; `true` when ours.
+    pub(crate) fn apply_community_owned_bots(
+        &mut self,
+        user_ids: &[i64],
+        pending: Option<&PendingRequest>,
+    ) -> bool {
+        if pending.map(|p| p.purpose)
+            != Some(RequestPurpose::Communities(
+                CommunitiesPurpose::GetOwnedBots,
+            ))
+        {
+            return false;
+        }
+        self.communities.owned_bots = Fetch::Ready(user_ids.to_vec());
+        true
+    }
+
     fn apply_add_chat_requests_page(
         &mut self,
         community_id: i64,
@@ -142,6 +159,7 @@ impl Session {
             }
             CommunitiesPurpose::ToggleCollapsed { .. }
             | CommunitiesPurpose::GetJoined
+            | CommunitiesPurpose::GetOwnedBots
             | CommunitiesPurpose::GetAddChatRequests { .. }
             | CommunitiesPurpose::GetMemberChats { .. } => return,
         };
@@ -185,15 +203,20 @@ impl Session {
         _seq: u64,
     ) {
         let Some((purpose, community_id)) = communities_purpose(pending) else {
-            if pending.map(|p| p.purpose)
-                == Some(RequestPurpose::Communities(CommunitiesPurpose::GetJoined))
-            {
-                let stale = self.communities.joined.take_data();
-                self.communities.joined = Fetch::Failed {
-                    error: error_reason(err),
-                    stale,
-                };
-            }
+            let fetch = match pending.map(|p| p.purpose) {
+                Some(RequestPurpose::Communities(CommunitiesPurpose::GetJoined)) => {
+                    &mut self.communities.joined
+                }
+                Some(RequestPurpose::Communities(CommunitiesPurpose::GetOwnedBots)) => {
+                    &mut self.communities.owned_bots
+                }
+                _ => return,
+            };
+            let stale = fetch.take_data();
+            *fetch = Fetch::Failed {
+                error: error_reason(err),
+                stale,
+            };
             return;
         };
         let outcome = match purpose {
@@ -263,7 +286,7 @@ impl Session {
                 );
                 return;
             }
-            CommunitiesPurpose::GetJoined => return,
+            CommunitiesPurpose::GetJoined | CommunitiesPurpose::GetOwnedBots => return,
         };
         self.communities.outcomes.push_back(outcome);
     }

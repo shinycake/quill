@@ -4,11 +4,11 @@ use serde_json::Value;
 /// Slice (communities backend core): `community` (TDLib 1.8.68,
 /// `schema/td_api.tl:2612`):
 /// `community id:int53 have_access:Bool name:string photo:chatPhotoInfo date:int32 status:CommunityMemberStatus permissions:communityPermissions = Community;`
-/// `photo` (chatPhotoInfo) is not parsed (no consumer yet). `status` and
-/// `permissions` are flattened into the rights the TDLib 1.8.68
-/// management methods check (`setCommunityPermissions`,
-/// `deleteCommunity`; docs/decisions/codex-tdlib-1.8.68.md).
-// ponytail: flat scalar subset; nested photo object when a consumer needs it.
+/// `photo` keeps its `small` file, the userpic the chat list and the info
+/// panel draw (as `chat.photo`). `status` and `permissions` are flattened
+/// into the rights the TDLib 1.8.68 management methods check
+/// (`setCommunityPermissions`, `deleteCommunity`;
+/// docs/decisions/codex-tdlib-1.8.68.md).
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ParsedCommunity {
@@ -17,6 +17,8 @@ pub struct ParsedCommunity {
     /// "Identifier of the community can't be passed to any method".
     pub have_access: bool,
     pub name: String,
+    /// `photo.small`; `None` without a photo.
+    pub photo: Option<ParsedFile>,
     pub date: i32,
     /// `status` is `communityMemberStatusCreator` — the only status
     /// `deleteCommunity` accepts ("requires owner privileges").
@@ -57,8 +59,8 @@ pub struct ParsedCommunityChat {
 /// Slice (communities backend core): `communityFullInfo` (TDLib 1.8.68,
 /// `schema/td_api.tl:2626`; also the direct `getCommunityFullInfo` answer):
 /// `communityFullInfo photo:chatPhoto chats:vector<communityChat> administrator_count:int32 banned_count:int32 add_chat_request_count:int32 = CommunityFullInfo;`
-/// `photo` intentionally skipped (no consumer yet; see ParsedCommunity note).
-// ponytail: flat scalar subset; nested chatPhoto when a consumer needs it.
+/// `photo` (the full `chatPhoto`) is not read: the panel draws
+/// `community.photo.small`, the same picture.
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ParsedCommunityFullInfo {
@@ -100,6 +102,7 @@ pub(crate) fn parse_community(value: &Value) -> Option<ParsedCommunity> {
             .and_then(Value::as_str)
             .unwrap_or_default()
             .to_owned(),
+        photo: parse_chat_photo_small(value.get("photo")),
         date: int53(value.get("date")).ok().unwrap_or(0).sat_i32(),
         is_owner,
         can_change_info: is_owner || admin_right("can_change_info"),

@@ -16,6 +16,8 @@ pub enum CommunityMember {
 pub enum CommunitiesPurpose {
     /// `getJoinedCommunities`; answers `communities`.
     GetJoined,
+    /// `getOwnedBots`; answers `users`.
+    GetOwnedBots,
     /// `addCommunityChat`. `ok` added the chat; the error
     /// `COMMUNITY_REQUEST_CREATED` means a request went to the admins.
     AddChat { chat_id: i64, is_hidden: bool },

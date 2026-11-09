@@ -132,3 +132,67 @@ fn a_collapsed_community_gets_one_row_for_its_joined_chats() {
     );
     assert!(session.collapsed_community_rows().is_empty());
 }
+
+/// A community whose `photo.small` is file 41, downloaded (`done`) or not.
+fn community_with_photo(done: bool) -> String {
+    format!(
+        r#"{{"@type":"updateCommunity","community":{{"@type":"community","id":42,"have_access":true,"name":"Rustaceans","photo":{{"@type":"chatPhotoInfo","small":{{"@type":"file","id":41,"size":24,"expected_size":24,"local":{{"@type":"localFile","path":"{path}","can_be_downloaded":true,"is_downloading_active":false,"is_downloading_completed":{done},"downloaded_size":24}},"remote":{{"@type":"remoteFile","id":"r","is_uploading_active":false}}}},"big":null,"has_animation":false,"is_personal":false}},"date":1,"status":{{"@type":"communityMemberStatusMember"}},"permissions":{{"@type":"communityPermissions","can_edit_chat_list":false}},"are_chats_collapsed":true}}}}"#,
+        path = if done { "/cache/41.jpg" } else { "" },
+    )
+}
+
+#[test]
+fn a_downloaded_community_photo_shows() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    apply_json(&mut session, &seq, &sink, &community_with_photo(true));
+    assert_eq!(session.community_photo_path(42), Some("/cache/41.jpg"));
+    assert!(session.take_avatar_claims().is_empty());
+}
+
+#[test]
+fn a_missing_community_photo_is_claimed_for_download() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    apply_json(&mut session, &seq, &sink, &community_with_photo(false));
+    assert_eq!(session.community_photo_path(42), None);
+    assert_eq!(session.take_avatar_claims(), vec![crate::ids::FileId(41)]);
+}
+
+#[test]
+fn owned_bots_come_from_our_own_ask() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        r#"{"@type":"users","total_count":1,"user_ids":[5]}"#,
+    );
+    assert!(session.communities.owned_bots.is_idle());
+    let purpose = RequestPurpose::Communities(CommunitiesPurpose::GetOwnedBots);
+    let extra = session.request(purpose, None);
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"users","total_count":2,"user_ids":[5,6],"@extra":"{}"}}"#,
+            extra.0
+        ),
+    );
+    assert_eq!(session.communities.owned_bots.data(), Some(&vec![5, 6]));
+    let extra = session.request(purpose, None);
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"error","code":400,"message":"BOTS_FAILED","@extra":"{}"}}"#,
+            extra.0
+        ),
+    );
+    let fetch = &session.communities.owned_bots;
+    assert!(fetch.error().is_some());
+    assert_eq!(fetch.data(), Some(&vec![5, 6]));
+}
