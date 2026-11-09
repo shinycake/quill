@@ -8,8 +8,7 @@ impl QuillApp {
     /// Phase 3.2: `inlineKeyboardButtonTypeCopyText` — copy to the clipboard.
     pub(in crate::ui) fn copy_inline_text(&mut self, text: &str, cx: &mut Context<Self>) {
         cx.write_to_clipboard(ClipboardItem::new_string(text.to_string()));
-        self.connection
-            .set_note(StatusNote::info(tr(keys::TEXT_COPIED)));
+        self.set_note(StatusNote::info(tr(keys::TEXT_COPIED)));
         cx.notify();
     }
 
@@ -55,10 +54,13 @@ impl QuillApp {
         };
         match edit.replacement_for(path, as_file) {
             Ok(replacement) => {
-                self.screen.connection.set_note(StatusNote::silent(tr_with(
-                    keys::Q_CHAT_REPLACING_ATTACHMENT_WITH,
-                    &[("file_name", &replacement.file_name.to_string())],
-                )));
+                self.screen.connection.set_note_for(
+                    &self.screen.windows,
+                    StatusNote::silent(tr_with(
+                        keys::Q_CHAT_REPLACING_ATTACHMENT_WITH,
+                        &[("file_name", &replacement.file_name.to_string())],
+                    )),
+                );
                 // A different file starts without the video editor's edits.
                 if edit
                     .media_edit
@@ -70,7 +72,7 @@ impl QuillApp {
                 }
                 edit.media_edit.replacement = Some(replacement);
             }
-            Err(note) => self.connection.set_note(StatusNote::error(note)),
+            Err(note) => self.set_note(StatusNote::error(note)),
         }
         cx.notify();
     }
@@ -81,8 +83,7 @@ impl QuillApp {
             edit.media_edit.replacement = None;
         }
         self.composer_ui.edit_replace_as_file = false;
-        self.connection
-            .set_note(StatusNote::silent(tr(keys::Q_CHAT_REPLACEMENT_CLEARED)));
+        self.set_note(StatusNote::silent(tr(keys::Q_CHAT_REPLACEMENT_CLEARED)));
         cx.notify();
     }
 
@@ -212,8 +213,7 @@ impl QuillApp {
         let restored = self.composer.read(cx).value().to_string();
         self.sync_composer_typing(&restored);
         self.sync_command_menu(cx);
-        self.connection
-            .set_note(StatusNote::silent(tr(keys::Q_CHAT_EDIT_CANCELLED)));
+        self.set_note(StatusNote::silent(tr(keys::Q_CHAT_EDIT_CANCELLED)));
         cx.notify();
     }
 
@@ -261,7 +261,7 @@ impl QuillApp {
             match result {
                 Ok(_) => {
                     self.finish_edit_restore_draft(window, cx);
-                    self.screen.connection.set_note(
+                    self.set_note(
                         self.send_started_note(
                             ComposerScheduling::None,
                             tr(keys::Q_CHAT_SAVING_EDIT),
@@ -272,14 +272,13 @@ impl QuillApp {
                     // R8: tdesktop `lng_edit_limit_reached` — the edit stays
                     // open so the text can be shortened.
                     let over = quill::text_split::units_over_limit(&text, limit);
-                    self.connection.set_note(StatusNote::info(tr_with(
+                    self.set_note(StatusNote::info(tr_with(
                         keys::Q_CHAT_MESSAGE_TOO_LONG_MAX_CHARACTERS,
                         &[("limit", &limit.to_string()), ("over", &over.to_string())],
                     )));
                 }
                 Err(_) => {
-                    self.connection
-                        .set_note(StatusNote::error(tr(keys::Q_CHAT_COULD_NOT_EDIT_MESSAGE)));
+                    self.set_note(StatusNote::error(tr(keys::Q_CHAT_COULD_NOT_EDIT_MESSAGE)));
                 }
             }
             cx.notify();
@@ -288,7 +287,7 @@ impl QuillApp {
         if self.demo_session.is_some() {
             self.apply_demo_edit(&edit, text.trim());
             self.finish_edit_restore_draft(window, cx);
-            self.connection.set_note(StatusNote::silent(tr(
+            self.set_note(StatusNote::silent(tr(
                 keys::Q_CHAT_DEMO_EDIT_APPLIED_LOCALLY_NO,
             )));
             cx.notify();
@@ -311,13 +310,13 @@ impl QuillApp {
         self.begin_vanish(confirm.chat_id, &[confirm.message_id]);
         if let Some(live) = self.live.as_mut() {
             let result = live.driver.delete_confirmed(&confirm);
-            self.connection.set_note(match result {
+            self.set_note(match result {
                 Ok(_) => StatusNote::silent(tr(keys::Q_CHAT_DELETING)),
                 Err(_) => StatusNote::error(tr(keys::Q_CHAT_COULD_NOT_DELETE_MESSAGE)),
             });
         } else if self.demo_session.is_some() {
             self.apply_demo_delete(confirm.chat_id, confirm.message_id);
-            self.connection.set_note(StatusNote::silent(tr(
+            self.set_note(StatusNote::silent(tr(
                 keys::Q_CHAT_DEMO_DELETE_APPLIED_LOCALLY_NO,
             )));
         }
@@ -329,20 +328,17 @@ impl QuillApp {
         let kept = cancel_reply_draft(self.chat_ui.take_reply(), String::new()).0;
         self.chat_ui.set_reply(kept);
         self.share.reply_elsewhere_open = false;
-        self.share.reply_quote_for = None;
         self.note_open_draft(true, cx);
-        self.connection
-            .set_note(StatusNote::silent(tr(keys::Q_CHAT_REPLY_CANCELLED)));
+        self.set_note(StatusNote::silent(tr(keys::Q_CHAT_REPLY_CANCELLED)));
         cx.notify();
     }
 
     /// Sticker/GIF/voice sends consume the composer reply. Drop it from the UI
     /// and from the stored draft, and keep any unsent text.
     pub(in crate::ui) fn consume_sent_reply(&mut self, chat_id: ChatId, cx: &mut Context<Self>) {
+        // Its quote picker goes with it (`ChatUi::set_reply`): a later
+        // reply to the same message does not open it again.
         self.chat_ui.set_reply(None);
-        // Its quote picker went with it: a later reply to the same
-        // message does not open it again.
-        self.share.reply_quote_for = None;
         if self.chat_ui.is_editing() {
             self.chat_ui.drop_stashed_reply();
             return;

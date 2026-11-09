@@ -139,13 +139,13 @@ impl QuillApp {
                     .request_giveaway_info(chat, message, summary)
                     .is_err()
                 {
-                    self.connection.set_note(StatusNote::error(tr(
+                    self.set_note(StatusNote::error(tr(
                         keys::Q_MONEY_COULD_NOT_LOAD_THE_GIVEAWAY,
                     )));
                 }
             }
             None => {
-                self.connection.set_note(StatusNote::info(tr(
+                self.set_note(StatusNote::info(tr(
                     keys::Q_MONEY_GIVEAWAY_DETAILS_NEED_A_SIGNED,
                 )));
             }

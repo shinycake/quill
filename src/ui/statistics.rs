@@ -353,7 +353,7 @@ impl QuillApp {
                 .driver
                 .refresh_chat_statistics(ChatId(chat_id), is_dark)
         {
-            self.connection.set_note(StatusNote::error(user_error_for(
+            self.set_note(StatusNote::error(user_error_for(
                 keys::Q_NOTES_FAILED_STATISTICS,
                 &err,
             )));

@@ -40,7 +40,7 @@ impl QuillApp {
         match self.live.as_mut() {
             Some(live) => {
                 if let Err(err) = live.driver.clear_call_history(revoke) {
-                    self.connection.set_note(StatusNote::error(user_error_for(
+                    self.set_note(StatusNote::error(user_error_for(
                         keys::Q_NOTES_FAILED_CLEAR_CALL_HISTORY,
                         &err,
                     )));

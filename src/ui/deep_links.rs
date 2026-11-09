@@ -8,7 +8,7 @@
 //! (same take-once pattern as `pending_story_open`).
 #![deny(clippy::indexing_slicing)]
 use super::app::QuillApp;
-use super::links_state::PendingOpen;
+use super::links_state::{PendingOpen, QueuedLink};
 use super::shell::{DialogKind, QuillShell};
 use super::*;
 use crate::ui::status_note::StatusNote;
@@ -39,25 +39,10 @@ fn deep_link_step_redraws(
     }
 }
 
-/// Whether `link`, taken from `QuillApp::pending_deep_link`, is the one an
-/// agent's step queued. Taken once; a link written there any other way
-/// (the launch argument, the OS) is the user's.
 /// The note after a t.me link opened its chat: none when it did, as
 /// Telegram Desktop shows nothing then.
 fn chat_link_note(opened: bool) -> Option<StatusNote> {
     (!opened).then(|| StatusNote::error(tr(keys::Q_MISC_COULDNT_OPEN_THE_CHAT)))
-}
-
-fn queued_by_agent(agent_link: &mut Option<String>, link: &str) -> bool {
-    agent_link.take().is_some_and(|queued| queued == link)
-}
-
-/// The chat window `link`, taken from `QuillApp::pending_deep_link`, was
-/// clicked in. Taken once; a link queued anywhere else has none.
-fn queued_in_window(window_link: &mut Option<(String, ChatId)>, link: &str) -> Option<ChatId> {
-    window_link
-        .take()
-        .and_then(|(queued, window)| (queued == link).then_some(window))
 }
 
 impl QuillApp {
@@ -74,17 +59,28 @@ impl QuillApp {
         if self.refused_while_locked() {
             return;
         }
+        // A link clicked in an account that left the screen goes with it:
+        // it names that account's chats, bots and posts.
+        let on_screen = self.session().map(|session| session.account.clone());
+        if self
+            .pending_deep_link
+            .as_ref()
+            .is_some_and(|queued| !queued.for_screen(on_screen.as_ref()) && on_screen.is_some())
+        {
+            self.pending_deep_link = None;
+        }
         // `tg://proxy` / `tg://socks` (and the t.me forms) are parsed
         // locally and need no sign-in: a user who is blocked from
         // Telegram can only get in through them.
-        if let Some(link) = self
+        if let Some(queued) = self
             .pending_deep_link
-            .take_if(|link| quill::proxy::parse_proxy_link(link).is_some())
+            .take_if(|queued| quill::proxy::parse_proxy_link(&queued.link).is_some())
         {
             // Its box belongs to the window the link was clicked in, not
             // to the main window this poll runs in.
-            let asker = queued_in_window(&mut self.screen.links.window_pending_link, &link);
-            self.as_asked_by(asker, |this| this.handle_proxy_link(&link, cx));
+            self.as_asked_by(queued.window, |this| {
+                this.handle_proxy_link(&queued.link, cx)
+            });
             return;
         }
         let Some(live) = self.live.as_mut() else {
@@ -102,16 +98,18 @@ impl QuillApp {
             Some(DeepLinkState::InvitePreview { .. })
         );
         if (live.driver.session.chats_state.deep_link.is_none() || invite_waits)
-            && let Some(link) = self.pending_deep_link.take()
+            && let Some(queued) = self
+                .pending_deep_link
+                .take_if(|queued| queued.for_screen(Some(&live.driver.session.account)))
         {
             if invite_waits {
                 live.driver.session.chats_state.deep_link = None;
                 self.screen.links.deep_link_invite = None;
             }
-            let from_agent = queued_by_agent(&mut self.screen.links.agent_pending_link, &link);
-            self.screen.links.flow_window =
-                queued_in_window(&mut self.screen.links.window_pending_link, &link);
-            let _ = live.driver.request_deep_link_info_from(&link, from_agent);
+            self.screen.links.flow_window = queued.window;
+            let _ = live
+                .driver
+                .request_deep_link_info_from(&queued.link, queued.by_agent);
         }
         // Consume terminal states once, retaining the invite preview until a decision.
         let state = live.driver.session.chats_state.deep_link.take();
@@ -289,20 +287,27 @@ impl QuillApp {
     }
 
     /// Starts the deep-link flow for `link` at the next poll, remembering
-    /// whether the handler asking is a step the UI driver injected, and
-    /// the chat window that asked (`asking_window`: the window of the
-    /// click, or the window an answer's request carried; none for a link
-    /// from the OS or a mini app, which the main window takes). The
-    /// origin rides with the link: a later link queued by someone else
-    /// replaces both, and the flow keeps its own in the session
+    /// the account on screen, whether the handler asking is a step the UI
+    /// driver injected, and the chat window that asked (`asking_window`:
+    /// the window of the click, or the window an answer's request carried;
+    /// none for a mini app's link, which the main window takes). The
+    /// origin rides with the link (`QueuedLink`): a later link replaces
+    /// it whole, and the flow keeps its own in the session
     /// (`ChatsState::deep_link_from_agent`).
     pub(super) fn queue_deep_link(&mut self, link: String) {
-        self.links.agent_pending_link = guard::injecting().then(|| link.clone());
-        self.links.window_pending_link = self
-            .asking_window()
-            .flatten()
-            .map(|window| (link.clone(), window));
-        self.pending_deep_link = Some(link);
+        self.pending_deep_link = Some(QueuedLink {
+            link,
+            account: self.session().map(|session| session.account.clone()),
+            window: self.asking_window().flatten(),
+            by_agent: guard::injecting(),
+        });
+        quill::wake::UPDATES.poke();
+    }
+
+    /// A link from outside Quill (the OS, a second launch): whichever
+    /// account is on screen takes it, in the main window.
+    pub(super) fn queue_outside_link(&mut self, link: String) {
+        self.pending_deep_link = Some(QueuedLink::outside(link));
         quill::wake::UPDATES.poke();
     }
 
@@ -447,7 +452,9 @@ impl QuillApp {
                 .select_search_chat_open(chat_id, open, text, reply, now_ms)
                 .is_ok();
             if let Some(note) = chat_link_note(opened) {
-                self.screen.connection.set_note(note);
+                self.screen
+                    .connection
+                    .set_note_for(&self.screen.windows, note);
             }
             if let Some(message_id) = jump_to
                 && live
@@ -455,7 +462,7 @@ impl QuillApp {
                     .jump_to_replied_message(MessageId::from_server_id(message_id))
                     .is_err()
             {
-                self.connection.set_note(StatusNote::error(tr(
+                self.set_note(StatusNote::error(tr(
                     keys::Q_MISC_OPENED_CHAT_COULDNT_JUMP_TO,
                 )));
             }
@@ -678,38 +685,31 @@ crate::ui::shell::register_dialogs! {
 
 #[cfg(test)]
 mod pump_tests {
-    use super::{deep_link_step_redraws, queued_by_agent};
+    use super::QueuedLink;
+    use super::deep_link_step_redraws;
+    use quill::ids::AccountKey;
     use quill::state::DeepLinkState;
 
+    /// Round 15 (area B, finding 5): a link clicked in an account goes
+    /// with it; one from outside Quill waits for whichever account is on
+    /// screen.
     #[test]
-    fn a_queued_link_is_the_agents_only_if_the_agent_queued_that_link() {
-        let mut agent = Some("https://t.me/agentpick".to_string());
-        assert!(queued_by_agent(&mut agent, "https://t.me/agentpick"));
-        assert_eq!(agent, None, "taken once");
-        assert!(!queued_by_agent(&mut agent, "https://t.me/agentpick"));
-        // The launch argument or the OS replaced the agent's link.
-        let mut agent = Some("https://t.me/agentpick".to_string());
-        assert!(!queued_by_agent(&mut agent, "https://t.me/userpick"));
-        assert_eq!(agent, None);
-    }
-
-    /// A link clicked in a chat window keeps that window as its origin
-    /// only while it is the link being resolved: the main window comes
-    /// forward for it, not for a later link queued from elsewhere.
-    #[test]
-    fn a_queued_link_keeps_the_chat_window_it_was_clicked_in() {
-        use quill::ids::ChatId;
-        let mut origin = Some(("https://t.me/pick".to_string(), ChatId(12)));
-        assert_eq!(
-            super::queued_in_window(&mut origin, "https://t.me/pick"),
-            Some(ChatId(12))
-        );
-        assert_eq!(origin, None, "taken once");
-        let mut origin = Some(("https://t.me/pick".to_string(), ChatId(12)));
-        assert_eq!(
-            super::queued_in_window(&mut origin, "https://t.me/os"),
-            None
-        );
+    fn a_queued_link_is_followed_only_by_the_account_it_was_clicked_in() {
+        let a = AccountKey("a".into());
+        let b = AccountKey("b".into());
+        let clicked = QueuedLink {
+            link: "https://t.me/c/1/2".into(),
+            account: Some(a.clone()),
+            window: None,
+            by_agent: true,
+        };
+        assert!(clicked.for_screen(Some(&a)));
+        assert!(!clicked.for_screen(Some(&b)));
+        assert!(!clicked.for_screen(None), "waits for its account");
+        let outside = QueuedLink::outside("https://t.me/durov".into());
+        assert!(outside.for_screen(Some(&a)) && outside.for_screen(Some(&b)));
+        assert!(outside.for_screen(None));
+        assert!(!outside.by_agent);
     }
 
     #[test]

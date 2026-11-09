@@ -227,8 +227,7 @@ impl QuillApp {
         let Some(job) = self.composer_sends.prep.begin(origin.slot.clone()) else {
             return;
         };
-        self.connection
-            .set_note(StatusNote::silent(tr(keys::Q_OPS_PREPARING_THE_FILES)));
+        self.set_note(StatusNote::silent(tr(keys::Q_OPS_PREPARING_THE_FILES)));
         cx.notify();
         let worker =
             cx.background_spawn(async move { prepare_snapshots(snaps, PreparedMedia::prepare) });
@@ -240,8 +239,33 @@ impl QuillApp {
                     this.finish_media_prep(job, origin, prepared, Some(window), cx);
                 }
             });
-            // Its window closed, or another account is on screen: the send
-            // still goes out, through its own account's client.
+            // Its window closed, or another account was on screen since:
+            // the send still goes out, through its own account's client.
+            // A window that shows the slot now (the chat reopened in a new
+            // window, the account back on screen) has its composer cleared
+            // as the one Send was tapped in would have.
+            let shown = this
+                .app()
+                .update(cx, |this, cx| {
+                    let slot = done.as_ref().map(|(origin, _)| origin.slot.clone())?;
+                    this.window_where(cx, |app| app.send_slot().as_ref() == Some(&slot))
+                })
+                .ok()
+                .flatten();
+            if let Some((scope, handle)) = shown {
+                let app = this.app();
+                let _ = handle.update(cx, |_, window, cx| {
+                    let _ = app.update(cx, |this, cx| {
+                        this.in_window_scope(scope, cx, |this, cx| {
+                            this.asked_in_place(|this| {
+                                if let Some((origin, prepared)) = done.take() {
+                                    this.finish_media_prep(job, origin, prepared, Some(window), cx);
+                                }
+                            });
+                        });
+                    });
+                });
+            }
             if let Some((origin, prepared)) = done.take() {
                 let _ = this.app().update(cx, |this, cx| {
                     this.finish_media_prep(job, origin, prepared, None, cx);
@@ -268,8 +292,7 @@ impl QuillApp {
             Ok(snaps) => self.deliver_live_send(origin, snaps, window, cx),
             Err(err) => {
                 // Nothing was taken from the composer: the draft stays.
-                self.connection
-                    .set_note(StatusNote::error(user_error(&err)));
+                self.set_note(StatusNote::error(user_error(&err)));
                 cx.notify();
             }
         }
@@ -291,8 +314,7 @@ impl QuillApp {
             .session()
             .is_some_and(|session| session.account == origin.slot.account);
         let (Some(live), Some(first)) = (self.live_of(&origin.slot.account), snaps.first()) else {
-            self.connection
-                .set_note(StatusNote::error(tr(keys::Q_CHAT_COULD_NOT_SEND_MESSAGE)));
+            self.set_note(StatusNote::error(tr(keys::Q_CHAT_COULD_NOT_SEND_MESSAGE)));
             cx.notify();
             return;
         };
@@ -332,9 +354,7 @@ impl QuillApp {
         }
         match failure {
             None => {
-                self.screen
-                    .connection
-                    .set_note(self.send_started_note(scheduling, tr(keys::Q_CHAT_SENDING)));
+                self.set_note(self.send_started_note(scheduling, tr(keys::Q_CHAT_SENDING)));
             }
             Some(quill::connect::ConnectSendError::CaptionTooLong { limit })
                 if is_open && sent == 0 =>
@@ -352,11 +372,10 @@ impl QuillApp {
                 );
             }
             Some(_) if sent > 0 => {
-                self.connection.set_note(partly_sent_note(sent, total));
+                self.set_note(partly_sent_note(sent, total));
             }
             Some(_) => {
-                self.connection
-                    .set_note(StatusNote::error(tr(keys::Q_CHAT_COULD_NOT_SEND_MESSAGE)));
+                self.set_note(StatusNote::error(tr(keys::Q_CHAT_COULD_NOT_SEND_MESSAGE)));
             }
         }
         cx.notify();

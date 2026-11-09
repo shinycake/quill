@@ -806,8 +806,7 @@ impl QuillApp {
             }
         }
         if requested {
-            self.connection
-                .set_note(StatusNote::silent(tr(keys::Q_CHAT_LOADING_INSTANT_VIEW)));
+            self.set_note(StatusNote::silent(tr(keys::Q_CHAT_LOADING_INSTANT_VIEW)));
             cx.notify();
         } else {
             self.open_link(&url, cx);
@@ -827,7 +826,7 @@ impl QuillApp {
     ) {
         if let Some(live) = self.live.as_mut() {
             let result = live.driver.send_callback_query(chat_id, message_id, &data);
-            self.connection.set_note(match result {
+            self.set_note(match result {
                 Ok(_) => StatusNote::silent(tr(keys::Q_CHAT_SENDING)),
                 Err(_) => StatusNote::error(tr(keys::Q_CHAT_COULD_NOT_SEND_CALLBACK)),
             });
@@ -835,7 +834,7 @@ impl QuillApp {
             return;
         }
         if self.demo_session.is_some() {
-            self.connection.set_note(StatusNote::silent(tr(
+            self.set_note(StatusNote::silent(tr(
                 keys::Q_CHAT_DEMO_CALLBACK_SENT_NO_LIVE,
             )));
             cx.notify();
@@ -920,13 +919,9 @@ impl QuillApp {
                     return;
                 }
                 if let Some(live) = self.live.as_ref() {
-                    self.screen
-                        .connection
-                        .set_note(chat_search_jump_note(&live.driver.session));
+                    self.set_note(chat_search_jump_note(&live.driver.session));
                 } else if let Some(session) = self.demo_session.as_ref() {
-                    self.screen
-                        .connection
-                        .set_note(chat_search_jump_note(session));
+                    self.set_note(chat_search_jump_note(session));
                 }
             }
             GoToTarget::SameChat { message_id } => self.jump_to_pinned_message(message_id, cx),
@@ -939,7 +934,8 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         if let Some(live) = self.live.as_mut() {
-            self.screen.connection.set_note(
+            self.screen.connection.set_note_for(
+                &self.screen.windows,
                 match live.driver.jump_to_chat_search_message(message_id) {
                     Ok(_) => chat_search_jump_note(&live.driver.session),
                     Err(_) => StatusNote::error(tr(keys::Q_CHAT_COULD_NOT_JUMP_TO_PINNED)),
@@ -949,7 +945,7 @@ impl QuillApp {
             let _ = session.begin_chat_search_jump(message_id);
             self.screen
                 .connection
-                .set_note(chat_search_jump_note(session));
+                .set_note_for(&self.screen.windows, chat_search_jump_note(session));
         }
         cx.notify();
     }

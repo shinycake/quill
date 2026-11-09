@@ -81,7 +81,7 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut() {
             live.driver.session.chat_list.archive_settings_open = true;
             if let Err(err) = live.driver.fetch_archive_chat_list_settings() {
-                self.connection.set_note(StatusNote::error(user_error_for(
+                self.set_note(StatusNote::error(user_error_for(
                     keys::Q_NOTES_FAILED_ARCHIVE_SETTINGS,
                     &err,
                 )));
@@ -101,7 +101,7 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut() {
             let Some(mut settings) = live.driver.session.chat_list.archive_chat_list_settings
             else {
-                self.connection.set_note(StatusNote::silent(tr(
+                self.set_note(StatusNote::silent(tr(
                     keys::Q_PREFS_ARCHIVE_SETTINGS_STILL_LOADING,
                 )));
                 cx.notify();
@@ -109,7 +109,7 @@ impl QuillApp {
             };
             archive_setting_set(&mut settings, index, on);
             if let Err(err) = live.driver.set_archive_chat_list_settings(settings) {
-                self.connection.set_note(StatusNote::error(user_error_for(
+                self.set_note(StatusNote::error(user_error_for(
                     keys::Q_NOTES_FAILED_ARCHIVE_SETTINGS,
                     &err,
                 )));
@@ -433,7 +433,7 @@ impl QuillApp {
                             .on_click(cx.listener(move |this, &on, _, cx| {
                                 if let Some(live) = this.live.as_mut() {
                                     if live.driver.set_less_data_for_calls(on).is_err() {
-                                        this.connection.set_note(StatusNote::error(tr(
+                                        this.set_note(StatusNote::error(tr(
                                             keys::Q_PREFS_COULDNT_UPDATE_CALL_SETTINGS,
                                         )));
                                     }

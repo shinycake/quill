@@ -273,7 +273,7 @@ impl QuillApp {
                 }
             }
             let count = self.forward_draft().map_or(0, |d| d.count());
-            self.connection.set_note(match count {
+            self.set_note(match count {
                 1 => StatusNote::silent(tr(keys::Q_LEFTOVERS_1_MESSAGE_SELECTED)),
                 n => StatusNote::silent(tr_with(
                     keys::Q_LEFTOVERS_MESSAGES_SELECTED,

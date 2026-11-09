@@ -60,8 +60,7 @@ impl QuillApp {
     /// Collect or Withdraw.
     pub(super) fn earn_withdraw(&mut self, target: WithdrawTarget, cx: &mut Context<Self>) {
         let Some(live) = self.live.as_mut() else {
-            self.connection
-                .set_note(StatusNote::info(tr(keys::Q_MONEY_DEMO_MODE_THIS_NEEDS_A)));
+            self.set_note(StatusNote::info(tr(keys::Q_MONEY_DEMO_MODE_THIS_NEEDS_A)));
             cx.notify();
             return;
         };
@@ -69,7 +68,7 @@ impl QuillApp {
         // cloud password state (tdesktop `cloudPassword().reload()`).
         let _ = live.driver.fetch_password_state();
         if live.driver.start_withdrawal(target).is_err() {
-            self.connection.set_note(StatusNote::error(tr(
+            self.set_note(StatusNote::error(tr(
                 keys::Q_MONEY_COULDNT_WITHDRAW_RIGHT_NOW,
             )));
         }
@@ -83,7 +82,7 @@ impl QuillApp {
             .map_or(1000, |earn| earn.limits.withdrawal_min());
         if typed < min {
             // tdesktop `lng_bot_earn_credits_out_minimal`.
-            self.connection.set_note(StatusNote::error(tr_with(
+            self.set_note(StatusNote::error(tr_with(
                 keys::Q_LEFTOVERS_WITHDRAW_MINIMUM,
                 &[
                     ("amount", &(group_digits(min)).to_string()),
@@ -228,7 +227,7 @@ impl QuillApp {
             .password
             .update(cx, |input, cx| input.set_value("", window, cx));
         if let Some(Err(_)) = sent {
-            self.connection.set_note(StatusNote::error(tr(
+            self.set_note(StatusNote::error(tr(
                 keys::Q_MONEY_COULDNT_WITHDRAW_RIGHT_NOW,
             )));
         }
@@ -251,7 +250,7 @@ impl QuillApp {
             && let Some(live) = self.live.as_mut()
             && live.driver.request_password_recovery().is_err()
         {
-            self.connection.set_note(StatusNote::error(tr(
+            self.set_note(StatusNote::error(tr(
                 keys::Q_MONEY_COULDNT_SEND_THE_RECOVERY_CODE,
             )));
         }

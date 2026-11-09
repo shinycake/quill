@@ -94,6 +94,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import dialog_hosts  # noqa: E402
+import note_hosts  # noqa: E402
 import ui_statics  # noqa: E402
 import view_reads  # noqa: E402
 
@@ -553,6 +554,17 @@ def main() -> int:
             "window) (src/ui/chat_window/dialog_hosts.rs). A write that only refreshes a\n"
             "box where it shows says why with `// box-host: <why>`.\n"
         )
+    unhosted_notes = note_hosts.problems(str(root.parent.parent))
+    if unhosted_notes:
+        print("\n".join(unhosted_notes))
+        print(
+            f"\n{len(unhosted_notes)} toast(s) take their window past the Asker.\n"
+            "Set a note with QuillApp::set_note: it toasts in the window that asked\n"
+            "(src/ui/chat_window/dialog_hosts.rs), as open_box does. A flow that runs\n"
+            "away from its window carries it and sets the note under as_asked_by(window, ..).\n"
+            "A toast that names its window for another reason says why with\n"
+            "`// note-host: <why>`.\n"
+        )
     unrouted = unrouted_opens(root, texts)
     if unrouted:
         print("\n".join(unrouted))
@@ -594,7 +606,15 @@ def main() -> int:
             "docs/contributing/structure.md (Window scope)."
         )
         return 1
-    if screen_failures or main_only or view_failures or unrouted or shared_statics or unhosted:
+    if (
+        screen_failures
+        or main_only
+        or view_failures
+        or unrouted
+        or shared_statics
+        or unhosted
+        or unhosted_notes
+    ):
         return 1
     print("window scope: OK")
     print("screen scope: OK")

@@ -37,13 +37,13 @@ impl QuillApp {
                     StatusNote::error(tr(keys::Q_OPS_COULD_NOT_DOWNLOAD_PLEASE_TRY))
                 }
             };
-            self.connection.set_note(note);
+            self.set_note(note);
         } else if let Some(session) = self.demo_session.as_mut() {
             // The transfer starts as the driver records one; no bytes arrive.
             if session.should_download(file_id) {
                 session.begin_user_download(file_id);
             }
-            self.connection.set_note(StatusNote::silent(tr(
+            self.set_note(StatusNote::silent(tr(
                 keys::Q_OPS_DEMO_ADDFILETODOWNLOADS_RUNS_WITH_LIVE,
             )));
         }
@@ -62,7 +62,7 @@ impl QuillApp {
         });
         if stopped {
             self.drop_play_intent_for(file_id);
-            self.connection.set_note(StatusNote::silent(tr(
+            self.set_note(StatusNote::silent(tr(
                 keys::Q_OPS_DOWNLOAD_STOPPED_PRESS_PLAY_TO,
             )));
             cx.notify();
@@ -82,8 +82,7 @@ impl QuillApp {
             // and files that may reveal the IP address.
             Some(path) => self.open_file_guarded(path, cx),
             None => {
-                self.connection
-                    .set_note(StatusNote::error(tr(keys::Q_OPS_COULD_NOT_OPEN_THE_FILE)));
+                self.set_note(StatusNote::error(tr(keys::Q_OPS_COULD_NOT_OPEN_THE_FILE)));
                 cx.notify();
             }
         }
@@ -115,12 +114,12 @@ impl QuillApp {
                 Ok(false) => StatusNote::silent(tr(keys::Q_OPS_NOTHING_TO_CANCEL)),
                 Err(_) => StatusNote::error(tr(keys::Q_OPS_COULD_NOT_CANCEL_THE_DOWNLOAD)),
             };
-            self.connection.set_note(note);
+            self.set_note(note);
         } else if let Some(session) = self.demo_session.as_mut() {
             if session.media.downloads.is_requested(file_id.0) {
                 session.abort_download(file_id);
             }
-            self.connection.set_note(StatusNote::silent(tr(
+            self.set_note(StatusNote::silent(tr(
                 keys::Q_OPS_DEMO_CANCELDOWNLOADFILE_RUNS_WITH_LIVE,
             )));
         }
@@ -132,15 +131,16 @@ impl QuillApp {
     /// `updateFileDownload`).
     pub(super) fn pause_media_download(&mut self, file_id: FileId, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
-            self.screen
-                .connection
-                .set_note(match live.driver.pause_download(file_id) {
+            self.screen.connection.set_note_for(
+                &self.screen.windows,
+                match live.driver.pause_download(file_id) {
                     Ok(true) => StatusNote::silent(tr(keys::Q_OPS_DOWNLOAD_PAUSED)),
                     Ok(false) => StatusNote::silent(tr(keys::Q_OPS_NOTHING_TO_PAUSE)),
                     Err(_) => StatusNote::error(tr(keys::Q_OPS_COULD_NOT_PAUSE_THE_DOWNLOAD)),
-                });
+                },
+            );
         } else if self.demo_session.is_some() {
-            self.connection.set_note(StatusNote::silent(tr(
+            self.set_note(StatusNote::silent(tr(
                 keys::Q_OPS_DEMO_TOGGLEDOWNLOADISPAUSED_RUNS_WITH_LIVE,
             )));
         }
@@ -152,18 +152,18 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut()
             && !live.driver.download_fits_disk(file_id)
         {
-            self.connection
-                .set_note(StatusNote::silent(tr(keys::Q_DISK_DOWNLOAD_NO_ROOM)));
+            self.set_note(StatusNote::silent(tr(keys::Q_DISK_DOWNLOAD_NO_ROOM)));
         } else if let Some(live) = self.live.as_mut() {
-            self.screen
-                .connection
-                .set_note(match live.driver.resume_download(file_id) {
+            self.screen.connection.set_note_for(
+                &self.screen.windows,
+                match live.driver.resume_download(file_id) {
                     Ok(true) => StatusNote::silent(tr(keys::Q_OPS_DOWNLOAD_RESUMED)),
                     Ok(false) => StatusNote::silent(tr(keys::Q_OPS_NOTHING_TO_RESUME)),
                     Err(_) => StatusNote::error(tr(keys::Q_OPS_COULD_NOT_RESUME_THE_DOWNLOAD)),
-                });
+                },
+            );
         } else if self.demo_session.is_some() {
-            self.connection.set_note(StatusNote::silent(tr(
+            self.set_note(StatusNote::silent(tr(
                 keys::Q_OPS_DEMO_TOGGLEDOWNLOADISPAUSED_RUNS_WITH_LIVE,
             )));
         }

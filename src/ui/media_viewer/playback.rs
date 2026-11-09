@@ -180,7 +180,7 @@ impl QuillApp {
         match path {
             Some(path) => self.open_file_guarded(path, cx),
             None => {
-                self.connection.set_note(StatusNote::silent(tr(
+                self.set_note(StatusNote::silent(tr(
                     keys::Q_AV_DOWNLOAD_THE_MEDIA_FIRST_TO_2,
                 )));
                 cx.notify();
@@ -300,7 +300,7 @@ impl QuillApp {
         }
         if !restarted {
             // Nothing playing: the speed applies to the next play.
-            self.connection.set_note(StatusNote::silent(tr_with(
+            self.set_note(StatusNote::silent(tr_with(
                 keys::Q_AV_PLAYBACK_SPEED,
                 &[("self_speed_label", &(Self::speed_label(next)).to_string())],
             )));

@@ -199,3 +199,6 @@ main_window._key_scope | the key-scope interceptor
 first_run.Welcome * | the first-run intro's player and timings, before any account
 first_run.Highlights * | the first-run highlights' timing, before any account
 composer_sends.prep * | prep jobs keyed by their SendSlot, whose account field names the account; a job whose screen or window is gone finishes through that account's client (send_prep.rs live_of)
+pending_deep_link.link | a link waiting for the deep-link pump: one from outside Quill (launch, OS) is taken by whichever account is on screen; one clicked in an account is followed only by that account (`QueuedLink::account`, `for_screen`) and dropped once another is on screen
+pending_deep_link.window | the chat window the link was clicked in; followed only with its account (`QueuedLink::for_screen`)
+pending_deep_link.by_agent | an agent's step queued the link; followed only with its account (`QueuedLink::for_screen`)

@@ -120,12 +120,13 @@ impl QuillApp {
 
     pub(super) fn jump_to_unread_marker(&mut self, kind: UnreadJumpKind, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
-            self.screen
-                .connection
-                .set_note(match live.driver.jump_to_unread_marker(kind) {
+            self.screen.connection.set_note_for(
+                &self.screen.windows,
+                match live.driver.jump_to_unread_marker(kind) {
                     Ok(()) => StatusNote::default(),
                     Err(_) => StatusNote::error(tr(keys::Q_MISC_COULD_NOT_FIND_THE_MESSAGE)),
-                });
+                },
+            );
             cx.notify();
         }
     }
@@ -138,7 +139,8 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         if let Some(live) = self.live.as_mut() {
-            self.screen.connection.set_note(
+            self.screen.connection.set_note_for(
+                &self.screen.windows,
                 match live.driver.read_all_chat_unread_markers(chat_id, kind) {
                     Ok(()) => StatusNote::default(),
                     Err(_) => StatusNote::error(tr(keys::Q_MISC_COULD_NOT_MARK_AS_READ)),
@@ -150,12 +152,13 @@ impl QuillApp {
 
     pub(super) fn read_all_unread_markers(&mut self, kind: UnreadJumpKind, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
-            self.screen
-                .connection
-                .set_note(match live.driver.read_all_unread_markers(kind) {
+            self.screen.connection.set_note_for(
+                &self.screen.windows,
+                match live.driver.read_all_unread_markers(kind) {
                     Ok(()) => StatusNote::default(),
                     Err(_) => StatusNote::error(tr(keys::Q_MISC_COULD_NOT_MARK_AS_READ)),
-                });
+                },
+            );
             cx.notify();
         }
     }

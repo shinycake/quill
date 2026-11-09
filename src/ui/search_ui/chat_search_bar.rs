@@ -263,21 +263,19 @@ impl QuillApp {
         }
         if let Some(live) = self.live.as_mut() {
             match live.driver.set_search_query(query) {
-                Ok(SearchQueryOutcome::Sent(_)) => self
-                    .connection
-                    .set_note(StatusNote::silent(tr(keys::Q_CHAT_SEARCHING_2))),
+                Ok(SearchQueryOutcome::Sent(_)) => {
+                    self.set_note(StatusNote::silent(tr(keys::Q_CHAT_SEARCHING_2)))
+                }
                 Ok(SearchQueryOutcome::Debounced { token }) => {
                     self.schedule_search_commit(token, cx);
                 }
                 Ok(SearchQueryOutcome::Unchanged) if query.trim().is_empty() => {
-                    self.connection.set_note(StatusNote::silent(tr(
+                    self.set_note(StatusNote::silent(tr(
                         keys::Q_CHAT_SEARCH_CHATS_AND_MESSAGES,
                     )));
                 }
                 Ok(SearchQueryOutcome::Unchanged) => {}
-                Err(_) => self
-                    .connection
-                    .set_note(StatusNote::error(tr(keys::Q_CHAT_COULD_NOT_SEARCH))),
+                Err(_) => self.set_note(StatusNote::error(tr(keys::Q_CHAT_COULD_NOT_SEARCH))),
             }
         } else if let Some(session) = self.demo_session.as_mut() {
             let trimmed = query.trim();
@@ -299,13 +297,13 @@ impl QuillApp {
             this.update(cx, |this, cx| {
                 if let Some(live) = this.live.as_mut() {
                     match live.driver.commit_debounced_search(token) {
-                        Ok(Some(_)) => this
-                            .connection
-                            .set_note(StatusNote::silent(tr(keys::Q_CHAT_SEARCHING_2))),
+                        Ok(Some(_)) => {
+                            this.set_note(StatusNote::silent(tr(keys::Q_CHAT_SEARCHING_2)))
+                        }
                         Ok(None) => {}
-                        Err(_) => this
-                            .connection
-                            .set_note(StatusNote::error(tr(keys::Q_CHAT_COULD_NOT_SEARCH))),
+                        Err(_) => {
+                            this.set_note(StatusNote::error(tr(keys::Q_CHAT_COULD_NOT_SEARCH)))
+                        }
                     }
                 }
                 cx.notify();
@@ -375,7 +373,8 @@ impl QuillApp {
         let (text, reply, now_ms) = self.leaving_draft_parts(cx);
         let open = self.chat_open_at(chat_id, None);
         if let Some(live) = self.live.as_mut() {
-            self.screen.connection.set_note(
+            self.screen.connection.set_note_for(
+                &self.screen.windows,
                 match live
                     .driver
                     .select_search_chat_open(chat_id, open, text, reply, now_ms)
@@ -397,8 +396,7 @@ impl QuillApp {
             }
             session.close_search();
             session.open_chat(chat_id);
-            self.connection
-                .set_note(StatusNote::silent(tr(keys::Q_CHAT_CHAT_SELECTED)));
+            self.set_note(StatusNote::silent(tr(keys::Q_CHAT_CHAT_SELECTED)));
         }
         self.enter_chat_ui(chat_id, cx);
         self.restore_open_draft(window, cx);
@@ -426,7 +424,8 @@ impl QuillApp {
         // The found message wins over the chat's saved scroll position.
         let _ = self.chat_open_at(chat_id, Some(message_id));
         if let Some(live) = self.live.as_mut() {
-            self.screen.connection.set_note(
+            self.screen.connection.set_note_for(
+                &self.screen.windows,
                 match live
                     .driver
                     .select_search_message(chat_id, message_id, text, reply, now_ms)
@@ -449,8 +448,7 @@ impl QuillApp {
             session.promote_search_message(chat_id, message_id);
             session.close_search();
             session.open_chat(chat_id);
-            self.connection
-                .set_note(StatusNote::silent(tr(keys::Q_CHAT_OPENED_CHAT)));
+            self.set_note(StatusNote::silent(tr(keys::Q_CHAT_OPENED_CHAT)));
         }
         self.enter_chat_ui(chat_id, cx);
         self.restore_open_draft(window, cx);

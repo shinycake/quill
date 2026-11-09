@@ -154,8 +154,7 @@ impl QuillApp {
             cx,
         );
         self.demo_seek_hover();
-        self.connection
-            .set_note(StatusNote::silent("screenshot demo — audio"));
+        self.set_note(StatusNote::silent("screenshot demo — audio"));
     }
 
     fn demo_ready_voice_playing(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
@@ -175,8 +174,7 @@ impl QuillApp {
             cx,
         );
         self.demo_seek_hover();
-        self.connection
-            .set_note(StatusNote::silent("screenshot demo — voice note · playing"));
+        self.set_note(StatusNote::silent("screenshot demo — voice note · playing"));
     }
 
     /// `QUILL_DEMO_SEEK_HOVER=<0..1>`: the pointer over the active row's
@@ -268,8 +266,7 @@ impl QuillApp {
             self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
             apply_ready_video(session, &self.demo_ui.sink, &self.demo_ui.seq);
         }
-        self.connection
-            .set_note(StatusNote::silent("screenshot demo — video · playing"));
+        self.set_note(StatusNote::silent("screenshot demo — video · playing"));
     }
 
     fn demo_ready_video_note(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {
@@ -277,8 +274,7 @@ impl QuillApp {
             self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
             apply_ready_video_note(session, &self.demo_ui.sink, &self.demo_ui.seq);
         }
-        self.connection
-            .set_note(StatusNote::silent("screenshot demo — video note · playing"));
+        self.set_note(StatusNote::silent("screenshot demo — video note · playing"));
     }
 
     fn demo_ready_video_inline(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {
@@ -287,7 +283,7 @@ impl QuillApp {
             apply_ready_video_viewer(session, &self.demo_ui.sink, &self.demo_ui.seq);
             apply_ready_video_note(session, &self.demo_ui.sink, &self.demo_ui.seq);
         }
-        self.connection.set_note(StatusNote::silent(
+        self.set_note(StatusNote::silent(
             "screenshot demo — inline video autoplay",
         ));
     }
@@ -354,7 +350,7 @@ impl QuillApp {
         );
         // MED2: demo shows the locked record bar + a transcribed note.
         self.recording.locked = true;
-        self.connection.set_note(StatusNote::silent(
+        self.set_note(StatusNote::silent(
             "screenshot demo — recording voice · locked",
         ));
     }
@@ -423,7 +419,7 @@ impl QuillApp {
         }
         self.pickers.media_panel.open = true;
         self.pickers.media_panel.tab = crate::ui::media_panel::PanelTab::Stickers;
-        self.connection.set_note(StatusNote::silent(
+        self.set_note(StatusNote::silent(
             "screenshot demo — stickers · tap to send",
         ));
     }

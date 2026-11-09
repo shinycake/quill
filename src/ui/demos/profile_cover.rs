@@ -148,7 +148,7 @@ impl QuillApp {
             apply_cover_fixture(session, &self.demo_ui.sink, &self.demo_ui.seq);
         }
         self.open_info_panel_target(target, window, cx);
-        self.connection.set_note(StatusNote::silent(note));
+        self.set_note(StatusNote::silent(note));
         cx.notify();
     }
 

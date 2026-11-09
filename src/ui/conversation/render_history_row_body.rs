@@ -451,8 +451,7 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut()
             && live.driver.retry_history().is_err()
         {
-            self.connection
-                .set_note(StatusNote::error(tr(keys::Q_CHAT_COULD_NOT_LOAD_HISTORY)));
+            self.set_note(StatusNote::error(tr(keys::Q_CHAT_COULD_NOT_LOAD_HISTORY)));
         }
         cx.notify();
     }
@@ -489,8 +488,7 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut()
             && live.driver.retry_topic_history().is_err()
         {
-            self.connection
-                .set_note(StatusNote::error(tr(keys::Q_CHAT_COULD_NOT_LOAD_HISTORY)));
+            self.set_note(StatusNote::error(tr(keys::Q_CHAT_COULD_NOT_LOAD_HISTORY)));
         }
         cx.notify();
     }

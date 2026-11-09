@@ -234,7 +234,7 @@ fn a_saved_toast_whose_folder_could_not_open_says_so(cx: &mut TestAppContext) {
     let (app, mut vcx) = new_app(cx);
     let vcx = &mut vcx;
     app.update(vcx, |app, cx| {
-        app.connection.set_note(
+        app.set_note(
             crate::ui::status_note::StatusNote::info("Saved to Downloads")
                 .with_reveal(std::path::PathBuf::from("/tmp/clip.mp4")),
         );

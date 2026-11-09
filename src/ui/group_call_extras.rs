@@ -55,7 +55,7 @@ impl QuillApp {
             }
             SelfMuteError::NotAllowed => return,
         };
-        self.connection.set_note(note);
+        self.set_note(note);
     }
 
     /// Mute or unmute the microphone without a toggle round trip.
@@ -345,7 +345,7 @@ impl QuillApp {
     ) {
         if let Some(live) = self.live.as_mut() {
             if live.driver.choose_group_call_join_as(sender).is_err() {
-                self.connection.set_note(StatusNote::error(tr(
+                self.set_note(StatusNote::error(tr(
                     keys::Q_AV_COULDNT_CHANGE_WHO_YOU_JOIN,
                 )));
             }

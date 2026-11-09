@@ -99,7 +99,7 @@ impl QuillApp {
             self.gift_market.push(MarketBox::Resale);
             self.open_box(crate::ui::shell::DialogKind::GiftMarket);
         } else {
-            self.connection.set_note(StatusNote::error(tr(
+            self.set_note(StatusNote::error(tr(
                 keys::Q_MONEY_COULDNT_LOAD_THE_GIFTS_ON,
             )));
         }

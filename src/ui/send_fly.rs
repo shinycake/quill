@@ -275,6 +275,7 @@ impl QuillApp {
             return;
         }
         // The sticker was chosen by the last press, in its window.
+        // note-host: the cell drawn under that press, not a toast or a box.
         let key = CellKey {
             window: self.windows.last_press,
             file: file.0,

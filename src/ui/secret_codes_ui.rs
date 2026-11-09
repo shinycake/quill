@@ -88,7 +88,7 @@ impl QuillApp {
             Code::NumberButtons => {
                 let now = !experimental::fast_buttons_mode();
                 self.set_experimental_option(experimental::FAST_BUTTONS_ID, now, cx);
-                self.connection.set_note(StatusNote::info(if now {
+                self.set_note(StatusNote::info(if now {
                     experimental::FAST_BUTTONS_ENABLED_TOAST
                 } else {
                     experimental::FAST_BUTTONS_DISABLED_TOAST
@@ -145,10 +145,10 @@ impl QuillApp {
                     .map(|record| record.display_name)
                     .unwrap_or_default();
                 self.switch_account(&key, &name, window, cx);
-                self.connection.set_note(StatusNote::info(toast));
+                self.set_note(StatusNote::info(toast));
             }
             Err(error) => {
-                self.connection.set_note(StatusNote::error(tr_with(
+                self.set_note(StatusNote::error(tr_with(
                     keys::Q_OPS_COULD_NOT_SWITCH_THE_ENVIRONMENT,
                     &[("error", &error.to_string())],
                 )));
@@ -171,7 +171,7 @@ impl QuillApp {
         };
         let to_test = action == test_environment::TestModeAction::AddTest;
         self.preferences.advanced.set_demo_test_environment(to_test);
-        self.connection.set_note(StatusNote::info(if to_test {
+        self.set_note(StatusNote::info(if to_test {
             test_environment::SWITCHED_TO_TEST
         } else {
             test_environment::SWITCHED_TO_PRODUCTION
@@ -197,7 +197,7 @@ impl QuillApp {
             if let (Some(api), Some(root)) = (api, root.as_deref())
                 && let Err(error) = debug_mode::start_tdlib_log(&api, root)
             {
-                self.connection.set_note(StatusNote::error(tr_with(
+                self.set_note(StatusNote::error(tr_with(
                     keys::Q_OPS_TDLIB_DEBUG_LOG_DID_NOT,
                     &[("error", &error.to_string())],
                 )));
@@ -208,7 +208,7 @@ impl QuillApp {
         if let Some(root) = root.as_deref()
             && let Err(error) = debug_mode::persist(root, debug_mode::enabled())
         {
-            self.connection.set_note(StatusNote::error(tr_with(
+            self.set_note(StatusNote::error(tr_with(
                 keys::Q_OPS_COULD_NOT_REMEMBER_THE_DEBUG,
                 &[("error", &error.to_string())],
             )));

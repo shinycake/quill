@@ -168,8 +168,7 @@ impl QuillApp {
     ) {
         self.demo_permissions_fixture(GROUP);
         self.open_permissions_dialog(ChatId(GROUP), cx);
-        self.connection
-            .set_note(StatusNote::silent("screenshot demo — group permissions"));
+        self.set_note(StatusNote::silent("screenshot demo — group permissions"));
         cx.notify();
     }
 

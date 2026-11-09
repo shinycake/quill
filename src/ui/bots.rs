@@ -155,7 +155,7 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         if answer.url.is_empty() {
-            self.connection.set_note(if answer.text.is_empty() {
+            self.set_note(if answer.text.is_empty() {
                 StatusNote::silent(tr(keys::Q_MEDIA_BOT_ANSWERED))
             } else {
                 StatusNote::info(answer.text)

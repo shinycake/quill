@@ -165,7 +165,7 @@ impl QuillApp {
                                 this.show_theme_editor(file, Some(editing), image, window, cx);
                             }
                             Err(err) => {
-                                this.connection.set_note(StatusNote::error(err.note()));
+                                this.set_note(StatusNote::error(err.note()));
                                 cx.notify();
                             }
                         }
@@ -305,7 +305,7 @@ impl QuillApp {
                 true
             }
             Err(err) => {
-                self.connection.set_note(StatusNote::error(err.note()));
+                self.set_note(StatusNote::error(err.note()));
                 cx.notify();
                 false
             }
@@ -334,7 +334,7 @@ impl QuillApp {
                 .spawn(async move { std::fs::write(&dest, file.to_zip()) })
                 .await;
             let _ = this.update(cx, |this, cx| {
-                this.connection.set_note(match written {
+                this.set_note(match written {
                     Ok(()) => StatusNote::info(tr(keys::Q_MISC_THEME_EXPORTED)),
                     Err(err) => StatusNote::error(tr_with(
                         keys::Q_MISC_COULDNT_EXPORT_THE_THEME,

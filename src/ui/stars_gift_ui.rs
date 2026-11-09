@@ -42,7 +42,7 @@ impl QuillApp {
             .update(cx, |input, cx| input.set_value("", window, cx));
         let opened = self.live.as_mut().map(|live| live.driver.open_stars_gift());
         if !matches!(opened, Some(Ok(()))) {
-            self.connection.set_note(StatusNote::error(tr(
+            self.set_note(StatusNote::error(tr(
                 keys::Q_MONEY_COULD_NOT_OPEN_GIFT_STARS,
             )));
         }
@@ -71,8 +71,7 @@ impl QuillApp {
             .as_mut()
             .map(|live| live.driver.choose_stars_gift_user(user_id, &name));
         if !matches!(sent, Some(Ok(_))) {
-            self.connection
-                .set_note(StatusNote::error(tr(keys::Q_MONEY_COULD_NOT_LOAD_THE_STAR)));
+            self.set_note(StatusNote::error(tr(keys::Q_MONEY_COULD_NOT_LOAD_THE_STAR)));
         }
         cx.notify();
     }

@@ -34,8 +34,7 @@ impl QuillApp {
             let gallery = &mut live.driver.session.media.shared_media;
             if gallery.open {
                 if live.driver.set_shared_media_split(split).is_err() {
-                    self.connection
-                        .set_note(StatusNote::error(tr(keys::Q_OPS_COULD_NOT_LOAD_THAT_TAB)));
+                    self.set_note(StatusNote::error(tr(keys::Q_OPS_COULD_NOT_LOAD_THAT_TAB)));
                 }
             } else {
                 gallery.media_split = split;
@@ -64,8 +63,7 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut()
             && live.driver.fetch_more_shared_media(tab).is_err()
         {
-            self.connection
-                .set_note(StatusNote::error(tr(keys::Q_OPS_COULD_NOT_LOAD_MORE)));
+            self.set_note(StatusNote::error(tr(keys::Q_OPS_COULD_NOT_LOAD_MORE)));
         }
         cx.notify();
     }

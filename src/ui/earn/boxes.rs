@@ -137,9 +137,9 @@ impl QuillApp {
                                     if this.earn.diamonds < 100 {
                                         this.earn.diamonds += 1;
                                     }
-                                    this.screen.connection.set_note(StatusNote::info(
-                                        diamonds_toast(this.screen.earn.diamonds),
-                                    ));
+                                    this.set_note(StatusNote::info(diamonds_toast(
+                                        this.screen.earn.diamonds,
+                                    )));
                                     cx.notify();
                                 }))
                                 .child(ton_icon(20., primary)),
@@ -373,8 +373,7 @@ impl QuillApp {
                     .disabled(link.is_empty())
                     .on_click(cx.listener(move |this, _, _, cx| {
                         cx.write_to_clipboard(ClipboardItem::new_string(link.clone()));
-                        this.connection
-                            .set_note(StatusNote::info(tr(keys::STICKERS_COPIED)));
+                        this.set_note(StatusNote::info(tr(keys::STICKERS_COPIED)));
                         cx.notify();
                     })),
             );

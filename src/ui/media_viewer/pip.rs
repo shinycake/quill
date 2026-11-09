@@ -110,8 +110,7 @@ impl QuillApp {
                 // closed below, as when its own window has closed.
                 let placed = app.in_screen_scope(screen, cx, |app, cx| {
                     if failed {
-                        app.connection
-                            .set_note(StatusNote::error(tr(keys::Q_MEDIA_PIP_FAILED)));
+                        app.set_note(StatusNote::error(tr(keys::Q_MEDIA_PIP_FAILED)));
                         return None;
                     }
                     let mut link = link.take();

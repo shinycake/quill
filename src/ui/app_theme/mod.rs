@@ -362,8 +362,7 @@ impl QuillApp {
         let auto_disagrees =
             self.appearance.auto_night != AutoNight::Off && self.night_mode_now(cx) != night;
         if auto_disagrees {
-            self.connection
-                .set_note(StatusNote::silent(tr(keys::Q_MISC_AUTO_NIGHT_MODE_IS_OFF)));
+            self.set_note(StatusNote::silent(tr(keys::Q_MISC_AUTO_NIGHT_MODE_IS_OFF)));
         }
         self.set_appearance(cx, |a| {
             a.follow_omarchy = false;

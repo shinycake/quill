@@ -69,8 +69,7 @@ impl QuillApp {
 
     pub(super) fn open_peer_color_dialog(&mut self, tab: PeerColorTab, cx: &mut Context<Self>) {
         let Some(draft) = self.my_peer_colors() else {
-            self.connection
-                .set_note(StatusNote::info(tr(keys::Q_MISC_COLORS_NEED_A_SIGNED_IN)));
+            self.set_note(StatusNote::info(tr(keys::Q_MISC_COLORS_NEED_A_SIGNED_IN)));
             cx.notify();
             return;
         };
@@ -123,8 +122,7 @@ impl QuillApp {
             ApplyOutcome::Unchanged => self.close_peer_color_dialog(cx),
             ApplyOutcome::Send { name, profile } => {
                 let Some(live) = self.live.as_mut() else {
-                    self.connection
-                        .set_note(StatusNote::info(tr(keys::Q_MISC_DEMO_MODE_COLORS_NEED_A)));
+                    self.set_note(StatusNote::info(tr(keys::Q_MISC_DEMO_MODE_COLORS_NEED_A)));
                     cx.notify();
                     return;
                 };
@@ -145,7 +143,7 @@ impl QuillApp {
                         .set_profile_colors(draft.profile_color_id, draft.profile_emoji_id)
                         .is_err();
                 }
-                self.connection.set_note(if failed {
+                self.set_note(if failed {
                     StatusNote::error(tr(keys::Q_MISC_COULD_NOT_CHANGE_THE_COLORS))
                 } else {
                     StatusNote::silent(tr(keys::Q_MISC_STYLE_UPDATE_REQUESTED))

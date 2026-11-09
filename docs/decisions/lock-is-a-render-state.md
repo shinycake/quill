@@ -189,6 +189,11 @@ stream PiP, the kit close, the export quit, the media session and the connection
 `scripts/test_lock_surfaces.py` tests the check itself. The check reads one level only: what a
 `runs-locked` step calls in turn is read in review.
 
+Round 15 (area B): notes are now set with `QuillApp::set_note`, which takes the toast's window from the
+Asker, so the check sees `poll_live`'s note (a failed send, a lost connection) as a call. It is listed as
+`runs-locked`: it was `connection.set_note` before and ran locked then too, and a locked window draws only
+its lock screen, never the toast.
+
 ### The agent socket
 
 The agent server runs on its own threads, so its gate is a process-wide flag: `agent::access::paused_by_lock`.

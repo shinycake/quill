@@ -39,13 +39,14 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         let Some(live) = self.live.as_mut() else {
-            self.connection.set_note(StatusNote::info(tr(
+            self.set_note(StatusNote::info(tr(
                 keys::Q_CHAT_STOPPING_A_LIVE_LOCATION_NEEDS,
             )));
             cx.notify();
             return;
         };
-        self.screen.connection.set_note(
+        self.screen.connection.set_note_for(
+            &self.screen.windows,
             match live.driver.stop_live_location(chat_id, message_id) {
                 Ok(_) => StatusNote::silent(tr(keys::Q_CHAT_STOPPED_SHARING_YOUR_LIVE_LOCATION)),
                 Err(_) => StatusNote::error(tr(keys::Q_CHAT_COULDNT_STOP_SHARING_TRY_AGAIN)),
@@ -68,7 +69,7 @@ impl QuillApp {
             return false;
         }
         let kind = session.chats.get(&chat_id.0).map(|chat| chat.kind.clone());
-        self.connection.set_note(match kind {
+        self.set_note(match kind {
             Some(ChatKind::Supergroup {
                 is_channel: true, ..
             }) => StatusNote::info(tr(keys::ERROR_NOCOPY_CHANNEL)),

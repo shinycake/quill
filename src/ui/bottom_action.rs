@@ -120,7 +120,7 @@ impl QuillApp {
             BottomBar::PremiumRequired => self.open_premium_from("require_premium", cx),
             BottomBar::JoinGroup | BottomBar::ApplyToJoin => {
                 self.join_channel(chat_id, cx);
-                self.connection.set_note(if bar == BottomBar::ApplyToJoin {
+                self.set_note(if bar == BottomBar::ApplyToJoin {
                     StatusNote::silent(tr(keys::Q_MEDIA_JOIN_REQUEST_SENT))
                 } else {
                     StatusNote::silent(tr(keys::Q_MEDIA_JOINING_GROUP))
@@ -150,8 +150,7 @@ impl QuillApp {
             if let Some(chat) = session.chats.get_mut(&chat_id.0) {
                 chat.blocked = false;
             }
-            self.connection
-                .set_note(StatusNote::silent(tr(keys::Q_MEDIA_UNBLOCKED_DEMO)));
+            self.set_note(StatusNote::silent(tr(keys::Q_MEDIA_UNBLOCKED_DEMO)));
         }
         if restart {
             self.start_bot_from_bar(chat_id, cx);
@@ -175,8 +174,7 @@ impl QuillApp {
         if self.live.is_some() {
             self.press_bot_start(chat_id, bot_id, parameter, cx);
         } else {
-            self.connection
-                .set_note(StatusNote::silent(tr(keys::Q_MEDIA_BOT_STARTED_DEMO)));
+            self.set_note(StatusNote::silent(tr(keys::Q_MEDIA_BOT_STARTED_DEMO)));
         }
     }
 }

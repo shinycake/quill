@@ -16,9 +16,6 @@ pub(crate) struct ConnectionUi {
     note: StatusNote,
     /// The toasts on screen and waiting, with the visible one's timer.
     pub(super) toasts: ToastQueue,
-    /// The window a note set now toasts in (`None`: the main window): the
-    /// one of the last press or key (`QuillApp::note_window_press`).
-    pub(super) note_window: Option<quill::ids::ChatId>,
     /// The deadline a wake-up is already scheduled for.
     pub(super) toast_wake: Option<Instant>,
     /// The last status note printed by `QUILL_TRACE_STATUS`.
@@ -33,7 +30,6 @@ impl ConnectionUi {
             status: connect_status,
             note: StatusNote::new(NoteKind::Silent, status_note),
             toasts: ToastQueue::default(),
-            note_window: None,
             toast_wake: None,
             status_traced: String::new(),
             presence: Default::default(),
@@ -46,15 +42,24 @@ impl ConnectionUi {
 impl super::on_screen::Farewell for ConnectionUi {}
 
 impl ConnectionUi {
-    /// Replaces the current note. Progress chatter ([`NoteKind::Silent`])
-    /// never replaces a note the toast still shows, so "pinned" or "sending"
+    /// Replaces the current note, toasting in the window `host` (`None`:
+    /// the main window). Progress chatter ([`NoteKind::Silent`]) never
+    /// replaces a note the toast still shows, so "pinned" or "sending"
     /// cannot wipe an unread failure; the toast's own timer clears that one.
-    pub(super) fn set_note(&mut self, note: StatusNote) {
-        self.set_note_in(self.note_window, note);
+    /// Code in `src/ui` sets a note with [`QuillApp::set_note`], which
+    /// names the window from the [`Asker`](super::chat_window::dialog_hosts::Asker);
+    /// `scripts/note_hosts.py` keeps the other callers of this one listed.
+    /// [`QuillApp::set_note`], for code that holds other parts of the app
+    /// borrowed (the client): `windows` is the app's, whose Asker names
+    /// the window.
+    pub(super) fn set_note_for(
+        &mut self,
+        windows: &super::chat_window::ChatWindows,
+        note: StatusNote,
+    ) {
+        self.set_note_in(windows.asking_window_or_last_press(), note);
     }
 
-    /// [`Self::set_note`], toasting in the window `host` (`None`: the
-    /// main window) whichever window the last input happened in.
     pub(super) fn set_note_in(&mut self, host: Option<quill::ids::ChatId>, note: StatusNote) {
         if note.kind() == NoteKind::Silent && self.note.is_toast() {
             return;
@@ -93,6 +98,19 @@ impl ConnectionUi {
         if self.note.is_toast() && !self.toasts.holds(&self.note) {
             self.note = StatusNote::default();
         }
+    }
+}
+
+impl super::app::QuillApp {
+    /// Replaces the current note ([`ConnectionUi::set_note_in`]). Its toast
+    /// shows in the window that asked for what runs now, as a box does
+    /// ([`Self::asking_window_or_last_press`]): the window of the press,
+    /// of the frame, of the deferred work, or the one a flow carried under
+    /// `as_asked_by`; where no window asked, the window of the last press.
+    pub(super) fn set_note(&mut self, note: StatusNote) {
+        self.screen
+            .connection
+            .set_note_for(&self.screen.windows, note);
     }
 }
 
@@ -185,24 +203,24 @@ mod tests {
     #[test]
     fn progress_chatter_cannot_wipe_a_shown_failure() {
         let mut c = connection();
-        c.set_note(StatusNote::error("Senden fehlgeschlagen"));
-        c.set_note(StatusNote::silent("sending…"));
+        c.set_note_in(None, StatusNote::error("Senden fehlgeschlagen"));
+        c.set_note_in(None, StatusNote::silent("sending…"));
         assert_eq!(c.status_note(), "Senden fehlgeschlagen");
         assert!(c.note().is_toast(), "a German failure still toasts");
-        c.set_note(StatusNote::info("Link kopiert"));
+        c.set_note_in(None, StatusNote::info("Link kopiert"));
         assert_eq!(c.status_note(), "Link kopiert");
         c.clear_note();
-        c.set_note(StatusNote::silent("sending…"));
+        c.set_note_in(None, StatusNote::silent("sending…"));
         assert_eq!(c.status_note(), "sending…");
     }
 
     #[test]
     fn a_finished_toast_frees_the_note() {
         let mut c = connection();
-        c.set_note(StatusNote::error("Couldn't send"));
+        c.set_note_in(None, StatusNote::error("Couldn't send"));
         c.advance_toasts(std::time::Instant::now() + std::time::Duration::from_secs(7));
         assert!(c.note().is_empty());
-        c.set_note(StatusNote::silent("sending…"));
+        c.set_note_in(None, StatusNote::silent("sending…"));
         assert_eq!(c.status_note(), "sending…");
     }
 }

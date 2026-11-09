@@ -90,14 +90,13 @@ impl QuillApp {
         };
         let dests: Vec<ChatId> = self.share.selection.chats().to_vec();
         if dests.is_empty() {
-            self.connection
-                .set_note(StatusNote::silent(tr(keys::Q_OPS_CHOOSE_A_CHAT_TO_FORWARD)));
+            self.set_note(StatusNote::silent(tr(keys::Q_OPS_CHOOSE_A_CHAT_TO_FORWARD)));
             cx.notify();
             return;
         }
         for dest in &dests {
             if let Some(note) = self.share_dest_refusal(*dest, cx) {
-                self.connection.set_note(StatusNote::error(note));
+                self.set_note(StatusNote::error(note));
                 cx.notify();
                 return;
             }
@@ -132,7 +131,7 @@ impl QuillApp {
                     failed += 1;
                 }
             }
-            self.connection.set_note(if failed == 0 {
+            self.set_note(if failed == 0 {
                 StatusNote::info(share_done_label(draft.count(), &titles))
             } else {
                 StatusNote::error(tr_with(
@@ -185,7 +184,7 @@ impl QuillApp {
             return;
         };
         if let Some(note) = self.share_dest_refusal(dest, cx) {
-            self.connection.set_note(StatusNote::error(note));
+            self.set_note(StatusNote::error(note));
             cx.notify();
             return;
         }
@@ -232,7 +231,7 @@ impl QuillApp {
             return;
         };
         if let Some(note) = self.share_dest_refusal(dest, cx) {
-            self.connection.set_note(StatusNote::error(note));
+            self.set_note(StatusNote::error(note));
             cx.notify();
             return;
         }
@@ -254,15 +253,14 @@ impl QuillApp {
                 .forward_messages_with_options(dest, &draft, &options);
             match result {
                 Ok(_) => {
-                    self.connection
-                        .set_note(StatusNote::silent(tr(keys::Q_OPS_FORWARDING)));
+                    self.set_note(StatusNote::silent(tr(keys::Q_OPS_FORWARDING)));
                     self.share.pending_forward = None;
                     self.share.forward_bar_dest = None;
                     self.update_pending_send(|send| {
                         send.scheduling = quill::composer::ComposerScheduling::None
                     });
                 }
-                Err(_) => self.connection.set_note(StatusNote::error(tr(
+                Err(_) => self.set_note(StatusNote::error(tr(
                     keys::Q_OPS_COULD_NOT_FORWARD_MESSAGES,
                 ))),
             }

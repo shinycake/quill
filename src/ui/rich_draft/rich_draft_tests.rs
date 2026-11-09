@@ -3,6 +3,7 @@
 //! it, discards, and asks a non-Premium sender about its formatting. Over
 //! the `ready-chats` demo; nothing reaches Telegram.
 
+use super::RichDraftBox;
 use crate::ui::app::QuillApp;
 use crate::ui::keybindings::bind_keys;
 use crate::ui::screenshot_demo::ScreenshotDemo;
@@ -172,11 +173,72 @@ fn sending_without_premium_offers_the_text_without_formatting(cx: &mut TestAppCo
         app.update(cx, |app, cx| app.submit_from_send_button(window, cx));
     });
     frames(vcx);
-    let choice = app.read_with(vcx, |app, _| {
-        app.composer_ui.rich_draft.premium_choice.clone()
-    });
-    assert_eq!(choice.as_deref(), Some("Plan\n**ship it**"));
+    let choice = app.read_with(vcx, |app, _| app.chat_ui.rich_draft_box.clone());
+    assert_eq!(
+        choice,
+        RichDraftBox::PremiumChoice("Plan\n**ship it**".into())
+    );
     assert!(shown(vcx, "rich-choice-plain"));
+}
+
+/// Round 15 (area B, finding 1): the "Remove Formatting" and "discard"
+/// boxes belong to the chat they were opened for. Another chat put on
+/// screen in the same window closes them, and neither sends chat 11's
+/// text to the new chat nor wipes its draft.
+#[gpui_kit::test]
+fn a_rich_draft_box_goes_with_its_chat(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    remote_rich_draft(&app, vcx, false);
+    vcx.update(|window, cx| {
+        app.update(cx, |app, cx| app.submit_from_send_button(window, cx));
+    });
+    frames(vcx);
+    assert!(shown(vcx, "rich-choice-plain"));
+    let other = app.read_with(vcx, |app, _| {
+        app.session()
+            .and_then(|session| {
+                session
+                    .ordered_chats()
+                    .into_iter()
+                    .map(|chat| chat.id)
+                    .find(|id| *id != OPEN)
+            })
+            .expect("the demo lists another chat")
+    });
+    // The session's chat changes (a link clicked in a chat window, a
+    // notification) and, before the frame that replaces the chat's state,
+    // "Send Without Formatting" is pressed on the box still shown.
+    app.update(vcx, |app, _| {
+        if let Some(session) = app.demo_session.as_mut() {
+            session.open_chat = Some(other);
+        }
+        assert!(!app.chat_ui_is_current());
+        let plain = app.take_rich_premium_choice();
+        assert_eq!(plain, None, "the box acts on chat 11 only");
+    });
+    vcx.update(|window, cx| {
+        app.update(cx, |app, cx| app.select_listed_chat(other, window, cx));
+    });
+    frames(vcx);
+    assert_eq!(
+        app.read_with(vcx, |app, _| app.chat_ui.rich_draft_box.clone()),
+        RichDraftBox::Closed
+    );
+    assert!(!shown(vcx, "rich-choice-plain"));
+    assert_eq!(
+        composer_text(&app, vcx),
+        "",
+        "nothing went into chat {other:?}"
+    );
+    assert!(stored_rich(&app, vcx).is_some(), "chat 11 keeps its draft");
+
+    // Back in chat 11 the box does not come back by itself.
+    vcx.update(|window, cx| {
+        app.update(cx, |app, cx| app.select_listed_chat(OPEN, window, cx));
+    });
+    frames(vcx);
+    assert!(!shown(vcx, "rich-choice-plain"));
 }
 
 #[gpui_kit::test]

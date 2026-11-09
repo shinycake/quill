@@ -63,7 +63,22 @@ impl QuillApp {
         true
     }
 
+    /// The shortcut's answer, in the frame of the window whose composer
+    /// asked (its toasts show there, and it lands while the main window
+    /// is minimized). An answer nothing waits for, or whose window closed,
+    /// is dropped in any window's frame.
     pub(super) fn ai_apply_in_place_upkeep(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let here = self.windows.scope;
+        let elsewhere = self
+            .ai_compose
+            .apply_in_place
+            .as_ref()
+            .is_some_and(|asked| {
+                asked.window != here && asked.window.is_none_or(|chat| self.windows.has(chat))
+            });
+        if elsewhere {
+            return;
+        }
         let Some(answer) =
             session_mut(self).and_then(|s| s.messages.ai_compose.apply_in_place.take())
         else {
@@ -76,6 +91,10 @@ impl QuillApp {
         else {
             return;
         };
+        if asked.window != here {
+            // Its window closed.
+            return;
+        }
         let (text, entities) = match answer.outcome {
             Ok(result) => result,
             Err(AiBoxError::StyleInvalid(_)) => {
@@ -88,33 +107,8 @@ impl QuillApp {
                 return;
             }
         };
-        // The composer that asked: a chat window's is rewritten in that
-        // window, with its state in place.
-        let Some(scope) = asked.window else {
-            self.apply_ai_in_place_answer(&asked, &text, &entities, window, cx);
-            return;
-        };
-        let handle = self
-            .windows
-            .open_windows()
-            .find(|(chat, _)| *chat == scope)
-            .map(|(_, handle)| handle);
-        let Some(handle) = handle else {
-            return;
-        };
-        let app = cx.weak_entity();
-        let screen = self.screen_epoch();
-        cx.defer(move |cx| {
-            let _ = handle.update(cx, |_, window, cx| {
-                let _ = app.update(cx, |app, cx| {
-                    app.in_screen_scope(screen, cx, |app, cx| {
-                        app.in_window_of(window, cx, |app, window, cx| {
-                            app.apply_ai_in_place_answer(&asked, &text, &entities, window, cx)
-                        })
-                    });
-                });
-            });
-        });
+        // The composer that asked is the one in place.
+        self.apply_ai_in_place_answer(&asked, &text, &entities, window, cx);
     }
 
     /// Rewrite the composer in place with the answer, while it still

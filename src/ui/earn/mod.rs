@@ -208,12 +208,11 @@ impl QuillApp {
         match self.live.as_mut() {
             Some(live) => {
                 if call(&mut live.driver).is_err() {
-                    self.connection.set_note(StatusNote::error(failure));
+                    self.set_note(StatusNote::error(failure));
                 }
             }
             None => {
-                self.connection
-                    .set_note(StatusNote::info(tr(keys::Q_MONEY_DEMO_MODE_THIS_NEEDS_A)));
+                self.set_note(StatusNote::info(tr(keys::Q_MONEY_DEMO_MODE_THIS_NEEDS_A)));
             }
         }
         cx.notify();
@@ -319,8 +318,7 @@ impl QuillApp {
             let _ = live.driver.fetch_chat_boost_features(chat_id);
         }
         if live.driver.open_earn_panel(panel, is_dark).is_err() {
-            self.connection
-                .set_note(StatusNote::error(tr(keys::Q_MONEY_COULDNT_LOAD_THE_PAGE)));
+            self.set_note(StatusNote::error(tr(keys::Q_MONEY_COULDNT_LOAD_THE_PAGE)));
         }
     }
 
@@ -338,7 +336,7 @@ impl QuillApp {
         let closed = std::mem::replace(&mut earn.setup_closed, false);
         let progressed = !notes.is_empty() || url.is_some() || closed;
         if let Some(note) = notes.into_iter().last() {
-            self.connection.set_note(StatusNote::info(note));
+            self.set_note(StatusNote::info(note));
         }
         // The revenue and affiliate pages are the main window's
         // (`earn_frame_upkeep`): a Telegram link from them opens there.

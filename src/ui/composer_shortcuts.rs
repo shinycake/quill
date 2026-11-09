@@ -184,8 +184,7 @@ impl QuillApp {
         let selected = dialog.selected.clone();
         let Some(url) = normalize_link_url(&typed) else {
             // Nothing (or something unusable) typed: leave the dialog open.
-            self.connection
-                .set_note(StatusNote::info(tr(keys::Q_CHAT_ENTER_A_VALID_LINK)));
+            self.set_note(StatusNote::info(tr(keys::Q_CHAT_ENTER_A_VALID_LINK)));
             cx.notify();
             return;
         };
@@ -193,7 +192,7 @@ impl QuillApp {
         let text = self.composer.read(cx).value().to_string();
         if text.get(range.clone()) != Some(selected.as_str()) {
             // The draft changed under the dialog; don't link the wrong text.
-            self.connection.set_note(StatusNote::info(tr(
+            self.set_note(StatusNote::info(tr(
                 keys::Q_CHAT_THE_TEXT_CHANGED_SELECT_IT_2,
             )));
             cx.notify();
@@ -287,16 +286,14 @@ impl QuillApp {
         // the rich editor still writes fences.
         let (block, current) = if self.chat_ui.rich_editor_open {
             let Some(fence) = quill::code_language::fence_at(&text, caret) else {
-                self.connection
-                    .set_note(StatusNote::silent(tr(keys::Q_CHAT_PUT_THE_CURSOR_INSIDE_A)));
+                self.set_note(StatusNote::silent(tr(keys::Q_CHAT_PUT_THE_CURSOR_INSIDE_A)));
                 cx.notify();
                 return;
             };
             (fence.block.clone(), fence.current(&text).to_string())
         } else {
             let Some(found) = self.composer_code_block_at_caret(cx) else {
-                self.connection
-                    .set_note(StatusNote::silent(tr(keys::Q_CHAT_PUT_THE_CURSOR_INSIDE_A)));
+                self.set_note(StatusNote::silent(tr(keys::Q_CHAT_PUT_THE_CURSOR_INSIDE_A)));
                 cx.notify();
                 return;
             };
@@ -350,7 +347,7 @@ impl QuillApp {
                 .is_some_and(|(range, _)| range == block);
             if !still_there {
                 self.close_code_language_dialog(window, cx);
-                self.connection.set_note(StatusNote::silent(tr(
+                self.set_note(StatusNote::silent(tr(
                     keys::Q_CHAT_THE_TEXT_CHANGED_OPEN_CODE,
                 )));
                 cx.notify();
@@ -376,7 +373,7 @@ impl QuillApp {
         let Some(fence) = fence else {
             // The draft changed under the box; do not edit the wrong block.
             self.close_code_language_dialog(window, cx);
-            self.connection.set_note(StatusNote::silent(tr(
+            self.set_note(StatusNote::silent(tr(
                 keys::Q_CHAT_THE_TEXT_CHANGED_OPEN_CODE,
             )));
             cx.notify();

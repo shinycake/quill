@@ -58,7 +58,7 @@ impl QuillApp {
             return;
         };
         if trial.left_count > 0 {
-            self.connection.set_note(StatusNote::info(text));
+            self.set_note(StatusNote::info(text));
             return;
         }
         // tdesktop `ShowTrialTranscribesToast`: "Telegram Premium" opens

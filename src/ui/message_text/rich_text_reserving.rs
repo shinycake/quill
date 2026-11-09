@@ -724,10 +724,10 @@ pub(in crate::ui) fn message_rich_block(
                 .on_click(cx.listener(move |this, _, _, cx| {
                     if let Some(live) = this.live.as_mut() {
                         match live.driver.fetch_full_rich_message(chat_id, message_id) {
-                            Ok(_) => this.connection.set_note(StatusNote::silent(tr(
+                            Ok(_) => this.set_note(StatusNote::silent(tr(
                                 keys::Q_MISC_LOADING_FULL_MESSAGE,
                             ))),
-                            Err(_) => this.connection.set_note(StatusNote::error(tr(
+                            Err(_) => this.set_note(StatusNote::error(tr(
                                 keys::Q_MISC_COULD_NOT_LOAD_FULL_MESSAGE,
                             ))),
                         }

@@ -118,7 +118,7 @@ impl QuillApp {
             }
             (ShowOrPremium::LastSeen, None) => true,
         };
-        self.connection.set_note(match (sent, kind) {
+        self.set_note(match (sent, kind) {
             (true, ShowOrPremium::LastSeen) => StatusNote::info(tr(keys::LASTSEEN_SHOWN_TOAST)),
             (true, ShowOrPremium::ReadTime) => StatusNote::info(tr(keys::READTIME_SHOWN_TOAST)),
             (false, ShowOrPremium::LastSeen) => {

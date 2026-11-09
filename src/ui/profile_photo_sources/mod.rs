@@ -344,7 +344,7 @@ impl QuillApp {
             },
             PhotoTarget::Profile => {
                 self.send_profile_photo(&photo.input)?;
-                self.connection.set_note(StatusNote::silent(tr(
+                self.set_note(StatusNote::silent(tr(
                     keys::Q_PEOPLE_PHOTO_UPDATE_REQUESTED,
                 )));
                 Ok(())

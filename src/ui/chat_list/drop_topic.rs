@@ -224,7 +224,7 @@ impl QuillApp {
             DropPayload::Forward(_) => self.share_dest_refusal(chat_id, cx).map(|n| n.to_string()),
         };
         if let Some(note) = refusal {
-            self.connection.set_note(StatusNote::error(note));
+            self.set_note(StatusNote::error(note));
             cx.notify();
             return;
         }
@@ -236,8 +236,7 @@ impl QuillApp {
             })
         });
         if gone {
-            self.connection
-                .set_note(StatusNote::error(tr(keys::Q_PEOPLE_COULD_NOT_OPEN_TOPIC)));
+            self.set_note(StatusNote::error(tr(keys::Q_PEOPLE_COULD_NOT_OPEN_TOPIC)));
             cx.notify();
             return;
         }
@@ -288,8 +287,7 @@ impl QuillApp {
             Some(topic) => {
                 self.select_topic_ui(topic, cx);
                 if self.session().and_then(|s| s.open_topic) != Some(topic) {
-                    self.connection
-                        .set_note(StatusNote::error(tr(keys::Q_PEOPLE_COULD_NOT_OPEN_TOPIC)));
+                    self.set_note(StatusNote::error(tr(keys::Q_PEOPLE_COULD_NOT_OPEN_TOPIC)));
                     return false;
                 }
             }

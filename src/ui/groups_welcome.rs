@@ -29,7 +29,7 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut()
             && live.driver.load_chat_welcome_messages(chat_id).is_err()
         {
-            self.connection.set_note(StatusNote::error(tr(
+            self.set_note(StatusNote::error(tr(
                 keys::Q_PEOPLE_COULD_NOT_LOAD_WELCOME_MESSAGES,
             )));
         }
@@ -52,7 +52,7 @@ impl QuillApp {
             None => return,
         };
         if text.is_empty() {
-            self.connection.set_note(StatusNote::error(tr(
+            self.set_note(StatusNote::error(tr(
                 keys::Q_PEOPLE_WELCOME_MESSAGE_CANNOT_BE_EMPTY,
             )));
             cx.notify();
@@ -60,15 +60,15 @@ impl QuillApp {
         }
         if let Some(live) = self.live.as_mut() {
             match live.driver.add_chat_welcome_message(chat_id, &text) {
-                Ok(_) => self
-                    .connection
-                    .set_note(StatusNote::silent(tr(keys::Q_PEOPLE_WELCOME_MESSAGE_ADDED))),
-                Err(_) => self.connection.set_note(StatusNote::error(tr(
+                Ok(_) => {
+                    self.set_note(StatusNote::silent(tr(keys::Q_PEOPLE_WELCOME_MESSAGE_ADDED)))
+                }
+                Err(_) => self.set_note(StatusNote::error(tr(
                     keys::Q_PEOPLE_COULD_NOT_ADD_WELCOME_MESSAGE,
                 ))),
             }
         } else {
-            self.connection.set_note(StatusNote::info(tr(
+            self.set_note(StatusNote::info(tr(
                 keys::Q_PEOPLE_WELCOME_MESSAGES_NEED_A_LIVE,
             )));
         }
@@ -94,7 +94,7 @@ impl QuillApp {
             None => return,
         };
         if text.is_empty() {
-            self.connection.set_note(StatusNote::error(tr(
+            self.set_note(StatusNote::error(tr(
                 keys::Q_PEOPLE_WELCOME_MESSAGE_CANNOT_BE_EMPTY,
             )));
             cx.notify();
@@ -105,15 +105,15 @@ impl QuillApp {
                 .driver
                 .edit_chat_welcome_message(chat_id, welcome_id, &text)
             {
-                Ok(_) => self.connection.set_note(StatusNote::silent(tr(
+                Ok(_) => self.set_note(StatusNote::silent(tr(
                     keys::Q_PEOPLE_WELCOME_MESSAGE_UPDATED,
                 ))),
-                Err(_) => self.connection.set_note(StatusNote::error(tr(
+                Err(_) => self.set_note(StatusNote::error(tr(
                     keys::Q_PEOPLE_COULD_NOT_EDIT_WELCOME_MESSAGE,
                 ))),
             }
         } else {
-            self.connection.set_note(StatusNote::info(tr(
+            self.set_note(StatusNote::info(tr(
                 keys::Q_PEOPLE_WELCOME_MESSAGES_NEED_A_LIVE,
             )));
         }
@@ -132,15 +132,15 @@ impl QuillApp {
     ) {
         if let Some(live) = self.live.as_mut() {
             match live.driver.delete_chat_welcome_message(chat_id, welcome_id) {
-                Ok(_) => self.connection.set_note(StatusNote::silent(tr(
+                Ok(_) => self.set_note(StatusNote::silent(tr(
                     keys::Q_PEOPLE_WELCOME_MESSAGE_DELETED,
                 ))),
-                Err(_) => self.connection.set_note(StatusNote::error(tr(
+                Err(_) => self.set_note(StatusNote::error(tr(
                     keys::Q_PEOPLE_COULD_NOT_DELETE_WELCOME_MESSAGE,
                 ))),
             }
         } else {
-            self.connection.set_note(StatusNote::info(tr(
+            self.set_note(StatusNote::info(tr(
                 keys::Q_PEOPLE_WELCOME_MESSAGES_NEED_A_LIVE,
             )));
         }

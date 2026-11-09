@@ -248,7 +248,7 @@ impl QuillApp {
             && let Some(live) = self.live.as_mut()
             && live.driver.request_password_recovery().is_err()
         {
-            self.connection.set_note(StatusNote::error(tr(
+            self.set_note(StatusNote::error(tr(
                 keys::Q_MONEY_COULDNT_SEND_THE_RECOVERY_CODE,
             )));
         }
@@ -261,8 +261,7 @@ impl QuillApp {
     /// opens it only if the user confirms. Anything but https is refused.
     pub(super) fn open_fragment_url(&mut self, url: &str, cx: &mut Context<Self>) {
         if !url.starts_with("https://") {
-            self.connection
-                .set_note(StatusNote::error(tr(keys::Q_MONEY_COULDNT_LOAD_THE_PAGE)));
+            self.set_note(StatusNote::error(tr(keys::Q_MONEY_COULDNT_LOAD_THE_PAGE)));
             return;
         }
         let link = LinkTarget::Url {

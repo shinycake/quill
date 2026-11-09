@@ -171,7 +171,7 @@ impl QuillApp {
         });
         input.update(cx, |input, cx| input.set_value("", window, cx));
         drop(password);
-        self.connection.set_note(match sent {
+        self.set_note(match sent {
             Some(Ok(Some(_))) => StatusNote::silent(tr(keys::Q_OPS_TRANSFERRING_OWNERSHIP)),
             Some(_) => StatusNote::error(tr(keys::Q_OPS_OWNERSHIP_CANT_BE_TRANSFERRED_RIGHT)),
             None => StatusNote::info(tr(keys::Q_OPS_TRANSFERRING_OWNERSHIP_NEEDS_A_LIVE)),
@@ -211,7 +211,7 @@ impl QuillApp {
         );
         let name = self.contact_display_name(done.user_id);
         let is_channel = self.group_flavor(ChatId(done.chat_id)) == Some(GroupFlavor::Channel);
-        self.connection.set_note(StatusNote::silent(tr_with(
+        self.set_note(StatusNote::silent(tr_with(
             if is_channel {
                 keys::Q_OPS_IS_NOW_THE_OWNER_OF_CHANNEL
             } else {

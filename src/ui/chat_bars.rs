@@ -316,8 +316,7 @@ impl QuillApp {
     fn bar_dismiss(&mut self, chat_id: ChatId, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
             if live.driver.dismiss_chat_action_bar(chat_id).is_err() {
-                self.connection
-                    .set_note(StatusNote::error(tr(keys::Q_CHAT_COULD_NOT_HIDE_THE_BAR)));
+                self.set_note(StatusNote::error(tr(keys::Q_CHAT_COULD_NOT_HIDE_THE_BAR)));
             }
         } else if let Some(session) = self.demo_session.as_mut() {
             session.set_chat_action_bar(chat_id.0, None);
@@ -336,7 +335,7 @@ impl QuillApp {
                 .is_ok();
             let _ = live.driver.dismiss_chat_action_bar(chat_id);
             if !(moved && reset) {
-                self.connection.set_note(StatusNote::error(tr(
+                self.set_note(StatusNote::error(tr(
                     keys::Q_CHAT_COULD_NOT_UNARCHIVE_THE_CHAT,
                 )));
             }
@@ -378,7 +377,7 @@ impl QuillApp {
                     let _ = app.update(cx, |this, cx| {
                         if let Some(live) = this.live.as_mut() {
                             if live.driver.share_phone_number(chat_id, user_id).is_err() {
-                                this.connection.set_note(StatusNote::error(tr(
+                                this.set_note(StatusNote::error(tr(
                                     keys::Q_CHAT_COULD_NOT_SHARE_YOUR_PHONE,
                                 )));
                             }
@@ -423,12 +422,11 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut() {
             let reported = live.driver.report_chat(chat_id);
             let left = live.driver.leave_channel(chat_id);
-            self.connection
-                .set_note(if reported.is_ok() && left.is_ok() {
-                    StatusNote::info(tr(keys::REPORT_SPAM_DONE))
-                } else {
-                    StatusNote::error(tr(keys::Q_CHAT_COULD_NOT_REPORT_THE_CHAT))
-                });
+            self.set_note(if reported.is_ok() && left.is_ok() {
+                StatusNote::info(tr(keys::REPORT_SPAM_DONE))
+            } else {
+                StatusNote::error(tr(keys::Q_CHAT_COULD_NOT_REPORT_THE_CHAT))
+            });
         } else if let Some(session) = self.demo_session.as_mut() {
             session.set_chat_action_bar(chat_id.0, None);
         }
@@ -464,7 +462,7 @@ impl QuillApp {
             if dialog.delete_chat {
                 ok &= live.driver.remove_chat_from_list(dialog.chat_id).is_ok();
             }
-            self.screen.connection.set_note(if ok {
+            self.set_note(if ok {
                 StatusNote::silent(tr_with(
                     keys::Q_CHAT_IS_NOW_BLOCKED,
                     &[(

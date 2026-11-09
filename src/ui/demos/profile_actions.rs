@@ -98,8 +98,7 @@ impl QuillApp {
             apply_all(session, &self.demo_ui.sink, &self.demo_ui.seq, &jsons);
         }
         self.open_info_panel_target(InfoPanelTarget::User(PROFILE_USER), window, cx);
-        self.connection
-            .set_note(StatusNote::silent("screenshot demo — contact profile"));
+        self.set_note(StatusNote::silent("screenshot demo — contact profile"));
         cx.notify();
     }
 
@@ -110,8 +109,7 @@ impl QuillApp {
             session.open_chat(ChatId(PROFILE_GROUP));
         }
         self.open_info_panel_target(InfoPanelTarget::Supergroup(PROFILE_GROUP), window, cx);
-        self.connection
-            .set_note(StatusNote::silent("screenshot demo — group profile"));
+        self.set_note(StatusNote::silent("screenshot demo — group profile"));
         cx.notify();
     }
 
@@ -139,8 +137,7 @@ impl QuillApp {
             session.open_chat(ChatId(PROFILE_CHANNEL));
         }
         self.open_info_panel_target(InfoPanelTarget::Supergroup(PROFILE_CHANNEL), window, cx);
-        self.connection
-            .set_note(StatusNote::silent("screenshot demo — channel profile"));
+        self.set_note(StatusNote::silent("screenshot demo — channel profile"));
         cx.notify();
     }
 }

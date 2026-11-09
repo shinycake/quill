@@ -167,8 +167,7 @@ fn a_deferred_replacement_keeps_the_status_note(cx: &mut TestAppContext) {
     app.update(&mut vcx, |app, cx| {
         app.screen_leaves_later(cx);
         assert!(app.goodbyes_due());
-        app.connection
-            .set_note(StatusNote::silent("Connecting to Telegram…"));
+        app.set_note(StatusNote::silent("Connecting to Telegram…"));
     });
     frames(&mut vcx);
     app.read_with(&vcx, |app, _| {

@@ -289,7 +289,7 @@ impl QuillApp {
                 .fetch_message_statistics(ChatId(chat_id), MessageId(message_id), is_dark)
                 .is_err()
             {
-                self.connection.set_note(StatusNote::error(tr(
+                self.set_note(StatusNote::error(tr(
                     keys::Q_MONEY_COULD_NOT_LOAD_STATISTICS,
                 )));
             }
@@ -313,7 +313,7 @@ impl QuillApp {
                 .fetch_story_insights(ChatId(chat_id), story_id, is_dark)
                 .is_err()
         {
-            self.connection.set_note(StatusNote::error(tr(
+            self.set_note(StatusNote::error(tr(
                 keys::Q_MONEY_COULD_NOT_LOAD_STORY_STATISTICS,
             )));
         }

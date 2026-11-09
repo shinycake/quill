@@ -70,7 +70,7 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         let Some(single) = ForwardDraft::from_message(chat_id, message_id, pending) else {
-            self.connection.set_note(StatusNote::error(tr(
+            self.set_note(StatusNote::error(tr(
                 keys::Q_MISC_CANNOT_FORWARD_THIS_MESSAGE,
             )));
             cx.notify();
@@ -117,13 +117,11 @@ impl QuillApp {
                     ForwardDraft::from_message(chat_id, message_id, pending);
             }
         }
-        self.screen
-            .connection
-            .set_note(match self.forward_draft().map(|d| d.count()) {
-                Some(1) => StatusNote::silent(tr(keys::Q_MISC_1_MESSAGE_SELECTED)),
-                Some(n) => StatusNote::silent(trn(keys::Q_MISC_MESSAGES_SELECTED, n)),
-                None => StatusNote::silent(tr(keys::Q_MISC_SELECTION_CLEARED)),
-            });
+        self.set_note(match self.forward_draft().map(|d| d.count()) {
+            Some(1) => StatusNote::silent(tr(keys::Q_MISC_1_MESSAGE_SELECTED)),
+            Some(n) => StatusNote::silent(trn(keys::Q_MISC_MESSAGES_SELECTED, n)),
+            None => StatusNote::silent(tr(keys::Q_MISC_SELECTION_CLEARED)),
+        });
         cx.notify();
     }
 
@@ -181,8 +179,7 @@ impl QuillApp {
         self.share
             .search_input
             .update(cx, |input, cx| input.set_value("", window, cx));
-        self.connection
-            .set_note(StatusNote::silent(tr(keys::Q_MISC_FORWARD_CANCELLED)));
+        self.set_note(StatusNote::silent(tr(keys::Q_MISC_FORWARD_CANCELLED)));
         cx.notify();
     }
 
@@ -227,6 +224,8 @@ impl QuillApp {
     pub(super) fn present_forward_result(&mut self, result: ForwardResult, cx: &mut Context<Self>) {
         let label = result.success_label();
         let host = self.windows.scope;
+        // note-host: the result shows in the window whose forward it is,
+        // put in place by the caller (`present_forward_answer`, the share box).
         self.connection.set_note_in(
             host,
             if result.forwarded_ids.is_empty() {

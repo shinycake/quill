@@ -173,7 +173,6 @@ impl QuillApp {
             }
             _ => {}
         }
-        self.connection
-            .set_note(StatusNote::silent("screenshot demo — your own sticker set"));
+        self.set_note(StatusNote::silent("screenshot demo — your own sticker set"));
     }
 }

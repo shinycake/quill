@@ -216,8 +216,7 @@ impl QuillApp {
         self.history.scroll_memory.forget((chat_id.0, None, 0));
         if let Some(live) = self.live.as_mut() {
             if live.driver.select_direct_topic(chat_id, topic).is_err() {
-                self.connection
-                    .set_note(StatusNote::error(tr(keys::Q_PEOPLE_COULD_NOT_OPEN_TOPIC)));
+                self.set_note(StatusNote::error(tr(keys::Q_PEOPLE_COULD_NOT_OPEN_TOPIC)));
             }
         } else if let Some(session) = self.demo_session.as_mut()
             && session.select_direct_topic(chat_id, topic)
@@ -351,14 +350,13 @@ impl QuillApp {
         ) -> Result<(), quill::connect::ConnectSendError>,
     ) {
         let Some(live) = self.live.as_mut() else {
-            self.connection.set_note(StatusNote::info(tr(
+            self.set_note(StatusNote::info(tr(
                 keys::Q_MISC_TOPICS_NEED_A_LIVE_CONNECTION,
             )));
             return;
         };
         if run(&mut live.driver).is_err() {
-            self.connection
-                .set_note(StatusNote::error(tr(keys::Q_MISC_COULD_NOT_UPDATE_TOPIC)));
+            self.set_note(StatusNote::error(tr(keys::Q_MISC_COULD_NOT_UPDATE_TOPIC)));
         }
     }
 }

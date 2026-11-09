@@ -342,7 +342,7 @@ impl QuillApp {
         };
         // The chat's own selection stays: its draft is not replaced.
         if self.share.pending_forward.is_some() && !self.share.forward_picker_open {
-            self.connection.set_note(StatusNote::error(tr(
+            self.set_note(StatusNote::error(tr(
                 keys::Q_OPS_FINISH_THE_CHAT_SELECTION_FIRST,
             )));
             cx.notify();

@@ -265,7 +265,7 @@ impl QuillApp {
                                 .small()
                                 .on_click(cx.listener(move |this, _, _, cx| {
                                     cx.write_to_clipboard(ClipboardItem::new_string(copy.clone()));
-                                    this.connection.set_note(StatusNote::info(tr(
+                                    this.set_note(StatusNote::info(tr(
                                         keys::Q_PEOPLE_BOOST_LINK_COPIED,
                                     )));
                                     cx.notify();

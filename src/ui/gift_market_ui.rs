@@ -182,7 +182,7 @@ impl QuillApp {
             Some(live) => match live.driver.fetch_gift_auction(auction_id) {
                 Ok(_) => self.gift_market.pending_auction = true,
                 Err(_) => {
-                    self.connection.set_note(StatusNote::error(tr(
+                    self.set_note(StatusNote::error(tr(
                         keys::Q_MONEY_COULDNT_LOAD_THE_AUCTION,
                     )));
                 }
@@ -277,10 +277,10 @@ impl QuillApp {
         let toasts = std::mem::take(&mut market.toasts);
         let low = std::mem::take(&mut market.balance_low);
         if let Some(note) = notes.into_iter().last() {
-            self.connection.set_note(StatusNote::info(note));
+            self.set_note(StatusNote::info(note));
         }
         if low {
-            self.connection.set_note(StatusNote::silent(tr(
+            self.set_note(StatusNote::silent(tr(
                 keys::Q_MONEY_YOUR_STARS_BALANCE_IS_TOO,
             )));
             self.open_stars(cx);

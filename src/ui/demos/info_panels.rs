@@ -140,8 +140,7 @@ impl QuillApp {
             apply_info_channel(session, &self.demo_ui.sink, &self.demo_ui.seq);
         }
         self.open_info_panel_target(InfoPanelTarget::Supergroup(CHANNEL), window, cx);
-        self.connection
-            .set_note(StatusNote::silent("screenshot demo — channel info panel"));
+        self.set_note(StatusNote::silent("screenshot demo — channel info panel"));
         cx.notify();
     }
 
@@ -166,8 +165,7 @@ impl QuillApp {
             }
         }
         self.open_info_panel_target(InfoPanelTarget::User(BIO_USER), window, cx);
-        self.connection
-            .set_note(StatusNote::silent("screenshot demo — user bio"));
+        self.set_note(StatusNote::silent("screenshot demo — user bio"));
         cx.notify();
     }
 
@@ -177,7 +175,7 @@ impl QuillApp {
             apply_info_group(session, &self.demo_ui.sink, &self.demo_ui.seq);
         }
         self.open_info_panel_target(InfoPanelTarget::Supergroup(GROUP), window, cx);
-        self.connection.set_note(StatusNote::silent(
+        self.set_note(StatusNote::silent(
             "screenshot demo — group info panel, external links stripped",
         ));
         cx.notify();

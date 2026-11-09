@@ -27,6 +27,8 @@ pub(crate) struct PickerUi {
     /// last one searches.
     pub(super) gif_search_input: Entity<InputState>,
     pub(super) gif_keystroke: u64,
+    /// What this window's GIF tab shows (`gifs_ui`).
+    pub(super) gif_wanted: super::gifs_ui::GifWanted,
     pub(super) gif_scroll: ScrollHandle,
     pub(super) sticker_search_input: Entity<TextareaState>,
 }
@@ -91,6 +93,7 @@ impl PickerUi {
             reaction_search_input,
             gif_search_input,
             gif_keystroke: 0,
+            gif_wanted: Default::default(),
             gif_scroll: ScrollHandle::new(),
             sticker_search_input,
         }

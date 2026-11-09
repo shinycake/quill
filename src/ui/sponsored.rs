@@ -437,7 +437,8 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         if let Some(live) = self.live.as_mut() {
-            self.screen.connection.set_note(
+            self.screen.connection.set_note_for(
+                &self.screen.windows,
                 match live.driver.hide_sponsored_messages(chat_id, message_id) {
                     Ok(Some(_)) => StatusNote::silent(tr(keys::Q_OPS_HIDING_ADS)),
                     Ok(None) => self.screen.connection.note().clone(),
@@ -506,7 +507,8 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         if let Some(live) = self.live.as_mut() {
-            self.screen.connection.set_note(
+            self.screen.connection.set_note_for(
+                &self.screen.windows,
                 match live
                     .driver
                     .report_sponsored_message(chat_id, message_id, "")
@@ -531,11 +533,11 @@ impl QuillApp {
                 if let Some(owned) = copy_and_parse(&json, &self.demo_ui.seq, &dyn_sink) {
                     session.apply(owned);
                 }
-                self.connection.set_note(StatusNote::silent(tr(
+                self.set_note(StatusNote::silent(tr(
                     keys::Q_OPS_DEMO_REPORT_OPTIONS_INJECTED,
                 )));
             } else {
-                self.connection.set_note(StatusNote::info(tr(
+                self.set_note(StatusNote::info(tr(
                     keys::Q_OPS_REPORT_NOT_AVAILABLE_FOR_THIS,
                 )));
             }
@@ -554,7 +556,8 @@ impl QuillApp {
             return;
         };
         if let Some(live) = self.live.as_mut() {
-            self.screen.connection.set_note(
+            self.screen.connection.set_note_for(
+                &self.screen.windows,
                 match live.driver.report_sponsored_message(
                     flight.chat_id,
                     flight.message_id,
@@ -577,8 +580,7 @@ impl QuillApp {
             if let Some(owned) = copy_and_parse(&json, &self.demo_ui.seq, &dyn_sink) {
                 session.apply(owned);
             }
-            self.connection
-                .set_note(StatusNote::silent(tr(keys::Q_OPS_DEMO_REPORT_SENT)));
+            self.set_note(StatusNote::silent(tr(keys::Q_OPS_DEMO_REPORT_SENT)));
         }
         cx.notify();
     }

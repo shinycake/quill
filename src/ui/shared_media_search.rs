@@ -115,8 +115,7 @@ impl QuillApp {
         let (_, tab) = key;
         if let Some(live) = self.live.as_mut() {
             if live.driver.search_shared_media(tab, text).is_err() {
-                self.connection
-                    .set_note(StatusNote::error(tr(keys::Q_OPS_COULD_NOT_LOAD_THAT_TAB)));
+                self.set_note(StatusNote::error(tr(keys::Q_OPS_COULD_NOT_LOAD_THAT_TAB)));
             }
         } else if let Some(session) = self.demo_session.as_mut() {
             session.media.shared_media.begin_search(tab, text);

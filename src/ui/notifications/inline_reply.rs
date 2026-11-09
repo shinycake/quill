@@ -214,7 +214,7 @@ impl QuillApp {
             Err(_) => {
                 // Not sendable here (no rights, a closed topic, a channel):
                 // open the chat instead so the user sees why.
-                self.connection.set_note(StatusNote::silent(tr(
+                self.set_note(StatusNote::silent(tr(
                     keys::Q_PREFS_REPLY_FROM_THE_NOTIFICATION_WAS,
                 )));
                 false

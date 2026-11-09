@@ -23,7 +23,7 @@ impl QuillApp {
                     } else {
                         live.driver.fetch_history()
                     };
-                    self.connection.set_note(match result {
+                    self.set_note(match result {
                         Ok(Some(_)) => {
                             StatusNote::silent(tr(keys::Q_LEFTOVERS_LOADING_OLDER_MESSAGES))
                         }

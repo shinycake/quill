@@ -244,8 +244,7 @@ impl QuillApp {
                             .small()
                             .on_click(cx.listener(move |this, _, _, cx| {
                                 cx.write_to_clipboard(ClipboardItem::new_string(copied.clone()));
-                                this.connection
-                                    .set_note(StatusNote::info(tr(keys::Q_AGENT_ACCESS_COPIED)));
+                                this.set_note(StatusNote::info(tr(keys::Q_AGENT_ACCESS_COPIED)));
                                 cx.notify();
                             })),
                     ),
@@ -293,8 +292,7 @@ impl QuillApp {
                             .small()
                             .on_click(cx.listener(move |this, _, _, cx| {
                                 cx.write_to_clipboard(ClipboardItem::new_string(copied.clone()));
-                                this.connection
-                                    .set_note(StatusNote::info(tr(keys::Q_AGENT_ACCESS_COPIED)));
+                                this.set_note(StatusNote::info(tr(keys::Q_AGENT_ACCESS_COPIED)));
                                 cx.notify();
                             })),
                     ),
@@ -322,8 +320,7 @@ impl QuillApp {
         }
         self.agent_ui.page.reset_confirm = false;
         access::reset_token();
-        self.connection
-            .set_note(StatusNote::info(tr(keys::Q_AGENT_PAGE_RESET_DONE)));
+        self.set_note(StatusNote::info(tr(keys::Q_AGENT_PAGE_RESET_DONE)));
         cx.notify();
     }
 }

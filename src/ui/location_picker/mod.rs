@@ -65,7 +65,7 @@ impl QuillApp {
 
     pub(in crate::ui) fn open_location_picker(&mut self, cx: &mut Context<Self>) {
         let Some(chat_id) = self.share_target() else {
-            self.connection.set_note(StatusNote::error(tr(
+            self.set_note(StatusNote::error(tr(
                 keys::Q_OPS_YOU_CANT_SEND_LOCATIONS_HERE,
             )));
             cx.notify();
@@ -82,7 +82,7 @@ impl QuillApp {
         self.location_ui.map_focus = Some(cx.focus_handle().tab_stop(true));
         if let Some(live) = self.live.as_mut() {
             if live.driver.open_location_picker(chat_id, country).is_err() {
-                self.connection.set_note(StatusNote::error(tr(
+                self.set_note(StatusNote::error(tr(
                     keys::Q_OPS_COULD_NOT_SEND_THE_LOCATION,
                 )));
                 cx.notify();
@@ -379,7 +379,7 @@ impl QuillApp {
         let options = self.send_options_to(chat_id);
         let Some(live) = self.live.as_mut() else {
             self.close_location_picker(cx);
-            self.connection.set_note(StatusNote::info(tr(
+            self.set_note(StatusNote::info(tr(
                 keys::Q_OPS_SHARING_NEEDS_A_LIVE_CONNECTION,
             )));
             cx.notify();
@@ -389,10 +389,9 @@ impl QuillApp {
             Ok(_) => {
                 self.close_location_picker(cx);
                 self.chat_ui.set_reply(None);
-                self.connection
-                    .set_note(StatusNote::silent(tr(keys::Q_OPS_SENDING_LOCATION)));
+                self.set_note(StatusNote::silent(tr(keys::Q_OPS_SENDING_LOCATION)));
             }
-            Err(_) => self.connection.set_note(StatusNote::error(tr(
+            Err(_) => self.set_note(StatusNote::error(tr(
                 keys::Q_OPS_COULD_NOT_SEND_THE_LOCATION,
             ))),
         }

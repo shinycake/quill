@@ -344,7 +344,7 @@ impl QuillApp {
         }
         if let Some(live) = self.live.as_mut() {
             let result = live.driver.select_topic(forum_topic_id);
-            self.connection.set_note(match result {
+            self.set_note(match result {
                 Ok(_) => StatusNote::silent(tr(keys::Q_PEOPLE_TOPIC_SELECTED)),
                 Err(_) => StatusNote::error(tr(keys::Q_PEOPLE_COULD_NOT_OPEN_TOPIC)),
             });
@@ -366,8 +366,7 @@ impl QuillApp {
             session.deselect_topic();
         }
         self.request_draft_restore();
-        self.connection
-            .set_note(StatusNote::silent(tr(keys::Q_PEOPLE_BACK_TO_TOPICS)));
+        self.set_note(StatusNote::silent(tr(keys::Q_PEOPLE_BACK_TO_TOPICS)));
         cx.notify();
     }
 }

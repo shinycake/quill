@@ -134,25 +134,22 @@ impl QuillApp {
                 match result {
                     Ok(_) => {
                         self.chat_ui.checklist_dialog = None;
-                        self.connection
-                            .set_note(StatusNote::silent(tr(keys::Q_MEDIA_ADDING_TASKS)));
+                        self.set_note(StatusNote::silent(tr(keys::Q_MEDIA_ADDING_TASKS)));
                     }
-                    Err(_) => self
-                        .connection
-                        .set_note(StatusNote::error(tr(keys::Q_MEDIA_COULD_NOT_ADD_THE_TASKS))),
+                    Err(_) => {
+                        self.set_note(StatusNote::error(tr(keys::Q_MEDIA_COULD_NOT_ADD_THE_TASKS)))
+                    }
                 }
             } else {
                 self.apply_demo_checklist_tasks(chat_id, message_id, &draft.tasks);
                 self.chat_ui.checklist_dialog = None;
-                self.connection
-                    .set_note(StatusNote::silent(tr(keys::Q_MEDIA_TASKS_ADDED_DEMO)));
+                self.set_note(StatusNote::silent(tr(keys::Q_MEDIA_TASKS_ADDED_DEMO)));
             }
             cx.notify();
             return;
         }
         let Some(chat_id) = self.session().and_then(|s| s.open_chat) else {
-            self.connection
-                .set_note(StatusNote::silent(tr(keys::Q_MEDIA_SELECT_A_CHAT_TO_SEND)));
+            self.set_note(StatusNote::silent(tr(keys::Q_MEDIA_SELECT_A_CHAT_TO_SEND)));
             cx.notify();
             return;
         };
@@ -165,16 +162,15 @@ impl QuillApp {
                 Ok(_) => {
                     self.chat_ui.checklist_dialog = None;
                     self.chat_ui.set_reply(None);
-                    self.connection
-                        .set_note(StatusNote::silent(tr(keys::Q_MEDIA_SENDING_CHECKLIST)));
+                    self.set_note(StatusNote::silent(tr(keys::Q_MEDIA_SENDING_CHECKLIST)));
                 }
-                Err(_) => self.connection.set_note(StatusNote::error(tr(
+                Err(_) => self.set_note(StatusNote::error(tr(
                     keys::Q_MEDIA_COULD_NOT_SEND_THE_CHECKLIST,
                 ))),
             }
         } else {
             self.chat_ui.checklist_dialog = None;
-            self.connection.set_note(StatusNote::info(tr(
+            self.set_note(StatusNote::info(tr(
                 keys::Q_MEDIA_CHECKLISTS_NEED_A_LIVE_CONNECTION,
             )));
         }
@@ -195,7 +191,8 @@ impl QuillApp {
                 self.checklist_premium_toast(keys::TODO_MARK_PREMIUM, window, cx);
                 return;
             }
-            self.screen.connection.set_note(
+            self.screen.connection.set_note_for(
+                &self.screen.windows,
                 match live
                     .driver
                     .toggle_checklist_task(chat_id, message_id, task_id)
@@ -209,8 +206,7 @@ impl QuillApp {
         }
         if self.demo_session.is_some() {
             self.apply_demo_checklist_toggle(chat_id, message_id, task_id);
-            self.connection
-                .set_note(StatusNote::silent(tr(keys::Q_MEDIA_CHECKLIST_UPDATED_DEMO)));
+            self.set_note(StatusNote::silent(tr(keys::Q_MEDIA_CHECKLIST_UPDATED_DEMO)));
             cx.notify();
         }
     }
@@ -529,8 +525,7 @@ impl QuillApp {
             .as_ref()
             .is_some_and(|panel| matches!(panel.attach.media, OptionMediaSlot::Preparing(_)))
         {
-            self.connection
-                .set_note(StatusNote::info(tr(keys::Q_MEDIA_WAIT_FOR_THE_VIDEO_TO)));
+            self.set_note(StatusNote::info(tr(keys::Q_MEDIA_WAIT_FOR_THE_VIDEO_TO)));
             cx.notify();
             return;
         }
@@ -546,12 +541,10 @@ impl QuillApp {
             {
                 Ok(_) => {
                     self.message_ui.poll_add_option = None;
-                    self.connection
-                        .set_note(StatusNote::silent(tr(keys::Q_MEDIA_ADDING_OPTION)));
+                    self.set_note(StatusNote::silent(tr(keys::Q_MEDIA_ADDING_OPTION)));
                 }
                 Err(_) => {
-                    self.connection
-                        .set_note(StatusNote::error(tr(keys::POLLS_ADD_OPTION_ERROR)));
+                    self.set_note(StatusNote::error(tr(keys::POLLS_ADD_OPTION_ERROR)));
                 }
             }
         } else if let Some(session) = self.demo_session.as_mut() {
@@ -570,8 +563,7 @@ impl QuillApp {
                     ));
             }
             self.message_ui.poll_add_option = None;
-            self.connection
-                .set_note(StatusNote::silent(tr(keys::Q_MEDIA_OPTION_ADDED_DEMO)));
+            self.set_note(StatusNote::silent(tr(keys::Q_MEDIA_OPTION_ADDED_DEMO)));
         }
         cx.notify();
     }

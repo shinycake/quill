@@ -108,7 +108,7 @@ impl QuillApp {
                 }) else {
                     return;
                 };
-                self.connection.set_note(match appended {
+                self.set_note(match appended {
                     Ok(count) => {
                         StatusNote::silent(trn(keys::Q_MISC_ATTACHED_FILES_SEND_TO_UPLOAD, count))
                     }
@@ -118,15 +118,14 @@ impl QuillApp {
                 cx.notify();
             }
             DropPlan::Reject(note) => {
-                self.connection.set_note(StatusNote::error(note));
+                self.set_note(StatusNote::error(note));
                 cx.notify();
             }
             DropPlan::Archive(source) => {
                 let Some(slot) = self.send_slot() else {
                     return;
                 };
-                self.connection
-                    .set_note(StatusNote::silent(tr(keys::Q_MISC_PREPARING_THE_ARCHIVE)));
+                self.set_note(StatusNote::silent(tr(keys::Q_MISC_PREPARING_THE_ARCHIVE)));
                 cx.notify();
                 let dir = quill::local_path::media_cache_base().join("archives");
                 quill::local_path::ensure_private_dir(&dir);
@@ -164,7 +163,7 @@ impl QuillApp {
                 }) else {
                     return;
                 };
-                self.connection.set_note(match appended {
+                self.set_note(match appended {
                     Ok(_) => {
                         archive.keep();
                         StatusNote::silent(tr(keys::Q_MISC_ATTACHED_THE_ARCHIVE_SEND_TO))
@@ -172,7 +171,7 @@ impl QuillApp {
                     Err(note) => StatusNote::error(note),
                 });
             }
-            Err(err) => self.connection.set_note(StatusNote::error(err.note())),
+            Err(err) => self.set_note(StatusNote::error(err.note())),
         }
         cx.notify();
     }

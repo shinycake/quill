@@ -410,12 +410,10 @@ impl QuillApp {
                 if let Some(live) = self.live.as_mut()
                     && let Err(err) = live.driver.translate_message(chat_id, message_id, to)
                 {
-                    self.screen
-                        .connection
-                        .set_note(StatusNote::error(user_error_for(
-                            keys::Q_NOTES_FAILED_TRANSLATE,
-                            &err,
-                        )));
+                    self.set_note(StatusNote::error(user_error_for(
+                        keys::Q_NOTES_FAILED_TRANSLATE,
+                        &err,
+                    )));
                 }
             }
             Some(TranslateSource::Selection { text, .. }) => {
@@ -425,14 +423,10 @@ impl QuillApp {
                     }
                     match live.driver.translate_selection(&text, to) {
                         Ok(job) => dialog.job = Some(job),
-                        Err(err) => {
-                            self.screen
-                                .connection
-                                .set_note(StatusNote::error(user_error_for(
-                                    keys::Q_NOTES_FAILED_TRANSLATE,
-                                    &err,
-                                )))
-                        }
+                        Err(err) => self.set_note(StatusNote::error(user_error_for(
+                            keys::Q_NOTES_FAILED_TRANSLATE,
+                            &err,
+                        ))),
                     }
                 }
             }
@@ -692,8 +686,7 @@ impl QuillApp {
                         .accessibility_label(tr(keys::Q_MISC_COPY_TRANSLATION))
                         .on_click(cx.listener(move |this, _, _, cx| {
                             cx.write_to_clipboard(ClipboardItem::new_string(text.clone()));
-                            this.connection
-                                .set_note(StatusNote::info(tr(keys::Q_MISC_TRANSLATION_COPIED)));
+                            this.set_note(StatusNote::info(tr(keys::Q_MISC_TRANSLATION_COPIED)));
                             cx.notify();
                         })),
                 )

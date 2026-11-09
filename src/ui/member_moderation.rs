@@ -216,7 +216,7 @@ impl QuillApp {
             },
             None => StatusNote::info(tr(keys::Q_PEOPLE_MEMBER_ACTIONS_NEED_A_LIVE)),
         };
-        self.connection.set_note(note);
+        self.set_note(note);
         self.refresh_member_dialog(cx);
     }
 
@@ -229,7 +229,7 @@ impl QuillApp {
             },
             None => StatusNote::info(tr(keys::Q_PEOPLE_MEMBER_ACTIONS_NEED_A_LIVE)),
         };
-        self.connection.set_note(note);
+        self.set_note(note);
         self.refresh_member_dialog(cx);
     }
 
@@ -240,7 +240,7 @@ impl QuillApp {
             .and_then(|s| s.user(user_id))
             .map(|user| (user.username.clone(), user.display_name()))
         else {
-            self.connection.set_note(StatusNote::error(tr(
+            self.set_note(StatusNote::error(tr(
                 keys::Q_OPS_CANT_MENTION_THIS_MEMBER_YET,
             )));
             cx.notify();

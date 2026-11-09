@@ -313,8 +313,7 @@ impl QuillApp {
             return;
         }
         let Some(live) = self.live.as_mut() else {
-            self.connection
-                .set_note(StatusNote::info(tr(keys::Q_PEOPLE_DEMO_MODE_THIS_NEEDS_A)));
+            self.set_note(StatusNote::info(tr(keys::Q_PEOPLE_DEMO_MODE_THIS_NEEDS_A)));
             self.admin.group_edit_box = None;
             cx.notify();
             return;
@@ -338,7 +337,7 @@ impl QuillApp {
                 }
             }
             Err(err) => {
-                self.connection.set_note(StatusNote::error(user_error_for(
+                self.set_note(StatusNote::error(user_error_for(
                     keys::Q_NOTES_FAILED_SAVE_GROUP_INFO,
                     &err,
                 )));

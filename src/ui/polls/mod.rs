@@ -58,7 +58,7 @@ impl QuillApp {
         };
         if let Some(live) = self.live.as_mut() {
             let result = live.driver.stop_poll(chat_id, message_id);
-            self.connection.set_note(match result {
+            self.set_note(match result {
                 Ok(_) => StatusNote::silent(tr(keys::Q_MEDIA_STOPPING_POLL)),
                 Err(_) => StatusNote::error(tr(keys::Q_MEDIA_COULD_NOT_STOP_POLL)),
             });
@@ -72,8 +72,7 @@ impl QuillApp {
             {
                 poll_content.poll.is_closed = true;
             }
-            self.connection
-                .set_note(StatusNote::silent(tr(keys::Q_MEDIA_POLL_STOPPED_DEMO)));
+            self.set_note(StatusNote::silent(tr(keys::Q_MEDIA_POLL_STOPPED_DEMO)));
         }
         cx.notify();
     }
@@ -88,7 +87,7 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         if self.demo_session.is_some() {
-            self.connection.set_note(StatusNote::info(tr(
+            self.set_note(StatusNote::info(tr(
                 keys::Q_MEDIA_VOTER_LISTS_ARE_UNAVAILABLE_IN,
             )));
             cx.notify();
@@ -113,7 +112,7 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         if self.demo_session.is_some() {
-            self.connection.set_note(StatusNote::info(tr(
+            self.set_note(StatusNote::info(tr(
                 keys::Q_MEDIA_POLL_STATS_ARE_UNAVAILABLE_IN,
             )));
             cx.notify();
@@ -126,7 +125,7 @@ impl QuillApp {
                 .fetch_poll_vote_statistics(chat_id, message_id, is_dark)
                 .is_err()
         {
-            self.connection.set_note(StatusNote::error(tr(
+            self.set_note(StatusNote::error(tr(
                 keys::Q_MEDIA_COULD_NOT_LOAD_POLL_STATS,
             )));
             cx.notify();
@@ -174,8 +173,7 @@ impl QuillApp {
                 .fetch_poll_voters(chat_id, message_id, option_index)
                 .is_err()
         {
-            self.connection
-                .set_note(StatusNote::error(tr(keys::Q_MEDIA_COULD_NOT_LOAD_VOTERS)));
+            self.set_note(StatusNote::error(tr(keys::Q_MEDIA_COULD_NOT_LOAD_VOTERS)));
         }
         cx.notify();
     }
@@ -193,7 +191,7 @@ impl QuillApp {
                 .load_more_poll_voters(chat_id, message_id, option_index)
                 .is_err()
         {
-            self.connection.set_note(StatusNote::error(tr(
+            self.set_note(StatusNote::error(tr(
                 keys::Q_MEDIA_COULD_NOT_LOAD_MORE_VOTERS,
             )));
         }
@@ -417,7 +415,7 @@ impl QuillApp {
             let result = live
                 .driver
                 .send_poll_answer(chat_id, message_id, option_index);
-            self.connection.set_note(match result {
+            self.set_note(match result {
                 Ok(_) => StatusNote::silent(tr(keys::Q_MEDIA_VOTING)),
                 Err(_) => StatusNote::error(tr(keys::Q_MEDIA_COULD_NOT_VOTE)),
             });
@@ -426,8 +424,7 @@ impl QuillApp {
         }
         if self.demo_session.is_some() {
             self.apply_demo_poll_vote(chat_id, message_id, option_index);
-            self.connection
-                .set_note(StatusNote::silent(tr(keys::Q_MEDIA_VOTE_UPDATED_DEMO)));
+            self.set_note(StatusNote::silent(tr(keys::Q_MEDIA_VOTE_UPDATED_DEMO)));
             cx.notify();
         }
     }
@@ -440,7 +437,8 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         if let Some(live) = self.live.as_mut() {
-            self.screen.connection.set_note(
+            self.screen.connection.set_note_for(
+                &self.screen.windows,
                 match live.driver.retract_poll_vote(chat_id, message_id) {
                     Ok(_) => StatusNote::silent(tr(keys::Q_MEDIA_VOTE_RETRACTED)),
                     Err(_) => StatusNote::error(tr(keys::Q_MEDIA_COULD_NOT_RETRACT_THE_VOTE)),
@@ -457,8 +455,7 @@ impl QuillApp {
             for option in &mut poll_content.poll.options {
                 option.is_chosen = false;
             }
-            self.connection
-                .set_note(StatusNote::silent(tr(keys::Q_MEDIA_VOTE_RETRACTED_DEMO)));
+            self.set_note(StatusNote::silent(tr(keys::Q_MEDIA_VOTE_RETRACTED_DEMO)));
         }
         cx.notify();
     }
@@ -487,7 +484,7 @@ impl QuillApp {
                 .is_none_or(|chat| chat_allows_polls(chat.permissions.as_ref()))
         });
         if !polls_allowed {
-            self.connection.set_note(StatusNote::silent(tr(
+            self.set_note(StatusNote::silent(tr(
                 keys::Q_MEDIA_POLLS_ARE_RESTRICTED_IN_THIS,
             )));
             cx.notify();
@@ -627,8 +624,7 @@ impl QuillApp {
         };
         // A custom deadline that passed while the box was open.
         if draft.close_date > 0 && draft.close_date <= quill::local_time::now_unix() {
-            self.connection
-                .set_note(StatusNote::error(tr(keys::POLLS_CREATE_DEADLINE_EXPIRED)));
+            self.set_note(StatusNote::error(tr(keys::POLLS_CREATE_DEADLINE_EXPIRED)));
             cx.notify();
             return;
         }
@@ -638,14 +634,12 @@ impl QuillApp {
             .as_ref()
             .is_some_and(|dialog| dialog.limit_by_country && dialog.country_codes.is_empty())
         {
-            self.connection
-                .set_note(StatusNote::error(tr(keys::POLLS_CREATE_CHOOSE_COUNTRY)));
+            self.set_note(StatusNote::error(tr(keys::POLLS_CREATE_CHOOSE_COUNTRY)));
             cx.notify();
             return;
         }
         if let Some(reason) = draft.validate() {
-            self.connection
-                .set_note(StatusNote::error(reason.to_string()));
+            self.set_note(StatusNote::error(reason.to_string()));
             cx.notify();
             return;
         }
@@ -655,8 +649,7 @@ impl QuillApp {
             .as_ref()
             .is_some_and(|dialog| dialog.media_preparing())
         {
-            self.connection
-                .set_note(StatusNote::info(tr(keys::Q_MEDIA_WAIT_FOR_THE_VIDEO_TO)));
+            self.set_note(StatusNote::info(tr(keys::Q_MEDIA_WAIT_FOR_THE_VIDEO_TO)));
             cx.notify();
             return;
         }
@@ -666,8 +659,7 @@ impl QuillApp {
             chat.can_post().then_some(chat_id)
         });
         let Some(chat_id) = plan else {
-            self.connection
-                .set_note(StatusNote::silent(tr(keys::Q_MEDIA_SELECT_A_CHAT_TO_SEND)));
+            self.set_note(StatusNote::silent(tr(keys::Q_MEDIA_SELECT_A_CHAT_TO_SEND)));
             cx.notify();
             return;
         };
@@ -683,12 +675,10 @@ impl QuillApp {
                 Ok(_) => {
                     self.chat_ui.poll_dialog = None;
                     self.chat_ui.set_reply(None);
-                    self.connection
-                        .set_note(StatusNote::silent(tr(keys::Q_MEDIA_SENDING_POLL)));
+                    self.set_note(StatusNote::silent(tr(keys::Q_MEDIA_SENDING_POLL)));
                 }
                 Err(_) => {
-                    self.connection
-                        .set_note(StatusNote::error(tr(keys::Q_MEDIA_COULD_NOT_SEND_POLL)));
+                    self.set_note(StatusNote::error(tr(keys::Q_MEDIA_COULD_NOT_SEND_POLL)));
                 }
             }
             cx.notify();
@@ -697,7 +687,7 @@ impl QuillApp {
         // Screenshot demos have no live driver; close the dialog honestly.
         let _ = window;
         self.chat_ui.poll_dialog = None;
-        self.connection.set_note(StatusNote::info(tr(
+        self.set_note(StatusNote::info(tr(
             keys::Q_MEDIA_POLLS_NEED_A_LIVE_CONNECTION,
         )));
         cx.notify();

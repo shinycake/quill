@@ -91,7 +91,7 @@ impl QuillApp {
             return;
         };
         if let Err(err) = live.driver.join_live_story(chat_id, story_id) {
-            self.connection.set_note(crate::ui::calls::join_error_note(
+            self.set_note(crate::ui::calls::join_error_note(
                 err,
                 keys::Q_MEDIA_COULD_NOT_JOIN_THE_LIVE,
             ));
@@ -248,7 +248,7 @@ impl QuillApp {
                 let sent = match self.live.as_mut() {
                     Some(live) => live.driver.send_live_story_comment(&markup, stars).is_ok(),
                     None => {
-                        self.connection.set_note(StatusNote::silent(tr(
+                        self.set_note(StatusNote::silent(tr(
                             keys::Q_MEDIA_DEMO_LIVE_STORIES_JOIN_WITH,
                         )));
                         false
@@ -275,7 +275,7 @@ impl QuillApp {
             .and_then(|s| s.stories.live.as_ref())
             .and_then(|live| live.note.clone())
         {
-            self.connection.set_note(StatusNote::info(note));
+            self.set_note(StatusNote::info(note));
         }
     }
 
@@ -330,7 +330,7 @@ impl QuillApp {
             .and_then(Session::live_spendable_stars)
             .unwrap_or(0);
         let needed = stars.saturating_sub(have).max(1);
-        self.connection.set_note(StatusNote::info(trn_with(
+        self.set_note(StatusNote::info(trn_with(
             keys::CREDITS_SMALL_BALANCE_TITLE,
             needed,
             &[("count", &group_digits(needed))],
@@ -558,7 +558,7 @@ impl QuillApp {
         {
             let muted = live.driver.group_call_playback_muted(call_id);
             if let Err(err) = live.driver.set_group_call_playback_muted(call_id, !muted) {
-                self.connection.set_note(StatusNote::error(err.to_string()));
+                self.set_note(StatusNote::error(err.to_string()));
             }
         }
         cx.notify();

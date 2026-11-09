@@ -93,7 +93,7 @@ impl QuillApp {
     }
 
     pub(super) fn note_gift_refused(&mut self, text: &str) {
-        self.connection.set_note(StatusNote::error(text));
+        self.set_note(StatusNote::error(text));
     }
 
     fn pick_gift_collection(&mut self, id: i32, cx: &mut Context<Self>) {

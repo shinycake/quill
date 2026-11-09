@@ -278,7 +278,7 @@ impl QuillApp {
         let sources = match sources {
             Ok(sources) => sources,
             Err(err) => {
-                self.connection.set_note(StatusNote::error(err.to_string()));
+                self.set_note(StatusNote::error(err.to_string()));
                 cx.notify();
                 return false;
             }

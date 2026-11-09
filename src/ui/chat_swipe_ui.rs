@@ -314,7 +314,7 @@ impl QuillApp {
             SwipeLabel::Pin | SwipeLabel::Unpin | SwipeLabel::Delete
         ) && self.connection.note().kind() != NoteKind::Error
         {
-            self.connection.set_note(StatusNote::info(label.toast()));
+            self.set_note(StatusNote::info(label.toast()));
         }
         cx.notify();
     }
