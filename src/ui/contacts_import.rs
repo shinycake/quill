@@ -28,6 +28,7 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         self.dialogs.import_contacts_dialog = Some(ImportContactsDialog::default());
+        self.open_box(crate::ui::shell::DialogKind::ImportContacts);
         if self.live.is_none()
             && let Some(path) = std::env::var_os("QUILL_DEMO_VCF")
         {

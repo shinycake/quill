@@ -11,7 +11,7 @@ impl Session {
         _extra: Option<RequestId>,
         _seq: u64,
     ) {
-        if self.apply_owned_bots_error(err, pending.map(|p| p.purpose)) {
+        if self.apply_owned_bots_error(err, pending) {
             return;
         }
         match pending.map(|p| p.purpose) {

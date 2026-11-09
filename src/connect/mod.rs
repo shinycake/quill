@@ -118,6 +118,8 @@ pub use flood_retry::{FLOOD_RETRY_MAX_ATTEMPTS, FLOOD_RETRY_MAX_WAIT};
 pub use group_calls::SelfMuteError;
 pub use live::*;
 pub use message_menu::{ADDED_REACTIONS_PAGE, ModerationChoice};
+pub use messages::SendPlace;
+pub(crate) use paid_messages::TRUST_FILE as PAID_TRUST_FILE;
 pub use sender::*;
 pub use ticks::{TickOutcome, TickScope};
 pub use types::*;

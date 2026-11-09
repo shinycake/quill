@@ -318,10 +318,12 @@ impl QuillApp {
         match action {
             DirectAction::Delete => {
                 self.direct_messages.confirm = Some(confirm(DirectConfirmKind::Delete));
+                self.open_box(crate::ui::shell::DialogKind::DirectConfirm);
             }
             DirectAction::Ban { channel, user_id } => {
                 self.direct_messages.confirm =
                     Some(confirm(DirectConfirmKind::Ban { channel, user_id }));
+                self.open_box(crate::ui::shell::DialogKind::DirectConfirm);
             }
             DirectAction::Unban { channel, user_id } => {
                 self.run_direct_live(|driver| {

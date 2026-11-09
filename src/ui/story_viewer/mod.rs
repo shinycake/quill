@@ -727,7 +727,9 @@ impl QuillApp {
         // tdesktop `Controller::updatePlayingAllowed` needs `_windowActive`:
         // with the main window behind another app, minimized, or a chat
         // window in front, nothing plays, advances or gets marked viewed.
+        // A locked Quill is not looked at, focused or not.
         !self.frame.main_active.get()
+            || self.refused_while_locked()
             || self.stories.viewer_ui().reaction_picker_open
             || self.stories.viewer_ui().reply_open
             || self.stories.viewer_ui().pause.is_paused()

@@ -449,3 +449,29 @@ fn closing_for_quit_stops_every_export(cx: &mut TestAppContext) {
     });
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[gpui_kit::test]
+fn a_quit_from_the_lock_screen_stops_the_export_and_quits(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    let dir = scratch("locked");
+    let export = running_account_export(&dir);
+    app.update(vcx, |app, cx| {
+        app.demo_session.as_mut().unwrap().settings.account_export = Some(export);
+        app.account.passcode.enabled = true;
+        app.lock_by_passcode(cx);
+    });
+    let exited = ask(&app, vcx);
+    assert!(
+        exited.get(),
+        "no box the lock screen cannot show holds the quit"
+    );
+    assert!(!box_open(&app, vcx), "nothing held for a later Quit");
+    let export = app.update(vcx, |app, _| {
+        let session = app.demo_session.as_mut().unwrap();
+        session.settings.account_export.take().unwrap()
+    });
+    wait_for_the_end(|| export.progress().is_settled());
+    drop(export);
+    let _ = std::fs::remove_dir_all(&dir);
+}

@@ -270,7 +270,8 @@ pub struct SetupPage {
     /// The sliders' values.
     pub params: ProgramParams,
     pub confirm: Option<SetupConfirm>,
-    pub saving: bool,
+    /// The save or end this page waits for; only its answer closes it.
+    pub(crate) saving: Option<crate::ids::RequestId>,
 }
 
 impl SetupPage {
@@ -280,8 +281,18 @@ impl SetupPage {
             program,
             params: setup_start(program),
             confirm: None,
-            saving: false,
+            saving: None,
         }
+    }
+
+    /// A save or end is in flight.
+    pub fn is_saving(&self) -> bool {
+        self.saving.is_some()
+    }
+
+    /// `request` is the save this page waits for.
+    pub(crate) fn waits_for(&self, request: Option<crate::ids::RequestId>) -> bool {
+        self.saving.is_some() && self.saving == request
     }
 
     /// A running program (Update instead of Start, End shown, sliders

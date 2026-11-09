@@ -145,9 +145,37 @@ pub struct AiComposeState {
     pub style_lookup: Option<StyleLookup>,
     pub example: Option<ExampleAnswer>,
     pub style_edit: Option<StyleEditAnswer>,
+    /// The Create or Save the open style editor waits for. Only its answer
+    /// lands in `style_edit`: a save from an editor the user left (Back,
+    /// then another style opened) does not close the next one.
+    pub(crate) style_save: Option<RequestId>,
     pub style_notice: Option<StyleNotice>,
     /// The style named by an in-flight delete, remove or add.
     pub(crate) op_names: HashMap<RequestId, String>,
+}
+
+impl AiComposeState {
+    /// The open style editor sent Create or Save as `request`.
+    pub(crate) fn wait_for_style_save(&mut self, request: RequestId) {
+        self.style_save = Some(request);
+        self.style_edit = None;
+    }
+
+    /// A style editor opened (or closed): an earlier editor's save no
+    /// longer answers anything on screen.
+    pub fn forget_style_save(&mut self) {
+        self.style_save = None;
+        self.style_edit = None;
+    }
+
+    /// `pending` is the save the open editor waits for: settle it.
+    fn take_style_save(&mut self, pending: Option<&PendingRequest>) -> bool {
+        let ours = pending.is_some_and(|p| Some(p.id) == self.style_save);
+        if ours {
+            self.style_save = None;
+        }
+        ours
+    }
 }
 
 /// An answer carrying the token of the request it answers.
@@ -259,7 +287,9 @@ impl Session {
                 }
                 Some(AiComposePurpose::CreateStyle | AiComposePurpose::EditStyle) => {
                     state.styles.promote_front(style.clone());
-                    state.style_edit = Some(StyleEditAnswer { outcome: Ok(style) });
+                    if state.take_style_save(pending) {
+                        state.style_edit = Some(StyleEditAnswer { outcome: Ok(style) });
+                    }
                 }
                 _ => {}
             },
@@ -397,12 +427,14 @@ impl Session {
                 );
             }
             AiComposePurpose::CreateStyle | AiComposePurpose::EditStyle => {
-                if error == StyleError::SavedTooMany {
-                    state.style_notice = Some(notice);
+                if state.take_style_save(pending) {
+                    if error == StyleError::SavedTooMany {
+                        state.style_notice = Some(notice);
+                    }
+                    state.style_edit = Some(StyleEditAnswer {
+                        outcome: Err(error),
+                    });
                 }
-                state.style_edit = Some(StyleEditAnswer {
-                    outcome: Err(error),
-                });
             }
             AiComposePurpose::AddStyle | AiComposePurpose::RemoveStyle => {
                 state.style_notice = Some(notice);

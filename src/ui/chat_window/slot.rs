@@ -200,12 +200,16 @@ impl WindowSlot {
         let forward_search_input = QuillApp::new_forward_search_field(window, cx);
         let history = HistoryUi::new(cx);
         QuillApp::observe_history_scroll(&history, Some(chat_id), cx);
+        let message_ui = MessageUi::new(window, cx);
+        // The window's history reports keyboard focus as the main window's
+        // does, into the window's own state (`history_a11y`).
+        crate::ui::history_a11y::install(&message_ui.history_focus, window, cx);
         Self {
             history,
             composer,
             composer_ui: Box::new(ComposerUi::new()),
             chat_ui: Box::new(ChatUi::for_chat(Some(chat_id))),
-            message_ui: MessageUi::new(window, cx),
+            message_ui,
             pickers: PickerUi::new(window, cx, emoji_search_input, reaction_search_input),
             viewer: ViewerUi::new(),
             chat_search_input: QuillApp::new_chat_search_field(window, cx),
@@ -418,19 +422,28 @@ impl QuillApp {
         }
     }
 
-    /// An input event started in `chat`'s window (`None`: the main
-    /// window): its state goes in place, and dialogs opened by what the
-    /// event does belong to that window.
-    pub(super) fn note_window_input(&mut self, chat: Option<ChatId>) {
-        self.windows.last_input = chat;
+    /// A press or key started in `chat`'s window (`None`: the main
+    /// window): its state goes in place, and a toast or a box that names
+    /// no window shows there.
+    pub(super) fn note_window_press(&mut self, chat: Option<ChatId>) {
+        self.windows.last_press = chat;
         self.connection.note_window = chat;
+        self.set_window_scope(chat);
+    }
+
+    /// The pointer moved or scrolled over `chat`'s window: its state goes
+    /// in place for the handlers. An inactive window under the pointer
+    /// gets these too, so they say nothing about where a box or a toast
+    /// goes.
+    pub(super) fn note_window_pointer(&mut self, chat: Option<ChatId>) {
         self.set_window_scope(chat);
     }
 }
 
 /// Painted first in a window's root: its capture-phase pointer listeners
 /// run before any handler in the window, so the window's state is in
-/// place for them (`QuillApp::note_window_input`). Draws nothing.
+/// place for them (`QuillApp::note_window_press`,
+/// `QuillApp::note_window_pointer`). Draws nothing.
 pub(in crate::ui) fn scope_probe(
     app: WeakEntity<QuillApp>,
     chat: Option<ChatId>,
@@ -438,25 +451,27 @@ pub(in crate::ui) fn scope_probe(
     canvas(
         |_, _, _| {},
         move |_, _, window, _| {
-            let note = {
+            let press = {
                 let app = app.clone();
                 move |cx: &mut App| {
-                    let _ = app.update(cx, |app, _| app.note_window_input(chat));
+                    let _ = app.update(cx, |app, _| app.note_window_press(chat));
                 }
             };
-            let on = note.clone();
+            let pointer = move |cx: &mut App| {
+                let _ = app.update(cx, |app, _| app.note_window_pointer(chat));
+            };
+            let on = press.clone();
             window.on_mouse_event(move |_: &MouseDownEvent, phase, _, cx| {
                 if phase == DispatchPhase::Capture {
                     on(cx);
                 }
             });
-            let on = note.clone();
             window.on_mouse_event(move |_: &MouseUpEvent, phase, _, cx| {
                 if phase == DispatchPhase::Capture {
-                    on(cx);
+                    press(cx);
                 }
             });
-            let on = note.clone();
+            let on = pointer.clone();
             window.on_mouse_event(move |_: &MouseMoveEvent, phase, _, cx| {
                 if phase == DispatchPhase::Capture {
                     on(cx);
@@ -464,7 +479,7 @@ pub(in crate::ui) fn scope_probe(
             });
             window.on_mouse_event(move |_: &ScrollEvent, phase, _, cx| {
                 if phase == DispatchPhase::Capture {
-                    note(cx);
+                    pointer(cx);
                 }
             });
         },

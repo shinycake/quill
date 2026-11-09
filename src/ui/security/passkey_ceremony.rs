@@ -199,6 +199,7 @@ impl QuillApp {
         if live.driver.begin_register().is_err() {
             return;
         }
+        self.open_box(DialogKind::PasskeyCeremony);
         self.run_passkey_ticker(window, cx);
         cx.notify();
     }
@@ -260,6 +261,7 @@ impl QuillApp {
             None => (None, None, false),
         };
         if let Some(options) = start {
+            // box-host: opened by an answer; start_passkey_creation named the window
             self.privacy.passkeys.ceremony = Some(CeremonyUi::new(
                 CeremonyMode::Register,
                 first_sheet(),
@@ -268,6 +270,7 @@ impl QuillApp {
             changed = true;
         }
         if let Some(options) = start_login {
+            // box-host: opened by an answer; start_passkey_login named the window
             self.privacy.passkeys.ceremony = Some(CeremonyUi::new(
                 CeremonyMode::Login,
                 first_sheet(),
@@ -648,6 +651,7 @@ impl QuillApp {
         if sheet == (CeremonySheet::Choose { bluetooth: true }) {
             ui.qr = hybrid::render_cable_qr(&hybrid::demo_qr());
         }
+        // box-host: demo
         self.privacy.passkeys.ceremony = Some(ui);
         cx.notify();
     }
@@ -666,6 +670,7 @@ impl QuillApp {
             .ceremony
             .as_ref()
             .map_or(CeremonyMode::Register, |ui| ui.mode);
+        // box-host: a step of the open ceremony; it stays where it shows
         self.privacy.passkeys.ceremony = Some(CeremonyUi::new(mode, sheet, None));
         cx.notify();
     }

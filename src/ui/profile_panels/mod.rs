@@ -366,9 +366,11 @@ impl QuillApp {
                 mode,
                 path: None,
             });
+            self.open_box(DialogKind::ProfilePanel);
             cx.notify();
             return;
         }
+        self.open_box(DialogKind::ProfilePanel);
         let picker = cx.prompt_for_paths(PathPromptOptions {
             files: true,
             directories: false,
@@ -392,6 +394,7 @@ impl QuillApp {
                         cx.notify();
                         return;
                     }
+                    // box-host: opened by a picker answer; start_personal_photo named the window
                     this.dialogs.profile_dialog = Some(ProfileDialog::PersonalPhoto {
                         user_id,
                         mode,

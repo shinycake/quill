@@ -36,6 +36,7 @@ impl QuillApp {
     pub(in crate::ui) fn open_mute_menu(&mut self, cx: &mut Context<Self>) {
         let chat = self.session().and_then(|session| session.open_chat);
         self.notify.mute_menu_open = true;
+        self.open_box(crate::ui::shell::DialogKind::MuteMenu);
         self.notify.mute_chat = chat;
         self.notify.ttl_picker = None;
         self.folders.menu_chat = None;

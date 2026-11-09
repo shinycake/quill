@@ -190,3 +190,63 @@ fn language_pack_link_only_reads_the_pack_info() {
     }
     std::fs::remove_dir_all(dir).unwrap();
 }
+
+/// Apply on code A, close, open code B: A's late `ok` does not mark B as
+/// applied (B was never used), and A's check or error does not land in B.
+#[test]
+fn a_gift_code_box_takes_only_its_own_answers() {
+    let (dir, prepared) = prepared_tmp(&MemorySecretStore::new());
+    let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+    let recorder = Arc::new(RecordingSender::new());
+    let seq = AtomicU64::new(0);
+    let mut driver = ready_driver(&recorder, prepared, &sink, &seq);
+    let info = |extra: &crate::ids::RequestId| json!({"@type":"premiumGiftCodeInfo","@extra":extra.as_extra(),"month_count":3,"day_count":90});
+    let a_check = driver.request_gift_code_info("A").unwrap();
+    feed(&mut driver, &seq, &sink, info(&a_check));
+    let a_apply = driver.apply_gift_code().unwrap();
+    driver.session.payments.gift_code = None;
+    let b_check = driver.request_gift_code_info("B").unwrap();
+    feed(
+        &mut driver,
+        &seq,
+        &sink,
+        json!({"@type":"ok","@extra":a_apply.as_extra()}),
+    );
+    let b = driver.session.payments.gift_code.as_ref().unwrap();
+    assert!(!b.applied && b.loading, "A's ok is not B's");
+    feed(
+        &mut driver,
+        &seq,
+        &sink,
+        json!({"@type":"error","@extra":a_check.as_extra(),"code":400,"message":"GIFT_CODE_INVALID"}),
+    );
+    let b = driver.session.payments.gift_code.as_ref().unwrap();
+    assert!(b.loading && b.error.is_none(), "A's error is not B's");
+    feed(&mut driver, &seq, &sink, info(&b_check));
+    let b = driver.session.payments.gift_code.as_ref().unwrap();
+    assert!(!b.loading && b.info.is_some());
+    assert!(driver.apply_gift_code().is_ok(), "B can still be applied");
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+/// A language link's late answer does not fill another link's box.
+#[test]
+fn a_language_link_box_takes_only_its_own_answer() {
+    let (dir, prepared) = prepared_tmp(&MemorySecretStore::new());
+    let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+    let recorder = Arc::new(RecordingSender::new());
+    let seq = AtomicU64::new(0);
+    let mut driver = ready_driver(&recorder, prepared, &sink, &seq);
+    let first = driver.request_language_pack_info("pt").unwrap();
+    driver.request_language_pack_info("de").unwrap();
+    feed(
+        &mut driver,
+        &seq,
+        &sink,
+        json!({"@type":"error","@extra":first.as_extra(),"code":400,"message":"LANG_PACK_INVALID"}),
+    );
+    let lookup = driver.session.settings.language_link.as_ref().unwrap();
+    assert_eq!(lookup.id, "de");
+    assert!(lookup.loading && lookup.error.is_none());
+    std::fs::remove_dir_all(dir).unwrap();
+}

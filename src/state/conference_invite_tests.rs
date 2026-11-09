@@ -150,3 +150,34 @@ fn an_invitation_replaces_an_earlier_calls_end_screen() {
         "the old end screen does not come back once the invitation stops"
     );
 }
+
+/// The busy-declined call's own updates belong to no call window: its end
+/// is not shown as "Call ended" once the invitation settles, and a late
+/// `Pending` neither takes the window nor is declined twice.
+#[test]
+fn a_busy_declined_calls_updates_do_not_reach_the_call_window() {
+    let mut session = session();
+    apply(
+        &mut session,
+        &invitation(crate::local_time::now_unix(), false, false),
+    );
+    let pending = r#"{"@type":"updateCall","call":{"@type":"call","id":5,"unique_id":"9","user_id":41,"is_outgoing":false,"is_video":true,"state":{"@type":"callStatePending","is_created":true,"is_received":true}}}"#;
+    apply(&mut session, pending);
+    assert_eq!(session.calls.busy_decline_queue, vec![(5, 41, true)]);
+    // The driver sent the discardCall.
+    session.calls.busy_decline_queue.clear();
+    apply(
+        &mut session,
+        r#"{"@type":"updateDeleteMessages","chat_id":41,"message_ids":[90],"is_permanent":true,"from_cache":false}"#,
+    );
+    assert_eq!(session.calls.conference_invite, None);
+    apply(&mut session, pending);
+    assert!(session.calls.active_call.is_none());
+    assert!(session.calls.busy_decline_queue.is_empty());
+    apply(
+        &mut session,
+        r#"{"@type":"updateCall","call":{"@type":"call","id":5,"unique_id":"9","user_id":41,"is_outgoing":false,"is_video":true,"state":{"@type":"callStateDiscarded","reason":{"@type":"callDiscardReasonDeclined"},"need_rating":true,"need_debug_information":false,"need_log":false}}}"#,
+    );
+    assert!(session.calls.summary.is_none(), "not this window's call");
+    assert!(session.calls.busy_declined_calls.is_empty());
+}

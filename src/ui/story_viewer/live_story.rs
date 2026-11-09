@@ -340,6 +340,7 @@ impl QuillApp {
             live.driver.session.payments.star_packs.open = true;
             let _ = live.driver.maybe_fetch_star_packs();
         } else if let Some(session) = self.demo_session.as_mut() {
+            // box-host: open_stars above named the window
             session.payments.hub.stars_open = true;
             session.payments.star_packs.open = true;
         }
@@ -408,6 +409,7 @@ impl QuillApp {
             slider,
             then_send,
         });
+        self.open_box(crate::ui::shell::DialogKind::LiveStoryStars);
         if let Some(live) = self.live.as_mut() {
             // The balance under the button.
             let _ = live.driver.maybe_fetch_star_transactions();
@@ -498,6 +500,7 @@ impl QuillApp {
             delete_all: false,
             ban: false,
         });
+        self.open_box(crate::ui::shell::DialogKind::LiveStoryDelete);
         cx.notify();
     }
 

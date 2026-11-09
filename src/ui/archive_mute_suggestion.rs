@@ -121,10 +121,12 @@ crate::ui::screenshot_demo::register_demos![
     crate::ui::screenshot_demo::DemoSpec::chat_list("ready-archive-mute-suggestion").setup(
         |app, _, _| {
             if let Some(demo) = app.demo_session.as_mut() {
+                // box-host: demo
                 demo.chat_list
                     .suggestions
                     .actions
                     .insert(ACTION.to_string());
+                // box-host: demo
                 demo.chat_list.archive_chat_list_settings = Some(Default::default());
             }
         }

@@ -84,6 +84,7 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         self.profile_cover.show_or_premium = Some(ShowOrPremiumBox { kind, user_id });
+        self.open_box(DialogKind::ShowOrPremium);
         cx.notify();
     }
 

@@ -32,9 +32,20 @@ drawn. It claims exactly this, and no more:
    `set_locked` (src/ui/passcode/lock_gate.rs).
 3. The render gate is mounted: `lock_layer.rs` registers `LockLayer` as a
    root plugin, and `PasscodeUi::new` calls `lock_layer::register`.
+4. What runs while locked. The functions in `UPKEEP` (the main window's
+   frame upkeep and the poll pass) run every frame or pass, locked or not.
+   Each must test `lock_waits()` in a condition, and every `self.method(`
+   call in it outside the gated part (after an early return on the gate, or
+   inside the `if` that tests `!self.lock_waits()`) must be listed in
+   scripts/lock-surfaces.txt as `path::fn -> method | runs-locked | reason`.
+   So a new step that would show or start something under the lock fails
+   here until it goes behind the gate, or is listed with why it may run.
+   A listed step that is gone fails too. The locked frames (`LOCKED_FRAMES`)
+   must not run the per-window or main frame upkeep at all.
 
 It does not prove that a listed `via` function is the only caller, nor that
-a gate's answer is used correctly beyond being tested in a condition.
+a gate's answer is used correctly beyond being tested in a condition, nor
+what a `runs-locked` step calls in turn: those are read in review.
 """
 
 import os
@@ -49,7 +60,19 @@ STARTS = re.compile(
     r"|\.begin_capture_start\(|\bCameraStream::start\(|\bintercept_keystrokes\("
     r"|\bobserve_keystrokes\(|\bcx\.on_action\(|\bswitch_account_even_locked\("
 )
-GATES = r"(?:refused_while_locked\(\)|paused_by_lock\(\)|app_locked\()"
+GATES = r"(?:refused_while_locked\(\)|lock_waits\(\)|paused_by_lock\(\)|app_locked\()"
+# Bodies that run locked or not, and the frames that run only while locked.
+UPKEEP = [
+    "src/ui/app_render/frame_upkeep.rs::frame_upkeep",
+    "src/ui/notifications/mod.rs::poll_live",
+]
+LOCKED_FRAMES = [
+    "src/ui/app_render/locked_root.rs::locked_root",
+    "src/ui/chat_window/view.rs::render_locked",
+]
+UPKEEP_CALL = re.compile(r"\bself\.([a-z_][a-z0-9_]*)\(")
+EARLY_GATE = re.compile(r"\bif\s+self\.lock_waits\(\)\s*\{\s*return\b")
+OPEN_GATE = re.compile(r"\bif\s+!\s*self\.lock_waits\(\)")
 # A gate tested in a condition: `if ..gate..`, a match guard `.. if ..gate.. =>`,
 # `return ..gate..`, or `let .. = ..gate..;` followed by `if`/`return` on it.
 GATED = re.compile(
@@ -151,8 +174,63 @@ def sources():
                     yield path, production(f.read())
 
 
+def gated_spans(body):
+    """The parts of an upkeep body that run only while unlocked."""
+    spans = []
+    early = EARLY_GATE.search(body)
+    if early:
+        spans.append((early.start(), len(body)))
+    for match in OPEN_GATE.finditer(body):
+        brace = body.find("{", match.end())
+        span = balanced(body, brace + 1) if brace != -1 else None
+        if span:
+            spans.append((match.start(), span[1]))
+    return spans
+
+
+def upkeep_problems(bodies, steps):
+    out = []
+    for key in UPKEEP:
+        found = bodies.get(key)
+        if not found:
+            out.append(f"{key}: missing (UPKEEP in scripts/lock_surfaces.py)")
+            continue
+        body = found[0]
+        spans = gated_spans(body)
+        if not spans:
+            out.append(f"{key}: runs locked or not, so it must test `lock_waits()` in a condition")
+        seen = set()
+        for call in UPKEEP_CALL.finditer(body):
+            if any(a <= call.start() < b for a, b in spans):
+                continue
+            name = call.group(1)
+            if name in ("lock_waits", "refused_while_locked"):
+                continue
+            seen.add(name)
+            if (key, name) not in steps:
+                out.append(
+                    f"{key}: `self.{name}(` runs while locked. Put it behind `lock_waits()` "
+                    f"(its state then waits for the unlock), or list it in {LIST} as "
+                    f"`{key} -> {name} | runs-locked | <why it shows and starts nothing>`."
+                )
+        for (step_key, name), n in sorted(steps.items()):
+            if step_key == key and name not in seen:
+                out.append(f"{LIST}:{n}: `{key} -> {name}` no longer runs while locked")
+    for (step_key, _), n in sorted(steps.items()):
+        if step_key not in UPKEEP:
+            out.append(f"{LIST}:{n}: `{step_key}` is not in UPKEEP")
+    for key in LOCKED_FRAMES:
+        found = bodies.get(key)
+        if not found:
+            out.append(f"{key}: missing (LOCKED_FRAMES in scripts/lock_surfaces.py)")
+        elif re.search(r"\b(?:per_window_upkeep|frame_upkeep)\(", found[0]):
+            out.append(f"{key}: a locked frame runs no upkeep")
+    return out
+
+
 def listed(path=LIST):
     out, problems = {}, []
+    steps = {}
     if not os.path.exists(path):
         return out, [f"{path}: missing"]
     with open(path, encoding="utf-8") as f:
@@ -161,17 +239,26 @@ def listed(path=LIST):
             if not line or line.startswith("#"):
                 continue
             parts = [p.strip() for p in line.split("|", 2)]
+            if " -> " in parts[0]:
+                key, _, name = parts[0].partition(" -> ")
+                if len(parts) != 3 or parts[1] != "runs-locked" or not parts[2]:
+                    problems.append(f"{path}:{n}: want `path::fn -> method | runs-locked | reason`")
+                elif (key.strip(), name.strip()) in steps:
+                    problems.append(f"{path}:{n}: `{parts[0]}` is listed twice")
+                else:
+                    steps[(key.strip(), name.strip())] = n
+                continue
             if len(parts) != 3 or not parts[2] or "::" not in parts[0]:
                 problems.append(f"{path}:{n}: want `path::fn | closer | reason`")
                 continue
             if parts[0] in out:
                 problems.append(f"{path}:{n}: `{parts[0]}` is listed twice")
             out[parts[0]] = (parts[1], n)
-    return out, problems
+    return out, problems, steps
 
 
 def problems():
-    entries, out = listed()
+    entries, out, steps = listed()
     starters, bodies, by_name, files = {}, {}, {}, {}
     for path, text in sources():
         files[path] = text
@@ -228,6 +315,8 @@ def problems():
                 out.append(f"{path}::{name}: writes the lock flag; only `set_locked` may")
             elif re.search(r"passcode\.locked\s*=[^=]", body) and path != GATE_FILE:
                 out.append(f"{path}::{name}: writes `passcode.locked`; only `set_locked` may")
+    # What runs while locked.
+    out += upkeep_problems(bodies, steps)
     # The render gate is mounted.
     if "register_plugin::<LockLayer>" not in files.get(LAYER_FILE, ""):
         out.append(f"{LAYER_FILE}: `LockLayer` is not registered as a root plugin")

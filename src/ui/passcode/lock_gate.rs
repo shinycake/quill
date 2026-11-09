@@ -15,6 +15,11 @@
 //! `scripts/lock_surfaces.py` checks that every such starter in the crate
 //! asks the gate or is listed in `scripts/lock-surfaces.txt` with what the
 //! lock does to it.
+//!
+//! What still runs while locked follows one rule (the decision doc's "What
+//! runs while locked"): ingest, delivery and teardown go on; work that would
+//! show or start something waits for the unlock (`lock_waits`, the queued
+//! `wait_for_unlock` intents) or is refused, never dropped without a word.
 #![deny(clippy::indexing_slicing)]
 
 use super::super::app::QuillApp;
@@ -25,6 +30,15 @@ impl QuillApp {
     /// link waits for the unlock; a recording or a mini app is refused.
     pub(in crate::ui) fn refused_while_locked(&self) -> bool {
         self.account.passcode.is_locked()
+    }
+
+    /// Locked: the pumps that turn a stored request or answer into
+    /// something shown or started do not run, and what they would drain
+    /// stays where it is for the first pass after the unlock. The main
+    /// frame's upkeep, the poll's drains and the parked plays ask it
+    /// (`scripts/lock_surfaces.py` checks those bodies).
+    pub(in crate::ui) fn lock_waits(&self) -> bool {
+        self.refused_while_locked()
     }
 
     /// Lock or unlock: the one writer of the flag. Every window draws again
@@ -44,6 +58,39 @@ impl QuillApp {
             quill::agent::access::set_paused_by_lock(locked);
         }
         cx.notify();
+    }
+
+    /// Locked, outside the demos: a connection would fail on the cleared
+    /// master key, so it is marked to start at the unlock instead.
+    pub(in crate::ui) fn connect_waits_for_unlock(&mut self) -> bool {
+        let waits = self.refused_while_locked() && !self.account.passcode.demo;
+        if waits {
+            self.account.passcode.deferred_connect = true;
+        }
+        waits
+    }
+
+    /// A lock asked while a passcode job ran lands now that it answered.
+    /// After a Turn off there is no passcode, so nothing locks.
+    pub(super) fn lock_held_for_job(&mut self, cx: &mut Context<Self>) {
+        if std::mem::take(&mut self.account.passcode.lock_after_job) {
+            self.lock_by_passcode(cx);
+        }
+    }
+
+    /// The unlock: what waited for it runs. The connection deferred at a
+    /// locked start or under the lock opens, the background accounts that
+    /// could not open on the cleared key start, the pumps run at the next
+    /// pass (`lock_waits`), and the queued intents run now.
+    pub(super) fn resume_after_unlock(&mut self, cx: &mut Context<Self>) {
+        if std::mem::take(&mut self.account.passcode.deferred_connect) {
+            self.start_connection(cx);
+        }
+        self.ensure_background_accounts(cx);
+        // The OS media controls come back with what is playing.
+        self.publish_now_playing();
+        quill::wake::UPDATES.poke();
+        self.run_unlock_intents(cx);
     }
 
     /// Close or stop what the lock screen does not cover or must not keep
@@ -84,6 +131,18 @@ impl QuillApp {
         // binding: Settings > Shortcuts and the push-to-talk key.
         self.preferences.keybinding_capture = None;
         self.group_call.ptt_capture = false;
+        // Now Playing names the sender or the song: the OS controls go off.
+        self.publish_now_playing();
+        // A locked window is not looked at: every chat window's chat
+        // notifies again (`shown_in_active_window`).
+        // A chat window's locked frame does not mark it active again
+        // (`render_locked`).
+        if let Some(session) = self.session_mut() {
+            session.active_window_chats.clear();
+        }
+        // The call windows stay answerable, but their boxes and secrets go
+        // (tdesktop `hidePanelLayers`).
+        self.close_call_layers_for_lock(cx);
     }
 }
 

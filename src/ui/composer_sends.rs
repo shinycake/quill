@@ -490,10 +490,15 @@ impl QuillApp {
         }
     }
 
-    /// `account` logged out or was removed: drop its choices, and the
-    /// mini apps it agreed to open (tdesktop keeps them with the account).
+    /// `account` logged out or was removed: drop its choices, and all it
+    /// kept outside TDLib (`quill::account_data::forget`: agent grants and
+    /// log, mini app trust, hashtags, and the rest), as tdesktop's
+    /// `Storage::Account::reset` does.
     pub(in crate::ui) fn forget_account_sends(&mut self, account: &AccountKey) {
-        quill::web_app::trust::forget_account(&account.to_string());
+        if let Some(root) = self.accounts_root() {
+            quill::account_data::forget(&root, account);
+        }
+        self.screen.recent_hashtags.forget(account);
         self.composer_ui.send_box.prep.cancel_account(account);
         let dropped = self.composer_sends.forget_account(account);
         self.forget_tray_checks(&dropped);

@@ -175,14 +175,14 @@ fn a_main_dialog_stays_open_while_the_pointer_is_in_a_chat_window(cx: &mut TestA
             suspicious: Vec::new(),
             from_poll_option: false,
         });
-        app.note_window_input(None);
+        app.note_window_press(None);
         cx.notify();
     });
     draw(h.main, cx);
     assert!(h.shell.read_with(cx, |shell, _| shell.dialog_open()));
     // The pointer moves into the chat window, then the main window draws.
     h.app.update(cx, |app, cx| {
-        app.note_window_input(Some(OTHER));
+        app.note_window_press(Some(OTHER));
         cx.notify();
     });
     draw(h.main, cx);
@@ -251,4 +251,107 @@ fn a_send_that_waited_keeps_its_one_time_options(cx: &mut TestAppContext) {
         "the held send goes silent, with its effect"
     );
     assert_eq!(after, crate::ui::composer_sends::SendOnce::default());
+}
+
+/// Round 13 B, finding 4: a chat window's reply bar, pointing at a message
+/// not in memory, asks for it from the window's own frame. The main window
+/// has no reply bar, so before the fix nothing asked.
+#[gpui_kit::test]
+fn a_chat_windows_reply_bar_fetches_its_own_message(cx: &mut TestAppContext) {
+    use crate::ui::composer_targets::REPLY_FETCHES;
+    use quill::composer::ComposerReplyTo;
+    use quill::ids::MessageId;
+    let h = new_app(cx);
+    let chat_window = h.open_in_new_window(OTHER, cx);
+    let unloaded = MessageId(987_654);
+    REPLY_FETCHES.with(|asked| asked.borrow_mut().clear());
+    in_window(&h, chat_window, Some(OTHER), cx, |app, _, _| {
+        app.chat_ui
+            .set_reply(Some(ComposerReplyTo::new(OTHER, unloaded)));
+    });
+    draw(h.main, cx);
+    assert!(
+        REPLY_FETCHES.with(|asked| asked.borrow().is_empty()),
+        "the main window has no reply bar"
+    );
+    draw(chat_window, cx);
+    let asked = REPLY_FETCHES.with(|asked| asked.borrow().clone());
+    assert!(
+        asked.contains(&(OTHER, unloaded)),
+        "the chat window asked for its bar's message: {asked:?}"
+    );
+}
+
+/// Round 13 B, finding 5: a chat window's history takes keyboard focus into
+/// its own accessibility state, and only the window a screen reader reads
+/// has its rows report the focus.
+#[gpui_kit::test]
+fn a_chat_windows_history_tracks_its_own_screen_reader_focus(cx: &mut TestAppContext) {
+    let h = new_app(cx);
+    let chat_window = h.open_in_new_window(OTHER, cx);
+    in_window(&h, chat_window, Some(OTHER), cx, |app, _, _| {
+        app.message_ui.a11y.force_screen_reader = true;
+    });
+    draw(h.main, cx);
+    draw(chat_window, cx);
+    assert!(read(&h, Some(OTHER), cx, |app, _| app
+        .slices
+        .window
+        .a11y_active
+        .get()));
+    assert!(
+        !read(&h, None, cx, |app, _| app.slices.window.a11y_active.get()),
+        "the main window has no screen reader"
+    );
+    in_window(&h, chat_window, Some(OTHER), cx, |app, window, cx| {
+        window.activate_window();
+        let handle = app.message_ui.history_focus.clone();
+        window.focus(&handle, cx);
+    });
+    draw(chat_window, cx);
+    draw(chat_window, cx);
+    assert!(
+        read(&h, Some(OTHER), cx, |app, _| app.message_ui.a11y.focused),
+        "the window's history took the focus"
+    );
+    assert!(!read(&h, None, cx, |app, _| app.message_ui.a11y.focused));
+}
+
+/// Round 13 B, finding 6: a chat window's title is the main window's title
+/// with its own view in place: Saved Messages by that name.
+#[gpui_kit::test]
+fn a_saved_messages_window_is_titled_saved_messages(cx: &mut TestAppContext) {
+    let h = new_app(cx);
+    let _chat_window = h.open_in_new_window(OTHER, cx);
+    let title = h.app.update(cx, |app, cx| {
+        if let Some(session) = app.session_mut() {
+            session.my_user_id = Some(OTHER.0);
+        }
+        app.chat_window_title(OTHER, cx)
+    });
+    let saved = quill::lang::tr(quill::lang::keys::SAVED_MESSAGES).to_string();
+    assert!(title.starts_with(&saved), "{title:?}");
+}
+
+/// Finding 6: a forum window's title names the topic open in that window,
+/// as the main window's does.
+#[gpui_kit::test]
+fn a_forum_windows_title_names_its_open_topic(cx: &mut TestAppContext) {
+    use crate::ui::demos::composer::{FORUM_CHAT, RELEASES_TOPIC};
+    let h = new_demo_app(cx, "ready-composer-bars");
+    let chat_window = h.open_in_new_window(FORUM_CHAT, cx);
+    in_window(&h, chat_window, Some(FORUM_CHAT), cx, |app, _, cx| {
+        app.select_topic_ui(RELEASES_TOPIC, cx);
+    });
+    draw(chat_window, cx);
+    let topic = read(&h, Some(FORUM_CHAT), cx, |app, _| {
+        app.session()
+            .and_then(|session| session.open_topic_info(FORUM_CHAT))
+            .map(|topic| topic.name)
+    })
+    .expect("the window's open topic");
+    let title = h
+        .app
+        .update(cx, |app, cx| app.chat_window_title(FORUM_CHAT, cx));
+    assert!(title.starts_with(&topic), "{title:?} names {topic:?}");
 }

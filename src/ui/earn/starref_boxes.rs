@@ -209,8 +209,8 @@ impl QuillApp {
                             tr(keys::Q_MONEY_START)
                         })
                         .primary()
-                        .loading(setup.saving)
-                        .disabled(setup.saving)
+                        .loading(setup.is_saving())
+                        .disabled(setup.is_saving())
                         .on_click(cx.listener(|this, _, _, cx| {
                             this.earn_call(
                                 tr(keys::Q_MONEY_COULDNT_SAVE_THE_AFFILIATE_PROGRAM),

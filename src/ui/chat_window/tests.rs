@@ -329,7 +329,7 @@ fn a_dialog_asked_for_in_a_chat_window_opens_there(cx: &mut TestAppContext) {
     // Input in the chat window, then a flag that opens a kit dialog
     // (Accounts): the window the input happened in hosts it.
     h.app.update(cx, |app, _| {
-        app.note_window_input(Some(OTHER));
+        app.note_window_press(Some(OTHER));
         app.account.accounts.open = true;
         app.set_window_scope(None);
     });
@@ -358,7 +358,7 @@ fn a_dialog_asked_for_in_a_chat_window_opens_there(cx: &mut TestAppContext) {
         .unwrap();
     assert!(!window_shell.read_with(cx, |shell, _| shell.dialog_open()));
     h.app.update(cx, |app, _| {
-        app.note_window_input(None);
+        app.note_window_press(None);
         app.account.accounts.open = true;
     });
     cx.update_window(chat_window, |_, window, cx| window.render_frame(cx))
@@ -1252,7 +1252,7 @@ fn a_note_from_a_chat_window_toasts_in_that_window(cx: &mut TestAppContext) {
     let h = new_app(cx);
     let chat_window = h.open_in_new_window(OTHER, cx);
     h.app.update(cx, |app, cx| {
-        app.note_window_input(Some(OTHER));
+        app.note_window_press(Some(OTHER));
         app.connection
             .set_note(crate::ui::status_note::StatusNote::error(
                 "Couldn't open the link",
@@ -1266,7 +1266,7 @@ fn a_note_from_a_chat_window_toasts_in_that_window(cx: &mut TestAppContext) {
     // The pointer moving over the main window leaves the toast where it
     // was asked for.
     h.app.update(cx, |app, cx| {
-        app.note_window_input(None);
+        app.note_window_press(None);
         cx.notify();
     });
     assert!(status_toast_drawn(chat_window, cx));
@@ -1281,10 +1281,10 @@ fn a_late_open_failure_toasts_in_the_window_that_asked(cx: &mut TestAppContext) 
     let (answer, answered) = futures_channel::oneshot::channel();
     quill::platform::script_next_os_open(quill::platform::OsOpen::Pending(answered));
     h.app.update(cx, |app, cx| {
-        app.note_window_input(Some(OTHER));
+        app.note_window_press(Some(OTHER));
         app.open_link("https://example.com/a", cx);
         // The pointer moves over the main window before the OS answers.
-        app.note_window_input(None);
+        app.note_window_press(None);
     });
     answer.send(false).unwrap();
     cx.run_until_parked();
@@ -1298,7 +1298,7 @@ fn closing_a_chat_window_moves_its_toast_to_the_main_window(cx: &mut TestAppCont
     let h = new_app(cx);
     let chat_window = h.open_in_new_window(OTHER, cx);
     h.app.update(cx, |app, cx| {
-        app.note_window_input(Some(OTHER));
+        app.note_window_press(Some(OTHER));
         app.connection
             .set_note(crate::ui::status_note::StatusNote::error(
                 "Couldn't open the link",
@@ -1330,7 +1330,7 @@ fn a_narrow_forum_window_showing_its_topics_draws_the_toast(cx: &mut TestAppCont
         .unwrap();
     assert!(topics_only, "the window shows only the topic list");
     h.app.update(cx, |app, cx| {
-        app.note_window_input(Some(forum));
+        app.note_window_press(Some(forum));
         app.connection
             .set_note(crate::ui::status_note::StatusNote::error(
                 "Couldn't open the link",

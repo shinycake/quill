@@ -103,6 +103,7 @@ impl QuillApp {
             step: Step::Pick,
             input,
         });
+        self.open_box(DialogKind::BotVerify);
         cx.notify();
     }
 

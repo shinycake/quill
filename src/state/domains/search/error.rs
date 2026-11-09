@@ -71,7 +71,12 @@ impl Session {
                 self.fail_message_calendar(pending)
             }
             Some(RequestPurpose::SearchFromMembers) => {
-                if let Some(picker) = self.search.chat_search.from_picker.as_mut() {
+                // Only the search the picker waits for ends; an older one's
+                // error keeps the newer answer coming.
+                if let Some(picker) = self.search.chat_search.from_picker.as_mut()
+                    && picker.request.is_some()
+                    && picker.request == pending.map(|p| p.id)
+                {
                     picker.request = None;
                 }
             }

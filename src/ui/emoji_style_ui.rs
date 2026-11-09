@@ -181,6 +181,7 @@ impl QuillApp {
 
     pub(super) fn open_emoji_set_style(&mut self, cx: &mut Context<Self>) {
         self.preferences.emoji_style.open = true;
+        self.open_box(DialogKind::EmojiSetStyle);
         self.preferences.emoji_style.file_error = None;
         cx.notify();
     }

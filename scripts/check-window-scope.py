@@ -72,6 +72,12 @@ window's with
 
 on one of the three lines above the call.
 
+The dialog host rule (scripts/dialog_hosts.py, round 13): every kit
+dialog open names the window it belongs to. A box whose flag is the
+window's own is `.per_window()`; every other open calls
+`open_box(DialogKind::X)` or `open_box_in(DialogKind::X, window)`, or says
+why it names none with `// box-host: <why>`.
+
 Known limits: a method is matched by name, not type; a field reached
 through a local binding (`let h = &mut this.history;` in an outer
 function, captured by the closure) or a helper on another type is not
@@ -87,6 +93,7 @@ import re
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import dialog_hosts  # noqa: E402
 import ui_statics  # noqa: E402
 import view_reads  # noqa: E402
 
@@ -536,6 +543,16 @@ def main() -> int:
             "WindowId (src/ui/selectable_text.rs, src/ui/spoiler_fx.rs); state that is\n"
             "safe to share is listed in scripts/ui-statics.txt with the reason.\n"
         )
+    unhosted = dialog_hosts.problems(str(root.parent.parent))
+    if unhosted:
+        print("\n".join(unhosted))
+        print(
+            f"\n{len(unhosted)} kit dialog open(s) do not say which window they belong to.\n"
+            "A box whose flag is the window's own is `.per_window()`; every other open\n"
+            "names its window with open_box(DialogKind::X) or open_box_in(DialogKind::X,\n"
+            "window) (src/ui/chat_window/dialog_hosts.rs). A write that only refreshes a\n"
+            "box where it shows says why with `// box-host: <why>`.\n"
+        )
     unrouted = unrouted_opens(root, texts)
     if unrouted:
         print("\n".join(unrouted))
@@ -577,12 +594,13 @@ def main() -> int:
             "docs/contributing/structure.md (Window scope)."
         )
         return 1
-    if screen_failures or main_only or view_failures or unrouted or shared_statics:
+    if screen_failures or main_only or view_failures or unrouted or shared_statics or unhosted:
         return 1
     print("window scope: OK")
     print("screen scope: OK")
     print("core view reads: OK")
     print("ui statics: OK")
+    print("dialog hosts: OK")
     return 0
 
 

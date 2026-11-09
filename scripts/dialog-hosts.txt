@@ -1,0 +1,21 @@
+# Session-wide dialogs the dialog host check (scripts/dialog_hosts.py) needs
+# told about, one per line:
+#   Name | keys | a.b c.d       the flag paths, where the predicate hides them
+#                               (`a.b()`: a method call that opens the box)
+#   Name | answer | <reason>    the session sets the flag on an answer and no
+#                               request in src/ui names a window, and why
+#                               none needs to
+#
+# A box no open names shows in the window of the last press or key, and
+# stays there once shown (src/ui/chat_window/dialog_hosts.rs).
+
+ChatExport | keys | dialogs.chat_export_dialog
+ChatExport | answer | the progress box shows the export its own box's Export button started, in the window that showed that box
+AccountExport | keys | dialogs.account_export_dialog
+AccountExport | answer | the progress box shows the export its own box's Export button started, in the window that showed that box
+Giveaway | keys | giveaway.form
+GiftMarket | keys | gift_market.stack gift_market.push()
+LogOut | keys | settings.log_out_confirm
+ArchiveMuteSuggestion | answer | TDLib suggests it with no request; the archive it is about is the main window's chat list
+CallSwap | answer | an incoming call during a call asks with no request; it has no close and must be answered, in the window of the last press
+PremiumLimit | answer | a limit error on any request; it shows in the window of the last press, the one whose action hit the limit

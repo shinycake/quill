@@ -99,6 +99,17 @@ pub fn save_chat_windows(state: &ChatWindowsState) {
     }
 }
 
+/// `account` logged out or was removed: the windows it had open are not
+/// offered to whoever signs in next under the key.
+pub fn forget_chat_windows_of(account: &str) {
+    let mut state = load_chat_windows();
+    if !state.windows.iter().any(|window| window.account == account) {
+        return;
+    }
+    state.windows.retain(|window| window.account != account);
+    save_chat_windows(&state);
+}
+
 pub fn save_chat_windows_to(path: &Path, state: &ChatWindowsState) -> std::io::Result<()> {
     write_json_atomic(path, state)
 }

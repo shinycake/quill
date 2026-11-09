@@ -109,6 +109,7 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         self.folders.share = Some(FolderShareDialog::new(window, cx, folder_id));
+        self.open_box(DialogKind::FolderShare);
         if let Some(live) = self.live.as_mut() {
             if live
                 .driver
@@ -779,6 +780,7 @@ impl QuillApp {
     /// `addlist` link opened: show the dialog and check the link.
     pub(super) fn open_folder_invite(&mut self, link: String, cx: &mut Context<Self>) {
         self.folders.invite = Some(FolderInviteDialog::new(link.clone()));
+        self.open_box(DialogKind::FolderInvite);
         if let Some(live) = self.live.as_mut()
             && let Err(err) = live.driver.check_folder_invite_link(&link)
         {

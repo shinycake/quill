@@ -38,6 +38,10 @@ impl QuillApp {
                 if let CallLinkStep::Offer { group_call_id } = step {
                     self.note_stream_join_intent(StreamJoinIntent::Call(group_call_id));
                 }
+                // Busy: the leave confirmation shows in this window.
+                if matches!(step, CallLinkStep::Busy) {
+                    self.open_box(crate::ui::shell::DialogKind::CallLinkLeave);
+                }
                 self.screen
                     .connection
                     .set_note(match step_note(step, live_stream) {

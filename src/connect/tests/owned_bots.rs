@@ -88,7 +88,7 @@ fn saving_sends_only_what_changed_and_keeps_the_texts_on_ok() {
             .iter()
             .all(|json| !json.contains("setBotInfoShortDescription"))
     );
-    assert_eq!(driver.session.bots.owned.edit.as_ref().unwrap().saving, 1);
+    assert_eq!(driver.session.bots.owned.edit.as_ref().unwrap().saving(), 1);
     feed(
         &mut driver,
         &seq,
@@ -97,7 +97,7 @@ fn saving_sends_only_what_changed_and_keeps_the_texts_on_ok() {
     );
     let edit = driver.session.bots.owned.edit.clone().unwrap();
     assert_eq!(edit.name.as_deref(), Some("New"));
-    assert_eq!((edit.saving, edit.saved), (0, 1));
+    assert_eq!((edit.saving(), edit.saved), (0, 1));
 }
 
 #[test]
@@ -117,9 +117,55 @@ fn a_refused_save_is_reported_and_not_kept() {
         ),
     );
     let edit = driver.session.bots.owned.edit.clone().unwrap();
-    assert_eq!(edit.saving, 0);
+    assert_eq!(edit.saving(), 0);
     assert!(edit.about.is_none());
     assert!(edit.error.unwrap().contains("400"));
+}
+
+/// Save, close, reopen the same bot: the first dialog's late answers
+/// (its load, its save, its refusal) settle nothing in the new one.
+#[test]
+fn a_reopened_editor_takes_only_its_own_answers() {
+    let (mut driver, recorder, sink, seq) = driver_parts();
+    driver.begin_bot_edit(21).unwrap();
+    let old_load = sent_request(&recorder, "getBotName");
+    let changes = crate::owned_bots::edit_changes("Old", "", "New", "").unwrap();
+    driver.save_bot_edit(21, &changes).unwrap();
+    let old_save = sent_request(&recorder, "setBotName");
+    let changes = crate::owned_bots::edit_changes("Old", "", "Old", "About").unwrap();
+    driver.save_bot_edit(21, &changes).unwrap();
+    let old_about = sent_request(&recorder, "setBotInfoShortDescription");
+    driver.end_bot_edit();
+
+    driver.begin_bot_edit(21).unwrap();
+    let changes = crate::owned_bots::edit_changes("Old", "", "Newer", "").unwrap();
+    driver.save_bot_edit(21, &changes).unwrap();
+    let ok = r#"{"@type":"ok"}"#;
+    let refused = r#"{"@type":"error","code":400,"message":"BOT_INVALID"}"#;
+    let stale = r#"{"@type":"text","text":"Stale"}"#;
+    feed(&mut driver, &seq, &sink, &answer(&extra_of(&old_save), ok));
+    feed(
+        &mut driver,
+        &seq,
+        &sink,
+        &answer(&extra_of(&old_about), refused),
+    );
+    feed(
+        &mut driver,
+        &seq,
+        &sink,
+        &answer(&extra_of(&old_load), stale),
+    );
+    let edit = driver.session.bots.owned.edit.clone().unwrap();
+    assert_eq!((edit.saving(), edit.saved), (1, 0));
+    assert_eq!(edit.pending_name.as_deref(), Some("Newer"));
+    assert!(edit.name.is_none() && edit.error.is_none());
+
+    let save = sent_request(&recorder, "setBotName");
+    feed(&mut driver, &seq, &sink, &answer(&extra_of(&save), ok));
+    let edit = driver.session.bots.owned.edit.clone().unwrap();
+    assert_eq!(edit.name.as_deref(), Some("Newer"));
+    assert_eq!((edit.saving(), edit.saved), (0, 1));
 }
 
 #[test]

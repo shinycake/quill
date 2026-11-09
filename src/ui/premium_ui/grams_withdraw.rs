@@ -74,6 +74,7 @@ impl QuillApp {
             // The demo has no password state: the password box.
             grams.withdraw = Some(GramWithdraw::open(None));
         }
+        self.open_box(DialogKind::GramsWithdraw);
         cx.notify();
     }
 

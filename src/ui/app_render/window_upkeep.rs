@@ -12,6 +12,11 @@ use quill::lang::{keys, tr};
 impl QuillApp {
     /// One window's frame upkeep, with that window's state in place.
     pub(in crate::ui) fn per_window_upkeep(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        // Whether a screen reader reads this window, for its history rows.
+        self.slices
+            .window
+            .a11y_active
+            .set(self.a11y_tree_wanted(window));
         // The window's menus and layers take and give back its focus, and
         // the menu's items claim their handles afresh for this frame.
         self.menu_focus_upkeep(window, cx);
@@ -19,6 +24,9 @@ impl QuillApp {
         self.advance_thread(window, cx);
         // A deleted message's reply or edit bar goes.
         self.cancel_gone_composer_targets(window, cx);
+        // The reply bar's message, when it is not in memory: each window's
+        // own bar (the driver asks once per message).
+        self.fetch_missing_reply_target();
         // What was open for a chat the view no longer shows goes.
         self.sync_chat_ui();
         // The histories every window still reads stay whole.
@@ -45,6 +53,27 @@ impl QuillApp {
         // A clicked mention, hashtag, command or link (`entity_links`).
         self.run_pending_link(window, cx);
         self.gift_boxes_upkeep(window, cx);
+        self.checkout_prefill_upkeep(window, cx);
+    }
+
+    /// Slice P1 fix-up: the checkout opens on Buy before the form arrives;
+    /// the saved order info and card go in once, at the first frame after
+    /// the form lands, of the window that hosts the box (a Buy in a chat
+    /// window does not wait for a main window that may be minimized). It
+    /// can't live in `poll_live`: the inputs need a `&mut Window`.
+    fn checkout_prefill_upkeep(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let here = self.windows.scope;
+        if !self.payments.dialog.as_ref().is_some_and(|d| !d.prefilled)
+            || !self
+                .windows
+                .dialog_may_show_in(crate::ui::shell::DialogKind::PaymentForm, here)
+        {
+            return;
+        }
+        let payment_form = self.session().and_then(|s| s.payments.form.clone());
+        if let (Some(dialog), Some(form)) = (self.payments.dialog.as_mut(), payment_form) {
+            dialog.prefill_from_form(&form, window, cx);
+        }
     }
 
     /// The gift and Grams boxes' follow-ups, each in the window that hosts

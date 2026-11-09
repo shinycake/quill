@@ -476,6 +476,40 @@ fn created_style_goes_to_the_front_and_answers_the_box() {
     assert_eq!(h.ai().styles.names(), ["pirate", "formal"]);
 }
 
+/// Save style X, press Back, open the editor for Y: X's late answer (or
+/// error) does not close Y's editor; X still joins the list.
+#[test]
+fn a_left_editors_save_does_not_answer_the_next_editor() {
+    let mut h = Harness::new();
+    let x = h
+        .driver
+        .create_text_composition_style("X", 0, "arr", true)
+        .unwrap();
+    h.driver.session.messages.ai_compose.forget_style_save();
+    h.answer(x, style_json("x", true));
+    assert!(h.ai().style_edit.is_none());
+    assert_eq!(h.ai().styles.names(), ["x"]);
+
+    let failed = h
+        .driver
+        .edit_text_composition_style("x", "X", 0, "arr", false)
+        .unwrap();
+    h.driver.session.messages.ai_compose.forget_style_save();
+    h.fail(failed, "TONES_SAVED_TOO_MANY");
+    assert!(h.ai().style_edit.is_none() && h.ai().style_notice.is_none());
+
+    // The open editor's own save still answers it.
+    let y = h
+        .driver
+        .create_text_composition_style("Y", 0, "arr", true)
+        .unwrap();
+    h.answer(y, style_json("y", true));
+    assert!(matches!(
+        h.ai().style_edit.clone().map(|answer| answer.outcome),
+        Some(Ok(style)) if style.name == "y"
+    ));
+}
+
 #[test]
 fn add_remove_and_delete_answers() {
     let mut h = Harness::new();

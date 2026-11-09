@@ -54,6 +54,15 @@ impl QuillApp {
         if !self.all_sessions().any(exporting) {
             return false;
         }
+        // Locked: the "Stop and quit?" box would be a box of a locked
+        // window, never drawn, holding every later Quit and the OS shutdown.
+        // A Quit from the lock screen quits safely instead: the exports stop
+        // as that box's Stop does, and the quit's own teardown waits for
+        // them to end (`close_all_for_quit`).
+        if self.refused_while_locked() {
+            self.stop_exports();
+            return false;
+        }
         raise_main_window(window, cx);
         if self.dialogs.export_stop.replace(Box::new(exit)).is_some() {
             return true;

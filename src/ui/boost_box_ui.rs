@@ -58,6 +58,7 @@ impl QuillApp {
                 keys::Q_MONEY_BOOSTS_NEED_A_LIVE_CONNECTION,
             ))),
         }
+        self.open_box(crate::ui::shell::DialogKind::BoostBox);
         cx.notify();
     }
 

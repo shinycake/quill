@@ -106,6 +106,7 @@ impl QuillApp {
             text,
             pays: suggestion.info.price.filter(|_| !suggestion.admin),
         });
+        self.open_box(DialogKind::SuggestAccept);
         cx.notify();
     }
 
@@ -212,6 +213,7 @@ impl QuillApp {
             text: decline_text(suggestion.admin, &suggestion.from, &suggestion.channel),
             reason,
         });
+        self.open_box(DialogKind::SuggestDecline);
         cx.notify();
     }
 

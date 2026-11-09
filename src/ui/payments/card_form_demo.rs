@@ -45,7 +45,10 @@ impl Transport for RecordedStripe {
 
 /// A test-mode Stripe checkout that asks for every card field, with one
 /// saved card.
-pub(super) fn stripe_checkout(can_save_credentials: bool, need_password: bool) -> PaymentFormData {
+pub(in crate::ui) fn stripe_checkout(
+    can_save_credentials: bool,
+    need_password: bool,
+) -> PaymentFormData {
     PaymentFormData {
         id: 1,
         form_type: PaymentFormTypeData::Regular(Box::new(PaymentFormRegular {

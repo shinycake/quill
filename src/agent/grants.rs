@@ -239,12 +239,28 @@ pub fn update(account: &AccountKey, change: impl FnOnce(&mut AccountGrants)) {
     if super::ui_driver::guard::refuse_if_injecting("change which chats agents may use") {
         return;
     }
+    change_all(|all| {
+        change(all.entry(account.0.clone()).or_default());
+        true
+    });
+}
+
+/// Serializes changes: each reads, changes and saves the grants while it
+/// holds this, so two at once (a log-out forgetting one account while the
+/// user edits another) can't put back what the other changed, and the
+/// file is written in the same order. Readers only wait for the cache.
+static CHANGING: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// Change every account's grants; `change` says whether it changed any.
+fn change_all(change: impl FnOnce(&mut BTreeMap<String, AccountGrants>) -> bool) {
+    let _changing = crate::locks::lock_or_recover(&CHANGING);
+    let mut all = crate::locks::read_or_recover(&CACHE)
+        .clone()
+        .unwrap_or_else(load);
+    if !change(&mut all) {
+        return;
+    }
     GENERATION.fetch_add(1, Ordering::SeqCst);
-    let mut all = match CACHE.read() {
-        Ok(guard) => guard.clone().unwrap_or_else(load),
-        Err(_) => load(),
-    };
-    change(all.entry(account.0.clone()).or_default());
     if crate::fast_buttons::persistence_enabled()
         && let Some(path) = path()
         && let Err(err) = crate::settings::write_json_atomic(
@@ -256,10 +272,15 @@ pub fn update(account: &AccountKey, change: impl FnOnce(&mut AccountGrants)) {
     {
         eprintln!("quill: could not save {GRANTS_FILE}: {err}");
     }
-    if let Ok(mut guard) = CACHE.write() {
-        *guard = Some(all);
-    }
+    *crate::locks::write_or_recover(&CACHE) = Some(all);
     crate::wake::AGENT.poke();
+}
+
+/// `account` logged out or was removed: its grants go, so whoever signs in
+/// next under the same key starts from the defaults. Not refused while the
+/// UI driver injects input: it only ever narrows what agents may use.
+pub fn forget_account(account: &AccountKey) {
+    change_all(|all| all.remove(&account.0).is_some());
 }
 
 #[cfg(test)]

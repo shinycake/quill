@@ -30,7 +30,7 @@ fn shown(shell: &Entity<QuillShell>, cx: &mut TestAppContext) -> Option<DialogKi
 /// The chat window's Mute box, asked for by its own input.
 fn open_mute_in_chat_window(h: &Harness, chat_window: AnyWindowHandle, cx: &mut TestAppContext) {
     h.app.update(cx, |app, cx| {
-        app.windows.last_input = Some(OTHER);
+        app.windows.last_press = Some(OTHER);
         app.in_window_scope(Some(OTHER), cx, |app, cx| app.open_mute_menu(cx));
     });
     draw(chat_window, cx);
@@ -46,7 +46,7 @@ fn a_box_shows_only_in_the_window_that_asked_for_it(cx: &mut TestAppContext) {
     assert_eq!(shown(&in_chat_window, cx), Some(DialogKind::MuteMenu));
     assert_eq!(shown(&h.shell, cx), None, "the main window shows no box");
     // Input in the main window does not move it.
-    h.app.update(cx, |app, _| app.windows.last_input = None);
+    h.app.update(cx, |app, _| app.windows.last_press = None);
     draw(h.main, cx);
     assert_eq!(shown(&h.shell, cx), None, "still not the main window's");
     assert_eq!(shown(&in_chat_window, cx), Some(DialogKind::MuteMenu));
@@ -89,7 +89,7 @@ fn a_chat_windows_box_stays_there_through_a_lock(cx: &mut TestAppContext) {
     draw(chat_window, cx);
     // The passcode is typed in the main window.
     h.app.update(cx, |app, cx| {
-        app.windows.last_input = None;
+        app.windows.last_press = None;
         app.set_locked(false, cx);
     });
     draw(h.main, cx);
@@ -108,7 +108,7 @@ fn new_topic_in_a_chat_window_opens_there(cx: &mut TestAppContext) {
     let chat_window = h.open_in_new_window(OTHER, cx);
     cx.update_window(h.main, |_, window, cx| {
         h.app.update(cx, |app, cx| {
-            app.windows.last_input = None;
+            app.windows.last_press = None;
             app.set_window_scope(None);
             app.open_forum_manage_dialog(OPEN, window, cx);
         });
@@ -118,7 +118,7 @@ fn new_topic_in_a_chat_window_opens_there(cx: &mut TestAppContext) {
     assert_eq!(shown(&h.shell, cx), Some(DialogKind::ForumManage));
     cx.update_window(chat_window, |_, window, cx| {
         h.app.update(cx, |app, cx| {
-            app.windows.last_input = Some(OTHER);
+            app.windows.last_press = Some(OTHER);
             app.in_window_scope(Some(OTHER), cx, |app, cx| {
                 app.open_forum_topic_editor(OTHER, None, window, cx);
             });
@@ -145,7 +145,7 @@ fn a_create_bot_box_closes_with_its_chat_window(cx: &mut TestAppContext) {
     let chat_window = h.open_in_new_window(OTHER, cx);
     cx.update_window(chat_window, |_, window, cx| {
         h.app.update(cx, |app, cx| {
-            app.windows.last_input = Some(OTHER);
+            app.windows.last_press = Some(OTHER);
             app.in_window_scope(Some(OTHER), cx, |app, cx| {
                 app.open_bot_create(
                     7,

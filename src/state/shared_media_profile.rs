@@ -234,19 +234,22 @@ impl SharedMediaState {
     }
 
     /// A profile tab failed to load.
-    pub fn fail_profile(&mut self, chat_id: ChatId, tab: SharedMediaTab, error: String) {
+    /// A load of `tab` failed; `true` when the tab itself failed (a failed
+    /// further page keeps a loaded tab as it is).
+    pub fn fail_profile(&mut self, chat_id: ChatId, tab: SharedMediaTab, error: String) -> bool {
         if !self.open || self.chat_id != Some(chat_id) {
-            return;
+            return false;
         }
         let state = self.tab_state(tab);
         state.loading_more = false;
         if state.status == SharedMediaTabStatus::Ready {
-            return;
+            return false;
         }
         state.items.clear();
         state.total_count = 0;
         state.error = error;
         state.status = SharedMediaTabStatus::Failed;
+        true
     }
 }
 
@@ -515,10 +518,11 @@ impl Session {
     /// A profile tab's request failed: the tab shows the error and hides
     /// from the bar unless it is the active one.
     pub(crate) fn fail_profile_tab(&mut self, chat_id: ChatId, tab: SharedMediaTab, error: String) {
-        if let Some(&key) = tab.count_keys().first() {
+        if self.media.shared_media.fail_profile(chat_id, tab, error)
+            && let Some(&key) = tab.count_keys().first()
+        {
             self.set_profile_count(chat_id, key, 0);
         }
-        self.media.shared_media.fail_profile(chat_id, tab, error);
     }
 }
 

@@ -460,6 +460,7 @@ crate::ui::shell::register_dialogs! {
         |app| app.message_ui.request_share.is_some(),
         QuillApp::build_request_share_dialog,
     )
+    .per_window()
     .close(|app, _, cx| {
             app.message_ui.request_share = None;
             cx.notify();

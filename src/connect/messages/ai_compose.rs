@@ -126,9 +126,11 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() || !self.style_fields_fit(title, prompt) {
             return Err(ConnectSendError::InvalidRequest);
         }
-        self.send_ai_compose(AiComposePurpose::CreateStyle, None, |extra| {
+        let extra = self.send_ai_compose(AiComposePurpose::CreateStyle, None, |extra| {
             create_text_composition_style(extra, title, custom_emoji_id, prompt, show_creator)
-        })
+        })?;
+        self.session.messages.ai_compose.wait_for_style_save(extra);
+        Ok(extra)
     }
 
     /// `editTextCompositionStyle` for a style the user created.
@@ -143,9 +145,11 @@ impl<S: JsonSender> ConnectDriver<S> {
         if name.is_empty() || !self.chats_path_active() || !self.style_fields_fit(title, prompt) {
             return Err(ConnectSendError::InvalidRequest);
         }
-        self.send_ai_compose(AiComposePurpose::EditStyle, None, |extra| {
+        let extra = self.send_ai_compose(AiComposePurpose::EditStyle, None, |extra| {
             edit_text_composition_style(extra, name, title, custom_emoji_id, prompt, show_creator)
-        })
+        })?;
+        self.session.messages.ai_compose.wait_for_style_save(extra);
+        Ok(extra)
     }
 
     /// `deleteTextCompositionStyle` for a style the user created.

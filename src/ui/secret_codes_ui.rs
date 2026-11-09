@@ -76,6 +76,7 @@ impl QuillApp {
         match code {
             Code::DebugMode => {
                 self.preferences.advanced.debug_confirm = Some(debug_mode::enabled());
+                self.open_box(DialogKind::DebugModeConfirm);
                 cx.notify();
             }
             Code::ViewLogs => self.show_log_folder(cx),

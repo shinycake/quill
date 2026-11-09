@@ -23,6 +23,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
+        // A set whose load failed (a FLOOD_WAIT while scrolling fast) is
+        // asked for again when the panel opens next, not left blank until
+        // restart.
+        self.session.media.media_library.failed.clear();
         if !self.session.stickers.stickers.installed_loaded
             && !self
                 .session

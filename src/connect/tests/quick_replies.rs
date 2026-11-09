@@ -285,3 +285,52 @@ fn the_limits_follow_the_tdlib_options_and_default_to_tdesktops() {
     let state = &driver.session.settings.quick_replies;
     assert_eq!((state.shortcut_limit(), state.message_limit()), (5, 3));
 }
+
+#[test]
+fn a_failed_message_load_is_not_asked_again_until_the_box_opens_again() {
+    let (mut driver, recorder, sink, seq) = driver_parts();
+    seed_shortcuts(&mut driver, &seq, &sink);
+    driver.ensure_quick_reply_messages(1).unwrap();
+    let request = sent_request(&recorder, "loadQuickReplyShortcutMessages");
+    let extra = request["@extra"].as_str().unwrap().to_string();
+    feed(
+        &mut driver,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"error","@extra":"{extra}","code":429,"message":"Too Many Requests: retry after 30"}}"#
+        ),
+    );
+    let state = &driver.session.settings.quick_replies;
+    assert!(state.error.is_some());
+    assert!(state.messages_settled(1), "a failed load ends the wait");
+    // The poll's next ticks ask for nothing.
+    for _ in 0..5 {
+        driver.ensure_quick_reply_messages(1).unwrap();
+    }
+    assert_eq!(count_sent(&recorder, "loadQuickReplyShortcutMessages"), 1);
+    // Opening the box again clears the line and asks once more.
+    driver.session.settings.quick_replies.reopen();
+    assert!(driver.session.settings.quick_replies.error.is_none());
+    assert!(!driver.session.settings.quick_replies.messages_settled(1));
+    driver.ensure_quick_reply_messages(1).unwrap();
+    driver.ensure_quick_reply_messages(1).unwrap();
+    assert_eq!(count_sent(&recorder, "loadQuickReplyShortcutMessages"), 2);
+}
+
+#[test]
+fn a_successful_request_clears_the_last_refusal() {
+    let (mut driver, recorder, sink, seq) = driver_parts();
+    seed_shortcuts(&mut driver, &seq, &sink);
+    driver.session.settings.quick_replies.error = Some("Quick replies: old".into());
+    driver.ensure_quick_reply_messages(2).unwrap();
+    let request = sent_request(&recorder, "loadQuickReplyShortcutMessages");
+    let extra = request["@extra"].as_str().unwrap().to_string();
+    feed(
+        &mut driver,
+        &seq,
+        &sink,
+        &format!(r#"{{"@type":"ok","@extra":"{extra}"}}"#),
+    );
+    assert!(driver.session.settings.quick_replies.error.is_none());
+}

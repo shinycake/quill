@@ -103,6 +103,7 @@ impl QuillApp {
                     step: CreateStep::Leave(text),
                     join_as: None,
                 });
+                self.open_box(DialogKind::GroupCallStart);
                 cx.notify();
             }
         }
@@ -127,6 +128,7 @@ impl QuillApp {
                             step: CreateStep::Waiting(request),
                             join_as: None,
                         });
+                        self.open_box(DialogKind::GroupCallStart);
                     }
                     Err(_) => {
                         self.group_call_boxes.start_dialog = None;
@@ -141,6 +143,7 @@ impl QuillApp {
                         step: CreateStep::Confirm,
                         join_as: None,
                     });
+                    self.open_box(DialogKind::GroupCallStart);
                 }
             },
             CreateKind::Schedule => self.open_group_call_schedule(chat_id, window, cx),
@@ -204,6 +207,7 @@ impl QuillApp {
             }),
             join_as,
         });
+        self.open_box(DialogKind::GroupCallStart);
         cx.notify();
     }
 

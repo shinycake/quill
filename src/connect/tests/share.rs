@@ -190,6 +190,47 @@ fn share_search_sends_both_searches_and_ignores_stale_answers() {
     let _ = std::fs::remove_dir_all(dir);
 }
 
+/// A failed server search (FLOOD_WAIT from fast typing) ends the search
+/// with what the other half found; an older query's error settles nothing.
+#[test]
+fn a_failed_share_search_stops_searching() {
+    let (dir, prepared) = prepared_tmp(&MemorySecretStore::new());
+    let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+    let recorder = Arc::new(RecordingSender::new());
+    let seq = AtomicU64::new(0);
+    let mut driver = ready_driver(&recorder, prepared, &sink, &seq);
+    let error = |extra: &str| {
+        format!(
+            r#"{{"@type":"error","code":500,"message":"Internal Server Error","@extra":"{extra}"}}"#
+        )
+    };
+    let extra = |ty: &str| {
+        sent_request(&recorder, ty)["@extra"]
+            .as_str()
+            .unwrap()
+            .to_string()
+    };
+    driver.search_share_chats("old").unwrap();
+    let old_server = extra("searchChatsOnServer");
+    driver.search_share_chats("qx").unwrap();
+    let (local, server) = (extra("searchChats"), extra("searchChatsOnServer"));
+    ingest(&mut driver, &error(&old_server), &seq, &sink);
+    ingest(
+        &mut driver,
+        &format!(r#"{{"@type":"chats","@extra":"{local}","total_count":0,"chat_ids":[]}}"#),
+        &seq,
+        &sink,
+    );
+    assert!(
+        driver.session.messages.share_search.is_searching(),
+        "the old query's error is not this search's"
+    );
+    ingest(&mut driver, &error(&server), &seq, &sink);
+    assert!(!driver.session.messages.share_search.is_searching());
+    assert!(driver.session.share_destinations("qx").is_empty());
+    let _ = std::fs::remove_dir_all(dir);
+}
+
 #[test]
 fn send_as_senders_load_and_set_only_listed_unlocked_identities() {
     let (dir, prepared) = prepared_tmp(&MemorySecretStore::new());

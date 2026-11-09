@@ -32,20 +32,39 @@ fn path() -> Option<PathBuf> {
     crate::settings::safe_app_root().map(|root| root.join("web_app_trust.json"))
 }
 
+fn load() -> Stored {
+    path()
+        .and_then(|path| crate::settings::read_with_pending(&path).ok())
+        .and_then(|bytes| serde_json::from_slice::<Stored>(&bytes).ok())
+        .unwrap_or_default()
+}
+
 fn current() -> Stored {
     if let Ok(guard) = BOTS.read()
         && let Some(stored) = guard.as_ref()
     {
         return stored.clone();
     }
-    let loaded = path()
-        .and_then(|path| crate::settings::read_with_pending(&path).ok())
-        .and_then(|bytes| serde_json::from_slice::<Stored>(&bytes).ok())
-        .unwrap_or_default();
-    if let Ok(mut guard) = BOTS.write() {
-        return guard.get_or_insert(loaded).clone();
+    crate::locks::write_or_recover(&BOTS)
+        .get_or_insert_with(load)
+        .clone()
+}
+
+/// Change the set under its lock and queue the save there too, so two
+/// changes at once (a log-out forgetting while another account trusts a
+/// bot) can't put back what the other removed. `change` says whether it
+/// changed anything.
+fn change(change: impl FnOnce(&mut Stored) -> bool) {
+    let mut guard = crate::locks::write_or_recover(&BOTS);
+    let stored = guard.get_or_insert_with(load);
+    if !change(stored) {
+        return;
     }
-    loaded
+    if PERSIST.load(Ordering::SeqCst)
+        && let Some(path) = path()
+    {
+        crate::settings::write_json_deferred(&path, &*stored);
+    }
 }
 
 /// Whether `account` already accepted the first-open box for this bot.
@@ -58,36 +77,18 @@ pub fn is_trusted(account: &str, bot_id: i64) -> bool {
 
 /// Remember the box `account` accepted.
 pub fn mark_trusted(account: &str, bot_id: i64) {
-    let mut stored = current();
-    if !stored
-        .accounts
-        .entry(account.to_string())
-        .or_default()
-        .insert(bot_id)
-    {
-        return;
-    }
-    store(stored);
+    change(|stored| {
+        stored
+            .accounts
+            .entry(account.to_string())
+            .or_default()
+            .insert(bot_id)
+    });
 }
 
-/// A removed account's answers go with it.
+/// A logged-out or removed account's answers go with it.
 pub fn forget_account(account: &str) {
-    let mut stored = current();
-    if stored.accounts.remove(account).is_none() {
-        return;
-    }
-    store(stored);
-}
-
-fn store(stored: Stored) {
-    if PERSIST.load(Ordering::SeqCst)
-        && let Some(path) = path()
-    {
-        crate::settings::write_json_deferred(&path, &stored);
-    }
-    if let Ok(mut guard) = BOTS.write() {
-        *guard = Some(stored);
-    }
+    change(|stored| stored.accounts.remove(account).is_some());
 }
 
 /// Whether opening `bot_id`'s app needs the box first: not for verified

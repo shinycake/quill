@@ -109,6 +109,7 @@ impl QuillApp {
 
     pub(in crate::ui) fn open_passkeys_about(&mut self, cx: &mut Context<Self>) {
         self.privacy.passkeys.about_open = true;
+        self.open_box(DialogKind::PasskeysAbout);
         cx.notify();
     }
 

@@ -48,6 +48,7 @@ impl QuillApp {
             }
         }
         self.payments.marketplace_open = true;
+        self.open_box(DialogKind::Marketplace);
         cx.notify();
     }
 

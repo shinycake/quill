@@ -83,6 +83,7 @@ impl QuillApp {
             search,
             load_failed,
         });
+        self.open_box(DialogKind::DropTopic);
         cx.notify();
     }
 

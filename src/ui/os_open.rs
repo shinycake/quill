@@ -15,10 +15,14 @@ use quill::platform::OsOpen;
 impl QuillApp {
     /// Open a link the user pressed: a Telegram link in Quill, a web link
     /// in the browser, a `mailto:` link in the mail client. Every link Quill opens goes
-    /// through here, so a refused or failed open is never silent.
+    /// through here, so a refused or failed open is never silent. While
+    /// locked, every open here waits for the unlock (`wait_for_unlock`).
     pub(in crate::ui) fn open_link(&mut self, url: &str, cx: &mut Context<Self>) {
-        // Nothing opens over the lock screen: a late open waits for no one.
+        // Nothing opens over the lock screen: the open waits for the unlock
+        // (a late answer's page, a 3-D Secure step, a withdrawal).
         if self.refused_while_locked() {
+            let url = url.to_string();
+            self.wait_for_unlock(move |this, cx| this.open_link(&url, cx));
             return;
         }
         // Telegram's own links open in Quill, as tdesktop converts them
@@ -42,8 +46,11 @@ impl QuillApp {
         failure: impl Into<String> + 'static,
         cx: &mut Context<Self>,
     ) {
-        // Nothing opens over the lock screen: a late open waits for no one.
+        // Nothing opens over the lock screen: the open waits for the unlock
+        // (a late answer's page, a 3-D Secure step, a withdrawal).
         if self.refused_while_locked() {
+            let url = url.to_string();
+            self.wait_for_unlock(move |this, cx| this.open_web_link(&url, failure, cx));
             return;
         }
         let open = quill::platform::open_external_url(url);
@@ -52,8 +59,11 @@ impl QuillApp {
 
     /// Open the mail client on a new message to `address`.
     pub(in crate::ui) fn open_mail_to(&mut self, address: &str, cx: &mut Context<Self>) {
-        // Nothing opens over the lock screen: a late open waits for no one.
+        // Nothing opens over the lock screen: the open waits for the unlock
+        // (a late answer's page, a 3-D Secure step, a withdrawal).
         if self.refused_while_locked() {
+            let address = address.to_string();
+            self.wait_for_unlock(move |this, cx| this.open_mail_to(&address, cx));
             return;
         }
         let open = quill::platform::open_mailto(address);
@@ -67,8 +77,11 @@ impl QuillApp {
         failure: impl Into<String> + 'static,
         cx: &mut Context<Self>,
     ) {
-        // Nothing opens over the lock screen: a late open waits for no one.
+        // Nothing opens over the lock screen: the open waits for the unlock
+        // (a late answer's page, a 3-D Secure step, a withdrawal).
         if self.refused_while_locked() {
+            let path = path.to_path_buf();
+            self.wait_for_unlock(move |this, cx| this.open_file(&path, failure, cx));
             return;
         }
         let open = quill::platform::open_local_file(path);
@@ -84,7 +97,8 @@ impl QuillApp {
         answered: impl FnOnce(&mut Self, bool, &mut Context<Self>) + 'static,
     ) {
         if self.refused_while_locked() {
-            answered(self, false, cx);
+            let path = path.to_path_buf();
+            self.wait_for_unlock(move |this, cx| this.open_file_then(&path, cx, answered));
             return;
         }
         let open = quill::platform::open_local_file(path);
@@ -99,8 +113,13 @@ impl QuillApp {
         failure: impl Into<String> + 'static,
         cx: &mut Context<Self>,
     ) {
-        // Nothing opens over the lock screen: a late open waits for no one.
+        // Nothing opens over the lock screen: the open waits for the unlock
+        // (a late answer's page, a 3-D Secure step, a withdrawal).
         if self.refused_while_locked() {
+            let target = target.to_string();
+            self.wait_for_unlock(move |this, cx| {
+                this.open_system_settings(&target, failure, cx);
+            });
             return;
         }
         let open = quill::platform::open_system_settings(target);
@@ -123,8 +142,11 @@ impl QuillApp {
         failure: impl Into<String> + 'static,
         cx: &mut Context<Self>,
     ) {
-        // Nothing opens over the lock screen: a late open waits for no one.
+        // Nothing opens over the lock screen: the open waits for the unlock
+        // (a late answer's page, a 3-D Secure step, a withdrawal).
         if self.refused_while_locked() {
+            let path = path.to_path_buf();
+            self.wait_for_unlock(move |this, cx| this.reveal_in_folder_or(&path, failure, cx));
             return;
         }
         let open = quill::platform::reveal_in_file_manager(path);

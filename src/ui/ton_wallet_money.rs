@@ -51,6 +51,7 @@ impl QuillApp {
         {
             wallet.money.open = true;
         }
+        self.open_box(DialogKind::Money);
         cx.notify();
     }
 

@@ -213,6 +213,7 @@ impl QuillApp {
                             tr(keys::Q_PREFS_LOG_OUT),
                             cx.listener(|this, _, _, cx| {
                                 this.settings.log_out_confirm = true;
+                                this.open_box(crate::ui::shell::DialogKind::LogOut);
                                 cx.notify();
                             }),
                             cx,

@@ -55,6 +55,7 @@ impl QuillApp {
             let _ = live.driver.refresh_group_admin(chat_id);
         }
         self.admin.group_settings_dialog = Some(GroupSettingsDialog { chat_id, view });
+        self.open_box(DialogKind::GroupSettings);
         self.set_group_settings_view(view, cx);
     }
 

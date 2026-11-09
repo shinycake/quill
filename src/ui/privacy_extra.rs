@@ -560,6 +560,7 @@ impl QuillApp {
             Some(warning) => {
                 self.privacy.extra.file_open_remember = false;
                 self.privacy.extra.file_open = Some(FileOpenConfirm { path, warning });
+                self.open_box(DialogKind::FileOpenConfirm);
                 cx.notify();
             }
         }

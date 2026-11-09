@@ -115,6 +115,7 @@ impl QuillApp {
             local_error: None,
             note: None,
         });
+        self.open_box(crate::ui::shell::DialogKind::Business);
         let me = self.session().and_then(|s| s.my_user_id);
         if let Some(live) = self.live.as_mut() {
             live.driver.session.settings.business.error = None;

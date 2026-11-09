@@ -165,6 +165,7 @@ impl QuillApp {
     /// Open the box on the installed stickers.
     pub(super) fn open_archived_stickers(&mut self, cx: &mut Context<Self>) {
         self.settings.sticker_settings_open = true;
+        self.open_box(DialogKind::ArchivedStickers);
         self.settings.sticker_manager.stickers.clear();
         self.settings
             .sticker_manager

@@ -749,6 +749,7 @@ crate::ui::shell::register_dialogs! {
         |app| app.message_ui.open_link_confirm.is_some(),
         QuillApp::build_open_link_dialog,
     )
+    .per_window()
     .close(|app, _, cx| {
             app.message_ui.open_link_confirm = None;
             cx.notify();

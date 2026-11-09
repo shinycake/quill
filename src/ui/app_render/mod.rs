@@ -63,7 +63,6 @@ impl Render for QuillApp {
         let outer_scope = self.windows.scope;
         self.set_window_scope(None);
         self.main_window.handle = Some(window.window_handle());
-        self.slices.a11y_active.set(self.a11y_tree_wanted(window));
         self.release_viewer_key_probe(window, cx);
         self.sync_update_pill();
         self.main_frame_starts(window, super::image_budget::WindowDraw::Whole, cx);

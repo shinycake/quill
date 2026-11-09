@@ -141,10 +141,33 @@ static PAUSED_BY_LOCK: AtomicBool = AtomicBool::new(false);
 /// What an agent reads while Quill is locked.
 pub const LOCKED_MESSAGE: &str = "Quill is locked. Nothing can be read or sent until the user unlocks Quill. Ask the user to unlock it, then retry.";
 
+/// What a write tool answers when Quill locked while it ran.
+pub const LOCKED_WHILE_RUNNING_MESSAGE: &str = "Quill was locked while this ran, so its result is withheld. It may have been done: once the user unlocks Quill, check before you retry.";
+
+/// Counts every lock, so a tool that was already running when Quill locked
+/// can tell (the lock holds for the whole call, not only its start).
+static LOCKS: AtomicU64 = AtomicU64::new(0);
+
 /// Pause or resume every agent tool and resource for the passcode lock.
 pub fn set_paused_by_lock(locked: bool) {
     PAUSED_BY_LOCK.store(locked, Ordering::SeqCst);
+    // After the flag: a call that read the count before this saw the flag
+    // unset at its start, and sees the count move by its end.
+    if locked {
+        LOCKS.fetch_add(1, Ordering::SeqCst);
+    }
+    crate::agent::events::wake_waiters();
     crate::wake::AGENT.poke();
+}
+
+/// How many times Quill has locked; read when a call starts.
+pub fn lock_count() -> u64 {
+    LOCKS.load(Ordering::SeqCst)
+}
+
+/// Quill is locked now, or locked at some point since `count` was read.
+pub fn locked_since(count: u64) -> bool {
+    paused_by_lock() || lock_count() != count
 }
 
 /// Whether agent tools and resources are paused because Quill is locked.
@@ -487,5 +510,66 @@ mod tests {
         super::set_paused_by_lock(false);
         let result = crate::agent::tools::call("list_chats", &serde_json::json!({}), "test");
         assert!(!locked(&result), "the unlock resumes the tools");
+    }
+
+    /// A wait already running when Quill locks ends at the lock, with
+    /// nothing, instead of waiting on to hand over what arrives meanwhile.
+    #[test]
+    fn a_running_wait_ends_at_the_lock() {
+        let _guard = crate::locks::lock_or_recover(&super::TEST_LOCK);
+        super::set_paused_by_lock(false);
+        let since = crate::agent::events::latest_seq();
+        let waiter = std::thread::spawn(move || {
+            crate::agent::events::wait_for(
+                9_401,
+                since,
+                std::time::Duration::from_secs(600),
+                |_| true,
+            )
+        });
+        super::set_paused_by_lock(true);
+        let (arrived, _) = waiter.join().unwrap();
+        assert!(arrived.is_empty());
+        super::set_paused_by_lock(false);
+    }
+
+    /// A call is locked when Quill locked at any point while it ran: a read
+    /// answers the lock message, a write says it may have been done.
+    #[test]
+    fn a_lock_during_a_call_withholds_its_result() {
+        let _guard = crate::locks::lock_or_recover(&super::TEST_LOCK);
+        super::set_paused_by_lock(false);
+        let start = super::lock_count();
+        assert!(!super::locked_since(start));
+        super::set_paused_by_lock(true);
+        assert!(super::locked_since(start), "locked now");
+        super::set_paused_by_lock(false);
+        assert!(super::locked_since(start), "locked and unlocked meanwhile");
+        let ok = || {
+            Ok(crate::agent::tools::ToolOutput {
+                text: "secret".into(),
+                data: serde_json::json!({}),
+            })
+        };
+        let text = |result: Result<
+            crate::agent::tools::ToolOutput,
+            crate::agent::tools::ToolError,
+        >| match result {
+            Ok(output) => output.text,
+            Err(crate::agent::tools::ToolError(message)) => message,
+        };
+        assert_eq!(
+            text(crate::agent::tools::withheld_if_locked(true, start, ok())),
+            super::LOCKED_MESSAGE
+        );
+        assert_eq!(
+            text(crate::agent::tools::withheld_if_locked(false, start, ok())),
+            super::LOCKED_WHILE_RUNNING_MESSAGE
+        );
+        let now = super::lock_count();
+        assert_eq!(
+            text(crate::agent::tools::withheld_if_locked(true, now, ok())),
+            "secret"
+        );
     }
 }

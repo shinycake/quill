@@ -15,8 +15,10 @@ pub struct BotEditTexts {
     /// Texts sent and not yet confirmed by `ok`.
     pub pending_name: Option<String>,
     pub pending_about: Option<String>,
-    /// Requests in flight (name, about, photo).
-    pub saving: u8,
+    /// The two loads in flight; an answer for another dialog drops.
+    pub(crate) loads: Vec<RequestId>,
+    /// Saves in flight (name, about, photo); only these settle the dialog.
+    pub(crate) saves: Vec<RequestId>,
     /// Confirmed saves since the dialog opened.
     pub saved: u8,
     pub error: Option<String>,
@@ -45,14 +47,36 @@ pub struct OwnedBotsState {
     pub create: CreateBotState,
 }
 
+impl BotEditTexts {
+    /// Saves sent and not yet answered.
+    pub fn saving(&self) -> usize {
+        self.saves.len()
+    }
+
+    /// `pending` is a request of this dialog in `list`: settle it.
+    fn take(list: &mut Vec<RequestId>, pending: Option<&PendingRequest>) -> bool {
+        let Some(id) = pending.map(|p| p.id) else {
+            return false;
+        };
+        let before = list.len();
+        list.retain(|sent| *sent != id);
+        list.len() != before
+    }
+}
+
 impl Session {
     /// A `text` answer for the edit dialog's two loads.
-    pub(crate) fn apply_owned_bot_text(&mut self, purpose: BotsPurpose, text: String) {
-        let BotsPurpose::GetBotEditText { bot_user_id, about } = purpose else {
+    pub(crate) fn apply_owned_bot_text(
+        &mut self,
+        purpose: BotsPurpose,
+        text: String,
+        pending: Option<&PendingRequest>,
+    ) {
+        let BotsPurpose::GetBotEditText { about, .. } = purpose else {
             return;
         };
         if let Some(edit) = self.bots.owned.edit.as_mut()
-            && edit.bot_id == bot_user_id
+            && BotEditTexts::take(&mut edit.loads, pending)
         {
             if about {
                 edit.about = Some(text);
@@ -67,16 +91,16 @@ impl Session {
         let Some(RequestPurpose::Bots(purpose)) = pending.map(|p| p.purpose) else {
             return;
         };
-        let (BotsPurpose::SetBotName { bot_user_id }
-        | BotsPurpose::SetBotAbout { bot_user_id }
-        | BotsPurpose::SetBotPhoto { bot_user_id }) = purpose
+        let (BotsPurpose::SetBotName { .. }
+        | BotsPurpose::SetBotAbout { .. }
+        | BotsPurpose::SetBotPhoto { .. }) = purpose
         else {
             return;
         };
         let Some(edit) = self.bots.owned.edit.as_mut() else {
             return;
         };
-        if edit.bot_id != bot_user_id {
+        if !BotEditTexts::take(&mut edit.saves, pending) {
             return;
         }
         match purpose {
@@ -92,7 +116,6 @@ impl Session {
             }
             _ => {}
         }
-        edit.saving = edit.saving.saturating_sub(1);
         edit.saved = edit.saved.saturating_add(1);
     }
 
@@ -132,31 +155,30 @@ impl Session {
     pub(crate) fn apply_owned_bots_error(
         &mut self,
         err: &TdError,
-        purpose: Option<RequestPurpose>,
+        pending: Option<&PendingRequest>,
     ) -> bool {
-        let Some(RequestPurpose::Bots(purpose)) = purpose else {
+        let Some(RequestPurpose::Bots(purpose)) = pending.map(|p| p.purpose) else {
             return false;
         };
         match purpose {
-            BotsPurpose::GetBotEditText { bot_user_id, .. } => {
+            BotsPurpose::GetBotEditText { .. } => {
                 if let Some(edit) = self.bots.owned.edit.as_mut()
-                    && edit.bot_id == bot_user_id
+                    && BotEditTexts::take(&mut edit.loads, pending)
                 {
                     edit.load_failed = true;
                 }
             }
-            BotsPurpose::SetBotName { bot_user_id }
-            | BotsPurpose::SetBotAbout { bot_user_id }
-            | BotsPurpose::SetBotPhoto { bot_user_id } => {
+            BotsPurpose::SetBotName { .. }
+            | BotsPurpose::SetBotAbout { .. }
+            | BotsPurpose::SetBotPhoto { .. } => {
                 let what = match purpose {
                     BotsPurpose::SetBotName { .. } => "the name",
                     BotsPurpose::SetBotAbout { .. } => "the about text",
                     _ => "the photo",
                 };
                 if let Some(edit) = self.bots.owned.edit.as_mut()
-                    && edit.bot_id == bot_user_id
+                    && BotEditTexts::take(&mut edit.saves, pending)
                 {
-                    edit.saving = edit.saving.saturating_sub(1);
                     match purpose {
                         BotsPurpose::SetBotName { .. } => edit.pending_name = None,
                         BotsPurpose::SetBotAbout { .. } => edit.pending_about = None,

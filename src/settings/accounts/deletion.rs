@@ -53,6 +53,9 @@ pub fn pending_deletes(app_root: &Path) -> Vec<AccountKey> {
 /// Never call it while a TDLib client of `key` may still be open. Fails
 /// without deleting while a settings write into the folder is stuck.
 pub fn delete_account_folder(app_root: &Path, key: &AccountKey) -> std::io::Result<()> {
+    // What the account kept outside its folder goes too, also when this is
+    // the next start finishing a removal.
+    crate::account_data::forget(app_root, key);
     // A queued settings write would recreate the folder after it is gone,
     // and one that failed stays queued, so drop what is left for it.
     crate::settings::flush_deferred_writes();

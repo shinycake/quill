@@ -228,8 +228,14 @@ pub fn latest_seq() -> u64 {
         .map_or(0, |state| state.next_seq)
 }
 
+/// Wake every [`wait_for`]: Quill locked, and a waiter must end now.
+pub(crate) fn wake_waiters() {
+    let _guard = crate::locks::lock_or_recover(&MESSAGES);
+    ARRIVED.notify_all();
+}
+
 /// Messages of `client_id` after `since` that `keep` accepts, waiting up to
-/// `timeout` for the first one. Returns as soon as any arrive, with the
+/// `timeout` for the first one. Ends with nothing when Quill locks. Returns as soon as any arrive, with the
 /// sequence number checked up to, which the next wait should start from.
 pub fn wait_for(
     client_id: i32,
@@ -266,6 +272,11 @@ pub fn wait_for(
             return (Vec::new(), checked);
         }
         guard = crate::locks::lock_or_recover(&MESSAGES);
+        // Checked under the buffer's lock, which `wake_waiters` takes before
+        // it wakes anyone: a lock can't land between this and the wait.
+        if crate::agent::access::paused_by_lock() {
+            return (Vec::new(), checked);
+        }
         let latest = guard.as_ref().map_or(0, |state| state.next_seq);
         if latest <= checked {
             guard = match ARRIVED.wait_timeout(guard, deadline.saturating_duration_since(now)) {

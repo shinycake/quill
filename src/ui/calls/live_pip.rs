@@ -72,7 +72,13 @@ impl QuillApp {
 
     /// The stream bar's PiP button: the stream's picture goes into a
     /// floating window and the stream window closes; the call stays.
+    /// Refused while locked: the lock closes Picture-in-Picture
+    /// (`check_live_pip`), so the stream window would close for a PiP that
+    /// never shows; the stream window stays instead.
     pub(crate) fn open_stream_pip(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.refused_while_locked() {
+            return;
+        }
         let Some(call_id) = self
             .session()
             .and_then(|s| s.calls.active_group_call.as_ref())

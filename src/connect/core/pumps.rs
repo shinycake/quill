@@ -25,6 +25,24 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.pump_call_media(std::time::Instant::now());
         let parameters = self.maybe_send_parameters();
         let membership = self.maybe_probe_channel_membership();
+        self.claim_account_owner();
         call.and(group_call).and(parameters).and(membership)
+    }
+
+    /// The account's user id is known: a folder last signed in as someone
+    /// else drops what they left (`account_data::claim`), once per user.
+    fn claim_account_owner(&mut self) {
+        let Some(me) = self.session.my_user_id else {
+            return;
+        };
+        if self.claimed_owner == Some(me) {
+            return;
+        }
+        self.claimed_owner = Some(me);
+        // `<app root>/accounts/<key>`.
+        let Some(app_root) = self.paths.root.parent().and_then(std::path::Path::parent) else {
+            return;
+        };
+        crate::account_data::claim(app_root, &self.session.account, me);
     }
 }

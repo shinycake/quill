@@ -221,6 +221,29 @@ impl Session {
         }
     }
 
+    /// The message's text changed: its translations into every language
+    /// go, and so do jobs still asking for one, so an answer for the old
+    /// text lands nowhere (tdesktop `HistoryItem::setTextValue` removes
+    /// `HistoryMessageTranslation`). A translated chat asks again.
+    pub(crate) fn forget_message_translations(&mut self, chat_id: ChatId, message_id: MessageId) {
+        let translate = &mut self.messages.translate;
+        let before = translate.messages.len() + translate.jobs.len();
+        translate
+            .messages
+            .retain(|(chat, message, _), _| (*chat, *message) != (chat_id.0, message_id.0));
+        let is_this = |job: &TranslateJob| {
+            job.target
+                == TranslateTarget::Message {
+                    chat_id: chat_id.0,
+                    message_id: message_id.0,
+                }
+        };
+        translate.jobs.retain(|_, job| !is_this(job));
+        if translate.messages.len() + translate.jobs.len() != before {
+            translate.revision += 1;
+        }
+    }
+
     /// Whether `message_id` still needs a translation into `to`.
     pub fn needs_translation(&self, chat_id: ChatId, message_id: MessageId, to: &str) -> bool {
         self.message_translation(chat_id, message_id, to).is_none()

@@ -70,6 +70,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             call_sound_watch: None,
             credentials,
             paths: prepared.paths,
+            claimed_owner: None,
             database_key: prepared.database_key,
             parameters_sent: false,
             search_debounce_token: 0,

@@ -16,7 +16,8 @@ impl<S: JsonSender> ConnectDriver<S> {
         let extra = self
             .session
             .request(RequestPurpose::CheckPremiumGiftCode, None);
-        self.session.payments.gift_code = Some(GiftCodeLookup::new(code.to_string()));
+        self.session.payments.gift_code =
+            Some(GiftCodeLookup::new(code.to_string()).checking(extra));
         let result = self.send_json_request(extra, &check_premium_gift_code(extra, code));
         if result.is_err() {
             self.session.payments.gift_code = None;
@@ -42,11 +43,15 @@ impl<S: JsonSender> ConnectDriver<S> {
         let extra = self
             .session
             .request(RequestPurpose::ApplyPremiumGiftCode, None);
+        if let Some(lookup) = self.session.payments.gift_code.as_mut() {
+            lookup.apply = Some(extra);
+        }
         let result = self.send_json_request(extra, &apply_premium_gift_code(extra, &code));
         if result.is_err()
             && let Some(lookup) = self.session.payments.gift_code.as_mut()
         {
             lookup.applying = false;
+            lookup.apply = None;
         }
         result
     }
@@ -60,7 +65,8 @@ impl<S: JsonSender> ConnectDriver<S> {
         let extra = self
             .session
             .request(RequestPurpose::GetLanguagePackInfo, None);
-        self.session.settings.language_link = Some(LanguageLinkLookup::new(id.to_string()));
+        self.session.settings.language_link =
+            Some(LanguageLinkLookup::new(id.to_string()).waiting_for(extra));
         let result = self.send_json_request(extra, &get_language_pack_info(extra, id));
         if result.is_err() {
             self.session.settings.language_link = None;

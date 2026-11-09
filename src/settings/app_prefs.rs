@@ -22,9 +22,12 @@ const MOVED_FILES: &[&str] = &[
     "spellcheck_words.json",
     "spellcheck_languages.json",
     "translate_prefs.json",
-    "recent_hashtags.json",
     "settings_search_recent.json",
 ];
+
+/// The account's own, read from the account's folder
+/// (`ui/recent_hashtags_state.rs`); an earlier build moved it here too.
+const RECENT_HASHTAGS: &str = "recent_hashtags.json";
 
 /// The custom themes folder (`app_theme::store::themes_dir`), moved whole.
 const MOVED_DIRS: &[&str] = &["themes"];
@@ -62,6 +65,7 @@ pub fn app_prefs_paths(app_root: &Path) -> AccountPaths {
 /// move is tried again on the next start.
 pub fn migrate_app_prefs(app_root: &Path) {
     let to = app_prefs_dir(app_root);
+    return_recent_hashtags(app_root);
     if to.join(MIGRATED_MARKER).exists() {
         return;
     }
@@ -79,6 +83,29 @@ pub fn migrate_app_prefs(app_root: &Path) {
     }
     if all_moved && let Err(err) = std::fs::write(to.join(MIGRATED_MARKER), b"") {
         log::warn!("app prefs: could not write the migration marker: {err}");
+    }
+}
+
+/// Put back the first account's recent hashtags that an earlier build
+/// moved into the app folder, where nothing reads them. When that account
+/// has a list again, or is gone, the stray copy is dropped.
+fn return_recent_hashtags(app_root: &Path) {
+    let stray = app_prefs_dir(app_root).join(RECENT_HASHTAGS);
+    if stray.symlink_metadata().is_err() {
+        return;
+    }
+    let primary = AccountKey::primary();
+    let owner = AccountPaths::for_root(app_root, &primary).root;
+    let registered = list_accounts(app_root).iter().any(|r| r.key == primary);
+    if registered
+        && std::fs::create_dir_all(&owner).is_ok()
+        && let Err(err) = move_item(&stray, &owner.join(RECENT_HASHTAGS), &owner)
+    {
+        log::warn!("app prefs: could not move {RECENT_HASHTAGS} back: {err}");
+        return;
+    }
+    if let Err(err) = remove_any(&stray) {
+        log::warn!("app prefs: could not remove the stray {RECENT_HASHTAGS}: {err}");
     }
 }
 
@@ -200,6 +227,58 @@ mod tests {
         // The account's own files stay.
         assert!(old.join("tdlib/td.binlog").exists());
         assert!(old.join("media_prefs.json").exists());
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// The first account's recent hashtags are its own: they stay in its
+    /// folder, where the `#` popup reads them.
+    #[test]
+    fn recent_hashtags_stay_with_the_first_account() {
+        let root = tmp_root("hashtags-stay");
+        let old = old_layout(&root);
+        fs::write(old.join(RECENT_HASHTAGS), b"{\"tags\":[[\"#a\",1]]}").unwrap();
+        migrate_app_prefs(&root);
+        let paths = AccountPaths::for_root(&root, &AccountKey::primary());
+        assert_eq!(load_recent_hashtags(&paths).tags.len(), 1);
+        assert!(!app_prefs_dir(&root).join(RECENT_HASHTAGS).exists());
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// A list an earlier build already moved into the app folder goes back,
+    /// also after that build wrote the marker.
+    #[test]
+    fn recent_hashtags_moved_earlier_go_back() {
+        let root = tmp_root("hashtags-back");
+        let app = app_prefs_dir(&root);
+        fs::create_dir_all(&app).unwrap();
+        fs::write(app.join(MIGRATED_MARKER), b"").unwrap();
+        fs::write(app.join(RECENT_HASHTAGS), b"{\"tags\":[[\"#a\",1]]}").unwrap();
+        migrate_app_prefs(&root);
+        let paths = AccountPaths::for_root(&root, &AccountKey::primary());
+        assert_eq!(load_recent_hashtags(&paths).tags.len(), 1);
+        assert!(!app.join(RECENT_HASHTAGS).exists());
+        // A list the account has written since wins over the stray one.
+        fs::write(app.join(RECENT_HASHTAGS), b"{\"tags\":[]}").unwrap();
+        migrate_app_prefs(&root);
+        assert_eq!(load_recent_hashtags(&paths).tags.len(), 1);
+        assert!(!app.join(RECENT_HASHTAGS).exists());
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// The first account is gone: its stray list is dropped, not handed to
+    /// whoever gets the folder next.
+    #[test]
+    fn a_removed_first_accounts_stray_hashtags_are_dropped() {
+        let root = tmp_root("hashtags-gone");
+        let work = add_account(&root, "Work").unwrap();
+        remove_account(&root, &AccountKey::primary()).unwrap();
+        let app = app_prefs_dir(&root);
+        fs::create_dir_all(&app).unwrap();
+        fs::write(app.join(RECENT_HASHTAGS), b"{\"tags\":[[\"#a\",1]]}").unwrap();
+        migrate_app_prefs(&root);
+        assert!(!app.join(RECENT_HASHTAGS).exists());
+        assert!(!primary(&root).exists());
+        assert!(list_accounts(&root).iter().any(|r| r.key == work));
         let _ = fs::remove_dir_all(&root);
     }
 

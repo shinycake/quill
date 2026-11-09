@@ -218,10 +218,12 @@ impl QuillApp {
             // The root made the players follow the call before this draw.
             video: self.call_picture_drawn(CallPicture::Remote),
             preview: self.call_picture_drawn(CallPicture::Local),
-            can_add_people: call
-                .ready
-                .as_ref()
-                .is_some_and(|ready| ready.is_group_call_supported),
+            // Not under the lock (`calls::lock_layers`).
+            can_add_people: !self.refused_while_locked()
+                && call
+                    .ready
+                    .as_ref()
+                    .is_some_and(|ready| ready.is_group_call_supported),
             joined_line: None,
         })
     }

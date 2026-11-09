@@ -198,6 +198,11 @@ impl Session {
             Some(RequestPurpose::Payments(PaymentsPurpose::GiftMarket(purpose))) => {
                 self.apply_gift_market_error(err, purpose, pending.map_or(0, |p| p.id.0))
             }
+            // The next look at the sticker preview asks again.
+            Some(RequestPurpose::GetPremiumStickerExamples) => {
+                self.payments.hub.premium_stickers_loading = false;
+                self.payments.hub.premium_stickers_asked = false;
+            }
             _ => {}
         }
     }

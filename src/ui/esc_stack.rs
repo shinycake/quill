@@ -716,17 +716,20 @@ mod dispatch_tests {
         let flags: [(&str, fn(&mut QuillApp), fn(&QuillApp) -> bool); 3] = [
             (
                 "marketplace",
+                // box-host: a test sets the flag directly
                 |a| a.payments.marketplace_open = true,
                 |a| a.payments.marketplace_open,
             ),
             (
                 "passcode settings",
+                // box-host: a test sets the flag directly
                 |a| a.account.passcode.open = true,
                 |a| a.account.passcode.open,
             ),
             (
                 "file open warning",
                 |a| {
+                    // box-host: a test sets the flag directly
                     a.privacy.extra.file_open = Some(crate::ui::privacy_extra::FileOpenConfirm {
                         path: std::path::PathBuf::from("setup.bin"),
                         warning: quill::file_prefs::OpenWarning::Executable,

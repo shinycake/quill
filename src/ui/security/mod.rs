@@ -510,6 +510,7 @@ impl QuillApp {
             return;
         }
         self.twofa.open = true;
+        self.open_box(DialogKind::TwoFa);
         self.goto_twofa_view(TwofaView::Status);
         // The last change's error belongs to the box it was shown in; a
         // cached state skips the fetch that would clear it. One still in
@@ -758,6 +759,7 @@ impl QuillApp {
             session_id,
             incomplete,
         });
+        self.open_box(DialogKind::SessionsConfirm);
         cx.notify();
     }
 
@@ -765,6 +767,7 @@ impl QuillApp {
     /// (TGX `AreYouSureSessions`).
     pub(super) fn begin_terminate_all_sessions(&mut self, cx: &mut Context<Self>) {
         self.privacy.sessions_confirm = Some(SessionsConfirm::TerminateAll);
+        self.open_box(DialogKind::SessionsConfirm);
         cx.notify();
     }
 

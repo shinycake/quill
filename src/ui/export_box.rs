@@ -70,6 +70,7 @@ impl QuillApp {
             .is_some_and(|s| s.settings.chat_export.is_some())
         {
             self.dialogs.chat_export_progress_hidden = false;
+            self.open_box(DialogKind::ChatExport);
             cx.notify();
             return;
         }
@@ -94,6 +95,7 @@ impl QuillApp {
             cx.notify();
         })
         .detach();
+        self.open_box(DialogKind::ChatExport);
         self.dialogs.chat_export_dialog = Some(ChatExportDraft {
             settings,
             size_slider: slider,

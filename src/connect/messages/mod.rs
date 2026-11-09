@@ -32,6 +32,9 @@ mod export_files;
 mod media_options;
 mod media_send;
 mod rich_html;
+mod send_place;
+
+pub use send_place::SendPlace;
 
 impl<S: JsonSender> ConnectDriver<S> {
     /// Load another page of history for the open chat (`from_message_id` = oldest, or 0).

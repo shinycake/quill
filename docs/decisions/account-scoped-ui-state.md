@@ -2169,3 +2169,353 @@ need that structure are listed at the end.
 - **Not tested.** The bot-create and Edit Bot polls, the Edit box
   closing on delete or upgrade, and the upgraded chat window's move all
   need a live driver. They have no tests.
+
+### Phase 13 (area A)
+
+Round 13 of the review, area A, on `claude/sm-review13-a`. All eleven
+material findings were fixed. A sweep of core for the same shapes found
+five more, and four of those were fixed too.
+
+**Per-account stores are forgotten in one place (1).** Account keys get
+reused: a logout keeps `account-<n>`, and `add_account` hands out the
+lowest free one. Agent grants, the agent action log, mini app trust,
+notification volumes and chat-window layouts were keyed by that string.
+So were the web view data folder and three files in the account folder.
+A new sign-in in the slot took all of them over. tdesktop's
+`Account::loggedOut` wipes every per-account key through
+`Storage::Account::reset`. Quill now does the same through
+`account_data`:
+
+- `account_data::forget(app_root, key)` drops every store above, plus
+  the folder's `recent_hashtags.json`, `paid_trust.json` and
+  `launch-lines.bin`, and `webview/<key>/`. A prompt the account is
+  still waiting on is answered Denied. Logout and account removal call
+  it (`forget_account_sends`), and so does `delete_account_folder`, so
+  the next start's sweep covers a removal that was cut short.
+- `account_data::claim` records the signed-in user in
+  `accounts/<key>/owner.json`. The first ready session of a different
+  user in that slot forgets the slot before anything reads it. That
+  covers a crash or quit in the middle of a logout.
+- `every_store_is_classified` walks `src/` for file-name literals
+  (`.json`, `.jsonl`, `.bin`, `.key`, `.wrapped`). Each one must be
+  listed as dropped or as kept with a reason, so a new store fails the
+  test until someone decides.
+- Writing the test turned up lost updates in `grants::update` and in
+  web app trust, where read, change and write were separate steps. Both
+  now change under one lock.
+- Kept on purpose: `exports/` (call logs and exports the user saved),
+  device preferences (tdesktop keeps app settings too), and the macOS
+  WKWebView store, which is keyed by a hash of account and bot.
+
+**The lock holds for a whole agent call (2).** `set_paused_by_lock`
+counts locks and wakes every `wait_for`. A wait checks the lock each
+time it wakes, so one that sees the lock returns nothing.
+`call_on` reads the count at the start. If Quill locked at any point
+during the call, a read tool returns the lock message, and a write tool
+returns `LOCKED_WHILE_RUNNING_MESSAGE` ("it may have been done"). Its
+images are dropped too.
+
+**A recording keeps the place it was sent from (3).** `SendTarget` now
+carries a `SendPlace` (topic, thread or direct-messages topic) taken at
+Send. `send_voice_note_to` and `send_recorded_video_note_to` route by
+it, and a closed topic is still refused, whatever chat is open when the
+file finishes.
+
+**Edits drop translations (4).** `updateMessageContent` with different
+text removes that message's translations and their jobs, in every
+language. An answer still in flight for the old text is dropped with
+them.
+
+**Answers settle only their own request (5, 6, 8, 10, 11).**
+
+- A history page dropped by a window reset ends the jump or the date
+  jump that waited for it (`abandon_history_around`).
+- A failed share search answers the search with no results.
+- The gift-code check and apply, the giveaway info and the language
+  link box each store their `RequestId`. Answers for other requests are
+  dropped.
+- The AI style editor waits for `style_save`. Opening an editor
+  forgets the last one's save. A late answer still adds the style to
+  the list but leaves the new editor alone.
+- The bot edit dialog keeps its loads and saves as `RequestId`s, so a
+  reopened dialog for the same bot ignores the old one's answers.
+  `saving` is now `saving()`, the count of saves in flight.
+
+**Recent hashtags stay with the first account (7).** The app prefs move
+no longer takes `recent_hashtags.json`. A file moved by an earlier
+build goes back to the first account's folder, or is removed when that
+account is gone.
+
+**A failed set loads again (9).** Reopening the sticker or emoji panel,
+or reconnecting, clears `media_library.failed`.
+
+**Sweep.**
+
+- The profile gallery's Stories tab never failed. Its purpose belongs
+  to the stories error arm, and the gallery arm sat in the media error
+  arm, which that purpose never reaches. The stories arm now fails the
+  tab. A failed further page no longer zeroes a loaded tab's count.
+- The Premium sticker examples could not be fetched again after a
+  failure. The error arm now clears `asked`.
+- An earlier "From:" picker query's error wiped the newer query's id,
+  so its answer was dropped. The error now has to match the stored id.
+- The affiliate setup page closed on any `setChatAffiliateProgram`
+  answer. It now waits for its own `RequestId` (`SetupPage::waits_for`),
+  so a save from a page you left no longer closes the next page. The
+  toast still shows.
+- Not fixed: the affiliate program lists (the join page and the
+  programs box) take any page answer of their purpose. A late "more"
+  page from an earlier join page or sort can mix into the new one. They
+  need a request id per list.
+
+**Tests.** `account_data_tests.rs` (forget, reuse, prompts, and the
+store classification), the lock tests in `agent/access.rs`,
+`connect/tests/send_place.rs`, and new cases in `translate.rs`,
+`history_window.rs`, `share.rs`, `link_info.rs`, `giveaways.rs`,
+`media_library.rs`, `ai_compose.rs`, `owned_bots.rs`, `earn.rs`,
+`shared_media_tabs.rs`, `find_in_history.rs`, `premium_purchase.rs`
+and `settings/app_prefs.rs`. None of them waits on time. The
+round-trip wait test ends on the lock, not a timeout.
+
+### Phase 13 (area B: a box belongs to the window that opened it)
+
+Round 13 of the review, area B, on `claude/sm-review13-b`. Findings 1 to
+3 came from one flaw in round 12's per-window dialog host. A box's window
+was chosen when a window's sync first saw its flag set, from the window
+of the last input, and the host was keyed by kind alone. So:
+
+1. Mute asked again from a chat window, while the main window showed
+   Mute for another chat, stayed in the main window and switched to the
+   chat window's chat.
+2. A per-window kind (Scheduled, a sticker set, a poll) shown in one
+   window held the same kind back in every other window. A closing chat
+   window ran the close of a kind against the main window's state.
+3. "Last input" counted pointer moves and scrolls. An answer opened its
+   box in whichever window the pointer had crossed while the request ran.
+
+**Designs considered.**
+
+- *A. Detect the open at the scope choke point.* Compare every flag on
+  each `set_window_scope` and credit a flag that turned on to the window
+  in place. An ask repeated while its flag is already set leaves no edge
+  (finding 1 again). An answer from the poll loop turns its flag on with
+  the main window in place. There is no cheap generic way to compare 150
+  flags, and it costs every frame. Rejected.
+- *B. A typed `Hosted<T>` wrapper on every session-wide flag.* The flag
+  carries its window, and the type makes an open without one impossible.
+  This is the strongest guarantee, but it touches about 150 fields, most
+  in src/state, which area A was changing in the same round. Rejected for
+  now. It stays the way to go if the static guard proves too loose.
+- *C. Keep round 12's host, and let sites opt in to claiming the box.*
+  This is what the review sketched. An open that forgets to claim falls
+  back to the same wrong window, so the fix depends on every site
+  remembering. Rejected.
+- *D (chosen). Every open names its window, and a guard checks that.*
+
+**What was built (`chat_window/dialog_hosts.rs`).**
+
+- A spec is session-wide unless it is marked `DialogSpec::per_window()`.
+  Per-window kinds keep their flag in the window's swapped state
+  (`chat_ui`, `message_ui`, `composer_ui`, `pickers`, `viewer`, `share`),
+  so the key is effectively (kind, window). Each window shows its own,
+  and the hosts table never holds them. 33 specs are per-window.
+- A session-wide open calls `QuillApp::open_box(kind)` as it sets the
+  flag. That names the window in place: input, `spawn_scoped`
+  continuations and a window's own frame all run with their window in
+  place. An answer whose flow knows its window uses
+  `ChatWindows::open_box_in(kind, window)`, for example the deep link
+  pump with the link's `flow_window`. A resolved link runs in the main
+  window's frame, so `run_resolved_deep_link` wraps its opens in
+  `as_asked_by(flow_window)`. A per-window box such a flow opens
+  (a sticker set, Share) goes through `in_asking_window`. A box that
+  waits for an answer is asked for at the request site (Boost, gift
+  info, payment form, login URL, export), so the answer shows where the
+  request was made.
+- Asked again from another window while shown, a session-wide box moves
+  there. An ask made before its flag is set waits for the flag.
+- An open no path named shows in the window of the last press or key
+  (`windows.last_press`). Pointer moves and scrolls only put a window's
+  state in place (`note_window_pointer`). They no longer change where a
+  box or a toast goes.
+- A chat window that closes from inside (its close button, Cmd/Ctrl+W,
+  the platform's close, or its chat going away) runs
+  `close_window_boxes` with its own state in place and its own `Window`.
+  Every per-window flag set there closes with its own close, and so does
+  every session-wide box it showed or asked for. The main window's box
+  of the same kind, and its flag, stay. A session-wide box left open
+  by a window that went without a close is closed by the main window's
+  next sync, with the main window's state in place. Before, any window's
+  sync could close it against its own state.
+- The lock is unchanged: `sync_host_dialogs` still returns at once while
+  locked. An ask made under the lock is recorded and shows after the
+  unlock, in the window that asked (`lock-is-a-render-state.md`).
+
+**The guard.** `scripts/dialog_hosts.py`, run by
+`check-window-scope.py`:
+
+- A spec's `.per_window()` must match its predicate. A predicate that
+  reads swapped window state (following `self` and `app` methods and
+  free helpers three calls deep) must be per-window, and one that does
+  not read it must not be.
+- The script takes the flag fields from each predicate, or from
+  `scripts/dialog-hosts.txt` when it cannot read them. Every write that
+  sets a session-wide flag in src/ui must have an `open_box` or
+  `open_box_in` that names the kind in the same function, or a
+  `// box-host: <why>` marker. Markers are for a refresh of a box that
+  is already open, a demo, or an answer whose request site asked.
+- A flag set in src/state or src/connect needs a UI `open_box` naming
+  the kind, or an `answer` entry in `dialog-hosts.txt` with its reason.
+- `open_box` on a per-window kind fails, and so does a stale entry.
+
+**The other findings.**
+
+- *4. The reply bar's missing message.* `fetch_missing_reply_target`
+  moved from the main-only upkeep into `per_window_upkeep`, so a chat
+  window's reply bar asks for its own message. The driver still asks
+  once per message.
+- *5. Screen reader focus.* `history_a11y::install` now runs for each
+  window slot's history focus handle. Before, it ran only for the main
+  window's. `a11y_active` moved from `Slices` into `WindowSlices`, and
+  `per_window_upkeep` writes it for the window that draws. So a screen
+  reader on one window does not make another window's rows report focus.
+- *6. The chat window title.* The main window's title function is now
+  `window_title_in_place`. `chat_window_title` runs it with the chat
+  window's view in place, so Saved Messages and an open topic, with the
+  topic's unread count, read the same in both.
+
+**Sweep.** The main-only steps of `frame_upkeep` were checked for reads
+of swapped window state. The only other match is
+`maybe_prefetch_link_preview`, which reads the composer in place, so a
+chat window's link preview chip never prefetches. It was left alone on
+purpose. The session keeps one `composer_preview`, and an answer for a
+URL other than the current one is dropped (`connect/core`). With two
+windows asking for different URLs, each answer would undo the other's,
+so the prefetch would loop. The fix is to key the preview by window or
+URL in the session and in the driver's answer path. That is a
+src/state and src/connect change, so it is left for a round that owns
+those files.
+
+Tests: `chat_window/dialog_host_window_tests.rs`. It covers Mute moving
+to the window that asked, an open naming the window in place rather than
+the last press, two windows showing their own Scheduled box, a closing
+window closing only its own boxes, a session box closing with its
+window, an answer showing in the window that asked, pointer moves not
+counting as a press, and a typed link's box opening in the window it was
+clicked in. `chat_window/upkeep_tests.rs` covers the reply fetch, the
+screen reader focus and flag per window, and the Saved Messages and
+topic titles. The existing `dialog_host_tests.rs` still pass.
+
+Not done, or not tested:
+- An ask that is never answered stays in the hosts table until the
+  same kind is asked for again. It shows nothing, because its flag is
+  clear.
+- A typed link's other effects (opening a chat, a mini app) still run in
+  the main window's `Window`. Only the boxes it opens, and the scope for
+  Share and sticker sets, follow `flow_window`.
+- `app_theme/editor.rs` (`show_theme_editor`, through a plain
+  `spawn_in`) and the mini app's remove-from-menu poll name the window in
+  place when they run.
+- The guard reads writes by field path. A write through a local alias
+  (`let state = &mut self.x; state.open = true`) is not seen.
+- `kit_dialog_open` and `open_dialog_name` still answer for the whole
+  app, not per window. The review did not mark this material.
+- The window close path is tested through `ChatWindowView::close`. The
+  platform's close button and a chat that goes away use the same
+  `closing(.., Some(window), ..)` path but have no test of their own.
+
+### Phase 13 (area C)
+
+Round 13 of the review, area C, on `claude/sm-review13-c`. The finding
+numbers are the review's ranked list. Area A took 7 (`wait_for_message`
+across the lock) and 13 (recent hashtags), and area B took 21 (the topic
+edit's window).
+
+- **The lock screen's Log out lifts the lock only when the wipe started
+  (1).** `begin_local_wipe` returns why it did not start, and
+  `confirm_lock_logout_in` keeps Quill locked with the reason on the lock
+  screen. This covers an unwritable record and a missing data folder.
+  Before, a read-only `accounts.json` unlocked Quill with no passcode typed.
+- **What runs while locked** is now a rule
+  (docs/decisions/lock-is-a-render-state.md, "What runs while locked"),
+  for 2–6, 8–12 and 16–18:
+  - **Pumps wait.** The main frame's upkeep returns on `lock_waits()` after
+    notification delivery, so `per_window_upkeep`, the sign-in sync, story
+    opens and the Grams and gift follow-ups wait with their state kept
+    (8, 11). The poll's drains moved to `notifications/poll_drains.rs`,
+    which runs only while unlocked: payment verification, callback and
+    login-URL answers, profile galleries, story stealth and the Earn drain
+    (2, 11). Parked plays wait too.
+  - **Opens are queued, not dropped (2).** Every `os_open.rs` open under the
+    lock is queued with `wait_for_unlock` and runs after the unlock. The
+    lock screen's Log out drops the queue.
+  - **Calls (4, 5, 18).** The lock closes the call windows' boxes and hides
+    the stream key (`calls::lock_layers`). Their openers, the RTMP copy and
+    revoke actions and the stream PiP refuse while locked. A background
+    account's ringing call shows on the lock screen with Answer and
+    Decline, and its OS notification keeps its buttons. Closing the stream
+    boxes or the stream window hides the key again.
+  - **Not looked at (6).** `app_active` is false while locked. The lock
+    clears `active_window_chats`, and a locked chat window does not set it
+    again, so the open chat notifies and sounds. Story playback and the
+    cover's video avatar stop.
+  - **Media controls (8).** Now Playing is cleared and media keys are
+    ignored while locked. The unlock publishes again.
+  - **Connections (10).** `start_connection` and a `LockedStore` refusal
+    under the lock defer to the unlock. `ensure_background_accounts`
+    starts nothing while locked and starts the accounts at the unlock.
+  - **Quit (9).** Under the lock, Quit stops the exports and quits instead
+    of opening a box nobody can see.
+  - **Kit close (12).** `close_kit_dialog_if_done` does nothing while
+    locked, and the video editor's encode continuation goes through it.
+  - **Passcode job (16).** A lock asked during a passcode job lands with
+    its answer (`lock_after_job`).
+  - **Full screen (17).** A chat window's locked frame runs
+    `viewer_follow_window_fullscreen`.
+- **The guard.** `lock_surfaces.py` check 4 lists every step that the main
+  frame upkeep and `poll_live` run outside the gate. Each such step needs a
+  `runs-locked` entry with a reason. A new one fails the check, and so does
+  a listed one that is gone. The locked frames must run no upkeep.
+  `scripts/test_lock_surfaces.py` tests the check.
+- **A request or update acts for its owner (14, 19).**
+  - A failed quick reply message load is marked failed (`messages_failed`)
+    instead of un-requested, so the poll stops rather than re-sending every
+    tick. Opening the box clears the error line and retries once, and an
+    `ok` clears the line too. The dialog owns its poll task
+    (`QuickRepliesDialog::watch`), so a submit cannot stack a second loop,
+    and closing the box ends the poll.
+  - A call declined as busy is remembered (`busy_declined_calls`), and its
+    later `updateCall`s are dropped, the terminal one included. The call
+    window no longer shows that caller's "Call ended".
+- **The sticker set box is claimed in one place (15).**
+  `claim_sticker_set_box` handles viewing a set and "Attached Stickers".
+  It closes the box in the other windows, and every window's photo or video
+  editor for another set.
+- **A window's state is cleaned when it goes (20, 22, 23, 24).**
+  - A track whose chat was deleted stops, and every stop clears
+    `playback.player.chat`.
+  - The checkout prefill runs in `per_window_upkeep`, in the window that
+    hosts the box.
+  - A closed chat window drops its GIF autoplay marks.
+  - Leaving Privacy closes the "Last seen" warning.
+- **Tests.**
+  - `passcode/lock_waits_tests.rs`: a link and a Grams withdrawal wait and
+    then open; Log out drops the queue; a locked window is not looked at; a
+    lock during a job; the call boxes; the deferred connection.
+  - `deleting_tests` `a_lock_screen_log_out_that_cannot_start_the_wipe_stays_locked`.
+  - `background_accounts::tests`
+    `a_call_on_another_account_can_be_answered_from_the_lock_screen`.
+  - `export_quit` `a_quit_from_the_lock_screen_stops_the_export_and_quits`.
+  - `notify_call` `a_locked_app_hides_the_caller_and_keeps_the_call_answerable`.
+  - The tests for 14 to 24 are in `connect/tests/quick_replies.rs`,
+    `ui/quick_replies/tests.rs`, `state/conference_invite_tests.rs`,
+    `chat_window/player_box_tests.rs` and `privacy/premium_rows_tests.rs`.
+- **Not done, or not tested.**
+  - With no live client, nothing tests the poll's drains, the
+    `app_active` change in `poll_live` or the background start deferral.
+  - The full-screen hand-back and the stream PiP refusal are untested.
+  - The 1:1 device menu stays usable under the lock.
+  - Finding 10's sibling, an export box closed without its `on_close`,
+    was not confirmed and is not fixed.
+  - A deleted chat's history is trimmed to its closed tail, not
+    forgotten (`chat_is_gone` needs the chat entry).
+  - The video editor branch of 15 has no test.

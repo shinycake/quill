@@ -12,7 +12,7 @@ impl QuillApp {
     /// Call once per frame; the title is only handed to the platform when
     /// it changed.
     pub(super) fn sync_window_title(&self, window: &mut Window) {
-        let title = self.compute_window_title();
+        let title = self.window_title_in_place();
         if *self.frame.window_title_shown.borrow() == title {
             return;
         }
@@ -28,7 +28,11 @@ impl QuillApp {
         *self.frame.window_title_shown.borrow_mut() = title;
     }
 
-    fn compute_window_title(&self) -> String {
+    /// The title of the window whose state is in place: its chat (Saved
+    /// Messages by that name, an open topic by the topic's), its unread
+    /// count and the total. A chat window's title is this with its view in
+    /// place (`chat_window_title`).
+    pub(super) fn window_title_in_place(&self) -> String {
         // A locked app shows no chat name (tdesktop: `locked ? nullptr`).
         if self.account.passcode.is_locked() {
             return window_title(None, 0, None);

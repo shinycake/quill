@@ -155,3 +155,31 @@ fn the_playlist_is_asked_for_once_per_user_and_pages_on_demand() {
     assert_eq!(request["offset"], 1);
     let _ = std::fs::remove_dir_all(dir);
 }
+
+/// A failed Stories tab says so (with Retry) instead of loading forever.
+#[test]
+fn a_failed_stories_tab_ends_its_loading() {
+    let (dir, prepared) = prepared_tmp(&MemorySecretStore::new());
+    let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+    let recorder = Arc::new(RecordingSender::new());
+    let seq = AtomicU64::new(0);
+    let mut driver = ready_driver(&recorder, prepared, &sink, &seq);
+    let chat = r#"{"@type":"updateNewChat","chat":{"id":7,"title":"Ada","type":{"@type":"chatTypePrivate","user_id":31},"unread_count":0}}"#;
+    driver
+        .ingest(copy_and_parse(chat, &seq, &sink).unwrap())
+        .unwrap();
+    driver.session.open_chat = Some(ChatId(7));
+    driver.open_shared_media().unwrap();
+    let request = sent_request(&recorder, "getChatPostedToChatPageStories");
+    let failed = format!(
+        r#"{{"@type":"error","@extra":"{}","code":500,"message":"INTERNAL"}}"#,
+        request["@extra"].as_str().unwrap()
+    );
+    driver
+        .ingest(copy_and_parse(&failed, &seq, &sink).unwrap())
+        .unwrap();
+    let tab = &driver.session.media.shared_media.tabs[SharedMediaTab::Stories.index()];
+    assert_eq!(tab.status, crate::state::SharedMediaTabStatus::Failed);
+    assert!(!tab.loading_more);
+    let _ = std::fs::remove_dir_all(dir);
+}

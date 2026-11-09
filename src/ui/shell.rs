@@ -146,6 +146,11 @@ pub(crate) struct DialogSpec {
     /// needs none: a flag held by the account's UI (`ui/on_screen.rs`) is
     /// gone with it, one read from the session is the next account's own.
     close: Option<DialogClose>,
+    /// The open flag lives in the window's own state, swapped in with its
+    /// slot (`chat_window::dialog_hosts`): each window shows its own.
+    /// Without it the flag is the account's and the box shows in the one
+    /// window that asked for it (`QuillApp::open_box`).
+    per_window: bool,
 }
 
 impl DialogSpec {
@@ -161,6 +166,18 @@ impl DialogSpec {
             is_open,
             build,
             close: None,
+            per_window: false,
+        }
+    }
+
+    /// The open flag is read from the window's own state (`chat_ui`,
+    /// `message_ui`, `composer_ui`, `pickers`, `viewer`, `share`): each
+    /// window shows its own box of this kind. `scripts/dialog_hosts.py`
+    /// checks that this matches what the flag reads.
+    pub(crate) const fn per_window(self) -> Self {
+        Self {
+            per_window: true,
+            ..self
         }
     }
 
@@ -318,6 +335,14 @@ impl QuillShell {
         }
     }
 
+    /// Whether `kind`'s open flag is the window's own (`DialogSpec::per_window`).
+    pub(super) fn is_per_window(kind: DialogKind) -> bool {
+        registry()
+            .iter()
+            .find(|spec| spec.kind == kind)
+            .is_some_and(|spec| spec.per_window)
+    }
+
     /// Whether `kind`'s flag is set, with the state in place now.
     fn flag_open(app: &QuillApp, kind: DialogKind) -> bool {
         registry()
@@ -326,26 +351,31 @@ impl QuillShell {
             .is_some_and(|spec| (spec.is_open)(app))
     }
 
-    /// Close the boxes of a chat window that closed (`dialog_hosts`), each
-    /// with its own close, so none moves to this window. One with no close
-    /// is free and shows in the window of the last input.
+    /// Close the session-wide boxes of a chat window that went without
+    /// running their close (`dialog_hosts`), each with its own close, so
+    /// none moves to the main window. One with no close is free and shows
+    /// in the window of the last press.
     fn close_left_dialogs(app: &Entity<QuillApp>, window: &mut Window, cx: &mut App) {
         let left = app.update(cx, |app, _| app.windows.take_left_dialogs());
         for kind in left {
             let Some(spec) = registry().iter().find(|spec| spec.kind == kind) else {
                 continue;
             };
-            let Some(close) = spec.close else {
-                continue;
-            };
-            // A close that steps back (a stacked page) runs again until
-            // the flag is clear.
-            for _ in 0..8 {
-                if !(spec.is_open)(app.read(cx)) {
-                    break;
-                }
-                app.update(cx, |app, cx| close(app, window, cx));
+            Self::run_close(spec, app, window, cx);
+        }
+    }
+
+    /// Run `spec`'s own close until its flag is clear: a close that steps
+    /// back (a stacked page) runs again.
+    fn run_close(spec: &DialogSpec, app: &Entity<QuillApp>, window: &mut Window, cx: &mut App) {
+        let Some(close) = spec.close else {
+            return;
+        };
+        for _ in 0..8 {
+            if !(spec.is_open)(app.read(cx)) {
+                break;
             }
+            app.update(cx, |app, cx| close(app, window, cx));
         }
     }
 
@@ -369,9 +399,9 @@ impl QuillShell {
 
     /// [`Self::sync_kit_dialogs`] for the window `host` (`None`: the main
     /// window, `Some(chat)`: that chat's own window). Each window has its
-    /// own kit dialog: a box opens in the window whose input asked for it,
-    /// stays there and closes with it (`chat_window::dialog_hosts`). Runs with the
-    /// host window's state in place, so the builders read it.
+    /// own kit dialog: a box opens in the window that asked for it, stays
+    /// there and closes with it (`chat_window::dialog_hosts`). Runs with the
+    /// host window's state in place, so the flags and builders read it.
     pub(super) fn sync_kit_dialogs_in(
         &mut self,
         host: Option<ChatId>,
@@ -405,7 +435,11 @@ impl QuillShell {
         }
         let shell = cx.entity();
         Self::close_blocked_dialogs(&app, window, cx);
-        Self::close_left_dialogs(&app, window, cx);
+        // A closed window's leftovers are session-wide: the main window's
+        // own state is in place for their close.
+        if host.is_none() {
+            Self::close_left_dialogs(&app, window, cx);
+        }
         // An account switch already closed the kit dialog this shell showed.
         if host.is_none()
             && app.update(cx, |app, _| {
@@ -414,19 +448,19 @@ impl QuillShell {
         {
             self.open_dialog = None;
         }
-        // A box this window owns whose flag is clear (its own close, or
-        // the kit's Esc, backdrop or close button) is free again.
+        // A session-wide box this window showed whose flag is clear (its own
+        // close, or the kit's Esc, backdrop or close button) is free again.
         let shown = self.open_dialog;
         app.update(cx, |app, _| {
-            for kind in app.windows.dialogs_of(host) {
+            for kind in app.windows.dialogs_shown_by(host) {
                 if Some(kind) != shown && !Self::flag_open(app, kind) {
                     app.windows.dialog_closed_in(kind, host);
                 }
             }
         });
         // The open box that wins by priority among those this window may
-        // show (`ChatWindows::dialog_may_show_in`); another window's box
-        // is not this window's to show.
+        // show (`ChatWindows::dialog_may_show_in`): its own per-window
+        // flags, and the session-wide boxes that asked for it.
         let winner = {
             let app = app.read(cx);
             registry()
@@ -434,6 +468,11 @@ impl QuillShell {
                 .find(|spec| app.windows.dialog_may_show_in(spec.kind, host) && (spec.is_open)(app))
                 .copied()
         };
+        // The box shows here: an ask asked again while shown stays here.
+        if let Some(spec) = winner {
+            let kind = spec.kind;
+            app.update(cx, |app, _| app.windows.dialog_opened_in(kind, host));
+        }
         let first_open = winner.map(|spec| spec.kind);
         if self.open_dialog != first_open {
             // Close the currently shown dialog (if any) before opening
@@ -449,8 +488,6 @@ impl QuillShell {
             }
             self.open_dialog = first_open;
             if let Some(spec) = winner {
-                let kind = spec.kind;
-                app.update(cx, |app, _| app.windows.dialog_opened_in(kind, host));
                 let build = spec.build;
                 let app_c = app.clone();
                 let shell_c = shell.clone();
@@ -539,13 +576,19 @@ impl QuillApp {
     /// run `on_close`, so the action itself clears the app-side open flag
     /// first; this closes the kit dialog only when the flag is actually
     /// cleared — validation failures and non-closing actions keep the
-    /// dialog open.
+    /// dialog open. While locked nothing closes here: every flag reads
+    /// closed then, so the window's top box would close under a flag still
+    /// set, and the shell, which does not sync under the lock, would never
+    /// rebuild it. Its sync after the unlock closes what is done.
     pub(crate) fn close_kit_dialog_if_done(
         &self,
         kind: DialogKind,
         window: &mut Window,
         cx: &mut App,
     ) {
+        if self.refused_while_locked() {
+            return;
+        }
         if !QuillShell::dialog_is_open(self, kind) {
             window.close_dialog(cx);
         }
@@ -554,6 +597,36 @@ impl QuillApp {
     /// A kit dialog is open (its app-side flag is set).
     pub(super) fn kit_dialog_open(&self) -> bool {
         QuillShell::first_open(self).is_some()
+    }
+
+    /// The chat window `chat` is closing, with `window` its own: each box
+    /// it has, shown or not, closes with its own close, with the window's
+    /// state in place. That is every per-window flag set in its state and
+    /// every session-wide box it showed or asked for; nothing of another
+    /// window's is touched, and nothing moves (`chat_window::dialog_hosts`).
+    pub(super) fn close_window_boxes(
+        &mut self,
+        chat: ChatId,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let hosted = self.windows.dialogs_of_window(chat);
+        self.in_window_scope(Some(chat), cx, |app, cx| {
+            for spec in registry() {
+                if !(spec.per_window || hosted.contains(&spec.kind)) {
+                    continue;
+                }
+                let Some(close) = spec.close else {
+                    continue;
+                };
+                for _ in 0..8 {
+                    if !(spec.is_open)(app) {
+                        break;
+                    }
+                    close(app, window, cx);
+                }
+            }
+        });
     }
 }
 

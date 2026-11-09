@@ -199,6 +199,7 @@ fn rating_pill(user_id: i64, rating: StarsRating, cx: &mut Context<QuillApp>) ->
         .accessibility_label(label)
         .on_click(cx.listener(move |this, _, _, cx| {
             this.profile_cover.rating_box = Some(user_id);
+            this.open_box(crate::ui::shell::DialogKind::StarsRating);
             this.profile_cover.rating_preview = false;
             cx.notify();
         }));

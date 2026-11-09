@@ -81,9 +81,11 @@ impl QuillApp {
     }
 
     /// Close what the Privacy page opens over itself: the rule editor, its
-    /// exceptions list and their pickers, and the Unblock confirmation.
-    /// They belong to the page, so leaving it (or Settings) closes them.
+    /// exceptions list and their pickers, the Unblock confirmation and the
+    /// "Last seen" warning. They belong to the page, so leaving it (or
+    /// Settings) closes them.
     pub(crate) fn close_privacy_layers(&mut self) {
+        self.privacy.last_seen_warning = None;
         self.privacy.editor = None;
         self.privacy.exceptions = None;
         self.privacy.exception_picker_open = false;
@@ -826,6 +828,7 @@ pub(crate) fn apply_ready_privacy(session: &mut Session, sink: &Arc<MemorySink>,
     session.settings.privacy_data.check_password_suggested = true;
     session.settings.privacy_data.inactive_session_ttl_days = Some(180);
     session.settings.read_date_show = Some(true);
+    // box-host: demo
     session.chat_list.archive_chat_list_settings =
         Some(quill::telegram::requests::ArchiveChatListSettings {
             archive_and_mute_new_chats_from_unknown_users: true,

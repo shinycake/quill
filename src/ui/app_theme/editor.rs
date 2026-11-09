@@ -227,6 +227,7 @@ impl QuillApp {
             editing,
             _subscriptions: subscriptions,
         });
+        self.open_box(DialogKind::ThemeEditor);
         self.apply_appearance(cx);
         cx.notify();
     }

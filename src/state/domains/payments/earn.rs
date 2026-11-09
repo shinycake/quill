@@ -297,13 +297,20 @@ impl Session {
             return;
         };
         let earn = &mut self.payments.earn;
+        let request = pending.map(|p| p.id);
+        let ours = earn.setup.as_ref().is_some_and(|s| s.waits_for(request));
         let existed = earn
             .setup
             .as_ref()
             .filter(|s| s.bot_user_id == bot_user_id)
             .is_some_and(SetupPage::exists);
-        earn.setup = None;
-        earn.setup_closed = true;
+        // Only the page that sent this save goes back; a page opened since
+        // (another bot, or the same one again) stays. The toast is true
+        // either way.
+        if ours {
+            earn.setup = None;
+            earn.setup_closed = true;
+        }
         earn.note(if end {
             "Affiliate program ended. Participating affiliates have been notified. All referral links will be disabled in 24 hours."
         } else if existed {
@@ -478,8 +485,10 @@ impl Session {
                 }
             }
             EarnPurpose::SetProgram { .. } => {
-                if let Some(setup) = earn.setup.as_mut() {
-                    setup.saving = false;
+                if let Some(setup) = earn.setup.as_mut()
+                    && setup.waits_for(request)
+                {
+                    setup.saving = None;
                 }
                 // tdesktop `UpdateProgram`: "Failed: " and the error.
                 earn.note(format!("Failed: {reason}"));

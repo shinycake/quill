@@ -97,6 +97,7 @@ impl QuillApp {
             self.gift_market.stack.pop();
             self.gift_market.push(MarketBox::Craft);
             self.gift_market.push(MarketBox::Buy);
+            self.open_box(crate::ui::shell::DialogKind::GiftMarket);
         }
         cx.notify();
     }

@@ -31,6 +31,9 @@ impl<S: JsonSender> ConnectDriver<S> {
             } else {
                 owned_bots::get_name_request(&extra.as_extra(), bot_user_id)
             };
+            if let Some(edit) = self.session.bots.owned.edit.as_mut() {
+                edit.loads.push(extra);
+            }
             self.send_json_request(extra, &json)?;
         }
         Ok(())
@@ -51,7 +54,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 RequestPurpose::Bots(BotsPurpose::SetBotName { bot_user_id }),
                 None,
             );
-            self.begin_save(|edit| edit.pending_name = Some(name.clone()));
+            self.begin_save(extra, |edit| edit.pending_name = Some(name.clone()));
             let json = owned_bots::set_name_request(&extra.as_extra(), bot_user_id, name);
             self.send_save(extra, &json)?;
         }
@@ -60,7 +63,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 RequestPurpose::Bots(BotsPurpose::SetBotAbout { bot_user_id }),
                 None,
             );
-            self.begin_save(|edit| edit.pending_about = Some(about.clone()));
+            self.begin_save(extra, |edit| edit.pending_about = Some(about.clone()));
             let json = owned_bots::set_about_request(&extra.as_extra(), bot_user_id, about);
             self.send_save(extra, &json)?;
         }
@@ -74,25 +77,25 @@ impl<S: JsonSender> ConnectDriver<S> {
             RequestPurpose::Bots(BotsPurpose::SetBotPhoto { bot_user_id }),
             None,
         );
-        self.begin_save(|_| {});
+        self.begin_save(extra, |_| {});
         let json = owned_bots::set_photo_request(&extra.as_extra(), bot_user_id, path);
         self.send_save(extra, &json)
     }
 
-    fn begin_save(&mut self, fill: impl FnOnce(&mut BotEditTexts)) {
+    fn begin_save(&mut self, extra: RequestId, fill: impl FnOnce(&mut BotEditTexts)) {
         if let Some(edit) = self.session.bots.owned.edit.as_mut() {
-            edit.saving = edit.saving.saturating_add(1);
+            edit.saves.push(extra);
             fill(edit);
         }
     }
 
-    /// Send a save; a refused send takes its count back.
+    /// Send a save; a refused send is no longer waited for.
     fn send_save(&mut self, extra: RequestId, json: &str) -> Result<(), ConnectSendError> {
         let sent = self.send_json_request(extra, json).map(|_| ());
         if sent.is_err()
             && let Some(edit) = self.session.bots.owned.edit.as_mut()
         {
-            edit.saving = edit.saving.saturating_sub(1);
+            edit.saves.retain(|sent| *sent != extra);
         }
         sent
     }

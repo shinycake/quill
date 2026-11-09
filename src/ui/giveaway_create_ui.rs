@@ -114,6 +114,7 @@ impl QuillApp {
             confirming: false,
             page: GiveawayPage::Form,
         });
+        self.open_box(DialogKind::Giveaway);
         cx.notify();
     }
 

@@ -17,6 +17,11 @@ use quill::lang::{keys, tr};
 
 impl QuillApp {
     pub(super) fn open_group_call_settings(&mut self, cx: &mut Context<Self>) {
+        // A box over the call window waits for no one under the lock
+        // (`calls::lock_layers`).
+        if self.refused_while_locked() {
+            return;
+        }
         self.group_call_screen.settings_open = true;
         cx.notify();
     }

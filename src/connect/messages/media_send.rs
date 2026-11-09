@@ -205,15 +205,18 @@ impl<S: JsonSender> ConnectDriver<S> {
         let Some(chat_id) = self.session.open_chat else {
             return Err(ConnectSendError::InvalidRequest);
         };
-        self.send_voice_note_to(chat_id, draft, caption, reply_to, play_once)
+        let place = self.send_place(chat_id);
+        self.send_voice_note_to(chat_id, &place, draft, caption, reply_to, play_once)
     }
 
-    /// [`Self::send_voice_note`] to `chat_id`, which is not necessarily the
-    /// open chat: a recording goes to the chat it was sent from, even when
-    /// the user opened another while the file was finished.
+    /// [`Self::send_voice_note`] to `chat_id` and `place`, which need not be
+    /// what is open: a recording goes to the chat, topic and thread it was
+    /// sent from, even when the user opened another while the file was
+    /// finished.
     pub fn send_voice_note_to(
         &mut self,
         chat_id: ChatId,
+        place: &SendPlace,
         draft: &VoiceDraft,
         caption: &str,
         reply_to: Option<SendReply>,
@@ -227,7 +230,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .chats
             .get(&chat_id.0)
             .is_some_and(|chat| chat.supported());
-        if !supported || self.topic_send_is_closed(chat_id) {
+        if !supported || self.place_is_closed(chat_id, place) {
             return Err(ConnectSendError::InvalidRequest);
         }
         let path = crate::local_path::pick_send_path(&draft.path)
@@ -236,7 +239,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         let extra = self
             .session
             .request(RequestPurpose::SendMessage, Some(chat_id));
-        let topic_id = self.send_topic(chat_id);
+        let topic_id = place.topic;
         // "Play once" is a self-destruct type, which TDLib accepts in
         // private chats only (the same gate as photos and videos).
         let self_destruct = self
@@ -258,7 +261,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 self_destruct,
             },
         );
-        let json = self.thread_routed(chat_id, json);
+        let json = self.place_routed(chat_id, place, json);
         match self.sender.send_json(&json) {
             Ok(()) => {
                 let _ = self.cancel_outgoing_typing();
@@ -283,14 +286,16 @@ impl<S: JsonSender> ConnectDriver<S> {
         let Some(chat_id) = self.session.open_chat else {
             return Err(ConnectSendError::InvalidRequest);
         };
-        self.send_recorded_video_note_to(chat_id, draft, reply_to)
+        let place = self.send_place(chat_id);
+        self.send_recorded_video_note_to(chat_id, &place, draft, reply_to)
     }
 
-    /// [`Self::send_recorded_video_note`] to `chat_id`, which is not
-    /// necessarily the open chat (see [`Self::send_voice_note_to`]).
+    /// [`Self::send_recorded_video_note`] to `chat_id` and `place`, which
+    /// need not be what is open (see [`Self::send_voice_note_to`]).
     pub fn send_recorded_video_note_to(
         &mut self,
         chat_id: ChatId,
+        place: &SendPlace,
         draft: &crate::video::VideoNoteDraft,
         reply_to: Option<SendReply>,
     ) -> Result<RequestId, ConnectSendError> {
@@ -302,7 +307,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .chats
             .get(&chat_id.0)
             .is_some_and(|chat| chat.supported());
-        if !supported || self.topic_send_is_closed(chat_id) {
+        if !supported || self.place_is_closed(chat_id, place) {
             return Err(ConnectSendError::InvalidRequest);
         }
         let path = crate::local_path::pick_send_path(&draft.path)
@@ -318,7 +323,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         let extra = self
             .session
             .request(RequestPurpose::SendMessage, Some(chat_id));
-        let topic_id = self.send_topic(chat_id);
+        let topic_id = place.topic;
         let json = send_video_note(
             extra,
             chat_id,
@@ -331,7 +336,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             },
             reply_to,
         );
-        let json = self.thread_routed(chat_id, json);
+        let json = self.place_routed(chat_id, place, json);
         match self.sender.send_json(&json) {
             Ok(()) => {
                 let _ = self.cancel_outgoing_typing();

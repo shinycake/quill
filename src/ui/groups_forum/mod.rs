@@ -35,9 +35,7 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         self.admin.forum_manage_dialog = Some(ForumManageDialog::new(window, cx, chat_id));
-        // One box for the account, asked for here: it shows in this
-        // window, not in the window that showed it for another forum.
-        self.windows.claim_dialog(DialogKind::ForumManage);
+        self.open_box(DialogKind::ForumManage);
         if let Some(live) = self.live.as_mut() {
             let _ = live.driver.refresh_forum_topics(chat_id);
         }

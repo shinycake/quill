@@ -45,6 +45,7 @@ impl QuillApp {
             return;
         }
         self.payments.gift_recipients_open = true;
+        self.open_box(DialogKind::GiftRecipients);
         cx.notify();
     }
 

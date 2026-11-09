@@ -108,6 +108,7 @@ impl QuillApp {
                     level,
                     reason: AskBoostReason::Autotranslate,
                 });
+                self.open_box(crate::ui::shell::DialogKind::EarnAskBoost);
                 if let Some(live) = self.live.as_mut() {
                     let _ = live.driver.fetch_chat_boost_link(chat_id);
                 }

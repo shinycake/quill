@@ -11,6 +11,9 @@ pub struct LanguageLinkLookup {
     pub info: Option<LanguagePackInfoData>,
     pub loading: bool,
     pub error: Option<String>,
+    /// The `getLanguagePackInfo` this box waits for; another box's answer
+    /// settles nothing here.
+    pub(crate) request: Option<RequestId>,
 }
 
 impl LanguageLinkLookup {
@@ -20,7 +23,26 @@ impl LanguageLinkLookup {
             info: None,
             loading: true,
             error: None,
+            request: None,
         }
+    }
+
+    /// The box waits for `request` to answer.
+    pub(crate) fn waiting_for(mut self, request: RequestId) -> Self {
+        self.request = Some(request);
+        self
+    }
+
+    /// `pending` is this box's own lookup: settle it.
+    fn take_answer(&mut self, pending: Option<&PendingRequest>) -> bool {
+        let ours = pending.is_some_and(|p| {
+            p.purpose == RequestPurpose::GetLanguagePackInfo && Some(p.id) == self.request
+        });
+        if ours {
+            self.request = None;
+            self.loading = false;
+        }
+        ours
     }
 }
 
@@ -31,20 +53,18 @@ impl Session {
         info: LanguagePackInfoData,
         pending: Option<&PendingRequest>,
     ) {
-        if pending.map(|p| p.purpose) == Some(RequestPurpose::GetLanguagePackInfo)
-            && let Some(lookup) = self.settings.language_link.as_mut()
+        if let Some(lookup) = self.settings.language_link.as_mut()
+            && lookup.take_answer(pending)
         {
-            lookup.loading = false;
             lookup.error = None;
             lookup.info = Some(info);
         }
     }
 
     pub(crate) fn apply_language_pack_error(&mut self, pending: Option<&PendingRequest>) {
-        if pending.map(|p| p.purpose) == Some(RequestPurpose::GetLanguagePackInfo)
-            && let Some(lookup) = self.settings.language_link.as_mut()
+        if let Some(lookup) = self.settings.language_link.as_mut()
+            && lookup.take_answer(pending)
         {
-            lookup.loading = false;
             lookup.info = None;
             lookup.error = Some("This language link is not valid.".into());
         }

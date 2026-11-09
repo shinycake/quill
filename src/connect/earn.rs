@@ -360,11 +360,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         let Some(setup) = self.session.payments.earn.setup.as_mut() else {
             return Err(ConnectSendError::InvalidRequest);
         };
-        if setup.saving {
+        if setup.is_saving() {
             return Ok(());
         }
         // tdesktop keeps `ConfirmUpdate` open until the answer.
-        setup.saving = true;
         let (bot_user_id, params) = (setup.bot_user_id, setup.params);
         let result = self.send_earn(
             EarnPurpose::SetProgram {
@@ -373,7 +372,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             },
             |extra| set_chat_affiliate_program(extra, bot_user_id, Some(params)),
         );
-        self.unlock_setup_on_error(&result);
+        self.setup_waits_for(&result);
         result.map(|_| ())
     }
 
@@ -383,10 +382,9 @@ impl<S: JsonSender> ConnectDriver<S> {
         let Some(setup) = self.session.payments.earn.setup.as_mut() else {
             return Err(ConnectSendError::InvalidRequest);
         };
-        if setup.saving {
+        if setup.is_saving() {
             return Ok(());
         }
-        setup.saving = true;
         setup.confirm = None;
         let bot_user_id = setup.bot_user_id;
         let result = self.send_earn(
@@ -396,15 +394,17 @@ impl<S: JsonSender> ConnectDriver<S> {
             },
             |extra| set_chat_affiliate_program(extra, bot_user_id, None),
         );
-        self.unlock_setup_on_error(&result);
+        self.setup_waits_for(&result);
         result.map(|_| ())
     }
 
-    fn unlock_setup_on_error<T>(&mut self, result: &Result<T, ConnectSendError>) {
-        if result.is_err()
+    /// The setup page waits for the save that left (a refused send leaves
+    /// it as it was).
+    fn setup_waits_for(&mut self, result: &Result<RequestId, ConnectSendError>) {
+        if let Ok(extra) = result
             && let Some(setup) = self.session.payments.earn.setup.as_mut()
         {
-            setup.saving = false;
+            setup.saving = Some(*extra);
         }
     }
 

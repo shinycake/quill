@@ -16,6 +16,13 @@ pub(crate) struct RecentHashtagsUi {
 impl crate::ui::on_screen::Farewell for RecentHashtagsUi {}
 
 impl RecentHashtagsUi {
+    /// `account` logged out or was removed: the list read for it goes.
+    pub(super) fn forget(&mut self, account: &AccountKey) {
+        if self.list.owner() == Some(account) {
+            *self.list.value_mut() = None;
+        }
+    }
+
     /// The list as last read, if it is `account`'s.
     pub(super) fn of(&self, account: &AccountKey) -> Option<&RecentHashtags> {
         if self.list.owner() == Some(account) {

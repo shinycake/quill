@@ -112,6 +112,22 @@ pub fn open(paths: &AccountPaths, database_key: &DatabaseKey) {
 #[cfg(all(target_os = "macos", feature = "ui"))]
 static OPENED: std::sync::OnceLock<LinesFile> = std::sync::OnceLock::new();
 
+/// The account [`open`] read the layouts of logged out or was removed:
+/// this launch's layouts hold its chat names, so none are written at quit.
+#[cfg(all(target_os = "macos", feature = "ui"))]
+static FORGOTTEN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// `paths`' account logged out or was removed: its saved layouts go, and
+/// when they are the ones this launch opened, none are written back.
+pub fn forget(paths: &AccountPaths) {
+    let file = paths.root.join(FILE);
+    #[cfg(all(target_os = "macos", feature = "ui"))]
+    if OPENED.get().is_some_and(|opened| opened.path == file) {
+        FORGOTTEN.store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+    let _ = std::fs::remove_file(file);
+}
+
 /// Writes this launch's layouts, when [`open`] knew the key. Recording stops
 /// either way. Call it off the main thread.
 pub fn save() {
@@ -119,6 +135,7 @@ pub fn save() {
     {
         let stamp = crate::launch_prewarm::cache_stamp();
         if let Some(layouts) = gpui_macos::line_cache::save(&stamp)
+            && !FORGOTTEN.load(std::sync::atomic::Ordering::SeqCst)
             && let Some(file) = OPENED.get()
         {
             let _ = file.write(&layouts);

@@ -332,7 +332,7 @@ impl QuillApp {
     /// focused)` for the row at `ix`. Nothing is focused while no screen
     /// reader reads the window.
     pub(super) fn history_a11y_row_focus(&self, ix: usize) -> (bool, bool) {
-        if !self.slices.a11y_active.get() {
+        if !self.slices.window.a11y_active.get() {
             return (false, false);
         }
         let Some(row) = self.history.rows.get(ix) else {

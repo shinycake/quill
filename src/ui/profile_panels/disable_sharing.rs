@@ -36,6 +36,7 @@ impl QuillApp {
         if self.chat_prefs.disable_sharing_box_shown < BOX_MAX_SHOWS {
             self.set_chat_prefs(cx, |prefs| prefs.disable_sharing_box_shown += 1);
             self.dialogs.disable_sharing = Some(chat_id);
+            self.open_box(DialogKind::DisableSharing);
             cx.notify();
             return;
         }

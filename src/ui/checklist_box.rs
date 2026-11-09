@@ -100,11 +100,13 @@ crate::ui::shell::register_dialogs! {
         |app| app.chat_ui.checklist_dialog.is_some(),
         QuillApp::build_checklist_dialog,
     )
+    .per_window()
     .close(|app, _, cx| app.close_checklist_dialog(cx)),
     PollAddOption => DialogSpec::new(
         2939,
         |app| app.message_ui.poll_add_option.is_some(),
         QuillApp::build_poll_add_option_dialog,
     )
+    .per_window()
     .close(|app, _, cx| app.close_poll_add_option(cx)),
 }

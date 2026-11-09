@@ -66,14 +66,19 @@ mod tests {
     use super::{HelperWriter, Sent};
     use std::io::{self, Write};
     use std::sync::mpsc;
-    use std::time::{Duration, Instant};
+    use std::time::Duration;
 
-    /// A pipe that never drains: the first write parks until released.
-    struct StuckPipe(mpsc::Receiver<()>);
+    /// A pipe that never drains: it says when a write starts, then parks
+    /// that write until released.
+    struct StuckPipe {
+        entered: mpsc::Sender<()>,
+        release: mpsc::Receiver<()>,
+    }
 
     impl Write for StuckPipe {
         fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-            let _ = self.0.recv_timeout(Duration::from_secs(10));
+            let _ = self.entered.send(());
+            let _ = self.release.recv();
             Ok(buf.len())
         }
         fn flush(&mut self) -> io::Result<()> {
@@ -81,21 +86,28 @@ mod tests {
         }
     }
 
+    /// The writer thread is parked inside the first write, the queue fills,
+    /// and every later send is dropped as wedged instead of waiting. No
+    /// clock: the test waits only for the writer to take the first message.
     #[test]
     fn a_full_pipe_never_blocks_the_caller() {
-        let (release, stuck) = mpsc::channel();
-        let writer = HelperWriter::spawn_with_capacity(StuckPipe(stuck), 4);
-        let started = Instant::now();
-        let results: Vec<Sent> = (0..20).map(|_| writer.send(b"x\n".to_vec())).collect();
-        assert!(started.elapsed() < Duration::from_secs(1));
-        assert_eq!(results.first(), Some(&Sent::Queued));
-        assert_eq!(results.last(), Some(&Sent::Wedged));
-        let queued = results.iter().filter(|r| **r == Sent::Queued).count();
-        assert!((4..=5).contains(&queued), "queued {queued}");
-        let dropping = Instant::now();
+        let (entered_tx, entered) = mpsc::channel();
+        let (release, release_rx) = mpsc::channel();
+        let pipe = StuckPipe {
+            entered: entered_tx,
+            release: release_rx,
+        };
+        let writer = HelperWriter::spawn_with_capacity(pipe, 4);
+        assert_eq!(writer.send(b"first\n".to_vec()), Sent::Queued);
+        // The writer took the first message and is stuck writing it.
+        assert!(entered.recv().is_ok());
+        let queued: Vec<Sent> = (0..4).map(|_| writer.send(b"x\n".to_vec())).collect();
+        assert_eq!(queued, vec![Sent::Queued; 4], "the queue holds four");
+        let dropped: Vec<Sent> = (0..16).map(|_| writer.send(b"x\n".to_vec())).collect();
+        assert_eq!(dropped, vec![Sent::Wedged; 16], "a full queue drops");
+        // Dropping the writer does not wait for the stuck thread.
         drop(writer);
-        assert!(dropping.elapsed() < Duration::from_secs(1));
-        let _ = release.send(());
+        drop(release);
     }
 
     #[test]

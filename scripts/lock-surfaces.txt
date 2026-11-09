@@ -22,12 +22,27 @@ src/ui/deep_links.rs::pump_deep_link | refuses | a launch or OS link waits for t
 src/ui/deep_links.rs::run_resolved_deep_link | refuses | the chat or box a link resolved to opens after the unlock
 src/ui/web_app_ui/spawn_mini_app_window.rs::spawn_mini_app_window | refuses | a mini app whose URL lands while locked would show, usable, over the lock; TDLib closes the launch
 src/ui/accounts.rs::switch_account | refuses | nothing behind the lock changes account; tdesktop empties the tray and Dock account items while locked
-src/ui/os_open.rs::open_link | refuses | nothing opens in the browser or mail client while locked
-src/ui/os_open.rs::open_web_link | refuses | as open_link
+src/ui/os_open.rs::open_link | refuses | nothing opens in the browser or mail client while locked: the open waits for the unlock (`wait_for_unlock`)
+src/ui/os_open.rs::open_web_link | refuses | as open_link: a 3-D Secure page, a withdrawal or a bot's URL opens after the unlock
 src/ui/os_open.rs::open_file | refuses | a file opened by a late answer would show over the lock
-src/ui/os_open.rs::open_file_then | refuses | as open_file; the caller hears it did not open
+src/ui/os_open.rs::open_file_then | refuses | as open_file; the caller hears the answer after the unlock
 src/ui/os_open.rs::reveal_in_folder_or | refuses | as open_file
 src/ui/os_open.rs::reveal_from | refuses | as open_file
+src/ui/os_open.rs::open_mail_to | refuses | as open_link
+src/ui/os_open.rs::open_system_settings | refuses | as open_link
+src/ui/call_add_people.rs::open_call_add_people | refuses | the call window stays answerable under the lock, but Add People would list the contacts; tdesktop asks for the passcode first (`Panel::addPeople`)
+src/ui/group_calls.rs::open_group_call_title_dialog | refuses | a box over the call window; tdesktop hides the call panel's layers on lock (`hidePanelLayers`)
+src/ui/group_calls.rs::copy_rtmp_value | refuses | the stream URL and key are secrets, not drawn under the lock
+src/ui/group_calls.rs::replace_video_chat_rtmp_url | refuses | as copy_rtmp_value
+src/ui/group_call_settings.rs::open_group_call_settings | refuses | a box over the call window, with the share link rows
+src/ui/group_call_stream_boxes.rs::open_stream_overlay | refuses | the stream window's boxes, the stream key's among them
+src/ui/calls/live_pip.rs::open_stream_pip | refuses | the lock closes Picture-in-Picture, so the stream window would close for a PiP that never shows
+src/ui/shell.rs::close_kit_dialog_if_done | refuses | every flag reads closed under the lock, so a close from a late continuation would close a box whose flag is set; the sync after the unlock closes it
+src/ui/export_quit.rs::exit_held_by_export | refuses | the "Stop and quit?" box cannot show over the lock: a Quit there stops the exports and quits
+src/ui/player_bar.rs::publish_now_playing | refuses | Now Playing names the sender or the song: off under the lock, as tdesktop's system media controls
+src/ui/player_bar.rs::drain_media_commands | refuses | media keys do nothing under the lock
+src/ui/passcode/lock_gate.rs::connect_waits_for_unlock | refuses | the master key is cleared under the lock: `start_connection` and `open_client` ask it, so a connection waits for the unlock
+src/ui/background_accounts/mod.rs::ensure_background_accounts | refuses | as start_connection: a background account would fail on the cleared key and never be retried
 src/ui/passcode/lock_gate.rs::intercept_keys_unlocked | refuses | the app's key interceptors all go through it: no shortcut, capture or viewer key acts on a key typed on the lock screen
 
 # Not the lock's.
@@ -77,3 +92,33 @@ src/update_install.rs::spawn_app | - | the updater restarts Quill, which starts 
 src/update_install/macos.rs::hdiutil_mounts | - | the updater lists mounted images
 src/update_install/macos.rs::launch | - | the updater restarts Quill, which starts locked
 src/update_install/macos.rs::unpack | - | the updater unpacks a download
+
+# What runs while locked: the steps of the main frame's upkeep and of the
+# poll pass outside their `lock_waits()` gate. Everything behind the gate
+# waits for the unlock with its state kept (docs/decisions/
+# lock-is-a-render-state.md, "What runs while locked").
+# <path::fn -> method> | runs-locked | <why it shows and starts nothing>
+src/ui/app_render/frame_upkeep.rs::frame_upkeep -> frame_profile_tick | runs-locked | the frame profiler's counters, a debug build feature
+src/ui/app_render/frame_upkeep.rs::frame_upkeep -> flush_notifications | runs-locked | notification delivery goes on under the lock with the sender hidden; a click only shows the window (`run_notification_action`, `switch_account` refuse), and a call pick answers the call, which stays usable
+src/ui/notifications/mod.rs::poll_live -> set_window_scope | runs-locked | puts the main window's state in place for the pass
+src/ui/notifications/mod.rs::poll_live -> polled_chrome | runs-locked | reads the status line to decide a redraw
+src/ui/notifications/mod.rs::poll_live -> sync_presence | runs-locked | online and idle presence; a locked Quill is idle
+src/ui/notifications/mod.rs::poll_live -> apply_pending_keybindings | runs-locked | loads the account's key bindings; binds, starts nothing
+src/ui/notifications/mod.rs::poll_live -> drain_background_clicks | runs-locked | replies and Mark as read typed into an OS notification; a chat open is queued for the render, which only shows the window while locked
+src/ui/notifications/mod.rs::poll_live -> drain_account_clicks | runs-locked | sorts other accounts' notification clicks; the switch they ask for is refused while locked (`switch_account`)
+src/ui/notifications/mod.rs::poll_live -> sync_rows_on_screen | runs-locked | records which rows were drawn, for redraws and auto-download
+src/ui/notifications/mod.rs::poll_live -> clear_device_qr | runs-locked | closes the device-linking scanner
+src/ui/notifications/mod.rs::poll_live -> video_pip_account_ended | runs-locked | closes Picture-in-Picture of an account that logged out
+src/ui/notifications/mod.rs::poll_live -> forget_sends_after_auth | runs-locked | forgets composer state of a client that signed out
+src/ui/notifications/mod.rs::poll_live -> poll_device_qr | runs-locked | keeps the scanner's result for the Devices page; the lock closed the scanner, and the result is drawn after the unlock
+src/ui/notifications/mod.rs::poll_live -> drain_account_notices | runs-locked | keeps a login review's outcome as state the unlocked frame draws
+src/ui/notifications/mod.rs::poll_live -> check_video_pip | runs-locked | closes Picture-in-Picture whose message went
+src/ui/notifications/mod.rs::poll_live -> check_playing_track | runs-locked | stops the player when its track or chat went
+src/ui/notifications/mod.rs::poll_live -> refetch_open_contacts | runs-locked | asks again for a contact list that was invalidated; shows nothing
+src/ui/notifications/mod.rs::poll_live -> poll_chat_export_progress | runs-locked | an export's progress, for the redraw; the export keeps running under the lock
+src/ui/notifications/mod.rs::poll_live -> finish_successful_sends | runs-locked | clears the drafts of messages that were sent
+src/ui/notifications/mod.rs::poll_live -> progress_inline_mode | runs-locked | sends an inline query that waited for its bot; its results are drawn after the unlock
+src/ui/notifications/mod.rs::poll_live -> deliver_notifications | runs-locked | notifications and sounds go on under the lock, with the sender hidden; a locked Quill counts as not looked at (`app_active`)
+src/ui/notifications/mod.rs::poll_live -> redraw_polled | runs-locked | asks for a redraw, which draws only the lock screen
+src/ui/notifications/mod.rs::poll_live -> discard_stopped_media_playback | runs-locked | drops a parked play whose download failed
+src/ui/notifications/mod.rs::poll_live -> restart_live_connection | runs-locked | a remote log out under the lock: the old client closes, and the new connection waits for the unlock (`connect_waits_for_unlock`)
