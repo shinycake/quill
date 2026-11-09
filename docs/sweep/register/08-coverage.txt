@@ -61,3 +61,14 @@ src/ui/chat.rs 121 read
 src/ui/chat_appearance_dialog.rs 842 read
 src/ui/chat_appearance_extras.rs 205 read
 src/ui/chat_bars.rs 691 read
+src/ui/chat_bars/join_requests.rs 414 read
+src/ui/chat_header_menu_ui.rs 254 read
+src/ui/chat_list/drop_on_row.rs 579 read
+src/ui/chat_list/drop_topic.rs 423 read
+src/ui/chat_list/header_fit.rs 198 read
+src/ui/chat_list/listed.rs 146 read
+src/ui/chat_list/mod.rs 812 read
+src/ui/chat_list/select_bar.rs 277 read
+src/ui/chat_list/sidebar.rs 703 read
+src/ui/chat_list/step_open.rs 85 read
+src/ui/chat_list/toggle_chat_pin.rs 144 read
