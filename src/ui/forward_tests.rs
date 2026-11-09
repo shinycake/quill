@@ -49,7 +49,8 @@ fn enter_toggles_the_first_match_and_does_not_send(cx: &mut TestAppContext) {
             let id = history.messages.keys().next().copied().expect("a message");
             (ChatId(*chat), MessageId(id))
         };
-        app.share.pending_forward = ForwardDraft::from_message(first, message, false);
+        app.share.pending_forward =
+            ForwardDraft::from_message(first, quill::ids::TopicId::None, message, false);
         app.open_forward_picker(window, cx);
         assert!(app.share.selection.is_empty());
         app.activate_first_forward_destination(cx);

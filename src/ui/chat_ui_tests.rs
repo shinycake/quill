@@ -326,3 +326,65 @@ fn another_chat_closes_the_poll_and_checklist_boxes(cx: &mut TestAppContext) {
         );
     });
 }
+
+/// Round 16 (area B, finding 1): a selection is its conversation's. Made
+/// in one forum topic, it is not shown, counted, deleted or forwarded in
+/// the next topic of the same forum (the frame before the upkeep drops it
+/// included), and it goes whole on the switch.
+#[gpui_kit::test]
+fn a_selection_made_in_one_topic_goes_with_it(cx: &mut TestAppContext) {
+    use crate::ui::demos::composer::{FORUM_CHAT, RELEASES_TOPIC};
+    use quill::ids::TopicId;
+    cx.update(gpui_kit::init);
+    let slot = Rc::new(std::cell::RefCell::new(None));
+    let slot_in = slot.clone();
+    let handle = cx.open_window(size(px(1100.), px(800.)), move |window, cx| {
+        let view = cx.new(|cx| {
+            QuillApp::new_with_demo(
+                window,
+                cx,
+                None,
+                Some(ScreenshotDemo::named("ready-composer-bars")),
+            )
+        });
+        let shell = cx.new(|_| QuillShell::new(view.clone()));
+        *slot_in.borrow_mut() = Some(view);
+        Root::new(shell, window, cx)
+    });
+    let app = slot.borrow().clone().expect("the app view");
+    let mut vcx = VisualTestContext::from_window(handle.into(), cx);
+    open(&app, &mut vcx, FORUM_CHAT);
+    app.update(&mut vcx, |app, cx| {
+        if let Some(session) = app.demo_session.as_mut() {
+            session.select_topic(FORUM_CHAT, 1);
+        }
+        cx.notify();
+    });
+    frames(&mut vcx);
+    app.update(&mut vcx, |app, cx| {
+        app.toggle_forward_select(FORUM_CHAT, MessageId(20), false, cx);
+        app.toggle_forward_select(FORUM_CHAT, MessageId(21), false, cx);
+    });
+    app.read_with(&vcx, |app, _| {
+        assert!(app.selecting_in(FORUM_CHAT));
+        let draft = app.forward_draft().expect("a selection");
+        assert!(draft.is_from(FORUM_CHAT, TopicId::forum(1)));
+        assert_eq!(draft.count(), 2);
+    });
+    // The other topic, before any frame ran its upkeep.
+    app.update(&mut vcx, |app, _| {
+        if let Some(session) = app.demo_session.as_mut() {
+            session.select_topic(FORUM_CHAT, RELEASES_TOPIC);
+        }
+        assert!(!app.selecting_in(FORUM_CHAT), "not in the other topic");
+        assert!(
+            app.forward_draft().is_none(),
+            "nothing to delete or forward"
+        );
+    });
+    frames(&mut vcx);
+    app.read_with(&vcx, |app, _| {
+        assert!(app.share.pending_forward.is_none(), "it went on the switch");
+        assert!(!app.selecting_in(FORUM_CHAT));
+    });
+}

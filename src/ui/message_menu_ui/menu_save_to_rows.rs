@@ -83,8 +83,12 @@ impl QuillApp {
                 cx,
                 move |this, _, cx| {
                     let me = this.session().and_then(|s| s.my_user_id);
-                    let draft =
-                        quill::composer::ForwardDraft::from_message(chat_id, message_id, false);
+                    let draft = quill::composer::ForwardDraft::from_message(
+                        chat_id,
+                        quill::ids::TopicId::None,
+                        message_id,
+                        false,
+                    );
                     if let (Some(live), Some(me), Some(draft)) = (this.live.as_mut(), me, draft) {
                         this.screen.connection.set_note_for(
                             &this.screen.windows,

@@ -5,7 +5,7 @@
 //! (`ShowAiComposeToneLimitError`).
 
 use super::{marked_link, session_mut};
-use crate::ui::ai_compose_state::AiComposeView;
+use crate::ui::ai_compose_state::{AiComposeView, StyleSave};
 use crate::ui::app::QuillApp;
 use crate::ui::shell::DialogKind;
 use gpui_kit::assets::IconName;
@@ -151,7 +151,7 @@ impl QuillApp {
                 ))
             }
             Err(error) => {
-                editor.pending = false;
+                editor.save = StyleSave::Editing;
                 match error {
                     StyleError::SavedTooMany => None,
                     StyleError::Invalid => Some(text_toast(tr(keys::AI_COMPOSE_TONE_INVALID))),
@@ -191,7 +191,7 @@ impl QuillApp {
                     .ai_compose
                     .preview
                     .take()
-                    .and_then(|preview| preview.style)
+                    .and_then(|preview| preview.into_style())
                     .filter(|style| style.name == name)
                     .or_else(|| {
                         self.session()
@@ -213,7 +213,7 @@ impl QuillApp {
                     .ai_compose
                     .preview
                     .as_ref()
-                    .is_some_and(|preview| preview.removing);
+                    .is_some_and(|preview| preview.removing());
                 asked.then(|| {
                     self.ai_compose.preview = None;
                     let key = match notice {

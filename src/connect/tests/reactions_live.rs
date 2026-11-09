@@ -277,10 +277,36 @@ fn keyword_emoji_search_uses_the_typed_language() {
         sent["@extra"].as_str().unwrap()
     );
     feed(&mut driver, &seq, &sink, &body);
-    assert_eq!(driver.session.stickers.emoji.keyword_emojis, vec!["🔥"]);
+    assert_eq!(
+        driver
+            .session
+            .stickers
+            .emoji
+            .keyword_emojis
+            .for_query("огонь"),
+        ["🔥".to_string()]
+    );
+    assert!(
+        driver
+            .session
+            .stickers
+            .emoji
+            .keyword_emojis
+            .for_query("fire")
+            .is_empty(),
+        "another query's list is none of its own"
+    );
     // A cleared query forgets the matches.
     driver.search_keyword_emojis("").unwrap();
-    assert!(driver.session.stickers.emoji.keyword_emojis.is_empty());
+    assert!(
+        driver
+            .session
+            .stickers
+            .emoji
+            .keyword_emojis
+            .emojis
+            .is_empty()
+    );
 }
 
 #[test]

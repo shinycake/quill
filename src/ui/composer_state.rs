@@ -62,6 +62,11 @@ pub(crate) struct ComposerUi {
     /// keystroke bumps it so only the latest quiet window fires (schema:
     /// "Do not call this function too often"; TGX rate-limits 400ms).
     pub(super) preview_token: u64,
+    /// The URL this composer last asked `getLinkPreview` about. A request
+    /// that failed for a reason other than "no preview" (`Failed`) is asked
+    /// again only once the URL has left the field and come back, so a
+    /// lasting error does not ask again on every frame.
+    pub(super) preview_tried: Option<String>,
     /// The composer text before the last keystroke, for "Replace emoji
     /// automatically" (it only reacts to one typed character).
     pub(super) prev_text: gpui_kit::SharedString,
@@ -137,6 +142,7 @@ impl ComposerUi {
             inline_return: None,
             edit_replace_as_file: false,
             preview_token: 0,
+            preview_tried: None,
             prev_text: gpui_kit::SharedString::default(),
             markdown_revert: None,
             send_silent_once: false,

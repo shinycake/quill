@@ -127,7 +127,8 @@ impl QuillApp {
             }
         }
         session.open_chat(CHAT);
-        self.share.pending_forward = ForwardDraft::from_message(CHAT, RICH, false);
+        self.share.pending_forward =
+            ForwardDraft::from_message(CHAT, quill::ids::TopicId::None, RICH, false);
     }
 }
 
@@ -205,18 +206,27 @@ mod tests {
         assert!(has(&mut cx, BUTTON));
 
         // Two messages selected: tdesktop offers it for a single item only.
-        let mut both = ForwardDraft::from_message(CHAT, RICH, false).unwrap();
-        both.toggle(CHAT, TEXT, false);
+        let mut both =
+            ForwardDraft::from_message(CHAT, quill::ids::TopicId::None, RICH, false).unwrap();
+        both.toggle(CHAT, quill::ids::TopicId::None, TEXT, false);
         select(&app, &mut cx, Some(both));
         assert!(has(&mut cx, BAR));
         assert!(!has(&mut cx, BUTTON));
 
         // A plain text message alone is not a rich message.
-        select(&app, &mut cx, ForwardDraft::from_message(CHAT, TEXT, false));
+        select(
+            &app,
+            &mut cx,
+            ForwardDraft::from_message(CHAT, quill::ids::TopicId::None, TEXT, false),
+        );
         assert!(!has(&mut cx, BUTTON));
 
         // Back to the rich message; the action ends the selection.
-        select(&app, &mut cx, ForwardDraft::from_message(CHAT, RICH, false));
+        select(
+            &app,
+            &mut cx,
+            ForwardDraft::from_message(CHAT, quill::ids::TopicId::None, RICH, false),
+        );
         assert!(has(&mut cx, BUTTON));
         cx.update(|window, cx| window.click(BUTTON, cx));
         frames(&mut cx);

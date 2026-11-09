@@ -207,7 +207,11 @@ impl QuillApp {
             session.messages.ai_compose.styles.set_server(list);
         }
         self.open_ai_style_preview(style.name.clone(), window, cx);
-        let token = self.ai_compose.preview.as_ref().map(|p| p.token);
+        let token = self
+            .ai_compose
+            .preview
+            .as_ref()
+            .and_then(|p| p.lookup_token());
         if variant != "preview-loading"
             && let (Some(token), Some(session)) = (token, session_mut(self))
         {

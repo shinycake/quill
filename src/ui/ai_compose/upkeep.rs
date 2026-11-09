@@ -7,9 +7,10 @@
 //! answers are taken in that window's frame (`ai_compose_window_upkeep`,
 //! a step of every window's upkeep), so they land while the main window
 //! is minimized and their toasts show in that window. The style preview
-//! a link opens is taken in the frame of the window that shows it. What is
-//! the session's (the button's blink, the style notice, emoji files) stays
-//! in the main window's upkeep.
+//! a link opens is taken in the frame of the window that shows it, and so
+//! are the style notices and the custom emoji they draw. Only the composer
+//! button's blink, which follows the main window's field, stays in the main
+//! window's upkeep.
 
 use super::{MarkedLink, marked_link, session_mut};
 use crate::ui::app::QuillApp;
@@ -22,46 +23,74 @@ use quill::ids::{FileId, OfAccount};
 use quill::lang::{keys, tr};
 
 impl QuillApp {
-    pub(in crate::ui) fn ai_compose_frame_upkeep(
-        &mut self,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
+    /// The main window's part: the composer button's blink.
+    pub(in crate::ui) fn ai_compose_frame_upkeep(&mut self, cx: &mut Context<Self>) {
         self.sync_ai_compose_button(cx);
-        self.ai_style_notice_upkeep(window, cx);
-        self.fetch_ai_compose_emoji();
-        self.fetch_ai_style_icons();
     }
 
     /// The window in place's own part: the box opened over its composer
     /// and the shortcut it asked for. The box goes when its window shows
-    /// another chat (checked in that window's frame), or closed (checked
-    /// in any).
+    /// another conversation, another topic of the same forum included
+    /// (checked in that window's frame), or closed (checked in any).
     pub(in crate::ui) fn ai_compose_window_upkeep(
         &mut self,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         let here = self.windows.scope;
-        if let Some((chat, owner)) = self.ai_compose.open.as_ref().map(|o| (o.chat_id, o.window)) {
+        if let Some((asked, owner)) = self
+            .ai_compose
+            .open
+            .as_ref()
+            .map(|o| (o.conversation.clone(), o.window))
+        {
             let closed = owner.is_some_and(|chat| !self.windows.has(chat));
-            let left = owner == here && self.session().and_then(|s| s.open_chat) != Some(chat);
+            let left = owner == here && self.open_conversation() != Some(asked);
             if closed || left {
                 self.close_ai_compose(cx);
             }
         }
-        if self
+        let box_here = self
             .ai_compose
             .open
             .as_ref()
-            .is_none_or(|open| open.window == here)
-        {
+            .is_none_or(|open| open.window == here);
+        if box_here {
             self.ai_compose_box_upkeep(window, cx);
         }
-        if self.ai_style_preview_is_here() {
+        let preview_here = self.ai_style_preview_is_here();
+        // An added or removed style says so in the window that asked:
+        // the preview's, else the box's, else the window of the last press.
+        if self.ai_style_notice_is_here(box_here, preview_here) {
+            self.ai_style_notice_upkeep(window, cx);
+        }
+        if preview_here {
             self.ai_style_preview_upkeep(window, cx);
         }
+        // The pills', the editor's and the preview's custom emoji, asked
+        // for in the frame of the window that draws them.
+        let drawn_here = (box_here && self.ai_compose.open.is_some()) || preview_here;
+        if drawn_here {
+            self.fetch_ai_compose_emoji();
+            self.fetch_ai_style_icons();
+        }
         self.ai_apply_in_place_upkeep(window, cx);
+    }
+
+    /// Whether the style notice waiting in the session is this window's:
+    /// the window of the preview it answers (Add Style, Remove), else the
+    /// window of the open box (its style menu), else the window of the last
+    /// press. Taken in the main window's frame only, the toasts showed
+    /// behind a chat window, and with the main window minimized its preview
+    /// did not close after Add or Remove.
+    fn ai_style_notice_is_here(&self, box_here: bool, preview_here: bool) -> bool {
+        if self.ai_compose.preview.is_some() {
+            return preview_here;
+        }
+        if self.ai_compose.open.is_some() {
+            return box_here;
+        }
+        self.windows.pressed_here()
     }
 
     /// The style preview's answers land in the window that shows its box,
@@ -138,7 +167,7 @@ impl QuillApp {
             .ai_compose
             .preview
             .as_ref()
-            .and_then(|preview| preview.style.as_ref())
+            .and_then(|preview| preview.style())
             .map(|style| style.custom_emoji_id);
         let account = self.current_account();
         let mut unresolved = Vec::new();

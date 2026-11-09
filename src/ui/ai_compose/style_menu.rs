@@ -6,7 +6,7 @@
 
 use super::pill_radius;
 use crate::ui::actions::AiComposeApply;
-use crate::ui::ai_compose_state::AiComposeView;
+use crate::ui::ai_compose_state::{AiComposeView, PreviewStage};
 use crate::ui::app::QuillApp;
 use crate::ui::shell::DialogKind;
 use crate::ui::status_note::StatusNote;
@@ -173,7 +173,11 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         if from_preview && let Some(preview) = self.ai_compose.preview.as_mut() {
-            preview.removing = true;
+            let stage = std::mem::replace(&mut preview.stage, PreviewStage::LookingUp { token: 0 });
+            preview.stage = match stage {
+                PreviewStage::Shown(style) => PreviewStage::Removing(style),
+                other => other,
+            };
         }
         if let Some(open) = self.ai_compose.open.as_mut()
             && open.editor.as_ref().and_then(|e| e.editing.as_deref()) == Some(name)

@@ -431,8 +431,11 @@ impl<S: JsonSender> ConnectDriver<S> {
                 .requests
                 .take_purpose(RequestPurpose::GetKeywordEmojis),
         );
-        self.session.stickers.emoji.keyword_emojis.clear();
         let query = query.trim();
+        self.session.stickers.emoji.keyword_emojis = crate::emoji::KeywordEmojis {
+            query: query.to_string(),
+            emojis: Vec::new(),
+        };
         if query.is_empty() {
             return Ok(());
         }

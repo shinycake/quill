@@ -46,7 +46,8 @@ fn forward_bar(
 }
 
 fn draft() -> ForwardDraft {
-    ForwardDraft::from_message(OTHER, OTHER_LAST, false).expect("a forward")
+    ForwardDraft::from_message(OTHER, quill::ids::TopicId::None, OTHER_LAST, false)
+        .expect("a forward")
 }
 
 #[gpui_kit::test]

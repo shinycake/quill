@@ -31,6 +31,28 @@ pub enum EmojiSetTab {
 /// Mirrors `StickerPanel`'s shape but stays separate — emoji sets, statuses
 /// and picker answers are a different domain from regular stickers, and the
 /// two panels must never share a slot.
+/// The panel's `getKeywordEmojis` search: one list for the session, with
+/// the query it was asked for. Two windows' panels share it, so each reads
+/// it through [`KeywordEmojis::for_query`]: a list asked for another
+/// window's query is none of its own.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct KeywordEmojis {
+    /// The trimmed query the list is for (the last one asked).
+    pub query: String,
+    pub emojis: Vec<String>,
+}
+
+impl KeywordEmojis {
+    /// The matches for `query`; none when the list is another query's.
+    pub fn for_query(&self, query: &str) -> &[String] {
+        if self.query == query.trim() {
+            &self.emojis
+        } else {
+            &[]
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct EmojiPanel {
     pub mutating_set: Option<(i64, bool)>,
@@ -89,8 +111,9 @@ pub struct EmojiPanel {
     pub custom_emoji_stickers: CustomEmojiStickers,
     /// `searchEmojis` answers for the composer's emoji suggestions.
     pub keyword_lookups: KeywordLookups,
-    /// B11: `getKeywordEmojis` answer for the panel's emoji search.
-    pub keyword_emojis: Vec<String>,
+    /// B11: `getKeywordEmojis` answer for the panel's emoji search, with
+    /// the query it is for.
+    pub keyword_emojis: KeywordEmojis,
     /// Slice S10: `getEmojiCategories` rows for the picker.
     pub categories: Vec<EmojiCategory>,
     /// `getEmojiCategories` for the sticker panel (`GetStickerCategories`).
@@ -331,7 +354,7 @@ impl Session {
             }
             EnvelopePayload::Stickers(StickersPayload::Emojis { emojis }) => {
                 if purpose == Some(RequestPurpose::GetKeywordEmojis) {
-                    self.stickers.emoji.keyword_emojis = emojis;
+                    self.stickers.emoji.keyword_emojis.emojis = emojis;
                 }
             }
             EnvelopePayload::Stickers(StickersPayload::EmojiCategories { categories, files }) => {

@@ -301,8 +301,12 @@ fn a_popup_replaced_by_another_is_answered(cx: &mut TestAppContext) {
 #[gpui_kit::test]
 fn the_mini_app_poll_keeps_the_window_its_flow_started_in(cx: &mut TestAppContext) {
     let (app, mut vcx) = new_app(cx);
+    let window = Some(quill::ids::ChatId(12));
+    app.update_in(&mut vcx, |app, main, cx| {
+        app.open_chat_in_new_window(quill::ids::ChatId(12), main, cx)
+    });
+    vcx.run_until_parked();
     app.update(&mut vcx, |app, cx| {
-        let window = Some(quill::ids::ChatId(12));
         app.as_asked_by(window, |app| app.ensure_mini_app_poll(cx));
         assert_eq!(app.mini_apps.from_window, window);
         app.unasked(|app| app.ensure_mini_app_poll(cx));

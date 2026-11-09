@@ -139,10 +139,6 @@ pub(super) struct MediaPanel {
     pub key: Option<PanelKey>,
     pub active_section: usize,
     pub hovered: Option<FileId>,
-    /// The sticker search query last sent to TDLib.
-    pub searched: String,
-    /// The emoji query `getKeywordEmojis` last went out for.
-    pub keyword_searched: String,
     /// The sticker category chosen in the strip under the search field
     /// (an index into `Session::stickers.emoji.sticker_categories`).
     pub category: Option<usize>,
@@ -163,8 +159,6 @@ impl Default for MediaPanel {
             key: None,
             active_section: 0,
             hovered: None,
-            searched: String::new(),
-            keyword_searched: String::new(),
             category: None,
         }
     }
@@ -451,6 +445,7 @@ impl QuillApp {
             category: self.pickers.media_panel.category,
             unicode_only: self.group_title_emoji_active(),
         };
+        self.sync_media_panel_search(&query);
         if self.pickers.media_panel.key.as_ref() == Some(&key) {
             return;
         }
@@ -482,28 +477,41 @@ impl QuillApp {
         self.pickers.media_panel.rows = rows;
         self.pickers.media_panel.sections = sections;
         self.pickers.media_panel.key = Some(key);
-        // Emoji search adds TDLib's keyword matches (all typed languages).
-        if self.pickers.media_panel.tab == PanelTab::Emoji
-            && query != self.pickers.media_panel.keyword_searched
-        {
-            self.pickers.media_panel.keyword_searched = query.clone();
-            if let Some(live) = self.live.as_mut() {
-                let _ = live.driver.search_keyword_emojis(&query);
-            }
-        }
         if category_changed && self.pickers.media_panel.tab == PanelTab::Stickers {
             self.search_chosen_sticker_category();
         }
+    }
+
+    /// The panel's searches go to TDLib for the query this window's field
+    /// holds. The answers are one list per session (sticker search, keyword
+    /// emoji), each with the query it is for, so "already asked" is read
+    /// from there, not from a mark of this window's: a second window's
+    /// search replaces the list, and this window asks again once it is the
+    /// window of the last press or key (only that one asks, so two windows
+    /// with two queries do not take turns asking).
+    fn sync_media_panel_search(&mut self, query: &str) {
+        if !self.windows.pressed_here() {
+            return;
+        }
+        let Some(session) = self.session() else {
+            return;
+        };
+        let tab = self.pickers.media_panel.tab;
+        // Emoji search adds TDLib's keyword matches (all typed languages).
+        let keywords =
+            tab == PanelTab::Emoji && session.stickers.emoji.keyword_emojis.query != query;
         // Sticker search goes to TDLib (by emoji or keyword).
-        if self.pickers.media_panel.tab == PanelTab::Stickers
-            && query != self.pickers.media_panel.searched
-        {
-            self.pickers.media_panel.searched = query.clone();
-            if !query.is_empty()
-                && let Some(live) = self.live.as_mut()
-            {
-                let _ = live.driver.search_sticker_picker(&query);
-            }
+        let stickers = tab == PanelTab::Stickers
+            && !query.is_empty()
+            && session.stickers.stickers.search_query != query;
+        let Some(live) = self.live.as_mut() else {
+            return;
+        };
+        if keywords {
+            let _ = live.driver.search_keyword_emojis(query);
+        }
+        if stickers {
+            let _ = live.driver.search_sticker_picker(query);
         }
     }
 
@@ -526,7 +534,7 @@ impl QuillApp {
                     quill::emoji_catalog::search(None, query)
                         .map(|entry| entry.emoji.replace('\u{fe0f}', ""))
                         .collect();
-                for emoji in &session.stickers.emoji.keyword_emojis {
+                for emoji in session.stickers.emoji.keyword_emojis.for_query(query) {
                     if !has_skin_tone(emoji) && seen.insert(emoji.replace('\u{fe0f}', "")) {
                         cells.push(PanelCell::Emoji(SharedString::from(emoji.clone())));
                     }
@@ -617,9 +625,16 @@ impl QuillApp {
                 label: category.unwrap_or_else(|| tr(keys::Q_MISC_SEARCH_RESULTS).into()),
                 set_id: None,
             });
+            // Typed: the session's results only while they are this
+            // query's (another window may have searched since).
+            let found = if query.is_empty() || session.stickers.stickers.search_query == query {
+                session.stickers.stickers.found_stickers.len()
+            } else {
+                0
+            };
             push_grid(
                 &mut rows,
-                (0..session.stickers.stickers.found_stickers.len())
+                (0..found)
                     .filter(|ix| self.sticker_listed(StickerSource::Found, *ix))
                     .map(|ix| PanelCell::Sticker {
                         source: StickerSource::Found,

@@ -249,12 +249,13 @@ impl QuillApp {
         ids: Vec<MessageId>,
         cx: &mut Context<Self>,
     ) {
+        let topic = self.open_topic_id(chat);
         if ids.is_empty() {
             if self
                 .share
                 .pending_forward
                 .as_ref()
-                .is_some_and(|draft| draft.from_chat_id == chat)
+                .is_some_and(|draft| draft.is_from(chat, topic))
             {
                 self.share.pending_forward = None;
                 self.share.forward_picker_open = false;
@@ -262,10 +263,10 @@ impl QuillApp {
             }
         } else {
             match self.share.pending_forward.as_mut() {
-                Some(draft) if draft.from_chat_id == chat => draft.message_ids = ids,
+                Some(draft) if draft.is_from(chat, topic) => draft.message_ids = ids,
                 _ => {
                     if let Some(mut draft) = ids.first().and_then(|&first| {
-                        quill::composer::ForwardDraft::from_message(chat, first, false)
+                        quill::composer::ForwardDraft::from_message(chat, topic, first, false)
                     }) {
                         draft.message_ids = ids;
                         self.share.pending_forward = Some(draft);

@@ -69,7 +69,8 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(single) = ForwardDraft::from_message(chat_id, message_id, pending) else {
+        let topic = self.open_topic_id(chat_id);
+        let Some(single) = ForwardDraft::from_message(chat_id, topic, message_id, pending) else {
             self.set_note(StatusNote::error(tr(
                 keys::Q_MISC_CANNOT_FORWARD_THIS_MESSAGE,
             )));
@@ -81,10 +82,10 @@ impl QuillApp {
         // again after this).
         self.viewer.extra.share_at = None;
         if let Some(existing) = self.screen.share.pending_forward.as_mut()
-            && existing.from_chat_id == chat_id
+            && existing.is_from(chat_id, topic)
             && self.screen.share.forward_picker_open
         {
-            existing.toggle(chat_id, message_id, pending);
+            existing.toggle(chat_id, topic, message_id, pending);
             if existing.is_empty() {
                 self.close_forward_picker(window, cx);
             }
@@ -103,9 +104,10 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         self.drop_deleted_selection();
+        let topic = self.open_topic_id(chat_id);
         match self.share.pending_forward.as_mut() {
             Some(draft) => {
-                draft.toggle(chat_id, message_id, pending);
+                draft.toggle(chat_id, topic, message_id, pending);
                 if draft.is_empty() {
                     self.share.pending_forward = None;
                     self.chat_ui.selection_focus = None;
@@ -114,7 +116,7 @@ impl QuillApp {
             }
             None => {
                 self.share.pending_forward =
-                    ForwardDraft::from_message(chat_id, message_id, pending);
+                    ForwardDraft::from_message(chat_id, topic, message_id, pending);
             }
         }
         self.set_note(match self.forward_draft().map(|d| d.count()) {
@@ -183,9 +185,11 @@ impl QuillApp {
         cx.notify();
     }
 
-    /// Chat switch: a forward draft stays only for its source chat (the
-    /// selection) and for the chat the forward bar waits in.
-    pub(super) fn dismiss_forward_for_chat(&mut self, chat_id: ChatId) {
+    /// Chat or conversation switch: a forward draft stays only for the
+    /// conversation it was picked in (the selection: its chat and topic,
+    /// thread or Saved sublist) and for the chat the forward bar waits in.
+    pub(super) fn dismiss_forward_for_view(&mut self, chat_id: ChatId) {
+        let topic = self.open_topic_id(chat_id);
         if self
             .share
             .forward_bar_dest
@@ -198,10 +202,11 @@ impl QuillApp {
                 .share
                 .pending_forward
                 .as_ref()
-                .is_some_and(|draft| draft.from_chat_id != chat_id)
+                .is_some_and(|draft| !draft.is_from(chat_id, topic))
         {
             self.share.pending_forward = None;
             self.share.forward_picker_open = false;
+            self.chat_ui.selection_focus = None;
         }
     }
 

@@ -6,7 +6,7 @@ use crate::diagnostics::MemorySink;
 use crate::ids::{AccountKey, ChatId, MessageId};
 use crate::platform::MemorySecretStore;
 use crate::state::SupergroupFullInfoData;
-use crate::state::{RequestPurpose, Session, SupergroupMembersFetch};
+use crate::state::{LinkPreviewFetch, RequestPurpose, Session, SupergroupMembersFetch};
 use crate::telegram::client::copy_and_parse;
 use crate::telegram::envelope::ChannelMemberStatus;
 use serde_json::Value;
@@ -526,12 +526,7 @@ fn driver_link_preview_prefetch_ingest() {
         .get("https://example.com/story")
         .expect("preview stored");
     assert_eq!(stored.url, "https://example.com/story");
-    let preview = stored
-        .preview
-        .as_ref()
-        .expect("loaded")
-        .as_ref()
-        .expect("card");
+    let preview = stored.preview().expect("card");
     assert_eq!(preview.title, "A short story");
     assert_eq!(preview.description, "Preview body");
     assert!(preview.has_large_media);
@@ -556,7 +551,7 @@ fn driver_link_preview_prefetch_ingest() {
         .composer_previews
         .get("https://example.com/story")
         .expect("preview kept");
-    assert!(stored.preview.as_ref().is_some_and(Option::is_some));
+    assert!(stored.preview().is_some());
     assert!(
         driver
             .session
@@ -592,7 +587,31 @@ fn driver_link_preview_prefetch_ingest() {
         .get("https://example.com/story")
         .expect("state kept");
     assert_eq!(stored.url, "https://example.com/story");
-    assert!(stored.preview.as_ref().expect("resolved").is_none());
+    assert!(matches!(stored.fetch, LinkPreviewFetch::NotFound));
+
+    // Round 16 (area B, finding 9): a transient error (FLOOD_WAIT, a 5xx)
+    // is no "no preview": it is `Failed`, which a composer asks again for.
+    let url = "https://example.com/flood";
+    let flood = driver.session.request(RequestPurpose::GetLinkPreview, None);
+    driver
+        .session
+        .messages
+        .composer_preview_urls
+        .insert(flood, url.to_string());
+    driver.session.messages.composer_previews.asked(url);
+    let json = format!(
+        r#"{{"@type":"error","code":429,"message":"FLOOD_WAIT_5","@extra":"{id}"}}"#,
+        id = flood.0,
+    );
+    let owned = copy_and_parse(&json, &seq, &dyn_sink).expect("parse 429");
+    driver.ingest(owned).expect("ingest 429");
+    let stored = driver
+        .session
+        .messages
+        .composer_previews
+        .get(url)
+        .expect("state kept");
+    assert!(matches!(stored.fetch, LinkPreviewFetch::Failed));
     let _ = std::fs::remove_dir_all(&dir);
 }
 

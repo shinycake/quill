@@ -17,8 +17,8 @@
 
 use super::app::QuillApp;
 use gpui_kit::*;
-use quill::composer::{ComposerEdit, ComposerReplyTo, DeleteConfirm, DraftTopic};
-use quill::ids::{ChatId, MessageId};
+use quill::composer::{ComposerEdit, ComposerReplyTo, DeleteConfirm};
+use quill::ids::{ChatId, MessageId, TopicId};
 
 /// The composer while a message is edited: the edit, the normal draft and
 /// reply stashed for it (`DraftType::Normal`), and the "Cancel editing?" box
@@ -55,11 +55,12 @@ pub(crate) struct ChatUi {
     /// The chat this value was made for; `None` before any chat showed.
     /// Only [`QuillApp::enter_chat_ui`] sets it.
     chat: Option<ChatId>,
-    /// The topic or thread of `chat` it was made for (the composer's draft
-    /// slot, `Session::open_draft_topic`). A forum's topics share the
-    /// chat id, so without it an edit opened in one topic stayed in the
-    /// next topic's composer.
-    topic: DraftTopic,
+    /// The conversation of `chat` it was made for: a forum topic, thread,
+    /// direct-messages conversation or Saved sublist
+    /// (`Session::open_topic_id`; with `chat`, the view's
+    /// `ConversationKey`). A forum's topics share the chat id, so without
+    /// it an edit opened in one topic stayed in the next topic's composer.
+    topic: TopicId,
     /// M2: the rich editor is open — the composer textarea is interpreted
     /// as block markup (`quill::rich::markup_to_blocks`) and sends via
     /// `inputMessageRichMessage`. Opened via the ⛶ button (visible after
@@ -148,7 +149,7 @@ impl ChatUi {
     }
 
     /// A fresh value for `topic` of `chat`.
-    fn for_topic(chat: ChatId, topic: DraftTopic) -> Self {
+    fn for_topic(chat: ChatId, topic: TopicId) -> Self {
         Self {
             chat: Some(chat),
             topic,
@@ -298,7 +299,7 @@ impl QuillApp {
     pub(super) fn enter_chat_ui(&mut self, chat: ChatId, cx: &mut Context<Self>) {
         // Phase B4: the TTL picker belongs to the chat it was opened for.
         self.close_ttl_picker_of_left_chat(Some(chat));
-        self.dismiss_forward_for_chat(chat);
+        self.dismiss_forward_for_view(chat);
         self.cancel_recording_here(cx);
         if self.chat_ui.chat == Some(chat) {
             return;
@@ -307,7 +308,7 @@ impl QuillApp {
         if let Some(left) = self.chat_ui.chat {
             self.drop_inline_play_intent_in_chat(self.windows.scope, left);
         }
-        let mut next = ChatUi::for_topic(chat, self.open_draft_topic(chat));
+        let mut next = ChatUi::for_topic(chat, self.open_topic_id(chat));
         let old = std::mem::take(&mut *self.screen.chat_ui);
         next.pending_reply = old.pending_reply.filter(|bar| bar.reply.belongs_to(chat));
         next.edit_mode = old.edit_mode.filter(|mode| mode.edit.chat_id == chat);
@@ -332,7 +333,7 @@ impl QuillApp {
         let Some(chat) = self.open_chat_id() else {
             return false;
         };
-        self.chat_ui.chat == Some(chat) && self.chat_ui.topic == self.open_draft_topic(chat)
+        self.chat_ui.chat == Some(chat) && self.chat_ui.topic == self.open_topic_id(chat)
     }
 
     pub(super) fn leave_chat_ui(&mut self) {
@@ -351,7 +352,7 @@ impl QuillApp {
         let Some(chat) = self.session().and_then(|session| session.open_chat) else {
             return;
         };
-        let topic = self.open_draft_topic(chat);
+        let topic = self.open_topic_id(chat);
         match self.chat_ui.chat {
             None => {
                 self.screen.chat_ui.chat = Some(chat);
@@ -365,6 +366,8 @@ impl QuillApp {
                 let mut next = ChatUi::for_topic(chat, topic);
                 next.pending_reply = self.screen.chat_ui.pending_reply.take();
                 *self.screen.chat_ui = next;
+                // The selection was the old conversation's messages.
+                self.dismiss_forward_for_view(chat);
             }
             Some(_) => {}
         }

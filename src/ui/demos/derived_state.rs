@@ -96,8 +96,10 @@ impl QuillApp {
     }
 
     fn demo_select_two(&mut self) {
-        if let Some(mut draft) = ForwardDraft::from_message(CHAT, MessageId(101), false) {
-            draft.toggle(CHAT, MessageId(102), false);
+        if let Some(mut draft) =
+            ForwardDraft::from_message(CHAT, quill::ids::TopicId::None, MessageId(101), false)
+        {
+            draft.toggle(CHAT, quill::ids::TopicId::None, MessageId(102), false);
             self.share.pending_forward = Some(draft);
         }
     }

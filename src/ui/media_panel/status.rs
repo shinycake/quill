@@ -109,7 +109,13 @@ impl QuillApp {
             let matching: std::collections::HashSet<String> =
                 quill::emoji_catalog::search(None, query)
                     .map(|entry| strip(entry.emoji))
-                    .chain(emoji.keyword_emojis.iter().map(|e| strip(e)))
+                    .chain(
+                        emoji
+                            .keyword_emojis
+                            .for_query(query)
+                            .iter()
+                            .map(|e| strip(e)),
+                    )
                     .collect();
             let listed = emoji
                 .custom_emoji_stickers

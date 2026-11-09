@@ -427,8 +427,12 @@ const MAIN_WINDOW: &[Surface] = &[
         name: "forward box",
         open: |h| {
             h.act(|app, window, cx| {
-                app.share.pending_forward =
-                    quill::composer::ForwardDraft::from_message(ChatId(11), MessageId(101), false);
+                app.share.pending_forward = quill::composer::ForwardDraft::from_message(
+                    ChatId(11),
+                    quill::ids::TopicId::None,
+                    MessageId(101),
+                    false,
+                );
                 app.open_forward_picker(window, cx);
             })
         },

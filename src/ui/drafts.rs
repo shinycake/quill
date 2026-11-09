@@ -45,6 +45,22 @@ impl QuillApp {
             .unwrap_or_default()
     }
 
+    /// The conversation the view in place shows inside `chat_id`
+    /// (`Session::open_topic_id`): the key, with the chat, of what the view
+    /// opened for one forum topic, thread or Saved sublist.
+    pub(in crate::ui) fn open_topic_id(&self, chat_id: ChatId) -> quill::ids::TopicId {
+        self.session().map_or(quill::ids::TopicId::None, |session| {
+            session.open_topic_id(chat_id)
+        })
+    }
+
+    /// The full key of the conversation the view in place shows, `None`
+    /// with no chat open.
+    pub(in crate::ui) fn open_conversation(&self) -> Option<quill::ids::ConversationKey> {
+        let session = self.session()?;
+        Some(session.open_conversation(session.open_chat?))
+    }
+
     pub(super) fn note_open_draft(&mut self, delayed: bool, cx: &mut Context<Self>) {
         if self.chat_ui.is_editing() {
             return;

@@ -13,7 +13,20 @@ impl QuillApp {
     /// The selection or forward draft as it stands now, `None` when no
     /// picked message is left. Read this, not `share.pending_forward`, for
     /// anything shown or done with the selected messages.
+    ///
+    /// A selection (no forward bar waits for it) is the conversation's it
+    /// was made in: while the view shows another topic, thread or Saved
+    /// sublist of its chat it is not there, so nothing counts, shows,
+    /// deletes or forwards it in the frame before `sync_chat_ui` drops it.
     pub(super) fn forward_draft(&self) -> Option<ForwardDraft> {
+        let live = self.live_forward_draft()?;
+        let elsewhere = self.share.forward_bar_dest.is_none()
+            && live.from_topic != self.open_topic_id(live.from_chat_id);
+        (!elsewhere).then_some(live)
+    }
+
+    /// The stored draft without the ids deleted since they were picked.
+    fn live_forward_draft(&self) -> Option<ForwardDraft> {
         let draft = self.share.pending_forward.as_ref()?;
         let session = self.session();
         let live = draft.clone().retaining(|id| {
@@ -26,7 +39,7 @@ impl QuillApp {
     /// the stored set (a toggle must not leave a ghost id behind).
     pub(super) fn drop_deleted_selection(&mut self) {
         let live = self
-            .forward_draft()
+            .live_forward_draft()
             .map(|draft| draft.message_ids)
             .unwrap_or_default();
         if let Some(draft) = self.share.pending_forward.as_mut() {

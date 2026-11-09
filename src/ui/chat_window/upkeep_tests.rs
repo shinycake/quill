@@ -197,8 +197,12 @@ fn a_forward_from_a_chat_window_answers_there(cx: &mut TestAppContext) {
     let h = new_app(cx);
     let _chat_window = h.open_in_new_window(OTHER, cx);
     read(&h, None, cx, |app, _| {
-        app.share.pending_forward =
-            quill::composer::ForwardDraft::from_message(OPEN, quill::ids::MessageId(101), false);
+        app.share.pending_forward = quill::composer::ForwardDraft::from_message(
+            OPEN,
+            quill::ids::TopicId::None,
+            quill::ids::MessageId(101),
+            false,
+        );
     });
     let result = quill::state::ForwardResult {
         dest_chat_id: OPEN,

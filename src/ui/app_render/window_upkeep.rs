@@ -72,8 +72,61 @@ impl QuillApp {
         // A Premium preview a reducer asked for, in the window showing
         // the chat it is about.
         self.pump_promo_request(cx);
+        // A Premium limit's toast (a full GIF list, too many pins), in the
+        // window of the last press: the one whose action hit the limit.
+        if self.windows.pressed_here() {
+            self.premium_limit_toast_upkeep(window, cx);
+        }
         self.gift_boxes_upkeep(window, cx);
+        self.call_boxes_upkeep(window, cx);
+        self.box_answers_upkeep(window, cx);
         self.checkout_prefill_upkeep(window, cx);
+        // Phase 4.6: push the playback clock into the seek sliders so the
+        // thumb follows elapsed time (the tick has no `&mut Window`).
+        self.sync_seek_slider(window, cx);
+    }
+
+    /// The video chat and stream boxes' follow-ups, in the window that
+    /// hosts the box (`dialog_may_show_in`): "Start video chat" and
+    /// "Stream with..." pressed in a chat window's header go on there with
+    /// the main window minimized, and their error toasts show there.
+    fn call_boxes_upkeep(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        use crate::ui::shell::DialogKind;
+        let here = self.windows.scope;
+        // Starting a video chat: the "join as" list, a refused create.
+        if self
+            .windows
+            .dialog_may_show_in(DialogKind::GroupCallStart, here)
+        {
+            self.group_call_create_frame_upkeep(window, cx);
+        }
+        // "Stream with...": the server error of a failed request.
+        if self.windows.dialog_may_show_in(DialogKind::RtmpStart, here) {
+            self.rtmp_start_frame_upkeep(window, cx);
+        }
+    }
+
+    /// The boxes whose answers fill their fields, in the window that hosts
+    /// them: the folder editor's spec, a collectible's failed lookup.
+    fn box_answers_upkeep(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        use crate::ui::shell::DialogKind;
+        let here = self.windows.scope;
+        // Parity slice: prefill the folder editor once its `getChatFolder`
+        // spec arrives.
+        if self
+            .windows
+            .dialog_may_show_in(DialogKind::FolderEditor, here)
+        {
+            self.maybe_prefill_folder_editor(window, cx);
+        }
+        // A collectible lookup that failed copies its link, with the toast
+        // in the box's window.
+        if self
+            .windows
+            .dialog_may_show_in(DialogKind::CollectibleInfo, here)
+        {
+            self.pump_collectible_info(cx);
+        }
     }
 
     /// Slice P1 fix-up: the checkout opens on Buy before the form arrives;

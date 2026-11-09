@@ -105,6 +105,14 @@ impl crate::ui::on_screen::Farewell for LinkUi {
         {
             app.close_language_box(cx);
         }
+        // The running flow lives in the session, which stays alive in the
+        // background: without this a Join box left unanswered, or a chat
+        // still resolving, popped up on the switch back (`pump_deep_link`).
+        // Kit `close_all_dialogs` runs no `on_close`, so the invite's
+        // cancel never runs on a switch.
+        if let Some(session) = app.session_mut() {
+            session.chats_state.end_deep_link_flow();
+        }
     }
 }
 

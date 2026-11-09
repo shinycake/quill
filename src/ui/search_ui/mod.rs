@@ -301,7 +301,16 @@ impl QuillApp {
             .is_some_and(|session| session.search.chat_search.open)
     }
 
+    /// Open the global search. It lives in the main window's sidebar
+    /// (its field is the main window's own), so asked from a chat window
+    /// (Cmd+K in an empty composer, a hashtag, a search chip) it opens
+    /// there and that window comes forward: opened in place, the hidden
+    /// main window switched to results and the chat window's typing went
+    /// to a field it does not draw.
     pub(super) fn open_search_ui(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.hand_to_main_window(cx, |app, window, cx| app.open_search_ui(window, cx)) {
+            return;
+        }
         if self.pane_mode() != PaneMode::Ready {
             return;
         }
@@ -323,6 +332,27 @@ impl QuillApp {
             .input
             .update(cx, |input, cx| input.focus(window, cx));
         cx.notify();
+    }
+
+    /// The global search for `query` (a clicked hashtag outside its
+    /// group), in the main window ([`Self::open_search_ui`]).
+    pub(in crate::ui) fn open_global_search_for(
+        &mut self,
+        query: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let asked = query.to_string();
+        if self.hand_to_main_window(cx, move |app, window, cx| {
+            app.open_global_search_for(&asked, window, cx)
+        }) {
+            return;
+        }
+        self.open_search_ui(window, cx);
+        self.search_ui
+            .input
+            .update(cx, |input, cx| input.set_value(query, window, cx));
+        self.sync_search_query(query, cx);
     }
 
     pub(in crate::ui) fn close_search_ui(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -472,6 +502,24 @@ impl QuillApp {
         if self.chat_search_is_open() {
             self.close_chat_search_ui(window, cx);
         }
+        // The rest is the global search's, which the main window shows.
+        let asked = tag.to_string();
+        if self.hand_to_main_window(cx, move |app, window, cx| {
+            app.global_tag_search(&asked, scope, window, cx)
+        }) {
+            return;
+        }
+        self.global_tag_search(tag, scope, window, cx);
+    }
+
+    /// `tag` in the global search, in `scope`, in the main window.
+    fn global_tag_search(
+        &mut self,
+        tag: &str,
+        scope: SearchScope,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         self.open_search_ui(window, cx);
         let query = tag.to_string();
         self.search_ui

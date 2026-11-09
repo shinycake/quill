@@ -3015,3 +3015,129 @@ Tests: `asker_tests.rs` (`a_gif_tab_shows_its_section_without_a_press`,
 and `each_window_keeps_its_own_gif_section` now checks that the other
 window shows its kept section without asking), `ai_compose/dialog_tests.rs`
 (`a_chat_windows_style_preview_takes_its_answer_in_its_own_frame`).
+
+### Phase 16 (area B: every main-only step says why, and per-chat state is per conversation)
+
+Round 16 of the review, area B, on `claude/sm-review16-b`. The numbers are
+the review's ranked findings. The four "dodges" are round-14 and round-15
+state that the implicit-state check did not catch. Two shapes kept coming
+back, so each now has a guard at its seam.
+
+**Main-only frame steps (findings 6, 7 and 11).** `frame_upkeep` runs only
+in the main window's frame. Each round found another step there that a
+chat window's box or press depends on, so with the main window minimized
+that work never moved on. Every step left in `frame_upkeep` now has its
+own `// main-only: <why>` comment directly above it. These are: restoring
+chat windows, the sticker box, the earn pages (only main draws the info
+panel), the AI button's blink, a pending story open, a pending mini-app
+action, the story viewer's upkeep (moved out into `story_frame_upkeep`)
+and sign-in. The rest moved to `per_window_upkeep`:
+
+- The video chat and stream boxes (`call_boxes_upkeep`) run in the window
+  that hosts the box (`dialog_may_show_in`), so "Start video chat" pressed
+  in a chat window's header takes its "join as" answer there (6).
+- The AI style notices run in the preview's window when a preview is open,
+  else in the box's window, else in the window of the last press. The
+  emoji and icon fetches run where the box or preview is drawn (7).
+- The Premium-limit toast runs in the window of the last press (11).
+- The folder editor's prefill and a failed collectible lookup run in the
+  window that hosts their box. The seek slider runs in every window.
+
+*Guard.* `check-window-scope.py` now fails CI on any `self.step(` call in
+`frame_upkeep` without a `// main-only:` comment block directly above it,
+and on any inline `self.field` work there. That work belongs in a step
+that says why it is main-only, or in `per_window_upkeep`. Profiling,
+`lock_waits` and `asked_in_place` are not steps. I checked the guard by
+adding an unmarked step and an inline write: both fail.
+
+**Per-conversation state (findings 1 and 2).** The forward selection and
+the AI box were keyed by chat only. A forum's topics, a direct-messages
+topic, a thread and a Saved Messages sublist share one chat id, so a
+selection made in one topic stayed live in the next topic of the same
+forum. There, Delete or Forward acted on the old topic's messages, and
+the AI answer wrote into the next topic's draft.
+
+- `TopicId` has a `Thread { message_thread_id }` variant and a `None`
+  default. `Session::open_conversation(chat)` gives the full
+  `ConversationKey`. The order is: a thread if one is open, else the
+  direct-messages topic, the forum topic or the Saved sublist.
+- `ForwardDraft` carries `from_topic`. `toggle` restarts the selection
+  when it comes from another conversation. `forward_draft()`, the seam
+  every reader goes through, hides a selection from another topic of the
+  chat on screen, even in the frame before the upkeep drops it. The
+  forward bar's own destination is not affected.
+- `ChatUi.topic` is the full `TopicId`, so a Saved sublist or thread
+  change also replaces `ChatUi` whole. On that change,
+  `dismiss_forward_for_view` drops the selection and its focus.
+- `AiComposeOpen` and `ApplyInPlace` hold a `ConversationKey` in place of
+  the chat id. The box closes, and the shortcut's answer is dropped, when
+  the window shows another conversation.
+
+*Designs considered.* (a) Clear the selection in each topic switcher
+(forum topics, threads, direct-messages topics, Saved sublists): the next
+switcher would forget. Rejected. (b) One selection per conversation, kept
+in a map: it would bring back a selection the user left. Rejected. (c, chosen) The selection names
+its conversation, and the read seam hides one that is not on screen.
+
+**What else was built, by finding.**
+
+3. *A deep-link flow outlived an account switch.* `ChatsState::
+   end_deep_link_flow` clears the link, its agent mark and the original.
+   `LinkUi`'s farewell calls it, so switching back does not replay the
+   flow.
+4. *A toast for a closed window blocked the queue.* `asking_window()`
+   filters `Asker::Window(w)` by `has(w)` in the seam, as `open_box_in`
+   already did. A flow whose window closed (a mini app, the wallpaper file
+   picker) now asks as the main window, so its toasts and boxes show.
+   `forget_chat_window` also tells the mini app its window closed
+   (`mini_app_window_closed`).
+5. *A prep whose Send window now shows another chat.* The prep finishes
+   in that window only while it still shows the slot. Otherwise it falls
+   through to `window_where`, as a closed window does.
+8. *Quick search and hashtag search from a chat window opened the main
+   window's search out of sight.* `open_search_ui` and the global branch
+   of a hashtag search hand the work to the main window
+   (`hand_to_main_window`), which comes to the front. A scoped hashtag
+   search closes that window's chat search first.
+9. *A link-preview failure was kept for the session.* An answer is one
+   `LinkPreviewFetch` (`Asked`, `Loaded`, `NotFound`, `Failed`). Error
+   codes 400 and 404 mean there is no preview. Any other error is
+   `Failed`: the chip says the preview could not load, and the composer
+   asks again once the URL changes (`preview_tried`).
+10. *Sticker and emoji keyword search used per-window "already searched"
+    copies.* `KeywordEmojis` keeps its query, and the readers use
+    `for_query`. `MediaPanel::searched` and `keyword_searched` are gone.
+    Only the window of the last press asks, and only when the session's
+    query differs. Found stickers show only for their own query.
+
+**Dodges.** `StyleEditor::pending` is `StyleSave { Editing, Sent }`. The
+preview's `token`, `style: Option<_>` (used as the "lookup running"
+flag) and `removing` are one `PreviewStage { LookingUp { token },
+Shown(style), Removing(style) }`. The baseline line for
+`StyleEditor::pending` is dropped. The `MediaPanel` copies and the mini
+app's `from_window` are covered by 10 and 4.
+
+*Main build fix.* `origin/main` (af2a519b2) did not build: the
+communities module called `ConnectionUi::set_note`, which phase 15
+removed. This branch is built on `fix-community-notes` (PR #1415), which
+fixes it.
+
+Tests: `chat_ui_tests.rs` (`a_selection_made_in_one_topic_goes_with_it`),
+`ai_compose/dialog_tests.rs`
+(`the_box_closes_when_the_view_moves_to_another_topic`,
+`the_shortcuts_answer_skips_another_topic`), `composer/actions.rs` (a
+toggle from another topic restarts the draft), `on_screen_tests.rs`
+(`a_switch_ends_the_link_flow_the_account_was_running`),
+`chat_window/dialog_host_tests.rs`
+(`a_closed_windows_flow_asks_as_the_main_window`,
+`a_chat_windows_video_chat_start_goes_on_in_its_own_frames`,
+`a_premium_limit_toast_shows_in_the_window_that_hit_it`), the connect
+link-preview test (a 429 is `Failed`), `reactions_live`
+(`for_query`), and `mini_app_flow_tests` (opens a real chat window first,
+so the Asker filter keeps it).
+
+**Not done, or not tested.**
+
+- The prep fallback (5) needs a live client to send. It has no test.
+- Search hand-off (8) and the link-preview retry (9) were not run live.
+

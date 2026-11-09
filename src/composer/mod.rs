@@ -1,7 +1,7 @@
 //! Composer send policy. IME composition must never send.
 #![deny(clippy::indexing_slicing)]
 
-use crate::ids::{ChatId, MessageId, ViewGeneration};
+use crate::ids::{ChatId, MessageId, TopicId, ViewGeneration};
 use crate::local_path::{is_explicit_send_path, pick_send_path};
 use crate::telegram::envelope::{BotCommand, MessageContent};
 use crate::telegram::requests::SelfDestructSend;
