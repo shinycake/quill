@@ -180,7 +180,7 @@ fn a_lock_during_a_passcode_job_lands_after_its_answer(cx: &mut TestAppContext) 
             !app.account.passcode.is_locked(),
             "no lock with no passcode to lift it"
         );
-        assert!(!app.account.passcode.lock_after_job);
+        assert!(!app.account.passcode.job.is_running());
     });
     // A job that keeps the passcode (a failed Turn off): the lock lands.
     app.update_in(vcx, |app, window, cx| {
@@ -190,6 +190,35 @@ fn a_lock_during_a_passcode_job_lands_after_its_answer(cx: &mut TestAppContext) 
     });
     frame(vcx);
     assert!(app.read_with(vcx, |app, _| app.account.passcode.is_locked()));
+}
+
+#[gpui_kit::test]
+fn closing_the_passcode_box_keeps_a_lock_waiting_for_the_job(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx, "ready-chats");
+    let vcx = &mut vcx;
+    // Turn off, then Esc (or "Lock now") on the box before the job answers.
+    app.update_in(vcx, |app, window, cx| {
+        app.account.passcode.enabled = true;
+        app.open_passcode(cx);
+        app.run_passcode_job(
+            || (),
+            |app, (), _, _| app.account.passcode.enabled = false,
+            window,
+            cx,
+        );
+        app.close_passcode(window, cx);
+        assert!(
+            app.account.passcode.job.is_running(),
+            "the job outlives its box"
+        );
+        app.lock_by_passcode(cx);
+        assert!(!app.account.passcode.is_locked(), "held for the answer");
+    });
+    frame(vcx);
+    assert!(
+        !app.read_with(vcx, |app, _| app.account.passcode.is_locked()),
+        "locked with no passcode to lift it"
+    );
 }
 
 #[gpui_kit::test]

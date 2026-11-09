@@ -132,12 +132,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// `getCustomEmojiStickers` for the passkeys' software icons, once per
     /// id (shares the custom emoji cache with message text).
     fn maybe_resolve_passkey_icons(&mut self) -> Result<(), ConnectSendError> {
-        if !self.chats_path_active()
-            || self
-                .session
-                .requests
-                .has_purpose(RequestPurpose::GetCustomEmojiStickers)
-        {
+        if !self.chats_path_active() || !self.custom_emoji_lookup_idle() {
             return Ok(());
         }
         let emoji = &self.session.stickers.emoji;
@@ -156,18 +151,6 @@ impl<S: JsonSender> ConnectDriver<S> {
             .collect();
         ids.sort_unstable();
         ids.dedup();
-        if ids.is_empty() {
-            return Ok(());
-        }
-        self.session
-            .stickers
-            .emoji
-            .status_resolution_attempted
-            .extend(ids.iter().copied());
-        let extra = self
-            .session
-            .request(RequestPurpose::GetCustomEmojiStickers, None);
-        let json = crate::telegram::requests_emoji::get_custom_emoji_stickers(extra, &ids);
-        self.send_json_request(extra, &json).map(|_| ())
+        self.lookup_custom_emoji(&ids).map(|_| ())
     }
 }

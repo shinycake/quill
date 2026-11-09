@@ -52,6 +52,17 @@ impl QuillApp {
         self.ensure_live_location_tick(cx);
         // A clicked mention, hashtag, command or link (`entity_links`).
         self.run_pending_link(window, cx);
+        // `parity:platform-deep-links`: the chat or box a deep link
+        // resolved to, in the frame of the window it belongs to.
+        self.run_resolved_deep_link(window, cx);
+        // The transcription quota's toast, in the window of the last press
+        // (the one whose Transcribe used a trial).
+        if self.windows.pressed_here() {
+            self.sync_speech_trial_hint(window, cx);
+        }
+        // A Premium preview a reducer asked for, in the window showing
+        // the chat it is about.
+        self.pump_promo_request(cx);
         self.gift_boxes_upkeep(window, cx);
         self.checkout_prefill_upkeep(window, cx);
     }

@@ -465,7 +465,7 @@ impl QuillApp {
     /// MED1: effective composer grouping — the user's toggle when set,
     /// else the remembered pref (grouped when remembering is off).
     pub(in crate::ui) fn composer_group_media_effective(&self) -> bool {
-        self.composer_ui.group_media.unwrap_or_else(|| {
+        self.pending_send().group_media.unwrap_or_else(|| {
             self.session()
                 .map(|s| s.settings.media_prefs.default_grouping())
                 .unwrap_or(true)
@@ -476,7 +476,7 @@ impl QuillApp {
     /// persisted when "remember grouping" is on (TGX `RememberAlbumSetting`).
     pub(in crate::ui) fn toggle_composer_group_media(&mut self, cx: &mut Context<Self>) {
         let next = !self.composer_group_media_effective();
-        self.composer_ui.group_media = Some(next);
+        self.set_composer_group_media(Some(next));
         if self
             .session()
             .is_some_and(|s| s.settings.media_prefs.remember_media_grouping)
@@ -485,6 +485,11 @@ impl QuillApp {
         } else {
             cx.notify();
         }
+    }
+
+    /// MED1: the open slot's "group media" choice (`None`: the pref).
+    pub(in crate::ui) fn set_composer_group_media(&mut self, choice: Option<bool>) {
+        self.update_pending_send(|send| send.group_media = choice);
     }
 
     /// MED1: flip the "remember media grouping" setting itself.

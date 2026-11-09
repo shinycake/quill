@@ -54,6 +54,10 @@ pub struct BotsState {
     /// (Phase 3.2). The UI takes it on the next poll and shows the answer in
     /// the status line (URL answers open in the OS browser).
     pub last_callback_answer: Option<CallbackQueryAnswer>,
+    /// The chat of the button's message `last_callback_answer` answers:
+    /// a URL in it opens as a link clicked in the window showing that
+    /// chat. Written with it (`Session::note_callback_answer`).
+    pub last_callback_chat: Option<ChatId>,
     /// Mini apps (docs/decisions/codex-miniapp-webview.md): open answers,
     /// consent answers and the attachment menu bots.
     pub web_apps: WebApps,
@@ -102,6 +106,7 @@ impl BotsState {
             similar_bots: HashMap::new(),
             game_scores: HashMap::new(),
             last_callback_answer: None,
+            last_callback_chat: None,
             web_apps: WebApps::default(),
             last_login_url_info: None,
             login_url_request: None,

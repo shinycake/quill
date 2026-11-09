@@ -130,7 +130,11 @@ fn replay_sponsored_report_ads_hidden_and_premium_required() {
     report(&mut session, "reportSponsoredResultPremiumRequired");
     assert!(session.messages.last_sponsored_report.is_none());
     assert_eq!(
-        session.payments.hub.promo_request,
+        session
+            .payments
+            .hub
+            .promo_request
+            .map(|request| request.feature),
         Some(quill::premium_hub::PremiumFeature::DisabledAds.into())
     );
 }

@@ -119,7 +119,7 @@ impl QuillApp {
         match option {
             ReplyOption::UpdateQuote => {
                 self.share.reply_elsewhere_open = false;
-                self.share.reply_quote_open = true;
+                self.share.reply_quote_for = Some((reply.chat_id, reply.message_id));
                 self.connection
                     .set_note(StatusNote::silent(tr(keys::Q_OPS_PICK_THE_PART_TO_QUOTE)));
             }
@@ -154,7 +154,7 @@ impl QuillApp {
         if self.chat_ui.reply().is_none() {
             return;
         }
-        self.share.reply_quote_open = false;
+        self.share.reply_quote_for = None;
         self.share.reply_elsewhere_open = true;
         self.share.forward_picker_open = false;
         self.share.focus_search = true;
@@ -167,7 +167,7 @@ impl QuillApp {
     pub(super) fn close_reply_panels(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let was_open = self.share.reply_elsewhere_open;
         self.share.reply_elsewhere_open = false;
-        self.share.reply_quote_open = false;
+        self.share.reply_quote_for = None;
         if was_open {
             self.share
                 .search_input
@@ -244,9 +244,20 @@ impl QuillApp {
         cx.notify();
     }
 
+    /// The quote picker is open: Update Quote opened it for the message
+    /// the composer replies to now.
+    pub(in crate::ui) fn reply_quote_open(&self) -> bool {
+        let Some(open_for) = self.share.reply_quote_for else {
+            return false;
+        };
+        self.chat_ui
+            .reply()
+            .is_some_and(|reply| (reply.chat_id, reply.message_id) == open_for)
+    }
+
     /// The quote picker: the parts of the message, one click each.
     pub(super) fn reply_quote_panel(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        if !self.share.reply_quote_open {
+        if !self.reply_quote_open() {
             return None;
         }
         self.reply_quote_panel_body(cx)
@@ -258,7 +269,7 @@ impl QuillApp {
     /// The outer function repeats this body's first check; keep the two in step.
     #[inline(never)]
     fn reply_quote_panel_body(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        if !self.share.reply_quote_open {
+        if !self.reply_quote_open() {
             return None;
         }
         let reply = self.chat_ui.reply()?;

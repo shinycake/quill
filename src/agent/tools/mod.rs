@@ -336,12 +336,19 @@ thread_local! {
     static GENERATION: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
     /// The connection the current call came on (0 when none).
     static CONN: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+    /// [`crate::agent::access::lock_count`] when the current call began
+    /// (`u64::MAX` off a call, which [`still_allowed`] then refuses).
+    static LOCKS_AT_START: std::cell::Cell<u64> = const { std::cell::Cell::new(u64::MAX) };
 }
 
+/// What a write answers when Quill locked while it waited its turn: the
+/// check runs before anything goes out, so nothing did.
+pub(crate) const LOCKED_BEFORE_SENDING_MESSAGE: &str = "Quill was locked while this waited its turn, so nothing was sent or changed. Ask the user to unlock Quill, then retry.";
+
 /// Refuses once Agent access went off (or the strip's Revoke was clicked,
-/// or the token was reset) after the current call began, or the user
-/// revoked this agent's connection: a write that waited in the queue must
-/// not go out.
+/// or the token was reset) after the current call began, Quill locked
+/// since then, or the user revoked this agent's connection: a write that
+/// waited in the queue must not go out.
 pub(crate) fn still_allowed() -> Result<(), ToolError> {
     let began = GENERATION
         .try_with(std::cell::Cell::get)
@@ -350,6 +357,9 @@ pub(crate) fn still_allowed() -> Result<(), ToolError> {
     if conn != 0 && crate::agent::activity::is_revoked(conn) {
         return Err(ToolError::new(crate::agent::server::REVOKED_MESSAGE));
     }
+    if locked_since_call_began() {
+        return Err(ToolError::new(LOCKED_BEFORE_SENDING_MESSAGE));
+    }
     if crate::agent::access::enabled() && crate::agent::access::generation() == began {
         Ok(())
     } else {
@@ -357,6 +367,16 @@ pub(crate) fn still_allowed() -> Result<(), ToolError> {
             "Agent access was turned off in Quill, so nothing was sent or changed. Ask the user to turn it back on.",
         ))
     }
+}
+
+/// Quill is locked, or locked at some point since the current call began:
+/// a step with an effect outside the answer (a send, a file copy) must not
+/// run, since [`withheld_if_locked`] hides only the answer.
+pub(crate) fn locked_since_call_began() -> bool {
+    let locks = LOCKS_AT_START
+        .try_with(std::cell::Cell::get)
+        .unwrap_or(u64::MAX);
+    crate::agent::access::locked_since(locks)
 }
 
 /// The name of the agent making the current call.
@@ -406,6 +426,11 @@ pub fn granted_message_arrived(
     since: &mut u64,
     wait: std::time::Duration,
 ) -> Result<bool, ToolError> {
+    // Locked, the wait below returns at once with nothing: an error makes
+    // the watcher sleep between looks instead of spinning a core.
+    if crate::agent::access::paused_by_lock() {
+        return Err(ToolError::new(crate::agent::access::LOCKED_MESSAGE));
+    }
     let ctx = Ctx::active()?;
     let me = target::my_user_id(&ctx)?;
     let mut known = std::collections::HashMap::new();
@@ -440,6 +465,7 @@ pub fn call_on(conn: u64, name: &str, arguments: &Value, agent: &str) -> Value {
     let _ = CONN.try_with(|current| current.set(conn));
     let _ = ui_shot::take_attached();
     let locks = crate::agent::access::lock_count();
+    let _ = LOCKS_AT_START.try_with(|current| current.set(locks));
     let result = match all_tools().find(|tool| tool.name == name) {
         // Locked: no read, send or window step, `quill_status` included
         // (it reads the account).
@@ -489,6 +515,12 @@ pub(crate) fn withheld_if_locked(
     if !crate::agent::access::locked_since(locks) {
         return result;
     }
+    // Refused at its queue turn ([`still_allowed`]): known not done.
+    if let Err(ToolError(message)) = &result
+        && message == LOCKED_BEFORE_SENDING_MESSAGE
+    {
+        return result;
+    }
     Err(ToolError::new(if read_only {
         crate::agent::access::LOCKED_MESSAGE
     } else {
@@ -521,6 +553,64 @@ pub(crate) fn int_arg(
 #[cfg(test)]
 mod tests {
     use super::{all_tools, call, catalog};
+    use crate::agent::access;
+
+    /// A write that waited in the paced queue while Quill locked is refused
+    /// at its turn, with a message that says nothing went out.
+    #[test]
+    fn a_lock_while_a_write_waits_stops_it() {
+        let _guard = crate::locks::lock_or_recover(&access::TEST_LOCK);
+        // The switch stays in memory: `quill agent` tests read it from disk.
+        crate::fast_buttons::set_persistence(false);
+        access::set_enabled(true);
+        access::set_paused_by_lock(false);
+        let begin = || {
+            let _ = super::GENERATION.try_with(|current| current.set(access::generation()));
+            let _ = super::CONN.try_with(|current| current.set(0));
+            let _ = super::LOCKS_AT_START.try_with(|current| current.set(access::lock_count()));
+        };
+        begin();
+        assert!(super::still_allowed().is_ok(), "nothing changed");
+        access::set_paused_by_lock(true);
+        access::set_paused_by_lock(false);
+        let refused = super::still_allowed();
+        assert!(
+            matches!(&refused, Err(super::ToolError(message)) if message == super::LOCKED_BEFORE_SENDING_MESSAGE),
+            "locked and unlocked while it waited"
+        );
+        let started = access::lock_count().saturating_sub(1);
+        let answer = super::withheld_if_locked(
+            false,
+            started,
+            refused.map(|()| super::ToolOutput {
+                text: "sent".into(),
+                data: serde_json::json!({}),
+            }),
+        );
+        assert!(
+            matches!(&answer, Err(super::ToolError(message)) if message == super::LOCKED_BEFORE_SENDING_MESSAGE),
+            "the call says nothing went out, not that it may have"
+        );
+        begin();
+        assert!(super::still_allowed().is_ok(), "a call begun after it");
+        access::set_enabled(false);
+    }
+
+    /// Locked, the `quill://unread` watcher's look fails at once, so the
+    /// watcher sleeps between looks instead of spinning.
+    #[test]
+    fn a_locked_watch_look_fails_without_waiting() {
+        let _guard = crate::locks::lock_or_recover(&access::TEST_LOCK);
+        access::set_paused_by_lock(true);
+        let mut since = 0;
+        let look = super::granted_message_arrived(&mut since, std::time::Duration::MAX);
+        assert!(
+            matches!(&look, Err(super::ToolError(message)) if message == access::LOCKED_MESSAGE),
+            "{:?}",
+            look.as_ref().err().map(|e| &e.0)
+        );
+        access::set_paused_by_lock(false);
+    }
 
     #[test]
     fn every_tool_is_described_with_an_example_and_output() {

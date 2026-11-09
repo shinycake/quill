@@ -31,8 +31,9 @@ pub(crate) struct DialogUi {
     /// "Appearance" of a channel or group: colors and emoji status.
     pub(super) chat_appearance_dialog: Option<super::chat_appearance_dialog::ChatAppearanceDialog>,
     /// B10: a profile photo gallery whose list was requested; the viewer
-    /// opens when it lands (checked by the poll loop).
-    pub(super) pending_profile_gallery: Option<quill::state::PhotoOwner>,
+    /// opens when it lands (checked by the poll loop), if nothing else
+    /// happened in its window since.
+    pub(super) pending_profile_gallery: Option<super::profile_panels::PendingGallery>,
     /// "Do you want to delete this photo?" for a photo deleted from the
     /// profile photo viewer, with whether an earlier photo's message goes
     /// for everyone.

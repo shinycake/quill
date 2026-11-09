@@ -52,11 +52,6 @@ pub enum GroupConfirmAction {
     /// line 12216). Telegram X's "Restart" (the unblock-slot action) only
     /// re-sends; the clear is the profile-action contract here.
     RestartBot,
-    /// Slice A2: abort the pending recovery-email setup
-    /// (`cancelRecoveryEmailAddressVerification`, schema 1.8.67, line
-    /// 11467). TGX confirms via `AbortRecoveryEmailConfirm`; the abort
-    /// carries no chat, so the dialog's chat id is a dummy.
-    AbortRecoveryEmailSetup,
     /// Slice payments: "Clear saved payment/shipping info" —
     /// `deleteSavedOrderInfo` + `deleteSavedCredentials` (schema 1.8.67,
     /// lines 15286 / 15289). The dialog's chat id is a dummy.

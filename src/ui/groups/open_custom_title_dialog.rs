@@ -305,14 +305,6 @@ impl QuillApp {
                             &[("sent", &sent.to_string())],
                         ))
                     }
-                    // Slice A2: abort the pending recovery-email setup
-                    // (`cancelRecoveryEmailAddressVerification`, schema
-                    // 1.8.67, line 11467). The dialog carries no chat, so
-                    // `dialog.chat_id` is unused here.
-                    GroupConfirmAction::AbortRecoveryEmailSetup => live
-                        .driver
-                        .cancel_recovery_email_setup()
-                        .map(|_| tr(keys::Q_PEOPLE_ABORTING_EMAIL_SETUP).to_string()),
                     GroupConfirmAction::RemoveSavedGif { file_id } => live
                         .driver
                         .set_gif_saved(file_id, false)

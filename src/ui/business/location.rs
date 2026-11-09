@@ -27,12 +27,14 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> LocationDraft {
-        let saved = self.my_business().location.unwrap_or_default();
+        let base = self.my_business().location;
+        let saved = base.clone().unwrap_or_default();
         let address = super::live_input(window, cx, tr(keys::LOCATION_ADDRESS));
         address.update(cx, |input, cx| {
             input.set_value(saved.address.clone(), window, cx)
         });
         LocationDraft {
+            base,
             address,
             point_e6: saved.point_e6,
         }
@@ -120,17 +122,23 @@ impl QuillApp {
 
     /// Save of the location screen (when it is left).
     pub(super) fn save_business_location(&mut self, cx: &mut Context<Self>) -> Leave {
-        let Some((address, point)) = self
+        let Some((address, point, base)) = self
             .dialogs
             .business_dialog
             .as_ref()
             .and_then(|d| d.location.as_ref())
-            .map(|l| (l.address.read(cx).value().to_string(), l.point_e6))
+            .map(|l| {
+                (
+                    l.address.read(cx).value().to_string(),
+                    l.point_e6,
+                    l.base.clone(),
+                )
+            })
         else {
             return Leave::Go(None);
         };
         let wanted = location_to_save(&address, point);
-        if wanted == self.my_business().location {
+        if wanted == base {
             return Leave::Go(None);
         }
         self.business_send("location", |driver| {

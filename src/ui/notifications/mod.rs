@@ -209,7 +209,7 @@ impl QuillApp {
                     if generation != this.connect.generation {
                         return None;
                     }
-                    let work_left = this.poll_live(cx);
+                    let work_left = this.poll_pass(cx);
                     let now = std::time::Instant::now();
                     let active = this.frame.window_active.get();
                     let redraw = this.delivery.polled_redraw.next_due(active, now);
@@ -310,10 +310,19 @@ impl QuillApp {
         }
     }
 
+    /// One pass of the poll loop ([`Self::poll_live`]). No window asked
+    /// for what it opens, whichever window's input ran last: an answer
+    /// that opens a box or a link names the window its request carried
+    /// (`as_asked_by`), and one that carried none shows in the window of
+    /// the last press (`chat_window::dialog_hosts`).
+    pub(super) fn poll_pass(&mut self, cx: &mut Context<Self>) -> bool {
+        self.unasked(|this| this.poll_live(cx))
+    }
+
     /// Drain and apply what TDLib has queued, within the budget. Returns
     /// whether work is known to be left, so the poll loop comes back after
-    /// its gap instead of resting.
-    pub(super) fn poll_live(&mut self, cx: &mut Context<Self>) -> bool {
+    /// its gap instead of resting. Run through [`Self::poll_pass`].
+    fn poll_live(&mut self, cx: &mut Context<Self>) -> bool {
         // Updates apply to the main window's view; a chat window's input
         // may have left its own state in place.
         self.set_window_scope(None);

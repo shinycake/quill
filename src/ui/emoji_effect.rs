@@ -42,8 +42,15 @@ use std::time::{Duration, Instant};
 const START_WAIT: Duration = Duration::from_secs(2);
 /// tdesktop `kSmallDelay`: a new effect starts this long after the last.
 const SMALL_DELAY: Duration = Duration::from_millis(200);
-/// Effects waiting or playing, at most.
+/// Effects waiting or playing for one chat, at most. Per chat: effects
+/// kept for a chat only a minimized window shows (they wait for it to draw)
+/// never hold back the chats of the other windows.
 const MAX_QUEUED: usize = 8;
+
+/// `chat` has as many effects waiting or playing as it may.
+fn chat_is_full(active: &[Active], chat: ChatId) -> bool {
+    active.iter().filter(|a| a.effect.chat_id == chat).count() >= MAX_QUEUED
+}
 /// The glyph's line is this many times its size tall.
 const GLYPH_LINE: f32 = 1.2;
 /// Frame rate asked of the clock while an effect waits for its first frame.
@@ -236,7 +243,7 @@ pub(crate) fn emoji_effects_on(key: Key) -> Vec<(EmojiEffect, bool)> {
 pub(super) fn push_premium(effect: EmojiEffect, outgoing: bool, now: Instant) {
     ACTIVE.with(|active| {
         let mut active = active.borrow_mut();
-        if active.len() >= MAX_QUEUED {
+        if chat_is_full(&active, effect.chat_id) {
             return;
         }
         active.push(Active {
@@ -264,7 +271,7 @@ pub(super) fn push_message(
 ) {
     ACTIVE.with(|active| {
         let mut active = active.borrow_mut();
-        if active.len() >= MAX_QUEUED {
+        if chat_is_full(&active, effect.chat_id) {
             return;
         }
         active.push(Active {
@@ -587,7 +594,7 @@ impl QuillApp {
                     // Only for a message on screen; a few play at once and
                     // the rest wait.
                     let key = (effect.chat_id.0, effect.message_id.0);
-                    if anchor(key).is_none() || active.len() >= MAX_QUEUED {
+                    if anchor(key).is_none() || chat_is_full(&active, effect.chat_id) {
                         continue;
                     }
                     active.push(Active {
@@ -784,8 +791,8 @@ impl QuillApp {
 #[cfg(test)]
 mod tests {
     use super::{
-        BADGE_GRACE, SHIFT_SHARE, START_WAIT, badge_within_grace, effect_origin, may_start,
-        shift_for, sticker_wait_over,
+        ACTIVE, BADGE_GRACE, MAX_QUEUED, SHIFT_SHARE, START_WAIT, badge_within_grace,
+        effect_origin, may_start, push_premium, shift_for, sticker_wait_over,
     };
     use std::time::{Duration, Instant};
 
@@ -852,5 +859,52 @@ mod tests {
         assert!(may_start(&half));
         // Five is the limit.
         assert!(!may_start(&[(ms(1500), ms(2000)); 5]));
+    }
+
+    fn effect_in(chat: i64) -> quill::emoji_interaction::EmojiEffect {
+        use quill::ids::{ChatId, FileId, MessageId};
+        use quill::telegram::envelope::{StickerFormat, StickerItem};
+        quill::emoji_interaction::EmojiEffect {
+            chat_id: ChatId(chat),
+            message_id: MessageId(1),
+            sticker: StickerItem {
+                custom_emoji_id: None,
+                id: 1,
+                set_id: 0,
+                emoji: "x".into(),
+                width: 512,
+                height: 512,
+                format: StickerFormat::Tgs,
+                file_id: FileId(1),
+                thumb_file_id: None,
+                thumb_width: 0,
+                thumb_height: 0,
+                requires_premium: false,
+                premium_animation: None,
+            },
+            incoming: false,
+        }
+    }
+
+    /// Round 14 (area B, finding 11): the cap is per chat, so effects
+    /// waiting for a minimized window's chat never drop another window's.
+    #[test]
+    fn a_full_chat_does_not_hold_back_another_chats_effects() {
+        let now = Instant::now();
+        for _ in 0..MAX_QUEUED + 2 {
+            push_premium(effect_in(1), false, now);
+        }
+        push_premium(effect_in(2), false, now);
+        let per_chat = |chat: i64| {
+            ACTIVE.with(|active| {
+                active
+                    .borrow()
+                    .iter()
+                    .filter(|a| a.effect.chat_id.0 == chat)
+                    .count()
+            })
+        };
+        assert_eq!(per_chat(1), MAX_QUEUED);
+        assert_eq!(per_chat(2), 1);
     }
 }

@@ -70,7 +70,6 @@ impl Render for QuillApp {
         let image_cache = self.slices.image_cache();
         self.sync_capture_block(window);
         self.sync_viewer_hdr(window);
-        self.sync_speech_trial_hint(window, cx);
         self.sync_window_title(window);
         super::window_frame::sync(window, self.appearance.native_window_frame);
         // Rows the history list painted last frame are what the user saw.
@@ -111,7 +110,8 @@ impl Render for QuillApp {
         let status_toast = self.status_toast_in(None, cx);
         // The menus' and layers' focus hand-off runs first in
         // `per_window_upkeep`, so a chat window's frame runs its own.
-        self.frame_upkeep(window, cx);
+        // The rest is the app's: no window asked for what it opens.
+        self.unasked(|this| this.frame_upkeep(window, cx));
         // Locked: the lock screen is all this window builds.
         if self.account.passcode.is_locked() {
             return self.locked_root(outer_scope, cx);

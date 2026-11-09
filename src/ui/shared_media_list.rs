@@ -7,6 +7,7 @@
 use super::app::QuillApp;
 use super::pressable::PressableDiv;
 use super::scroll_load::{load_due, loading_row, scrolled_near_end, watch_scroll};
+use super::shared_media_grid_state::PageKey;
 use crate::ui::status_note::StatusNote;
 use gpui_kit::component::button::{Button, ButtonVariants};
 use gpui_kit::component::menu::ContextMenuExt as _;
@@ -38,9 +39,11 @@ impl QuillApp {
             .id(("shared-media-items", tab.index() as u64))
             .flex_1()
             .overflow_y_scroll()
-            .when_some(self.shared_media_grid.list_scroll(tab), |list, scroll| {
-                list.track_scroll(scroll)
-            })
+            .when_some(
+                self.shared_media_grid
+                    .list_scroll(tab, PageKey::of(state_chat, state)),
+                |list, (scroll, _)| list.track_scroll(scroll),
+            )
             .py_1();
         if let Some(bar) = self.shared_media_date_bar(tab, cx) {
             list = list.child(bar);
@@ -172,10 +175,10 @@ impl QuillApp {
         let Some(state) = media.tab_at(tab) else {
             return;
         };
-        let (Some(scroll), Some(asked)) = (
-            self.shared_media_grid.list_scroll(tab),
-            self.shared_media_grid.list_asked(tab),
-        ) else {
+        let Some((scroll, asked)) = self
+            .shared_media_grid
+            .list_scroll(tab, PageKey::of(media.chat_id, state))
+        else {
             return;
         };
         if !media.open

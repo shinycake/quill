@@ -11,12 +11,16 @@
 //! - **A session-wide kind** (the default) has one flag for the account, so
 //!   it shows in one window: the one that asked for it last. Every open
 //!   names its window as it sets the flag ([`QuillApp::open_box`]: the
-//!   window whose state is in place, which is the window of the user
-//!   action; [`ChatWindows::open_box_in`] for an answer, with the window of
-//!   the flow that asked, such as a link's `flow_window`). Asked for again
-//!   from another window while shown, it moves there. An ask made before
-//!   the answer that sets the flag waits for it.
-//!   `scripts/dialog_hosts.py` rejects an open that names no window.
+//!   window that asked, see [`Asker`]; [`ChatWindows::open_box_in`] for an
+//!   answer, with the window of the flow that asked, such as a link's
+//!   `flow_window`). Asked for again from another window while shown, it
+//!   moves there. An ask made before the answer that sets the flag waits
+//!   for it.
+//!   `scripts/dialog_hosts.py` rejects an open that names no window, and
+//!   an `open_box` (or a queued link) that runs where no window asked: the
+//!   poll loop, the main window's own upkeep and the toast drain. Those
+//!   carry the asking window with the request and open under
+//!   [`QuillApp::as_asked_by`].
 //! - An open no path named (a reducer's answer nothing asked for) shows in
 //!   the window of the last press or key, and stays there once shown.
 //!   Pointer moves and scrolls do not count: they only put a window's state
@@ -56,28 +60,86 @@ pub(in crate::ui) struct DialogHosts {
     left: Vec<DialogKind>,
 }
 
+/// Who asks for what the code running now opens: a box
+/// ([`QuillApp::open_box`]) or a link ([`QuillApp::queue_deep_link`]).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(in crate::ui) enum Asker {
+    /// The window whose state is in place: input runs with the window of
+    /// the press or key in place, a window's frame with its own, deferred
+    /// work (`scoped`) with the window it started in. The default.
+    InPlace,
+    /// The window a flow that runs away from it carried (`None`: the main
+    /// window), while that part runs ([`QuillApp::as_asked_by`]).
+    Window(Option<ChatId>),
+    /// No window asked: the poll loop, the main window's own upkeep and
+    /// the toast drain ([`QuillApp::unasked`]). The window in place there
+    /// is the main one whichever window the user acted in, so an open that
+    /// did not carry its window shows in the window of the last press.
+    Nobody,
+}
+
 impl QuillApp {
-    /// The window whose state is in place asks for the box `kind`, as its
-    /// flag is set (or before the request whose answer sets it): the box
-    /// shows there, and moves there from another window that shows it.
-    /// Input, deferred work (`scoped`) and a window's frame each run with
-    /// their window's state in place, so this is the window of the action.
+    /// The window that asked for what runs now (`None`: the main window),
+    /// or `None` when no window did ([`Asker::Nobody`]).
+    pub(in crate::ui) fn asking_window(&self) -> Option<Option<ChatId>> {
+        match self.windows.asker {
+            Asker::InPlace => Some(self.windows.scope),
+            Asker::Window(window) => Some(window),
+            Asker::Nobody => None,
+        }
+    }
+
+    /// The window showing `chat` (`None`: the main window), as the window
+    /// that asked for an answer about it: a request made from a message,
+    /// a button or a bar of that chat, which shows in one window only.
+    pub(in crate::ui) fn window_showing(&self, chat: ChatId) -> Option<ChatId> {
+        self.windows.has_window(chat).then_some(chat)
+    }
+
+    /// The window that asked for what runs now asks for the box `kind`, as
+    /// its flag is set (or before the request whose answer sets it): the
+    /// box shows there, and moves there from another window that shows it.
+    /// Where no window asked ([`Asker::Nobody`]) it shows in the window of
+    /// the last press; such a site carries its window instead
+    /// (`scripts/dialog_hosts.py`).
     pub(in crate::ui) fn open_box(&mut self, kind: DialogKind) {
-        let here = self.windows.asking.unwrap_or(self.windows.scope);
+        let here = self.asking_window_or_last_press();
         self.windows.open_box_in(kind, here);
     }
 
+    /// The window of the action running now, or the window of the last
+    /// press where no window asked ([`Asker::Nobody`]).
+    pub(in crate::ui) fn asking_window_or_last_press(&self) -> Option<ChatId> {
+        self.asking_window().unwrap_or(self.windows.last_press)
+    }
+
     /// Run `f`, the part of a flow that runs away from the window that
-    /// started it (a resolved link, run in the main window's frame), with
-    /// `window` as the window its boxes name ([`Self::open_box`]).
+    /// started it (a resolved link, an answer drained by the poll loop),
+    /// with `window` as the window that asked: its boxes and links name it.
     pub(in crate::ui) fn as_asked_by<R>(
         &mut self,
         window: Option<ChatId>,
         f: impl FnOnce(&mut Self) -> R,
     ) -> R {
-        let outer = self.windows.asking.replace(window);
+        self.with_asker(Asker::Window(window), f)
+    }
+
+    /// Run `f`, work no window asked for (the poll loop, the main
+    /// window's own upkeep, the toast drain), as [`Asker::Nobody`].
+    pub(in crate::ui) fn unasked<R>(&mut self, f: impl FnOnce(&mut Self) -> R) -> R {
+        self.with_asker(Asker::Nobody, f)
+    }
+
+    /// Run `f`, a window's own frame upkeep, as the window in place
+    /// ([`Asker::InPlace`]), inside work no window asked for.
+    pub(in crate::ui) fn asked_in_place<R>(&mut self, f: impl FnOnce(&mut Self) -> R) -> R {
+        self.with_asker(Asker::InPlace, f)
+    }
+
+    pub(super) fn with_asker<R>(&mut self, asker: Asker, f: impl FnOnce(&mut Self) -> R) -> R {
+        let outer = std::mem::replace(&mut self.windows.asker, asker);
         let result = f(self);
-        self.windows.asking = outer;
+        self.windows.asker = outer;
         result
     }
 
@@ -91,16 +153,19 @@ impl QuillApp {
         f: impl FnOnce(&mut Self, &mut gpui_kit::Context<Self>),
     ) {
         let target = self
-            .windows
-            .asking
-            .flatten()
-            .filter(|chat| self.windows.has(*chat))
-            .or(self.windows.scope);
+            .asking_window()
+            .unwrap_or(self.windows.last_press)
+            .filter(|chat| self.windows.has(*chat));
         self.in_window_scope(target, cx, f);
     }
 }
 
 impl ChatWindows {
+    /// The last press or key was in the window whose state is in place.
+    pub(in crate::ui) fn pressed_here(&self) -> bool {
+        self.last_press == self.scope
+    }
+
     /// The window `window` (`None`: the main window) asks for the box
     /// `kind`: [`QuillApp::open_box`] for an answer whose flow knows the
     /// window that asked. A per-window kind needs no ask: its flag is in
@@ -119,6 +184,17 @@ impl ChatWindows {
                 shown: false,
             },
         );
+    }
+
+    /// The window that shows, or asked for, the session-wide box `kind`
+    /// (`None`: the main window); with neither, the window of the last
+    /// press. An answer that follows up on a box (its request failed on a
+    /// limit) opens its own box where that one is.
+    pub(in crate::ui) fn window_of_box(&self, kind: DialogKind) -> Option<ChatId> {
+        match self.dialogs.hosts.get(&kind) {
+            Some(owner) => owner.window,
+            None => self.last_press,
+        }
     }
 
     /// Whether the window `host` (`None`: the main window) may show the

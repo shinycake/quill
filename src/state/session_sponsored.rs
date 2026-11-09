@@ -174,14 +174,17 @@ impl Session {
         if self.my_is_premium() {
             return Some(true);
         }
-        self.request_no_ads_preview();
+        self.request_no_ads_preview(chat_id);
         Some(false)
     }
 
     /// tdesktop `ShowPremiumPreviewBox(PremiumFeature::NoAds)`, opened by
     /// the UI on its next frame.
-    fn request_no_ads_preview(&mut self) {
-        self.payments.hub.promo_request = Some(PremiumFeature::DisabledAds.into());
+    fn request_no_ads_preview(&mut self, chat_id: ChatId) {
+        self.payments.hub.promo_request = Some(crate::premium_hub::PromoRequest {
+            feature: PremiumFeature::DisabledAds.into(),
+            chat_id,
+        });
     }
 
     /// `toggleHasSponsoredMessagesEnabled(false)` answered `ok`: no ads are
@@ -285,7 +288,7 @@ impl Session {
                     ReportSponsoredResult::AdsHidden => self.messages.sponsored_hidden = true,
                     ReportSponsoredResult::PremiumRequired => {
                         self.messages.last_sponsored_report = None;
-                        self.request_no_ads_preview();
+                        self.request_no_ads_preview(chat_id);
                         return;
                     }
                     _ => {}

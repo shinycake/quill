@@ -386,7 +386,8 @@ fn subscription<W: Write + Send + 'static>(
                         }
                     }
                     Ok(false) => {}
-                    // Signed out or not connected yet: look again later.
+                    // Signed out, not connected yet or locked: look again
+                    // later.
                     Err(_) => std::thread::sleep(WATCH_WAIT),
                 }
             }
@@ -521,10 +522,12 @@ fn answer(request: &Value, id: &Value, agent: &str, conn: u64) -> String {
                 .get("uri")
                 .and_then(Value::as_str)
                 .unwrap_or_default();
+            // Locked, only the guide answers: every other resource reads
+            // the account (`quill://grants` names the granted chats).
+            if uri != super::guide::GUIDE_URI && super::access::paused_by_lock() {
+                return error_line(id, code::ACCESS_OFF, super::access::LOCKED_MESSAGE);
+            }
             if uri == super::guide::UNREAD_URI {
-                if super::access::paused_by_lock() {
-                    return error_line(id, code::ACCESS_OFF, super::access::LOCKED_MESSAGE);
-                }
                 return match super::tools::unread_resource() {
                     Ok(result) => result_line(id, result),
                     Err(super::tools::ToolError(message)) => {

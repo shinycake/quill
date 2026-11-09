@@ -77,7 +77,10 @@ impl AgentScreen {
 
 /// Q1: TDLib `@type`s that are safe to re-send verbatim after a rate
 /// limit (reads and paging; a repeat never duplicates a side effect).
-const RETRYABLE_TYPES: [&str; 22] = [
+const RETRYABLE_TYPES: [&str; 23] = [
+    // A rate-limited custom emoji lookup waits and asks again instead of
+    // leaving its emoji blank (`emoji::custom_lookup`).
+    "getCustomEmojiStickers",
     "getChatHistory",
     "getMessageThreadHistory",
     "searchChatMessages",

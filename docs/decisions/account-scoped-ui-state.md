@@ -2203,9 +2203,11 @@ A new sign-in in the slot took all of them over. tdesktop's
 - Writing the test turned up lost updates in `grants::update` and in
   web app trust, where read, change and write were separate steps. Both
   now change under one lock.
-- Kept on purpose: `exports/` (call logs and exports the user saved),
-  device preferences (tdesktop keeps app settings too), and the macOS
-  WKWebView store, which is keyed by a hash of account and bot.
+- Kept on purpose: `exports/` (call logs and exports the user saved)
+  and device preferences (tdesktop keeps app settings too). (This line
+  also listed the macOS WKWebView store as safe because it is keyed by
+  account and bot. It was not: the account key is what gets reused.
+  Phase 14 (area A) salts it.)
 
 **The lock holds for a whole agent call (2).** `set_paused_by_lock`
 counts locks and wakes every `wait_for`. A wait checks the lock each
@@ -2519,3 +2521,275 @@ edit's window).
   - A deleted chat's history is trimmed to its closed tail, not
     forgotten (`chat_is_gone` needs the chat entry).
   - The video editor branch of 15 has no test.
+
+### Phase 14 (area A)
+
+Round 14 of the review, area A (core: state, connect, telegram, agent,
+`account_data`). All seven findings were fixed.
+
+**The macOS mini app store follows the slot's user (1).** WKWebView keeps
+cookies, local storage and IndexedDB per data-store identifier, under
+`~/Library/WebKit`, not in Quill's folder. The identifier was a hash of
+the account key and the bot, and the key is reused, so a new user in the
+slot opened the last user's mini app sessions. Deleting `webview/<key>/`
+did nothing on macOS. `account_data::webview_store_id` now mixes in a
+random salt saved as `webview/<key>/store-salt.key`. `forget` deletes it
+with the folder, so a log-out, a removal, or a new user's `claim` gives
+the next sign-in new stores. When the salt can't be saved, every launch
+gets a fresh one and keeps nothing. WebView2 and WebKitGTK were already
+fine, since they take the deleted folder. The old stores are left on disk.
+Removing them needs `WKWebsiteDataStore.remove(forIdentifier:)` in the
+helper process, which has no hook for it yet.
+
+**The lock (2-5).** The `quill://unread` watcher no longer spins a core
+while locked. Writes asleep in the paced queue, `download_file`'s copy and
+`resources/read quill://grants` now ask the lock. Details are in
+`lock-is-a-render-state.md` ("The agent socket"), and check 5 of
+`scripts/lock_surfaces.py` holds them in place.
+
+**A bg link preview shows only its own search (6).**
+`chats_state.background_search` holds the `RequestId` of the search the
+preview waits for. `apply` stores a `background` answer only for that id,
+and the error arm shows only that search's error. Closing the preview
+clears it, so a late answer for link A never shows, or gets applied, under
+link B.
+
+**A failed custom emoji lookup asks again (7).** Every
+`getCustomEmojiStickers` now goes out through
+`ConnectDriver::lookup_custom_emoji`. It marks the ids attempted and
+records them per request (`emoji::custom_lookup`). A lookup that was not
+sent, failed, or was swept unanswered unmarks its ids, so the next resolve
+pass asks again. An id stops being asked after three failures, so a
+lasting error can't turn every pass into a request. A rate limit waits and
+re-sends instead (`getCustomEmojiStickers` joined `RETRYABLE_TYPES`). The
+status note shows only while the status picker is open. The status
+picker's earlier path also marked ids attempted when the lookup was
+deduped and never sent. The seam dedupes before it marks.
+
+**Guards.** Check 5 of `lock_surfaces.py`, and the test
+`custom_emoji_lookups_go_out_through_one_seam`.
+
+**Tests.** `a_reused_slot_opens_other_mini_app_stores`
+(`account_data_tests.rs`), `a_lock_while_a_write_waits_stops_it` and
+`a_locked_watch_look_fails_without_waiting` (`agent/tools`),
+`a_locked_quill_reads_out_only_the_guide` (`agent/server_tests.rs`),
+`a_late_background_search_answer_never_lands_under_another_link`
+(`state/tests/chat_list_more.rs`), `a_failed_custom_emoji_lookup_asks_again`
+(`emoji/tests.rs`), and the `emoji/custom_lookup.rs` unit tests. None of
+them waits on time.
+
+### Phase 14 (area B: what opens, opens for the window that asked)
+
+Round 14 of the review, area B, on `claude/sm-review14-b`. The finding
+numbers are the review's ranked list. Findings 1, 3, 4, 5, 9 and 10 share
+one root. Round 13's `open_box` named the window whose state was in place.
+In input that is the window of the press. In the poll loop, the main
+window's own frame steps, a toast drain and tasks started for the screen,
+the state in place is the main window's, whichever window the user acted
+in. So answers opened their boxes in the main window, links queued there
+had no origin, and a link resolved for a chat window waited for the main
+window's frame, which never comes while that window is minimized.
+
+**Designs considered.**
+
+- *A. Put the asking window into every request in src/state.* Each
+  `PendingRequest` would carry a window and every answer would read it.
+  That is the strongest form, but it touches the core types for a UI
+  concern, and most answers already know their chat. Rejected.
+- *B. Mark each answer site `box-host:` and keep `open_box` as it was.*
+  Every new site would have to remember. Rejected.
+- *C (chosen). Say who asks, once, where the code starts running.*
+  `ChatWindows::asker` is an `Asker`: `InPlace` (input, a window's own
+  frame, `spawn_scoped` work), `Window(w)` (a flow that carried its window,
+  `as_asked_by`) or `Nobody` (`unasked`). `open_box` opens in the asking
+  window, or in the window of the last press when nobody asked.
+  `queue_deep_link` records the asking window as the link's origin. The
+  poll pass (`poll_pass`), the main frame's upkeep, the toast drain and
+  every `ScopedApp` update of a `spawn_screen`, `spawn_app` or
+  `defer_screen` task run as `Nobody`. A `spawn_scoped` task keeps the
+  asker it started under. Sites that know their window say so with
+  `as_asked_by(window, ..)`: `window_showing(chat)` for an answer about a
+  chat, `window_of_box(kind)` for one that follows a box.
+
+**What was built, by finding.**
+
+1. *A link clicked in a chat window waits for the main window.* The
+   resolved half runs in the frame it belongs to. `resolved_link_frame`
+   gives the chat window for a link whose chat has a window, or for a box
+   (`QrCode`, `ChangePhone`, `PeerColor` and the like). A settings page
+   (`opens_in_main_window`) or a chat with no window gives the main window,
+   which is raised. `run_resolved_deep_link` moved from `frame_upkeep` to
+   `per_window_upkeep`, and runs only when its frame is the window in place.
+2. *A send being prepared is dropped with its window.* `SendPrepState`
+   moved from the per-window `SendBoxUi` to the app-wide `ComposerSends`.
+   A prep whose window closed finishes through `ScopedApp::app()` with no
+   window: the send goes through the account's client (`live_of`, the
+   screen's or a background account's), and only the stored draft is
+   cleared. A closing window no longer clears another window's job.
+3. *Join in a chat window's invite box opens the chat in the main window.*
+   Join keeps the asking window as the link's `flow_window`, so the chat
+   opens, and the result shows, where Join was pressed.
+4. *Boxes from the poll, the main frame and toast drains.* Proxy links run
+   under the window that queued them. The folder limit follows the box that
+   hit it (`window_of_box`). `PromoRequest` carries the ad's chat and
+   `pump_promo_request` runs per window, in the window showing that chat.
+   Grams Needed and Stars run in the window of the suggested post's chat.
+   Area C found two more: the mini-app poll (`startattach` terms, Remove
+   from menu) keeps `MiniApps::from_window`, and QR Share puts the chooser
+   into the window that pressed Share. The swipe poll, the wallpaper file
+   pick and the touch bar name their window too.
+5. *`queue_deep_link` took the window in place.* It takes the asker. A link
+   from the OS, a mini app or a notification is asked by the main window
+   (`as_asked_by(None, ..)`), so the pointer's last window no longer
+   decides.
+6. *An invite box waiting held every later link.* A new link replaces a
+   waiting invite preview: the session's `deep_link` and the box's
+   `deep_link_invite` are cleared and the new link goes on.
+7. *The round-video circle in every window.* The overlay shows only in the
+   window recording (`recording.origin()` or `opening_origin()`), and
+   `RoundPreview::end()` drops the last frame, so the next recording does
+   not start on it.
+8. *The quote picker outlived its reply.* `reply_quote_for` keys the
+   picker to the reply's (chat, message). `reply_quote_open` compares it
+   with the current reply, and a cleared, sent or replaced reply closes it.
+9. *Share pick, custom emoji card and the transcription toast.* The share
+   pick holds its link for the window that picked
+   (`hold_resolved_link`). The card shows in the window of the tap
+   (`custom_emoji_tapped`), and chat windows draw it. The speech trial
+   toast moved to `per_window_upkeep` for the window of the last press.
+10. *A second window's ask moved the old box with its old content.*
+    `press_login_url` no longer asks for `LoginUrlConfirm`. The consent box
+    opens only at its answer, under the window of the button's chat, with
+    that answer's content. An `Open` answer opens no box.
+11. *Low.* The auto-delete picker closes only when its own chat is left
+    (`close_ttl_picker_of_left_chat`). "Group media" is the tray's
+    (`PendingSend.group_media`), so it is per chat. The effects cap is per
+    chat (`chat_is_full`). A window's GIF tab follows its own field
+    (`follow_gif_field`).
+
+**Guard.** `scripts/dialog_hosts.py` rule 5 walks the call graph from
+where nobody asks: `poll_live`, the main frame's steps (not
+`per_window_upkeep`), `drain_suggested_post_notes`, and the bodies of
+`spawn_screen*`, `spawn_app*` and `defer_screen*` calls. It fails on an
+`open_box(` or `queue_deep_link(` reached outside `as_asked_by` or
+`asked_in_place`, unless a `// box-host: <why>` marker says why. Closures
+that run later (listeners, toasts' links, spawned tasks) are skipped. It
+also fails when a root is called outside `unasked(..)`. It runs from
+`check-window-scope.py`, with offline tests in
+`scripts/test_dialog_hosts.py` (CI step "window scope check tests").
+
+**Tests.** `chat_window/asker_tests.rs` covers the asker in place, under
+`as_asked_by` and `unasked`; screen and scoped tasks; queued links' origin;
+an unasked box going to the last press; a link run in a chat window's
+frame with the main window never drawn; which frame a resolved link
+belongs to; the share pick; the folder limit; the No ads preview; the
+camera circle; the custom emoji card; the auto-delete picker; the prep
+guard across windows; group media per chat; the GIF tab; and QR Share.
+Also: `composer/bars_tests.rs` (quote picker), `emoji_effect` (per-chat
+cap), `web_app_ui/mini_app_flow_tests.rs` (mini-app poll window),
+`state/tests/sessions.rs` (the callback answer keeps its chat) and the
+updated `premium_ui/preview_tests.rs`.
+
+**Not done, or not tested.**
+
+- With no live client, nothing tests the proxy link, Join (3), the callback
+  and login URL answers (10), Grams Needed, or a prep finishing after its
+  window closed (2). The guard covers their window choice.
+- The invite preview hand-over (6) has no test of its own.
+- The speech trial toast's move has no test.
+
+### Phase 14 (area C)
+
+Round 14 of the review, area C (the rest of `src/ui`), on
+`claude/sm-review14-c`. The numbers are the review's finding numbers.
+Area B took 14 and 19 (a `spawn_screen` task's `open_box`, the shared
+seam). The other twenty were fixed.
+
+- **A job's mark lives with the job, not its box (1).** `PasscodeUi::busy`
+  and `lock_after_job` became one value, `PasscodeJob` (`Idle`, `Running`,
+  `RunningThenLock`). `close_passcode` no longer touches it, so Esc or
+  "Lock now" during a Turn off leaves the lock waiting for the answer.
+  The two baseline lines for `PasscodeUi::busy` are gone.
+- **The lock's owner-less deferrals now name their owner (2, 6).**
+  - `adopt_live` clears `deferred_connect`, and `resume_after_unlock`
+    connects only when the screen has no client. So the unlock no longer
+    closes the account adopted from the lock card's Answer, and the call
+    answered there keeps going.
+  - An unlock intent keeps the account and the window that asked
+    (`asking_window`). It runs as that window, and it is dropped when
+    another account is on screen at the unlock.
+- **Calls under the lock (3, 4, 5, 21, 22).**
+  - The stream's Leave/End box is not refused.
+  - A stream PiP the lock closes clears `window_closed_by_user`, so the
+    stream window comes back.
+  - The background ring sounds over an older call's summary.
+  - The lock stops every window's inline clips.
+  - Answering from the lock card dismisses the OS notification.
+  - Details are in lock-is-a-render-state.md.
+- **Drafts are compared with what they were built from (7, 8).**
+  - Each Business draft (greeting, away, hours, location, start page)
+    keeps `base`, the saved value it was made from. Leaving saves only
+    when the draft differs from `base`, not from the server's value now.
+    An untouched screen writes nothing, even when the full info arrived
+    or changed after it was built. Chatbots already worked this way.
+  - The story reply and live comment fields empty when the viewer moves
+    to another story or closes (`clear_story_fields`). A restart of the
+    same story keeps them.
+- **Session pages opened by a box close with it (9, 16).**
+  - `drop_invite_link_pages` removes another admin's links, a link's
+    join requests and its members (and the UI's details and revoked
+    marks). It runs for the chat when the Group Settings box closes, and
+    for every chat in `AdminUi`'s farewell.
+  - `GiftMarketUi`'s farewell stops following the auction on the old
+    account's driver.
+- **A box shows where it was asked (10, 11).**
+  - "Abort recovery email setup" is an inline `TwofaConfirm` inside the
+    2FA box. `GroupConfirmAction::AbortRecoveryEmailSetup` is gone.
+  - A same-forum topic edit calls `open_box(ForumManage)`, so the box
+    moves to the chat window that asked.
+- **Late answers check that they still apply (12, 13, 18).**
+  - A pending profile gallery (`PendingGallery`) records its window, the
+    chat that window showed, and its viewer open count. It opens only in
+    that window, unlocked, with no viewer opened since, on the same chat.
+  - A parked inline round video is dropped on a chat change
+    (`enter_chat_ui` and `sync_chat_ui`) and at resume when its window shows another chat.
+  - A set image that lands after the sticker set box moved to another set
+    opens no editor, and its written PNG is removed (`sticker_box_shows`).
+- **Holds and lists (15, 20).**
+  - A parked voice note or song holds its chat's history while the next
+    track downloads.
+  - The shared-media list tabs reset scroll and "asked" per page
+    (`list_scroll(tab, PageKey)`), as the grid tabs did.
+- **Log-out and the mini app (17).** `close_mini_app_for_forget` closes
+  the account's mini app with `reap_after_notice`. Then
+  `account_data::forget_after_helper` removes the web view folder only
+  once the helper is gone, on a thread that waits for the notice.
+- **Tests.**
+  - `closing_the_passcode_box_keeps_a_lock_waiting_for_the_job`
+  - `under_the_lock_only_the_leave_box_opens`
+  - `locking_quill_closes_the_live_pip` (extended)
+  - `an_older_call_summary_does_not_silence_another_accounts_ring`
+  - `an_unlock_intent_runs_as_its_window_and_only_for_its_account`
+  - `locking_stops_a_chat_windows_round_video`
+  - `an_untouched_screen_never_overwrites_a_newer_saved_value`
+  - `a_reply_draft_does_not_follow_into_the_next_story`
+  - `another_admins_links_close_with_the_group_settings_box`
+  - `aborting_the_recovery_email_asks_inside_the_2fa_box`
+  - `new_topic_for_the_main_windows_forum_opens_in_the_chat_window`
+  - `the_group_avatar_opens_its_photos_newest_first` (extended with the
+    late gallery)
+  - `another_chat_drops_a_round_video_waiting_to_play`
+  - `the_next_song_downloading_keeps_its_chats_history`
+  - `a_set_image_that_lands_after_the_box_moved_on_opens_nothing`
+  - `a_list_tab_starts_over_on_another_chats_page`
+  - `the_web_view_data_waits_for_the_mini_app_helper`
+  - None of them waits on time.
+- **Not tested.**
+  - The `deferred_connect` skip (it needs a live client to adopt).
+  - The gift auction farewell (it needs a live driver).
+  - The OS notification dismissal on answer.
+  - The web view folder's removal after the helper exits (only the wait
+    before it is tested).
+- **Not done.** The Business screens still show the empty state until the
+  full info arrives. Nothing is written from it now, but the screen is not
+  rebuilt when the info lands.

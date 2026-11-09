@@ -66,13 +66,16 @@ impl QuillApp {
     }
 
     pub(super) fn new_greeting_draft(&self) -> GreetingDraft {
-        match self.my_business().greeting {
+        let base = self.my_business().greeting;
+        match base.clone() {
             Some(saved) => GreetingDraft {
+                base,
                 enabled: true,
                 recipients: saved.recipients.make_valid(),
                 days: saved.inactivity_days,
             },
             None => GreetingDraft {
+                base: None,
                 enabled: false,
                 recipients: BusinessRecipients::everyone(),
                 days: bs::DEFAULT_INACTIVITY_DAYS,
@@ -92,6 +95,7 @@ impl QuillApp {
             _ => ScheduleChoice::Always,
         };
         AwayDraft {
+            base: saved.clone(),
             enabled: saved.is_some(),
             recipients: saved
                 .as_ref()
@@ -403,7 +407,7 @@ impl QuillApp {
                 return Leave::Go(Some(tr(keys::Q_OPS_THE_GREETING_MESSAGE_STAYS_OFF).into()));
             }
         };
-        if wanted == self.my_business().greeting {
+        if wanted == draft.base {
             return Leave::Go(None);
         }
         self.business_send(tr(keys::Q_OPS_GREETING_MESSAGE_SETTINGS), |driver| {
@@ -453,7 +457,7 @@ impl QuillApp {
                 return Leave::Go(Some(tr(keys::Q_OPS_THE_AWAY_MESSAGE_STAYS_OFF).into()));
             }
         };
-        if wanted == self.my_business().away {
+        if wanted == draft.base {
             return Leave::Go(None);
         }
         self.business_send(tr(keys::Q_OPS_AWAY_MESSAGE_SETTINGS), |driver| {

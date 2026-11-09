@@ -24,6 +24,10 @@ pub(crate) enum TwofaConfirm {
     Reset { with_email: bool },
     /// Cancel the pending reset.
     CancelReset,
+    /// Abort the pending recovery email (TGX `AbortRecoveryEmailConfirm`).
+    /// Inline in the 2FA box like the others: a separate confirm box
+    /// would open under it and show only once it closed.
+    AbortRecoveryEmail,
 }
 
 fn now_secs() -> i64 {
@@ -138,20 +142,17 @@ impl QuillApp {
                             })),
                     )
                     .child(
-                        // TGX `AbortRecoveryEmail`, confirmed like TGX's
-                        // `AbortRecoveryEmailConfirm` through the shared
-                        // dialog. No chat is involved, so its chat id is
-                        // a dummy.
-                        Button::new("twofa-abort-email")
-                            .label(tr(keys::Q_PREFS_ABORT_RECOVERY_EMAIL_SETUP))
-                            .ghost()
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.open_group_confirm(
-                                    quill::ids::ChatId(0),
-                                    GroupConfirmAction::AbortRecoveryEmailSetup,
-                                    cx,
-                                );
-                            })),
+                        // TGX `AbortRecoveryEmail`, confirmed in place
+                        // (`AbortRecoveryEmailConfirm`).
+                        self.twofa_confirm_or(
+                            cx,
+                            tr(keys::Q_PREFS_ABORT_RECOVERY_EMAIL_SETUP),
+                            tr(keys::Q_PEOPLE_ARE_YOU_SURE_YOU_WANT),
+                            TwofaConfirm::AbortRecoveryEmail,
+                            tr(keys::Q_PEOPLE_ABORT),
+                            tr(keys::CANCEL),
+                            loading,
+                        ),
                     ),
             )
     }
@@ -465,6 +466,10 @@ impl QuillApp {
                                         }
                                         TwofaConfirm::CancelReset => {
                                             live.driver.cancel_twofa_password_reset()
+                                        }
+                                        // `cancelRecoveryEmailAddressVerification`.
+                                        TwofaConfirm::AbortRecoveryEmail => {
+                                            live.driver.cancel_recovery_email_setup()
                                         }
                                     };
                                 }

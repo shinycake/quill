@@ -23,6 +23,10 @@ pub struct ChatsState {
     pub emoji_chat_themes: Vec<EmojiChatTheme>,
     /// `searchBackground` answer for a `bg/` link; `None` until it arrives.
     pub searched_background: Option<Background>,
+    /// The one `searchBackground` the link preview waits for: only its
+    /// answer or error lands, so a late answer for an earlier link never
+    /// shows (or is applied) under a later one. `None` once it closes.
+    pub background_search: Option<RequestId>,
     /// One-shot `getBackgroundUrl` answer: the link the wallpaper preview
     /// copies.
     pub background_url: Option<String>,
@@ -111,6 +115,7 @@ impl ChatsState {
             chat_gift_themes: HashMap::new(),
             emoji_chat_themes: Vec::new(),
             searched_background: None,
+            background_search: None,
             background_url: None,
             background_error: None,
             chat_look_oks: 0,

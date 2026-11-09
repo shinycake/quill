@@ -163,7 +163,7 @@ fn a_wrong_passcode_empties_the_field_it_was_typed_in(cx: &mut TestAppContext) {
     assert_eq!(typed(&app, Some(OTHER), cx), "", "the wrong passcode went");
     assert_eq!(typed(&app, None, cx), "99", "the main window's text stays");
     app.read_with(cx, |app, _| {
-        assert!(!app.account.passcode.busy);
+        assert!(!app.account.passcode.job.is_running());
         assert!(app.account.passcode.lock_error.is_some());
     });
 }
@@ -230,7 +230,7 @@ fn a_system_unlock_answered_after_its_window_closed_ends_the_wait(cx: &mut TestA
     cx.update_window(chat_window, |_, window, cx| {
         app.update(cx, |app, cx| {
             app.in_window_scope(Some(OTHER), cx, |app, cx| {
-                app.account.passcode.busy = true;
+                app.account.passcode.job = crate::ui::passcode::PasscodeJob::Running;
                 let master = quill::passcode::MasterKey::from_bytes([7; 32]);
                 app.spawn_system_unlock_wait(receiver, master, window, cx);
             });
@@ -241,9 +241,82 @@ fn a_system_unlock_answered_after_its_window_closed_ends_the_wait(cx: &mut TestA
     cx.run_until_parked();
     app.read_with(cx, |app, _| {
         assert!(
-            !app.account.passcode.busy,
+            !app.account.passcode.job.is_running(),
             "the lock takes a passcode again"
         );
         assert!(app.account.passcode.is_locked());
     });
+}
+
+/// The lock stops a chat window's inline clips too: that window runs no
+/// frame upkeep while locked, so a round video there kept its sound.
+#[gpui_kit::test]
+fn locking_stops_a_chat_windows_round_video(cx: &mut TestAppContext) {
+    let (app, main) = new_app(cx);
+    let _chat_window = open_chat_window(&app, main, cx);
+    let key = (OTHER.0, 77);
+    app.update(cx, |app, _| {
+        app.players.inline_videos.request(
+            Some(OTHER),
+            key,
+            crate::ui::inline_players::Demand::Sound,
+        );
+    });
+    lock(&app, cx);
+    cx.run_until_parked();
+    assert_eq!(
+        app.read_with(cx, |app, _| app.players.inline_videos.demand(key)),
+        None,
+        "the chat window's clip left"
+    );
+}
+
+/// An open asked under the lock runs after the unlock as the window that
+/// asked, not the one the passcode was typed in, and only while its
+/// account is still on screen.
+#[gpui_kit::test]
+fn an_unlock_intent_runs_as_its_window_and_only_for_its_account(cx: &mut TestAppContext) {
+    let (app, main) = new_app(cx);
+    let _chat_window = open_chat_window(&app, main, cx);
+    lock(&app, cx);
+    cx.run_until_parked();
+    let ran = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+    let (first, second) = (ran.clone(), ran.clone());
+    app.update(cx, |app, cx| {
+        app.in_window_scope(Some(OTHER), cx, |app, _| {
+            app.wait_for_unlock(move |app, _| {
+                first.borrow_mut().push(app.asking_window_or_last_press())
+            });
+        });
+    });
+    cx.update_window(main, |_, window, cx| {
+        app.update(cx, |app, cx| {
+            app.set_window_scope(None);
+            app.unlock_answered(Ok(()), window, cx);
+        })
+    })
+    .expect("the main window");
+    cx.run_until_parked();
+    assert_eq!(
+        *ran.borrow(),
+        vec![Some(OTHER)],
+        "it ran as the chat window"
+    );
+    // Asked for one account; another came on screen before the unlock.
+    lock(&app, cx);
+    cx.run_until_parked();
+    app.update(cx, |app, _| {
+        app.wait_for_unlock(move |app, _| {
+            second.borrow_mut().push(app.asking_window_or_last_press())
+        });
+        if let Some(session) = app.demo_session.as_deref_mut() {
+            session.account = quill::ids::AccountKey::new("account-2").expect("a key");
+        }
+    });
+    cx.update_window(main, |_, window, cx| {
+        app.update(cx, |app, cx| app.unlock_answered(Ok(()), window, cx))
+    })
+    .expect("the main window");
+    cx.run_until_parked();
+    assert_eq!(ran.borrow().len(), 1, "dropped for the other account");
 }

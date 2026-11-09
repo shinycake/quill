@@ -18,7 +18,40 @@ fn gallery_items(gallery: &PhotoGallery) -> Vec<MediaViewerItem> {
     profile_photo_items(gallery.photos.iter().map(|photo| &photo.photo), chat_id)
 }
 
+/// A gallery click waiting for its photos, with what it was asked over:
+/// the window (`None`: the main window), the chat that window showed, and
+/// that window's viewer opens so far. The answer opens it only while all
+/// three still hold: a click on another photo, a chat change, a window
+/// close or the lock in between (each viewer open counts) drops it, so
+/// it never opens late over what the user moved on to.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(in crate::ui) struct PendingGallery {
+    owner: PhotoOwner,
+    window: Option<ChatId>,
+    chat: Option<ChatId>,
+    viewer_opens: u64,
+}
+
 impl QuillApp {
+    /// Wait for `owner`'s photos, to open them over what is shown now.
+    pub(in crate::ui) fn wait_for_profile_gallery(&mut self, owner: PhotoOwner) {
+        self.dialogs.pending_profile_gallery = Some(PendingGallery {
+            owner,
+            window: self.asking_window_or_last_press(),
+            chat: self.viewed_chat(),
+            viewer_opens: self.viewer.open_gen,
+        });
+    }
+
+    /// The pending gallery still belongs on screen, with its window's
+    /// state in place.
+    fn pending_gallery_still_wanted(&self, pending: &PendingGallery) -> bool {
+        !self.account.passcode.is_locked()
+            && !self.viewer.state.is_open()
+            && self.viewer.open_gen == pending.viewer_opens
+            && self.viewed_chat() == pending.chat
+    }
+
     /// Open the photos of `owner` in the media viewer, on the current one
     /// with the earlier ones after it. A user's list is fetched first when
     /// it is not cached; a group or channel opens once its current photo
@@ -79,7 +112,7 @@ impl QuillApp {
             PhotoOwner::Chat(_) => Ok(()),
         };
         match sent {
-            Ok(()) => self.dialogs.pending_profile_gallery = Some(owner),
+            Ok(()) => self.wait_for_profile_gallery(owner),
             Err(_) => self.connection.set_note(StatusNote::error(tr(
                 keys::Q_PEOPLE_COULDNT_REACH_TELEGRAM_TRY_AGAIN,
             ))),
@@ -92,9 +125,10 @@ impl QuillApp {
     /// something changed.
     pub(in crate::ui) fn pump_profile_gallery(&mut self, cx: &mut Context<Self>) -> bool {
         let mut changed = self.sync_profile_photo_viewer(cx);
-        let Some(owner) = self.dialogs.pending_profile_gallery else {
+        let Some(pending) = self.dialogs.pending_profile_gallery else {
             return changed;
         };
+        let owner = pending.owner;
         let failure = self.session().and_then(|s| match owner {
             PhotoOwner::User(user_id) => match s.users_state.user_profile_photos.get(&user_id) {
                 Some(ProfilePhotosFetch::Failed(reason)) => Some(reason.clone()),
@@ -118,7 +152,13 @@ impl QuillApp {
         };
         self.dialogs.pending_profile_gallery = None;
         if !gallery.photos.is_empty() {
-            self.show_photo_gallery(owner, cx);
+            // In the window it was asked in; dropped when that window
+            // closed or moved on.
+            self.in_window_scope(pending.window, cx, |this, cx| {
+                if this.pending_gallery_still_wanted(&pending) {
+                    this.show_photo_gallery(owner, cx);
+                }
+            });
         } else if let Some(reason) = failure {
             self.connection.set_note(StatusNote::error(tr_with(
                 keys::Q_PEOPLE_COULDNT_LOAD_PROFILE_PHOTOS,

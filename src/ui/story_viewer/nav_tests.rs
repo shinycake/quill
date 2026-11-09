@@ -56,6 +56,38 @@ fn next_and_prev_cross_into_the_neighbour_posters(cx: &mut TestAppContext) {
     assert_eq!(shown(&app, vcx), Some((LEO, 3)), "the first story restarts");
 }
 
+/// A reply typed for one story and not sent stays with it: the next
+/// poster's reply row starts empty, as does a viewer opened again. A
+/// restart of the same story keeps it.
+#[gpui_kit::test]
+fn a_reply_draft_does_not_follow_into_the_next_story(cx: &mut TestAppContext) {
+    let (app, mut vcx) = open_app(cx, "ready-story-viewer");
+    let vcx = &mut vcx;
+    let draft = |app: &Entity<QuillApp>, vcx: &mut VisualTestContext| {
+        app.read_with(vcx, |app, cx| {
+            app.stories.reply_input.read(cx).value().to_string()
+        })
+    };
+    let type_draft = |app: &Entity<QuillApp>, vcx: &mut VisualTestContext| {
+        app.update_in(vcx, |app, window, cx| {
+            app.stories
+                .reply_input
+                .update(cx, |input, cx| input.set_value("congrats!", window, cx));
+        });
+    };
+    type_draft(&app, vcx);
+    step(&app, vcx, -1);
+    assert_eq!(shown(&app, vcx), Some((LEO, 3)), "the story restarted");
+    assert_eq!(draft(&app, vcx), "congrats!", "a restart keeps it");
+    step(&app, vcx, 1);
+    assert_eq!(shown(&app, vcx), Some((NEWS, 1)));
+    assert_eq!(draft(&app, vcx), "", "not sent to the next poster");
+    type_draft(&app, vcx);
+    app.update(vcx, |app, cx| app.close_story_viewer(cx));
+    frames(vcx);
+    assert_eq!(draft(&app, vcx), "", "gone with the viewer");
+}
+
 #[gpui_kit::test]
 fn a_poster_reopens_on_the_story_last_shown_for_it(cx: &mut TestAppContext) {
     let (app, mut vcx) = open_app(cx, "ready-story-viewer");

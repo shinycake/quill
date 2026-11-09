@@ -329,7 +329,7 @@ impl QuillApp {
         let kept = cancel_reply_draft(self.chat_ui.take_reply(), String::new()).0;
         self.chat_ui.set_reply(kept);
         self.share.reply_elsewhere_open = false;
-        self.share.reply_quote_open = false;
+        self.share.reply_quote_for = None;
         self.note_open_draft(true, cx);
         self.connection
             .set_note(StatusNote::silent(tr(keys::Q_CHAT_REPLY_CANCELLED)));
@@ -340,6 +340,9 @@ impl QuillApp {
     /// and from the stored draft, and keep any unsent text.
     pub(in crate::ui) fn consume_sent_reply(&mut self, chat_id: ChatId, cx: &mut Context<Self>) {
         self.chat_ui.set_reply(None);
+        // Its quote picker went with it: a later reply to the same
+        // message does not open it again.
+        self.share.reply_quote_for = None;
         if self.chat_ui.is_editing() {
             self.chat_ui.drop_stashed_reply();
             return;

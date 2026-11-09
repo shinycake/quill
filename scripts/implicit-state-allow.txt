@@ -1,0 +1,2 @@
+# Bools that name a stage word but are not a stage (scripts/check-implicit-state.py).
+# One per line: Struct::field <reason>

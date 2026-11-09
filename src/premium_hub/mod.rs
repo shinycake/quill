@@ -669,6 +669,14 @@ pub mod feature;
 pub mod fragment;
 pub mod gift_value;
 pub mod promo;
+
+/// A Premium preview the session asks the UI to open, and the chat whose
+/// ad the user acted on: the preview shows in the window showing it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PromoRequest {
+    pub feature: promo::PromoFeature,
+    pub chat_id: crate::ids::ChatId,
+}
 pub mod purchase;
 pub mod ton;
 pub mod upgraded;
@@ -798,7 +806,7 @@ pub struct PremiumHub {
     pub promo_page: promo::PromoPage,
     /// A preview a reducer asked the UI to open (tdesktop opens the No Ads
     /// preview when a sponsored report needs Premium).
-    pub promo_request: Option<promo::PromoFeature>,
+    pub promo_request: Option<PromoRequest>,
     /// `getBusinessFeatures`: the Business screen's rows in the server's
     /// order; `None` until it answers.
     pub business_features: Option<Vec<BusinessFeature>>,

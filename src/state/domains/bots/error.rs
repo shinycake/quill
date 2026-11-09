@@ -131,21 +131,27 @@ impl Session {
             {
                 self.bots.game_scores.remove(&(chat_id.0, message_id.0));
             }
-            self.bots.last_callback_answer = Some(CallbackQueryAnswer {
-                text: "couldn't load the scores".to_string(),
-                show_alert: false,
-                url: String::new(),
-            });
+            self.note_callback_answer(
+                pending.and_then(|p| p.chat_id),
+                CallbackQueryAnswer {
+                    text: "couldn't load the scores".to_string(),
+                    show_alert: false,
+                    url: String::new(),
+                },
+            );
         }
         if pending.map(|p| p.purpose) == Some(RequestPurpose::GetCallbackQueryAnswer) {
             // TDLib returns error 502 when the bot misses the query
             // timeout: surface it as an answer note (no TDLib text is
             // echoed) so the press gets visible feedback.
-            self.bots.last_callback_answer = Some(CallbackQueryAnswer {
-                text: "bot did not answer".to_string(),
-                show_alert: false,
-                url: String::new(),
-            });
+            self.note_callback_answer(
+                pending.and_then(|p| p.chat_id),
+                CallbackQueryAnswer {
+                    text: "bot did not answer".to_string(),
+                    show_alert: false,
+                    url: String::new(),
+                },
+            );
         }
         // B1: a refused password-protected callback surfaces
         // honestly — 400 is the wrong-password case, anything else
@@ -156,11 +162,14 @@ impl Session {
             } else {
                 "bot did not answer"
             };
-            self.bots.last_callback_answer = Some(CallbackQueryAnswer {
-                text: text.to_string(),
-                show_alert: false,
-                url: String::new(),
-            });
+            self.note_callback_answer(
+                pending.and_then(|p| p.chat_id),
+                CallbackQueryAnswer {
+                    text: text.to_string(),
+                    show_alert: false,
+                    url: String::new(),
+                },
+            );
         }
         // B1: a refused `getLoginUrlInfo` / `getLoginUrl` degrades
         // the login button to an ordinary URL button (schema 1.8.67

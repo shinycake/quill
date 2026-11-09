@@ -119,6 +119,12 @@ impl QuillApp {
         // The user moved on: a press still waiting for its story is dropped.
         self.chat_list.pending_story_open = None;
         self.leave_story_item(cx);
+        // Another story (not the same one restarted): the reply and live
+        // comment typed for the last one are not sent to this poster
+        // (tdesktop clears the controls on every story change).
+        if prev != next {
+            self.clear_story_fields(cx);
+        }
         self.stories.video.retry();
         self.stories.playback.start(Instant::now());
         self.sync_story_video(cx);
@@ -138,6 +144,31 @@ impl QuillApp {
     /// the pause and the result lines. A reply typed or recorded for one
     /// story is never sent to the next, and an editor never saves the
     /// story it was opened on while another is shown.
+    /// Empty the reply and live comment fields. They are one field each
+    /// for the whole viewer, so a draft is the story's only while that
+    /// story shows. Emptying a field needs its window: the viewer draws in
+    /// the main window, and this runs right after the current update,
+    /// before the next key.
+    pub(in crate::ui) fn clear_story_fields(&mut self, cx: &mut Context<Self>) {
+        let fields = [
+            self.stories.reply_input.clone(),
+            self.stories.live.input.clone(),
+        ];
+        if fields.iter().all(|field| field.read(cx).value().is_empty()) {
+            return;
+        }
+        let Some(main) = self.main_window.handle else {
+            return;
+        };
+        cx.defer(move |cx| {
+            let _ = main.update(cx, |_, window, cx| {
+                for field in fields {
+                    field.update(cx, |input, cx| input.set_value("", window, cx));
+                }
+            });
+        });
+    }
+
     pub(in crate::ui) fn leave_story_item(&mut self, cx: &mut Context<Self>) {
         if !self.stories.viewer.is_open() {
             return;

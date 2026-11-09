@@ -72,8 +72,8 @@ impl QuillApp {
 
     /// A lock asked while a passcode job ran lands now that it answered.
     /// After a Turn off there is no passcode, so nothing locks.
-    pub(super) fn lock_held_for_job(&mut self, cx: &mut Context<Self>) {
-        if std::mem::take(&mut self.account.passcode.lock_after_job) {
+    pub(super) fn lock_held_for_job(&mut self, job: super::PasscodeJob, cx: &mut Context<Self>) {
+        if job == super::PasscodeJob::RunningThenLock {
             self.lock_by_passcode(cx);
         }
     }
@@ -83,7 +83,10 @@ impl QuillApp {
     /// could not open on the cleared key start, the pumps run at the next
     /// pass (`lock_waits`), and the queued intents run now.
     pub(super) fn resume_after_unlock(&mut self, cx: &mut Context<Self>) {
-        if std::mem::take(&mut self.account.passcode.deferred_connect) {
+        // A switch under the lock (a ringing call's Answer) may have put a
+        // background client on screen since: that client stays, and the
+        // call answered on it with it.
+        if std::mem::take(&mut self.account.passcode.deferred_connect) && self.live.is_none() {
             self.start_connection(cx);
         }
         self.ensure_background_accounts(cx);
@@ -109,6 +112,9 @@ impl QuillApp {
             }
             // Every window's context menus go too.
             app.dismiss_context_menus(cx);
+            // And its inline clips: a locked chat window runs no frame
+            // upkeep, so a round video playing there kept its sound.
+            app.players.inline_videos.leave_window(app.windows.scope);
         });
         self.release_story_viewer(cx);
         // The mini app is a helper window the lock screen does not cover;

@@ -73,4 +73,27 @@ fn the_group_avatar_opens_its_photos_newest_first(cx: &mut TestAppContext) {
         )
     });
     assert_eq!(next, (Some(9302), Some(("Photo 2 of 3".to_string(), true))));
+
+    // A gallery still waiting for its photos opens when they land, but
+    // not over a viewer opened since.
+    let owner = PhotoOwner::Chat(ChatId(PHOTO_GROUP));
+    let reopened = app.update(&mut vcx, |app, cx| {
+        app.close_media_viewer(cx);
+        app.wait_for_profile_gallery(owner);
+        app.pump_profile_gallery(cx);
+        app.viewer.state.is_open()
+    });
+    assert!(reopened, "the photos landed: the gallery opens");
+    let late = app.update(&mut vcx, |app, cx| {
+        app.close_media_viewer(cx);
+        app.wait_for_profile_gallery(owner);
+        // Another photo was opened (and closed) meanwhile.
+        app.viewer.open_gen += 1;
+        app.pump_profile_gallery(cx);
+        (
+            app.viewer.state.is_open(),
+            app.dialogs.pending_profile_gallery.is_some(),
+        )
+    });
+    assert_eq!(late, (false, false), "dropped, not opened late");
 }

@@ -33,9 +33,14 @@ jobs:
       # docs/decisions/sweep-window-slot-scope.md: async work names its window.
       - name: window scope
         run: python3 scripts/check-window-scope.py
+      - name: window scope check tests
+        run: python3 -m unittest discover -s scripts -p 'test_dialog_hosts.py'
       # docs/decisions/account-scoped-ui-state.md: the account's UI is OnScreen.
       - name: screen state
         run: python3 scripts/check-screen-state.py
+      # docs/contributing/state-machines.md: stages are one enum, not flags.
+      - name: implicit state
+        run: python3 scripts/check-implicit-state.py
       # src/ui/dismiss_layer.rs: click-to-dismiss layers never pass clicks through.
       - name: click through
         run: python3 scripts/check-click-through.py

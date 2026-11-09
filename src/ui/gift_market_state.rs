@@ -102,7 +102,21 @@ pub(crate) struct GiftMarketUi {
     pub(super) forge_started: Option<Instant>,
 }
 
-impl crate::ui::on_screen::Farewell for GiftMarketUi {}
+/// The auction a bid box follows (`openGiftAuction`) is followed by the
+/// account's own client: it stops with the box, as tdesktop closes it, so
+/// the account going to the background does not keep applying its updates
+/// (the next account's frame upkeep follows nothing on its own driver).
+impl crate::ui::on_screen::Farewell for GiftMarketUi {
+    fn farewell(
+        app: &mut crate::ui::app::QuillApp,
+        _: &mut gpui_kit::Window,
+        _: &mut gpui_kit::Context<crate::ui::app::QuillApp>,
+    ) {
+        if let Some(live) = app.live.as_mut() {
+            let _ = live.driver.follow_gift_auction(None);
+        }
+    }
+}
 
 impl GiftMarketUi {
     pub(super) fn new() -> Self {

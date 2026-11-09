@@ -198,3 +198,4 @@ main_window.dialogs_closed | the main window's dialogs were closed this switch
 main_window._key_scope | the key-scope interceptor
 first_run.Welcome * | the first-run intro's player and timings, before any account
 first_run.Highlights * | the first-run highlights' timing, before any account
+composer_sends.prep * | prep jobs keyed by their SendSlot, whose account field names the account; a job whose screen or window is gone finishes through that account's client (send_prep.rs live_of)

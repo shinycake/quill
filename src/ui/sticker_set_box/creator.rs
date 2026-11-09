@@ -161,6 +161,14 @@ impl QuillApp {
         self.toggle_viewed_sticker_set(set_id, false, cx);
     }
 
+    /// The sticker set box is on `set_id`: what a set's editor finishes
+    /// is for the set the box shows, or for nothing.
+    pub(super) fn sticker_box_shows(&self, set_id: i64) -> bool {
+        self.session()
+            .and_then(|s| s.stickers.sticker_set_view.as_ref())
+            .is_some_and(|view| view.set_id == set_id)
+    }
+
     /// "Create a New Sticker" / "Create a New Emoji": pick an image, then
     /// the photo editor on the sticker canvas.
     pub(super) fn begin_create_sticker(
@@ -218,6 +226,10 @@ impl QuillApp {
             super::super::photo_editor::PhotoEditor::for_set(pixels, set_id, kind)
         });
         match editor {
+            // The pick or the decode outlived its box: the box shows
+            // another set now (`claim_sticker_set_box`), whose "New
+            // Sticker" this editor's Done would fill.
+            Some(_) if !self.sticker_box_shows(set_id) => {}
             Some(editor) => self.viewer.photo_editor = Some(editor),
             None => self
                 .connection
@@ -244,6 +256,10 @@ impl QuillApp {
             let written = worker.await;
             let _ = this.update(cx, |this, cx| {
                 match written {
+                    // The box moved to another set while it was written.
+                    Some(path) if !this.sticker_box_shows(set_id) => {
+                        let _ = std::fs::remove_file(path);
+                    }
                     Some(path) => {
                         this.sticker_box.discard_create();
                         this.sticker_box.create = Some(CreateSticker {

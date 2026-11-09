@@ -7,9 +7,12 @@
 //! stay where they are, marked as preparing (derived from
 //! [`SendPrepState`], never from a flag the screen keeps), and the send goes
 //! out when the files are ready, to the chat and account Send was tapped in,
-//! whichever chat is open by then. A slot has at most one send in flight: a
+//! whichever chat is open by then, also when the window it was tapped in has
+//! closed or another account is on screen (it goes through that account's
+//! client then). A slot has at most one send in flight, in any window: a
 //! Send tapped in the same chat meanwhile is refused with the "Preparing the
-//! files" note (it does not queue), so the messages keep their order.
+//! files" note (it does not queue), so the messages keep their order. The
+//! jobs are the app's (`ComposerSends::prep`), so their numbers are unique.
 //!
 //! A failed or timed out preparation changes nothing but the toast: the
 //! draft, the tray and the reply are still there for another try. After a
@@ -192,10 +195,25 @@ pub(super) fn prepare_snapshots(
 }
 
 impl QuillApp {
-    /// Files of the open slot's send are being prepared.
+    /// Files of the open slot's send are being prepared, from any window.
     pub(super) fn tray_preparing(&self) -> bool {
         self.send_slot()
-            .is_some_and(|slot| self.composer_ui.send_box.prep.is_preparing(&slot))
+            .is_some_and(|slot| self.composer_sends.prep.is_preparing(&slot))
+    }
+
+    /// The client of `account`: the screen's, or the one an account in the
+    /// background keeps.
+    fn live_of(&mut self, account: &AccountKey) -> Option<&mut quill::connect::LiveConnect> {
+        let on_screen = self
+            .session()
+            .is_some_and(|session| &session.account == account);
+        if on_screen {
+            self.live.as_mut()
+        } else {
+            self.background
+                .client_mut(account)
+                .and_then(|client| client.live.as_mut())
+        }
     }
 
     /// Read the files in the background, then send. Returns at once.
@@ -206,7 +224,7 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(job) = self.composer_ui.send_box.prep.begin(origin.slot.clone()) else {
+        let Some(job) = self.composer_sends.prep.begin(origin.slot.clone()) else {
             return;
         };
         self.connection
@@ -216,29 +234,34 @@ impl QuillApp {
             cx.background_spawn(async move { prepare_snapshots(snaps, PreparedMedia::prepare) });
         self.spawn_scoped_in(window, cx, async move |this, cx| {
             let prepared = worker.await;
-            let ran = this.update_in(cx, |this, window, cx| {
-                this.finish_media_prep(job, origin, prepared, window, cx);
+            let mut done = Some((origin, prepared));
+            let _ = this.update_in(cx, |this, window, cx| {
+                if let Some((origin, prepared)) = done.take() {
+                    this.finish_media_prep(job, origin, prepared, Some(window), cx);
+                }
             });
-            if ran.is_err() {
-                // The window closed: the job must not hold the slot.
-                let _ = this.main().update(cx, |this, cx| {
-                    this.composer_ui.send_box.prep.finish(job);
-                    cx.notify();
+            // Its window closed, or another account is on screen: the send
+            // still goes out, through its own account's client.
+            if let Some((origin, prepared)) = done.take() {
+                let _ = this.app().update(cx, |this, cx| {
+                    this.finish_media_prep(job, origin, prepared, None, cx);
                 });
             }
         })
         .detach();
     }
 
-    fn finish_media_prep(
+    /// `window`: the window Send was tapped in, with its state in place;
+    /// `None` once it closed or its account left the screen.
+    pub(super) fn finish_media_prep(
         &mut self,
         job: u64,
         origin: SendOrigin,
         prepared: Result<Vec<ComposerSnapshot>, PrepareError>,
-        window: &mut Window,
+        window: Option<&mut Window>,
         cx: &mut Context<Self>,
     ) {
-        if self.composer_ui.send_box.prep.finish(job).is_none() {
+        if self.composer_sends.prep.finish(job).is_none() {
             return;
         }
         match prepared {
@@ -252,20 +275,22 @@ impl QuillApp {
         }
     }
 
-    /// Hand the snapshots to the driver, one message at a time, and clear
-    /// what Send took when they all went out.
+    /// Hand the snapshots to the client of the account Send was tapped
+    /// in, one message at a time, and clear what Send took when they all
+    /// went out. `window`: the window Send was tapped in, with its state in
+    /// place; `None` once it closed or its account left the screen (the
+    /// stored draft and the tray are cleared then, not a composer).
     pub(super) fn deliver_live_send(
         &mut self,
         origin: SendOrigin,
         snaps: Vec<ComposerSnapshot>,
-        window: &mut Window,
+        window: Option<&mut Window>,
         cx: &mut Context<Self>,
     ) {
-        let same_account = self
+        let on_screen = self
             .session()
             .is_some_and(|session| session.account == origin.slot.account);
-        let (true, Some(live), Some(first)) = (same_account, self.live.as_mut(), snaps.first())
-        else {
+        let (Some(live), Some(first)) = (self.live_of(&origin.slot.account), snaps.first()) else {
             self.connection
                 .set_note(StatusNote::error(tr(keys::Q_CHAT_COULD_NOT_SEND_MESSAGE)));
             cx.notify();
@@ -284,7 +309,8 @@ impl QuillApp {
             }
         }
         let total = snaps.len();
-        let is_open = self.send_slot().as_ref() == Some(&origin.slot);
+        let is_open = window.is_some() && self.send_slot().as_ref() == Some(&origin.slot);
+        let window = window.filter(|_| is_open);
         if sent > 0 {
             // Clear exactly what went out: the files of the sent snapshots
             // and the text they took. A partial send keeps the rest.
@@ -296,7 +322,13 @@ impl QuillApp {
                 sent_snaps,
             );
             let left = unsent_text(origin.split.as_deref(), &snaps, sent);
-            self.clear_after_send(&done, is_open, &left, window, cx);
+            self.clear_after_send(&done, window, &left, cx);
+        }
+        // The notes are the screen's: an account in the background sends
+        // without one.
+        if !on_screen {
+            cx.notify();
+            return;
         }
         match failure {
             None => {
@@ -334,21 +366,22 @@ impl QuillApp {
     /// the text, the reply and the options; in a chat left meanwhile its
     /// stored draft and tray (tdesktop clears the field and resets the
     /// preview draft after sending).
+    /// `window`: the window showing the slot, with its state in place.
     fn clear_after_send(
         &mut self,
         origin: &SendOrigin,
-        is_open: bool,
+        window: Option<&mut Window>,
         left: &str,
-        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         let chat_id = origin.chat_id;
         let topic = origin.slot.draft.topic;
-        let text_now = if is_open {
+        let account = &origin.slot.account;
+        let text_now = if window.is_some() {
             Some(self.composer_markup(cx))
         } else {
-            self.session()
-                .and_then(|session| session.draft_for(chat_id, topic))
+            self.live_of(account)
+                .and_then(|live| live.driver.session.draft_for(chat_id, topic))
                 .map(|draft| draft.text.clone())
         };
         let tray_now: Vec<PathBuf> = self
@@ -373,47 +406,53 @@ impl QuillApp {
             });
             self.forget_tray_checks(&dropped);
         }
-        if is_open {
-            // MED1: the grouping override was consumed: the next composer
-            // follows the pref again.
-            self.composer_ui.group_media = None;
-            self.chat_ui.schedule_popup_open = false;
-            self.chat_ui.set_reply(None);
-            self.clear_suggest_bar_after_send(chat_id);
-        }
+        let Some(window) = window else {
+            if plan.clear_text {
+                // `left`: the unsent parts of a split text, else nothing.
+                if left.is_empty() {
+                    self.forget_stored_draft(account, chat_id, topic);
+                } else {
+                    self.keep_stored_draft_text(account, chat_id, topic, left);
+                }
+            }
+            return;
+        };
+        // MED1: the grouping override was consumed: the next tray of the
+        // slot follows the pref again.
+        self.composer_sends
+            .update(&origin.slot, |send| send.group_media = None);
+        self.chat_ui.schedule_popup_open = false;
+        self.chat_ui.set_reply(None);
+        self.clear_suggest_bar_after_send(chat_id);
         self.composer_ui.clear_draft_on_success = plan
             .clears_draft_on_ack(left)
             .then(|| DraftClear::of_text(chat_id, &origin.markup));
         if plan.clear_text {
             // `left`: the unsent parts of a split text, else nothing.
-            if is_open && left.is_empty() {
+            if left.is_empty() {
                 self.composer
                     .update(cx, |input, cx| input.set_value("", window, cx));
                 self.forget_local_draft(chat_id);
-            } else if is_open {
-                self.set_composer_markup(left, window, cx);
-            } else if left.is_empty() {
-                self.forget_stored_draft(chat_id, topic);
             } else {
-                self.keep_stored_draft_text(chat_id, topic, left);
+                self.set_composer_markup(left, window, cx);
             }
         }
-        if is_open {
-            // `set_value` sends no change event: drop the sticker and
-            // animated-emoji suggestions the sent text held.
-            let text = self.composer.read(cx).value().to_string();
-            self.sync_composer_suggestions(&text, cx);
-        }
+        // `set_value` sends no change event: drop the sticker and
+        // animated-emoji suggestions the sent text held.
+        let text = self.composer.read(cx).value().to_string();
+        self.sync_composer_suggestions(&text, cx);
     }
 
-    /// Cut the stored draft of a chat that is not on screen down to `text`.
+    /// Cut the stored draft of a chat that is not on screen down to `text`,
+    /// in `account`'s client.
     fn keep_stored_draft_text(
         &mut self,
+        account: &AccountKey,
         chat_id: ChatId,
         topic: quill::composer::DraftTopic,
         text: &str,
     ) {
-        if let Some(live) = self.live.as_mut() {
+        if let Some(live) = self.live_of(account) {
             live.driver.cancel_pending_draft_of(chat_id);
             let draft = live
                 .driver
@@ -430,9 +469,15 @@ impl QuillApp {
         }
     }
 
-    /// Drop the stored draft of a chat that is not on screen.
-    fn forget_stored_draft(&mut self, chat_id: ChatId, topic: quill::composer::DraftTopic) {
-        if let Some(live) = self.live.as_mut() {
+    /// Drop the stored draft of a chat that is not on screen, in
+    /// `account`'s client.
+    fn forget_stored_draft(
+        &mut self,
+        account: &AccountKey,
+        chat_id: ChatId,
+        topic: quill::composer::DraftTopic,
+    ) {
+        if let Some(live) = self.live_of(account) {
             live.driver.cancel_pending_draft_of(chat_id);
             live.driver
                 .session

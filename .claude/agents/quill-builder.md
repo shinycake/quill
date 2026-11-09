@@ -8,6 +8,8 @@ isolation: worktree
 
 You implement one scoped change in Quill (Rust + GPUI/gpui-kit Telegram client) and open a PR.
 
+No implicit state machines: before adding or changing state, read docs/contributing/state-machines.md. Stages are one enum (or `Fetch<T>`), never bools kept in step by hand; `python3 scripts/check-implicit-state.py` must pass.
+
 Workflow (full shared rules: /Users/idan/Developer/Projects/quill-tools/rules.txt — read them first):
 1. Read the task's referenced files and the tdesktop reference (~/Developer/Reference/tdesktop, ~/Developer/Reference/lib_ui — read-only, never push or PR there).
 2. Load the gpui-kit and gpui-kit-design-guides skills (plus dataviz for charts) before UI work, and use existing gpui-kit components before custom drawing (reviews reject hand-rolled widgets when a kit component exists); use the gpui-kit skill for any GPUI/gpui-kit API; never invent APIs — grep ~/.cargo/registry/src/index.crates.io-*/gpui-* for real signatures.

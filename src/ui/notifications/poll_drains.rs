@@ -202,12 +202,16 @@ impl QuillApp {
             }
         }
         // Phase 3.2: bot answers to inline keyboard callback presses.
-        if let Some(answer) = self
-            .live
-            .as_mut()
-            .and_then(|live| live.driver.session.bots.last_callback_answer.take())
-        {
-            self.present_callback_answer(answer, cx);
+        if let Some((answer, chat)) = self.live.as_mut().and_then(|live| {
+            let bots = &mut live.driver.session.bots;
+            Some((
+                bots.last_callback_answer.take()?,
+                bots.last_callback_chat.take(),
+            ))
+        }) {
+            // A URL in it opens as a link clicked where the button was.
+            let asker = chat.and_then(|chat| self.window_showing(chat));
+            self.as_asked_by(asker, |this| this.present_callback_answer(answer, cx));
             progressed = true;
         }
         // B1: `getLoginUrlInfo` / `getLoginUrl` answers to login-URL button
@@ -220,7 +224,12 @@ impl QuillApp {
             Some((info, request))
         });
         if let Some((info, request)) = login_url {
-            self.present_login_url_info(info, request, cx);
+            // Its consent box and its link belong to the window showing
+            // the button's chat, not to the main window this poll runs in.
+            let asker = request
+                .as_ref()
+                .and_then(|request| self.window_showing(request.chat_id));
+            self.as_asked_by(asker, |this| this.present_login_url_info(info, request, cx));
             progressed = true;
         }
         // Slice P1: a `paymentResult` verification URL — the provider's

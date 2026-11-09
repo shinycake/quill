@@ -9,6 +9,8 @@ use crate::telegram::envelope_emoji::{EmojiCategory, EmojiStatusItem};
 use crate::text::TextEntityKind;
 use std::collections::{HashMap, HashSet};
 
+pub mod custom_lookup;
+pub use custom_lookup::CustomEmojiLookups;
 mod custom_stickers;
 pub use custom_stickers::CustomEmojiStickers;
 pub mod keyword_lookup;
@@ -39,6 +41,9 @@ pub struct EmojiPanel {
     pub status_open: bool,
     pub status_note: Option<String>,
     pub status_resolution_attempted: std::collections::HashSet<i64>,
+    /// The ids each `getCustomEmojiStickers` asked for, so a failed one
+    /// asks again ([`custom_lookup`]).
+    pub custom_lookups: CustomEmojiLookups,
     pub open: bool,
     pub failed: bool,
     pub mutation_failed: bool,

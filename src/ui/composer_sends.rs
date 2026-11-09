@@ -37,6 +37,10 @@ pub(crate) struct PendingSend {
     pub(super) caption_above: bool,
     /// "High quality": photos keep up to 2560 px instead of 1280 px.
     pub(super) hd_photos: bool,
+    /// MED1: the "group media" choice for this tray's 2+ files; `None`
+    /// follows `media_prefs.default_grouping()`. It belongs to the tray, so
+    /// a choice made for one chat does not group another chat's files.
+    pub(super) group_media: Option<bool>,
     /// Stars to unlock the media; 0 sends a normal message.
     pub(super) paid_stars: i64,
     /// `messageSchedulingState*` for the next send.
@@ -67,6 +71,7 @@ impl PendingSend {
         self_destruct: None,
         caption_above: false,
         hd_photos: false,
+        group_media: None,
         paid_stars: 0,
         scheduling: ComposerScheduling::None,
         schedule_repeat: 0,
@@ -85,6 +90,7 @@ impl PendingSend {
         self.self_destruct = None;
         self.caption_above = false;
         self.hd_photos = false;
+        self.group_media = None;
         self.paid_stars = 0;
         self.held_send = None;
     }
@@ -155,6 +161,9 @@ impl AccountSends {
 #[derive(Default)]
 pub(crate) struct ComposerSends {
     accounts: HashMap<AccountKey, AccountSends>,
+    /// The media sends being prepared, of every window and account
+    /// (`send_prep`): one guard per slot whichever window shows it.
+    pub(super) prep: super::send_prep::SendPrepState,
 }
 
 impl ComposerSends {
@@ -495,11 +504,14 @@ impl QuillApp {
     /// log, mini app trust, hashtags, and the rest), as tdesktop's
     /// `Storage::Account::reset` does.
     pub(in crate::ui) fn forget_account_sends(&mut self, account: &AccountKey) {
+        // Its mini app's helper has the web view data open: it closes
+        // first, and the data goes once the helper is gone.
+        let helper_gone = self.close_mini_app_for_forget(account);
         if let Some(root) = self.accounts_root() {
-            quill::account_data::forget(&root, account);
+            quill::account_data::forget_after_helper(&root, account, helper_gone);
         }
         self.screen.recent_hashtags.forget(account);
-        self.composer_ui.send_box.prep.cancel_account(account);
+        self.composer_sends.prep.cancel_account(account);
         let dropped = self.composer_sends.forget_account(account);
         self.forget_tray_checks(&dropped);
     }

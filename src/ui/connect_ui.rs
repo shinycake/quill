@@ -110,7 +110,7 @@ impl super::app::QuillApp {
                 LaunchWait::Skipped => "chats_skipped",
             });
         }
-        self.poll_live(cx);
+        self.poll_pass(cx);
     }
 
     pub(super) fn start_connection(&mut self, cx: &mut gpui_kit::Context<Self>) {
@@ -145,7 +145,7 @@ impl super::app::QuillApp {
                 // TDLib has been opening its database while the window was
                 // built: apply what it has answered (and send what that
                 // asks for) before the first frame.
-                self.poll_live(cx);
+                self.poll_pass(cx);
                 return;
             }
             Some(First::Preparing(early)) => Some(early),

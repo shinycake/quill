@@ -575,7 +575,17 @@ impl QuillApp {
         if let Some(dialog) = self.folders.invite.as_mut() {
             dialog.adding = false;
         }
-        self.show_folder_limit(kind, cx);
+        // The limit box goes where the box whose request hit the limit
+        // is, not to the main window this poll runs in.
+        let waiting = if self.folders.invite.is_some() {
+            DialogKind::FolderInvite
+        } else if self.folders.share.is_some() {
+            DialogKind::FolderShare
+        } else {
+            DialogKind::FolderEditor
+        };
+        let asker = self.windows.window_of_box(waiting);
+        self.as_asked_by(asker, |this| this.show_folder_limit(kind, cx));
         true
     }
 

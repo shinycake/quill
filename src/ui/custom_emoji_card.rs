@@ -37,6 +37,7 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut() {
             let _ = live.driver.preview_custom_emoji(emoji_id, set_id);
         }
+        self.message_ui.custom_emoji_tapped = Some(emoji_id);
         cx.notify();
     }
 
@@ -47,13 +48,22 @@ impl QuillApp {
             session.stickers.custom_emoji_preview = None;
         }
         self.message_ui.custom_emoji_card_seen = None;
+        self.message_ui.custom_emoji_tapped = None;
         cx.notify();
     }
 
-    /// The card, while a tapped emoji's pack is known. A new card starts
-    /// its own timer.
-    pub(super) fn custom_emoji_card(&mut self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        self.session()?.stickers.custom_emoji_preview.as_ref()?;
+    /// The card, while a tapped emoji's pack is known, in the window the
+    /// emoji was tapped in (every window's render asks, with its state in
+    /// place). A new card starts its own timer.
+    pub(in crate::ui) fn custom_emoji_card(
+        &mut self,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        let tapped = self.message_ui.custom_emoji_tapped?;
+        let preview = self.session()?.stickers.custom_emoji_preview.as_ref()?;
+        if preview.emoji_id != tapped {
+            return None;
+        }
         self.custom_emoji_card_body(cx)
     }
 

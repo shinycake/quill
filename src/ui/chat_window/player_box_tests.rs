@@ -319,6 +319,30 @@ fn deleting_the_tracks_chat_stops_the_player_and_releases_its_history(cx: &mut T
     });
 }
 
+/// A song ended and the next one downloads before it plays: no track is
+/// active, but the playlist's chat keeps its history whole meanwhile.
+#[gpui_kit::test]
+fn the_next_song_downloading_keeps_its_chats_history(cx: &mut TestAppContext) {
+    use crate::ui::play_intent::{PlayIntent, PlayTarget};
+    let h = new_app(cx);
+    in_window(&h, h.main, None, cx, |app, _, _| {
+        app.playback.player.chat = None;
+        app.playback.intent = Some(PlayIntent {
+            file: quill::ids::FileId(9001),
+            target: PlayTarget::Audio {
+                chat: OTHER,
+                message: OTHER_LAST,
+                duration: 120.0,
+            },
+        });
+        app.sync_history_holds();
+        assert!(app.session().is_some_and(|s| s.chat_history_in_use(OTHER)));
+        app.playback.intent = None;
+        app.sync_history_holds();
+        assert!(!app.session().is_some_and(|s| s.chat_history_in_use(OTHER)));
+    });
+}
+
 /// A closed chat window's GIF autoplay marks go, so the chat's GIFs
 /// autoplay on its first visit in the main window.
 #[gpui_kit::test]

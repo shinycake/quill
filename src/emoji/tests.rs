@@ -510,3 +510,30 @@ fn an_empty_installed_list_is_loaded_only_after_its_answer() {
     session.invalidate_installed_emoji_sets();
     assert!(!session.stickers.emoji.installed_loaded);
 }
+
+/// A failed custom emoji lookup (message text, a live story's comments,
+/// passkeys) asks for its ids again on the next pass, and says nothing in
+/// the closed status picker.
+#[test]
+fn a_failed_custom_emoji_lookup_asks_again() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    let extra = session.request(RequestPurpose::GetCustomEmojiStickers, None);
+    session
+        .stickers
+        .emoji
+        .begin_custom_emoji_lookup(extra, &[41, 42]);
+    assert!(!session.custom_emoji_needs_resolving(41));
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"error","code":500,"message":"INTERNAL","@extra":"{}"}}"#,
+            extra.0
+        ),
+    );
+    assert!(session.custom_emoji_needs_resolving(41));
+    assert!(session.custom_emoji_needs_resolving(42));
+    assert!(session.stickers.emoji.status_note.is_none());
+}

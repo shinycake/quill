@@ -122,6 +122,26 @@ fn forgetting_an_account_drops_all_it_left_and_nothing_else() {
     forget(&root, &kept);
 }
 
+/// A log-out while the account's mini app helper runs keeps its web view
+/// data until the helper is gone (it has the files open); the rest goes now.
+#[test]
+fn the_web_view_data_waits_for_the_mini_app_helper() {
+    let _serial = crate::locks::lock_or_recover(&SERIAL);
+    let root = root();
+    let key = AccountKey::new("account-936").unwrap();
+    fill(&root, &key);
+    let (helper_alive, helper_gone) = std::sync::mpsc::sync_channel::<()>(1);
+    forget_after_helper(&root, &key, Some(helper_gone));
+    crate::settings::flush_deferred_writes();
+    assert_eq!(
+        left_behind(&root, &key),
+        vec!["mini app storage"],
+        "only the web view data waits"
+    );
+    drop(helper_alive);
+    forget(&root, &key);
+}
+
 /// A different Telegram user in a slot drops what the last one left, as
 /// when the app quit before a log-out finished; the same user keeps it.
 #[test]
@@ -137,6 +157,43 @@ fn a_new_user_in_a_reused_slot_inherits_nothing() {
     crate::settings::flush_deferred_writes();
     assert_eq!(left_behind(&root, &key), Vec::<&str>::new());
     assert!(!claim(&root, &key, 200));
+}
+
+/// The macOS mini app store lives outside Quill's folder, so its id must
+/// change when the slot does: the same user keeps it, while a log-out (or a
+/// new user's claim) hands the next sign-in under that key other stores.
+#[test]
+fn a_reused_slot_opens_other_mini_app_stores() {
+    let _serial = crate::locks::lock_or_recover(&SERIAL);
+    let root = root();
+    let key = AccountKey::new("account-935").unwrap();
+    let _ = std::fs::remove_dir_all(AccountPaths::for_root(&root, &key).root);
+    let account = key.0.as_str();
+    let id = |bot| webview_store_id(Some(&root), account, bot);
+    let first = id(42);
+    assert_eq!(first.len(), 32);
+    assert_eq!(id(42), first, "kept while the same user stays");
+    assert_ne!(id(43), first, "one store per bot");
+    assert_ne!(
+        webview_store_id(Some(&root), "account-936", 42),
+        first,
+        "one store per account"
+    );
+    forget(&root, &key);
+    let after_logout = id(42);
+    assert_ne!(after_logout, first, "a log-out drops the store");
+    assert!(!claim(&root, &key, 300));
+    assert_eq!(id(42), after_logout);
+    assert!(claim(&root, &key, 400), "another user");
+    assert_ne!(id(42), after_logout, "another user gets other stores");
+    assert_ne!(
+        webview_store_id(None, account, 42),
+        webview_store_id(None, account, 42),
+        "with nowhere to keep a salt, nothing is shared"
+    );
+    forget(&root, &key);
+    let _ = std::fs::remove_dir_all(AccountPaths::for_root(&root, &key).root);
+    let _ = std::fs::remove_dir_all(webview_dir(&root, "account-936"));
 }
 
 /// A prompt an agent filed for an account that then logged out is
@@ -175,6 +232,7 @@ const DROPPED: &[&str] = &[
     "recent_hashtags.json",
     "paid_trust.json",
     "launch-lines.bin",
+    "store-salt.key",
 ];
 
 /// Every other file name production code reads or writes, and why a

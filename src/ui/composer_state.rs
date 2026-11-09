@@ -100,9 +100,6 @@ pub(crate) struct ComposerUi {
     pub(super) date_dialog: Option<super::composer_date::ComposerDateDialog>,
     /// The "Code Language" box for the fenced block under the caret.
     pub(super) code_language: Option<super::composer_shortcuts::CodeLanguageDialog>,
-    /// MED1: composer "group media" override for 2+ attachments; `None`
-    /// follows `media_prefs.default_grouping()`.
-    pub(super) group_media: Option<bool>,
     /// Cross-fade timeline of the round Send / Record / Save button.
     pub(super) send_morph: std::cell::Cell<Option<quill::send_button::SendMorph>>,
     /// Phase S2: pending inline-bot warning for a `SwitchInline` press in
@@ -154,7 +151,6 @@ impl ComposerUi {
             link_dialog: None,
             date_dialog: None,
             code_language: None,
-            group_media: None,
             send_morph: Default::default(),
             pending_inline_bot_alert: None,
             inline_bot_alert_shown: false,

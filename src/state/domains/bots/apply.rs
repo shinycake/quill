@@ -3,6 +3,16 @@ use crate::state::*;
 use crate::telegram::envelope::BotsPayload;
 
 impl Session {
+    /// A bot answered an inline button press on a message of `chat_id`.
+    pub(crate) fn note_callback_answer(
+        &mut self,
+        chat_id: Option<ChatId>,
+        answer: crate::telegram::envelope::CallbackQueryAnswer,
+    ) {
+        self.bots.last_callback_answer = Some(answer);
+        self.bots.last_callback_chat = chat_id;
+    }
+
     /// Applies one bots payload; called by
     /// [`Session::apply_payload`].
     pub(crate) fn apply_bots_payload(
@@ -53,7 +63,7 @@ impl Session {
                             | RequestPurpose::GetCallbackQueryAnswerGame
                     )
                 ) {
-                    self.bots.last_callback_answer = Some(answer);
+                    self.note_callback_answer(pending.and_then(|p| p.chat_id), answer);
                 }
             }
             BotsPayload::GameHighScores(scores) => {

@@ -65,6 +65,10 @@ impl QuillApp {
             .is_none_or(|dialog| dialog.chat_id != chat_id)
         {
             self.open_forum_manage_dialog(chat_id, window, cx);
+        } else {
+            // The same forum's box, maybe open in another window: it moves
+            // to the window that asked, as a new box would open there.
+            self.open_box(DialogKind::ForumManage);
         }
         self.begin_topic_editor(topic_id, window, cx);
     }

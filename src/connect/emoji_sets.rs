@@ -16,11 +16,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         self.session.stickers.emoji.status_open = true;
         self.session.stickers.emoji.status_note = None;
-        self.session
-            .stickers
-            .emoji
-            .status_resolution_attempted
-            .clear();
+        self.session.stickers.emoji.reset_custom_emoji_lookups();
         for (purpose, build) in [
             (
                 RequestPurpose::GetRecentEmojiStatuses,
@@ -154,19 +150,62 @@ impl<S: JsonSender> ConnectDriver<S> {
         if custom_emoji_id <= 0 {
             return Err(ConnectSendError::InvalidRequest);
         }
-        self.emoji_set_request(RequestPurpose::GetCustomEmojiStickers, |extra| {
-            crate::telegram::requests_emoji::get_custom_emoji_stickers(extra, &[custom_emoji_id])
-        })
+        self.lookup_custom_emoji(&[custom_emoji_id])
+    }
+
+    /// No `getCustomEmojiStickers` is out, so a resolve pass may send one.
+    /// A lookup the stale-request sweep dropped unanswered counts as failed
+    /// first, so its ids are asked for again.
+    pub(crate) fn custom_emoji_lookup_idle(&mut self) -> bool {
+        let requests = &self.session.requests;
+        self.session
+            .stickers
+            .emoji
+            .sweep_custom_emoji_lookups(|request| requests.get(request).is_some());
+        !requests.has_purpose(RequestPurpose::GetCustomEmojiStickers)
+    }
+
+    /// The one way a `getCustomEmojiStickers` goes out: `ids` are marked
+    /// attempted while it is out, and asked for again when it is not sent
+    /// or fails (`emoji::custom_lookup`). `Ok(None)` when another lookup
+    /// is still out.
+    pub(crate) fn lookup_custom_emoji(
+        &mut self,
+        ids: &[i64],
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        if ids.is_empty() || !self.custom_emoji_lookup_idle() {
+            return Ok(None);
+        }
+        let extra = self
+            .session
+            .request(RequestPurpose::GetCustomEmojiStickers, None);
+        self.session
+            .stickers
+            .emoji
+            .begin_custom_emoji_lookup(extra, ids);
+        let json = crate::telegram::requests_emoji::get_custom_emoji_stickers(extra, ids);
+        if let Err(err) = self.sender.send_json(&json) {
+            self.session.requests.take(extra);
+            let emoji = &mut self.session.stickers.emoji;
+            emoji.custom_emoji_lookup_not_sent(extra);
+            if emoji.status_open || emoji.chat_status_open {
+                emoji.failed = true;
+                emoji.status_note =
+                    Some("Could not update emoji statuses. Retry the action.".into());
+            }
+            return Err(err);
+        }
+        Ok(Some(extra))
     }
 
     pub(crate) fn maybe_resolve_emoji_status_choices(&mut self) -> Result<(), ConnectSendError> {
         if !self.chats_path_active()
             || !(self.session.stickers.emoji.status_open
                 || self.session.stickers.emoji.chat_status_open)
-            || self
-                .session
-                .requests
-                .has_purpose(RequestPurpose::GetCustomEmojiStickers)
+            || !self.custom_emoji_lookup_idle()
         {
             return Ok(());
         }
@@ -229,16 +268,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         ids.sort_unstable();
         ids.dedup();
         ids.truncate(200);
-        if !ids.is_empty() {
-            self.session
-                .stickers
-                .emoji
-                .status_resolution_attempted
-                .extend(ids.iter().copied());
-            self.emoji_set_request(RequestPurpose::GetCustomEmojiStickers, |extra| {
-                crate::telegram::requests_emoji::get_custom_emoji_stickers(extra, &ids)
-            })?;
-        }
+        self.lookup_custom_emoji(&ids)?;
         Ok(())
     }
 
@@ -250,12 +280,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         &mut self,
         open_chat_ids: &[i64],
     ) -> Result<(), ConnectSendError> {
-        if !self.chats_path_active()
-            || self
-                .session
-                .requests
-                .has_purpose(RequestPurpose::GetCustomEmojiStickers)
-        {
+        if !self.chats_path_active() || !self.custom_emoji_lookup_idle() {
             return Ok(());
         }
         let mut ids = self
@@ -273,16 +298,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         ids.sort_unstable();
         ids.dedup();
         ids.truncate(200);
-        if !ids.is_empty() {
-            self.session
-                .stickers
-                .emoji
-                .status_resolution_attempted
-                .extend(ids.iter().copied());
-            self.emoji_set_request(RequestPurpose::GetCustomEmojiStickers, |extra| {
-                crate::telegram::requests_emoji::get_custom_emoji_stickers(extra, &ids)
-            })?;
-        }
+        self.lookup_custom_emoji(&ids)?;
         Ok(())
     }
 

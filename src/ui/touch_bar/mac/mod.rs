@@ -141,7 +141,9 @@ pub(super) fn install(demo: bool, window: &mut Window, cx: &mut Context<QuillApp
             let command = next_command().await;
             let alive = this
                 .update_in(cx, |this, window, cx| {
-                    this.run_touch_bar_command(command, window, cx);
+                    // The press is the touch bar's window's.
+                    let from = this.window_scope_of(window);
+                    this.as_asked_by(from, |this| this.run_touch_bar_command(command, window, cx));
                 })
                 .is_ok();
             if !alive {

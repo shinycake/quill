@@ -72,11 +72,23 @@ impl QuillApp {
         self.set_promo_page(page, cx);
     }
 
-    /// Open the preview the reducer asked for (a refused "Hide ads").
+    /// Open the preview the reducer asked for (a refused "Hide ads"), in
+    /// the window showing the ad's chat: that window's frame runs it
+    /// (`per_window_upkeep`), so it opens while the main window is
+    /// minimized too.
     pub(in crate::ui) fn pump_promo_request(&mut self, cx: &mut Context<Self>) {
-        if let Some(feature) = self.hub_mut().and_then(|hub| hub.promo_request.take()) {
-            self.open_premium_at(feature, cx);
+        let here = self.windows.scope;
+        let Some(request) = self
+            .hub_mut()
+            .and_then(|hub| hub.promo_request)
+            .filter(|request| self.window_showing(request.chat_id) == here)
+        else {
+            return;
+        };
+        if let Some(hub) = self.hub_mut() {
+            hub.promo_request = None;
         }
+        self.open_premium_at(request.feature, cx);
     }
 
     pub(in crate::ui) fn close_premium(&mut self, cx: &mut Context<Self>) {

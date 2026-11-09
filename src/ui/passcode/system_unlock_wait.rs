@@ -1,6 +1,6 @@
 //! The wait for a Touch ID / system password answer on the lock screen.
 //! The window that asked finishes the unlock, with its own state in place;
-//! if it closed meanwhile, the main window does, and `busy` never stays set
+//! if it closed meanwhile, the main window does, and the job never stays running
 //! (a stuck `busy` refused every later unlock until a restart).
 
 use super::*;
@@ -32,7 +32,7 @@ impl QuillApp {
             }
             // The window that asked finishes, with its own state in place.
             let ran = this.update_in(cx, |this, window, cx| {
-                this.account.passcode.busy = false;
+                this.account.passcode.job = PasscodeJob::Idle;
                 if ok {
                     this.in_window_of(window, cx, |this, window, cx| this.unlock_done(window, cx));
                 }
@@ -41,7 +41,7 @@ impl QuillApp {
             // It closed meanwhile: the answer still counts, in the main window.
             if ran.is_err() {
                 let _ = this.update(cx, |this, cx| {
-                    this.account.passcode.busy = false;
+                    this.account.passcode.job = PasscodeJob::Idle;
                     if ok {
                         this.unlock_in_main_window(cx);
                     }

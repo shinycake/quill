@@ -102,3 +102,31 @@ fn the_filter_box_applies_on_save_and_drops_on_cancel(cx: &mut TestAppContext) {
         assert!(open.draft().all_actions());
     });
 }
+
+/// Another admin's invite links, opened from the Group Settings box's
+/// Invite Links, close with the box: it reopens on the group's own links.
+#[gpui_kit::test]
+fn another_admins_links_close_with_the_group_settings_box(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    app.update_in(&mut vcx, |app, _, cx| {
+        app.open_group_settings_view(CHANNEL, GroupSettingsView::InviteLinks, cx);
+        let Some(session) = app.session_mut() else {
+            panic!("the demo session");
+        };
+        session.groups.admin_invite_links.insert(
+            CHANNEL.0,
+            quill::state::AdminLinksState {
+                creator_user_id: 77,
+                active: quill::state::InviteLinkFetch::Loading,
+                revoked: quill::state::InviteLinkFetch::Loading,
+                active_request: None,
+                revoked_request: None,
+            },
+        );
+        app.close_group_settings_dialog(cx);
+        let open = app
+            .session()
+            .is_some_and(|s| s.groups.admin_invite_links.contains_key(&CHANNEL.0));
+        assert!(!open, "the admin's page went with the box");
+    });
+}
