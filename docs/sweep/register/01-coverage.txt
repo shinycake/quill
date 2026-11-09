@@ -135,3 +135,16 @@ src/calls/capture/feeder.rs	548	read
 src/calls/capture/mic_cpal.rs	208	read
 src/calls/capture/mod.rs	249	read
 src/calls/capture/pipewire_dl.rs	458	read
+src/calls/engine/tgcalls/group_callbacks.rs	606	read
+src/calls/engine/tgcalls/group_conference.rs	270	read
+src/calls/engine/tgcalls/group_config.rs	201	read
+src/calls/engine/tgcalls/group_offer.rs	334	read
+src/calls/engine/tgcalls/group_stream.rs	73	read
+src/calls/engine/tgcalls/mod.rs	563	read
+src/calls/engine/tgcalls/reaper.rs	261	read
+src/calls/engine/tgcalls/sender.rs	179	read
+src/calls/engine/tgcalls/sound.rs	271	read
+src/calls/engine/types.rs	313	read
+src/calls/group_call_create.rs	332	read
+src/calls/level_tap.rs	87	read
+src/calls/live_video/convert.rs	550	read
