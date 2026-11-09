@@ -819,6 +819,20 @@ impl RequestRegistry {
             .any(|p| p.purpose == purpose && p.chat_id == Some(chat_id))
     }
 
+    /// An in-flight request for a purpose and message (`request_for_message`).
+    pub fn has_purpose_for_message(
+        &self,
+        purpose: RequestPurpose,
+        chat_id: ChatId,
+        message_id: MessageId,
+    ) -> bool {
+        self.pending.values().any(|p| {
+            p.purpose == purpose
+                && p.chat_id == Some(chat_id)
+                && p.around_message_id == Some(message_id)
+        })
+    }
+
     /// Bots slice: whether a `getInlineQueryResults` request is in flight
     /// for the (chat, bot) pair, whatever the page. `has_purpose_for_chat`
     /// compares the full purpose (including `first_page`), so it cannot

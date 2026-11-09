@@ -111,6 +111,7 @@ mod translate;
 mod types;
 mod typing;
 mod web_apps;
+mod widgets;
 
 pub use closing::*;
 pub use connect_flow::*;

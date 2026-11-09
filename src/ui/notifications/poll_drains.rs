@@ -70,6 +70,16 @@ impl QuillApp {
             self.set_note(StatusNote::error(err));
             progressed = true;
         }
+        // Message widgets: their bots' answers and public data polls.
+        let answers = self
+            .live
+            .as_mut()
+            .map(|live| live.driver.take_widget_answers())
+            .unwrap_or_default();
+        if !answers.is_empty() {
+            self.land_widget_answers(answers, cx);
+            progressed = true;
+        }
         // B7: a basic group became a supergroup: leave the old chat.
         if self.pump_chat_upgrades(cx) {
             progressed = true;

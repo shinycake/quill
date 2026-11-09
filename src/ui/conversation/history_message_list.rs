@@ -381,6 +381,7 @@ impl QuillApp {
             self.history.pane_width.get(),
             cx,
         );
+        self.begin_widget_pass(target, cx);
         let surface = self.history_userpic_surface();
         self.players
             .userpic_videos
@@ -718,6 +719,7 @@ impl QuillApp {
             None => element,
         };
         let has_day = row.day_label().is_some();
+        let covered = self.history.scroll_date.covered_row == Some(ix);
         // The wide layout centres dates and the unread label in its column.
         let wide = self.chat_wide();
         let bar_probe = self.history.bar_probe.clone();
@@ -769,7 +771,12 @@ impl QuillApp {
             .child(tracker)
             .when_some(row.day_label(), |this, label| {
                 this.child(super::chat_palette::with_palette(palette, false, || {
-                    super::chat_wide_ui::wide_column(wide, day_separator(label, cx))
+                    let separator =
+                        super::chat_wide_ui::wide_column(wide, day_separator(label, cx));
+                    // The floating pill stands in for it.
+                    div()
+                        .when(covered, |this| this.opacity(0.))
+                        .child(separator)
                 }))
             })
             .when(row.unread_divider(), |this| {

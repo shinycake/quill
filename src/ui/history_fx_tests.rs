@@ -141,4 +141,7 @@ fn the_date_shows_as_soon_as_a_separator_leaves_the_top(cx: &mut TestAppContext)
     });
     vcx.run_until_parked();
     assert!(date_up(&app, vcx, &day));
+    // One pill: the row's own one gives way to the floating one.
+    let covered = app.read_with(vcx, |app, _| app.history.scroll_date.covered_row);
+    assert_eq!(covered, Some(start), "the separator under the pill hides");
 }

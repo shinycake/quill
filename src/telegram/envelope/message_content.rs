@@ -110,10 +110,9 @@ pub enum MessageContent {
     /// `schema/td_api.tl:5449`) — the seller-side notice. Quill is a
     /// buyer client; kept minimal for a compact "payment received" row.
     PaymentReceived(PaymentReceivedContent),
-    /// `messageWidget` (TDLib 1.8.70): a bot's HTML widget. Quill doesn't
-    /// run widgets (Telegram Desktop runs them in its own QuickJS sandbox,
-    /// `tgw/`), so only what the placeholder card and the caption need is
-    /// kept; the HTML and the widget data are dropped.
+    /// `messageWidget` (TDLib 1.8.70): a bot's HTML widget, run in the
+    /// QuickJS sandbox (`src/ui/widget_runtime/`,
+    /// docs/decisions/message-widgets.md).
     Widget(WidgetContent),
     Unsupported {
         type_name: String,
@@ -121,14 +120,29 @@ pub enum MessageContent {
 }
 
 /// Parsed `messageWidget` (TDLib 1.8.70).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct WidgetContent {
-    /// The widget's size as the bot set it, in points.
+    /// The widget's size as the bot set it, in CSS px; 0 width fills the
+    /// bubble, 0 height lets the widget size itself.
     pub width: i32,
     pub height: i32,
+    /// The widget's document (1-32768 bytes).
+    pub html: String,
+    /// The bot's data every copy of the widget sees.
+    pub public_data: String,
+    /// The bot's data for this chat only.
+    pub chat_data: String,
+    /// The shared widget this message shows; 0 when it isn't shared.
+    pub widget_id: i64,
     pub caption: String,
     pub caption_entities: Vec<TextEntity>,
     pub show_caption_above_media: bool,
+    /// A forwarded copy: no chat data and no chat type for the widget.
+    pub is_copy: bool,
+    /// The widget may send queries to the bot on a press...
+    pub can_send_queries: bool,
+    /// ...and without one, while it is on screen.
+    pub can_send_background_queries: bool,
 }
 
 /// Slice bots-games: parsed `messageGame` (TDLib 1.8.67,
@@ -726,16 +740,29 @@ pub(crate) fn parse_message_widget(value: &Value) -> (MessageContent, Vec<Parsed
             .max(0)
     };
     let (caption, caption_entities) = parse_caption(value.get("caption"));
+    let flag = |name: &str| value.get(name).and_then(Value::as_bool).unwrap_or(false);
+    let text = |name: &str| {
+        value
+            .get(name)
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string()
+    };
     (
         MessageContent::Widget(WidgetContent {
             width: size("width"),
             height: size("height"),
+            html: text("html"),
+            public_data: text("public_data"),
+            chat_data: text("chat_data"),
+            // TDLib's JSON writes int64 as a string.
+            widget_id: int64(value.get("widget_id")).unwrap_or(0),
             caption,
             caption_entities,
-            show_caption_above_media: value
-                .get("show_caption_above_media")
-                .and_then(Value::as_bool)
-                .unwrap_or(false),
+            show_caption_above_media: flag("show_caption_above_media"),
+            is_copy: flag("is_copy"),
+            can_send_queries: flag("can_send_queries"),
+            can_send_background_queries: flag("can_send_background_queries"),
         }),
         Vec::new(),
     )

@@ -101,6 +101,10 @@ impl Session {
             | BotsPayload::CustomRequestResult { .. }) => {
                 self.apply_web_app_payload(payload, pending);
             }
+            payload @ (BotsPayload::WidgetQueryAnswer { .. }
+            | BotsPayload::WidgetPublicData { .. }) => {
+                self.apply_widget_answer(payload, pending);
+            }
             BotsPayload::LoginUrlInfo(info) => {
                 // B1: `getLoginUrlInfo` response to our own login-button
                 // press (matched by `@extra`).

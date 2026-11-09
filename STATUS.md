@@ -917,7 +917,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Mini apps can open invoices (openInvoice): run the checkout and report paid, failed, pending or cancelled back to the app <!-- parity:bots-webapp-invoice -->
 - [x] Mini apps can ask to share your phone number, with a confirmation box <!-- parity:bots-webapp-share-phone -->
 - [x] Message widgets show as a card with their caption (messageWidget, TDLib 1.8.70) <!-- parity:bots-widget-card -->
-- [ ] Message widgets run in the chat: sandboxed HTML/JS with bot queries and public-data polling (built on branch claude/message-widgets-runtime; held until TelegramMessenger/widget-sandbox has a license) <!-- parity:bots-widget-runtime -->
+- [x] Message widgets run in the chat: sandboxed HTML/JS with bot queries and public-data polling <!-- parity:bots-widget-runtime -->
 - [x] Add an option to an open poll and "Allow adding options" when creating <!-- parity:polls-add-option -->
 - [x] Poll creation extras: hide results until close, restrict to subscribers, absolute deadline <!-- parity:polls-create-extras -->
 - [x] Links and media in poll options <!-- parity:polls-option-media -->

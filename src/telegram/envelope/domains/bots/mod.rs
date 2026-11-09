@@ -58,4 +58,9 @@ pub enum BotsPayload {
     UpdateWebAppMessageSent { launch_id: i64 },
     /// Mini apps: `customRequestResult` (`sendWebAppCustomRequest` answer).
     CustomRequestResult { result: String },
+    /// Message widgets: `widgetQueryAnswer` (`getWidgetQueryAnswer` answer).
+    WidgetQueryAnswer { data: String },
+    /// Message widgets: `widgetPublicData` (`getWidgetPublicData` answer);
+    /// `poll_period` is when to ask again, in seconds.
+    WidgetPublicData { data: String, poll_period: i32 },
 }

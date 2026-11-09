@@ -97,6 +97,9 @@ pub struct BotsState {
     pub inline_bot_resolve_seq: u64,
     /// Editing an owned bot and creating a managed one.
     pub owned: OwnedBotsState,
+    /// Message widgets: TDLib's answers to their queries and public data
+    /// polls, in order, until the UI takes them for the runtimes.
+    pub widget_answers: Vec<crate::message_widget::WidgetAnswer>,
 }
 
 impl BotsState {
@@ -122,6 +125,7 @@ impl BotsState {
             inline_bot_resolve: None,
             inline_bot_resolve_seq: 0,
             owned: OwnedBotsState::default(),
+            widget_answers: Vec::new(),
         }
     }
 }

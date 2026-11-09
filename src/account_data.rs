@@ -84,6 +84,12 @@ fn webview_salt(dir: &Path) -> Option<String> {
     Some(salt)
 }
 
+/// Where one account's message widgets keep their storage and last height
+/// (one file per message, [`crate::message_widget::storage`]).
+pub fn widget_dir(app_root: &Path, account: &str) -> PathBuf {
+    app_root.join("widgets").join(account)
+}
+
 /// `key`'s account logged out or was removed: drop everything Quill kept
 /// for it outside TDLib's database, so nobody who signs in next under the
 /// same key inherits it. Safe to run more than once.
@@ -115,6 +121,7 @@ pub fn forget_after_helper(
     }
     let paths = AccountPaths::for_root(app_root, key);
     forget_folder_data(&paths);
+    let _ = std::fs::remove_dir_all(widget_dir(app_root, account));
     let dir = webview_dir(app_root, account);
     let Some(helper_gone) = helper_gone else {
         let _ = std::fs::remove_dir_all(dir);

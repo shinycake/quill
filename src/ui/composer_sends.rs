@@ -511,6 +511,7 @@ impl QuillApp {
             quill::account_data::forget_after_helper(&root, account, helper_gone);
         }
         self.screen.recent_hashtags.forget(account);
+        self.forget_widget_storage(account);
         self.composer_sends.prep.cancel_account(account);
         let dropped = self.composer_sends.forget_account(account);
         self.forget_tray_checks(&dropped);

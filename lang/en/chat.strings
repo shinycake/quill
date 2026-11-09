@@ -408,7 +408,9 @@
 "qll_chat_processing_join_requests" = "Processing join requests";
 "qll_chat_public_chats" = "Public chats";
 "qll_chat_put_the_cursor_inside_a" = "Put the cursor inside a code block first.";
-"qll_chat_widget_not_supported" = "Message widgets don't run in Quill yet.";
+"qll_chat_widget_failed" = "This widget couldn't start.";
+"lng_tgw_stopped" = "Widget stopped";
+"lng_tgw_copied" = "Copied: {text}";
 "qll_chat_quill_cannot_display_this_message" = "Quill cannot display this message. A newer release may support it.";
 "qll_chat_quote" = "Quote";
 "qll_chat_quote_reply" = "Quote & Reply";

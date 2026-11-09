@@ -24,7 +24,7 @@ wallet types whose amounts moved from `int53` to `int64`; Quill parses none).
 | `inputStoryAreaTypeFoundVenue` removed | Never sent by Quill. |
 | `toggleSupergroupIsForum` + `has_forum_sidebar`; `supergroup.has_forum_sidebar`; `userTypeBot.has_topic_sidebar` | Quill reads `has_forum_sidebar` and sends it back when the owner toggles topics, so the toggle doesn't clear a layout set from another app. Telegram Desktop has no sidebar layout yet (only the `forum_sidebar` flag in its scheme), so Quill doesn't draw one. |
 | `community.are_chats_collapsed`, `communityFullInfo.notification_settings` and the new community methods | Built: see `communities-1-8-70.md`. |
-| `messageWidget`, widget queries and `getWidgetPublicData` | A placeholder card, see below. |
+| `messageWidget`, widget queries and `getWidgetPublicData` | Widgets run in the history, see below and `message-widgets.md`. |
 | `story.music`, `postStory.music`, `editStoryMusic` | Not built: Telegram Desktop has the field in its scheme but no UI that plays or picks story music. |
 | `recognizeSpeechInFile`, `updateSpeechRecognitionInFile`, `getSpeechRecognitionLanguages`, `fixRecognizedTextWithAi`, `fixRecognizedRichMessageWithAi` | Not built: Telegram Desktop never calls `messages.transcribeAudioFile` or `getTranscriptionLangs`. Voice message transcription (`recognizeSpeech`) is unchanged. |
 | `getTextEmojiRanges` | Not used; Quill finds emoji in its own text pipeline. |
@@ -34,15 +34,19 @@ wallet types whose amounts moved from `int53` to `int64`; Quill parses none).
 
 `messageWidget` is a bot's HTML widget with its own data and queries.
 Telegram Desktop doesn't use a web view for it: it runs the widget script in
-QuickJS inside a separate sandbox library (`ThirdParty/widget-sandbox`) and
-draws the validated DOM with its own renderer (`Telegram/SourceFiles/tgw/`,
-about 17,600 lines). Building that is a project of its own, so this round
-parses the message into `MessageContent::Widget` (size, caption, caption
-position) and shows a card that names the widget and says it doesn't run in
-Quill, with the caption below or above it like any media caption. The chat
-list shows the caption, or "Widget" (`lng_in_dlg_widget`). The HTML and the
-widget data are dropped at parse time. Captions can't be edited (only the
-bot edits a widget).
+QuickJS inside widget-sandbox and draws the checked DOM with its own
+renderer. The first round of this update parsed the message and showed a
+placeholder card. Quill now runs widgets the same way, with widget-sandbox,
+QuickJS-ng and twidget compiled in and its own painter on every OS. The
+design, its limits and an open license question on widget-sandbox are in
+`message-widgets.md`. `MessageContent::Widget` keeps the HTML, `public_data`,
+`chat_data`, `widget_id`, `is_copy` and both query flags. The card that names
+the widget stays as the fallback when the runtime fails or never draws.
+The driver calls `getWidgetQueryAnswer` (data queries, never the wallet card)
+and `getWidgetPublicData` (only while the widget is on screen and asked for
+polling, at TDLib's `poll_period`). A 502 from the first is a bot timeout.
+The chat list shows the caption, or "Widget" (`lng_in_dlg_widget`). Captions
+can't be edited (only the bot edits a widget).
 
 ## How verified
 
@@ -56,8 +60,9 @@ bot edits a widget).
   `libtdjson.1.8.70.dylib` is 41,918,568 B (1.8.69: 41,388,568 B). Offline
   probe (ctypes, no network): `getOption("version")` = 1.8.70,
   `commit_hash` = 23383aef…, `getTextEmojiRanges` answers.
-- `/verify` capture of the `ready-unsupported-message` demo, which now also
-  holds a widget message with a caption, in light and dark.
+- `/verify` capture of the `ready-unsupported-message` demo, which also
+  holds a widget message with a caption, and of `ready-widgets` (running
+  widgets, see `message-widgets.md`), in light and dark.
 - Not run: a live widget message (no bot sends one to the test account yet)
   and the Windows and Linux TDLib builds (both read the pin from `pins.rs`;
   CI caches are keyed on it).
