@@ -97,9 +97,6 @@ features = [
 ]
 default-features = false
 
-[target.'cfg(target_os = "macos")'.dependencies.foreign-types]
-version = "0.5"
-
 [target.'cfg(target_os = "macos")'.dependencies.futures]
 version = "0.3.34"
 
@@ -240,6 +237,7 @@ default-features = false
 version = "0.3.2"
 features = [
     "std",
+    "CABase",
     "CALayer",
     "CAMetalDisplayLink",
     "CAMetalLayer",
@@ -333,5 +331,12 @@ level = "allow"
 priority = -1
 
 [lints.rust.unexpected_cfgs]
+level = "allow"
+priority = 0
+
+# Quill: upstream builds this crate from crates.io, where Cargo caps lints;
+# as a path dependency its cocoa-era deprecation warnings would flood every
+# build.
+[lints.rust.deprecated]
 level = "allow"
 priority = 0

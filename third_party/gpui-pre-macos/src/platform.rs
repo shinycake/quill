@@ -10,12 +10,12 @@ use ctor::ctor;
 use dispatch2::DispatchQueue;
 use futures::channel::oneshot;
 use gpui::{
-    Action, ActivationPolicy, ActivityGuard, AnyWindowHandle, BackgroundExecutor, ClipboardItem,
-    CursorStyle, ForegroundExecutor, GraphicalEnvironment, KeyContext, Keymap, Menu, MenuItem,
-    OsMenu, OwnedMenu, PathPromptOptions, Platform, PlatformDisplay, PlatformKeyboardLayout,
-    PlatformKeyboardMapper, PlatformTextSystem, PlatformWindow, PowerMode, Result, SystemMenuType,
-    Task, ThermalState, WindowAppearance, WindowKind, WindowParams, WindowingRequest,
-    popup::PopupNotSupportedError,
+    Action, ActivationPolicy, ActivityGuard, AnyWindowHandle, AppLifecyclePhase,
+    BackgroundExecutor, ClipboardItem, CursorStyle, ForegroundExecutor, GraphicalEnvironment,
+    KeyContext, Keymap, Menu, MenuItem, OsMenu, OwnedMenu, PathPromptOptions, Platform,
+    PlatformDisplay, PlatformKeyboardLayout, PlatformKeyboardMapper, PlatformTextSystem,
+    PlatformWindow, PowerMode, QuitAnswer, QuitStep, Result, SystemMenuType, Task, ThermalState,
+    WindowAppearance, WindowKind, WindowParams, WindowingRequest, popup::PopupNotSupportedError,
 };
 use gpui_apple::{
     keychain,
@@ -32,9 +32,10 @@ use objc2::{
 use objc2_app_kit::{
     NSAppearance, NSAppearanceNameAqua, NSAppearanceNameDarkAqua, NSAppearanceNameVibrantDark,
     NSAppearanceNameVibrantLight, NSApplication, NSApplicationActivationPolicy,
-    NSControlStateValueOn, NSCursor, NSDocumentController, NSEventModifierFlags, NSMenu,
-    NSMenuItem, NSModalResponse, NSModalResponseOK, NSOpenPanel, NSSavePanel, NSScroller,
-    NSScrollerStyle, NSWorkspace, NSWorkspaceDidWakeNotification, NSWorkspaceWillSleepNotification,
+    NSApplicationTerminateReply, NSControlStateValueOn, NSCursor, NSDocumentController,
+    NSEventModifierFlags, NSMenu, NSMenuItem, NSModalResponse, NSModalResponseOK, NSOpenPanel,
+    NSSavePanel, NSScroller, NSScrollerStyle, NSWorkspace, NSWorkspaceDidWakeNotification,
+    NSWorkspaceWillSleepNotification,
 };
 use objc2_foundation::{
     NSActivityOptions, NSArray, NSBundle, NSError, NSInteger, NSProcessInfo, NSString, NSURL,
@@ -86,6 +87,15 @@ unsafe fn build_classes() {
             decl.add_method(
                 sel!(applicationShouldHandleReopen:hasVisibleWindows:),
                 should_handle_reopen as extern "C-unwind" fn(_, Sel, *mut AnyObject, Bool) -> Bool,
+            );
+            decl.add_method(
+                sel!(applicationDidBecomeActive:),
+                did_become_active as extern "C-unwind" fn(_, Sel, *mut AnyObject),
+            );
+            decl.add_method(
+                sel!(applicationShouldTerminate:),
+                should_terminate
+                    as extern "C-unwind" fn(_, Sel, *mut AnyObject) -> NSApplicationTerminateReply,
             );
             decl.add_method(
                 sel!(applicationWillTerminate:),
@@ -174,6 +184,7 @@ pub(crate) struct MacPlatformState {
     general_pasteboard: Pasteboard,
     find_pasteboard: Pasteboard,
     reopen: Option<Box<dyn FnMut()>>,
+    app_lifecycle: Option<Box<dyn FnMut(AppLifecyclePhase)>>,
     on_keyboard_layout_change: Option<Box<dyn FnMut()>>,
     thermal_observer: Option<ProcessInfoObserver>,
     power_mode_observer: Option<ProcessInfoObserver>,
@@ -182,6 +193,11 @@ pub(crate) struct MacPlatformState {
     on_system_wake: Option<Box<dyn FnMut()>>,
     system_power_observers_registered: bool,
     quit: Option<Box<dyn FnMut() -> bool>>,
+    quit_request: Option<Box<dyn FnMut() -> QuitAnswer>>,
+    /// `quit_request` was registered; an empty slot then means it runs.
+    quit_request_set: bool,
+    /// `Platform::quit` ran: the app decided, so `terminate:` asks nothing.
+    quit_decided: bool,
     menu_command: Option<Box<dyn FnMut(&dyn Action)>>,
     validate_menu_command: Option<Box<dyn FnMut(&dyn Action) -> bool>>,
     will_open_menu: Option<Box<dyn FnMut()>>,
@@ -230,8 +246,11 @@ impl MacPlatform {
             Arc::new(gpui::NoopTextSystem::new())
         };
 
-        let keyboard_layout = MacKeyboardLayout::new();
-        let keyboard_mapper = Rc::new(MacKeyboardMapper::new(keyboard_layout.id()));
+        // Quill: reading the input source starts the Text Services Manager,
+        // which blocks ~90 ms on a cold launch. The layout is read once the
+        // first window has drawn (`read_keyboard_layout_after_first_frame`);
+        // until then it is unknown and keys map as on a US layout.
+        let keyboard_mapper = Rc::new(MacKeyboardMapper::new(""));
 
         let state = Mutex::new(MacPlatformState {
             headless,
@@ -244,7 +263,11 @@ impl MacPlatform {
             general_pasteboard: Pasteboard::general(),
             find_pasteboard: Pasteboard::find(),
             reopen: None,
+            app_lifecycle: None,
             quit: None,
+            quit_request: None,
+            quit_request_set: false,
+            quit_decided: false,
             menu_command: None,
             validate_menu_command: None,
             will_open_menu: None,
@@ -552,6 +575,18 @@ impl Platform for MacPlatform {
             let app_delegate: *mut AnyObject = msg_send![APP_DELEGATE_CLASS, new];
             let _: () = msg_send![app, setDelegate: app_delegate];
 
+            // Quill: with no main menu, `finishLaunching` makes a default one
+            // and adds AppKit's text input items to it, which loads the
+            // Writing Tools framework on the main thread (~100 ms cold). An
+            // empty menu is left alone; the app's `set_menus` gets those
+            // items when it installs the real menu.
+            let main_menu: *mut AnyObject = msg_send![app, mainMenu];
+            if main_menu.is_null() {
+                let empty: *mut AnyObject = msg_send![class!(NSMenu), new];
+                let _: () = msg_send![app, setMainMenu: empty];
+                let _: () = msg_send![empty, release];
+            }
+
             let self_ptr = self as *const Self as *mut c_void;
             mac_platform_ivar(&*app)
                 .load_ptr::<*mut c_void>(&*app)
@@ -560,6 +595,24 @@ impl Platform for MacPlatform {
                 .load_ptr::<*mut c_void>(&*app_delegate)
                 .write(self_ptr);
 
+            disable_autofill_heuristics();
+            crate::writing_tools::hold();
+
+            // Quill: the app opens its windows here, before `run`, and
+            // their first frame is committed to the window server. `run`
+            // calls `finishLaunching`, which waits for the
+            // open-application Apple Event and sets up the menu bar and
+            // AppKit's text input (hundreds of ms on a cold launch); the
+            // windows are on screen meanwhile. `did_finish_launching` then
+            // finds no callback left.
+            let callback = self.0.lock().finish_launching.take();
+            if let Some(callback) = callback {
+                autoreleasepool(|_| {
+                    callback();
+                    let _: () = msg_send![class!(CATransaction), flush];
+                });
+            }
+            crate::launch_mark("ns_run");
             autoreleasepool(|_| {
                 let _: () = msg_send![app, run];
             });
@@ -583,6 +636,7 @@ impl Platform for MacPlatform {
         // this, we make quitting the application asynchronous so that we aren't holding borrows to
         // the app state on the stack when we actually terminate the app.
 
+        self.0.lock().quit_decided = true;
         unsafe {
             DispatchQueue::main().exec_async_f(ptr::null_mut(), quit);
         }
@@ -1041,8 +1095,18 @@ impl Platform for MacPlatform {
         self.0.lock().quit = Some(callback);
     }
 
+    fn on_quit_request(&self, callback: Box<dyn FnMut() -> QuitAnswer>) {
+        let mut lock = self.0.lock();
+        lock.quit_request = Some(callback);
+        lock.quit_request_set = true;
+    }
+
     fn on_reopen(&self, callback: Box<dyn FnMut()>) {
         self.0.lock().reopen = Some(callback);
+    }
+
+    fn on_app_lifecycle(&self, callback: Box<dyn FnMut(AppLifecyclePhase)>) {
+        self.0.lock().app_lifecycle = Some(callback);
     }
 
     fn on_keyboard_layout_change(&self, callback: Box<dyn FnMut()>) {
@@ -1118,7 +1182,11 @@ impl Platform for MacPlatform {
     }
 
     fn keyboard_layout(&self) -> Box<dyn PlatformKeyboardLayout> {
-        Box::new(MacKeyboardLayout::new())
+        if KEYBOARD_LAYOUT_READ.load(Ordering::Acquire) {
+            Box::new(MacKeyboardLayout::new())
+        } else {
+            Box::new(MacKeyboardLayout::unknown())
+        }
     }
 
     fn keyboard_mapper(&self) -> Rc<dyn PlatformKeyboardMapper> {
@@ -1141,7 +1209,7 @@ impl Platform for MacPlatform {
             let delegate: *mut AnyObject = msg_send![app, delegate];
             let menu = self.create_menu_bar(&menus, delegate, actions, keymap);
             drop(state);
-            let _: () = msg_send![app, setMainMenu: &*menu];
+            crate::writing_tools::set_main_menu(menu);
         }
         self.0.lock().menus = Some(menus.into_iter().map(|menu| menu.owned()).collect());
     }
@@ -1293,13 +1361,19 @@ fn mac_platform_ivar(object: &AnyObject) -> &Ivar {
 }
 
 extern "C-unwind" fn will_finish_launching(_this: &AnyObject, _: Sel, _: *mut AnyObject) {
+    crate::launch_mark("will_finish");
+}
+
+/// The autofill heuristic controller causes slowdown and high CPU usage.
+/// We don't know exactly why. This disables the full heuristic controller.
+///
+/// Adapted from: https://github.com/ghostty-org/ghostty/pull/8625
+///
+/// Quill: called from `run` before the app opens any window (it used to run
+/// in `applicationWillFinishLaunching:`, which now comes after the windows).
+fn disable_autofill_heuristics() {
     unsafe {
         let user_defaults: *mut AnyObject = msg_send![class!(NSUserDefaults), standardUserDefaults];
-
-        // The autofill heuristic controller causes slowdown and high CPU usage.
-        // We don't know exactly why. This disables the full heuristic controller.
-        //
-        // Adapted from: https://github.com/ghostty-org/ghostty/pull/8625
         let name = ns_string("NSAutoFillHeuristicControllerEnabled");
         let existing_value: *mut AnyObject = msg_send![user_defaults, objectForKey: name];
         if existing_value.is_null() {
@@ -1310,6 +1384,7 @@ extern "C-unwind" fn will_finish_launching(_this: &AnyObject, _: Sel, _: *mut An
 }
 
 extern "C-unwind" fn did_finish_launching(this: &AnyObject, _: Sel, _: *mut AnyObject) {
+    crate::launch_mark("did_finish");
     unsafe {
         let app: *mut AnyObject = msg_send![APP_CLASS, sharedApplication];
         let policy = get_mac_platform(this).0.lock().activation_policy;
@@ -1346,6 +1421,7 @@ extern "C-unwind" fn did_finish_launching(this: &AnyObject, _: Sel, _: *mut AnyO
             callback();
         }
     }
+    crate::writing_tools::start_load();
 }
 
 /// `observer` must be the app delegate, whose class declares `onSystemSleep:`
@@ -1374,18 +1450,95 @@ extern "C-unwind" fn should_handle_reopen(
     this: &AnyObject,
     _: Sel,
     _: *mut AnyObject,
-    has_open_windows: Bool,
+    _: Bool,
 ) -> Bool {
-    if !has_open_windows.as_bool() {
-        let platform = unsafe { get_mac_platform(this) };
-        let mut lock = platform.0.lock();
-        if let Some(mut callback) = lock.reopen.take() {
-            drop(lock);
-            callback();
-            platform.0.lock().reopen.get_or_insert(callback);
-        }
+    let platform = unsafe { get_mac_platform(this) };
+    let mut lock = platform.0.lock();
+    if let Some(mut callback) = lock.reopen.take() {
+        drop(lock);
+        callback();
+        platform.0.lock().reopen.get_or_insert(callback);
     }
     Bool::YES
+}
+
+extern "C-unwind" fn did_become_active(this: &AnyObject, _: Sel, _: *mut AnyObject) {
+    // Deferred like `on_screen_parameters_change`: the notification may fire
+    // while the App is already borrowed.
+    let platform = unsafe { get_mac_platform(this) };
+    let platform_ptr = platform as *const MacPlatform as *mut c_void;
+    unsafe {
+        DispatchQueue::main().exec_async_f(platform_ptr, did_become_active);
+    }
+
+    extern "C" fn did_become_active(context: *mut c_void) {
+        let platform = unsafe { &*(context as *const MacPlatform) };
+        let callback = platform.0.lock().app_lifecycle.take();
+        if let Some(mut callback) = callback {
+            callback(AppLifecyclePhase::Active);
+            platform.0.lock().app_lifecycle.get_or_insert(callback);
+        }
+    }
+}
+
+extern "C-unwind" fn should_terminate(
+    this: &AnyObject,
+    _: Sel,
+    _: *mut AnyObject,
+) -> NSApplicationTerminateReply {
+    let platform = unsafe { get_mac_platform(this) };
+    if platform.0.lock().quit_decided {
+        return NSApplicationTerminateReply::TerminateNow;
+    }
+    match ask_quit_request(platform) {
+        QuitAnswer::Allow => NSApplicationTerminateReply::TerminateNow,
+        QuitAnswer::Refuse => NSApplicationTerminateReply::TerminateCancel,
+        QuitAnswer::Later => {
+            ask_quit_request_later(platform, 1);
+            NSApplicationTerminateReply::TerminateLater
+        }
+    }
+}
+
+fn ask_quit_request(platform: &MacPlatform) -> QuitAnswer {
+    let mut lock = platform.0.lock();
+    if !lock.quit_request_set {
+        return QuitAnswer::Allow;
+    }
+    let Some(mut callback) = lock.quit_request.take() else {
+        return QuitAnswer::Later;
+    };
+    drop(lock);
+    let answer = callback();
+    platform.0.lock().quit_request.get_or_insert(callback);
+    answer
+}
+
+/// How many asks the quit AppKit waits on has had; one quit waits at a time.
+static QUIT_ASKED: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+
+// The app was busy when AppKit asked: it waits for
+// `replyToApplicationShouldTerminate:`, and the app is asked again from the
+// main queue, at most `QUIT_ASKS_AGAIN` times (`QuitAnswer::step`).
+fn ask_quit_request_later(platform: &MacPlatform, asked: u32) {
+    QUIT_ASKED.store(asked, std::sync::atomic::Ordering::Relaxed);
+    let platform_ptr = platform as *const MacPlatform as *mut c_void;
+    // SAFETY: platform lives for the process lifetime while callbacks are registered.
+    unsafe {
+        DispatchQueue::main().exec_async_f(platform_ptr, answer_later);
+    }
+
+    extern "C" fn answer_later(context: *mut c_void) {
+        // SAFETY: context is the MacPlatform pointer queued above.
+        let platform = unsafe { &*(context as *const MacPlatform) };
+        let asked = QUIT_ASKED.load(std::sync::atomic::Ordering::Relaxed);
+        match ask_quit_request(platform).step(asked) {
+            QuitStep::AskAgain(asked) => ask_quit_request_later(platform, asked),
+            QuitStep::Settled(allow) => {
+                NSApplication::sharedApplication(platform.1).replyToApplicationShouldTerminate(allow)
+            }
+        }
+    }
 }
 
 extern "C-unwind" fn will_terminate(this: &AnyObject, _: Sel, _: *mut AnyObject) {
@@ -1398,7 +1551,37 @@ extern "C-unwind" fn will_terminate(this: &AnyObject, _: Sel, _: *mut AnyObject)
     }
 }
 
+/// Quill: whether the keyboard layout has been read from the input source.
+static KEYBOARD_LAYOUT_READ: AtomicBool = AtomicBool::new(false);
+
+/// Quill: called after a window draws. The first time, the keyboard layout
+/// is read on a later turn of the main run loop, through the same path as a
+/// layout change, so the first frame does not wait for the Text Services
+/// Manager.
+pub(crate) fn read_keyboard_layout_after_first_frame() {
+    static ASKED: AtomicBool = AtomicBool::new(false);
+    if ASKED.swap(true, Ordering::AcqRel) {
+        return;
+    }
+    // SAFETY: called on the main thread from a window draw; the delegate is
+    // the GPUI app delegate, whose class declares `onKeyboardLayoutChange:`.
+    unsafe {
+        let app: *mut AnyObject = msg_send![APP_CLASS, sharedApplication];
+        let delegate: *mut AnyObject = msg_send![app, delegate];
+        if delegate.is_null() {
+            KEYBOARD_LAYOUT_READ.store(true, Ordering::Release);
+            return;
+        }
+        let _: () = msg_send![delegate,
+            performSelectorOnMainThread: sel!(onKeyboardLayoutChange:),
+            withObject: ptr::null_mut::<AnyObject>(),
+            waitUntilDone: Bool::NO
+        ];
+    }
+}
+
 extern "C-unwind" fn on_keyboard_layout_change(this: &AnyObject, _: Sel, _: *mut AnyObject) {
+    KEYBOARD_LAYOUT_READ.store(true, Ordering::Release);
     let platform = unsafe { get_mac_platform(this) };
     let mut lock = platform.0.lock();
     let keyboard_layout = MacKeyboardLayout::new();
