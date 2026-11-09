@@ -92,7 +92,7 @@ impl QuillApp {
             return;
         }
         let Some(live) = self.live.as_mut() else {
-            self.connection.set_note(StatusNote::info(tr(
+            self.set_note(StatusNote::info(tr(
                 keys::Q_PEOPLE_PROFILE_PHOTOS_NEED_A_LIVE,
             )));
             cx.notify();
@@ -122,7 +122,7 @@ impl QuillApp {
         };
         match sent {
             Ok(()) => self.wait_for_profile_gallery(owner),
-            Err(_) => self.connection.set_note(StatusNote::error(tr(
+            Err(_) => self.set_note(StatusNote::error(tr(
                 keys::Q_PEOPLE_COULDNT_REACH_TELEGRAM_TRY_AGAIN,
             ))),
         }
@@ -151,7 +151,7 @@ impl QuillApp {
         let Some(gallery) = self.session().and_then(|s| s.photo_gallery(owner)) else {
             if let Some(reason) = failure {
                 self.dialogs.pending_profile_gallery = None;
-                self.connection.set_note(StatusNote::error(tr_with(
+                self.set_note(StatusNote::error(tr_with(
                     keys::Q_PEOPLE_COULDNT_LOAD_PROFILE_PHOTOS,
                     &[("reason", &reason)],
                 )));
@@ -169,13 +169,12 @@ impl QuillApp {
                 }
             });
         } else if let Some(reason) = failure {
-            self.connection.set_note(StatusNote::error(tr_with(
+            self.set_note(StatusNote::error(tr_with(
                 keys::Q_PEOPLE_COULDNT_LOAD_PROFILE_PHOTOS,
                 &[("reason", &reason)],
             )));
         } else {
-            self.connection
-                .set_note(StatusNote::silent(tr(keys::Q_PEOPLE_NO_PROFILE_PHOTOS)));
+            self.set_note(StatusNote::silent(tr(keys::Q_PEOPLE_NO_PROFILE_PHOTOS)));
         }
         true
     }
@@ -240,7 +239,7 @@ impl QuillApp {
             return;
         };
         let Some(live) = self.live.as_mut() else {
-            self.connection.set_note(StatusNote::info(tr(
+            self.set_note(StatusNote::info(tr(
                 keys::Q_PEOPLE_PROFILE_PHOTO_CHANGES_NEED_A,
             )));
             cx.notify();
@@ -254,12 +253,12 @@ impl QuillApp {
         };
         match sent {
             Ok(_) => {
-                self.connection.set_note(StatusNote::silent(tr(
+                self.set_note(StatusNote::silent(tr(
                     keys::Q_PEOPLE_MAIN_PROFILE_PHOTO_UPDATED,
                 )));
                 self.close_media_viewer(cx);
             }
-            Err(_) => self.connection.set_note(StatusNote::error(tr(
+            Err(_) => self.set_note(StatusNote::error(tr(
                 keys::Q_PEOPLE_COULDNT_REACH_TELEGRAM_TRY_AGAIN,
             ))),
         }
@@ -294,17 +293,15 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         let Some(live) = self.live.as_mut() else {
-            self.connection.set_note(StatusNote::info(tr(
+            self.set_note(StatusNote::info(tr(
                 keys::Q_PEOPLE_DEMO_MODE_REPORTS_NEED_A,
             )));
             cx.notify();
             return;
         };
         match live.driver.report_photo(owner, file_id, reason.td_type()) {
-            Ok(_) => self
-                .connection
-                .set_note(StatusNote::silent(tr(keys::Q_PEOPLE_REPORT_SENT))),
-            Err(_) => self.connection.set_note(StatusNote::error(tr(
+            Ok(_) => self.set_note(StatusNote::silent(tr(keys::Q_PEOPLE_REPORT_SENT))),
+            Err(_) => self.set_note(StatusNote::error(tr(
                 keys::Q_PEOPLE_COULDNT_REACH_TELEGRAM_TRY_AGAIN,
             ))),
         }

@@ -10,7 +10,7 @@ use crate::ui::status_note::StatusNote;
 use gpui_kit::*;
 use quill::diagnostics::{DiagnosticSink, MemorySink};
 use quill::ids::ChatId;
-use quill::state::{InfoPanelTarget, RequestPurpose, Session};
+use quill::state::{ChatPhotosFetch, InfoPanelTarget, RequestPurpose, Session};
 use quill::telegram::client::copy_and_parse;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -83,10 +83,20 @@ fn apply_group_photos(session: &mut Session, sink: &Arc<MemorySink>, seq: &Atomi
             )
         })
         .collect();
+    for json in std::mem::take(&mut jsons) {
+        if let Some(owned) = copy_and_parse(&json, seq, &dyn_sink) {
+            session.apply(owned);
+        }
+    }
+    // The history page lands only as the fetch the gallery waits for.
     let extra = session.request(
         RequestPurpose::GetChatPhotoHistory,
         Some(ChatId(PHOTO_GROUP)),
     );
+    session
+        .users_state
+        .chat_photo_history
+        .insert(PHOTO_GROUP, ChatPhotosFetch::Loading(extra));
     jsons.push(format!(
         r#"{{"@type":"foundChatMessages","@extra":"{}","total_count":{},"next_from_message_id":0,"messages":[{}]}}"#,
         extra.0,
@@ -107,7 +117,7 @@ impl QuillApp {
             apply_group_photos(session, &self.demo_ui.sink, &self.demo_ui.seq);
         }
         self.open_info_panel_target(InfoPanelTarget::Supergroup(PHOTO_GROUP), window, cx);
-        self.connection.set_note(StatusNote::silent(
+        self.set_note(StatusNote::silent(
             "screenshot demo — group info panel, three group photos",
         ));
         cx.notify();

@@ -66,8 +66,7 @@ impl QuillApp {
             live.driver.maybe_fetch_premium()
         });
         if let Some(Err(_)) = sent {
-            self.connection
-                .set_note(StatusNote::error(tr(keys::Q_NOTES_COULDNT_LOAD_PREMIUM)));
+            self.set_note(StatusNote::error(tr(keys::Q_NOTES_COULDNT_LOAD_PREMIUM)));
         }
         self.set_promo_page(page, cx);
     }

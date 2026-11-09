@@ -87,8 +87,7 @@ impl QuillApp {
             self.privacy.device_login_qr =
                 Some(zeroize::Zeroizing::new("tg://login?token=AQID".into()));
         }
-        self.connection
-            .set_note(StatusNote::silent("screenshot demo — active sessions"));
+        self.set_note(StatusNote::silent("screenshot demo — active sessions"));
     }
 
     pub(crate) fn demo_ready_storage_usage(
@@ -108,8 +107,7 @@ impl QuillApp {
             session.settings.storage_freed = Some(54_525_952);
         }
         self.open_settings(Some(quill::settings_catalog::Page::DataStorage), cx);
-        self.connection
-            .set_note(StatusNote::silent("screenshot demo — data & storage"));
+        self.set_note(StatusNote::silent("screenshot demo — data & storage"));
     }
 
     fn demo_link_handler_row(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
@@ -123,8 +121,7 @@ impl QuillApp {
             checking.then_some(quill::link_handler::LinkHandlerState::Checking),
         );
         self.open_settings_on(quill::settings_catalog::Page::System, cx);
-        self.connection
-            .set_note(StatusNote::silent("screenshot demo — default app row"));
+        self.set_note(StatusNote::silent("screenshot demo — default app row"));
     }
 
     fn demo_appearance(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
@@ -146,7 +143,6 @@ impl QuillApp {
         self.appearance.wallpaper_rgb = Some(0x0e1621);
         self.appearance.font_size_px = 16;
         self.open_settings_on(quill::settings_catalog::Page::Appearance, cx);
-        self.connection
-            .set_note(StatusNote::silent("screenshot demo — appearance settings"));
+        self.set_note(StatusNote::silent("screenshot demo — appearance settings"));
     }
 }

@@ -316,7 +316,7 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut()
             && live.driver.load_more_search_results().is_err()
         {
-            self.connection.set_note(StatusNote::error(tr(
+            self.set_note(StatusNote::error(tr(
                 keys::Q_CHAT_COULD_NOT_LOAD_MORE_RESULTS,
             )));
         }
@@ -421,7 +421,7 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut()
             && live.driver.search_public_posts_paid().is_err()
         {
-            self.connection.set_note(StatusNote::error(tr(
+            self.set_note(StatusNote::error(tr(
                 keys::Q_CHAT_COULD_NOT_SEARCH_PUBLIC_POSTS,
             )));
         }

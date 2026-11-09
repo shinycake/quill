@@ -246,7 +246,7 @@ impl QuillApp {
             BidAction::Place(n) | BidAction::Increase(n) => n,
         };
         let Some(MessageSender::User { user_id }) = self.auction_recipient() else {
-            self.connection.set_note(StatusNote::info(tr(
+            self.set_note(StatusNote::info(tr(
                 keys::Q_MONEY_AUCTION_GIFTS_CAN_ONLY_BE,
             )));
             cx.notify();
@@ -258,7 +258,7 @@ impl QuillApp {
             .and_then(|s| s.payments.hub.balance)
             .is_some_and(|balance| balance.stars < add);
         if poor {
-            self.connection.set_note(StatusNote::silent(tr(
+            self.set_note(StatusNote::silent(tr(
                 keys::Q_MONEY_YOUR_STARS_BALANCE_IS_TOO,
             )));
             self.open_stars(cx);
@@ -278,8 +278,7 @@ impl QuillApp {
                 .bid_gift_auction(gift_id, stars, user_id, &text, hide)
                 .is_ok(),
             None => {
-                self.connection
-                    .set_note(StatusNote::info(tr(keys::Q_MONEY_BIDS_NEED_A_SIGNED_IN)));
+                self.set_note(StatusNote::info(tr(keys::Q_MONEY_BIDS_NEED_A_SIGNED_IN)));
                 false
             }
         };
@@ -293,8 +292,7 @@ impl QuillApp {
                 )
             });
         } else if self.live.is_some() {
-            self.connection
-                .set_note(StatusNote::error(tr(keys::Q_MONEY_COULDNT_PLACE_THE_BID)));
+            self.set_note(StatusNote::error(tr(keys::Q_MONEY_COULDNT_PLACE_THE_BID)));
         }
         cx.notify();
     }

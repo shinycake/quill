@@ -153,7 +153,7 @@ impl QuillApp {
                 return false;
             }
             if let Some(line) = self.business_mut().and_then(|d| d.local_error.take()) {
-                self.connection.set_note(StatusNote::error(line));
+                self.set_note(StatusNote::error(line));
             }
         }
         self.close_business(cx);
@@ -192,8 +192,11 @@ impl QuillApp {
         let missing = self.business_draft_missing(view);
         match view {
             View::Greeting | View::Away | View::Location | View::StartPage | View::Hours => {
-                if missing && !self.business_fill_draft(view, window, cx) {
-                    self.business_info_watch(window, cx);
+                // Before the full info arrives the screen shows "Loading…";
+                // the frame upkeep builds it when the info lands
+                // (`business_info_upkeep`).
+                if missing {
+                    self.business_fill_draft(view, window, cx);
                 }
                 if view == View::Hours
                     && let Some(live) = self.live.as_mut()
@@ -276,45 +279,20 @@ impl QuillApp {
         true
     }
 
-    /// Wait for the full info while a screen shows "Loading…"; the screen
-    /// fills in when it lands. Stops when the screen is left.
-    fn business_info_watch(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.spawn_screen_in(window, cx, async move |this, cx| {
-            loop {
-                cx.background_executor()
-                    .timer(std::time::Duration::from_millis(200))
-                    .await;
-                let Ok(done) =
-                    this.update_in(cx, |this, window, cx| this.business_info_pump(window, cx))
-                else {
-                    break;
-                };
-                if done {
-                    break;
-                }
-            }
-        })
-        .detach();
-    }
-
-    /// Fill the open screen's draft if the full info arrived. `true` when
-    /// nothing is left to wait for.
-    pub(super) fn business_info_pump(
+    /// Frame upkeep of the window hosting the Business box: a screen
+    /// waiting for the full info is built from it once it is stored. A
+    /// pure function of the state: no draft and the saved value present.
+    pub(in crate::ui) fn business_info_upkeep(
         &mut self,
         window: &mut Window,
         cx: &mut Context<Self>,
-    ) -> bool {
+    ) {
         let Some(view) = self.business_view() else {
-            return true;
+            return;
         };
-        if !self.business_waits_for_info(view) {
-            return true;
-        }
-        let filled = self.business_fill_draft(view, window, cx);
-        if filled {
+        if self.business_waits_for_info(view) && self.business_fill_draft(view, window, cx) {
             cx.notify();
         }
-        filled
     }
 
     /// Whether this screen shows "Loading…" until the full info arrives.

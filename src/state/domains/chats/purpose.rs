@@ -59,7 +59,7 @@ pub enum ChatsPurpose {
     /// Response is `background`, stored like `SetDefaultBackground`.
     SetDefaultBackgroundLocal,
     /// `searchBackground` for a `bg/` link. Response is `background`
-    /// (`Session::searched_background`).
+    /// (`ChatsState::background_search`).
     SearchBackground,
     /// `setChatBackground`. Response is `ok`; `updateChatBackground`
     /// carries the new wallpaper.

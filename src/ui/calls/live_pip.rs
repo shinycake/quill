@@ -168,8 +168,7 @@ impl QuillApp {
                     (None, Some(window)) => close_window(window, false, cx),
                     (_, None) => {
                         app.group_call.live_pip = None;
-                        app.connection
-                            .set_note(StatusNote::error(tr(keys::Q_MEDIA_PIP_FAILED)));
+                        app.set_note(StatusNote::error(tr(keys::Q_MEDIA_PIP_FAILED)));
                         app.check_live_pip(cx);
                     }
                 }

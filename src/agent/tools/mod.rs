@@ -332,51 +332,96 @@ or {\"contacts\": true, \"reason\": \"To find Ann's chat.\"}. Output: {granted, 
 thread_local! {
     /// The agent whose request this thread runs, for prompts.
     static AGENT: std::cell::RefCell<String> = const { std::cell::RefCell::new(String::new()) };
-    /// The switch's generation when the current call began.
-    static GENERATION: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
-    /// The connection the current call came on (0 when none).
-    static CONN: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
-    /// [`crate::agent::access::lock_count`] when the current call began
-    /// (`u64::MAX` off a call, which [`still_allowed`] then refuses).
-    static LOCKS_AT_START: std::cell::Cell<u64> = const { std::cell::Cell::new(u64::MAX) };
+    /// What held when the current call began; `None` off a call, which
+    /// [`still_allowed`] then refuses.
+    static CALL: std::cell::Cell<Option<CallStart>> = const { std::cell::Cell::new(None) };
+}
+
+/// The switches a call's writes are checked against at their queue turn.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct CallStart {
+    /// The connection the call came on (0 when none).
+    conn: u64,
+    /// [`crate::agent::access::generation`]: the Agent access switch.
+    access: u64,
+    /// [`crate::agent::access::lock_count`].
+    locks: u64,
+    /// [`crate::agent::grants::generation`]: which chats agents may use.
+    grants: u64,
+}
+
+impl CallStart {
+    fn now(conn: u64) -> Self {
+        Self {
+            conn,
+            access: crate::agent::access::generation(),
+            locks: crate::agent::access::lock_count(),
+            grants: crate::agent::grants::generation(),
+        }
+    }
+}
+
+fn call_start() -> Option<CallStart> {
+    CALL.try_with(std::cell::Cell::get).ok().flatten()
+}
+
+/// Marks the thread as running a call for as long as it lives, and off a
+/// call again when the call ends (or unwinds).
+struct CallScope;
+
+impl CallScope {
+    fn begin(start: CallStart) -> Self {
+        let _ = CALL.try_with(|current| current.set(Some(start)));
+        CallScope
+    }
+}
+
+impl Drop for CallScope {
+    fn drop(&mut self) {
+        let _ = CALL.try_with(|current| current.set(None));
+    }
 }
 
 /// What a write answers when Quill locked while it waited its turn: the
 /// check runs before anything goes out, so nothing did.
 pub(crate) const LOCKED_BEFORE_SENDING_MESSAGE: &str = "Quill was locked while this waited its turn, so nothing was sent or changed. Ask the user to unlock Quill, then retry.";
 
+/// What a write answers when the user changed which chats agents may use
+/// while it waited (at the confirm prompt or in the paced queue): the grant
+/// it was let through on may no longer hold, so nothing went out.
+pub(crate) const GRANTS_CHANGED_MESSAGE: &str = "The user changed which chats agents may use while this waited, so nothing was sent or changed. Call quill_status to see the grants now, then retry if the chat is still granted for writing.";
+
 /// Refuses once Agent access went off (or the strip's Revoke was clicked,
 /// or the token was reset) after the current call began, Quill locked
-/// since then, or the user revoked this agent's connection: a write that
-/// waited in the queue must not go out.
+/// since then, the user changed the grants since then, or the user revoked
+/// this agent's connection: a write that waited in the queue or at the
+/// confirm prompt must not go out.
 pub(crate) fn still_allowed() -> Result<(), ToolError> {
-    let began = GENERATION
-        .try_with(std::cell::Cell::get)
-        .unwrap_or(u64::MAX);
-    let conn = CONN.try_with(std::cell::Cell::get).unwrap_or(0);
-    if conn != 0 && crate::agent::activity::is_revoked(conn) {
+    let Some(began) = call_start() else {
+        return Err(ToolError::new(LOCKED_BEFORE_SENDING_MESSAGE));
+    };
+    if began.conn != 0 && crate::agent::activity::is_revoked(began.conn) {
         return Err(ToolError::new(crate::agent::server::REVOKED_MESSAGE));
     }
     if locked_since_call_began() {
         return Err(ToolError::new(LOCKED_BEFORE_SENDING_MESSAGE));
     }
-    if crate::agent::access::enabled() && crate::agent::access::generation() == began {
-        Ok(())
-    } else {
-        Err(ToolError::new(
+    if !crate::agent::access::enabled() || crate::agent::access::generation() != began.access {
+        return Err(ToolError::new(
             "Agent access was turned off in Quill, so nothing was sent or changed. Ask the user to turn it back on.",
-        ))
+        ));
     }
+    if crate::agent::grants::generation() != began.grants {
+        return Err(ToolError::new(GRANTS_CHANGED_MESSAGE));
+    }
+    Ok(())
 }
 
 /// Quill is locked, or locked at some point since the current call began:
 /// a step with an effect outside the answer (a send, a file copy) must not
 /// run, since [`withheld_if_locked`] hides only the answer.
 pub(crate) fn locked_since_call_began() -> bool {
-    let locks = LOCKS_AT_START
-        .try_with(std::cell::Cell::get)
-        .unwrap_or(u64::MAX);
-    crate::agent::access::locked_since(locks)
+    call_start().is_none_or(|began| crate::agent::access::locked_since(began.locks))
 }
 
 /// The name of the agent making the current call.
@@ -461,11 +506,10 @@ pub fn call(name: &str, arguments: &Value, agent: &str) -> Value {
 /// among those it used ([`crate::agent::activity::note_tool`]).
 pub fn call_on(conn: u64, name: &str, arguments: &Value, agent: &str) -> Value {
     let _ = AGENT.try_with(|current| current.replace(agent.to_string()));
-    let _ = GENERATION.try_with(|current| current.set(crate::agent::access::generation()));
-    let _ = CONN.try_with(|current| current.set(conn));
     let _ = ui_shot::take_attached();
-    let locks = crate::agent::access::lock_count();
-    let _ = LOCKS_AT_START.try_with(|current| current.set(locks));
+    let start = CallStart::now(conn);
+    let locks = start.locks;
+    let _call = CallScope::begin(start);
     let result = match all_tools().find(|tool| tool.name == name) {
         // Locked: no read, send or window step, `quill_status` included
         // (it reads the account).
@@ -564,12 +608,8 @@ mod tests {
         crate::fast_buttons::set_persistence(false);
         access::set_enabled(true);
         access::set_paused_by_lock(false);
-        let begin = || {
-            let _ = super::GENERATION.try_with(|current| current.set(access::generation()));
-            let _ = super::CONN.try_with(|current| current.set(0));
-            let _ = super::LOCKS_AT_START.try_with(|current| current.set(access::lock_count()));
-        };
-        begin();
+        let begin = || super::CallScope::begin(super::CallStart::now(0));
+        let call = begin();
         assert!(super::still_allowed().is_ok(), "nothing changed");
         access::set_paused_by_lock(true);
         access::set_paused_by_lock(false);
@@ -591,8 +631,34 @@ mod tests {
             matches!(&answer, Err(super::ToolError(message)) if message == super::LOCKED_BEFORE_SENDING_MESSAGE),
             "the call says nothing went out, not that it may have"
         );
-        begin();
+        drop(call);
+        let call = begin();
         assert!(super::still_allowed().is_ok(), "a call begun after it");
+        drop(call);
+        assert!(super::still_allowed().is_err(), "off a call");
+        assert!(super::locked_since_call_began(), "off a call");
+        access::set_enabled(false);
+    }
+
+    /// A write that waited while the user changed the grants is refused at
+    /// its turn: the grant it was let through on may be gone.
+    #[test]
+    fn a_grant_change_while_a_write_waits_stops_it() {
+        let _guard = crate::locks::lock_or_recover(&access::TEST_LOCK);
+        crate::fast_buttons::set_persistence(false);
+        access::set_enabled(true);
+        access::set_paused_by_lock(false);
+        let call = super::CallScope::begin(super::CallStart::now(0));
+        assert!(super::still_allowed().is_ok());
+        crate::agent::grants::bump_generation_for_test();
+        assert!(matches!(
+            super::still_allowed(),
+            Err(super::ToolError(message)) if message == super::GRANTS_CHANGED_MESSAGE
+        ));
+        drop(call);
+        let call = super::CallScope::begin(super::CallStart::now(0));
+        assert!(super::still_allowed().is_ok(), "a call begun after it");
+        drop(call);
         access::set_enabled(false);
     }
 

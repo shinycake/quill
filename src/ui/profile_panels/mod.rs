@@ -66,7 +66,7 @@ impl QuillApp {
     /// "Phone number copied to clipboard" and friends).
     pub(super) fn copy_profile_text(&mut self, text: &str, toast: &str, cx: &mut Context<Self>) {
         cx.write_to_clipboard(ClipboardItem::new_string(text.to_string()));
-        self.connection.set_note(StatusNote::info(toast));
+        self.set_note(StatusNote::info(toast));
         cx.notify();
     }
 
@@ -335,17 +335,15 @@ impl QuillApp {
     /// (`setProfilePhoto` with the suggestion's `chatPhoto.id`).
     pub(super) fn accept_suggested_photo(&mut self, photo_id: i64, cx: &mut Context<Self>) {
         let Some(live) = self.live.as_mut() else {
-            self.connection.set_note(StatusNote::info(tr(
+            self.set_note(StatusNote::info(tr(
                 keys::Q_PEOPLE_PROFILE_PHOTO_CHANGES_NEED_A,
             )));
             cx.notify();
             return;
         };
         match live.driver.set_profile_photo_previous(photo_id) {
-            Ok(_) => self
-                .connection
-                .set_note(StatusNote::silent(tr(keys::Q_PEOPLE_PROFILE_PHOTO_UPDATED))),
-            Err(_) => self.connection.set_note(StatusNote::error(tr(
+            Ok(_) => self.set_note(StatusNote::silent(tr(keys::Q_PEOPLE_PROFILE_PHOTO_UPDATED))),
+            Err(_) => self.set_note(StatusNote::error(tr(
                 keys::Q_PEOPLE_COULDNT_REACH_TELEGRAM_TRY_AGAIN,
             ))),
         }
@@ -389,8 +387,7 @@ impl QuillApp {
                         return;
                     }
                     if !is_profile_photo_file(&path) {
-                        this.connection
-                            .set_note(StatusNote::silent(tr(keys::Q_PEOPLE_CHOOSE_A_JPEG_PNG_OR)));
+                        this.set_note(StatusNote::silent(tr(keys::Q_PEOPLE_CHOOSE_A_JPEG_PNG_OR)));
                         cx.notify();
                         return;
                     }

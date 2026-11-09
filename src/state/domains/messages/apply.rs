@@ -557,7 +557,7 @@ impl Session {
             MessagesPayload::WebPageInstantView { .. } => {}
             // MED4b: `linkPreview` (`getLinkPreview` answer) — captured
             // by the driver before `apply` into
-            // `Session::composer_preview`; nothing to reduce here.
+            // `Session::composer_previews`; nothing to reduce here.
             MessagesPayload::LinkPreview { .. } => {}
             // M1 fix-up: `getMessageProperties` returns
             // `messageProperties`. The driver gates the chained

@@ -23,14 +23,14 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut() {
             live.driver.session.settings.badge_prefs = prefs;
             if let Err(err) = live.driver.save_badge_prefs() {
-                self.connection.set_note(StatusNote::silent(tr_with(
+                self.set_note(StatusNote::silent(tr_with(
                     keys::Q_PREFS_COULDN_T_SAVE_BADGE_SETTINGS,
                     &[("err", &err.to_string())],
                 )));
             }
         } else if let Some(demo) = self.demo_session.as_mut() {
             demo.settings.badge_prefs = prefs;
-            self.connection.set_note(StatusNote::silent(tr(
+            self.set_note(StatusNote::silent(tr(
                 keys::Q_PREFS_DEMO_BADGE_SETTINGS_ARE_NOT,
             )));
         }
@@ -48,7 +48,7 @@ impl QuillApp {
             live.driver.save_desktop_notifications();
         } else if let Some(demo) = self.demo_session.as_mut() {
             demo.settings.desktop_notifications = on;
-            self.connection.set_note(StatusNote::silent(tr(
+            self.set_note(StatusNote::silent(tr(
                 keys::Q_PREFS_DEMO_DESKTOP_NOTIFICATIONS_ARE_NOT,
             )));
         }
@@ -72,8 +72,7 @@ impl QuillApp {
             live.driver.save_inapp_sounds_enabled();
         } else if let Some(demo) = self.demo_session.as_mut() {
             demo.settings.inapp_sounds_enabled = on;
-            self.connection
-                .set_note(StatusNote::silent(tr(keys::Q_PREFS_DEMO_IN_APP_SOUNDS_ARE)));
+            self.set_note(StatusNote::silent(tr(keys::Q_PREFS_DEMO_IN_APP_SOUNDS_ARE)));
         }
         cx.notify();
     }
@@ -278,7 +277,7 @@ impl QuillApp {
     ) {
         if let Some(live) = self.live.as_mut() {
             if let Err(err) = live.driver.set_contact_joined_notifications(on) {
-                self.connection.set_note(StatusNote::error(user_error_for(
+                self.set_note(StatusNote::error(user_error_for(
                     keys::Q_NOTES_FAILED_NOTIFICATION_SETTING,
                     &err,
                 )));
@@ -379,16 +378,17 @@ impl QuillApp {
     /// refill them. Demo: seed the schema defaults directly.
     pub(in crate::ui) fn reset_all_notification_settings(&mut self, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
-            self.screen
-                .connection
-                .set_note(match live.driver.reset_all_notification_settings() {
+            self.screen.connection.set_note_for(
+                &self.screen.windows,
+                match live.driver.reset_all_notification_settings() {
                     Ok(_) => {
                         StatusNote::silent(tr(keys::Q_PREFS_RESETTING_ALL_NOTIFICATION_SETTINGS))
                     }
                     Err(_) => {
                         StatusNote::error(tr(keys::Q_PREFS_COULD_NOT_RESET_NOTIFICATION_SETTINGS))
                     }
-                });
+                },
+            );
         } else if let Some(session) = self.demo_session.as_mut() {
             for scope in NotificationSettingsScope::ALL {
                 session
@@ -396,7 +396,7 @@ impl QuillApp {
                     .scope_notification_settings
                     .insert(scope, ScopeNotificationSettings::default());
             }
-            self.connection.set_note(StatusNote::silent(tr(
+            self.set_note(StatusNote::silent(tr(
                 keys::Q_PREFS_NOTIFICATION_SETTINGS_RESET,
             )));
         }

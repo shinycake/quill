@@ -109,8 +109,7 @@ fn a_gone_story_opened_from_a_card_or_the_tray_drops_the_open_quietly(cx: &mut T
     let vcx = &mut vcx;
     for scope in [StoryOpenScope::Single, StoryOpenScope::Tray] {
         app.update(vcx, |app, cx| {
-            app.connection
-                .set_note(crate::ui::status_note::StatusNote::silent(""));
+            app.set_note(crate::ui::status_note::StatusNote::silent(""));
             app.open_story_viewer(ChatId(POSTER), 97, scope, cx);
             if let Some(session) = app.demo_session.as_mut() {
                 session.stories.missing.insert((POSTER, 97));
@@ -183,8 +182,7 @@ fn open_then_fail(
     scope: StoryOpenScope,
 ) -> (Option<PendingStoryOpen>, String) {
     app.update(vcx, |app, cx| {
-        app.connection
-            .set_note(crate::ui::status_note::StatusNote::silent(""));
+        app.set_note(crate::ui::status_note::StatusNote::silent(""));
         app.open_story_viewer(ChatId(POSTER), story, scope, cx);
         if let Some(session) = app.demo_session.as_mut() {
             session

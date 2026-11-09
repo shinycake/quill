@@ -16,11 +16,6 @@ pub(crate) struct ShareUi {
     pub(super) forward_picker_open: bool,
     /// "Reply in Another Chat": the chat chooser for the composer's reply.
     pub(super) reply_elsewhere_open: bool,
-    /// "Update Quote": the picker for the part of the message to quote,
-    /// open for the reply to this message. It shows only while the
-    /// composer's reply is to that message (`QuillApp::reply_quote_open`),
-    /// so a reply sent, cancelled or replaced closes it.
-    pub(super) reply_quote_for: Option<(quill::ids::ChatId, quill::ids::MessageId)>,
     /// Destinations ticked in the share box.
     pub(super) selection: quill::share_box::ShareSelection,
     /// The share box's optional comment, sent before the forwards.
@@ -56,7 +51,6 @@ impl ShareUi {
             pending_forward: None,
             forward_picker_open: false,
             reply_elsewhere_open: false,
-            reply_quote_for: None,
             selection: quill::share_box::ShareSelection::default(),
             comment_input: share_comment_input,
             search_input: forward_search_input,

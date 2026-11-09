@@ -70,7 +70,7 @@ impl QuillApp {
     /// (TGX tap-to-switch, desktop-mapped). Ignored while recording.
     pub(super) fn toggle_record_mode(&mut self, cx: &mut Context<Self>) {
         if self.recording_active() {
-            self.connection.set_note(StatusNote::silent(tr(
+            self.set_note(StatusNote::silent(tr(
                 keys::Q_MISC_FINISH_THE_RECORDING_FIRST,
             )));
             cx.notify();
@@ -78,7 +78,7 @@ impl QuillApp {
         }
         let next = !matches!(self.record_mode(), RecordMode::Video);
         self.set_media_pref(|prefs| prefs.prefer_video_mode = next, cx);
-        self.screen.connection.set_note(StatusNote::silent(format!(
+        self.set_note(StatusNote::silent(format!(
             "{} — {}",
             if next {
                 tr(keys::Q_MISC_VIDEO_NOTE_MODE)
@@ -133,7 +133,7 @@ impl QuillApp {
         if let Some((name, layer)) = self.open_secret_chat_peer_layer()
             && layer < 66
         {
-            self.connection.set_note(StatusNote::info(tr_with(
+            self.set_note(StatusNote::info(tr_with(
                 keys::Q_MISC_S_TELEGRAM_CLIENT_DOESNT_SUPPORT,
                 &[("name", &name.to_string())],
             )));
@@ -183,7 +183,7 @@ impl QuillApp {
 
     fn fail_recording(&mut self, reason: String, cx: &mut Context<Self>) {
         self.cancel_recording(cx);
-        self.connection.set_note(StatusNote::error(reason));
+        self.set_note(StatusNote::error(reason));
         cx.notify();
     }
 
@@ -211,13 +211,11 @@ impl QuillApp {
             return;
         }
         self.recording.locked = !self.recording.locked;
-        self.screen
-            .connection
-            .set_note(if self.screen.recording.locked {
-                StatusNote::silent(tr(keys::Q_MISC_RECORDING_LOCKED_ESC_WONT_CANCEL))
-            } else {
-                StatusNote::silent(tr(keys::Q_MISC_RECORDING_UNLOCKED))
-            });
+        self.set_note(if self.screen.recording.locked {
+            StatusNote::silent(tr(keys::Q_MISC_RECORDING_LOCKED_ESC_WONT_CANCEL))
+        } else {
+            StatusNote::silent(tr(keys::Q_MISC_RECORDING_UNLOCKED))
+        });
         cx.notify();
     }
 
@@ -230,12 +228,10 @@ impl QuillApp {
         if capture.is_paused() {
             capture.resume();
             self.stop_record_preview();
-            self.connection
-                .set_note(StatusNote::silent(tr(keys::Q_MISC_RECORDING_VOICE_NOTE)));
+            self.set_note(StatusNote::silent(tr(keys::Q_MISC_RECORDING_VOICE_NOTE)));
         } else {
             capture.pause();
-            self.connection
-                .set_note(StatusNote::silent(tr(keys::Q_MISC_RECORDING_PAUSED)));
+            self.set_note(StatusNote::silent(tr(keys::Q_MISC_RECORDING_PAUSED)));
         }
         self.sync_voice_action();
         cx.notify();
@@ -255,7 +251,7 @@ impl QuillApp {
             return;
         };
         let Some(path) = capture.preview_path().map(std::path::Path::to_path_buf) else {
-            self.connection.set_note(StatusNote::silent(tr(
+            self.set_note(StatusNote::silent(tr(
                 keys::Q_MISC_GETTING_THE_RECORDING_READY,
             )));
             cx.notify();
@@ -296,7 +292,7 @@ impl QuillApp {
             self.recording.preview = Some(clock);
             self.spawn_voice_tick(cx);
         } else {
-            self.connection.set_note(StatusNote::error(tr(
+            self.set_note(StatusNote::error(tr(
                 keys::Q_MISC_COULDNT_PLAY_THE_RECORDING,
             )));
         }
@@ -317,13 +313,11 @@ impl QuillApp {
     /// Switch "Play once" for the voice message being recorded.
     pub(super) fn toggle_record_once(&mut self, cx: &mut Context<Self>) {
         self.recording.once = !self.recording.once;
-        self.screen
-            .connection
-            .set_note(if self.screen.recording.once {
-                StatusNote::info(tr(keys::RECORD_ONCE_ACTIVE_TOOLTIP))
-            } else {
-                StatusNote::silent(tr(keys::Q_MISC_PLAY_ONCE_OFF))
-            });
+        self.set_note(if self.screen.recording.once {
+            StatusNote::info(tr(keys::RECORD_ONCE_ACTIVE_TOOLTIP))
+        } else {
+            StatusNote::silent(tr(keys::Q_MISC_PLAY_ONCE_OFF))
+        });
         cx.notify();
     }
 
@@ -347,7 +341,7 @@ impl QuillApp {
             None => self.recording.cancel_start(),
         }
         self.sync_voice_action();
-        self.connection.set_note(if was_video {
+        self.set_note(if was_video {
             StatusNote::silent(tr(keys::Q_MISC_VIDEO_RECORDING_CANCELLED))
         } else {
             StatusNote::silent(tr(keys::Q_MISC_VOICE_RECORDING_CANCELLED))
@@ -378,15 +372,15 @@ impl QuillApp {
         }
         if let Some(live) = self.live.as_mut() {
             match live.driver.recognize_speech(chat_id, message_id) {
-                Ok(_) => self
-                    .connection
-                    .set_note(StatusNote::silent(tr(keys::Q_MISC_TRANSCRIPTION_REQUESTED))),
-                Err(_) => self.connection.set_note(StatusNote::error(tr(
+                Ok(_) => {
+                    self.set_note(StatusNote::silent(tr(keys::Q_MISC_TRANSCRIPTION_REQUESTED)))
+                }
+                Err(_) => self.set_note(StatusNote::error(tr(
                     keys::Q_MISC_COULDNT_REQUEST_TRANSCRIPTION,
                 ))),
             }
         } else {
-            self.connection.set_note(StatusNote::info(tr(
+            self.set_note(StatusNote::info(tr(
                 keys::Q_MISC_DEMO_TRANSCRIPTION_NEEDS_A_LIVE,
             )));
         }
@@ -397,7 +391,7 @@ impl QuillApp {
     /// status-note feedback the toggle gave.
     pub(super) fn set_hq_round_videos(&mut self, on: bool, cx: &mut Context<Self>) {
         self.set_media_pref(|prefs| prefs.hq_round_videos = on, cx);
-        self.connection.set_note(if on {
+        self.set_note(if on {
             StatusNote::silent(tr(keys::Q_MISC_HQ_ROUND_VIDEOS_ON_480PX))
         } else {
             StatusNote::silent(tr(keys::Q_MISC_HQ_ROUND_VIDEOS_OFF_280PX))

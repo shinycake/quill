@@ -173,7 +173,7 @@ impl QuillApp {
             InviteLinkRequest::Create { .. } | InviteLinkRequest::CreateSubscription { .. }
         );
         let Some(live) = self.live.as_mut() else {
-            self.connection.set_note(StatusNote::info(tr(
+            self.set_note(StatusNote::info(tr(
                 keys::Q_PEOPLE_INVITE_LINKS_NEED_A_LIVE,
             )));
             cx.notify();
@@ -224,7 +224,7 @@ impl QuillApp {
             (Err(_), true) => StatusNote::error(tr(keys::Q_PEOPLE_COULD_NOT_CREATE_INVITE_LINK)),
             (Err(_), false) => StatusNote::error(tr(keys::Q_PEOPLE_COULD_NOT_SAVE_INVITE_LINK)),
         };
-        self.connection.set_note(note);
+        self.set_note(note);
         cx.notify();
     }
 

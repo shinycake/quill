@@ -55,7 +55,7 @@ impl QuillApp {
             // The installed emoji packs, and the statuses to list.
             let _ = live.driver.open_media_panel();
             if live.driver.load_emoji_status_choices().is_err() {
-                self.connection.set_note(StatusNote::error(tr(
+                self.set_note(StatusNote::error(tr(
                     keys::Q_MISC_COULD_NOT_LOAD_EMOJI_STATUSES,
                 )));
             }

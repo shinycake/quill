@@ -3,7 +3,7 @@ use super::*;
 use crate::ids::{ChatId, MessageId, RequestId, TopicId};
 use crate::settings::InstantViewMode;
 use crate::state::MessagesPurpose;
-use crate::state::{ComposerLinkPreview, RequestPurpose, UnreadJumpKind};
+use crate::state::{RequestPurpose, UnreadJumpKind};
 use crate::telegram::requests::{
     add_message_reaction, get_link_preview, get_message_link, get_message_properties,
     get_replied_message, get_web_page_instant_view, pin_chat_message, read_all_chat_markers,
@@ -573,7 +573,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// `LinkPreview.loadLinkPreview`: `GetLinkPreview(FormattedText(url),
     /// null)`). The UI debounces (schema: "Do not call this function too
     /// often"); the answer (or 404) lands in
-    /// `Session::composer_preview` for the chip.
+    /// `Session::composer_previews` for the chip.
     pub fn request_composer_link_preview(&mut self, url: &str) -> Result<(), ConnectSendError> {
         let extra = self.session.request(RequestPurpose::GetLinkPreview, None);
         let json = get_link_preview(extra, url);
@@ -585,10 +585,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                     .insert(extra, url.to_string());
                 // Loading state — the chip shows "Getting link info…"
                 // (TGX `LinkPreview.isLoading`).
-                self.session.messages.composer_preview = Some(ComposerLinkPreview {
-                    url: url.to_string(),
-                    preview: None,
-                });
+                self.session.messages.composer_previews.asked(url);
                 Ok(())
             }
             Err(err) => {

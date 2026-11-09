@@ -577,3 +577,32 @@ fn the_quote_picker_does_not_outlive_its_reply(cx: &mut TestAppContext) {
         "the next reply to the same message opens no picker"
     );
 }
+
+/// Round 15 (area B, finding 6): a text send (Send without Done) closes
+/// the picker with its reply too: the picker is part of the reply bar,
+/// so every way a send drops the reply drops it.
+#[gpui_kit::test]
+fn a_text_send_closes_the_quote_picker(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    reply_to_ada(&app, vcx);
+    vcx.update(|window, cx| window.click(("composer-reply-quote", 1usize), cx));
+    frames(vcx);
+    assert!(app.read_with(vcx, |app, _| app.reply_quote_open()));
+    vcx.update(|window, cx| {
+        app.update(cx, |app, cx| {
+            app.set_composer_markup("thanks", window, cx);
+            app.submit_from_send_button(window, cx);
+        });
+    });
+    frames(vcx);
+    assert!(
+        app.read_with(vcx, |app, _| app.chat_ui.reply().is_none()),
+        "the send took the reply"
+    );
+    reply_to_ada(&app, vcx);
+    assert!(
+        !app.read_with(vcx, |app, _| app.reply_quote_open()),
+        "the next reply to the same message opens no picker"
+    );
+}

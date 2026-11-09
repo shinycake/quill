@@ -47,32 +47,28 @@ impl QuillApp {
             // Another chat's finished op does not show on this page.
             live.driver.session.settle_story_page_op();
             if let Err(err) = live.driver.get_chat_story_albums(chat_id) {
-                self.screen
-                    .connection
-                    .set_note(StatusNote::error(user_error_for(
-                        keys::Q_NOTES_FAILED_STORY_ALBUMS,
-                        &err,
-                    )));
+                self.screen.connection.set_note_for(
+                    &self.screen.windows,
+                    StatusNote::error(user_error_for(keys::Q_NOTES_FAILED_STORY_ALBUMS, &err)),
+                );
             }
             if let Err(err) = live
                 .driver
                 .get_chat_posted_to_chat_page_stories(chat_id, 0, 50)
             {
-                self.screen
-                    .connection
-                    .set_note(StatusNote::error(user_error_for(
-                        keys::Q_NOTES_FAILED_CHAT_PAGE_STORIES,
-                        &err,
-                    )));
+                self.screen.connection.set_note_for(
+                    &self.screen.windows,
+                    StatusNote::error(user_error_for(keys::Q_NOTES_FAILED_CHAT_PAGE_STORIES, &err)),
+                );
             }
             if let Err(err) = live.driver.get_chat_archived_stories(chat_id, 0, 50) {
-                self.connection.set_note(StatusNote::error(user_error_for(
+                self.set_note(StatusNote::error(user_error_for(
                     keys::Q_NOTES_FAILED_ARCHIVED_STORIES,
                     &err,
                 )));
             }
         } else {
-            self.connection.set_note(StatusNote::silent(tr(
+            self.set_note(StatusNote::silent(tr(
                 keys::Q_MEDIA_DEMO_STORY_ALBUMS_CHAT_PAGE,
             )));
         }
@@ -131,13 +127,13 @@ impl QuillApp {
                 .driver
                 .get_story_album_stories(chat_id, album_id, offset, 50)
             {
-                self.connection.set_note(StatusNote::error(user_error_for(
+                self.set_note(StatusNote::error(user_error_for(
                     keys::Q_NOTES_FAILED_ALBUM_STORIES,
                     &err,
                 )));
             }
         } else {
-            self.connection.set_note(StatusNote::silent(tr(
+            self.set_note(StatusNote::silent(tr(
                 keys::Q_MEDIA_DEMO_ALBUM_STORIES_LOAD_WITH,
             )));
         }
@@ -164,7 +160,7 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         let Some(live) = self.live.as_mut() else {
-            self.connection.set_note(StatusNote::silent(tr_with(
+            self.set_note(StatusNote::silent(tr_with(
                 keys::Q_MEDIA_DEMO_RUNS_WITH_LIVE_TDLIB,
                 &[("what", what)],
             )));
@@ -172,8 +168,7 @@ impl QuillApp {
             return;
         };
         if let Err(err) = f(live) {
-            self.connection
-                .set_note(StatusNote::error(user_error_doing(what, &err)));
+            self.set_note(StatusNote::error(user_error_doing(what, &err)));
         }
         cx.notify();
     }
@@ -202,7 +197,7 @@ impl QuillApp {
         }
         let (story_ids, skipped) = self.partition_addable_stories(chat_id, &story_ids);
         if !skipped.is_empty() {
-            self.connection.set_note(StatusNote::info(trn_with(
+            self.set_note(StatusNote::info(trn_with(
                 keys::Q_NOTES_STORIES_SKIPPED,
                 skipped.len(),
                 &[("count", &skipped.len().to_string())],
@@ -354,15 +349,14 @@ impl QuillApp {
         }
         let (added, skipped) = self.partition_addable_stories(chat_id, &added);
         if !skipped.is_empty() {
-            self.connection.set_note(StatusNote::info(trn_with(
+            self.set_note(StatusNote::info(trn_with(
                 keys::Q_NOTES_STORIES_SKIPPED,
                 skipped.len(),
                 &[("count", &skipped.len().to_string())],
             )));
         }
         if added.is_empty() && removed.is_empty() {
-            self.connection
-                .set_note(StatusNote::error(tr(keys::Q_NOTES_NO_STORY_CAN_BE_ADDED)));
+            self.set_note(StatusNote::error(tr(keys::Q_NOTES_NO_STORY_CAN_BE_ADDED)));
             cx.notify();
             return;
         }

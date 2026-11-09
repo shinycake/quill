@@ -400,13 +400,13 @@ impl QuillApp {
             match live.driver.refresh_chat_invite_links(chat_id) {
                 Ok(_) => {}
                 Err(_) => {
-                    self.connection.set_note(StatusNote::error(tr(
+                    self.set_note(StatusNote::error(tr(
                         keys::Q_PEOPLE_COULD_NOT_REFRESH_INVITE_LINKS,
                     )));
                 }
             }
         } else {
-            self.connection.set_note(StatusNote::info(tr(
+            self.set_note(StatusNote::info(tr(
                 keys::Q_PEOPLE_INVITE_LINKS_NEED_A_LIVE,
             )));
         }
@@ -416,8 +416,7 @@ impl QuillApp {
     /// Phase D3a: copy an invite-link URL to the clipboard.
     pub(super) fn copy_invite_link(&mut self, invite_link: &str, cx: &mut Context<Self>) {
         cx.write_to_clipboard(ClipboardItem::new_string(invite_link.to_string()));
-        self.connection
-            .set_note(StatusNote::info(tr(keys::Q_PEOPLE_INVITE_LINK_COPIED)));
+        self.set_note(StatusNote::info(tr(keys::Q_PEOPLE_INVITE_LINK_COPIED)));
         cx.notify();
     }
 
@@ -434,13 +433,13 @@ impl QuillApp {
             match live.driver.revoke_chat_invite_link(chat_id, invite_link) {
                 Ok(_) => {}
                 Err(_) => {
-                    self.connection.set_note(StatusNote::error(tr(
+                    self.set_note(StatusNote::error(tr(
                         keys::Q_PEOPLE_COULD_NOT_REVOKE_INVITE_LINK,
                     )));
                 }
             }
         } else {
-            self.connection.set_note(StatusNote::info(tr(
+            self.set_note(StatusNote::info(tr(
                 keys::Q_PEOPLE_INVITE_LINKS_NEED_A_LIVE,
             )));
         }
@@ -453,13 +452,13 @@ impl QuillApp {
             match live.driver.refresh_chat_join_requests(chat_id) {
                 Ok(_) => {}
                 Err(_) => {
-                    self.connection.set_note(StatusNote::error(tr(
+                    self.set_note(StatusNote::error(tr(
                         keys::Q_PEOPLE_COULD_NOT_REFRESH_JOIN_REQUESTS,
                     )));
                 }
             }
         } else {
-            self.connection.set_note(StatusNote::info(tr(
+            self.set_note(StatusNote::info(tr(
                 keys::Q_PEOPLE_JOIN_REQUESTS_NEED_A_LIVE,
             )));
         }
@@ -481,13 +480,13 @@ impl QuillApp {
             {
                 Ok(_) => {}
                 Err(_) => {
-                    self.connection.set_note(StatusNote::error(tr(
+                    self.set_note(StatusNote::error(tr(
                         keys::Q_PEOPLE_COULD_NOT_PROCESS_JOIN_REQUEST,
                     )));
                 }
             }
         } else {
-            self.connection.set_note(StatusNote::info(tr(
+            self.set_note(StatusNote::info(tr(
                 keys::Q_PEOPLE_JOIN_REQUESTS_NEED_A_LIVE,
             )));
         }
@@ -502,13 +501,13 @@ impl QuillApp {
             match live.driver.refresh_chat_administrators(chat_id) {
                 Ok(_) => {}
                 Err(_) => {
-                    self.connection.set_note(StatusNote::error(tr(
+                    self.set_note(StatusNote::error(tr(
                         keys::Q_PEOPLE_COULD_NOT_REFRESH_ADMINISTRATORS,
                     )));
                 }
             }
         } else {
-            self.connection.set_note(StatusNote::info(tr(
+            self.set_note(StatusNote::info(tr(
                 keys::Q_PEOPLE_ADMINISTRATORS_NEED_A_LIVE_CONNECTION,
             )));
         }
@@ -520,16 +519,13 @@ impl QuillApp {
     pub(super) fn set_anti_spam(&mut self, chat_id: ChatId, enabled: bool, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
             match live.driver.toggle_aggressive_anti_spam(chat_id, enabled) {
-                Ok(_) => self
-                    .connection
-                    .set_note(StatusNote::silent(tr(keys::Q_PEOPLE_ANTI_SPAM_UPDATED))),
-                Err(_) => self.connection.set_note(StatusNote::error(tr(
+                Ok(_) => self.set_note(StatusNote::silent(tr(keys::Q_PEOPLE_ANTI_SPAM_UPDATED))),
+                Err(_) => self.set_note(StatusNote::error(tr(
                     keys::Q_PEOPLE_COULD_NOT_CHANGE_ANTI_SPAM,
                 ))),
             }
         } else {
-            self.connection
-                .set_note(StatusNote::info(tr(keys::Q_PEOPLE_ANTI_SPAM_NEEDS_A_LIVE)));
+            self.set_note(StatusNote::info(tr(keys::Q_PEOPLE_ANTI_SPAM_NEEDS_A_LIVE)));
         }
         cx.notify();
     }
@@ -602,16 +598,14 @@ impl QuillApp {
         if name.is_empty() {
             // box-host: put back after a failed submit; it stays where it shows
             self.admin.community.create_dialog = Some(dialog);
-            self.connection
-                .set_note(StatusNote::error(tr(keys::Q_PEOPLE_NAME_CANNOT_BE_EMPTY)));
+            self.set_note(StatusNote::error(tr(keys::Q_PEOPLE_NAME_CANNOT_BE_EMPTY)));
             cx.notify();
             return;
         }
         let Some(chat_id) = dialog.chat_id else {
             // box-host: put back after a failed submit; it stays where it shows
             self.admin.community.create_dialog = Some(dialog);
-            self.connection
-                .set_note(StatusNote::silent(tr(keys::Q_PEOPLE_PICK_A_CHAT_FOR_THE)));
+            self.set_note(StatusNote::silent(tr(keys::Q_PEOPLE_PICK_A_CHAT_FOR_THE)));
             cx.notify();
             return;
         };
@@ -635,7 +629,7 @@ impl QuillApp {
                 StatusNote::info(tr(keys::Q_PEOPLE_CREATING_COMMUNITIES_NEEDS_A_LIVE))
             }
         };
-        self.connection.set_note(note);
+        self.set_note(note);
         cx.notify();
     }
 
@@ -676,18 +670,23 @@ impl QuillApp {
         allowed: bool,
         cx: &mut Context<Self>,
     ) {
-        self.screen.connection.set_note(match self.live.as_mut() {
-            Some(live) => match live.driver.set_community_permissions(community_id, allowed) {
-                Ok(Some(_)) => {
-                    StatusNote::silent(tr(keys::Q_PEOPLE_UPDATING_COMMUNITY_PERMISSIONS))
-                }
-                Ok(None) => StatusNote::error(tr(keys::Q_PEOPLE_YOU_CANT_CHANGE_THIS_COMMUNITYS)),
-                Err(_) => {
-                    StatusNote::error(tr(keys::Q_PEOPLE_COULD_NOT_UPDATE_COMMUNITY_PERMISSIONS))
-                }
+        self.screen.connection.set_note_for(
+            &self.screen.windows,
+            match self.live.as_mut() {
+                Some(live) => match live.driver.set_community_permissions(community_id, allowed) {
+                    Ok(Some(_)) => {
+                        StatusNote::silent(tr(keys::Q_PEOPLE_UPDATING_COMMUNITY_PERMISSIONS))
+                    }
+                    Ok(None) => {
+                        StatusNote::error(tr(keys::Q_PEOPLE_YOU_CANT_CHANGE_THIS_COMMUNITYS))
+                    }
+                    Err(_) => {
+                        StatusNote::error(tr(keys::Q_PEOPLE_COULD_NOT_UPDATE_COMMUNITY_PERMISSIONS))
+                    }
+                },
+                None => StatusNote::info(tr(keys::Q_PEOPLE_COMMUNITY_PERMISSIONS_NEED_A_LIVE)),
             },
-            None => StatusNote::info(tr(keys::Q_PEOPLE_COMMUNITY_PERMISSIONS_NEED_A_LIVE)),
-        });
+        );
         cx.notify();
     }
 }

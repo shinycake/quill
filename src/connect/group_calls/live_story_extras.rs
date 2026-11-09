@@ -50,7 +50,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             })
             .filter(|id| {
                 *id > 0
-                    && !emoji.status_resolution_attempted.contains(id)
+                    && !emoji.custom_lookups.attempted(*id)
                     && !emoji
                         .custom_emoji_stickers
                         .iter()

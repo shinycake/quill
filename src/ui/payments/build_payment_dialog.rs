@@ -361,7 +361,7 @@ impl QuillApp {
         });
         self.open_box(DialogKind::Subscriptions);
         if !matches!(sent, Some(Ok(_))) {
-            self.connection.set_note(StatusNote::error(tr(
+            self.set_note(StatusNote::error(tr(
                 keys::Q_MONEY_COULD_NOT_LOAD_SUBSCRIPTIONS,
             )));
         }
@@ -409,7 +409,7 @@ impl QuillApp {
             .as_mut()
             .map(|live| live.driver.fetch_more_star_subscriptions());
         if !matches!(sent, Some(Ok(_))) {
-            self.connection.set_note(StatusNote::error(tr(
+            self.set_note(StatusNote::error(tr(
                 keys::Q_MONEY_COULD_NOT_LOAD_MORE_SUBSCRIPTIONS,
             )));
         }
@@ -440,7 +440,7 @@ impl QuillApp {
             live.driver.edit_star_subscription(&id, true)
         });
         if !matches!(sent, Some(Ok(_))) {
-            self.connection.set_note(StatusNote::error(tr(
+            self.set_note(StatusNote::error(tr(
                 keys::Q_MONEY_COULD_NOT_CANCEL_THE_SUBSCRIPTION,
             )));
         }
@@ -464,8 +464,7 @@ impl QuillApp {
             .as_mut()
             .map(|live| live.driver.edit_star_subscription(&id, false));
         if !matches!(sent, Some(Ok(_))) {
-            self.connection
-                .set_note(StatusNote::error(tr(keys::Q_MONEY_COULD_NOT_RE_ENABLE_THE)));
+            self.set_note(StatusNote::error(tr(keys::Q_MONEY_COULD_NOT_RE_ENABLE_THE)));
         }
         cx.notify();
     }
@@ -479,7 +478,7 @@ impl QuillApp {
             .as_mut()
             .map(|live| live.driver.reuse_star_subscription(&id));
         if !matches!(sent, Some(Ok(_))) {
-            self.connection.set_note(StatusNote::error(tr(
+            self.set_note(StatusNote::error(tr(
                 keys::Q_MONEY_COULD_NOT_REJOIN_THE_SUBSCRIPTION,
             )));
         }

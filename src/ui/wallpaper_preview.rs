@@ -83,7 +83,7 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut() {
             live.driver.session.chats_state.background_error = None;
             if live.driver.search_background(&name).is_err() {
-                self.connection.set_note(StatusNote::error(tr(
+                self.set_note(StatusNote::error(tr(
                     keys::Q_MISC_COULD_NOT_OPEN_THE_WALLPAPER,
                 )));
                 return;
@@ -117,8 +117,7 @@ impl QuillApp {
 
     fn preview_wallpaper_file(&mut self, path: PathBuf, cx: &mut Context<Self>) {
         if !is_wallpaper_image(&path) {
-            self.connection
-                .set_note(StatusNote::silent(tr(keys::Q_MISC_CHOOSE_A_JPEG_PNG_OR)));
+            self.set_note(StatusNote::silent(tr(keys::Q_MISC_CHOOSE_A_JPEG_PNG_OR)));
             cx.notify();
             return;
         }
@@ -144,7 +143,7 @@ impl QuillApp {
                 .chain(session.chats_state.default_backgrounds.values())
                 .find(|b| b.id == *id)
                 .cloned(),
-            PreviewSource::Link(_) => session.chats_state.searched_background.clone(),
+            PreviewSource::Link(_) => session.chats_state.background_search.found().cloned(),
             PreviewSource::File(_) => None,
         }
     }
@@ -152,8 +151,7 @@ impl QuillApp {
     pub(super) fn close_wallpaper_preview(&mut self, cx: &mut Context<Self>) {
         self.dialogs.wallpaper_preview = None;
         if let Some(session) = self.wallpaper_session_mut() {
-            session.chats_state.searched_background = None;
-            session.chats_state.background_search = None;
+            session.chats_state.background_search = quill::state::BackgroundSearch::Idle;
             session.chats_state.background_url = None;
         }
         cx.notify();
@@ -172,7 +170,7 @@ impl QuillApp {
                     live.driver
                         .set_default_background_local(&path.to_string_lossy(), blurred, dark)
                 {
-                    self.connection.set_note(StatusNote::error(user_error_for(
+                    self.set_note(StatusNote::error(user_error_for(
                         keys::Q_NOTES_FAILED_SET_WALLPAPER,
                         &err,
                     )));
@@ -191,7 +189,7 @@ impl QuillApp {
                             live.driver
                                 .set_default_background(background.id, Some(&kind), dark)
                         {
-                            self.connection.set_note(StatusNote::error(user_error_for(
+                            self.set_note(StatusNote::error(user_error_for(
                                 keys::Q_NOTES_FAILED_SET_WALLPAPER,
                                 &err,
                             )));
@@ -233,7 +231,7 @@ impl QuillApp {
                 .get_background_url(&background.name, &kind)
                 .is_err()
         {
-            self.connection.set_note(StatusNote::error(tr(
+            self.set_note(StatusNote::error(tr(
                 keys::Q_MISC_COULD_NOT_MAKE_THE_WALLPAPER,
             )));
         }

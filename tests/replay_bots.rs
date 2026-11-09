@@ -309,7 +309,8 @@ fn replay_callback_query_answer_surfaced() {
         .bots
         .last_callback_answer
         .take()
-        .expect("answer stored");
+        .expect("answer stored")
+        .answer;
     assert_eq!(answer.text, "Voted!");
     assert!(!answer.show_alert);
     assert!(answer.url.is_empty());
@@ -341,7 +342,8 @@ fn replay_callback_query_answer_surfaced() {
         .bots
         .last_callback_answer
         .take()
-        .expect("fallback note");
+        .expect("fallback note")
+        .answer;
     assert_eq!(answer.text, "bot did not answer");
     assert!(answer.url.is_empty());
 }

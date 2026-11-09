@@ -314,7 +314,7 @@ impl QuillApp {
             return;
         }
         if !self.session().is_some_and(|s| s.my_is_premium()) {
-            self.connection.set_note(StatusNote::info(tr(
+            self.set_note(StatusNote::info(tr(
                 keys::Q_MEDIA_CUSTOM_EMOJI_NEED_TELEGRAM_PREMIUM,
             )));
             cx.notify();

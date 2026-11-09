@@ -666,7 +666,7 @@
 "qll_ops_update_failed_verification" = "The downloaded app did not pass verification. Nothing was installed.";
 "qll_ops_invite_links" = "{active} invite links";
 "qll_ops_invite_links_need_a_live" = "Invite links need a live connection (demo)";
-"qll_ops_is_calling" = "{name} is calling ({kind})";
+"qll_ops_is_calling_you" = "{name} is calling you…";
 "qll_ops_is_calling_2" = "{caller} is calling {account_name}.";
 "qll_ops_is_now_the_owner_of_channel" = "{name} is now the owner of the channel.";
 "qll_ops_is_now_the_owner_of_group" = "{name} is now the owner of the group.";

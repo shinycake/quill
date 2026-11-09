@@ -252,7 +252,7 @@ impl Session {
                             && usize::try_from(*total_count).unwrap_or(0) > changes.len(),
                     ),
                     Some(ChatPhotosFetch::Failed(_)) => (&[][..], 0, false),
-                    Some(ChatPhotosFetch::Loading) | None => {
+                    Some(ChatPhotosFetch::Loading(_)) | None => {
                         current.and_then(Option::as_ref)?;
                         (&[][..], 0, false)
                     }
@@ -431,8 +431,15 @@ impl Session {
         self.users_state.chat_photo_history.remove(&chat_id.0);
     }
 
-    /// A `foundChatMessages` page of a chat's photo history. A later page
-    /// (`loading_more`) extends the list.
+    /// The user's photo changed (here or on another device): the gallery
+    /// is out of date, so the viewer fetches it again.
+    pub(crate) fn forget_user_photos(&mut self, user_id: i64) {
+        self.users_state.user_profile_photos.remove(&user_id);
+    }
+
+    /// A `foundChatMessages` page of a chat's photo history. The first page
+    /// starts the list and a later page extends it, each only when it is
+    /// the request the list waits for.
     pub(crate) fn apply_chat_photo_history(
         &mut self,
         messages: Vec<ParsedMessage>,
@@ -446,13 +453,15 @@ impl Session {
         for message in &messages {
             self.remember_files(&message.files);
         }
-        let mut changes = match self.users_state.chat_photo_history.remove(&chat_id.0) {
-            Some(ChatPhotosFetch::Loaded {
-                changes,
-                loading_more: true,
-                ..
-            }) => changes,
-            _ => Vec::new(),
+        let mut changes = match self.users_state.chat_photo_history.get(&chat_id.0) {
+            Some(ChatPhotosFetch::Loading(id)) if *id == pending.id => Vec::new(),
+            Some(ChatPhotosFetch::Loaded { next_page, .. }) if next_page.answers(pending.id) => {
+                match self.users_state.chat_photo_history.remove(&chat_id.0) {
+                    Some(ChatPhotosFetch::Loaded { changes, .. }) => changes,
+                    _ => Vec::new(),
+                }
+            }
+            _ => return,
         };
         let known: Vec<MessageId> = changes.iter().map(|change| change.message_id).collect();
         changes.extend(
@@ -473,9 +482,46 @@ impl Session {
                 total_count,
                 changes,
                 next_from_message_id,
-                loading_more: false,
+                next_page: PhotoPage::Idle,
             },
         );
+    }
+}
+
+#[cfg(test)]
+impl Session {
+    /// A `getUserProfilePhotos` page as `fetch_user_profile_photos` /
+    /// `fetch_more_photos` send it: the first page, or the next one of a
+    /// loaded list.
+    pub(crate) fn ask_user_photos_page(&mut self, user_id: i64) -> RequestId {
+        let extra = self.request_for_user(RequestPurpose::GetUserProfilePhotos, user_id);
+        match self.users_state.user_profile_photos.get_mut(&user_id) {
+            Some(ProfilePhotosFetch::Loaded { next_page, .. }) => {
+                *next_page = PhotoPage::Asking(extra);
+            }
+            _ => {
+                self.users_state
+                    .user_profile_photos
+                    .insert(user_id, ProfilePhotosFetch::Loading(extra));
+            }
+        }
+        extra
+    }
+
+    /// The chat photo history page the connect layer would send next.
+    pub(crate) fn ask_chat_photos_page(&mut self, chat_id: ChatId) -> RequestId {
+        let extra = self.request(RequestPurpose::GetChatPhotoHistory, Some(chat_id));
+        match self.users_state.chat_photo_history.get_mut(&chat_id.0) {
+            Some(ChatPhotosFetch::Loaded { next_page, .. }) => {
+                *next_page = PhotoPage::Asking(extra);
+            }
+            _ => {
+                self.users_state
+                    .chat_photo_history
+                    .insert(chat_id.0, ChatPhotosFetch::Loading(extra));
+            }
+        }
+        extra
     }
 }
 

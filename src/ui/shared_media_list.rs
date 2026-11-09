@@ -257,7 +257,7 @@ impl QuillApp {
     pub(super) fn open_shared_media_calendar_ui(&mut self, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
             if live.driver.open_shared_media_calendar().is_err() {
-                self.connection.set_note(StatusNote::error(tr(
+                self.set_note(StatusNote::error(tr(
                     keys::Q_OPS_COULD_NOT_OPEN_THE_CALENDAR,
                 )));
             }

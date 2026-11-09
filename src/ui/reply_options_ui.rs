@@ -119,9 +119,8 @@ impl QuillApp {
         match option {
             ReplyOption::UpdateQuote => {
                 self.share.reply_elsewhere_open = false;
-                self.share.reply_quote_for = Some((reply.chat_id, reply.message_id));
-                self.connection
-                    .set_note(StatusNote::silent(tr(keys::Q_OPS_PICK_THE_PART_TO_QUOTE)));
+                self.chat_ui.open_quote_picker();
+                self.set_note(StatusNote::silent(tr(keys::Q_OPS_PICK_THE_PART_TO_QUOTE)));
             }
             ReplyOption::ReplyInAnotherChat => {
                 self.open_reply_elsewhere(window, cx);
@@ -154,7 +153,7 @@ impl QuillApp {
         if self.chat_ui.reply().is_none() {
             return;
         }
-        self.share.reply_quote_for = None;
+        self.chat_ui.close_quote_picker();
         self.share.reply_elsewhere_open = true;
         self.share.forward_picker_open = false;
         self.share.focus_search = true;
@@ -167,7 +166,7 @@ impl QuillApp {
     pub(super) fn close_reply_panels(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let was_open = self.share.reply_elsewhere_open;
         self.share.reply_elsewhere_open = false;
-        self.share.reply_quote_for = None;
+        self.chat_ui.close_quote_picker();
         if was_open {
             self.share
                 .search_input
@@ -191,7 +190,7 @@ impl QuillApp {
             .and_then(|s| s.chats.get(&dest.0))
             .is_some_and(|chat| matches!(chat.kind, ChatKind::Secret { .. }));
         if secret {
-            self.connection.set_note(StatusNote::error(tr(
+            self.set_note(StatusNote::error(tr(
                 keys::Q_OPS_REPLIES_FROM_ANOTHER_CHAT_CANT,
             )));
             cx.notify();
@@ -213,7 +212,7 @@ impl QuillApp {
             self.composer
                 .update(cx, |input, cx| input.focus(window, cx));
         }
-        self.connection.set_note(StatusNote::silent(tr(
+        self.set_note(StatusNote::silent(tr(
             keys::Q_OPS_REPLYING_FROM_ANOTHER_CHAT,
         )));
         cx.notify();
@@ -247,12 +246,7 @@ impl QuillApp {
     /// The quote picker is open: Update Quote opened it for the message
     /// the composer replies to now.
     pub(in crate::ui) fn reply_quote_open(&self) -> bool {
-        let Some(open_for) = self.share.reply_quote_for else {
-            return false;
-        };
-        self.chat_ui
-            .reply()
-            .is_some_and(|reply| (reply.chat_id, reply.message_id) == open_for)
+        self.chat_ui.quote_picker_open()
     }
 
     /// The quote picker: the parts of the message, one click each.

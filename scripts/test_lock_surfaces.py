@@ -56,5 +56,24 @@ class WhatRunsWhileLocked(unittest.TestCase):
         self.assertTrue(any("runs no upkeep" in line for line in found))
 
 
+SERVER = {ls.AGENT_SERVER: 'fn answer() { "resources/read" if paused_by_lock() {} read_resource(x) }'}
+
+
+class AgentWritesAfterAWait(unittest.TestCase):
+    def problems(self, path, body):
+        return ls.agent_problems({path: f"fn confirm() {{ {body} }}", **SERVER})
+
+    def test_a_write_allowed_after_a_prompt_asks_again(self):
+        path = "src/agent/tools/write/common.rs"
+        found = self.problems(path, "match prompts::wait(id) { Allowed => Ok(()) }")
+        self.assertTrue(any("prompts::wait(" in line for line in found))
+        ok = "match prompts::wait(id) { Allowed => still_allowed() }"
+        self.assertEqual(self.problems(path, ok), [])
+
+    def test_request_access_is_not_a_write(self):
+        path = "src/agent/tools/ask.rs"
+        self.assertEqual(self.problems(path, "match prompts::wait(id) { Allowed => Ok(()) }"), [])
+
+
 if __name__ == "__main__":
     unittest.main()

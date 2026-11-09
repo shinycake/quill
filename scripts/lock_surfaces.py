@@ -48,7 +48,10 @@ drawn. It claims exactly this, and no more:
    have waited must ask the lock itself. In the production code under
    src/agent/: every function that takes a paced queue turn
    (`pacing::take_turn(`) must call `still_allowed()` after it (that
-   check refuses once Quill locked since the call began), and every
+   check refuses once Quill locked, Agent access went off or the grants
+   changed since the call began), so must every write tool that waits
+   for the user's click (`prompts::wait(` under src/agent/tools/write/
+   and in src/agent/tools/td_call.rs), and every
    function that copies a file to an agent's path (`copy_new(`, outside
    its own definition) must test `locked_since_call_began()` in a
    condition before it. In `agent/server.rs::answer`, the `resources/read`
@@ -243,6 +246,9 @@ def upkeep_problems(bodies, steps):
 
 
 AGENT_SERVER = "src/agent/server.rs"
+# Writes that can wait for the user's click (request_access in ask.rs is
+# the grant change itself, not a write).
+WRITE_PROMPTS = ("src/agent/tools/write/", "src/agent/tools/td_call.rs")
 
 
 def agent_problems(files):
@@ -257,6 +263,14 @@ def agent_problems(files):
                     f"{path}::{name}: a write that waited its queue turn must call "
                     f"`still_allowed()` after `pacing::take_turn(`, which refuses once Quill locked"
                 )
+            if path.startswith(WRITE_PROMPTS):
+                wait = body.find("prompts::wait(")
+                if wait != -1 and "still_allowed()" not in body[wait:]:
+                    out.append(
+                        f"{path}::{name}: a write the user allowed after a wait must call "
+                        f"`still_allowed()` after `prompts::wait(`, which refuses once Quill "
+                        f"locked or the grants changed"
+                    )
             if name == "copy_new":
                 continue
             copy = body.find("copy_new(")

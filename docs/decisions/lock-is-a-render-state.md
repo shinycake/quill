@@ -201,6 +201,11 @@ stream PiP, the kit close, the export quit, the media session and the connection
 `scripts/test_lock_surfaces.py` tests the check itself. The check reads one level only: what a
 `runs-locked` step calls in turn is read in review.
 
+Round 15 (area B): notes are now set with `QuillApp::set_note`, which takes the toast's window from the
+Asker, so the check sees `poll_live`'s note (a failed send, a lost connection) as a call. It is listed as
+`runs-locked`: it was `connection.set_note` before and ran locked then too, and a locked window draws only
+its lock screen, never the toast.
+
 ### The agent socket
 
 The agent server runs on its own threads, so its gate is a process-wide flag: `agent::access::paused_by_lock`.
@@ -213,15 +218,18 @@ locked machine is no different from a person there. The error tells the agent to
 Round 14 closed what still ran past the gate, because hiding a call's answer does not undo its effects:
 
 - A write still asleep in the paced queue (up to 30 s) asks the lock at its turn. `still_allowed` refuses
-  once Quill locked since the call began (`tools::LOCKS_AT_START`), with
-  `LOCKED_BEFORE_SENDING_MESSAGE` ("nothing was sent"), which the call returns as is.
+  once Quill locked since the call began (the lock count in `tools::CallStart`), with
+  `LOCKED_BEFORE_SENDING_MESSAGE` ("nothing was sent"), which the call returns as is. Round 15 made the
+  call's start one value that is cleared when the call ends, so off a call the check refuses, and a write
+  allowed at the "Confirm each send" prompt asks the check again after the wait. The same check refuses
+  once the user changed the grants while the write waited (`GRANTS_CHANGED_MESSAGE`).
 - `download_file` with `to` checks `locked_since_call_began()` after the download and before the copy, so
   a chat's file never lands at the agent's path while locked.
 - The `quill://unread` watcher's look fails at once while locked, so the watcher sleeps between looks.
   Before, the round-13 lock check in `wait_for` returned at once and the watcher spun a core for the whole
   lock.
 - Check 5 of `scripts/lock_surfaces.py` holds these in place: every queue turn is followed by
-  `still_allowed()`, every `copy_new(` is gated on `locked_since_call_began()`, and `resources/read` tests
+  `still_allowed()` (and, since round 15, so is every write tool's `prompts::wait(`), every `copy_new(` is gated on `locked_since_call_began()`, and `resources/read` tests
   `paused_by_lock()` before `read_resource(`.
 
 ### The guard (`scripts/lock_surfaces.py`)

@@ -29,8 +29,7 @@ impl QuillApp {
     pub(super) fn open_jump_date_ui(&mut self, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
             if live.driver.open_history_calendar().is_err() {
-                self.connection
-                    .set_note(StatusNote::silent(tr(keys::Q_MISC_OPEN_A_CHAT_TO_JUMP)));
+                self.set_note(StatusNote::silent(tr(keys::Q_MISC_OPEN_A_CHAT_TO_JUMP)));
             }
         } else if let Some(session) = self.demo_session.as_mut() {
             session.open_history_calendar(now_unix());
@@ -62,12 +61,13 @@ impl QuillApp {
 
     fn jump_date_pick(&mut self, day: i64, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
-            self.screen
-                .connection
-                .set_note(match live.driver.jump_to_date(day) {
+            self.screen.connection.set_note_for(
+                &self.screen.windows,
+                match live.driver.jump_to_date(day) {
                     Ok(_) => StatusNote::silent(tr(keys::Q_MISC_JUMPING_TO_DATE)),
                     Err(_) => StatusNote::error(tr(keys::Q_MISC_COULD_NOT_JUMP_TO_THAT)),
-                });
+                },
+            );
         } else if let Some(session) = self.demo_session.as_mut() {
             session.close_history_calendar();
         }

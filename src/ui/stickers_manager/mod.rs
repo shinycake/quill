@@ -182,7 +182,7 @@ impl QuillApp {
                     driver.fetch_archived_stickers(false)
                 });
             if loaded.is_err() {
-                self.connection.set_note(StatusNote::error(tr(
+                self.set_note(StatusNote::error(tr(
                     keys::Q_MEDIA_COULD_NOT_LOAD_STICKER_TAB,
                 )));
             }
@@ -235,9 +235,10 @@ impl QuillApp {
                 .commit_sticker_manager(kind == Kind::Masks, removed, order)
                 .is_err()
             {
-                self.screen.connection.set_note(StatusNote::error(tr(
-                    keys::Q_MEDIA_COULDNT_UPDATE_STICKERS_TRY_AGAIN,
-                )));
+                self.screen.connection.set_note_for(
+                    &self.screen.windows,
+                    StatusNote::error(tr(keys::Q_MEDIA_COULDNT_UPDATE_STICKERS_TRY_AGAIN)),
+                );
             }
             live.driver.set_sticker_manager_open(false);
         } else if let Some(session) = self.demo_session.as_mut() {
@@ -269,7 +270,7 @@ impl QuillApp {
                 (Kind::Masks, _) => live.driver.select_mask_tab(MasksTab::Installed),
             };
             if result.is_err() {
-                self.connection.set_note(StatusNote::error(tr(
+                self.set_note(StatusNote::error(tr(
                     keys::Q_MEDIA_COULD_NOT_LOAD_STICKER_TAB,
                 )));
             }
@@ -366,7 +367,7 @@ impl QuillApp {
             _ => return,
         };
         if result.is_err() {
-            self.connection.set_note(StatusNote::error(tr(
+            self.set_note(StatusNote::error(tr(
                 keys::Q_MEDIA_COULD_NOT_LOAD_MORE_TRENDING,
             )));
         }

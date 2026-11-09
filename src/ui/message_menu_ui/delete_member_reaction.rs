@@ -15,16 +15,19 @@ impl QuillApp {
         sender: MessageSender,
         cx: &mut Context<Self>,
     ) {
-        self.screen.connection.set_note(match self.live.as_mut() {
-            Some(live) => match live
-                .driver
-                .delete_message_reactions_from(chat_id, message_id, sender)
-            {
-                Ok(Some(_)) => StatusNote::silent(tr(keys::Q_CHAT_DELETING_REACTION)),
-                _ => StatusNote::error(tr(keys::Q_CHAT_COULD_NOT_DELETE_THE_REACTION)),
+        self.screen.connection.set_note_for(
+            &self.screen.windows,
+            match self.live.as_mut() {
+                Some(live) => match live
+                    .driver
+                    .delete_message_reactions_from(chat_id, message_id, sender)
+                {
+                    Ok(Some(_)) => StatusNote::silent(tr(keys::Q_CHAT_DELETING_REACTION)),
+                    _ => StatusNote::error(tr(keys::Q_CHAT_COULD_NOT_DELETE_THE_REACTION)),
+                },
+                None => StatusNote::info(tr(keys::Q_CHAT_REACTION_DELETION_NEEDS_A_LIVE)),
             },
-            None => StatusNote::info(tr(keys::Q_CHAT_REACTION_DELETION_NEEDS_A_LIVE)),
-        });
+        );
         cx.notify();
     }
 

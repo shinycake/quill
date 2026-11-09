@@ -331,11 +331,10 @@ impl QuillApp {
         let shown_before = self.polled_chrome();
         self.sync_presence();
         if let Some(err) = quill::settings::take_deferred_write_failure() {
-            self.connection
-                .set_note(StatusNote::error(quill::lang::tr_with(
-                    keys::Q_PREFS_COULDNT_SAVE_SETTINGS,
-                    &[("err", &err.to_string())],
-                )));
+            self.set_note(StatusNote::error(quill::lang::tr_with(
+                keys::Q_PREFS_COULDNT_SAVE_SETTINGS,
+                &[("err", &err.to_string())],
+            )));
         }
         self.apply_pending_keybindings(cx);
         // Notification clicks from the Linux listener thread: replies and
@@ -428,9 +427,10 @@ impl QuillApp {
             .connect
             .claim_closed_note(live.bridge.stopped_unexpectedly(), budget_hit)
         {
-            self.screen.connection.set_note(StatusNote::silent(tr(
-                keys::Q_PREFS_CONNECTION_TO_TELEGRAM_WAS_CLOSED,
-            )));
+            self.screen.connection.set_note_for(
+                &self.screen.windows,
+                StatusNote::silent(tr(keys::Q_PREFS_CONNECTION_TO_TELEGRAM_WAS_CLOSED)),
+            );
             progressed = true;
             need = RedrawNeed::Now;
         }
@@ -479,16 +479,14 @@ impl QuillApp {
             self.auth_ui.recovery_mode = false;
         }
         if send_failed {
-            self.connection.set_note(StatusNote::error(tr(
+            self.set_note(StatusNote::error(tr(
                 keys::Q_PREFS_FAILED_TO_SEND_TDLIB_REQUEST,
             )));
         } else if progressed {
             if let Some(err) = err {
-                self.connection
-                    .set_note(StatusNote::error(err.user_message()));
+                self.set_note(StatusNote::error(err.user_message()));
             } else if new_auth != prev_auth {
-                self.connection
-                    .set_note(StatusNote::silent(live_status_for(&new_auth)));
+                self.set_note(StatusNote::silent(live_status_for(&new_auth)));
             }
         }
         // From here on, `progressed` marks results the UI drains (status

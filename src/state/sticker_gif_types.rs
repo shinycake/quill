@@ -106,6 +106,45 @@ pub struct GifPanel {
     /// suggested search emojis.
     pub search_provider: String,
     pub provider_emojis: Vec<String>,
+    /// The searches answered lately, so a window's GIF tab shows its own
+    /// search while another window's is the one in `search_results`.
+    pub searches_kept: GifSearches,
+}
+
+/// GIF searches answered lately, by query: each window's GIF tab asks for
+/// its own section (tdesktop has a `GifsListWidget` per window), but the
+/// session pages one search at a time.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct GifSearches(Vec<GifSearchKept>);
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GifSearchKept {
+    pub query: String,
+    pub results: Vec<AnimationItem>,
+}
+
+impl GifSearches {
+    /// Enough for every open window's GIF tab.
+    pub const KEPT: usize = 8;
+
+    /// The GIFs found for `query`, when it was answered lately.
+    pub fn get(&self, query: &str) -> Option<&[AnimationItem]> {
+        self.0
+            .iter()
+            .find(|kept| kept.query == query)
+            .map(|kept| kept.results.as_slice())
+    }
+
+    /// `query` was answered with `results` (every page so far).
+    pub fn keep(&mut self, query: &str, results: &[AnimationItem]) {
+        self.0.retain(|kept| kept.query != query);
+        self.0.push(GifSearchKept {
+            query: query.to_string(),
+            results: results.to_vec(),
+        });
+        let over = self.0.len().saturating_sub(Self::KEPT);
+        self.0.drain(..over);
+    }
 }
 
 impl GifPanel {

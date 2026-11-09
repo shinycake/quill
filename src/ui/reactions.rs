@@ -342,7 +342,8 @@ impl QuillApp {
             });
         }
         if let Some(live) = self.live.as_mut() {
-            self.screen.connection.set_note(
+            self.screen.connection.set_note_for(
+                &self.screen.windows,
                 match live
                     .driver
                     .toggle_reaction_choice(chat_id, message_id, &choice)
@@ -359,8 +360,7 @@ impl QuillApp {
                 self.toggle_emoji_reaction(chat_id, message_id, emoji, cx)
             }
             ReactionChoice::CustomEmoji(_) => {
-                self.connection
-                    .set_note(StatusNote::silent(tr(keys::Q_MISC_REACTION_UPDATED)));
+                self.set_note(StatusNote::silent(tr(keys::Q_MISC_REACTION_UPDATED)));
                 cx.notify();
             }
         }
@@ -377,7 +377,7 @@ impl QuillApp {
             let result = live
                 .driver
                 .toggle_message_reaction(chat_id, message_id, &emoji);
-            self.connection.set_note(match result {
+            self.set_note(match result {
                 Ok(_) => StatusNote::silent(tr(keys::Q_MISC_UPDATING_REACTION)),
                 Err(_) => StatusNote::error(tr(keys::Q_MISC_COULD_NOT_UPDATE_REACTION)),
             });
@@ -386,8 +386,7 @@ impl QuillApp {
         }
         if self.demo_session.is_some() {
             self.apply_demo_reaction_toggle(chat_id, message_id, &emoji);
-            self.connection
-                .set_note(StatusNote::silent(tr(keys::Q_MISC_REACTION_UPDATED)));
+            self.set_note(StatusNote::silent(tr(keys::Q_MISC_REACTION_UPDATED)));
             cx.notify();
         }
     }

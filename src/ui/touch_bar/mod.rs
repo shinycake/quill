@@ -308,7 +308,7 @@ impl QuillApp {
     fn touch_bar_reorder(&mut self, ids: Vec<i64>, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
             if let Err(err) = live.driver.set_pinned_chat_order(false, ids) {
-                self.connection.set_note(StatusNote::error(user_error_for(
+                self.set_note(StatusNote::error(user_error_for(
                     keys::Q_NOTES_FAILED_PIN_REORDER,
                     &err,
                 )));

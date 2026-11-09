@@ -39,7 +39,7 @@ impl QuillApp {
     ) {
         if let Some(live) = self.live.as_mut() {
             let result = live.driver.unpin_chat_message(chat_id, message_id);
-            self.connection.set_note(match result {
+            self.set_note(match result {
                 Ok(_) => StatusNote::silent(tr(keys::Q_CHAT_UNPINNING)),
                 Err(_) => StatusNote::error(tr(keys::Q_CHAT_COULD_NOT_UNPIN)),
             });
@@ -427,7 +427,8 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         if let Some(live) = self.live.as_mut() {
-            self.screen.connection.set_note(
+            self.screen.connection.set_note_for(
+                &self.screen.windows,
                 match live.driver.jump_to_replied_message(message_id) {
                     Ok(_) => chat_search_jump_note(&live.driver.session),
                     Err(_) => StatusNote::error(tr(keys::Q_CHAT_COULD_NOT_JUMP_TO_MESSAGE)),
@@ -437,7 +438,7 @@ impl QuillApp {
             let _ = session.begin_chat_search_jump(message_id);
             self.screen
                 .connection
-                .set_note(chat_search_jump_note(session));
+                .set_note_for(&self.screen.windows, chat_search_jump_note(session));
         }
         cx.notify();
     }

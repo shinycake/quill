@@ -364,10 +364,9 @@ impl QuillApp {
         // A held Send takes the tray once its renders land, which would
         // close this editor and lose its edits without a word.
         if self.pending_send().held_send.is_some() {
-            self.connection
-                .set_note(super::status_note::StatusNote::silent(quill::lang::tr(
-                    quill::lang::keys::Q_OPS_PHOTOS_ARE_SENDING,
-                )));
+            self.set_note(super::status_note::StatusNote::silent(quill::lang::tr(
+                quill::lang::keys::Q_OPS_PHOTOS_ARE_SENDING,
+            )));
             cx.notify();
             return;
         }
@@ -417,7 +416,7 @@ impl QuillApp {
                                 Some(PhotoEditor::new(EditorPurpose::Attachment(item), pixels));
                         }
                     }
-                    Err(_) => this.connection.set_note(StatusNote::error(tr(
+                    Err(_) => this.set_note(StatusNote::error(tr(
                         keys::Q_MISC_COULDNT_OPEN_THIS_IMAGE_FOR,
                     ))),
                 }

@@ -27,7 +27,7 @@ impl QuillApp {
                         .await;
                     let _ = this.update(cx, |this, cx| {
                         if let Err(error) = result {
-                            this.connection.set_note(StatusNote::error(tr_with(
+                            this.set_note(StatusNote::error(tr_with(
                                 keys::Q_PREFS_COULD_NOT_UPDATE_THE_SEND,
                                 &[("error", &error.to_string())],
                             )));

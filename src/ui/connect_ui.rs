@@ -131,8 +131,7 @@ impl super::app::QuillApp {
         let credentials = self.credentials.clone();
         self.connection.status = ConnectUiStatus::Live;
         self.auth_demo.demo_state = AuthorizationState::WaitTdlibParameters;
-        self.connection
-            .set_note(StatusNote::silent(tr(keys::Q_MISC_CONNECTING_TO_TELEGRAM)));
+        self.set_note(StatusNote::silent(tr(keys::Q_MISC_CONNECTING_TO_TELEGRAM)));
         // The first connection of the run first deletes folders an earlier
         // run left for deletion (it quit before their clients had closed).
         let sweep = self.startup_sweep();
@@ -267,7 +266,7 @@ impl super::app::QuillApp {
             }
             Err(ConnectBlocker::DiskFull) => {
                 self.refuse_screen_open(cx);
-                self.connection.set_note(StatusNote::silent(""));
+                self.set_note(StatusNote::silent(""));
             }
             // Prepared before the lock, refused by the key it cleared: open
             // again after the unlock instead of a "key locked" card.
@@ -282,8 +281,7 @@ impl super::app::QuillApp {
                 None => {
                     self.auth_demo.demo_state = AuthorizationState::WaitPhoneNumber;
                     self.connection.status = ConnectUiStatus::NeedCredentials;
-                    self.connection
-                        .set_note(StatusNote::error(blocker.user_message()));
+                    self.set_note(StatusNote::error(blocker.user_message()));
                 }
             },
         }

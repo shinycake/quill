@@ -393,7 +393,7 @@ impl QuillApp {
             live.driver.fetch_payment_receipt(chat_id, message_id)
         });
         if !matches!(sent, Some(Ok(_))) {
-            self.connection.set_note(StatusNote::error(tr(
+            self.set_note(StatusNote::error(tr(
                 keys::Q_MONEY_COULD_NOT_LOAD_THE_RECEIPT,
             )));
         }
@@ -415,7 +415,7 @@ impl QuillApp {
             .as_ref()
             .is_some_and(|dialog| dialog.allow_save_order);
         let (Some(order), Some(request)) = (order, request) else {
-            self.connection.set_note(StatusNote::silent(tr(
+            self.set_note(StatusNote::silent(tr(
                 keys::Q_MONEY_PAYMENT_FORM_NOT_LOADED,
             )));
             cx.notify();
@@ -427,7 +427,7 @@ impl QuillApp {
                 .validate_payment_order_info(&request.invoice, &order, allow_save)
         });
         if !matches!(sent, Some(Ok(_))) {
-            self.connection.set_note(StatusNote::error(tr(
+            self.set_note(StatusNote::error(tr(
                 keys::Q_MONEY_COULD_NOT_VALIDATE_ORDER_INFO,
             )));
         }
@@ -452,7 +452,7 @@ impl QuillApp {
         let (Some((Some(form), Some(request), validated, shipping_id, false)), Some(dialog)) =
             (snapshot, dialog)
         else {
-            self.connection.set_note(StatusNote::silent(tr(
+            self.set_note(StatusNote::silent(tr(
                 keys::Q_MONEY_PAYMENT_FORM_NOT_LOADED,
             )));
             cx.notify();
@@ -470,7 +470,7 @@ impl QuillApp {
             || invoice.need_email_address
             || invoice.need_shipping_address;
         if needs_order && validated.is_none() {
-            self.connection.set_note(StatusNote::silent(tr(
+            self.set_note(StatusNote::silent(tr(
                 keys::Q_MONEY_VALIDATE_THE_ORDER_INFO_FIRST,
             )));
             cx.notify();
@@ -501,7 +501,7 @@ impl QuillApp {
             )
         });
         if !matches!(sent, Some(Ok(_))) {
-            self.connection.set_note(StatusNote::error(tr(
+            self.set_note(StatusNote::error(tr(
                 keys::Q_MONEY_COULD_NOT_SUBMIT_THE_PAYMENT,
             )));
         }

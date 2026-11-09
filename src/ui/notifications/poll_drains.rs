@@ -44,10 +44,9 @@ impl QuillApp {
                 .live
                 .as_ref()
                 .is_some_and(|live| live.driver.session.messages.message_link_public);
-            self.connection
-                .set_note(StatusNote::info(quill::message_menu::link_copied_note(
-                    public,
-                )));
+            self.set_note(StatusNote::info(quill::message_menu::link_copied_note(
+                public,
+            )));
             progressed = true;
         }
         // Batch 7: keep a translated chat's translations coming, and
@@ -68,7 +67,7 @@ impl QuillApp {
             .as_mut()
             .and_then(|live| live.driver.session.messages.message_link_error.take())
         {
-            self.connection.set_note(StatusNote::error(err));
+            self.set_note(StatusNote::error(err));
             progressed = true;
         }
         // B7: a basic group became a supergroup: leave the old chat.
@@ -87,7 +86,7 @@ impl QuillApp {
             .as_mut()
             .and_then(|live| live.driver.session.chats_state.chat_action_error.take())
         {
-            self.connection.set_note(StatusNote::error(err));
+            self.set_note(StatusNote::error(err));
             progressed = true;
         }
         // MED2 fix-up: a refused `recognizeSpeech` surfaces in the status
@@ -98,7 +97,7 @@ impl QuillApp {
             .as_mut()
             .and_then(|live| live.driver.session.messages.recognize_speech_error.take())
         {
-            self.connection.set_note(StatusNote::error(err));
+            self.set_note(StatusNote::error(err));
             progressed = true;
         }
         // Slice msg-richtext-ai-tools: a failed AI request surfaces in
@@ -109,7 +108,7 @@ impl QuillApp {
             .as_mut()
             .and_then(|live| live.driver.session.messages.ai_error.take())
         {
-            self.connection.set_note(StatusNote::error(err));
+            self.set_note(StatusNote::error(err));
             progressed = true;
         }
         if let Some(err) = self
@@ -117,7 +116,7 @@ impl QuillApp {
             .as_mut()
             .and_then(|live| live.driver.session.messages.resend_error.take())
         {
-            self.connection.set_note(StatusNote::error(err));
+            self.set_note(StatusNote::error(err));
             progressed = true;
         }
         // TDLib 1.8.68 community management (rename / photo /
@@ -127,7 +126,7 @@ impl QuillApp {
             .as_mut()
             .and_then(|live| live.driver.session.groups.community_error.take())
         {
-            self.connection.set_note(StatusNote::error(err));
+            self.set_note(StatusNote::error(err));
             progressed = true;
         }
         // Slice G1 fix-up: an invite-link mutation (create/edit/revoke/
@@ -138,7 +137,7 @@ impl QuillApp {
             .as_mut()
             .and_then(|live| live.driver.session.groups.invite_link_error.take())
         {
-            self.connection.set_note(StatusNote::error(err));
+            self.set_note(StatusNote::error(err));
             progressed = true;
         }
         // Ban / delete-all / report-spam from the delete box, and "Save to
@@ -148,7 +147,7 @@ impl QuillApp {
             .as_mut()
             .and_then(|live| live.driver.session.messages.message_action_note.take())
         {
-            self.connection.set_note(StatusNote::info(note));
+            self.set_note(StatusNote::info(note));
             progressed = true;
         }
         // The transfer-ownership dialog: a finished transfer closes it
@@ -167,7 +166,7 @@ impl QuillApp {
             .as_mut()
             .and_then(|live| live.driver.session.chats_state.report_chat_outcome.take())
         {
-            self.connection.set_note(StatusNote::info(note));
+            self.set_note(StatusNote::info(note));
             progressed = true;
         }
         // Slice G1 fix-up: `updateChatMember` dropped the member-list
@@ -202,13 +201,11 @@ impl QuillApp {
             }
         }
         // Phase 3.2: bot answers to inline keyboard callback presses.
-        if let Some((answer, chat)) = self.live.as_mut().and_then(|live| {
-            let bots = &mut live.driver.session.bots;
-            Some((
-                bots.last_callback_answer.take()?,
-                bots.last_callback_chat.take(),
-            ))
-        }) {
+        if let Some(quill::state::CallbackAnswer { answer, chat }) = self
+            .live
+            .as_mut()
+            .and_then(|live| live.driver.session.bots.last_callback_answer.take())
+        {
             // A URL in it opens as a link clicked where the button was.
             let asker = chat.and_then(|chat| self.window_showing(chat));
             self.as_asked_by(asker, |this| this.present_callback_answer(answer, cx));
@@ -250,7 +247,7 @@ impl QuillApp {
             .as_mut()
             .and_then(|live| live.driver.session.payments.receipt_error.take())
         {
-            self.connection.set_note(StatusNote::error(err));
+            self.set_note(StatusNote::error(err));
             progressed = true;
         }
         if let Some(note) = self
@@ -258,7 +255,7 @@ impl QuillApp {
             .as_mut()
             .and_then(|live| live.driver.session.payments.unlocked_notice.take())
         {
-            self.connection.set_note(StatusNote::info(note));
+            self.set_note(StatusNote::info(note));
             progressed = true;
         }
         if let Some(notice) = self
@@ -266,7 +263,7 @@ impl QuillApp {
             .as_mut()
             .and_then(|live| live.driver.session.messages.send_permission_error.take())
         {
-            self.connection.set_note(StatusNote::error(notice));
+            self.set_note(StatusNote::error(notice));
             progressed = true;
         }
         if let Some(notice) = self
@@ -274,7 +271,7 @@ impl QuillApp {
             .as_mut()
             .and_then(|live| live.driver.session.messages.flood_notice.take())
         {
-            self.connection.set_note(StatusNote::error(notice));
+            self.set_note(StatusNote::error(notice));
             progressed = true;
         }
         // TDLib refused the `logOut`: the account stays signed in.
@@ -283,11 +280,10 @@ impl QuillApp {
             .as_mut()
             .and_then(|live| live.driver.session.auth_state.logout_refused.take())
         {
-            self.connection
-                .set_note(StatusNote::error(crate::ui::user_error::user_error_for(
-                    quill::lang::keys::Q_NOTES_FAILED_LOG_OUT,
-                    &err,
-                )));
+            self.set_note(StatusNote::error(crate::ui::user_error::user_error_for(
+                quill::lang::keys::Q_NOTES_FAILED_LOG_OUT,
+                &err,
+            )));
             progressed = true;
         }
         self.poll_folder_new_chats();

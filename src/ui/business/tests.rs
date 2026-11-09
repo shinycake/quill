@@ -389,7 +389,8 @@ fn saved_info() -> quill::business_info::BusinessInfo {
 }
 
 fn land_full_info(app: &Entity<QuillApp>, cx: &mut VisualTestContext) {
-    app.update(cx, |app, _| {
+    app.update(cx, |app, cx| {
+        cx.notify();
         let session = app.demo_session.as_mut().expect("demo session");
         session.users_state.user_full_infos.insert(
             777,
@@ -443,11 +444,12 @@ fn a_screen_waits_for_the_full_info_before_it_can_be_changed(cx: &mut TestAppCon
 
         go(&app, vcx, screen);
         land_full_info(&app, vcx);
-        let filled =
-            vcx.update(|window, cx| app.update(cx, |app, cx| app.business_info_pump(window, cx)));
-        assert!(filled, "{screen:?} was built when the info landed");
+        // The next frame builds the screen from it: no wait, no poll.
         frames(vcx);
-        assert!(!waits(&app, vcx, screen));
+        assert!(
+            !waits(&app, vcx, screen),
+            "{screen:?} was built when the info landed"
+        );
         let shows_saved = app.read_with(vcx, |app, cx| {
             let d = app.dialogs.business_dialog.as_ref().expect("dialog");
             match screen {
@@ -481,7 +483,7 @@ fn a_screen_waits_for_the_full_info_before_it_can_be_changed(cx: &mut TestAppCon
     // A change made once the info is in saves (demo mode says it cannot).
     go(&app, vcx, View::Greeting);
     land_full_info(&app, vcx);
-    vcx.update(|window, cx| app.update(cx, |app, cx| app.business_info_pump(window, cx)));
+    frames(vcx);
     act(&app, vcx, |app, _, cx| {
         app.set_business_enabled(MessageKind::Greeting, false, cx)
     });

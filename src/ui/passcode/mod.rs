@@ -417,7 +417,7 @@ impl QuillApp {
                     this.account.passcode.autolock_secs = passcode::DEFAULT_AUTOLOCK_SECS;
                     quill::wake::PASSCODE.poke();
                     this.goto_passcode_view(PasscodeView::Status, window, cx);
-                    this.connection.set_note(StatusNote::silent(tr(
+                    this.set_note(StatusNote::silent(tr(
                         keys::Q_PREFS_LOCAL_PASSCODE_TURNED_ON,
                     )));
                 }
@@ -460,8 +460,7 @@ impl QuillApp {
             |this, result, window, cx| match result {
                 Ok(()) => {
                     this.goto_passcode_view(PasscodeView::Status, window, cx);
-                    this.connection
-                        .set_note(StatusNote::silent(tr(keys::Q_PREFS_LOCAL_PASSCODE_CHANGED)));
+                    this.set_note(StatusNote::silent(tr(keys::Q_PREFS_LOCAL_PASSCODE_CHANGED)));
                 }
                 Err(err) => this.account.passcode.error = Some(error_text(&err)),
             },
@@ -506,7 +505,7 @@ impl QuillApp {
                     this.account.passcode.system_unlock = false;
                     this.account.passcode.system_unlock_key = None;
                     this.goto_passcode_view(PasscodeView::Status, window, cx);
-                    this.connection.set_note(StatusNote::silent(tr(
+                    this.set_note(StatusNote::silent(tr(
                         keys::Q_PREFS_LOCAL_PASSCODE_TURNED_OFF,
                     )));
                 }

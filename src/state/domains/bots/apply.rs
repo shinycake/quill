@@ -9,8 +9,10 @@ impl Session {
         chat_id: Option<ChatId>,
         answer: crate::telegram::envelope::CallbackQueryAnswer,
     ) {
-        self.bots.last_callback_answer = Some(answer);
-        self.bots.last_callback_chat = chat_id;
+        self.bots.last_callback_answer = Some(CallbackAnswer {
+            answer,
+            chat: chat_id,
+        });
     }
 
     /// Applies one bots payload; called by

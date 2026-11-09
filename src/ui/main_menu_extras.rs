@@ -84,7 +84,7 @@ impl QuillApp {
                 Some(id) if collectible => live.driver.change_collectible_emoji_status(id, secs),
                 _ => live.driver.change_emoji_status(id, secs),
             };
-            self.connection.set_note(match sent {
+            self.set_note(match sent {
                 Ok(Some(_)) => StatusNote::silent(tr(keys::Q_MISC_UPDATING_EMOJI_STATUS)),
                 Ok(None) => StatusNote::silent(tr(keys::Q_MISC_AN_EMOJI_STATUS_IS_ALREADY)),
                 Err(_) => StatusNote::error(tr(keys::Q_MISC_COULD_NOT_UPDATE_EMOJI_STATUS)),

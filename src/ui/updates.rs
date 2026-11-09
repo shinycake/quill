@@ -339,7 +339,7 @@ impl QuillApp {
                         .on_click(cx.listener(|this, _, _, cx| {
                             match quill::update_install::acknowledge_changelog() {
                                 Ok(()) => this.preferences.update_state = UpdateState::UpToDate,
-                                Err(_) => this.connection.set_note(StatusNote::error(tr(
+                                Err(_) => this.set_note(StatusNote::error(tr(
                                     keys::Q_OPS_COULD_NOT_SAVE_CHANGELOG_DISMISSAL,
                                 ))),
                             }

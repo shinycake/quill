@@ -149,7 +149,7 @@ impl QuillApp {
         if std::env::var("QUILL_DEMO_USERPICS").is_ok_and(|mode| mode == "window") {
             self.open_chat_in_new_window(ChatId(USERPIC_GROUP), window, cx);
         }
-        self.connection.set_note(StatusNote::silent(
+        self.set_note(StatusNote::silent(
             "screenshot demo — group of Premium members with video userpics",
         ));
         cx.notify();

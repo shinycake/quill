@@ -27,9 +27,9 @@ pub fn install_link_inbox(
                         if this.pending_deep_link.is_none()
                             && let Some(link) = quill::deep_link_inbox::pop_link()
                         {
-                            // From the OS: the main window takes it,
-                            // whichever window the pointer crossed last.
-                            this.as_asked_by(None, |this| this.queue_deep_link(link));
+                            // From the OS: the main window of whichever
+                            // account is on screen takes it.
+                            this.queue_outside_link(link);
                         }
                     })
                     .is_ok();

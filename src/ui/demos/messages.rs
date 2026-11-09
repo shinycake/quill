@@ -138,7 +138,7 @@ impl QuillApp {
             input.set_value("Demo chat B", window, cx);
             input.focus(window, cx);
         });
-        self.connection.set_note(StatusNote::silent(
+        self.set_note(StatusNote::silent(
             "screenshot demo — select → pick dest → forwarded",
         ));
     }
@@ -156,7 +156,7 @@ impl QuillApp {
             }
         }
         self.open_mute_menu(cx);
-        self.connection.set_note(StatusNote::silent(
+        self.set_note(StatusNote::silent(
             "screenshot demo — mute presets · muted icon · archive",
         ));
     }
@@ -167,7 +167,7 @@ impl QuillApp {
             apply_ready_pin(session, &self.demo_ui.sink, &self.demo_ui.seq);
             let _ = session.begin_chat_search_jump(MessageId(101));
         }
-        self.connection.set_note(StatusNote::silent(
+        self.set_note(StatusNote::silent(
             "screenshot demo — pin · unpin · pinned bar",
         ));
     }
@@ -187,7 +187,7 @@ impl QuillApp {
             position: point(px(420.), px(200.)),
         });
         self.message_ui.reactions_expanded = true;
-        self.connection.set_note(StatusNote::silent(
+        self.set_note(StatusNote::silent(
             "screenshot demo — react · unreact · chips",
         ));
     }

@@ -704,7 +704,7 @@ fn searching_a_background_keeps_the_answer_without_installing_it() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
     let extra = session.request(RequestPurpose::SearchBackground, None);
-    session.chats_state.background_search = Some(extra);
+    session.chats_state.background_search = crate::state::BackgroundSearch::Waiting(extra);
     apply_json(
         &mut session,
         &seq,
@@ -715,11 +715,7 @@ fn searching_a_background_keeps_the_answer_without_installing_it() {
         ),
     );
     assert_eq!(
-        session
-            .chats_state
-            .searched_background
-            .as_ref()
-            .map(|b| b.id),
+        session.chats_state.background_search.found().map(|b| b.id),
         Some(8)
     );
     assert!(session.chats_state.default_backgrounds.is_empty());
@@ -740,10 +736,10 @@ fn a_late_background_search_answer_never_lands_under_another_link() {
     let link_a = session.request(RequestPurpose::SearchBackground, None);
     let failing_a = session.request(RequestPurpose::SearchBackground, None);
     let link_b = session.request(RequestPurpose::SearchBackground, None);
-    session.chats_state.background_search = Some(link_b);
+    session.chats_state.background_search = crate::state::BackgroundSearch::Waiting(link_b);
     apply_json(&mut session, &seq, &sink, &background(link_a, 8));
     assert!(
-        session.chats_state.searched_background.is_none(),
+        session.chats_state.background_search.found().is_none(),
         "A's answer"
     );
     apply_json(
@@ -758,11 +754,7 @@ fn a_late_background_search_answer_never_lands_under_another_link() {
     assert!(session.chats_state.background_error.is_none(), "A's error");
     apply_json(&mut session, &seq, &sink, &background(link_b, 9));
     assert_eq!(
-        session
-            .chats_state
-            .searched_background
-            .as_ref()
-            .map(|b| b.id),
+        session.chats_state.background_search.found().map(|b| b.id),
         Some(9)
     );
 }

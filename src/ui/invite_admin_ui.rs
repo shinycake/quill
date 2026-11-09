@@ -138,16 +138,19 @@ impl QuillApp {
     }
 
     fn delete_revoked_link(&mut self, chat_id: ChatId, invite_link: &str, cx: &mut Context<Self>) {
-        self.screen.connection.set_note(match self.live.as_mut() {
-            Some(live) => match live
-                .driver
-                .delete_revoked_chat_invite_link(chat_id, invite_link)
-            {
-                Ok(_) => StatusNote::info(tr(keys::Q_OPS_DELETING_INVITE_LINK)),
-                Err(_) => StatusNote::error(tr(keys::Q_OPS_COULD_NOT_DELETE_INVITE_LINK)),
+        self.screen.connection.set_note_for(
+            &self.screen.windows,
+            match self.live.as_mut() {
+                Some(live) => match live
+                    .driver
+                    .delete_revoked_chat_invite_link(chat_id, invite_link)
+                {
+                    Ok(_) => StatusNote::info(tr(keys::Q_OPS_DELETING_INVITE_LINK)),
+                    Err(_) => StatusNote::error(tr(keys::Q_OPS_COULD_NOT_DELETE_INVITE_LINK)),
+                },
+                None => StatusNote::info(tr(keys::Q_OPS_INVITE_LINKS_NEED_A_LIVE)),
             },
-            None => StatusNote::info(tr(keys::Q_OPS_INVITE_LINKS_NEED_A_LIVE)),
-        });
+        );
         cx.notify();
     }
 
@@ -168,19 +171,23 @@ impl QuillApp {
                 .show_cancel(true)
                 .on_ok(move |_, _, cx| {
                     let _ = app.update(cx, |this, cx| {
-                        this.screen.connection.set_note(match this.live.as_mut() {
-                            Some(live) => {
-                                match live.driver.delete_all_revoked_chat_invite_links(chat_id) {
-                                    Ok(_) => {
-                                        StatusNote::info(tr(keys::Q_OPS_DELETING_REVOKED_LINKS))
+                        this.screen.connection.set_note_for(
+                            &this.screen.windows,
+                            match this.live.as_mut() {
+                                Some(live) => {
+                                    match live.driver.delete_all_revoked_chat_invite_links(chat_id)
+                                    {
+                                        Ok(_) => {
+                                            StatusNote::info(tr(keys::Q_OPS_DELETING_REVOKED_LINKS))
+                                        }
+                                        Err(_) => StatusNote::error(tr(
+                                            keys::Q_OPS_COULD_NOT_DELETE_REVOKED_LINKS,
+                                        )),
                                     }
-                                    Err(_) => StatusNote::error(tr(
-                                        keys::Q_OPS_COULD_NOT_DELETE_REVOKED_LINKS,
-                                    )),
                                 }
-                            }
-                            None => StatusNote::info(tr(keys::Q_OPS_INVITE_LINKS_NEED_A_LIVE)),
-                        });
+                                None => StatusNote::info(tr(keys::Q_OPS_INVITE_LINKS_NEED_A_LIVE)),
+                            },
+                        );
                         cx.notify();
                     });
                     true

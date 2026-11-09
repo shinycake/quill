@@ -33,7 +33,7 @@ impl QuillApp {
             .as_ref()
             .is_some_and(|live| live.driver.session.is_offline());
         if offline {
-            self.connection.set_note(StatusNote::error(tr(
+            self.set_note(StatusNote::error(tr(
                 keys::Q_OPS_YOURE_OFFLINE_CANT_START_A,
             )));
             cx.notify();
@@ -88,7 +88,7 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut()
             && let Err(err) = live.driver.fetch_more_call_history()
         {
-            self.connection.set_note(StatusNote::error(user_error_for(
+            self.set_note(StatusNote::error(user_error_for(
                 keys::Q_NOTES_FAILED_CALL_HISTORY,
                 &err,
             )));
@@ -152,7 +152,7 @@ impl QuillApp {
                             if let Some(live) = this.live.as_mut()
                                 && let Err(err) = live.driver.fetch_call_history()
                             {
-                                this.connection.set_note(StatusNote::error(user_error_for(
+                                this.set_note(StatusNote::error(user_error_for(
                                     keys::Q_NOTES_FAILED_CALL_HISTORY,
                                     &err,
                                 )));

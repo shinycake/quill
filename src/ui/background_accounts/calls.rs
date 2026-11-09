@@ -208,8 +208,7 @@ impl QuillApp {
         if ready {
             self.accept_incoming_call(cx);
         } else {
-            self.connection
-                .set_note(StatusNote::silent(tr(keys::Q_OPS_THE_CALL_ENDED_BEFORE_IT)));
+            self.set_note(StatusNote::silent(tr(keys::Q_OPS_THE_CALL_ENDED_BEFORE_IT)));
         }
         cx.notify();
     }

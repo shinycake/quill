@@ -84,6 +84,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             pending_draft: None,
             flood_retries: Vec::new(),
             flood_attempts: HashMap::new(),
+            custom_emoji_hold: None,
             last_request_sweep: None,
             system_proxy_sent: None,
             system_proxy_asked: None,

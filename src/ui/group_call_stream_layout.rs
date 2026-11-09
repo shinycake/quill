@@ -671,7 +671,7 @@ impl QuillApp {
                 if let Some(call_id) = call_id
                     && let Err(err) = live.driver.set_group_call_playback_muted(call_id, !muted)
                 {
-                    self.connection.set_note(StatusNote::error(err.to_string()));
+                    self.set_note(StatusNote::error(err.to_string()));
                 }
             }
             None => self.group_call.stream.demo_muted = !muted,

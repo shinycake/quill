@@ -131,7 +131,7 @@ impl QuillApp {
         if moved {
             // Quill's menu is a dropdown (no right click on its entries),
             // so the toast names the way back instead.
-            self.connection.set_note(StatusNote::silent(tr(
+            self.set_note(StatusNote::silent(tr(
                 keys::Q_CHATLIST_ARCHIVE_MOVED_TO_THE_MAIN,
             )));
         }

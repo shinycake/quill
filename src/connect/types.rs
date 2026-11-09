@@ -361,6 +361,9 @@ pub struct ConnectDriver<S: JsonSender> {
     pub(crate) flood_retries: Vec<super::flood_retry::FloodRetry>,
     /// Q1: re-send count per request id that hit a rate limit.
     pub(crate) flood_attempts: HashMap<u64, u8>,
+    /// A `getCustomEmojiStickers` rate limit that was not retried: no
+    /// lookup goes out before this time (`flood_retry::absorb_flood`).
+    pub(crate) custom_emoji_hold: Option<std::time::Instant>,
     /// R5: when the stale-request sweep last scanned the registry.
     pub(crate) last_request_sweep: Option<std::time::Instant>,
     /// The last "Use system proxy settings" step sent and when; a step

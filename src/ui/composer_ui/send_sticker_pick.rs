@@ -55,7 +55,7 @@ impl QuillApp {
                 },
             );
             let ok = result.is_ok();
-            self.connection.set_note(if ok {
+            self.set_note(if ok {
                 StatusNote::silent(tr(keys::Q_CHAT_STICKER_SENT))
             } else {
                 StatusNote::error(tr(keys::Q_CHAT_COULD_NOT_SEND_STICKER))
@@ -63,8 +63,7 @@ impl QuillApp {
             ok
         } else if self.demo_session.is_some() {
             self.apply_demo_sticker(chat_id, &emoji, file_id, reply);
-            self.connection
-                .set_note(StatusNote::silent(tr(keys::Q_CHAT_STICKER_SENT)));
+            self.set_note(StatusNote::silent(tr(keys::Q_CHAT_STICKER_SENT)));
             true
         } else {
             false
@@ -151,25 +150,23 @@ impl QuillApp {
             return;
         }
         let text = self.composer.read(cx).value().to_string();
+        // No URL: nothing to fetch. The chip reads the preview of its own
+        // composer's URL, so another window's stays.
         let Some(url) = self.chosen_preview_url(&text) else {
-            // No URL: drop any stale preview so the chip never shows a
-            // preview for a URL that's no longer there.
-            if let Some(live) = self.live.as_mut()
-                && live.driver.session.messages.composer_preview.is_some()
-            {
-                live.driver.session.messages.composer_preview = None;
-            }
             return;
         };
         // TGX never prefetches a disabled preview.
         if self.preview_choice().disabled {
             return;
         }
-        let already = self
-            .live
-            .as_ref()
-            .and_then(|live| live.driver.session.messages.composer_preview.as_ref())
-            .is_some_and(|p| p.url == url);
+        let already = self.live.as_ref().is_some_and(|live| {
+            live.driver
+                .session
+                .messages
+                .composer_previews
+                .get(&url)
+                .is_some()
+        });
         if already {
             return;
         }
@@ -195,7 +192,7 @@ impl QuillApp {
                 if let Some(live) = this.live.as_mut()
                     && live.driver.request_composer_link_preview(&url).is_err()
                 {
-                    this.connection.set_note(StatusNote::error(tr(
+                    this.set_note(StatusNote::error(tr(
                         keys::Q_CHAT_COULDNT_LOAD_LINK_PREVIEW,
                     )));
                 }
@@ -272,7 +269,7 @@ impl QuillApp {
                 change(&mut choice);
                 this.set_preview_choice(choice);
                 if let Some(note) = note {
-                    this.connection.set_note(StatusNote::info(note));
+                    this.set_note(StatusNote::info(note));
                 }
                 cx.notify();
             });
@@ -384,8 +381,7 @@ impl QuillApp {
         // the demo session.
         let stored = self
             .session()
-            .and_then(|s| s.messages.composer_preview.clone())
-            .filter(|p| p.url == first);
+            .and_then(|s| s.messages.composer_previews.get(&first).cloned());
         let fetched: Option<quill::telegram::envelope::LinkPreview> =
             stored.as_ref().and_then(|p| p.preview.clone()).flatten();
         let preview_line: Option<String> = match &stored {

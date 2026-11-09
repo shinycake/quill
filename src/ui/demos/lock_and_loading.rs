@@ -41,7 +41,8 @@ impl QuillApp {
 
     /// `ready-business-loading`: the Greeting screen opened before the own
     /// account's full info arrived. `QUILL_DEMO_BUSINESS_INFO=landed`: the
-    /// info lands and the screen fills in with the saved settings.
+    /// info lands and the next frame fills the screen in with the saved
+    /// settings (`business_info_upkeep`).
     fn demo_business_loading(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let landed = std::env::var("QUILL_DEMO_BUSINESS_INFO").is_ok_and(|v| v == "landed");
         if let Some(session) = self.demo_session.as_mut() {
@@ -55,28 +56,25 @@ impl QuillApp {
         }
         self.open_business(window, cx);
         self.business_go(View::Greeting, window, cx);
-        if landed {
-            if let Some(session) = self.demo_session.as_mut() {
-                session.users_state.user_full_infos.insert(
-                    777,
-                    quill::state::UserFullInfoData {
-                        extras: quill::telegram::envelope::UserProfileExtras {
-                            business: Some(quill::business_info::BusinessInfo {
-                                greeting: Some(quill::business_settings::GreetingSettings {
-                                    shortcut_id: 2,
-                                    recipients:
-                                        quill::business_settings::BusinessRecipients::everyone(),
-                                    inactivity_days: 7,
-                                }),
-                                ..Default::default()
+        if landed && let Some(session) = self.demo_session.as_mut() {
+            session.users_state.user_full_infos.insert(
+                777,
+                quill::state::UserFullInfoData {
+                    extras: quill::telegram::envelope::UserProfileExtras {
+                        business: Some(quill::business_info::BusinessInfo {
+                            greeting: Some(quill::business_settings::GreetingSettings {
+                                shortcut_id: 2,
+                                recipients: quill::business_settings::BusinessRecipients::everyone(
+                                ),
+                                inactivity_days: 7,
                             }),
                             ..Default::default()
-                        },
+                        }),
                         ..Default::default()
                     },
-                );
-            }
-            self.business_info_pump(window, cx);
+                    ..Default::default()
+                },
+            );
         }
         cx.notify();
     }

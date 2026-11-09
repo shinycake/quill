@@ -116,7 +116,7 @@ impl QuillApp {
         match self.live.as_mut() {
             Some(live) => Some(f(&mut live.driver)),
             None => {
-                self.connection.set_note(StatusNote::silent(tr(
+                self.set_note(StatusNote::silent(tr(
                     keys::Q_PREFS_DEMO_PROXY_SETTINGS_ARE_NOT,
                 )));
                 None

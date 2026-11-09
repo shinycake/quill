@@ -363,7 +363,7 @@ impl QuillApp {
                             match store::load(&Self::themes_dir(), &export) {
                                 Ok(file) => this.export_theme_file(file, &export, cx),
                                 Err(err) => {
-                                    this.connection.set_note(StatusNote::error(err.note()));
+                                    this.set_note(StatusNote::error(err.note()));
                                     cx.notify();
                                 }
                             }
@@ -440,7 +440,7 @@ impl QuillApp {
                     this.choose_app_theme(ThemeId::Custom(name), night, cx);
                 }
                 Err(err) => {
-                    this.connection.set_note(StatusNote::error(err.note()));
+                    this.set_note(StatusNote::error(err.note()));
                     cx.notify();
                 }
             });
@@ -452,7 +452,7 @@ impl QuillApp {
     /// the built-in default.
     fn delete_custom_theme(&mut self, name: &str, cx: &mut Context<Self>) {
         if let Err(err) = store::delete(&Self::themes_dir(), name) {
-            self.connection.set_note(StatusNote::error(err.note()));
+            self.set_note(StatusNote::error(err.note()));
         }
         self.refresh_custom_themes();
         let gone = ThemeId::Custom(name.to_string());

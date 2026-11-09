@@ -79,7 +79,7 @@ impl QuillApp {
     /// the call windows stay answerable under the lock, so this one must
     /// be too: Decline, or End & Answer.
     pub(in crate::ui) fn swap_call_lock_card(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let title = self.swap_call_title()?;
+        let (title, caller) = self.swap_call_text()?;
         let decline = Button::new("lock-swap-call-decline")
             .label(tr(keys::CALL_DECLINE))
             .danger()
@@ -91,7 +91,7 @@ impl QuillApp {
         Some(lock_call_card(
             "lock-swap-call",
             title,
-            tr(keys::Q_OPS_YOURE_ALREADY_IN_A_CALL).to_string(),
+            caller,
             decline,
             answer,
             cx,

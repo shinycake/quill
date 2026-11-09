@@ -119,15 +119,13 @@ impl QuillApp {
                 .is_none()
                 && let Err(err) = live.driver.fetch_chat_folder(folder_id)
             {
-                self.screen
-                    .connection
-                    .set_note(StatusNote::error(user_error_for(
-                        keys::Q_NOTES_FAILED_FOLDER,
-                        &err,
-                    )));
+                self.screen.connection.set_note_for(
+                    &self.screen.windows,
+                    StatusNote::error(user_error_for(keys::Q_NOTES_FAILED_FOLDER, &err)),
+                );
             }
             if let Err(err) = live.driver.fetch_folder_share(folder_id) {
-                self.connection.set_note(StatusNote::error(user_error_for(
+                self.set_note(StatusNote::error(user_error_for(
                     keys::Q_NOTES_FAILED_FOLDER_LINKS,
                     &err,
                 )));
@@ -338,8 +336,7 @@ impl QuillApp {
         if let Some(dialog) = self.folders.share.as_mut() {
             dialog.copied = Some(link.to_string());
         }
-        self.connection
-            .set_note(StatusNote::info(tr(keys::STAR_REF_LINK_COPIED_TITLE)));
+        self.set_note(StatusNote::info(tr(keys::STAR_REF_LINK_COPIED_TITLE)));
         cx.notify();
     }
 
@@ -368,7 +365,7 @@ impl QuillApp {
             }
         } else if let Some(error) = error {
             // Recommended folders (or a stray failure) report in the toast.
-            self.connection.set_note(StatusNote::error(error));
+            self.set_note(StatusNote::error(error));
             changed = true;
         }
         if changed {
@@ -784,7 +781,7 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut()
             && let Err(err) = live.driver.check_folder_invite_link(&link)
         {
-            self.connection.set_note(StatusNote::error(user_error_for(
+            self.set_note(StatusNote::error(user_error_for(
                 keys::Q_NOTES_FAILED_CHECK_FOLDER_LINK,
                 &err,
             )));
@@ -827,7 +824,7 @@ impl QuillApp {
                 .map(|d| d.selected.len())
                 .unwrap_or(0);
             self.close_folder_invite(cx);
-            self.connection.set_note(match (name, joined) {
+            self.set_note(match (name, joined) {
                 (Some(name), 0) => StatusNote::silent(tr_with(
                     keys::FILTERS_ADDED_TITLE,
                     &[("folder", &name.to_string())],

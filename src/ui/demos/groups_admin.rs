@@ -28,8 +28,7 @@ impl QuillApp {
             apply_ready_group_manage(session, &self.demo_ui.sink, &self.demo_ui.seq);
         }
         self.open_info_panel_target(InfoPanelTarget::Supergroup(61), window, cx);
-        self.connection
-            .set_note(StatusNote::silent("screenshot demo — group info edit"));
+        self.set_note(StatusNote::silent("screenshot demo — group info edit"));
         cx.notify();
     }
 }

@@ -57,7 +57,7 @@ impl QuillApp {
         if let Some(path) = path {
             let _ = std::fs::remove_file(path);
         }
-        self.connection.set_note(StatusNote::silent(tr(
+        self.set_note(StatusNote::silent(tr(
             keys::Q_NOTES_RECORDING_NOT_SENT_ACCOUNT_CHANGED,
         )));
         cx.notify();

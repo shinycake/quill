@@ -130,8 +130,7 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut()
             && live.driver.open_thread(chat_id, message_id).is_err()
         {
-            self.connection
-                .set_note(StatusNote::error(tr(keys::Q_OPS_COULD_NOT_OPEN_COMMENTS)));
+            self.set_note(StatusNote::error(tr(keys::Q_OPS_COULD_NOT_OPEN_COMMENTS)));
         }
         cx.notify();
     }

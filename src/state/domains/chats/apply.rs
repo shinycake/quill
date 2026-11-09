@@ -423,9 +423,12 @@ impl Session {
                             .insert(self.chats_state.background_set_for_dark, background);
                     }
                     Some(RequestPurpose::SearchBackground)
-                        if pending.map(|p| p.id) == self.chats_state.background_search =>
+                        if self
+                            .chats_state
+                            .background_search
+                            .waits_for(pending.map(|p| p.id)) =>
                     {
-                        self.chats_state.searched_background = Some(background);
+                        self.chats_state.background_search = BackgroundSearch::Found(background);
                     }
                     _ => {}
                 }

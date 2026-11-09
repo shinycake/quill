@@ -78,7 +78,7 @@ impl QuillApp {
             .and_then(|live| live.driver.session.settings.notices.review_outcome.take());
         match outcome {
             Some(LoginReview::Allowed) => {
-                self.connection.set_note(StatusNote::silent(tr(
+                self.set_note(StatusNote::silent(tr(
                     keys::Q_OPS_NEW_LOGIN_ALLOWED_YOU_CAN,
                 )));
             }

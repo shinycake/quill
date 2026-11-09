@@ -4,6 +4,35 @@
 use crate::state::*;
 use crate::telegram::envelope::{ChatAccent, ChatBackground, EmojiChatTheme};
 
+/// Where the link preview's `searchBackground` for a `bg/` link stands.
+/// Only the search it waits for lands, so a late answer (or failure) for an
+/// earlier link never shows, or is applied, under a later one.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub enum BackgroundSearch {
+    /// No link preview is waiting for a search.
+    #[default]
+    Idle,
+    /// This search is out.
+    Waiting(RequestId),
+    /// The search's answer.
+    Found(Background),
+}
+
+impl BackgroundSearch {
+    /// The background the search found, once it answered.
+    pub fn found(&self) -> Option<&Background> {
+        match self {
+            BackgroundSearch::Found(background) => Some(background),
+            _ => None,
+        }
+    }
+
+    /// The preview waits for `request`.
+    pub fn waits_for(&self, request: Option<RequestId>) -> bool {
+        matches!(self, BackgroundSearch::Waiting(id) if Some(*id) == request)
+    }
+}
+
 pub struct ChatsState {
     /// `getInstalledBackgrounds` answer for the current theme; `None` until
     /// fetched.
@@ -21,12 +50,8 @@ pub struct ChatsState {
     pub chat_gift_themes: HashMap<i64, EmojiChatTheme>,
     /// `updateEmojiChatThemes`: the themes a private chat can pick.
     pub emoji_chat_themes: Vec<EmojiChatTheme>,
-    /// `searchBackground` answer for a `bg/` link; `None` until it arrives.
-    pub searched_background: Option<Background>,
-    /// The one `searchBackground` the link preview waits for: only its
-    /// answer or error lands, so a late answer for an earlier link never
-    /// shows (or is applied) under a later one. `None` once it closes.
-    pub background_search: Option<RequestId>,
+    /// The link preview's `searchBackground` ([`BackgroundSearch`]).
+    pub background_search: BackgroundSearch,
     /// One-shot `getBackgroundUrl` answer: the link the wallpaper preview
     /// copies.
     pub background_url: Option<String>,
@@ -114,8 +139,7 @@ impl ChatsState {
             chat_theme_names: HashMap::new(),
             chat_gift_themes: HashMap::new(),
             emoji_chat_themes: Vec::new(),
-            searched_background: None,
-            background_search: None,
+            background_search: BackgroundSearch::Idle,
             background_url: None,
             background_error: None,
             chat_look_oks: 0,

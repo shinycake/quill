@@ -98,7 +98,7 @@ impl QuillApp {
                     dialog.not_joined = demo;
                 }
             }
-            Err(err) => self.connection.set_note(StatusNote::error(user_error_for(
+            Err(err) => self.set_note(StatusNote::error(user_error_for(
                 keys::Q_NOTES_FAILED_ADD_CONTACT,
                 &err,
             ))),
@@ -140,7 +140,7 @@ impl QuillApp {
                 cx.notify();
             }
             Some(NewContactOutcome::Failed(code)) => {
-                self.connection.set_note(StatusNote::error(tr_with(
+                self.set_note(StatusNote::error(tr_with(
                     keys::Q_OPS_ADD_CONTACT_FAILED_ERROR,
                     &[("code", &code.to_string())],
                 )));

@@ -288,7 +288,7 @@ impl QuillApp {
                 PlaybackKind::Audio => keys::Q_AV_AUDIO_CANT_BE_PLAYED,
             }
         };
-        self.connection.set_note(StatusNote::error(tr(note)));
+        self.set_note(StatusNote::error(tr(note)));
         cx.notify();
     }
 
@@ -357,7 +357,7 @@ impl QuillApp {
         let _ = self.players.audio.seek(offset, was_playing);
         quill::wake::CHROME.poke();
         if was_playing {
-            self.screen.connection.set_note(StatusNote::silent(format!(
+            self.set_note(StatusNote::silent(format!(
                 "{} — seek {}",
                 match self.active_playback_kind() {
                     PlaybackKind::Voice => tr(keys::Q_AV_PLAYING_VOICE_NOTE),
@@ -442,8 +442,7 @@ impl QuillApp {
                             if let Some(id) = finished_id {
                                 this.playback.positions.insert(id, 0.0);
                             }
-                            this.connection
-                                .set_note(StatusNote::silent(tr(keys::Q_AV_PLAYBACK_FINISHED)));
+                            this.set_note(StatusNote::silent(tr(keys::Q_AV_PLAYBACK_FINISHED)));
                             if let Some((chat, id)) = next {
                                 this.play_message(chat, id, cx);
                             }
@@ -617,11 +616,10 @@ impl QuillApp {
             // bar keeps working and Play resumes from the frozen position).
             if self.is_playing() {
                 self.pause_active_playback();
-                self.connection
-                    .set_note(StatusNote::silent(tr(keys::Q_AV_VOICE_NOTE_PAUSED)));
+                self.set_note(StatusNote::silent(tr(keys::Q_AV_VOICE_NOTE_PAUSED)));
             } else {
                 self.resume_active_playback(cx);
-                self.screen.connection.set_note(if self.is_playing() {
+                self.set_note(if self.is_playing() {
                     StatusNote::silent(tr(keys::Q_AV_PLAYING_VOICE_NOTE))
                 } else {
                     StatusNote::error(tr(keys::Q_AV_VOICE_NOTE_CANT_BE_PLAYED))
@@ -651,8 +649,7 @@ impl QuillApp {
         self.playback.intent = None;
         let roots = self.media_display_roots();
         let Some(safe) = sandboxed_display_path(&path, &roots) else {
-            self.connection
-                .set_note(StatusNote::silent(tr(keys::Q_AV_VOICE_FILE_IS_OUTSIDE_THE)));
+            self.set_note(StatusNote::silent(tr(keys::Q_AV_VOICE_FILE_IS_OUTSIDE_THE)));
             cx.notify();
             return;
         };
@@ -674,7 +671,7 @@ impl QuillApp {
         if !listened {
             self.mark_voice_opened(chat_id, message_id);
         }
-        self.connection.set_note(if playing {
+        self.set_note(if playing {
             StatusNote::silent(tr(keys::Q_AV_PLAYING_VOICE_NOTE))
         } else {
             StatusNote::error(tr(keys::Q_AV_VOICE_NOTE_CANT_BE_PLAYED))
@@ -698,11 +695,10 @@ impl QuillApp {
             // Active row: pause ↔ resume (see voice toggle).
             if self.is_playing() {
                 self.pause_active_playback();
-                self.connection
-                    .set_note(StatusNote::silent(tr(keys::Q_AV_AUDIO_PAUSED)));
+                self.set_note(StatusNote::silent(tr(keys::Q_AV_AUDIO_PAUSED)));
             } else {
                 self.resume_active_playback(cx);
-                self.screen.connection.set_note(if self.is_playing() {
+                self.set_note(if self.is_playing() {
                     StatusNote::silent(tr(keys::Q_AV_PLAYING_AUDIO))
                 } else {
                     StatusNote::error(tr(keys::Q_AV_AUDIO_CANT_BE_PLAYED))
@@ -731,8 +727,7 @@ impl QuillApp {
         self.playback.intent = None;
         let roots = self.media_display_roots();
         let Some(safe) = sandboxed_display_path(&path, &roots) else {
-            self.connection
-                .set_note(StatusNote::silent(tr(keys::Q_AV_AUDIO_FILE_IS_OUTSIDE_THE)));
+            self.set_note(StatusNote::silent(tr(keys::Q_AV_AUDIO_FILE_IS_OUTSIDE_THE)));
             cx.notify();
             return;
         };
@@ -752,7 +747,7 @@ impl QuillApp {
             &safe,
             cx,
         );
-        self.connection.set_note(if playing {
+        self.set_note(if playing {
             StatusNote::silent(tr(keys::Q_AV_PLAYING_AUDIO))
         } else {
             StatusNote::error(tr(keys::Q_AV_AUDIO_CANT_BE_PLAYED))

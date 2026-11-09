@@ -195,7 +195,7 @@ impl QuillApp {
         self.close_ai_compose(cx);
         self.close_kit_dialog_if_done(DialogKind::AiCompose, window, cx);
         self.share.link_text = Some(link);
-        self.connection.set_note(StatusNote::silent(tr(
+        self.set_note(StatusNote::silent(tr(
             keys::Q_MISC_CHOOSE_A_CHAT_TO_SHARE_2,
         )));
         cx.notify();

@@ -42,7 +42,7 @@ fn apply_page(
     next: i64,
     changes: &[String],
 ) {
-    let extra = session.request(RequestPurpose::GetChatPhotoHistory, Some(ChatId(GROUP)));
+    let extra = session.ask_chat_photos_page(ChatId(GROUP));
     apply_json(
         session,
         seq,
@@ -109,12 +109,6 @@ fn photo_history_pages_follow_the_current_photo() {
     );
 
     // The next page is asked for and appended.
-    let Some(ChatPhotosFetch::Loaded { loading_more, .. }) =
-        session.users_state.chat_photo_history.get_mut(&GROUP)
-    else {
-        panic!("history loaded");
-    };
-    *loading_more = true;
     apply_page(&mut session, &seq, &sink, 3, 0, &[change_json(10, 501, 45)]);
     let gallery = session
         .photo_gallery(PhotoOwner::Chat(ChatId(GROUP)))
@@ -297,7 +291,7 @@ fn user_photos_page_and_end_with_the_public_photo() {
         ),
     );
     assert!(session.media.files.contains_key(&992));
-    let extra = session.request_for_user(RequestPurpose::GetUserProfilePhotos, 31);
+    let extra = session.ask_user_photos_page(31);
     apply_json(
         &mut session,
         &seq,
@@ -314,13 +308,7 @@ fn user_photos_page_and_end_with_the_public_photo() {
     assert!(gallery.has_more);
     assert_eq!(ids(&gallery), [(9001, GalleryPhotoKind::Main)]);
 
-    let Some(ProfilePhotosFetch::Loaded { loading_more, .. }) =
-        session.users_state.user_profile_photos.get_mut(&31)
-    else {
-        panic!("loaded");
-    };
-    *loading_more = true;
-    let extra = session.request_for_user(RequestPurpose::GetUserProfilePhotos, 31);
+    let extra = session.ask_user_photos_page(31);
     apply_json(
         &mut session,
         &seq,
@@ -357,12 +345,7 @@ fn a_failed_later_page_keeps_the_loaded_photos() {
         20,
         &[change_json(30, 503, 41)],
     );
-    if let Some(ChatPhotosFetch::Loaded { loading_more, .. }) =
-        session.users_state.chat_photo_history.get_mut(&GROUP)
-    {
-        *loading_more = true;
-    }
-    let extra = session.request(RequestPurpose::GetChatPhotoHistory, Some(ChatId(GROUP)));
+    let extra = session.ask_chat_photos_page(ChatId(GROUP));
     apply_json(
         &mut session,
         &seq,
@@ -375,8 +358,69 @@ fn a_failed_later_page_keeps_the_loaded_photos() {
     assert!(matches!(
         session.users_state.chat_photo_history.get(&GROUP),
         Some(ChatPhotosFetch::Loaded {
-            loading_more: false,
+            next_page: PhotoPage::Idle,
             ..
         })
     ));
+}
+
+/// The chat's photo changes while a page of its history is out: the
+/// dropped fetch's answer (first page or a later one) never lands, and the
+/// refetch's does.
+#[test]
+fn a_chat_photo_change_while_a_page_is_out_drops_its_answer() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    seed_group(&mut session, &seq, &sink, MEMBER_STATUS);
+    let page = |extra: RequestId, change: String| {
+        format!(
+            r#"{{"@type":"foundChatMessages","@extra":"{}","total_count":2,"next_from_message_id":20,"messages":[{change}]}}"#,
+            extra.0
+        )
+    };
+    let photo_changed = |file: i32| {
+        format!(
+            r#"{{"@type":"updateChatPhoto","chat_id":{GROUP},"photo":{{"@type":"chatPhotoInfo","small":{},"big":{},"has_animation":false,"is_personal":false}}}}"#,
+            media_file_json(file, "\"\"", false),
+            media_file_json(file + 1, "\"\"", false),
+        )
+    };
+    // The first page is out when the photo changes.
+    let stale = session.ask_chat_photos_page(ChatId(GROUP));
+    apply_json(&mut session, &seq, &sink, &photo_changed(61));
+    let fresh = session.ask_chat_photos_page(ChatId(GROUP));
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &page(stale, change_json(30, 503, 41)),
+    );
+    assert!(matches!(
+        session.users_state.chat_photo_history.get(&GROUP),
+        Some(ChatPhotosFetch::Loading(id)) if *id == fresh
+    ));
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &page(fresh, change_json(40, 504, 47)),
+    );
+    let listed = |session: &Session| match session.users_state.chat_photo_history.get(&GROUP) {
+        Some(ChatPhotosFetch::Loaded { changes, .. }) => {
+            changes.iter().map(|c| c.photo.id).collect::<Vec<_>>()
+        }
+        _ => Vec::new(),
+    };
+    assert_eq!(listed(&session), [504]);
+    // A later page is out when the photo changes: nothing of it lands,
+    // not even as the first page of a new list.
+    let more = session.ask_chat_photos_page(ChatId(GROUP));
+    apply_json(&mut session, &seq, &sink, &photo_changed(63));
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &page(more, change_json(20, 502, 43)),
+    );
+    assert!(!session.users_state.chat_photo_history.contains_key(&GROUP));
 }

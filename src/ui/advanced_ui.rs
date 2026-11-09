@@ -243,8 +243,7 @@ impl QuillApp {
                         .on_click(cx.listener(|this, _, _, cx| {
                             let code = experimental::encode_export(this.experimental_values());
                             cx.write_to_clipboard(ClipboardItem::new_string(code));
-                            this.connection
-                                .set_note(StatusNote::info(experimental::EXPORTED_TOAST));
+                            this.set_note(StatusNote::info(experimental::EXPORTED_TOAST));
                             cx.notify();
                         }))
                         .into_any_element(),
@@ -290,7 +289,7 @@ impl QuillApp {
                 StatusNote::info(experimental::IMPORTED_TOAST)
             }
         };
-        self.connection.set_note(note);
+        self.set_note(note);
         cx.notify();
     }
 }

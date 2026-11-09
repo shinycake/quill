@@ -40,11 +40,20 @@ impl QuillApp {
         self.apply_compose_after_open(window, cx);
         self.adopt_remote_draft(window, cx);
         self.sync_composer_placeholder(window, cx);
+        // MED4b: debounced `getLinkPreview` prefetch for this window's
+        // detected-URL chip (at most one timer per new URL; the session
+        // keeps a preview per URL).
+        self.maybe_prefetch_link_preview(cx);
+        // Two windows' GIF tabs share one list: the pressed one's GIFs.
+        self.gif_tab_upkeep(cx);
         // Emoji keywords for the `:` popup arrived.
         self.refresh_suggest_menu(cx);
         // Words with emoji: picked again when the text, caret or answers move.
         self.sync_emoji_words(cx);
         self.apply_ai_composer_answer(window, cx);
+        // The AI compose box and the apply-in-place shortcut opened over
+        // this window's composer: their answers and toasts.
+        self.ai_compose_window_upkeep(window, cx);
         // The countdowns tick while the chat shows a running one: slow
         // mode on the send button, self-destruct badges, live locations.
         self.ensure_slow_mode_tick(cx);
@@ -65,6 +74,15 @@ impl QuillApp {
         self.pump_promo_request(cx);
         self.gift_boxes_upkeep(window, cx);
         self.checkout_prefill_upkeep(window, cx);
+        // A Business screen opened before the account's full info arrived
+        // is built from it at the first frame after it lands, in the
+        // window that hosts the box (its inputs need that window).
+        if self
+            .windows
+            .dialog_may_show_in(crate::ui::shell::DialogKind::Business, self.windows.scope)
+        {
+            self.business_info_upkeep(window, cx);
+        }
     }
 
     /// Slice P1 fix-up: the checkout opens on Buy before the form arrives;
@@ -159,8 +177,7 @@ impl QuillApp {
             && open_chat == Some(chat_id)
         {
             self.set_composer_markup(&text, window, cx);
-            self.connection
-                .set_note(StatusNote::silent(tr(keys::Q_REST_AI_UPDATED_THE_DRAFT)));
+            self.set_note(StatusNote::silent(tr(keys::Q_REST_AI_UPDATED_THE_DRAFT)));
         }
         if let Some((chat_id, rich, note)) = ai_blocks
             && open_chat == Some(chat_id)
@@ -169,7 +186,7 @@ impl QuillApp {
                 .map(|draft| draft.markup())
                 .unwrap_or_default();
             self.set_composer_markup(&text, window, cx);
-            self.connection.set_note(StatusNote::info(note));
+            self.set_note(StatusNote::info(note));
         }
     }
 }

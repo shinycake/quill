@@ -42,14 +42,11 @@ impl QuillApp {
         self.rtmp_start_frame_upkeep(window, cx);
         // Starting a video chat: the "join as" list, a refused create.
         self.group_call_create_frame_upkeep(window, cx);
-        // main-only: the AI compose box carries the window it was opened in.
+        // main-only: the AI button's blink, the style link's preview and
+        // the emoji files are the session's; the box and the shortcut are
+        // their window's (`ai_compose_window_upkeep`).
         self.ai_compose_frame_upkeep(window, cx);
         self.premium_limit_toast_upkeep(window, cx);
-        // MED4b: debounced `getLinkPreview` prefetch for the
-        // detected-URL chip (spawns at most one timer per new URL).
-        // main-only: the session keeps one composer preview; every window
-        // asking would refetch it for each window in turn.
-        self.maybe_prefetch_link_preview(cx);
         // Parity slice: prefill the folder editor once its `getChatFolder`
         // spec arrives.
         self.maybe_prefill_folder_editor(window, cx);
@@ -149,8 +146,7 @@ impl QuillApp {
             // Its reply, and a reply being recorded, end with it.
             // main-only: only the main window draws the story viewer.
             self.release_story_viewer(cx);
-            self.connection
-                .set_note(StatusNote::silent(tr(keys::Q_REST_STORY_DELETED)));
+            self.set_note(StatusNote::silent(tr(keys::Q_REST_STORY_DELETED)));
         }
         self.follow_story_tray(cx);
         self.story_viewers_scrolled(cx);

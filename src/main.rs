@@ -331,7 +331,7 @@ fn open_main_window(cx: &mut gpui_kit::App, launch: MainWindowLaunch) -> gpui_ki
         ui::crash_notice::install(window, cx);
         let view = cx.new(|cx| {
             let mut app = ui::QuillApp::new(window, cx, launch.credentials);
-            app.pending_deep_link = launch.pending_deep_link;
+            app.pending_deep_link = launch.pending_deep_link.map(ui::QueuedLink::outside);
             app
         });
         quill::startup_trace::mark("app_new");

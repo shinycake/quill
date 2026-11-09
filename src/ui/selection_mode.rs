@@ -289,8 +289,7 @@ impl QuillApp {
             return;
         }
         cx.write_to_clipboard(ClipboardItem::new_string(text));
-        self.connection
-            .set_note(StatusNote::info(tr(keys::TEXT_COPIED)));
+        self.set_note(StatusNote::info(tr(keys::TEXT_COPIED)));
         cx.notify();
     }
 
@@ -352,7 +351,7 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut() {
             let _ = live.driver.ensure_media_files(&missing);
         }
-        self.connection.set_note(match missing.len() {
+        self.set_note(match missing.len() {
             1 => StatusNote::silent(tr(keys::Q_CHAT_DOWNLOADING_1_FILE)),
             n => StatusNote::silent(trn(keys::Q_CHAT_DOWNLOADING_FILES, n)),
         });
@@ -394,7 +393,7 @@ impl QuillApp {
             if let Some(live) = self.live.as_mut() {
                 let _ = live.driver.ensure_media_files(&missing);
             }
-            self.connection.set_note(StatusNote::silent(tr(
+            self.set_note(StatusNote::silent(tr(
                 keys::Q_CHAT_DOWNLOADING_CHOOSE_SAVE_AGAIN_WHEN,
             )));
             cx.notify();
@@ -433,7 +432,7 @@ impl QuillApp {
                 })
                 .await;
             let _ = this.update(cx, |this, cx| {
-                this.connection.set_note(match saved {
+                this.set_note(match saved {
                     1 => StatusNote::silent(tr(keys::Q_CHAT_SAVED_1_FILE)),
                     n => StatusNote::silent(trn(keys::Q_CHAT_SAVED_FILES, n)),
                 });
@@ -642,7 +641,7 @@ impl QuillApp {
             self.begin_vanish(chat_id, ids);
             if let Some(live) = self.live.as_mut() {
                 if live.driver.delete_selected(chat_id, ids, revoke).is_err() {
-                    self.connection.set_note(StatusNote::error(tr(
+                    self.set_note(StatusNote::error(tr(
                         keys::Q_CHAT_COULD_NOT_DELETE_MESSAGES,
                     )));
                 }

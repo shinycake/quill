@@ -182,7 +182,7 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut() {
             let result = { live.driver.set_read_date_privacy(next) };
             if let Err(err) = result {
-                self.connection.set_note(StatusNote::error(user_error_for(
+                self.set_note(StatusNote::error(user_error_for(
                     keys::Q_NOTES_FAILED_READ_DATE,
                     &err,
                 )));

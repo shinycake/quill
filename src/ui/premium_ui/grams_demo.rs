@@ -97,8 +97,7 @@ impl QuillApp {
             }
             _ => self.open_grams(cx),
         }
-        self.connection
-            .set_note(StatusNote::silent("screenshot demo — My Grams"));
+        self.set_note(StatusNote::silent("screenshot demo — My Grams"));
         cx.notify();
     }
 }

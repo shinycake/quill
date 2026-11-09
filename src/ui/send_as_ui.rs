@@ -96,14 +96,15 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         if locked {
-            self.connection.set_note(StatusNote::info(tr(
+            self.set_note(StatusNote::info(tr(
                 keys::Q_OPS_SUBSCRIBE_TO_TELEGRAM_PREMIUM_TO,
             )));
             cx.notify();
             return;
         }
         if let Some(live) = self.live.as_mut() {
-            self.screen.connection.set_note(
+            self.screen.connection.set_note_for(
+                &self.screen.windows,
                 match live.driver.set_chat_message_sender(chat_id, sender) {
                     Ok(()) => StatusNote::silent(tr(keys::Q_OPS_CHANGING_SENDER)),
                     Err(_) => StatusNote::error(tr(keys::Q_OPS_COULD_NOT_CHANGE_THE_SENDER)),

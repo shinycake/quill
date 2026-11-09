@@ -43,8 +43,7 @@ impl QuillApp {
             self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
             apply_ready_channels(session, &self.demo_ui.sink, &self.demo_ui.seq);
         }
-        self.connection
-            .set_note(StatusNote::silent("screenshot demo — broadcast channel"));
+        self.set_note(StatusNote::silent("screenshot demo — broadcast channel"));
     }
 
     fn demo_ready_channels_admin(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -55,7 +54,7 @@ impl QuillApp {
             self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
             apply_ready_channels_admin(session, &self.demo_ui.sink, &self.demo_ui.seq);
         }
-        self.connection.set_note(StatusNote::silent(
+        self.set_note(StatusNote::silent(
             "screenshot demo — broadcast channel admin",
         ));
     }
@@ -65,7 +64,6 @@ impl QuillApp {
             self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
             apply_ready_sponsored(session, &self.demo_ui.sink, &self.demo_ui.seq);
         }
-        self.connection
-            .set_note(StatusNote::silent("screenshot demo — sponsored messages"));
+        self.set_note(StatusNote::silent("screenshot demo — sponsored messages"));
     }
 }

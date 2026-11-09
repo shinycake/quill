@@ -433,7 +433,7 @@ impl QuillApp {
                 .send_inline_query_result(chat_id, query_id, &result_id)
                 .is_err()
         {
-            self.connection.set_note(StatusNote::error(tr(
+            self.set_note(StatusNote::error(tr(
                 keys::Q_MEDIA_COULD_NOT_SEND_THE_INLINE,
             )));
         }

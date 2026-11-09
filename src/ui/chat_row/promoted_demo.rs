@@ -92,7 +92,6 @@ impl QuillApp {
                 PackValue::Ordinary("COVID-19 Info".into()),
             )],
         );
-        self.connection
-            .set_note(StatusNote::silent("screenshot demo — promoted chats"));
+        self.set_note(StatusNote::silent("screenshot demo — promoted chats"));
     }
 }

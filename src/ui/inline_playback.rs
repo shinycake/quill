@@ -165,8 +165,7 @@ impl QuillApp {
         }
         if open_chat.is_some_and(|chat| self.gif_playing(chat, message_id)) {
             self.stop_animation_playback();
-            self.connection
-                .set_note(StatusNote::silent(tr(keys::Q_AV_GIF_PAUSED)));
+            self.set_note(StatusNote::silent(tr(keys::Q_AV_GIF_PAUSED)));
             cx.notify();
             return;
         }
@@ -218,8 +217,7 @@ impl QuillApp {
         self.playback.intent = None;
         let roots = self.media_display_roots();
         let Some(safe) = sandboxed_display_path(&path, &roots) else {
-            self.connection
-                .set_note(StatusNote::error(tr(keys::Q_AV_GIF_FILE_IS_OUTSIDE_THE)));
+            self.set_note(StatusNote::error(tr(keys::Q_AV_GIF_FILE_IS_OUTSIDE_THE)));
             cx.notify();
             return;
         };
@@ -231,8 +229,7 @@ impl QuillApp {
             window: self.windows.scope,
             message: ChatMessage::new(chat_id, message_id),
         });
-        self.connection
-            .set_note(StatusNote::silent(tr(keys::Q_AV_LOADING_GIF_PLAYBACK)));
+        self.set_note(StatusNote::silent(tr(keys::Q_AV_LOADING_GIF_PLAYBACK)));
         self.spawn_gif_decode(chat_id, message_id, file_id, safe, cx);
         cx.notify();
     }
@@ -361,8 +358,7 @@ impl QuillApp {
         }
         self.playback.gif = Some(clip);
         self.playback.gif_started_at = Some(Instant::now());
-        self.connection
-            .set_note(StatusNote::silent(tr(keys::Q_AV_PLAYING_GIF)));
+        self.set_note(StatusNote::silent(tr(keys::Q_AV_PLAYING_GIF)));
         self.notify_conversation(cx);
         cx.notify();
     }
@@ -411,8 +407,7 @@ impl QuillApp {
             }
             Err(_) => {
                 self.stop_animation_playback();
-                self.connection
-                    .set_note(StatusNote::error(tr(keys::Q_AV_COULD_NOT_PLAY_GIF)));
+                self.set_note(StatusNote::error(tr(keys::Q_AV_COULD_NOT_PLAY_GIF)));
             }
         }
         self.notify_conversation(cx);

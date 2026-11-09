@@ -23,7 +23,12 @@ impl Session {
             // Only the search the link preview waits for: an earlier
             // link's failure never shows under a later one.
             Some(RequestPurpose::SearchBackground) => {
-                if pending.map(|p| p.id) == self.chats_state.background_search {
+                if self
+                    .chats_state
+                    .background_search
+                    .waits_for(pending.map(|p| p.id))
+                {
+                    self.chats_state.background_search = BackgroundSearch::Idle;
                     self.chats_state.background_error = Some(error_reason(err));
                 }
             }

@@ -59,7 +59,7 @@ impl QuillApp {
             self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
             apply_ready_bot_chat(session, &self.demo_ui.sink, &self.demo_ui.seq);
         }
-        self.connection.set_note(StatusNote::silent(
+        self.set_note(StatusNote::silent(
             "screenshot demo — bot chat with info panel",
         ));
     }
@@ -69,7 +69,7 @@ impl QuillApp {
             self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
             apply_ready_bot_keyboard(session, &self.demo_ui.sink, &self.demo_ui.seq);
         }
-        self.connection.set_note(StatusNote::silent(
+        self.set_note(StatusNote::silent(
             "screenshot demo — bot keyboards: inline buttons, custom keyboard, force reply",
         ));
     }
@@ -99,7 +99,6 @@ impl QuillApp {
             apply_ready_profile_edit(session, &self.demo_ui.sink, &self.demo_ui.seq);
         }
         self.open_edit_profile_dialog(window, cx);
-        self.connection
-            .set_note(StatusNote::silent("screenshot demo — edit profile dialog"));
+        self.set_note(StatusNote::silent("screenshot demo — edit profile dialog"));
     }
 }

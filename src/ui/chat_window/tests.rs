@@ -1253,10 +1253,9 @@ fn a_note_from_a_chat_window_toasts_in_that_window(cx: &mut TestAppContext) {
     let chat_window = h.open_in_new_window(OTHER, cx);
     h.app.update(cx, |app, cx| {
         app.note_window_press(Some(OTHER));
-        app.connection
-            .set_note(crate::ui::status_note::StatusNote::error(
-                "Couldn't open the link",
-            ));
+        app.set_note(crate::ui::status_note::StatusNote::error(
+            "Couldn't open the link",
+        ));
         app.set_window_scope(None);
         cx.notify();
     });
@@ -1271,6 +1270,64 @@ fn a_note_from_a_chat_window_toasts_in_that_window(cx: &mut TestAppContext) {
     });
     assert!(status_toast_drawn(chat_window, cx));
     assert!(!status_toast_drawn(h.main, cx));
+}
+
+/// Round 15 (area B, finding 7): a note toasts where the Asker says, as
+/// a box opens there. A bot's answer to a button pressed in the chat
+/// window, drained by the poll loop after the user clicked in the main
+/// window, toasts in the chat window; so does a note set in the chat
+/// window's own frame.
+#[gpui_kit::test]
+fn a_note_toasts_in_the_window_that_asked_not_the_last_press(cx: &mut TestAppContext) {
+    crate::ui::app_render::pin_toasts_for_tests();
+    let h = new_app(cx);
+    let chat_window = h.open_in_new_window(OTHER, cx);
+    h.app.update(cx, |app, cx| {
+        app.note_window_press(Some(OTHER));
+        // The user clicks in the main window before the bot answers.
+        app.note_window_press(None);
+        app.unasked(|app| {
+            app.as_asked_by(Some(OTHER), |app| {
+                app.set_note(crate::ui::status_note::StatusNote::error(
+                    "The bot's answer",
+                ));
+            });
+        });
+        cx.notify();
+    });
+    assert!(
+        status_toast_drawn(chat_window, cx),
+        "the window that pressed"
+    );
+    assert!(!status_toast_drawn(h.main, cx), "not the last press");
+
+    // A note set in the chat window's frame (a resolved link that could
+    // not open its chat) toasts there too.
+    h.app.update(cx, |app, cx| {
+        app.connection.drop_toasts();
+        app.note_window_press(None);
+        app.in_window_scope(Some(OTHER), cx, |app, _| {
+            app.asked_in_place(|app| {
+                app.set_note(crate::ui::status_note::StatusNote::error(
+                    "Couldn't open the chat",
+                ));
+            });
+        });
+        cx.notify();
+    });
+    assert!(status_toast_drawn(chat_window, cx));
+    assert!(!status_toast_drawn(h.main, cx));
+
+    // Where no window asked, the last press decides, as for a box.
+    h.app.update(cx, |app, cx| {
+        app.connection.drop_toasts();
+        app.unasked(|app| {
+            app.set_note(crate::ui::status_note::StatusNote::error("Connection lost"));
+        });
+        cx.notify();
+    });
+    assert!(status_toast_drawn(h.main, cx));
+    assert!(!status_toast_drawn(chat_window, cx));
 }
 
 #[gpui_kit::test]
@@ -1299,10 +1356,9 @@ fn closing_a_chat_window_moves_its_toast_to_the_main_window(cx: &mut TestAppCont
     let chat_window = h.open_in_new_window(OTHER, cx);
     h.app.update(cx, |app, cx| {
         app.note_window_press(Some(OTHER));
-        app.connection
-            .set_note(crate::ui::status_note::StatusNote::error(
-                "Couldn't open the link",
-            ));
+        app.set_note(crate::ui::status_note::StatusNote::error(
+            "Couldn't open the link",
+        ));
         cx.notify();
     });
     assert!(status_toast_drawn(chat_window, cx));
@@ -1331,10 +1387,9 @@ fn a_narrow_forum_window_showing_its_topics_draws_the_toast(cx: &mut TestAppCont
     assert!(topics_only, "the window shows only the topic list");
     h.app.update(cx, |app, cx| {
         app.note_window_press(Some(forum));
-        app.connection
-            .set_note(crate::ui::status_note::StatusNote::error(
-                "Couldn't open the link",
-            ));
+        app.set_note(crate::ui::status_note::StatusNote::error(
+            "Couldn't open the link",
+        ));
         cx.notify();
     });
     assert!(status_toast_drawn(chat_window, cx));

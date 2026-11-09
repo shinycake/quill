@@ -91,7 +91,7 @@ impl QuillApp {
         self.composer.update(cx, |input, cx| {
             input.set_value("album caption", window, cx);
         });
-        self.connection.set_note(StatusNote::silent(
+        self.set_note(StatusNote::silent(
             "screenshot demo — received album · own album",
         ));
     }
@@ -103,7 +103,7 @@ impl QuillApp {
             self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
             apply_ready_drafts(session, &self.demo_ui.sink, &self.demo_ui.seq);
         }
-        self.connection.set_note(StatusNote::silent(
+        self.set_note(StatusNote::silent(
             "screenshot demo — draft from another device",
         ));
     }
@@ -113,8 +113,7 @@ impl QuillApp {
             self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
             apply_ready_link_preview(session, &self.demo_ui.sink, &self.demo_ui.seq);
         }
-        self.connection
-            .set_note(StatusNote::info("screenshot demo — link preview"));
+        self.set_note(StatusNote::info("screenshot demo — link preview"));
     }
 
     fn demo_ready_showcase(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
@@ -184,8 +183,7 @@ impl QuillApp {
             self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
             apply_ready_text_entities(session, &self.demo_ui.sink, &self.demo_ui.seq);
         }
-        self.connection
-            .set_note(StatusNote::silent("screenshot demo — text entities"));
+        self.set_note(StatusNote::silent("screenshot demo — text entities"));
     }
 
     fn demo_ready_unsupported_message(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {
@@ -212,7 +210,7 @@ impl QuillApp {
             self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
             apply_ready_video_note_send(session, &self.demo_ui.sink, &self.demo_ui.seq);
         }
-        self.connection.set_note(StatusNote::silent(
+        self.set_note(StatusNote::silent(
             "screenshot demo — video note attach · own round note",
         ));
     }
@@ -225,7 +223,7 @@ impl QuillApp {
             self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
             apply_ready_video_send(session, &self.demo_ui.sink, &self.demo_ui.seq);
         }
-        self.connection.set_note(StatusNote::silent(
+        self.set_note(StatusNote::silent(
             "screenshot demo — attach video · own clip playing",
         ));
     }
@@ -238,7 +236,7 @@ impl QuillApp {
             apply_ready_privacy(session, &self.demo_ui.sink, &self.demo_ui.seq);
         }
         self.open_settings(Some(quill::settings_catalog::Page::Privacy), cx);
-        self.connection.set_note(StatusNote::silent(
+        self.set_note(StatusNote::silent(
             "screenshot demo — privacy settings (injected, no live Telegram)",
         ));
     }

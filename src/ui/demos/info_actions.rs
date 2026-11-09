@@ -56,8 +56,7 @@ impl QuillApp {
             apply_all(session, &self.demo_ui.sink, &self.demo_ui.seq, &[info]);
         }
         self.open_info_panel_target(InfoPanelTarget::User(BOT), window, cx);
-        self.connection
-            .set_note(StatusNote::silent("screenshot demo — bot info panel"));
+        self.set_note(StatusNote::silent("screenshot demo — bot info panel"));
         cx.notify();
     }
 
@@ -82,7 +81,7 @@ impl QuillApp {
             session.open_chat(ChatId(CHANNEL));
         }
         self.open_info_panel_target(InfoPanelTarget::Supergroup(CHANNEL), window, cx);
-        self.connection.set_note(StatusNote::silent(
+        self.set_note(StatusNote::silent(
             "screenshot demo — channel info, not joined",
         ));
         cx.notify();

@@ -6,7 +6,7 @@ use crate::diagnostics::MemorySink;
 use crate::ids::{AccountKey, ChatId, MessageId};
 use crate::platform::MemorySecretStore;
 use crate::state::SupergroupFullInfoData;
-use crate::state::{ComposerLinkPreview, RequestPurpose, Session, SupergroupMembersFetch};
+use crate::state::{RequestPurpose, Session, SupergroupMembersFetch};
 use crate::telegram::client::copy_and_parse;
 use crate::telegram::envelope::ChannelMemberStatus;
 use serde_json::Value;
@@ -485,7 +485,7 @@ fn driver_instant_view_error_falls_back() {
 #[test]
 fn driver_link_preview_prefetch_ingest() {
     // MED4b: a `linkPreview` answer for a tracked `GetLinkPreview`
-    // request populates `session.messages.composer_preview` (the chip reads
+    // request populates `session.messages.composer_previews` (the chip reads
     // it); a 404 becomes "no link info" (`Some(None)`), never a
     // card. The URL rides `composer_preview_urls`, keyed by id.
     use crate::telegram::client::copy_and_parse;
@@ -507,10 +507,11 @@ fn driver_link_preview_prefetch_ingest() {
         .messages
         .composer_preview_urls
         .insert(extra, "https://example.com/story".to_string());
-    driver.session.messages.composer_preview = Some(ComposerLinkPreview {
-        url: "https://example.com/story".to_string(),
-        preview: None,
-    });
+    driver
+        .session
+        .messages
+        .composer_previews
+        .asked("https://example.com/story");
 
     let json = format!(
         r#"{{"@type":"linkPreview","url":"https://example.com/story","display_url":"example.com","site_name":"Example","title":"A short story","description":{{"@type":"formattedText","text":"Preview body","entities":[]}},"author":"","type":{{"@type":"linkPreviewTypeArticle"}},"has_large_media":true,"show_large_media":false,"show_media_above_description":false,"skip_confirmation":true,"show_above_text":false,"instant_view_version":0,"@extra":"{id}"}}"#,
@@ -521,8 +522,8 @@ fn driver_link_preview_prefetch_ingest() {
     let stored = driver
         .session
         .messages
-        .composer_preview
-        .as_ref()
+        .composer_previews
+        .get("https://example.com/story")
         .expect("preview stored");
     assert_eq!(stored.url, "https://example.com/story");
     let preview = stored
@@ -552,10 +553,19 @@ fn driver_link_preview_prefetch_ingest() {
     let stored = driver
         .session
         .messages
-        .composer_preview
-        .as_ref()
+        .composer_previews
+        .get("https://example.com/story")
         .expect("preview kept");
-    assert_eq!(stored.url, "https://example.com/story");
+    assert!(stored.preview.as_ref().is_some_and(Option::is_some));
+    assert!(
+        driver
+            .session
+            .messages
+            .composer_previews
+            .get("https://example.com/old")
+            .is_none(),
+        "a URL no composer asked for is not kept"
+    );
 
     // 404 for the current URL → "no link info", never a card.
     let miss = driver.session.request(RequestPurpose::GetLinkPreview, None);
@@ -564,10 +574,11 @@ fn driver_link_preview_prefetch_ingest() {
         .messages
         .composer_preview_urls
         .insert(miss, "https://example.com/story".to_string());
-    driver.session.messages.composer_preview = Some(ComposerLinkPreview {
-        url: "https://example.com/story".to_string(),
-        preview: None,
-    });
+    driver
+        .session
+        .messages
+        .composer_previews
+        .asked("https://example.com/story");
     let json = format!(
         r#"{{"@type":"error","code":404,"message":"Not Found","@extra":"{id}"}}"#,
         id = miss.0,
@@ -577,8 +588,8 @@ fn driver_link_preview_prefetch_ingest() {
     let stored = driver
         .session
         .messages
-        .composer_preview
-        .as_ref()
+        .composer_previews
+        .get("https://example.com/story")
         .expect("state kept");
     assert_eq!(stored.url, "https://example.com/story");
     assert!(stored.preview.as_ref().expect("resolved").is_none());

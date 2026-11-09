@@ -114,14 +114,14 @@ impl QuillApp {
         let save = PermissionsSave::new(dialog.permissions, dialog.slow_mode_delay, dialog.boosts);
         if let Some(live) = self.live.as_mut() {
             match live.driver.save_permissions_box(dialog.chat_id, save) {
-                Ok(true) => self
-                    .connection
-                    .set_note(StatusNote::silent(tr(keys::Q_PEOPLE_PERMISSIONS_UPDATED))),
+                Ok(true) => {
+                    self.set_note(StatusNote::silent(tr(keys::Q_PEOPLE_PERMISSIONS_UPDATED)))
+                }
                 Ok(false) => {}
                 Err(_) => {
                     // box-host: put back after a failed submit; it stays where it shows
                     self.admin.permissions_dialog = Some(dialog);
-                    self.connection.set_note(StatusNote::error(tr(
+                    self.set_note(StatusNote::error(tr(
                         keys::Q_PEOPLE_COULD_NOT_UPDATE_PERMISSIONS,
                     )));
                 }

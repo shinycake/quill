@@ -105,8 +105,7 @@ impl QuillApp {
                 .map(|_| ())
         };
         if result.is_err() {
-            self.connection
-                .set_note(StatusNote::error(tr(keys::Q_PEOPLE_COULD_NOT_LOAD_MEMBERS)));
+            self.set_note(StatusNote::error(tr(keys::Q_PEOPLE_COULD_NOT_LOAD_MEMBERS)));
         }
         cx.notify();
     }
@@ -139,7 +138,7 @@ impl QuillApp {
             None => return,
         };
         if user_ids.is_empty() {
-            self.connection.set_note(StatusNote::silent(tr(
+            self.set_note(StatusNote::silent(tr(
                 keys::Q_PEOPLE_PICK_AT_LEAST_ONE_CONTACT,
             )));
             cx.notify();
@@ -152,7 +151,7 @@ impl QuillApp {
             },
             None => StatusNote::info(tr(keys::Q_PEOPLE_ADDING_MEMBERS_NEEDS_A_LIVE)),
         };
-        self.connection.set_note(note);
+        self.set_note(note);
         // TDLib sends `updateChatMember` to bots only: the add's own answer
         // (`failedToAddMembers`) drops the cached pages and marks the chat
         // stale, and `poll_live` refetches the open dialog's page then.

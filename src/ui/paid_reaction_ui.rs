@@ -47,7 +47,7 @@ impl QuillApp {
                 .driver
                 .add_paid_reaction(chat_id, message_id, stars, sender, now);
             if let Some(note) = live.driver.session.payments.paid.note.clone() {
-                self.connection.set_note(StatusNote::info(note));
+                self.set_note(StatusNote::info(note));
             }
         } else if let Some(session) = self.demo_session.as_mut() {
             let balance = session.payments.hub.balance.map(|b| b.stars);
@@ -56,9 +56,7 @@ impl QuillApp {
                 None => {
                     paid.add(chat_id.0, message_id.0, stars, sender, now);
                 }
-                Some(refusal) => self
-                    .connection
-                    .set_note(StatusNote::error(refusal.message().to_string())),
+                Some(refusal) => self.set_note(StatusNote::error(refusal.message().to_string())),
             }
         }
         cx.notify();

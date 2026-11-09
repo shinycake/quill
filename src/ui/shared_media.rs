@@ -251,17 +251,15 @@ impl QuillApp {
         let opened = if let Some(live) = self.live.as_mut() {
             match live.driver.open_shared_media() {
                 Ok(true) => {
-                    self.connection
-                        .set_note(StatusNote::silent(tr(keys::Q_OPS_SHARED_MEDIA)));
+                    self.set_note(StatusNote::silent(tr(keys::Q_OPS_SHARED_MEDIA)));
                     true
                 }
                 Ok(false) => {
-                    self.connection
-                        .set_note(StatusNote::silent(tr(keys::Q_OPS_SELECT_A_CHAT_TO_BROWSE)));
+                    self.set_note(StatusNote::silent(tr(keys::Q_OPS_SELECT_A_CHAT_TO_BROWSE)));
                     false
                 }
                 Err(_) => {
-                    self.connection.set_note(StatusNote::error(tr(
+                    self.set_note(StatusNote::error(tr(
                         keys::Q_OPS_COULD_NOT_OPEN_SHARED_MEDIA,
                     )));
                     false
@@ -271,13 +269,11 @@ impl QuillApp {
             match session.open_chat {
                 Some(chat_id) => {
                     session.media.shared_media.open_for(chat_id);
-                    self.connection
-                        .set_note(StatusNote::silent(tr(keys::Q_OPS_SHARED_MEDIA)));
+                    self.set_note(StatusNote::silent(tr(keys::Q_OPS_SHARED_MEDIA)));
                     true
                 }
                 None => {
-                    self.connection
-                        .set_note(StatusNote::silent(tr(keys::Q_OPS_SELECT_A_CHAT_TO_BROWSE)));
+                    self.set_note(StatusNote::silent(tr(keys::Q_OPS_SELECT_A_CHAT_TO_BROWSE)));
                     false
                 }
             }
@@ -295,8 +291,7 @@ impl QuillApp {
         } else if let Some(session) = self.demo_session.as_mut() {
             session.media.shared_media.close();
         }
-        self.connection
-            .set_note(StatusNote::silent(tr(keys::Q_OPS_SHARED_MEDIA_CLOSED)));
+        self.set_note(StatusNote::silent(tr(keys::Q_OPS_SHARED_MEDIA_CLOSED)));
         cx.notify();
     }
 
@@ -309,8 +304,7 @@ impl QuillApp {
     ) {
         if let Some(live) = self.live.as_mut() {
             if live.driver.select_shared_media_tab(tab).is_err() {
-                self.connection
-                    .set_note(StatusNote::error(tr(keys::Q_OPS_COULD_NOT_LOAD_THAT_TAB)));
+                self.set_note(StatusNote::error(tr(keys::Q_OPS_COULD_NOT_LOAD_THAT_TAB)));
             }
         } else if let Some(session) = self.demo_session.as_mut() {
             session.media.shared_media.select_tab_dropping_search(tab);
@@ -322,7 +316,7 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut() {
             let tab = live.driver.session.media.shared_media.active_tab;
             if live.driver.fetch_shared_media(tab).is_err() {
-                self.connection.set_note(StatusNote::error(tr(
+                self.set_note(StatusNote::error(tr(
                     keys::Q_OPS_COULD_NOT_RETRY_LOADING_SHARED,
                 )));
             }
@@ -339,10 +333,8 @@ impl QuillApp {
     ) {
         if let Some(live) = self.live.as_mut() {
             match live.driver.jump_to_shared_media_item(message_id) {
-                Ok(_) => self
-                    .connection
-                    .set_note(StatusNote::silent(tr(keys::Q_OPS_JUMPED_TO_MESSAGE))),
-                Err(_) => self.connection.set_note(StatusNote::error(tr(
+                Ok(_) => self.set_note(StatusNote::silent(tr(keys::Q_OPS_JUMPED_TO_MESSAGE))),
+                Err(_) => self.set_note(StatusNote::error(tr(
                     keys::Q_OPS_COULD_NOT_OPEN_THAT_MESSAGE,
                 ))),
             }

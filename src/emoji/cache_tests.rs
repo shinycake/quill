@@ -66,22 +66,26 @@ fn accepting_custom_emoji_stickers_replaces_by_id() {
 fn custom_emoji_cache_is_bounded() {
     let mut session = session();
     let total = CUSTOM_EMOJI_CACHE_CAP as i64 + 5;
+    let ids: Vec<i64> = (1..=total).collect();
     session
         .stickers
         .emoji
-        .status_resolution_attempted
-        .extend(1..=total);
+        .begin_custom_emoji_lookup(crate::ids::RequestId(1), &ids);
     let batch: Vec<StickerItem> = (1..=total)
         .map(|id| resolved_emoji(Some(id), id as i32))
         .collect();
     session.accept_custom_emoji_stickers(batch);
+    session
+        .stickers
+        .emoji
+        .custom_emoji_lookup_answered(crate::ids::RequestId(1));
     let held = &session.stickers.emoji.custom_emoji_stickers;
     assert_eq!(held.len(), CUSTOM_EMOJI_CACHE_CAP);
     assert_eq!(held.first().and_then(|s| s.custom_emoji_id), Some(6));
     assert_eq!(held.last().and_then(|s| s.custom_emoji_id), Some(total));
-    let attempted = &session.stickers.emoji.status_resolution_attempted;
-    assert!(!attempted.contains(&1));
-    assert!(attempted.contains(&total));
+    let lookups = &session.stickers.emoji.custom_lookups;
+    assert!(!lookups.attempted(1));
+    assert!(lookups.attempted(total));
 }
 
 /// An id the screen shows survives a merge that overflows the cap; the
@@ -119,7 +123,10 @@ fn visible_custom_emoji_survives_overflow() {
 fn unresolved_custom_emoji_ids_skip_resolved_and_attempted() {
     let mut session = session();
     session.accept_custom_emoji_stickers(vec![resolved_emoji(Some(2), 11)]);
-    session.stickers.emoji.status_resolution_attempted.insert(3);
+    session
+        .stickers
+        .emoji
+        .begin_custom_emoji_lookup(crate::ids::RequestId(1), &[3]);
     assert_eq!(
         session.unresolved_custom_emoji_ids(vec![1, 2, 3, 4]),
         vec![1, 4]

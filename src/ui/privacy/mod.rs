@@ -527,7 +527,7 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut() {
             let result = { live.driver.block_sender(user_id) };
             if let Err(err) = result {
-                self.connection.set_note(StatusNote::error(user_error_for(
+                self.set_note(StatusNote::error(user_error_for(
                     keys::Q_NOTES_FAILED_BLOCK,
                     &err,
                 )));
@@ -553,7 +553,7 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut() {
             let result = { live.driver.unblock_sender(user_id) };
             if let Err(err) = result {
-                self.connection.set_note(StatusNote::error(user_error_for(
+                self.set_note(StatusNote::error(user_error_for(
                     keys::Q_NOTES_FAILED_UNBLOCK,
                     &err,
                 )));

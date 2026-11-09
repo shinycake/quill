@@ -4,6 +4,16 @@
 use crate::state::*;
 use crate::telegram::envelope::GroupBotCommands;
 
+/// A bot's answer to an inline button press, with the chat of the button's
+/// message: a URL in it opens as a link clicked in the window showing that
+/// chat. One value, so the two are always written and taken together
+/// (`Session::note_callback_answer`).
+#[derive(Debug, Clone, PartialEq)]
+pub struct CallbackAnswer {
+    pub answer: CallbackQueryAnswer,
+    pub chat: Option<ChatId>,
+}
+
 /// Which group a `bot_commands` list belongs to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum GroupCommandsKey {
@@ -51,13 +61,10 @@ pub struct BotsState {
     /// flight (the panel shows a loading row); `Some` = loaded rows.
     pub game_scores: HashMap<(i64, i64), Option<Vec<GameHighScore>>>,
     /// Last `callbackQueryAnswer` to an inline keyboard callback-button press
-    /// (Phase 3.2). The UI takes it on the next poll and shows the answer in
-    /// the status line (URL answers open in the OS browser).
-    pub last_callback_answer: Option<CallbackQueryAnswer>,
-    /// The chat of the button's message `last_callback_answer` answers:
-    /// a URL in it opens as a link clicked in the window showing that
-    /// chat. Written with it (`Session::note_callback_answer`).
-    pub last_callback_chat: Option<ChatId>,
+    /// (Phase 3.2), with the chat of the press. The UI takes it on the next
+    /// poll and shows the answer in the status line (URL answers open in the
+    /// OS browser).
+    pub last_callback_answer: Option<CallbackAnswer>,
     /// Mini apps (docs/decisions/codex-miniapp-webview.md): open answers,
     /// consent answers and the attachment menu bots.
     pub web_apps: WebApps,
@@ -106,7 +113,6 @@ impl BotsState {
             similar_bots: HashMap::new(),
             game_scores: HashMap::new(),
             last_callback_answer: None,
-            last_callback_chat: None,
             web_apps: WebApps::default(),
             last_login_url_info: None,
             login_url_request: None,

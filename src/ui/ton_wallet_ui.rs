@@ -65,7 +65,7 @@ impl QuillApp {
     /// "Copy Address" (iOS toast: "Address copied").
     pub(super) fn copy_ton_address(&mut self, address: String, cx: &mut Context<Self>) {
         cx.write_to_clipboard(ClipboardItem::new_string(address));
-        self.connection.set_note(StatusNote::info(tr(
+        self.set_note(StatusNote::info(tr(
             keys::Q_MONEY_ADDRESS_COPIED_TO_CLIPBOARD,
         )));
         cx.notify();

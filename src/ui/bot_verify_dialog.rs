@@ -192,7 +192,7 @@ impl QuillApp {
             }
         };
         let Some(live) = self.live.as_mut() else {
-            self.connection.set_note(StatusNote::info(tr(
+            self.set_note(StatusNote::info(tr(
                 keys::Q_MEDIA_DEMO_MODE_VERIFYING_NEEDS_A,
             )));
             cx.notify();
@@ -204,7 +204,7 @@ impl QuillApp {
             live.driver
                 .set_bot_verification(bot_id, sender, &description)
         };
-        self.connection.set_note(match (sent, remove) {
+        self.set_note(match (sent, remove) {
             (Ok(_), false) => StatusNote::silent(tr_with(
                 keys::Q_MEDIA_VERIFYING_AS_A,
                 &[("name", &name.to_string()), ("noun", (target.noun()))],

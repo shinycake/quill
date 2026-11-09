@@ -33,7 +33,7 @@ impl QuillApp {
             if reply.is_some() {
                 self.chat_ui.set_reply(None);
             }
-            self.connection.set_note(StatusNote::silent(tr(
+            self.set_note(StatusNote::silent(tr(
                 keys::Q_CHAT_DEMO_SEND_APPLIED_LOCALLY_NO,
             )));
             cx.notify();
@@ -43,7 +43,7 @@ impl QuillApp {
             return false;
         }
         if self.session().is_some_and(|s| s.is_frozen()) {
-            self.connection.set_note(StatusNote::error(tr(
+            self.set_note(StatusNote::error(tr(
                 keys::Q_CHAT_YOUR_ACCOUNT_IS_FROZEN_AND,
             )));
             cx.notify();
@@ -57,8 +57,7 @@ impl QuillApp {
             .and_then(|s| s.chats.get(&chat_id.0))
             .is_some_and(|chat| chat.supported());
         if !supported {
-            self.connection
-                .set_note(StatusNote::silent(tr(keys::Q_CHAT_THIS_CHAT_TYPE_IS_NOT)));
+            self.set_note(StatusNote::silent(tr(keys::Q_CHAT_THIS_CHAT_TYPE_IS_NOT)));
             cx.notify();
             return true;
         }
@@ -87,11 +86,9 @@ impl QuillApp {
                     quill::composer::ComposerScheduling::None,
                     tr(keys::Q_CHAT_SENDING),
                 );
-                self.connection.set_note(note);
+                self.set_note(note);
             }
-            Err(_) => self
-                .connection
-                .set_note(StatusNote::error(tr(keys::Q_CHAT_COULD_NOT_SEND_MESSAGE))),
+            Err(_) => self.set_note(StatusNote::error(tr(keys::Q_CHAT_COULD_NOT_SEND_MESSAGE))),
         }
         cx.notify();
         true

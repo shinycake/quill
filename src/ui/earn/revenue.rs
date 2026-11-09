@@ -783,7 +783,7 @@ impl QuillApp {
                         .driver
                         .set_channel_sponsored_messages(quill::ids::ChatId(chat_id), off);
                     if sent.is_err() {
-                        this.connection.set_note(StatusNote::error(tr(
+                        this.set_note(StatusNote::error(tr(
                             keys::Q_MONEY_COULDNT_CHANGE_THE_ADS_SETTING,
                         )));
                     }

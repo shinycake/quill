@@ -77,8 +77,7 @@ impl QuillApp {
                 // The dialog could not open (no desktop portal on Linux,
                 // say): the selection stays for another try.
                 Ok(Err(_)) | Err(_) => {
-                    this.connection
-                        .set_note(StatusNote::error(tr(keys::EXPORT_HTML_FAILED)));
+                    this.set_note(StatusNote::error(tr(keys::EXPORT_HTML_FAILED)));
                     cx.notify();
                 }
             });
@@ -98,8 +97,7 @@ impl QuillApp {
                 .start_rich_html_export(chat_id, message_id, base)
         });
         if matches!(started, Some(Err(_))) {
-            self.connection
-                .set_note(StatusNote::error(tr(keys::EXPORT_HTML_FAILED)));
+            self.set_note(StatusNote::error(tr(keys::EXPORT_HTML_FAILED)));
         }
         cx.notify();
     }
@@ -119,7 +117,7 @@ impl QuillApp {
     /// `showFailToast`); logout and quit end one silently.
     pub(super) fn toast_rich_html(&mut self, outcome: &RichHtmlOutcome) {
         if let Some(note) = rich_html_note(outcome) {
-            self.connection.set_note(note);
+            self.set_note(note);
         }
     }
 }

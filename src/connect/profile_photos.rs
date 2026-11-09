@@ -3,7 +3,9 @@
 //! `SharedMediaType::ChatPhoto`).
 use super::*;
 use crate::ids::{ChatId, MessageId, RequestId};
-use crate::state::{ChatPhotosFetch, PhotoDelete, PhotoOwner, ProfilePhotosFetch, RequestPurpose};
+use crate::state::{
+    ChatPhotosFetch, PhotoDelete, PhotoOwner, PhotoPage, ProfilePhotosFetch, RequestPurpose,
+};
 use crate::telegram::envelope::ChatKind;
 use crate::telegram::requests::{
     delete_messages, get_basic_group_full_info, get_supergroup_full_info, get_user_profile_photos,
@@ -64,7 +66,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         if matches!(
             self.session.users_state.chat_photo_history.get(&chat_id.0),
-            Some(ChatPhotosFetch::Loading | ChatPhotosFetch::Loaded { .. })
+            Some(ChatPhotosFetch::Loading(_) | ChatPhotosFetch::Loaded { .. })
         ) {
             return Ok(());
         }
@@ -74,7 +76,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.session
             .users_state
             .chat_photo_history
-            .insert(chat_id.0, ChatPhotosFetch::Loading);
+            .insert(chat_id.0, ChatPhotosFetch::Loading(extra));
         let json = search_chat_photos(extra, chat_id, MessageId(0), CHAT_PHOTOS_LIMIT);
         if let Err(err) = self.send_json_request(extra, &json) {
             self.session
@@ -101,23 +103,26 @@ impl<S: JsonSender> ConnectDriver<S> {
                 let Some(ProfilePhotosFetch::Loaded {
                     total_count,
                     photos,
-                    loading_more,
-                }) = self
-                    .session
-                    .users_state
-                    .user_profile_photos
-                    .get_mut(&user_id)
+                    next_page,
+                }) = self.session.users_state.user_profile_photos.get(&user_id)
                 else {
                     return Ok(None);
                 };
                 let offset = i32::try_from(photos.len()).unwrap_or(i32::MAX);
-                if *loading_more || offset >= *total_count {
+                if next_page.asking() || offset >= *total_count {
                     return Ok(None);
                 }
-                *loading_more = true;
                 let extra = self
                     .session
                     .request_for_user(RequestPurpose::GetUserProfilePhotos, user_id);
+                if let Some(ProfilePhotosFetch::Loaded { next_page, .. }) = self
+                    .session
+                    .users_state
+                    .user_profile_photos
+                    .get_mut(&user_id)
+                {
+                    *next_page = PhotoPage::Asking(extra);
+                }
                 let json = get_user_profile_photos(
                     extra,
                     user_id,
@@ -126,49 +131,52 @@ impl<S: JsonSender> ConnectDriver<S> {
                 );
                 let sent = self.send_json_request(extra, &json);
                 if sent.is_err()
-                    && let Some(ProfilePhotosFetch::Loaded { loading_more, .. }) = self
+                    && let Some(ProfilePhotosFetch::Loaded { next_page, .. }) = self
                         .session
                         .users_state
                         .user_profile_photos
                         .get_mut(&user_id)
                 {
-                    *loading_more = false;
+                    *next_page = PhotoPage::Idle;
                 }
                 sent.map(Some)
             }
             PhotoOwner::Chat(chat_id) => {
                 let Some(ChatPhotosFetch::Loaded {
                     next_from_message_id,
-                    loading_more,
+                    next_page,
                     ..
-                }) = self
+                }) = self.session.users_state.chat_photo_history.get(&chat_id.0)
+                else {
+                    return Ok(None);
+                };
+                if next_page.asking() || next_from_message_id.0 == 0 {
+                    return Ok(None);
+                }
+                let from = *next_from_message_id;
+                let extra = self
+                    .session
+                    .request(RequestPurpose::GetChatPhotoHistory, Some(chat_id));
+                if let Some(ChatPhotosFetch::Loaded { next_page, .. }) = self
                     .session
                     .users_state
                     .chat_photo_history
                     .get_mut(&chat_id.0)
-                else {
-                    return Ok(None);
-                };
-                if *loading_more || next_from_message_id.0 == 0 {
-                    return Ok(None);
+                {
+                    *next_page = PhotoPage::Asking(extra);
                 }
-                let from = *next_from_message_id;
-                *loading_more = true;
-                let extra = self
-                    .session
-                    .request(RequestPurpose::GetChatPhotoHistory, Some(chat_id));
                 let sent = self.send_json_request(
                     extra,
                     &search_chat_photos(extra, chat_id, from, CHAT_PHOTOS_LIMIT),
                 );
                 if sent.is_err()
-                    && let Some(ChatPhotosFetch::Loaded { loading_more, .. }) = self
+                    && let Some(ChatPhotosFetch::Loaded { next_page, .. }) = self
                         .session
                         .users_state
                         .chat_photo_history
                         .get_mut(&chat_id.0)
                 {
-                    *loading_more = false;
+                    *next_page = PhotoPage::Idle;
                 }
                 sent.map(Some)
             }

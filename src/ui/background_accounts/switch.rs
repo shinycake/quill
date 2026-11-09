@@ -85,8 +85,7 @@ impl QuillApp {
         self.connection.status = ConnectUiStatus::Live;
         self.connection.presence.reset();
         let auth = live.driver.session.auth.clone();
-        self.connection
-            .set_note(StatusNote::silent(live_status_for(&auth)));
+        self.set_note(StatusNote::silent(live_status_for(&auth)));
         self.auth_demo.demo_state = auth;
         live.attach_call_engine(&DiscardSink);
         // The auto-switch runs on screen; its settings are the app's.

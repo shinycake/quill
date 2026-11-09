@@ -23,7 +23,7 @@ impl QuillApp {
             live.driver.save_notify_view();
         } else if let Some(demo) = self.demo_session.as_mut() {
             demo.settings.notify_view = view;
-            self.connection.set_note(StatusNote::silent(tr(
+            self.set_note(StatusNote::silent(tr(
                 keys::Q_PREFS_DEMO_NOTIFICATION_PREVIEW_SETTINGS_ARE,
             )));
         }
@@ -42,7 +42,7 @@ impl QuillApp {
             live.driver.save_notify_photo_previews();
         } else if let Some(demo) = self.demo_session.as_mut() {
             demo.settings.notify_photo_previews = on;
-            self.connection.set_note(StatusNote::silent(tr(
+            self.set_note(StatusNote::silent(tr(
                 keys::Q_PREFS_DEMO_NOTIFICATION_PREVIEW_SETTINGS_ARE,
             )));
         }

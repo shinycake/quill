@@ -307,19 +307,15 @@ impl QuillApp {
         }
         if let Some(live) = self.live.as_mut() {
             match live.driver.open_search() {
-                Ok(Some(_)) => self
-                    .connection
-                    .set_note(StatusNote::silent(tr(keys::Q_CHAT_SEARCHING_2))),
-                Ok(None) => self.connection.set_note(StatusNote::silent(tr(
+                Ok(Some(_)) => self.set_note(StatusNote::silent(tr(keys::Q_CHAT_SEARCHING_2))),
+                Ok(None) => self.set_note(StatusNote::silent(tr(
                     keys::Q_CHAT_SEARCH_CHATS_AND_MESSAGES,
                 ))),
-                Err(_) => self
-                    .connection
-                    .set_note(StatusNote::error(tr(keys::Q_CHAT_COULD_NOT_SEARCH))),
+                Err(_) => self.set_note(StatusNote::error(tr(keys::Q_CHAT_COULD_NOT_SEARCH))),
             }
         } else if let Some(session) = self.demo_session.as_mut() {
             session.open_search();
-            self.connection.set_note(StatusNote::silent(tr(
+            self.set_note(StatusNote::silent(tr(
                 keys::Q_CHAT_SEARCH_CHATS_AND_MESSAGES,
             )));
         }
@@ -344,8 +340,7 @@ impl QuillApp {
             .input
             .update(cx, |input, cx| input.set_value("", window, cx));
         window.focus(&self.focus_sidebar, cx);
-        self.connection
-            .set_note(StatusNote::silent(tr(keys::Q_CHAT_SEARCH_CLOSED)));
+        self.set_note(StatusNote::silent(tr(keys::Q_CHAT_SEARCH_CLOSED)));
         cx.notify();
     }
 
@@ -370,7 +365,7 @@ impl QuillApp {
     pub(super) fn clear_search_recents(&mut self, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
             if let Err(err) = live.driver.clear_recently_found_chats() {
-                self.connection.set_note(StatusNote::error(user_error_for(
+                self.set_note(StatusNote::error(user_error_for(
                     keys::Q_NOTES_FAILED_CLEAR_RECENTS,
                     &err,
                 )));
@@ -385,7 +380,7 @@ impl QuillApp {
     pub(super) fn remove_recent_search(&mut self, chat_id: ChatId, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
             if let Err(err) = live.driver.remove_recent_search(chat_id) {
-                self.connection.set_note(StatusNote::error(user_error_for(
+                self.set_note(StatusNote::error(user_error_for(
                     keys::Q_NOTES_FAILED_REMOVE_RECENT,
                     &err,
                 )));
@@ -400,7 +395,7 @@ impl QuillApp {
     pub(in crate::ui) fn remove_top_chat(&mut self, chat_id: ChatId, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
             if let Err(err) = live.driver.remove_top_chat(chat_id) {
-                self.connection.set_note(StatusNote::error(user_error_for(
+                self.set_note(StatusNote::error(user_error_for(
                     keys::Q_NOTES_FAILED_REMOVE_CONTACT,
                     &err,
                 )));
@@ -415,7 +410,7 @@ impl QuillApp {
     pub(crate) fn set_top_chats_disabled(&mut self, disabled: bool, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
             if let Err(err) = live.driver.set_top_chats_disabled(disabled) {
-                self.connection.set_note(StatusNote::error(user_error_for(
+                self.set_note(StatusNote::error(user_error_for(
                     keys::Q_NOTES_FAILED_FREQUENT_CONTACTS,
                     &err,
                 )));
@@ -484,12 +479,8 @@ impl QuillApp {
             .update(cx, |input, cx| input.set_value(&query, window, cx));
         if let Some(live) = self.live.as_mut() {
             match live.driver.search_hashtag(tag, scope) {
-                Ok(_) => self
-                    .connection
-                    .set_note(StatusNote::silent(tr(keys::Q_CHAT_SEARCHING_2))),
-                Err(_) => self
-                    .connection
-                    .set_note(StatusNote::error(tr(keys::Q_CHAT_COULD_NOT_SEARCH))),
+                Ok(_) => self.set_note(StatusNote::silent(tr(keys::Q_CHAT_SEARCHING_2))),
+                Err(_) => self.set_note(StatusNote::error(tr(keys::Q_CHAT_COULD_NOT_SEARCH))),
             }
         } else if let Some(session) = self.demo_session.as_mut() {
             session.search.search.filters.scope = scope;
@@ -525,7 +516,7 @@ impl QuillApp {
     ) {
         if let Some(live) = self.live.as_mut() {
             if let Err(err) = live.driver.set_search_community_filter(community_id) {
-                self.connection.set_note(StatusNote::error(user_error_for(
+                self.set_note(StatusNote::error(user_error_for(
                     keys::Q_NOTES_FAILED_COMMUNITY_FILTER,
                     &err,
                 )));
@@ -546,29 +537,24 @@ impl QuillApp {
         let opened = if let Some(live) = self.live.as_mut() {
             match live.driver.open_chat_search() {
                 Ok(true) => {
-                    self.connection
-                        .set_note(StatusNote::silent(tr(keys::Q_CHAT_SEARCH_IN_CHAT)));
+                    self.set_note(StatusNote::silent(tr(keys::Q_CHAT_SEARCH_IN_CHAT)));
                     true
                 }
                 Ok(false) => {
-                    self.connection
-                        .set_note(StatusNote::silent(tr(keys::Q_CHAT_SELECT_A_CHAT_TO_SEARCH)));
+                    self.set_note(StatusNote::silent(tr(keys::Q_CHAT_SELECT_A_CHAT_TO_SEARCH)));
                     false
                 }
                 Err(_) => {
-                    self.connection
-                        .set_note(StatusNote::error(tr(keys::Q_CHAT_COULD_NOT_SEARCH_IN_CHAT)));
+                    self.set_note(StatusNote::error(tr(keys::Q_CHAT_COULD_NOT_SEARCH_IN_CHAT)));
                     false
                 }
             }
         } else if let Some(session) = self.demo_session.as_mut() {
             if session.open_chat_search() {
-                self.connection
-                    .set_note(StatusNote::silent(tr(keys::Q_CHAT_SEARCH_IN_CHAT)));
+                self.set_note(StatusNote::silent(tr(keys::Q_CHAT_SEARCH_IN_CHAT)));
                 true
             } else {
-                self.connection
-                    .set_note(StatusNote::silent(tr(keys::Q_CHAT_SELECT_A_CHAT_TO_SEARCH)));
+                self.set_note(StatusNote::silent(tr(keys::Q_CHAT_SELECT_A_CHAT_TO_SEARCH)));
                 false
             }
         } else {
@@ -598,8 +584,7 @@ impl QuillApp {
             .update(cx, |input, cx| input.set_value("", window, cx));
         self.composer
             .update(cx, |input, cx| input.focus(window, cx));
-        self.connection
-            .set_note(StatusNote::silent(tr(keys::Q_CHAT_IN_CHAT_SEARCH_CLOSED)));
+        self.set_note(StatusNote::silent(tr(keys::Q_CHAT_IN_CHAT_SEARCH_CLOSED)));
         cx.notify();
     }
 
@@ -620,20 +605,19 @@ impl QuillApp {
         }
         if let Some(live) = self.live.as_mut() {
             match live.driver.set_chat_search_query(query) {
-                Ok(ChatSearchQueryOutcome::Sent(_)) => self
-                    .connection
-                    .set_note(StatusNote::silent(tr(keys::Q_CHAT_SEARCHING_IN_CHAT))),
+                Ok(ChatSearchQueryOutcome::Sent(_)) => {
+                    self.set_note(StatusNote::silent(tr(keys::Q_CHAT_SEARCHING_IN_CHAT)))
+                }
                 Ok(ChatSearchQueryOutcome::Debounced { token }) => {
                     self.schedule_chat_search_commit(token, cx);
                 }
                 Ok(ChatSearchQueryOutcome::Unchanged) if query.trim().is_empty() => {
-                    self.connection
-                        .set_note(StatusNote::silent(tr(keys::Q_CHAT_SEARCH_IN_CHAT)));
+                    self.set_note(StatusNote::silent(tr(keys::Q_CHAT_SEARCH_IN_CHAT)));
                 }
                 Ok(ChatSearchQueryOutcome::Unchanged) => {}
-                Err(_) => self
-                    .connection
-                    .set_note(StatusNote::error(tr(keys::Q_CHAT_COULD_NOT_SEARCH_IN_CHAT))),
+                Err(_) => {
+                    self.set_note(StatusNote::error(tr(keys::Q_CHAT_COULD_NOT_SEARCH_IN_CHAT)))
+                }
             }
         } else if let Some(session) = self.demo_session.as_mut() {
             let trimmed = query.trim();
@@ -655,12 +639,11 @@ impl QuillApp {
             this.update(cx, |this, cx| {
                 if let Some(live) = this.live.as_mut() {
                     match live.driver.commit_debounced_chat_search(token) {
-                        Ok(Some(_)) => this
-                            .connection
-                            .set_note(StatusNote::silent(tr(keys::Q_CHAT_SEARCHING_IN_CHAT))),
+                        Ok(Some(_)) => {
+                            this.set_note(StatusNote::silent(tr(keys::Q_CHAT_SEARCHING_IN_CHAT)))
+                        }
                         Ok(None) => {}
                         Err(_) => this
-                            .connection
                             .set_note(StatusNote::error(tr(keys::Q_CHAT_COULD_NOT_SEARCH_IN_CHAT))),
                     }
                 }
@@ -673,12 +656,13 @@ impl QuillApp {
 
     pub(super) fn jump_selected_chat_search_hit(&mut self, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
-            self.screen
-                .connection
-                .set_note(match live.driver.jump_selected_chat_search_hit() {
+            self.screen.connection.set_note_for(
+                &self.screen.windows,
+                match live.driver.jump_selected_chat_search_hit() {
                     Ok(_) => chat_search_jump_note(&live.driver.session),
                     Err(_) => StatusNote::error(tr(keys::Q_CHAT_COULD_NOT_JUMP_TO_MESSAGE)),
-                });
+                },
+            );
         } else if let Some(session) = self.demo_session.as_mut() {
             if let Some(id) = session
                 .search
@@ -690,7 +674,7 @@ impl QuillApp {
             }
             self.screen
                 .connection
-                .set_note(chat_search_jump_note(session));
+                .set_note_for(&self.screen.windows, chat_search_jump_note(session));
         }
         cx.notify();
     }
@@ -701,7 +685,8 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         if let Some(live) = self.live.as_mut() {
-            self.screen.connection.set_note(
+            self.screen.connection.set_note_for(
+                &self.screen.windows,
                 match live.driver.jump_to_chat_search_message(message_id) {
                     Ok(_) => chat_search_jump_note(&live.driver.session),
                     Err(_) => StatusNote::error(tr(keys::Q_CHAT_COULD_NOT_JUMP_TO_MESSAGE)),
@@ -711,45 +696,47 @@ impl QuillApp {
             let _ = session.begin_chat_search_jump(message_id);
             self.screen
                 .connection
-                .set_note(chat_search_jump_note(session));
+                .set_note_for(&self.screen.windows, chat_search_jump_note(session));
         }
         cx.notify();
     }
 
     pub(super) fn chat_search_newer(&mut self, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
-            self.screen
-                .connection
-                .set_note(match live.driver.chat_search_newer() {
+            self.screen.connection.set_note_for(
+                &self.screen.windows,
+                match live.driver.chat_search_newer() {
                     Ok(_) => chat_search_jump_note(&live.driver.session),
                     Err(_) => StatusNote::error(tr(keys::Q_CHAT_COULD_NOT_JUMP_TO_MESSAGE)),
-                });
+                },
+            );
         } else if let Some(session) = self.demo_session.as_mut() {
             if let Some(id) = session.search.chat_search.select_newer() {
                 let _ = session.begin_chat_search_jump(id);
             }
             self.screen
                 .connection
-                .set_note(chat_search_jump_note(session));
+                .set_note_for(&self.screen.windows, chat_search_jump_note(session));
         }
         cx.notify();
     }
 
     pub(super) fn chat_search_older(&mut self, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
-            self.screen
-                .connection
-                .set_note(match live.driver.chat_search_older() {
+            self.screen.connection.set_note_for(
+                &self.screen.windows,
+                match live.driver.chat_search_older() {
                     Ok(_) => chat_search_jump_note(&live.driver.session),
                     Err(_) => StatusNote::error(tr(keys::Q_CHAT_COULD_NOT_JUMP_TO_MESSAGE)),
-                });
+                },
+            );
         } else if let Some(session) = self.demo_session.as_mut() {
             if let Some(id) = session.search.chat_search.select_older() {
                 let _ = session.begin_chat_search_jump(id);
             }
             self.screen
                 .connection
-                .set_note(chat_search_jump_note(session));
+                .set_note_for(&self.screen.windows, chat_search_jump_note(session));
         }
         cx.notify();
     }
@@ -762,8 +749,7 @@ impl QuillApp {
     ) {
         if let Some(live) = self.live.as_mut() {
             if live.driver.set_chat_search_sender(sender).is_err() {
-                self.connection
-                    .set_note(StatusNote::error(tr(keys::Q_CHAT_COULD_NOT_SEARCH_IN_CHAT)));
+                self.set_note(StatusNote::error(tr(keys::Q_CHAT_COULD_NOT_SEARCH_IN_CHAT)));
             }
         } else if let Some(session) = self.demo_session.as_mut() {
             session.search.chat_search.sender = sender;
@@ -787,8 +773,7 @@ impl QuillApp {
     ) {
         if let Some(live) = self.live.as_mut() {
             if live.driver.set_chat_search_media(media).is_err() {
-                self.connection
-                    .set_note(StatusNote::error(tr(keys::Q_CHAT_COULD_NOT_SEARCH_IN_CHAT)));
+                self.set_note(StatusNote::error(tr(keys::Q_CHAT_COULD_NOT_SEARCH_IN_CHAT)));
             }
         } else if let Some(session) = self.demo_session.as_mut() {
             session.search.chat_search.media = media;
@@ -812,7 +797,7 @@ impl QuillApp {
             }
         } else if let Some(live) = self.live.as_mut() {
             if live.driver.open_chat_search_from_picker().is_err() {
-                self.connection.set_note(StatusNote::info(tr(
+                self.set_note(StatusNote::info(tr(
                     keys::Q_CHAT_MEMBERS_ARE_NOT_AVAILABLE_HERE,
                 )));
             }
@@ -836,12 +821,10 @@ impl QuillApp {
     ) {
         if let Some(live) = self.live.as_mut() {
             if let Err(err) = live.driver.set_search_filters(filters) {
-                self.screen
-                    .connection
-                    .set_note(StatusNote::error(user_error_for(
-                        keys::Q_NOTES_FAILED_SEARCH_FILTERS,
-                        &err,
-                    )));
+                self.screen.connection.set_note_for(
+                    &self.screen.windows,
+                    StatusNote::error(user_error_for(keys::Q_NOTES_FAILED_SEARCH_FILTERS, &err)),
+                );
             }
             if filters.scope == SearchScope::Apps {
                 let _ = live.driver.fetch_grossing_web_app_bots();

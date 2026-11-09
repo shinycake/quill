@@ -142,7 +142,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .passkeys
             .icon_ids()
             .filter(|id| {
-                !emoji.status_resolution_attempted.contains(id)
+                !emoji.custom_lookups.attempted(*id)
                     && !emoji
                         .custom_emoji_stickers
                         .iter()

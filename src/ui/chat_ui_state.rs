@@ -49,6 +49,22 @@ impl Default for ChatVisit {
     }
 }
 
+/// The reply bar: the message the composer replies to, and its quote
+/// picker. One value, so the picker goes with the reply however the reply
+/// goes (sent, cancelled, replaced by a reply to another message).
+#[derive(Debug, Clone)]
+struct ReplyBar {
+    reply: ComposerReplyTo,
+    quote_picker: QuotePicker,
+}
+
+/// "Update Quote" opened the picker for the part of the message to quote.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum QuotePicker {
+    Closed,
+    Open,
+}
+
 /// One view's state for the chat it shows.
 #[derive(Default)]
 pub(crate) struct ChatUi {
@@ -90,6 +106,9 @@ pub(crate) struct ChatUi {
     /// `progress_inline_mode` sends it when updates land, in whichever
     /// window this value is in.
     pub(super) inline_query_waiting: bool,
+    /// The rich draft's "discard" or "Remove Formatting" box: its buttons
+    /// act on this chat's draft.
+    pub(super) rich_draft_box: super::rich_draft::RichDraftBox,
     /// Delete confirm (tdesktop `DeleteMessagesBox` / Unigram popup).
     pub(super) pending_delete: Option<DeleteConfirm>,
     /// B4: pending "Stop poll" confirm (`stopPoll`, schema 1.8.67 line
@@ -129,7 +148,7 @@ pub(crate) struct ChatUi {
     /// Same-chat reply draft (tdesktop `FieldHeader::replyToMessage`).
     /// Private on purpose: a sender must take the reply through
     /// `QuillApp::reply_for_send` so a reply to a deleted message is dropped.
-    pending_reply: Option<ComposerReplyTo>,
+    pending_reply: Option<ReplyBar>,
     /// Editing an own message (tdesktop `FieldHeader::editMessage`), with
     /// the normal draft stashed beside it. `None` is plain composing. Read
     /// and change it only through the methods below so every way out of
@@ -169,19 +188,51 @@ impl ChatUi {
     /// The reply the bar shows. Display and bookkeeping only: anything that
     /// sends reads `QuillApp::reply_for_send`, which drops a deleted target.
     pub(super) fn reply(&self) -> Option<&ComposerReplyTo> {
-        self.pending_reply.as_ref()
+        self.pending_reply.as_ref().map(|bar| &bar.reply)
     }
 
     pub(super) fn has_reply(&self) -> bool {
         self.pending_reply.is_some()
     }
 
+    /// A new quote for the same message keeps its picker open; a reply to
+    /// another message, or none, closes it.
     pub(super) fn set_reply(&mut self, reply: Option<ComposerReplyTo>) {
-        self.pending_reply = reply;
+        let picker = |next: &ComposerReplyTo| match &self.pending_reply {
+            Some(bar)
+                if (bar.reply.chat_id, bar.reply.message_id) == (next.chat_id, next.message_id) =>
+            {
+                bar.quote_picker
+            }
+            _ => QuotePicker::Closed,
+        };
+        self.pending_reply = reply.map(|reply| ReplyBar {
+            quote_picker: picker(&reply),
+            reply,
+        });
     }
 
     pub(super) fn take_reply(&mut self) -> Option<ComposerReplyTo> {
-        self.pending_reply.take()
+        self.pending_reply.take().map(|bar| bar.reply)
+    }
+
+    /// "Update Quote": the picker opens for the reply shown.
+    pub(super) fn open_quote_picker(&mut self) {
+        if let Some(bar) = self.pending_reply.as_mut() {
+            bar.quote_picker = QuotePicker::Open;
+        }
+    }
+
+    pub(super) fn close_quote_picker(&mut self) {
+        if let Some(bar) = self.pending_reply.as_mut() {
+            bar.quote_picker = QuotePicker::Closed;
+        }
+    }
+
+    pub(super) fn quote_picker_open(&self) -> bool {
+        self.pending_reply
+            .as_ref()
+            .is_some_and(|bar| bar.quote_picker == QuotePicker::Open)
     }
 
     pub(super) fn is_editing(&self) -> bool {
@@ -282,7 +333,7 @@ impl QuillApp {
         next.pending_reply = old
             .pending_reply
             .take()
-            .filter(|reply| reply.belongs_to(chat));
+            .filter(|bar| bar.reply.belongs_to(chat));
         next.edit_mode = old
             .edit_mode
             .take()
@@ -305,6 +356,17 @@ impl QuillApp {
         if left.is_some() && self.notify.ttl_picker == left {
             self.notify.ttl_picker = None;
         }
+    }
+
+    /// The `ChatUi` in place was made for the chat and topic the view
+    /// shows now. A click can land between a chat change and the frame
+    /// that replaces the value (`sync_chat_ui`): a box of the old chat
+    /// must not act on the new one then.
+    pub(super) fn chat_ui_is_current(&self) -> bool {
+        let Some(chat) = self.open_chat_id() else {
+            return false;
+        };
+        self.chat_ui.chat == Some(chat) && self.chat_ui.topic == self.open_draft_topic(chat)
     }
 
     /// The view in place shows no chat any more (`leave_open_chat`).

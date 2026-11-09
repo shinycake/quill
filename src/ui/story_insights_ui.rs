@@ -56,12 +56,12 @@ impl QuillApp {
                 .retry_story_statistics(*chat_id, story_id, is_dark)
                 .is_err()
             {
-                self.connection.set_note(StatusNote::error(tr(
+                self.set_note(StatusNote::error(tr(
                     keys::Q_MEDIA_COULD_NOT_LOAD_STORY_STATISTICS,
                 )));
             }
         } else if self.demo_session.is_some() {
-            self.connection.set_note(StatusNote::silent(tr(
+            self.set_note(StatusNote::silent(tr(
                 keys::Q_MEDIA_DEMO_STORY_STATISTICS_RUN_WITH,
             )));
         }
@@ -149,7 +149,7 @@ impl QuillApp {
                 .fetch_story_public_forwards(item.chat_id, item.story_id, &offset)
                 .is_err()
         {
-            self.connection.set_note(StatusNote::error(tr(
+            self.set_note(StatusNote::error(tr(
                 keys::Q_MEDIA_COULD_NOT_LOAD_PUBLIC_SHARES,
             )));
         }
@@ -417,12 +417,12 @@ impl QuillApp {
     ) {
         if let Some(live) = self.live.as_mut() {
             if live.driver.search_public_stories(query).is_err() {
-                self.connection.set_note(StatusNote::error(tr(
+                self.set_note(StatusNote::error(tr(
                     keys::Q_MEDIA_COULD_NOT_SEARCH_STORIES,
                 )));
             }
         } else if self.demo_session.is_some() {
-            self.connection.set_note(StatusNote::silent(tr(
+            self.set_note(StatusNote::silent(tr(
                 keys::Q_MEDIA_DEMO_PUBLIC_STORY_SEARCH_RUNS,
             )));
         }

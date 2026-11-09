@@ -41,7 +41,7 @@ impl QuillApp {
         let mut email = self.screen.auth_ui.email_input.read(cx).value().to_string();
         let result = live.driver.submit_email(&email);
         email.zeroize();
-        self.screen.connection.set_note(match result {
+        self.set_note(match result {
             Ok(_) => {
                 self.screen
                     .auth_ui
@@ -81,11 +81,10 @@ impl QuillApp {
                 self.auth_ui.signin.code_clock = None;
                 self.auth_ui.signin.error_clock = None;
                 self.auth_ui.signin.banned_dismissed = false;
-                self.connection
-                    .set_note(StatusNote::silent(tr(keys::Q_NOTES_PHONE_SUBMITTED)));
+                self.set_note(StatusNote::silent(tr(keys::Q_NOTES_PHONE_SUBMITTED)));
             }
             Err(_) => {
-                self.connection.set_note(StatusNote::error(tr(
+                self.set_note(StatusNote::error(tr(
                     keys::Q_NOTES_COULDNT_SUBMIT_THE_PHONE_NUMBER,
                 )));
             }
@@ -112,12 +111,10 @@ impl QuillApp {
                 self.auth_ui
                     .code_input
                     .update(cx, |input, cx| input.set_value("", window, cx));
-                self.connection
-                    .set_note(StatusNote::silent(tr(keys::Q_NOTES_CODE_SUBMITTED)));
+                self.set_note(StatusNote::silent(tr(keys::Q_NOTES_CODE_SUBMITTED)));
             }
             Err(_) => {
-                self.connection
-                    .set_note(StatusNote::error(tr(keys::Q_NOTES_COULDNT_SUBMIT_THE_CODE)));
+                self.set_note(StatusNote::error(tr(keys::Q_NOTES_COULDNT_SUBMIT_THE_CODE)));
             }
         }
         cx.notify();
@@ -147,11 +144,10 @@ impl QuillApp {
                 self.auth_ui
                     .password_input
                     .update(cx, |input, cx| input.set_value("", window, cx));
-                self.connection
-                    .set_note(StatusNote::silent(tr(keys::Q_NOTES_PASSWORD_SUBMITTED)));
+                self.set_note(StatusNote::silent(tr(keys::Q_NOTES_PASSWORD_SUBMITTED)));
             }
             Err(_) => {
-                self.connection.set_note(StatusNote::error(tr(
+                self.set_note(StatusNote::error(tr(
                     keys::Q_NOTES_COULDNT_SUBMIT_THE_PASSWORD,
                 )));
             }
@@ -175,12 +171,10 @@ impl QuillApp {
         match live.driver.resend_code() {
             Ok(_) => {
                 self.auth_ui.signin.code_clock = None;
-                self.connection
-                    .set_note(StatusNote::silent(tr(keys::Q_NOTES_CODE_RESENT)));
+                self.set_note(StatusNote::silent(tr(keys::Q_NOTES_CODE_RESENT)));
             }
             Err(_) => {
-                self.connection
-                    .set_note(StatusNote::error(tr(keys::Q_NOTES_COULDNT_RESEND_THE_CODE)));
+                self.set_note(StatusNote::error(tr(keys::Q_NOTES_COULDNT_RESEND_THE_CODE)));
             }
         }
         cx.notify();
@@ -194,12 +188,10 @@ impl QuillApp {
         };
         match live.driver.request_qr_login() {
             Ok(_) => {
-                self.connection
-                    .set_note(StatusNote::silent(tr(keys::Q_NOTES_QR_LOGIN_REQUESTED)));
+                self.set_note(StatusNote::silent(tr(keys::Q_NOTES_QR_LOGIN_REQUESTED)));
             }
             Err(_) => {
-                self.connection
-                    .set_note(StatusNote::error(tr(keys::Q_NOTES_COULDNT_START_QR_LOGIN)));
+                self.set_note(StatusNote::error(tr(keys::Q_NOTES_COULDNT_START_QR_LOGIN)));
             }
         }
         cx.notify();

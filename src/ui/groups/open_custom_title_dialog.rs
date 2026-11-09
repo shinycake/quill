@@ -48,7 +48,7 @@ impl QuillApp {
                 if too_long || has_emoji {
                     // box-host: put back after a failed submit; it stays where it shows
                     self.admin.username_dialog = Some(dialog);
-                    self.connection.set_note(if too_long {
+                    self.set_note(if too_long {
                         StatusNote::silent(tr(keys::Q_PEOPLE_CUSTOM_TITLE_MUST_BE_AT))
                     } else {
                         StatusNote::error(tr(keys::Q_PEOPLE_CUSTOM_TITLE_CANNOT_CONTAIN_EMOJI))
@@ -85,7 +85,7 @@ impl QuillApp {
                 if value.is_empty() {
                     // box-host: put back after a failed submit; it stays where it shows
                     self.admin.username_dialog = Some(dialog);
-                    self.connection.set_note(StatusNote::error(tr(
+                    self.set_note(StatusNote::error(tr(
                         keys::Q_PEOPLE_COMMUNITY_NAME_CANNOT_BE_EMPTY,
                     )));
                     cx.notify();
@@ -108,7 +108,7 @@ impl QuillApp {
                 }
             }
         };
-        self.connection.set_note(StatusNote::info(note));
+        self.set_note(StatusNote::info(note));
         cx.notify();
     }
 
@@ -364,7 +364,7 @@ impl QuillApp {
                 tr(keys::Q_PEOPLE_CHAT_ACTIONS_NEED_A_LIVE).to_string()
             }
         };
-        self.connection.set_note(StatusNote::info(note));
+        self.set_note(StatusNote::info(note));
         cx.notify();
     }
 

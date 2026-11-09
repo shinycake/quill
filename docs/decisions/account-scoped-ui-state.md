@@ -2794,6 +2794,228 @@ seam). The other twenty were fixed.
   full info arrives. Nothing is written from it now, but the screen is not
   rebuilt when the info lands.
 
+### Phase 15 (area A)
+
+Round 15 of the review, area A (core: state, connect, telegram, agent,
+`account_data`, `emoji`). All four findings were fixed, and the four
+round-14 changes that got past `check-implicit-state.py` became one value
+each.
+
+**A rate limit no longer gives custom emoji up (1).** Round 14 sent
+`getCustomEmojiStickers` through the flood retry. A wait over 60 s, or a
+fourth 429, still reached the stickers error arm, which counted a failure
+for every id. Nothing backed off, so three passes a few seconds apart gave
+the ids up for the session. A rate limit is now no failure: the error arm
+frees the ids without counting (`custom_emoji_lookup_rate_limited`), and
+`absorb_flood` sets `ConnectDriver::custom_emoji_hold` to the end of the
+wait. `custom_emoji_lookup_idle` is false while it holds, `request_tick`
+lets it go when it is due, and `next_deadline` wakes the poll loop for it.
+The hold is for the method, not the ids: TDLib limits the call, so any
+batch would hit it.
+
+**A user's photo gallery follows their photo (2).** `updateUser` with a
+different `profile_photo.id` (a new photo, or none) and `updateUserFullInfo`
+with a different `photo_id` drop `user_profile_photos[user]`
+(`Session::forget_user_photos`, next to `forget_chat_photos`). The viewer
+fetches the gallery again the next time it opens. That covers a contact's
+change and your own change from another device; the own Set/Delete OK
+uses the same helper. A fetch that was out when the photo changed could
+still land the old list, so each stage of `ProfilePhotosFetch` and
+`ChatPhotosFetch` now names its request: `Loading(RequestId)` for the
+first page, and `next_page: PhotoPage` (`Idle` or `Asking(RequestId)`)
+in place of the `loading_more` bool. An answer or error lands only when
+it is the request the list waits for, so a dropped fetch's first page or
+later page never shows, and a late later page can no longer be taken as
+the first page of a new list (the round-15 "own profile photo pages"
+note). Tests: `a_user_photo_change_while_a_page_is_out_drops_its_answer`
+(`state/tests/profile_panels.rs`) and
+`a_chat_photo_change_while_a_page_is_out_drops_its_answer`
+(`state/tests/photo_gallery.rs`).
+
+**A grant change stops waiting writes (3).** The per-call thread locals
+(the switch's generation, the connection, the lock count) are one
+`CallStart`, which also records `grants::generation()`. `still_allowed`
+refuses with `GRANTS_CHANGED_MESSAGE` ("nothing was sent or changed") once
+the grants moved since the call began. It refuses rather than re-resolving,
+since it has no target: any grant change while a write waits is rare, and
+the agent retries against the new grants. `common::confirm` now asks
+`still_allowed` after the user's Allow too, like `td_call`'s prompt.
+
+**`mark_read` is one queue turn (4).** `viewMessages` and
+`toggleChatIsMarkedAsUnread` go out in one turn (`common::change_steps`),
+so the turn's check is the only point where the tool can answer "nothing
+was sent or changed". A lock between the two requests now gives
+`LOCKED_WHILE_RUNNING_MESSAGE` ("may have been done").
+
+**One value each.**
+
+- `bots.last_callback_answer` is an `Option<CallbackAnswer>` holding the
+  answer and the chat of the press. `last_callback_chat` is gone.
+- `chats_state.background_search` is a `BackgroundSearch` enum (`Idle`,
+  `Waiting(RequestId)`, `Found(Background)`). `searched_background` is
+  gone. A failed search goes back to `Idle` and shows `background_error`.
+- `EmojiPanel.status_resolution_attempted` is gone. Each id's stage is an
+  `IdLookup` in `CustomEmojiLookups` (`Asking`, `Failed`, `GaveUp`,
+  `Answered`), and callers ask `custom_lookups.attempted(id)`.
+- `LOCKS_AT_START` is part of `CallStart`, held in an `Option` that a
+  `CallScope` guard clears when the call ends. Off a call, `still_allowed`
+  and `locked_since_call_began` refuse.
+
+**Guards.** Check 5 of `scripts/lock_surfaces.py` now also needs
+`still_allowed()` after every `prompts::wait(` in a write tool
+(`src/agent/tools/write/`, `td_call.rs`), with unit tests in
+`scripts/test_lock_surfaces.py`.
+
+**Tests.** `a_long_custom_emoji_rate_limit_holds_lookups_instead_of_giving_up`
+and `custom_emoji_rate_limit_retries_that_run_out_hold_lookups`
+(`connect/tests/flood_retry.rs`), `a_changed_user_photo_drops_their_gallery`
+(`state/tests/profile_panels.rs`), `a_grant_change_while_a_write_waits_stops_it`
+(`agent/tools`), and `mark_read_is_one_turn_of_up_to_two_requests`
+(`agent/tools/write/manage.rs`). The existing callback, background and
+custom emoji tests moved to the new types. None of them waits on time.
+
+**src/ui lines touched.** Only what the type changes forced:
+`ui/notifications/poll_drains.rs` (the callback answer drain) and
+`ui/wallpaper_preview.rs` (`previewed_background` and
+`close_wallpaper_preview`).
+
+### Phase 15 (area B: the Asker decides toasts too, and boxes go with their chat)
+
+Round 15 of the review, area B, on `claude/sm-review15-b`. The numbers are
+the review's ranked findings; the three "dodges" are round-14 state the
+implicit-state check did not catch.
+
+**Toasts and the Asker (finding 7, first dodge).** A toast's window was a
+copy: `ConnectionUi::note_window`, written beside `ChatWindows::last_press`
+in `note_window_press` and cleared by hand on window close. Boxes of the
+same flow went to the Asker (`asking_window`), toasts to the last press,
+so a bot's answer to a button pressed in a chat window toasted in the main
+window once the user had clicked there. The copy is gone. `set_note` is a
+`QuillApp` method that takes the window from the Asker, as `open_box`
+does (`asking_window_or_last_press`): the window of the press, of the
+frame, of the deferred work, or the one a flow carried under
+`as_asked_by`; with nobody asking, the last press. The 1,300 note sites
+call it. Where the client is borrowed, they call
+`connection.set_note_for(&windows, note)`, which reads the same Asker
+(`ChatWindows::asking_window_or_last_press`). `set_note_in` (a window
+named by hand) stays for the seam and the forward result, which names the
+window it puts in place. `report_failed_open` keeps the asking window
+across the OS's answer and sets the note under `as_asked_by`.
+
+*Designs considered.* (a) Keep `note_window` and write it whenever the
+Asker changes (`with_asker`, the scope swaps): still two fields kept in
+step by hand. Rejected. (b) Give each toast a "resolve later" host and
+place it at the end of the update: the Asker can change several times in
+one update, so the place would be wrong. Rejected. (c, chosen) The note's
+window is read from the Asker when the note is set, in one function.
+
+*Guard.* `scripts/note_hosts.py`, run by `check-window-scope.py`, fails
+on `set_note_in(` or `toasts.push_in(` outside `connection_state.rs`, and
+on a read of `windows.last_press` outside `src/ui/chat_window/`, unless a
+`// note-host: <why>` marker says why (two sites: the forward result and
+the sticker fly's cell). Offline tests: `scripts/test_note_hosts.py` (CI
+step "window scope check tests"). `lock-surfaces.txt` lists `poll_live ->
+set_note` as runs-locked, as the old `connection.set_note` was.
+
+**Box hosts (second dodge).** `dialog_hosts::Host { window, shown: bool }`
+is `enum Host { Asked(window), Shown(window) }`.
+
+**What was built, by finding.**
+
+1. *The rich draft's boxes acted on the chat shown now.* "Discard" and
+   "Remove Formatting" are one `RichDraftBox` (`Closed`, `Discard`,
+   `PremiumChoice(plain)`) in `ChatUi` (third dodge: the
+   `premium_choice: Option<String>` flag and `discard_confirm` are gone
+   from the per-window `RichDraftUi`). A chat or topic change replaces
+   `ChatUi`, so the box closes. A click that lands between the chat
+   change and that frame does nothing: both buttons ask
+   `chat_ui_is_current()` first.
+2. *The AI compose box and the apply-in-place shortcut advanced only on
+   main-window frames.* `ai_compose_window_upkeep` is a step of
+   `per_window_upkeep`. In the box's own window's frame it closes the box
+   when that window shows another chat, takes the box's answer, the style
+   editor's answer, the style refresh and the saved-style pick. In the
+   asking window's frame it takes the shortcut's answer and rewrites that
+   composer in place, with no defer. A box or a request whose window
+   closed is dropped in any frame. The button's blink, the style link's
+   preview and notices, and the emoji files stay in the main upkeep.
+3. *AI error toasts showed in the main window.* They follow from 2: each
+   push uses the `Window` of the frame that took the answer.
+4. *A prep that ended through the fallback left the sent caption on
+   screen.* When the window Send was tapped in is gone, the fallback asks
+   `window_where` for a window that shows the slot now (the chat reopened
+   in a new window, or the account back on screen in the main window).
+   It finishes there with that `Window`, so the composer, reply and
+   options are cleared as they would have been. With no such window it
+   clears the stored draft, as before.
+5. *The app-wide pending link outlived its account.* The link and its
+   origin are one `QueuedLink { link, account, window, by_agent }`
+   (`LinkUi::agent_pending_link` and `window_pending_link` are gone). A
+   link from outside Quill (`QueuedLink::outside`: the launch argument,
+   the OS through `queue_outside_link`) has no account, and whichever
+   account is on screen takes it. A link clicked in an account is followed
+   only by that account (`for_screen`) and is dropped once another account
+   is on screen. So a t.me/c post link or a bot start link of account A
+   never resolves on B, and an agent's link is still the agent's.
+6. *The quote picker came back after a normal send.* The picker is part of
+   the reply bar: `ChatUi`'s reply is a `ReplyBar { reply, quote_picker }`.
+   Every way a reply goes (a send's `set_reply(None)`, Escape, a reply to
+   another message) takes the picker with it; a new quote for the same
+   message keeps it open. `ShareUi::reply_quote_for` is gone.
+7. *Toasts ignored the Asker.* Above.
+8. *Re-entering the GIF tab dropped the emoji section.* Each window keeps
+   what its tab asks for: `PickerUi::gif_wanted: GifWanted` (`Saved` or
+   `Search(query)`; trending is the empty query). A footer emoji empties
+   the field but stays the window's section. Entering the tab asks for the
+   window's own section again when the session's one list holds another.
+   With two windows' tabs open, the window of the last press asks for its
+   own (`gif_tab_upkeep`, per window), and the other window's tab shows
+   none of those GIFs until a press there. A request that cannot be sent
+   leaves the window on what the list holds, so nothing asks every frame.
+9. *A chat window's link-preview chip never loaded.* The session keeps a
+   preview per URL (`ComposerLinkPreviews`, the last eight asked), and
+   `maybe_prefetch_link_preview` runs in every window's upkeep for that
+   window's composer. A composer with no URL clears nothing: each chip
+   reads its own URL's preview.
+
+**Tests.** `rich_draft_tests.rs` (`a_rich_draft_box_goes_with_its_chat`),
+`ai_compose/dialog_tests.rs` (a chat window's box takes its answer and
+toasts with no main-window frame), `composer/bars_tests.rs` (a text send
+closes the picker), `chat_window/tests.rs` (a note toasts in the window
+that asked, in the window's own frame, and at the last press when nobody
+asked), `chat_window/asker_tests.rs` (queued links' origin, each window's
+GIF section, `window_where`), `deep_links.rs` (`QueuedLink::for_screen`)
+and `connect/tests/message_ops` (previews by URL).
+
+**Not done, or not tested.**
+
+- The prep fallback (4) needs a live client to send; only `window_where`
+  is tested. The account round trip was not run live.
+- The style notices (`ai_style_notice_upkeep`) still run in the main
+  frame.
+
+**Follow-up (the two leftovers above, fixed).**
+
+- *A second window's GIF tab showed nothing until a press there.* The
+  session still pages one search, but now keeps the searches answered
+  lately by query (`GifPanel::searches_kept`, the last eight). A window
+  shows what it wants (`QuillApp::gif_shown`): the live list when it
+  holds the window's section, the saved GIFs, or its search kept from
+  before. A window that has none of these asks once, on its first frame
+  with the tab open (`PickerUi::gif_asked`, an enum), after any answer on
+  its way, so it never cancels another window's. The window in use
+  takes the list back for paging only when nothing is loading. Only the
+  live list pages or shows the spinner.
+- *The style preview ran in the main frame.* It runs in
+  `ai_compose_window_upkeep` of the window that shows its box
+  (`window_of_box(AiStylePreview)`), or the main window's once that
+  window closed. Its toasts show in that window.
+
+Tests: `asker_tests.rs` (`a_gif_tab_shows_its_section_without_a_press`,
+and `each_window_keeps_its_own_gif_section` now checks that the other
+window shows its kept section without asking), `ai_compose/dialog_tests.rs`
+(`a_chat_windows_style_preview_takes_its_answer_in_its_own_frame`).
+
 ### Phase 15 (area C)
 
 Round 15 of the review, area C (the rest of `src/ui`), on
@@ -2806,15 +3028,19 @@ go far enough. This round fixes them at their source.
   is `None` until the own user's full info has arrived. A draft is built
   only from a saved value (`new_*_draft(saved, ..)`). A screen opened
   before the info arrives shows "Loading…" (`business_waits_for_info`),
-  and `business_info_watch` builds the draft once the info lands. Nothing
-  is ever built from empty values, so the `base` comparison from round 14
+  and the frame upkeep of the window hosting the box builds the draft at
+  the first frame after the info is stored (`business_info_upkeep` in
+  `per_window_upkeep`). The screen is derived from the state, with no
+  waiting task and no poll. Nothing is ever built from empty values, so the `base` comparison from round 14
   now compares against the real saved value. Hours fall back to the
   saved zone when the zone list has not loaded.
 - **A second call under the lock (2).** The swap prompt is a kit box of
   the locked main window, so it is not drawn. The lock screen now draws a
   card for it (`swap_call_lock_card`, Decline and End & Answer) next to
   the background ring's card. Both use one card builder,
-  `lock_call_card`, and `locked_root` stacks them. The second call also
+  `lock_call_card`, and `locked_root` stacks them. The wording follows
+  tdesktop's call panel: "Incoming call" or "Incoming video call", then
+  "Name is calling you…" (`swap_call_text`, also used by the swap box). The second call also
   rings: `sync_call_sounds` loops Incoming while the swap prompt shows.
 - **An invitation alone keeps the call tick (3).** `call_tick_wanted`
   (call on screen, background ring, or conference invitation) is the one

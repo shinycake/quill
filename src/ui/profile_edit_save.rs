@@ -98,7 +98,7 @@ impl QuillApp {
         };
         let edits = dialog.initial.edits_to(&dialog.current_fields(cx));
         let Some(live) = self.live.as_mut() else {
-            self.connection.set_note(StatusNote::info(tr(
+            self.set_note(StatusNote::info(tr(
                 keys::Q_PEOPLE_DEMO_MODE_PROFILE_EDITS_NEED,
             )));
             cx.notify();
@@ -111,7 +111,7 @@ impl QuillApp {
                 ProfileEdit::SetBio(bio) => live.driver.set_bio(bio),
             };
             if let Err(err) = sent {
-                self.connection.set_note(StatusNote::error(user_error_for(
+                self.set_note(StatusNote::error(user_error_for(
                     keys::Q_NOTES_FAILED_SAVE_PROFILE,
                     &err,
                 )));
@@ -119,8 +119,7 @@ impl QuillApp {
                 return;
             }
         }
-        self.connection
-            .set_note(StatusNote::silent(tr(keys::Q_PEOPLE_NAME_UPDATE_REQUESTED)));
+        self.set_note(StatusNote::silent(tr(keys::Q_PEOPLE_NAME_UPDATE_REQUESTED)));
         self.close_edit_profile_dialog(cx);
     }
 }

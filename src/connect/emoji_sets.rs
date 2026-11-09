@@ -153,16 +153,17 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.lookup_custom_emoji(&[custom_emoji_id])
     }
 
-    /// No `getCustomEmojiStickers` is out, so a resolve pass may send one.
-    /// A lookup the stale-request sweep dropped unanswered counts as failed
-    /// first, so its ids are asked for again.
+    /// No `getCustomEmojiStickers` is out and no rate limit holds them, so
+    /// a resolve pass may send one. A lookup the stale-request sweep dropped
+    /// unanswered counts as failed first, so its ids are asked for again.
     pub(crate) fn custom_emoji_lookup_idle(&mut self) -> bool {
         let requests = &self.session.requests;
         self.session
             .stickers
             .emoji
             .sweep_custom_emoji_lookups(|request| requests.get(request).is_some());
-        !requests.has_purpose(RequestPurpose::GetCustomEmojiStickers)
+        self.custom_emoji_hold.is_none()
+            && !requests.has_purpose(RequestPurpose::GetCustomEmojiStickers)
     }
 
     /// The one way a `getCustomEmojiStickers` goes out: `ids` are marked
@@ -250,12 +251,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             )
             .filter(|id| {
                 *id > 0
-                    && !self
-                        .session
-                        .stickers
-                        .emoji
-                        .status_resolution_attempted
-                        .contains(id)
+                    && !self.session.stickers.emoji.custom_lookups.attempted(*id)
                     && !self
                         .session
                         .stickers

@@ -376,20 +376,20 @@ impl QuillApp {
     fn finish_story_reply_media(&mut self, sent: Option<bool>, what: &str, cx: &mut Context<Self>) {
         match sent {
             Some(true) => {
-                self.connection.set_note(StatusNote::silent(tr_with(
+                self.set_note(StatusNote::silent(tr_with(
                     keys::Q_MEDIA_STORY_REPLY_SENT_2,
                     &[("what", what)],
                 )));
                 self.end_story_reply(cx);
             }
             Some(false) => {
-                self.connection.set_note(StatusNote::error(tr_with(
+                self.set_note(StatusNote::error(tr_with(
                     keys::Q_MEDIA_COULD_NOT_SEND_STORY_REPLY_2,
                     &[("what", what)],
                 )));
             }
             None => {
-                self.connection.set_note(StatusNote::silent(tr(
+                self.set_note(StatusNote::silent(tr(
                     keys::Q_MEDIA_DEMO_STORY_REPLIES_RUN_WITH,
                 )));
             }
@@ -463,7 +463,7 @@ impl QuillApp {
                         sent
                     }
                     Err(err) => {
-                        this.connection.set_note(StatusNote::error(err));
+                        this.set_note(StatusNote::error(err));
                         cx.notify();
                         return;
                     }
@@ -514,7 +514,7 @@ impl QuillApp {
                 let draft = match result {
                     Ok(draft) => draft,
                     Err(err) => {
-                        this.connection.set_note(StatusNote::error(err));
+                        this.set_note(StatusNote::error(err));
                         cx.notify();
                         return;
                     }

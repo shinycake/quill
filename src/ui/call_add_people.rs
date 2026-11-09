@@ -78,8 +78,7 @@ impl QuillApp {
             .filter(|call| matches!(call.state, CallState::Ready))
             .map(|call| call.id);
         let Some(call_id) = established else {
-            self.connection
-                .set_note(StatusNote::info(tr(keys::CALL_ERROR_ADD_NOT_STARTED)));
+            self.set_note(StatusNote::info(tr(keys::CALL_ERROR_ADD_NOT_STARTED)));
             cx.notify();
             return;
         };
@@ -190,13 +189,12 @@ impl QuillApp {
                 .upgrade_call_to_conference(invite, share_link)
                 .is_err()
             {
-                self.connection.set_note(StatusNote::error(tr(
+                self.set_note(StatusNote::error(tr(
                     keys::Q_AV_COULDNT_JOIN_THE_VOICE_CHAT,
                 )));
             }
         } else {
-            self.connection
-                .set_note(StatusNote::info(tr(keys::Q_AV_VOICE_CHATS_NEED_A_LIVE)));
+            self.set_note(StatusNote::info(tr(keys::Q_AV_VOICE_CHATS_NEED_A_LIVE)));
         }
         cx.notify();
     }

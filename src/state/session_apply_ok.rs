@@ -784,7 +784,7 @@ impl Session {
             Some(RequestPurpose::SetProfilePhoto | RequestPurpose::DeleteProfilePhoto)
         ) && let Some(me) = self.my_user_id
         {
-            self.users_state.user_profile_photos.remove(&me);
+            self.forget_user_photos(me);
         }
         if pending.map(|p| p.purpose) == Some(RequestPurpose::AddContact) {
             // Phase 6: the new contact arrives via `updateUser`

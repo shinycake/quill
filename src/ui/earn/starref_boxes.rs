@@ -614,8 +614,7 @@ impl QuillApp {
 
     fn copy_affiliate_link(&mut self, url: &str, cx: &mut Context<Self>) {
         cx.write_to_clipboard(ClipboardItem::new_string(url.to_string()));
-        self.connection
-            .set_note(StatusNote::info(tr(keys::STICKERS_COPIED)));
+        self.set_note(StatusNote::info(tr(keys::STICKERS_COPIED)));
         cx.notify();
     }
 

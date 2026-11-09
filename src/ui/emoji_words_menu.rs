@@ -135,8 +135,7 @@ impl QuillApp {
         };
         let items = self.word_strip_items(&word);
         if items.is_empty() {
-            self.connection
-                .set_note(StatusNote::info(tr(keys::Q_CHAT_EMOJI_WORD_NONE)));
+            self.set_note(StatusNote::info(tr(keys::Q_CHAT_EMOJI_WORD_NONE)));
         } else {
             let ui = &mut self.composer_ui.emoji_words;
             ui.unhover();
@@ -176,8 +175,7 @@ impl QuillApp {
     pub(super) fn emoji_words_turned_off(&mut self, cx: &mut Context<Self>) {
         self.composer_ui.emoji_words.unhover();
         self.sync_emoji_words(cx);
-        self.connection
-            .set_note(StatusNote::info(tr(keys::Q_CHAT_EMOJI_WORDS_OFF_NOTE)));
+        self.set_note(StatusNote::info(tr(keys::Q_CHAT_EMOJI_WORDS_OFF_NOTE)));
         cx.notify();
     }
 

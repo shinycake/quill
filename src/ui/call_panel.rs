@@ -381,7 +381,7 @@ impl QuillApp {
                 app.calls.window_opening = false;
                 match result {
                     Ok(handle) => app.calls.window = Some(handle.into()),
-                    Err(_) => app.connection.set_note(StatusNote::error(tr(
+                    Err(_) => app.set_note(StatusNote::error(tr(
                         keys::Q_OPS_COULDNT_OPEN_THE_CALL_WINDOW,
                     ))),
                 }

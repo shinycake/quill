@@ -146,7 +146,7 @@ impl QuillApp {
                     .approve_suggested_post(accept.chat_id, accept.message_id, accept.send_date)
                     .is_err()
                 {
-                    self.connection.set_note(StatusNote::error(tr(
+                    self.set_note(StatusNote::error(tr(
                         keys::Q_MONEY_COULDNT_PUBLISH_THE_POST,
                     )));
                 }
@@ -240,7 +240,7 @@ impl QuillApp {
                     .decline_suggested_post(decline.chat_id, decline.message_id, &reason)
                     .is_err()
                 {
-                    self.connection.set_note(StatusNote::error(tr(
+                    self.set_note(StatusNote::error(tr(
                         keys::Q_MONEY_COULDNT_DECLINE_THE_POST,
                     )));
                 }
