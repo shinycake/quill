@@ -3444,3 +3444,78 @@ is, since tdesktop does the same.
   - None of them waits on time.
 - **The flaky `settings::media` test** was already fixed on the merged
   base (`Start the media prefs test from an empty folder`).
+
+### Phase 17 (area A)
+
+Round 17 of the review, area A (core outside `src/ui`). All three findings
+were fixed, and the round-16 `own_info` dodge was converted.
+
+**An agent send gets only its own outcome (1).** TDLib numbers messages
+still being sent per chat (`MessagesManager::get_next_message_id`), and
+scheduled sends share `ScheduledServerMessageId(1)` per date. `agent::events`
+matched `updateMessageSendSucceeded/Failed` by client and temporary id
+only, and kept entries after a waiter read them. So a send could get
+another chat's delivery or error, or an older send's outcome. The log now
+stores each outcome with its chat and a sequence number. `send_inner` takes
+`events::send_mark()` before the request goes out, and `wait_sent(client,
+chat, since, ids, ..)` accepts only outcomes for that chat recorded after
+the mark. The activity page's Undo also offers only the user's own
+messages: `agent_undo_for` drops any logged id whose loaded message is not
+outgoing. An id that isn't loaded is still refused by
+`ConnectDriver::delete_selected`, which needs the message in the history.
+This also covers logs written before the fix. Tests:
+`a_send_gets_only_its_own_chats_outcome_after_it_went_out`, the old
+`send_outcomes_reach_their_waiter` (it no longer sleeps), and
+`undo_never_offers_someone_elses_message`.
+
+**Approve all doesn't bring handled join requests back (2).** This is the
+round-16 #4 shape for the groups lists. On the `ok` of
+`processChatJoinRequests`, `Session::drop_chat_join_request_pages` takes
+every in-flight `GetChatJoinRequests` and `GetMoreChatJoinRequests` for the
+chat out of the registry (the new `RequestRegistry::take_purpose_for_chat`)
+and clears `join_request_latest`. A late page then has no pending request.
+Only clearing `latest` would not be enough, because the answer arm accepts a
+missing `latest`. The link-list arm also takes its `GetLinkJoinRequests`
+pages and clears `request`. `LinkRequestsState::loading` was that same
+stage kept by hand, so it is now `loading()`, derived from `request`, and
+its two baseline lines are gone. Tests:
+`approve_all_drops_the_chat_wide_page_in_flight` and
+`approve_all_for_a_link_drops_its_page_in_flight`.
+
+**A refused approve keeps the list (3).** The `processChatJoinRequest`
+error no longer writes `JoinRequestFetch::Failed`.
+`Session::fail_join_request` keeps both loaded lists, puts the line in
+`invite_link_error` (shown as a toast), and removes the row when the server
+says the request is gone (`HIDE_REQUESTER_MISSING`,
+`USER_ALREADY_PARTICIPANT`). The success path and the "gone" path share
+`forget_join_request`, which removes the row from the chat-wide list and the
+link list. Test: `a_refused_approve_keeps_the_list`. Demo:
+`ready-join-request-refused` (`QUILL_DEMO_JOIN_ERROR=other` for a refusal
+that keeps the row).
+
+**Dodge: the Business wait is derived (round 16).**
+`BusinessSettingsState::own_info: Fetch<()>` was replaced by
+`own_info_error: Option<String>`, which holds only the last failure.
+`Session::business_own_info()` derives the stage: Ready when the own full
+info is cached, Loading while a `getUserFullInfo` for it is in flight,
+otherwise Failed with the stored reason, or Idle. `settle_own_full_info` and
+its two callers are gone. Test:
+`the_business_wait_ends_with_the_own_full_info_error_or_answer`, which now
+also checks that dropping the info stops it reading as ready.
+
+**Checked, not a bug: an Allow that widens grants.** Reviewer C asked
+whether an Allow that widens grants refuses the call that asked for it
+(`still_allowed`, `agent/tools/mod.rs`). It doesn't. A widening ask (`Ask::Chat`, `AllChats`,
+`Contacts`) comes only from `request_access` (`tools/ask.rs`), and that
+call returns on Allowed without calling `still_allowed`. Writes then run
+as new calls with a new `CallScope`. The asks that do run `still_allowed`
+after Allow are `Ask::Write` and `Ask::Raw`. `apply_ask` changes nothing
+for those, and `grants::update` keeps the generation on a no-op (Phase 16
+#1). What remains is a write from another, concurrent call that is waiting
+when the user widens a grant. It is refused with `GRANTS_CHANGED_MESSAGE`
+and works on retry. That is a spurious refusal, never a write that goes
+out without a grant.
+
+**Guards.** None added. Matching an outcome to its send and dropping pages
+after a bulk reset are about what each request means. A script reading
+the source text can't check them.

@@ -135,8 +135,6 @@ LanguageState::packs_loading
 LanguageState::packs_loading+error
 Latest::wake_pending
 LayerFade::closing
-LinkRequestsState::loading
-LinkRequestsState::loading+error
 LinuxState::failed
 LiveInput::failed
 LiveStoryState::extras_requested

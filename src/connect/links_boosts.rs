@@ -155,7 +155,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         let Some(state) = self.session.groups.invite_pages.join_requests(chat_id.0) else {
             return Ok(None);
         };
-        if state.loading || state.requests.len() as i32 >= state.total_count {
+        if state.loading() || state.requests.len() as i32 >= state.total_count {
             return Ok(None);
         }
         let Some(last) = state.requests.last() else {
@@ -190,7 +190,6 @@ impl<S: JsonSender> ConnectDriver<S> {
             .join_requests_mut(chat_id.0)
         {
             Some(state) if append => {
-                state.loading = true;
                 state.error = None;
                 state.request = Some(extra);
             }
@@ -201,7 +200,6 @@ impl<S: JsonSender> ConnectDriver<S> {
                         invite_link: invite_link.to_owned(),
                         total_count: 0,
                         requests: Vec::new(),
-                        loading: true,
                         error: None,
                         request: Some(extra),
                     },
@@ -314,7 +312,6 @@ impl<S: JsonSender> ConnectDriver<S> {
             .request(RequestPurpose::GetChatBoosts { append }, Some(chat_id));
         match self.session.groups.chat_boost_lists.get_mut(&chat_id.0) {
             Some(state) if append => {
-                state.loading = true;
                 state.error = None;
                 state.request = Some(extra);
             }

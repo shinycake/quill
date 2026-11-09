@@ -603,6 +603,9 @@ fn send_inner(
     count: u32,
 ) -> Result<Vec<Value>, ToolError> {
     admit(ctx, target, count)?;
+    // Before the request goes out: no outcome recorded earlier is this
+    // send's.
+    let since = events::send_mark();
     let answer = td::call(&ctx.client, request).map_err(write_error(ctx))?;
     let pending: Vec<Value> = match answer.get("messages").and_then(Value::as_array) {
         Some(list) => list.clone(),
@@ -613,7 +616,13 @@ fn send_inner(
         .filter(|m| m.get("sending_state").is_some_and(|s| !s.is_null()))
         .filter_map(|m| m.get("id").and_then(Value::as_i64))
         .collect();
-    let outcomes = events::wait_sent(ctx.client.id(), &waiting, DELIVERY_WAIT);
+    let outcomes = events::wait_sent(
+        ctx.client.id(),
+        target.chat_id,
+        since,
+        &waiting,
+        DELIVERY_WAIT,
+    );
     let mut delivered = Vec::with_capacity(pending.len());
     for message in pending {
         let id = message.get("id").and_then(Value::as_i64);

@@ -533,8 +533,8 @@ fn the_business_wait_ends_with_the_own_full_info_error_or_answer() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
     session.my_user_id = Some(31);
-    session.settings.business.own_info.begin();
     let extra = session.request_for_user(RequestPurpose::GetUserFullInfo, 31);
+    assert!(session.business_own_info().is_loading());
     apply_json(
         &mut session,
         &seq,
@@ -545,11 +545,11 @@ fn the_business_wait_ends_with_the_own_full_info_error_or_answer() {
         ),
     );
     assert!(
-        session.settings.business.own_info.error().is_some(),
+        session.business_own_info().error().is_some(),
         "a failure is not an endless Loading"
     );
-    // Another user's failure leaves the wait alone.
-    session.settings.business.own_info.begin();
+    // Asked again: another user's failure leaves the wait alone.
+    let extra = session.request_for_user(RequestPurpose::GetUserFullInfo, 31);
     let other = session.request_for_user(RequestPurpose::GetUserFullInfo, 32);
     apply_json(
         &mut session,
@@ -560,8 +560,7 @@ fn the_business_wait_ends_with_the_own_full_info_error_or_answer() {
             other.0
         ),
     );
-    assert!(session.settings.business.own_info.is_loading());
-    let extra = session.request_for_user(RequestPurpose::GetUserFullInfo, 31);
+    assert!(session.business_own_info().is_loading());
     apply_json(
         &mut session,
         &seq,
@@ -571,5 +570,9 @@ fn the_business_wait_ends_with_the_own_full_info_error_or_answer() {
             extra.0
         ),
     );
-    assert_eq!(session.settings.business.own_info, Fetch::Ready(()));
+    assert_eq!(session.business_own_info(), Fetch::Ready(()));
+    // The info is the state: once it is dropped, the screens no longer
+    // read as ready.
+    session.users_state.user_full_infos.remove(&31);
+    assert!(!matches!(session.business_own_info(), Fetch::Ready(())));
 }

@@ -42,9 +42,16 @@ pub struct LinkRequestsState {
     pub invite_link: String,
     pub total_count: i32,
     pub requests: Vec<ParsedChatJoinRequest>,
-    pub loading: bool,
     pub error: Option<String>,
+    /// The page in flight, if any; its answer is the only one that lands.
     pub request: Option<RequestId>,
+}
+
+impl LinkRequestsState {
+    /// A page is being asked for.
+    pub fn loading(&self) -> bool {
+        self.request.is_some()
+    }
 }
 
 impl Session {

@@ -219,3 +219,47 @@ fn another_accounts_log_offers_no_undo_open_or_add_a_chat(cx: &mut TestAppContex
     let _ = quill::settings::remove_account(&root, &other);
     activity::clear();
 }
+
+/// Undo deletes only the user's own messages: a logged id that is someone
+/// else's message (an older log, or an outcome taken from another chat)
+/// is never offered.
+#[gpui_kit::test]
+fn undo_never_offers_someone_elses_message(cx: &mut TestAppContext) {
+    let _guard = quill::locks::lock_or_recover(&TEST_LOCK);
+    let (app, mut vcx) = open_page_app(cx);
+    let vcx = &mut vcx;
+    let found = app.update(vcx, |app, _| {
+        app.session().and_then(|session| {
+            session.histories.iter().find_map(|(chat, history)| {
+                let theirs = history.messages.iter().find(|(_, m)| !m.is_outgoing)?.0;
+                let mine = history.messages.iter().find(|(_, m)| m.is_outgoing)?.0;
+                Some((*chat, *theirs, *mine))
+            })
+        })
+    });
+    let Some((chat_id, theirs, mine)) = found else {
+        panic!("a demo chat with messages both ways");
+    };
+    let action = |message_ids: Vec<i64>| Action {
+        time: 0,
+        account: AccountKey::primary(),
+        agent: "Claude Code".into(),
+        tool: "send_message".into(),
+        chat_id,
+        chat_title: "Chat".into(),
+        summary: "hi".into(),
+        ok: true,
+        declined: false,
+        id: 0,
+        message_ids,
+        undone: false,
+    };
+    app.update(vcx, |app, _| {
+        assert_eq!(app.agent_undo_for(&action(vec![theirs])), None);
+        assert_eq!(
+            app.agent_undo_for(&action(vec![theirs, mine])),
+            Some(super::Undo::Delete(vec![mine]))
+        );
+    });
+    activity::clear();
+}

@@ -670,42 +670,13 @@ impl Session {
         // approximate per the schema; `updateChatPendingJoinRequests`
         // is the authoritative badge source.
         // An approved request adds a member: the member lists ask again.
-        if let Some(RequestPurpose::Groups(GroupsPurpose::ProcessChatJoinRequest { .. })) =
+        // The request leaves the chat-wide list and one link's list.
+        if let Some(RequestPurpose::Groups(GroupsPurpose::ProcessChatJoinRequest { user_id })) =
             pending.map(|p| p.purpose)
             && let Some(chat_id) = pending.and_then(|p| p.chat_id)
         {
             self.groups.members_added(chat_id.0);
-        }
-        if let Some(RequestPurpose::Groups(GroupsPurpose::ProcessChatJoinRequest { user_id })) =
-            pending.map(|p| p.purpose)
-            && let Some(chat_id) = pending.and_then(|p| p.chat_id)
-            && let Some(JoinRequestFetch::Loaded(list)) =
-                self.groups.join_requests.get(&chat_id.0).cloned()
-        {
-            let requests: Vec<ParsedChatJoinRequest> = list
-                .requests
-                .into_iter()
-                .filter(|r| r.user_id != user_id)
-                .collect();
-            self.groups.join_requests.insert(
-                chat_id.0,
-                JoinRequestFetch::Loaded(JoinRequestList {
-                    total_count: list.total_count.saturating_sub(1),
-                    requests,
-                }),
-            );
-        }
-        // A single request handled from one link's list leaves that list too.
-        if let Some(RequestPurpose::Groups(GroupsPurpose::ProcessChatJoinRequest { user_id })) =
-            pending.map(|p| p.purpose)
-            && let Some(chat_id) = pending.and_then(|p| p.chat_id)
-            && let Some(state) = self.groups.invite_pages.join_requests_mut(chat_id.0)
-        {
-            let before = state.requests.len();
-            state.requests.retain(|r| r.user_id != user_id);
-            if state.requests.len() < before {
-                state.total_count = state.total_count.saturating_sub(1);
-            }
+            self.forget_join_request(chat_id, user_id);
         }
         // B8: bulk join-request processing and revoked-link deletion.
         match pending.map(|p| (p.purpose, p.id, p.chat_id)) {
@@ -714,11 +685,21 @@ impl Session {
                 _,
                 Some(chat_id),
             )) => {
+                // A page asked before this went out would bring handled
+                // requests back.
+                for append in [true, false] {
+                    self.requests.take_purpose_for_chat(
+                        RequestPurpose::GetLinkJoinRequests { append },
+                        chat_id,
+                    );
+                }
                 if let Some(state) = self.groups.invite_pages.join_requests_mut(chat_id.0) {
                     state.requests.clear();
                     state.total_count = 0;
+                    state.request = None;
                 }
                 // The requests list and badge may now be stale; refetch.
+                self.drop_chat_join_request_pages(chat_id);
                 self.groups.join_requests.remove(&chat_id.0);
             }
             Some((
@@ -726,6 +707,7 @@ impl Session {
                 _,
                 Some(chat_id),
             )) => {
+                self.drop_chat_join_request_pages(chat_id);
                 self.groups.join_requests.insert(
                     chat_id.0,
                     JoinRequestFetch::Loaded(JoinRequestList {

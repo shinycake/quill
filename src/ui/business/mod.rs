@@ -297,7 +297,7 @@ impl QuillApp {
     /// its request failed: the screen shows it with a Retry.
     pub(super) fn business_info_error(&self) -> Option<String> {
         self.session()
-            .and_then(|s| s.settings.business.own_info.error().map(str::to_string))
+            .and_then(|s| s.business_own_info().error().map(str::to_string))
     }
 
     /// A waiting screen's Retry: the own full info, asked again.

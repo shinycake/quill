@@ -75,8 +75,27 @@ pub enum Sent {
 /// Outcomes kept for waiters.
 const SENT_BUFFER: usize = 256;
 
-/// (client, temporary message id, outcome), oldest first.
-type Outcomes = VecDeque<(i32, i64, Sent)>;
+/// How one message Quill handed to Telegram ended, as the update said.
+struct Outcome {
+    /// Increases by one per outcome, across clients.
+    seq: u64,
+    client_id: i32,
+    /// The chat the message is in. TDLib numbers messages still being
+    /// sent per chat, so the temporary id alone names one message only
+    /// together with its chat.
+    chat_id: i64,
+    /// The temporary id the message had while it was being sent.
+    old_id: i64,
+    sent: Sent,
+}
+
+#[derive(Default)]
+struct Outcomes {
+    next_seq: u64,
+    /// Oldest first.
+    recent: VecDeque<Outcome>,
+}
+
 static OUTCOMES: Mutex<Option<Outcomes>> = Mutex::new(None);
 static SETTLED: Condvar = Condvar::new();
 
@@ -88,37 +107,64 @@ fn record_send(json: &str) {
         return;
     };
     let message = update.get("message").cloned().unwrap_or(Value::Null);
-    let outcome =
-        if update.get("@type").and_then(Value::as_str) == Some("updateMessageSendSucceeded") {
-            Sent::Delivered(message)
-        } else {
-            let error = update.get("error");
-            Sent::Failed(
-                error
-                    .and_then(|e| e.get("code"))
-                    .and_then(Value::as_i64)
-                    .unwrap_or(0),
-                error
-                    .and_then(|e| e.get("message"))
-                    .and_then(Value::as_str)
-                    .unwrap_or("unknown error")
-                    .to_string(),
-            )
-        };
+    let Some(chat_id) = message.get("chat_id").and_then(Value::as_i64) else {
+        return;
+    };
+    let sent = if update.get("@type").and_then(Value::as_str) == Some("updateMessageSendSucceeded")
+    {
+        Sent::Delivered(message)
+    } else {
+        let error = update.get("error");
+        Sent::Failed(
+            error
+                .and_then(|e| e.get("code"))
+                .and_then(Value::as_i64)
+                .unwrap_or(0),
+            error
+                .and_then(|e| e.get("message"))
+                .and_then(Value::as_str)
+                .unwrap_or("unknown error")
+                .to_string(),
+        )
+    };
     let mut guard = crate::locks::lock_or_recover(&OUTCOMES);
-    let outcomes = guard.get_or_insert_with(VecDeque::new);
-    outcomes.push_back((client_of(&update), old_id, outcome));
-    while outcomes.len() > SENT_BUFFER {
-        outcomes.pop_front();
+    let outcomes = guard.get_or_insert_with(Outcomes::default);
+    outcomes.next_seq = outcomes.next_seq.wrapping_add(1);
+    let seq = outcomes.next_seq;
+    outcomes.recent.push_back(Outcome {
+        seq,
+        client_id: client_of(&update),
+        chat_id,
+        old_id,
+        sent,
+    });
+    while outcomes.recent.len() > SENT_BUFFER {
+        outcomes.recent.pop_front();
     }
     drop(guard);
     SETTLED.notify_all();
 }
 
-/// Wait up to `timeout` for every message in `pending` (temporary ids of
-/// `client`) to be delivered or refused. Each slot is `None` if it is still
-/// pending when the time runs out.
-pub fn wait_sent(client_id: i32, pending: &[i64], timeout: Duration) -> Vec<Option<Sent>> {
+/// Where a send starts in the outcome log: take it before the request
+/// goes out and pass it to [`wait_sent`], so an outcome recorded earlier
+/// (an older send that had the same temporary id) never answers it.
+pub fn send_mark() -> u64 {
+    crate::locks::lock_or_recover(&OUTCOMES)
+        .as_ref()
+        .map_or(0, |outcomes| outcomes.next_seq)
+}
+
+/// Wait up to `timeout` for every message in `pending` (temporary ids in
+/// `chat_id` of `client_id`, sent after `since` from [`send_mark`]) to be
+/// delivered or refused. Each slot is `None` if it is still pending when
+/// the time runs out.
+pub fn wait_sent(
+    client_id: i32,
+    chat_id: i64,
+    since: u64,
+    pending: &[i64],
+    timeout: Duration,
+) -> Vec<Option<Sent>> {
     let deadline = Instant::now() + timeout;
     let mut guard = crate::locks::lock_or_recover(&OUTCOMES);
     loop {
@@ -127,10 +173,13 @@ pub fn wait_sent(client_id: i32, pending: &[i64], timeout: Duration) -> Vec<Opti
             .map(|id| {
                 guard.as_ref().and_then(|outcomes| {
                     outcomes
+                        .recent
                         .iter()
-                        .rev()
-                        .find(|(client, old, _)| *client == client_id && old == id)
-                        .map(|(_, _, sent)| sent.clone())
+                        .filter(|o| o.seq > since)
+                        .find(|o| {
+                            o.client_id == client_id && o.chat_id == chat_id && o.old_id == *id
+                        })
+                        .map(|o| o.sent.clone())
                 })
             })
             .collect();
@@ -295,15 +344,14 @@ mod tests {
 
     #[test]
     fn send_outcomes_reach_their_waiter() {
-        let waiter = std::thread::spawn(|| super::wait_sent(93, &[10, 11], Duration::from_secs(5)));
-        std::thread::sleep(Duration::from_millis(50));
+        let since = super::send_mark();
         super::record_send(
             r#"{"@type":"updateMessageSendSucceeded","message":{"id":2048,"chat_id":5},"old_message_id":10,"@client_id":93}"#,
         );
         super::record_send(
-            r#"{"@type":"updateMessageSendFailed","message":{"id":11},"old_message_id":11,"error":{"@type":"error","code":400,"message":"CHAT_WRITE_FORBIDDEN"},"@client_id":93}"#,
+            r#"{"@type":"updateMessageSendFailed","message":{"id":11,"chat_id":5},"old_message_id":11,"error":{"@type":"error","code":400,"message":"CHAT_WRITE_FORBIDDEN"},"@client_id":93}"#,
         );
-        let got = waiter.join().unwrap_or_default();
+        let got = super::wait_sent(93, 5, since, &[10, 11], Duration::ZERO);
         assert!(matches!(got.first(), Some(Some(super::Sent::Delivered(m))) if m["id"] == 2048));
         assert_eq!(
             got.get(1),
@@ -311,6 +359,33 @@ mod tests {
                 400,
                 "CHAT_WRITE_FORBIDDEN".into()
             )))
+        );
+    }
+
+    /// TDLib numbers messages being sent per chat: another chat's message
+    /// with the same temporary id, or an earlier send's, is not this one.
+    #[test]
+    fn a_send_gets_only_its_own_chats_outcome_after_it_went_out() {
+        super::record_send(
+            r#"{"@type":"updateMessageSendFailed","message":{"id":20,"chat_id":6},"old_message_id":20,"error":{"@type":"error","code":429,"message":"Too Many Requests: retry after 9"},"@client_id":94}"#,
+        );
+        let since = super::send_mark();
+        super::record_send(
+            r#"{"@type":"updateMessageSendSucceeded","message":{"id":4096,"chat_id":7},"old_message_id":20,"@client_id":94}"#,
+        );
+        // The chat-7 send started after chat 6's outcome: it gets its own.
+        let got = super::wait_sent(94, 7, since, &[20], Duration::ZERO);
+        assert!(matches!(got.first(), Some(Some(super::Sent::Delivered(m))) if m["id"] == 4096));
+        // A chat-6 send started now has no outcome yet: the old failure
+        // and chat 7's delivery are not it.
+        let later = super::send_mark();
+        assert_eq!(
+            super::wait_sent(94, 6, later, &[20], Duration::ZERO),
+            vec![None]
+        );
+        assert_eq!(
+            super::wait_sent(94, 6, since, &[20], Duration::ZERO),
+            vec![None]
         );
     }
 

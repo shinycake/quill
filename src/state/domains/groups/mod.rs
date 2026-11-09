@@ -5,6 +5,7 @@ mod error;
 mod event_log;
 mod group_type;
 mod invite_pages;
+mod join_requests;
 mod new_chat;
 mod private_sharing;
 mod purpose;

@@ -16,11 +16,12 @@ pub struct BusinessSettingsState {
     pub saving: Vec<BusinessSettingKind>,
     /// The last refused save, in words.
     pub error: Option<String>,
-    /// The own `getUserFullInfo` the Business screens wait for (their
-    /// saved values are in it): its answer, its error or a lost request
-    /// ends the wait, and a failure shows a Retry instead of "Loading…".
-    /// The info itself is in `users_state.user_full_infos`.
-    pub own_info: crate::state::fetch::Fetch<()>,
+    /// Why the last own `getUserFullInfo` failed (or a lost request), for
+    /// the Retry the Business screens show instead of "Loading…". Asking
+    /// again clears it. Whether the info is in or on its way is never kept
+    /// here: [`Session::business_own_info`] reads the cache and the request
+    /// table.
+    pub own_info_error: Option<String>,
 }
 
 impl Session {
@@ -37,22 +38,41 @@ impl Session {
         }
     }
 
-    /// The own full info arrived (an answer or an update): the Business
-    /// wait is over.
-    pub(crate) fn settle_own_full_info(&mut self, user_id: i64) {
-        if self.my_user_id == Some(user_id) {
-            self.settings.business.own_info.succeed(());
+    /// The own full info the Business screens are built from (their saved
+    /// values are in it): ready once it is cached, loading while a
+    /// `getUserFullInfo` for it is in flight, failed with the last reason
+    /// otherwise.
+    pub fn business_own_info(&self) -> crate::state::fetch::Fetch<()> {
+        use crate::state::fetch::Fetch;
+        let Some(me) = self.my_user_id else {
+            return Fetch::Idle;
+        };
+        if self.users_state.user_full_infos.contains_key(&me) {
+            return Fetch::Ready(());
+        }
+        if self
+            .requests
+            .has_purpose_for_user(RequestPurpose::GetUserFullInfo, me)
+        {
+            return Fetch::Loading { stale: None };
+        }
+        match &self.settings.business.own_info_error {
+            Some(error) => Fetch::Failed {
+                error: error.clone(),
+                stale: None,
+            },
+            None => Fetch::Idle,
         }
     }
 
-    /// A failed `getUserFullInfo`: for the own user, the Business wait
-    /// fails with the reason (a lost request settles here too).
+    /// A failed `getUserFullInfo`: for the own user, the reason the
+    /// Business screens show (a lost request settles here too).
     pub(crate) fn fail_own_full_info(&mut self, err: &TdError, pending: Option<&PendingRequest>) {
         let Some(pending) = pending.filter(|p| p.purpose == RequestPurpose::GetUserFullInfo) else {
             return;
         };
         if pending.user_id.is_some() && pending.user_id == self.my_user_id {
-            self.settings.business.own_info.fail(error_reason(err));
+            self.settings.business.own_info_error = Some(error_reason(err));
         }
     }
 
