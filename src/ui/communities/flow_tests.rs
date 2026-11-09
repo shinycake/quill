@@ -1,0 +1,175 @@
+//! The community screens in a window over the `ready-communities` demo:
+//! the collapsed row, Pick → Visibility → back, and the requests undo.
+use super::CommunityBox;
+use super::requests::UNDO_DURATION;
+use crate::ui::app::QuillApp;
+use crate::ui::chat_row::ChatListItem;
+use crate::ui::screenshot_demo::ScreenshotDemo;
+use crate::ui::shell::QuillShell;
+use gpui_kit::component::Root;
+use gpui_kit::test::TestWindowExt;
+use gpui_kit::{AppContext, Entity, TestAppContext, VisualTestContext, px, size};
+
+const RUSTACEANS: i64 = 900;
+const GUILD: i64 = 901;
+const OWN_CHANNEL: i64 = 66;
+
+fn new_app(cx: &mut TestAppContext) -> (Entity<QuillApp>, VisualTestContext) {
+    cx.update(gpui_kit::init);
+    let slot = std::rc::Rc::new(std::cell::RefCell::new(None));
+    let slot_in = slot.clone();
+    let demo = ScreenshotDemo::named("ready-communities");
+    let handle = cx.open_window(size(px(1100.), px(800.)), move |window, cx| {
+        let view = cx.new(|cx| QuillApp::new_with_demo(window, cx, None, Some(demo)));
+        *slot_in.borrow_mut() = Some(view.clone());
+        let shell = cx.new(|_| QuillShell::new(view));
+        Root::new(shell, window, cx)
+    });
+    let app = slot.borrow().clone().expect("the app view");
+    (app, VisualTestContext::from_window(handle.into(), cx))
+}
+
+fn frames(vcx: &mut VisualTestContext) {
+    vcx.run_until_parked();
+    for _ in 0..2 {
+        vcx.update(|window, cx| window.render_frame(cx));
+    }
+}
+
+fn listed_chats(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> Vec<i64> {
+    app.read_with(vcx, |app, _| {
+        app.chat_list
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                ChatListItem::Chat { id, .. } => Some(id.0),
+                _ => None,
+            })
+            .collect()
+    })
+}
+
+#[gpui_kit::test]
+fn a_collapsed_community_takes_its_chats_out_of_the_list(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    frames(&mut vcx);
+    let rows: Vec<i64> = app.read_with(&vcx, |app, _| {
+        app.chat_list
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                ChatListItem::Community { community_id, .. } => Some(*community_id),
+                _ => None,
+            })
+            .collect()
+    });
+    assert_eq!(rows, vec![RUSTACEANS]);
+    let chats = listed_chats(&app, &mut vcx);
+    assert!(!chats.contains(&61) && !chats.contains(&62), "{chats:?}");
+    assert!(chats.contains(&65) && chats.contains(&67), "{chats:?}");
+}
+
+#[gpui_kit::test]
+fn ungrouping_brings_the_chats_back(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    frames(&mut vcx);
+    app.update(&mut vcx, |app, _| {
+        let session = app.demo_session.as_mut().expect("demo session");
+        if let Some(community) = session.groups.communities.get_mut(&RUSTACEANS) {
+            community.are_chats_collapsed = false;
+        }
+    });
+    frames(&mut vcx);
+    let chats = listed_chats(&app, &mut vcx);
+    assert!(chats.contains(&61) && chats.contains(&62), "{chats:?}");
+}
+
+#[gpui_kit::test]
+fn cancel_on_the_visibility_box_goes_back_to_the_picker(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    frames(&mut vcx);
+    app.update(&mut vcx, |app, cx| {
+        app.open_add_to_community(OWN_CHANNEL, cx)
+    });
+    frames(&mut vcx);
+    app.update(&mut vcx, |app, cx| {
+        app.choose_community_visibility(
+            RUSTACEANS,
+            OWN_CHANNEL,
+            Some(super::Back::Pick {
+                chat_id: OWN_CHANNEL,
+            }),
+            cx,
+        )
+    });
+    frames(&mut vcx);
+    let open = app.read_with(&vcx, |app, _| {
+        matches!(
+            app.admin.community.flow.open,
+            Some(CommunityBox::Visibility { hidden: false, .. })
+        )
+    });
+    assert!(open, "the visibility box opens on Visible");
+    app.update_in(&mut vcx, |app, window, cx| {
+        app.community_visibility_back(window, cx)
+    });
+    frames(&mut vcx);
+    let back = app.read_with(&vcx, |app, _| {
+        matches!(
+            app.admin.community.flow.open,
+            Some(CommunityBox::Pick {
+                chat_id: OWN_CHANNEL
+            })
+        )
+    });
+    assert!(back, "Cancel returns to the picker");
+}
+
+fn pending_undo(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> Option<i64> {
+    app.read_with(vcx, |app, _| match &app.admin.community.flow.open {
+        Some(CommunityBox::Requests { undo, .. }) => undo.as_ref().map(|undo| undo.chat_id),
+        _ => None,
+    })
+}
+
+#[gpui_kit::test]
+fn an_answer_waits_out_its_undo_time(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    frames(&mut vcx);
+    app.update(&mut vcx, |app, cx| app.open_community_requests(GUILD, cx));
+    frames(&mut vcx);
+    app.update(&mut vcx, |app, cx| {
+        app.answer_community_request(70, true, cx)
+    });
+    frames(&mut vcx);
+    assert_eq!(pending_undo(&app, &mut vcx), Some(70));
+    vcx.executor().advance_clock(UNDO_DURATION);
+    frames(&mut vcx);
+    assert_eq!(
+        pending_undo(&app, &mut vcx),
+        None,
+        "sent once the time is up"
+    );
+}
+
+#[gpui_kit::test]
+fn undo_drops_the_answer_and_a_new_answer_replaces_it(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    frames(&mut vcx);
+    app.update(&mut vcx, |app, cx| app.open_community_requests(GUILD, cx));
+    frames(&mut vcx);
+    app.update(&mut vcx, |app, cx| {
+        app.answer_community_request(70, true, cx)
+    });
+    app.update(&mut vcx, |app, cx| app.undo_community_request(cx));
+    frames(&mut vcx);
+    assert_eq!(pending_undo(&app, &mut vcx), None);
+    app.update(&mut vcx, |app, cx| {
+        app.answer_community_request(70, false, cx)
+    });
+    app.update(&mut vcx, |app, cx| {
+        app.answer_community_request(69, true, cx)
+    });
+    frames(&mut vcx);
+    assert_eq!(pending_undo(&app, &mut vcx), Some(69));
+}

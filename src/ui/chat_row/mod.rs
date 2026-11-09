@@ -83,6 +83,9 @@ pub(super) enum ChatListItem {
     ArchiveRow { height: Pixels },
     /// The same entry collapsed to a slim bar.
     ArchiveBar,
+    /// A community shown as one chat ("Show as One Chat"), standing in
+    /// for its chats in the main list.
+    Community { community_id: i64, height: Pixels },
     /// The stories strip, first row of the list: it scrolls away with the
     /// rows, which is what collapses it (`quill::stories_strip`).
     StoryStrip,

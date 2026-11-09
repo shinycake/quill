@@ -367,6 +367,7 @@ impl QuillApp {
     fn main_menu_open(&self) -> bool {
         self.chat_list.menu.is_some()
             || self.chat_list.archive_menu.is_some()
+            || self.admin.community.flow.row_menu.is_some()
             || self.chat_list.global.story_menu.is_some()
             || self.playback.playlist_menu.is_some()
             || self.folders.tab_menu.is_some()
@@ -395,6 +396,7 @@ impl QuillApp {
             self.playback.playlist_menu = None;
             self.chat_list.menu = None;
             self.chat_list.archive_menu = None;
+            self.admin.community.flow.row_menu = None;
             self.chat_list.global.story_menu = None;
             self.folders.tab_menu = None;
         }

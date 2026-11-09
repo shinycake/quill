@@ -28,6 +28,8 @@ use std::rc::Rc;
 pub struct CommunityUi {
     pub(crate) create_dialog: Option<CreateCommunityDialog>,
     pub(crate) hub_open: bool,
+    /// The TDLib 1.8.70 community boxes and the collapsed row's menu.
+    pub(crate) flow: crate::ui::communities::CommunitiesUi,
 }
 
 /// Slice G10: "New community" dialog (side-menu entry). `createCommunity`
@@ -375,12 +377,25 @@ pub fn render_community_info_panel(
         .items_center()
         .gap_3()
         .p_4()
+        .child(crate::ui::communities::community_avatar_centered(
+            &community.name,
+            72.,
+            cx,
+        ))
         .child(
             div()
                 .text_lg()
                 .font_semibold()
                 .child(community.name.clone()),
         )
+        .when_some(full_info.as_ref(), |body, info| {
+            body.child(
+                div()
+                    .text_sm()
+                    .text_color(cx.theme().muted_foreground)
+                    .child(quill::lang::trn(keys::COMMUNITY_CHATS, info.chats.len())),
+            )
+        })
         .when(community.can_change_info, |body| {
             body.child(
                 Button::new(format!("g10-info-edit-name-{community_id}"))
@@ -407,46 +422,13 @@ pub fn render_community_info_panel(
                         ),
                     ],
                 ));
-            let mut chats = div().flex().flex_col().gap_1().w_full();
-            chats = chats.child(
-                div()
-                    .text_xs()
-                    .text_color(cx.theme().muted_foreground)
-                    .child(tr_with(
-                        keys::Q_OPS_CHATS,
-                        &[("len", &(info.chats.len()).to_string())],
-                    )),
-            );
-            for chat in &info.chats {
-                let title = session
-                    .and_then(|s| s.chats.get(&chat.chat_id))
-                    .map(|c| c.title.clone())
-                    .unwrap_or_else(|| {
-                        tr_with(keys::Q_OPS_CHAT, &[("chat_id", &chat.chat_id.to_string())])
-                    });
-                let mut row = div()
-                    .flex()
-                    .items_center()
-                    .justify_between()
-                    .gap_2()
-                    .child(div().flex_1().text_sm().child(title));
-                if chat.is_hidden {
-                    row = row.child(
-                        div()
-                            .text_xs()
-                            .text_color(cx.theme().muted_foreground)
-                            .child(tr(keys::INFO_MOBILE_HIDDEN)),
-                    );
-                }
-                chats = chats.child(row);
-            }
             div()
                 .flex()
                 .flex_col()
                 .gap_2()
                 .w_full()
                 .child(stats)
-                .child(chats)
+                .child(app.community_info_sections(community_id, cx))
         }
         None => div()
             .text_sm()

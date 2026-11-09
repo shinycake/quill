@@ -389,7 +389,6 @@
 "qll_ops_chat_2" = "Chat";
 "qll_ops_chat_automation" = "Chat Automation";
 "qll_ops_chat_types" = "Chat types";
-"qll_ops_chats" = "Chats ({len})";
 "qll_ops_chats_could_not_be_read" = "{failed_chats} chats could not be read and have no messages in the export.";
 "qll_ops_chats_selected#one" = "{count} chat selected";
 "qll_ops_chats_selected#other" = "{count} chats selected";
