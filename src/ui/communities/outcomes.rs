@@ -117,7 +117,7 @@ impl QuillApp {
                 &[("user", &self.community_member_name(member))],
             )),
         };
-        self.connection.set_note(note);
+        self.set_note(note);
         cx.notify();
     }
 
@@ -138,8 +138,7 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut()
             && let Err(err) = live.driver.sync_collapsed_communities()
         {
-            self.connection
-                .set_note(StatusNote::error(user_error(&err)));
+            self.set_note(StatusNote::error(user_error(&err)));
         }
         progressed
     }
