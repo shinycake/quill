@@ -109,3 +109,16 @@ src/ai_compose/diff.rs	308	read
 src/ai_compose/limit.rs	66	read
 src/ai_compose/mod.rs	35	read
 src/ai_compose/prefs.rs	102	read
+src/calls/capture/pipewire_frames.rs	151	read
+src/calls/capture/screen.rs	320	read
+src/calls/capture/screen_bgra.rs	262	read
+src/calls/capture/screen_linux.rs	323	read
+src/calls/capture/screen_mac.rs	596	read
+src/calls/capture/screen_win.rs	644	read
+src/calls/capture/screen_x11.rs	461	read
+src/calls/capture/screen_yuv.rs	235	read
+src/calls/capture/spa_pod.rs	361	read
+src/calls/capture/system_audio.rs	105	read
+src/calls/capture/system_audio_cpal.rs	96	read
+src/calls/engine/api.rs	361	read
+src/calls/engine/conference.rs	109	read
