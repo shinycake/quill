@@ -118,6 +118,10 @@ impl QuillApp {
                 let sender_status =
                     self.sender_status_element(chrome.sender.as_ref(), message.id.0, cx);
                 let avatar = self.history_sender_avatar(chrome, message.sender, cx);
+                // A widget sits inside the bubble's padding, like a card.
+                let room = crate::ui::history::bubble_width::BubbleRoom::new(look.history, avatar.is_some(), look.plain);
+                let inner = crate::ui::history::bubble_width::content_for_outer(room.outer(), look.plain);
+                let widget = self.widget_bubble(message, f32::from(inner).min(room.media(false) as f32), cx);
                 let row = session_history_row(
                     message,
                     files,
@@ -168,6 +172,7 @@ impl QuillApp {
                     },
                     self.message_custom_emoji_frames(message, cx),
                     inline,
+                    widget,
                     &self.message_ui.spoiler_revealed,
                     inputs.is_secret,
                     inputs.fact_check_expanded,
