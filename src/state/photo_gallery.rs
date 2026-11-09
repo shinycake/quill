@@ -431,6 +431,12 @@ impl Session {
         self.users_state.chat_photo_history.remove(&chat_id.0);
     }
 
+    /// The user's photo changed (here or on another device): the gallery
+    /// is out of date, so the viewer fetches it again.
+    pub(crate) fn forget_user_photos(&mut self, user_id: i64) {
+        self.users_state.user_profile_photos.remove(&user_id);
+    }
+
     /// A `foundChatMessages` page of a chat's photo history. A later page
     /// (`loading_more`) extends the list.
     pub(crate) fn apply_chat_photo_history(

@@ -10,7 +10,7 @@
 //! with the "Too many attempts" notice for user actions (reducer side).
 use super::*;
 use crate::ids::{ChatId, RequestId};
-use crate::state::PENDING_REQUEST_TTL;
+use crate::state::{PENDING_REQUEST_TTL, RequestPurpose};
 use crate::telegram::envelope::{Envelope, EnvelopePayload};
 use std::time::{Duration, Instant};
 
@@ -62,9 +62,40 @@ impl<S: JsonSender> ConnectDriver<S> {
                 return true;
             }
         }
+        self.hold_custom_emoji_after_flood(envelope, extra, now);
         self.flood_attempts.remove(&extra.0);
         self.sender.forget_retained(extra);
         false
+    }
+
+    /// A custom emoji lookup's rate limit reaches the reducer (the wait is
+    /// too long to retry, or the retries ran out). Its ids are freed there
+    /// without counting a failure, and no lookup goes out until the wait is
+    /// over, so the next pass does not hit the limit again at once.
+    fn hold_custom_emoji_after_flood(
+        &mut self,
+        envelope: &Envelope,
+        extra: RequestId,
+        now: Instant,
+    ) {
+        let EnvelopePayload::Error(err) = &envelope.payload else {
+            return;
+        };
+        let lookup = self
+            .session
+            .requests
+            .get(extra)
+            .is_some_and(|pending| pending.purpose == RequestPurpose::GetCustomEmojiStickers);
+        if !err.is_flood() || !lookup {
+            return;
+        }
+        let wait = err
+            .flood_wait_secs
+            .map_or(FLOOD_RETRY_DEFAULT_WAIT, Duration::from_secs);
+        let until = now
+            .checked_add(wait.saturating_add(FLOOD_RETRY_SLACK))
+            .unwrap_or(now);
+        self.custom_emoji_hold = Some(self.custom_emoji_hold.map_or(until, |held| held.max(until)));
     }
 
     /// Per-poll request housekeeping: re-send reads whose rate-limit wait
@@ -106,6 +137,10 @@ impl<S: JsonSender> ConnectDriver<S> {
                 }
             }
         }
+        if self.custom_emoji_hold.is_some_and(|until| until <= now) {
+            self.custom_emoji_hold = None;
+            changed = true;
+        }
         let sweep_due = self
             .last_request_sweep
             .is_none_or(|last| now.saturating_duration_since(last) >= SWEEP_EVERY);
@@ -129,6 +164,9 @@ impl<S: JsonSender> ConnectDriver<S> {
             .iter()
             .map(|r| r.due.saturating_duration_since(now))
             .min();
+        let emoji_hold = self
+            .custom_emoji_hold
+            .map(|until| until.saturating_duration_since(now));
         let bot = self
             .session
             .next_pending_bot_expiry_ms()
@@ -155,7 +193,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .and_then(|live| live.pending_reaction.as_ref())
             .map(|pending| Duration::from_millis(pending.commit_at_ms.saturating_sub(now_ms)));
         [
-            retry, bot, levels, hint, level, microphone, paid, live_stars,
+            retry, emoji_hold, bot, levels, hint, level, microphone, paid, live_stars,
         ]
         .into_iter()
         .flatten()

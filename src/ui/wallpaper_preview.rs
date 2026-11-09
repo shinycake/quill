@@ -144,7 +144,7 @@ impl QuillApp {
                 .chain(session.chats_state.default_backgrounds.values())
                 .find(|b| b.id == *id)
                 .cloned(),
-            PreviewSource::Link(_) => session.chats_state.searched_background.clone(),
+            PreviewSource::Link(_) => session.chats_state.background_search.found().cloned(),
             PreviewSource::File(_) => None,
         }
     }
@@ -152,8 +152,7 @@ impl QuillApp {
     pub(super) fn close_wallpaper_preview(&mut self, cx: &mut Context<Self>) {
         self.dialogs.wallpaper_preview = None;
         if let Some(session) = self.wallpaper_session_mut() {
-            session.chats_state.searched_background = None;
-            session.chats_state.background_search = None;
+            session.chats_state.background_search = quill::state::BackgroundSearch::Idle;
             session.chats_state.background_url = None;
         }
         cx.notify();

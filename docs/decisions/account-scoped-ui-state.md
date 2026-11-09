@@ -2793,3 +2793,77 @@ seam). The other twenty were fixed.
 - **Not done.** The Business screens still show the empty state until the
   full info arrives. Nothing is written from it now, but the screen is not
   rebuilt when the info lands.
+
+### Phase 15 (area A)
+
+Round 15 of the review, area A (core: state, connect, telegram, agent,
+`account_data`, `emoji`). All four findings were fixed, and the four
+round-14 changes that got past `check-implicit-state.py` became one value
+each.
+
+**A rate limit no longer gives custom emoji up (1).** Round 14 sent
+`getCustomEmojiStickers` through the flood retry. A wait over 60 s, or a
+fourth 429, still reached the stickers error arm, which counted a failure
+for every id. Nothing backed off, so three passes a few seconds apart gave
+the ids up for the session. A rate limit is now no failure: the error arm
+frees the ids without counting (`custom_emoji_lookup_rate_limited`), and
+`absorb_flood` sets `ConnectDriver::custom_emoji_hold` to the end of the
+wait. `custom_emoji_lookup_idle` is false while it holds, `request_tick`
+lets it go when it is due, and `next_deadline` wakes the poll loop for it.
+The hold is for the method, not the ids: TDLib limits the call, so any
+batch would hit it.
+
+**A user's photo gallery follows their photo (2).** `updateUser` with a
+different `profile_photo.id` (a new photo, or none) and `updateUserFullInfo`
+with a different `photo_id` drop `user_profile_photos[user]`
+(`Session::forget_user_photos`, next to `forget_chat_photos`). The viewer
+fetches the gallery again the next time it opens. That covers a contact's
+change and your own change from another device; the own Set/Delete OK
+uses the same helper.
+
+**A grant change stops waiting writes (3).** The per-call thread locals
+(the switch's generation, the connection, the lock count) are one
+`CallStart`, which also records `grants::generation()`. `still_allowed`
+refuses with `GRANTS_CHANGED_MESSAGE` ("nothing was sent or changed") once
+the grants moved since the call began. It refuses rather than re-resolving,
+since it has no target: any grant change while a write waits is rare, and
+the agent retries against the new grants. `common::confirm` now asks
+`still_allowed` after the user's Allow too, like `td_call`'s prompt.
+
+**`mark_read` is one queue turn (4).** `viewMessages` and
+`toggleChatIsMarkedAsUnread` go out in one turn (`common::change_steps`),
+so the turn's check is the only point where the tool can answer "nothing
+was sent or changed". A lock between the two requests now gives
+`LOCKED_WHILE_RUNNING_MESSAGE` ("may have been done").
+
+**One value each.**
+
+- `bots.last_callback_answer` is an `Option<CallbackAnswer>` holding the
+  answer and the chat of the press. `last_callback_chat` is gone.
+- `chats_state.background_search` is a `BackgroundSearch` enum (`Idle`,
+  `Waiting(RequestId)`, `Found(Background)`). `searched_background` is
+  gone. A failed search goes back to `Idle` and shows `background_error`.
+- `EmojiPanel.status_resolution_attempted` is gone. Each id's stage is an
+  `IdLookup` in `CustomEmojiLookups` (`Asking`, `Failed`, `GaveUp`,
+  `Answered`), and callers ask `custom_lookups.attempted(id)`.
+- `LOCKS_AT_START` is part of `CallStart`, held in an `Option` that a
+  `CallScope` guard clears when the call ends. Off a call, `still_allowed`
+  and `locked_since_call_began` refuse.
+
+**Guards.** Check 5 of `scripts/lock_surfaces.py` now also needs
+`still_allowed()` after every `prompts::wait(` in a write tool
+(`src/agent/tools/write/`, `td_call.rs`), with unit tests in
+`scripts/test_lock_surfaces.py`.
+
+**Tests.** `a_long_custom_emoji_rate_limit_holds_lookups_instead_of_giving_up`
+and `custom_emoji_rate_limit_retries_that_run_out_hold_lookups`
+(`connect/tests/flood_retry.rs`), `a_changed_user_photo_drops_their_gallery`
+(`state/tests/profile_panels.rs`), `a_grant_change_while_a_write_waits_stops_it`
+(`agent/tools`), and `mark_read_is_one_turn_of_up_to_two_requests`
+(`agent/tools/write/manage.rs`). The existing callback, background and
+custom emoji tests moved to the new types. None of them waits on time.
+
+**src/ui lines touched.** Only what the type changes forced:
+`ui/notifications/poll_drains.rs` (the callback answer drain) and
+`ui/wallpaper_preview.rs` (`previewed_background` and
+`close_wallpaper_preview`).

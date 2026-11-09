@@ -420,3 +420,46 @@ fn a_failed_follow_up_page_keeps_the_listed_groups() {
     // The list ends here, as in tdesktop, so Load more cannot repeat.
     assert!(paging.exhausted);
 }
+
+/// A user's photo that changes (here or on another device) drops their
+/// cached gallery, so the viewer fetches the new list; an `updateUser`
+/// with the same photo keeps it.
+#[test]
+fn a_changed_user_photo_drops_their_gallery() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    let user = |photo: &str| {
+        format!(
+            r#"{{"@type":"updateUser","user":{{"id":31,"first_name":"X","type":{{"@type":"userTypeRegular"}}{photo}}}}}"#
+        )
+    };
+    let with_photo = |id: i64| {
+        user(&format!(
+            r#","profile_photo":{{"@type":"profilePhoto","id":{id},"small":{},"big":{},"has_animation":false,"is_personal":false}}"#,
+            media_file_json(11, "\"\"", false),
+            media_file_json(12, "\"\"", false),
+        ))
+    };
+    let cache = |session: &mut Session| {
+        session.users_state.user_profile_photos.insert(
+            31,
+            ProfilePhotosFetch::Loaded {
+                total_count: 1,
+                photos: Vec::new(),
+                loading_more: false,
+            },
+        );
+    };
+    apply_json(&mut session, &seq, &sink, &with_photo(901));
+    cache(&mut session);
+    apply_json(&mut session, &seq, &sink, &with_photo(901));
+    assert!(session.users_state.user_profile_photos.contains_key(&31));
+    apply_json(&mut session, &seq, &sink, &with_photo(902));
+    assert!(!session.users_state.user_profile_photos.contains_key(&31));
+    cache(&mut session);
+    apply_json(&mut session, &seq, &sink, &user(""));
+    assert!(
+        !session.users_state.user_profile_photos.contains_key(&31),
+        "deleted"
+    );
+}

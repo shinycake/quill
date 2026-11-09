@@ -3,7 +3,7 @@
 
 use super::super::target::{chat_schema, require};
 use super::super::{Ctx, ToolError, ToolOutput};
-use super::common::{self, TEXT_LIMIT, change, formatted};
+use super::common::{self, TEXT_LIMIT, change, change_steps, formatted};
 use crate::agent::grants::Scope;
 use serde_json::{Value, json};
 
@@ -92,38 +92,40 @@ pub fn mark_read(args: &Value) -> Result<ToolOutput, ToolError> {
     let ctx = Ctx::active()?;
     let target = require(&ctx, args, Scope::ReadWrite)?;
     let chat = ctx.call(json!({"@type": "getChat", "chat_id": target.chat_id}))?;
-    if let Some(last) = chat
-        .get("last_message")
-        .and_then(|m| m.get("id"))
-        .and_then(Value::as_i64)
-    {
-        change(
-            &ctx,
-            &target,
-            "mark_read",
-            "",
-            json!({
-                "@type": "viewMessages",
-                "chat_id": target.chat_id,
-                "message_ids": [last],
-                "source": {"@type": "messageSourceChatList"},
-                "force_read": true,
-            }),
-        )?;
-    }
-    if chat.get("is_marked_as_unread").and_then(Value::as_bool) == Some(true) {
-        change(
-            &ctx,
-            &target,
-            "mark_read",
-            "",
-            json!({"@type": "toggleChatIsMarkedAsUnread", "chat_id": target.chat_id, "is_marked_as_unread": false}),
-        )?;
-    }
+    change_steps(
+        &ctx,
+        &target,
+        "mark_read",
+        "",
+        mark_read_requests(&chat, target.chat_id),
+    )?;
     Ok(done(
         format!("Marked \"{}\" as read.", target.title),
         json!({"chat": target.summary(), "read": true}),
     ))
+}
+
+/// What marking `chat` read takes: reading up to its last message, and
+/// clearing the "marked as unread" mark.
+fn mark_read_requests(chat: &Value, chat_id: i64) -> Vec<Value> {
+    let last = chat
+        .get("last_message")
+        .and_then(|m| m.get("id"))
+        .and_then(Value::as_i64);
+    let marked = chat.get("is_marked_as_unread").and_then(Value::as_bool) == Some(true);
+    let view = last.map(|last| {
+        json!({
+            "@type": "viewMessages",
+            "chat_id": chat_id,
+            "message_ids": [last],
+            "source": {"@type": "messageSourceChatList"},
+            "force_read": true,
+        })
+    });
+    let unmark = marked.then(|| {
+        json!({"@type": "toggleChatIsMarkedAsUnread", "chat_id": chat_id, "is_marked_as_unread": false})
+    });
+    view.into_iter().chain(unmark).collect()
 }
 
 pub fn mute_schema() -> Value {
@@ -314,4 +316,30 @@ pub fn set_chat_folder(args: &Value) -> Result<ToolOutput, ToolError> {
         format!("{summary}: \"{}\".", target.title),
         json!({"chat": target.summary(), "folder": {"id": id, "name": name}, "in_folder": !remove}),
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::mark_read_requests;
+    use serde_json::{Value, json};
+
+    fn types(requests: &[Value]) -> Vec<&str> {
+        requests
+            .iter()
+            .filter_map(|request| request.get("@type").and_then(Value::as_str))
+            .collect()
+    }
+
+    /// Both steps of marking a chat read go out in the one queue turn.
+    #[test]
+    fn mark_read_is_one_turn_of_up_to_two_requests() {
+        let chat = json!({"last_message": {"id": 9}, "is_marked_as_unread": true});
+        assert_eq!(
+            types(&mark_read_requests(&chat, 4)),
+            ["viewMessages", "toggleChatIsMarkedAsUnread"]
+        );
+        let read = json!({"last_message": {"id": 9}, "is_marked_as_unread": false});
+        assert_eq!(types(&mark_read_requests(&read, 4)), ["viewMessages"]);
+        assert!(mark_read_requests(&json!({}), 4).is_empty());
+    }
 }

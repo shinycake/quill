@@ -201,15 +201,18 @@ locked machine is no different from a person there. The error tells the agent to
 Round 14 closed what still ran past the gate, because hiding a call's answer does not undo its effects:
 
 - A write still asleep in the paced queue (up to 30 s) asks the lock at its turn. `still_allowed` refuses
-  once Quill locked since the call began (`tools::LOCKS_AT_START`), with
-  `LOCKED_BEFORE_SENDING_MESSAGE` ("nothing was sent"), which the call returns as is.
+  once Quill locked since the call began (the lock count in `tools::CallStart`), with
+  `LOCKED_BEFORE_SENDING_MESSAGE` ("nothing was sent"), which the call returns as is. Round 15 made the
+  call's start one value that is cleared when the call ends, so off a call the check refuses, and a write
+  allowed at the "Confirm each send" prompt asks the check again after the wait. The same check refuses
+  once the user changed the grants while the write waited (`GRANTS_CHANGED_MESSAGE`).
 - `download_file` with `to` checks `locked_since_call_began()` after the download and before the copy, so
   a chat's file never lands at the agent's path while locked.
 - The `quill://unread` watcher's look fails at once while locked, so the watcher sleeps between looks.
   Before, the round-13 lock check in `wait_for` returned at once and the watcher spun a core for the whole
   lock.
 - Check 5 of `scripts/lock_surfaces.py` holds these in place: every queue turn is followed by
-  `still_allowed()`, every `copy_new(` is gated on `locked_since_call_began()`, and `resources/read` tests
+  `still_allowed()` (and, since round 15, so is every write tool's `prompts::wait(`), every `copy_new(` is gated on `locked_since_call_began()`, and `resources/read` tests
   `paused_by_lock()` before `read_resource(`.
 
 ### The guard (`scripts/lock_surfaces.py`)
