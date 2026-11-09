@@ -272,6 +272,10 @@ pub(super) struct MiniApps {
     pub(super) emoji_access_shown: std::collections::HashSet<quill::ids::OfAccount<i64>>,
     /// The poll task, alive while a window is.
     poll: Option<Task<()>>,
+    /// The window the last mini-app flow was started in (`None`: the main
+    /// window): the poll's answers and the helper's events open their
+    /// boxes and links there, not in the main window the poll runs in.
+    from_window: Option<quill::ids::ChatId>,
     generation: u64,
 }
 

@@ -31,6 +31,17 @@ Checked here:
    request, which knows its window), or a `Name | answer | <reason>` line in
    scripts/dialog-hosts.txt.
 4. An `open_box*` names a session-wide kind (a per-window one needs none).
+5. Where no window asked (round 14), an open names the window the request
+   carried. The poll loop (`poll_live`), the main window's own upkeep (the
+   steps of `frame_upkeep` but `per_window_upkeep`) and the toast drain
+   (`drain_suggested_post_notes`) run with the main window in place
+   whichever window the user acted in, and run as `Asker::Nobody`
+   (`QuillApp::unasked`, which their callers must use). A function they
+   reach (through `self.` / `this.` / `app.` method calls, by name) must
+   not call `open_box(` or `queue_deep_link(` outside an
+   `as_asked_by(window, ..)` call: carry the asking window with the
+   request (the chat it was about, the box it follows up) and open under
+   `as_asked_by`, or say why with `// box-host: <why>`.
 
 A flag is found by the field paths its predicate reads (the last two
 names, `notify.mute_menu_open`). A predicate that hides them (a closure
@@ -40,7 +51,9 @@ argument, a negation) gives its paths in scripts/dialog-hosts.txt as
 
 Known limits: a write through a local binding (`let boxes = &mut
 self.call_boxes; boxes.confirm = ..`) is not seen, and the enclosing
-function is the nearest `fn` above the write.
+function is the nearest `fn` above the write. Rule 5 follows methods by
+name (a false hit is possible: mark it), and not through closures handed
+to other types.
 
 Run by scripts/check-window-scope.py.
 """
@@ -317,6 +330,142 @@ def problems(root="."):
     for name, sites in sorted(opened.items()):
         if name not in all_specs:
             out.append(f"{sites[0]}: open_box names `{name}`, which is not a registered dialog")
+    out += unasked_problems(ui)
+    return out
+
+
+# Rule 5: the functions no window asks in, by file and name, and the
+# frame whose `self.x(` steps are the main window's own.
+UNASKED_ROOTS = [
+    ("src/ui/notifications/mod.rs", "poll_live"),
+    ("src/ui/suggested_posts_ui.rs", "drain_suggested_post_notes"),
+]
+MAIN_FRAME = ("src/ui/app_render/frame_upkeep.rs", "frame_upkeep")
+# The window's own frame inside the main frame: the window in place asks.
+IN_PLACE_STEPS = {"per_window_upkeep", "asked_in_place", "lock_waits"}
+ASKER_SENSITIVE = re.compile(r"\b(open_box|queue_deep_link)\(")
+METHOD_CALL = re.compile(r"\b(?:self|this|app)\s*\.\s*([a-z_][a-z0-9_]*)\s*\(")
+NAMED_ASKER = re.compile(r"\b(?:as_asked_by|asked_in_place)\s*\(")
+# Calls whose closures run later, in input or in a task (a click handler, a
+# toast's link, a spawned job): what they do is not this pass's.
+LATER = re.compile(
+    r"\b(?:listener|marked_toast|on_[a-z_]+|spawn\w*|defer\w*|subscribe\w*|observe\w*)\s*\("
+)
+# Calls of a root, and the wrapper that runs it as nobody.
+UNASKED_CALL = re.compile(r"\bunasked\s*\(")
+# Tasks no window asked for: their `ScopedApp` updates run as nobody
+# (`chat_window/scoped.rs`), so the bodies of these calls are roots too.
+UNASKED_TASK = re.compile(
+    r"\b(?:spawn_screen|spawn_screen_in|spawn_app|spawn_app_in|defer_screen|defer_screen_in)\s*\("
+)
+
+
+def blank_calls(body, pattern):
+    """`body` with the arguments of the calls `pattern` finds blanked."""
+    out, at = body, 0
+    while True:
+        m = pattern.search(out, at)
+        if not m:
+            return out
+        end = balanced(out, m.end(), "(", ")")
+        if end is None:
+            return out
+        out = out[: m.start()] + " " * (end + 1 - m.start()) + out[end + 1 :]
+        at = end + 1
+
+
+def without_named_askers(body):
+    """`body` with what names its asker (`as_asked_by(..)`,
+    `asked_in_place(..)`) and what runs later (`LATER`) blanked."""
+    return blank_calls(blank_calls(body, NAMED_ASKER), LATER)
+
+
+def fn_bodies(ui):
+    """name -> [(path, offset of body, body)] for every `fn` in src/ui."""
+    out = {}
+    for path, text in ui:
+        for m in re.finditer(r"\bfn ([a-z_][a-z0-9_]*)\s*(?:<[^>(]*>)?\(", text):
+            brace = text.find("{", m.end())
+            semi = text.find(";", m.end())
+            if brace == -1 or (semi != -1 and semi < brace):
+                continue
+            end = balanced(text, brace + 1, "{", "}")
+            if end is not None:
+                out.setdefault(m.group(1), []).append((path, text, brace + 1, text[brace + 1 : end]))
+    return out
+
+
+def unasked_problems(ui):
+    """Rule 5."""
+    bodies = fn_bodies(ui)
+    texts = dict(ui)
+    out = []
+    starts = []
+    for path, name in UNASKED_ROOTS:
+        if name not in {n for n, entries in bodies.items() if any(p == path for p, *_ in entries)}:
+            out.append(f"{path}: no `fn {name}` (UNASKED_ROOTS in scripts/dialog_hosts.py)")
+            continue
+        starts.append((name, name))
+    frame = [e for e in bodies.get(MAIN_FRAME[1], []) if e[0] == MAIN_FRAME[0]]
+    if not frame:
+        out.append(f"{MAIN_FRAME[0]}: no `fn {MAIN_FRAME[1]}` (MAIN_FRAME in scripts/dialog_hosts.py)")
+    for _, _, _, body in frame:
+        for step in METHOD_CALL.findall(without_named_askers(body)):
+            if step not in IN_PLACE_STEPS:
+                starts.append((step, f"{MAIN_FRAME[1]} > {step}"))
+    # The bodies of tasks no window asked for.
+    for path, text in ui:
+        for m in UNASKED_TASK.finditer(text):
+            if text[max(0, m.start() - 3) : m.start()].endswith("fn "):
+                continue
+            end = balanced(text, m.end(), "(", ")")
+            if end is None:
+                continue
+            line_no = text.count("\n", 0, m.start()) + 1
+            name = f"{m.group(0).rstrip('( ')} at {path}:{line_no}"
+            bodies.setdefault(name, []).append((path, text, m.end(), text[m.end() : end]))
+            starts.append((name, name))
+    # Each root's callers run it as nobody.
+    roots = [name for _, name in UNASKED_ROOTS] + [MAIN_FRAME[1]]
+    for path, text in ui:
+        for root in roots:
+            for m in re.finditer(rf"\.\s*{root}\s*\(", text):
+                line_no = text.count("\n", 0, m.start()) + 1
+                line = text.split("\n")[line_no - 1]
+                if not UNASKED_CALL.search(line):
+                    out.append(
+                        f"{path}:{line_no}: `{root}` runs where no window asks: call it inside "
+                        f"`unasked(|this| this.{root}(..))`"
+                    )
+    lines_of = {}
+    seen = set()
+    queue = list(starts)
+    hits = {}
+    while queue:
+        name, via = queue.pop(0)
+        if name in seen:
+            continue
+        seen.add(name)
+        for path, text, base, body in bodies.get(name, []):
+            open_body = without_named_askers(body)
+            for m in ASKER_SENSITIVE.finditer(open_body):
+                if open_body[max(0, m.start() - 3) : m.start()].endswith("fn "):
+                    continue
+                line_no = text.count("\n", 0, base + m.start()) + 1
+                lines = lines_of.setdefault(path, text.split("\n"))
+                above = lines[max(0, line_no - 4) : line_no]
+                if any(MARKER.search(l) for l in above):
+                    continue
+                hits.setdefault((path, line_no), (m.group(1), via))
+            for callee in METHOD_CALL.findall(open_body):
+                if callee not in seen:
+                    queue.append((callee, f"{via} > {callee}"))
+    for (path, line_no), (call, via) in sorted(hits.items()):
+        out.append(
+            f"{path}:{line_no}: `{call}` runs where no window asked ({via}): carry the asking "
+            f"window with the request and run it under `as_asked_by(window, ..)`, or say why "
+            f"with `// box-host: <why>`"
+        )
     return out
 
 

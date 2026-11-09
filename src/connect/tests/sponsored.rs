@@ -107,7 +107,12 @@ fn sponsored_fetch_view_once_and_click() {
             .any(|json| json.contains("toggleHasSponsoredMessagesEnabled"))
     );
     assert_eq!(
-        driver.session.payments.hub.promo_request,
+        driver
+            .session
+            .payments
+            .hub
+            .promo_request
+            .map(|request| request.feature),
         Some(crate::premium_hub::PremiumFeature::DisabledAds.into())
     );
     assert!(driver.session.messages.last_sponsored_report.is_none());

@@ -240,12 +240,13 @@ impl QuillApp {
     /// `chat`'s, so choosing the open chat again keeps its bars.
     ///
     /// What other owners still hold for the chat left is ended here too:
-    /// the forward selection (`ShareUi`), the auto-delete picker
-    /// (`NotifyUi`, not per window) and a recording (`RecordingUi`, which
-    /// owes TDLib and disk a cancel).
+    /// the forward selection (`ShareUi`), the auto-delete picker of the
+    /// chat left (`NotifyUi`, not per window: one open for a chat another
+    /// window shows stays) and a recording (`RecordingUi`, which owes
+    /// TDLib and disk a cancel).
     pub(super) fn enter_chat_ui(&mut self, chat: ChatId, cx: &mut Context<Self>) {
-        // Phase B4: the TTL picker belongs to the previous chat.
-        self.notify.ttl_picker = None;
+        // Phase B4: the TTL picker belongs to the chat it was opened for.
+        self.close_ttl_picker_of_left_chat(Some(chat));
         self.dismiss_forward_for_chat(chat);
         self.cancel_recording_here(cx);
         if self.chat_ui.chat == Some(chat) {
@@ -257,6 +258,15 @@ impl QuillApp {
         next.pending_reply = old.pending_reply.filter(|reply| reply.belongs_to(chat));
         next.edit_mode = old.edit_mode.filter(|mode| mode.edit.chat_id == chat);
         *self.screen.chat_ui = next;
+    }
+
+    /// The view in place leaves its chat for `next` (`None`: no chat):
+    /// an auto-delete picker open for the chat left closes with it.
+    pub(super) fn close_ttl_picker_of_left_chat(&mut self, next: Option<ChatId>) {
+        let left = self.chat_ui.chat.filter(|chat| Some(*chat) != next);
+        if left.is_some() && self.notify.ttl_picker == left {
+            self.notify.ttl_picker = None;
+        }
     }
 
     /// The view in place shows no chat any more (`leave_open_chat`).

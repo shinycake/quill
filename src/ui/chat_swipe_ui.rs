@@ -258,7 +258,10 @@ impl QuillApp {
                 cx.background_executor()
                     .timer(Duration::from_millis(POLL_MS))
                     .await;
-                let Ok(more) = this.update(cx, |this, cx| this.poll_swipe(cx)) else {
+                // The chat list is the main window's: so is what a swipe opens.
+                let Ok(more) = this.update(cx, |this, cx| {
+                    this.as_asked_by(None, |this| this.poll_swipe(cx))
+                }) else {
                     return;
                 };
                 if !more {

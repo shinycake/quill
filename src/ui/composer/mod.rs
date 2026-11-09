@@ -371,7 +371,7 @@ impl QuillApp {
                     if snaps.iter().any(ComposerSnapshot::needs_media_prep) {
                         self.begin_media_prep(origin, snaps, window, cx);
                     } else {
-                        self.deliver_live_send(origin, snaps, window, cx);
+                        self.deliver_live_send(origin, snaps, Some(window), cx);
                     }
                     return;
                 }
@@ -430,7 +430,6 @@ impl QuillApp {
                         self.apply_demo_outgoing(&text, attachments.first(), reply.as_ref());
                     }
                     self.finish_pending_send();
-                    self.composer_ui.group_media = None;
                     self.chat_ui.set_reply(None);
                     if let Some(chat_id) = self.demo_session.as_ref().and_then(|s| s.open_chat) {
                         self.forget_local_draft(chat_id);
@@ -757,9 +756,8 @@ impl QuillApp {
     }
 
     pub(super) fn clear_attachment(&mut self, cx: &mut Context<Self>) {
+        // MED1: the grouping override goes with the tray.
         self.clear_pending_attachments();
-        // MED1: the grouping override belongs to this composer batch.
-        self.composer_ui.group_media = None;
         self.connection
             .set_note(StatusNote::silent(tr(keys::Q_CHAT_ATTACHMENT_CLEARED)));
         cx.notify();

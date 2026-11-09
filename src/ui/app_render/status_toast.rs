@@ -43,7 +43,8 @@ impl QuillApp {
     /// clicked away. Without a live session the footer line carries the
     /// note instead, so nothing toasts.
     pub(super) fn status_toast_visible(&mut self, cx: &mut Context<Self>) -> Option<StatusNote> {
-        self.drain_suggested_post_notes(cx);
+        // Any window's toast may drain it first: no window asked here.
+        self.unasked(|this| this.drain_suggested_post_notes(cx));
         // `QUILL_TRACE_STATUS=1`: print every status note (toasted or not)
         // to stderr, for diagnosing a live session.
         if self.connection.status_note() != self.connection.status_traced {

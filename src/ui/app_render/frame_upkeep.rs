@@ -25,8 +25,8 @@ impl QuillApp {
             return;
         }
         // What every window's frame runs, here with the main window's
-        // state in place (`window_upkeep`).
-        self.per_window_upkeep(window, cx);
+        // state in place (`window_upkeep`), as the window that asks.
+        self.asked_in_place(|this| this.per_window_upkeep(window, cx));
         // The chat windows open at the last run come back once the
         // account is ready (`chat_window::saved`).
         // main-only: it opens the chat windows themselves.
@@ -55,13 +55,7 @@ impl QuillApp {
         self.maybe_prefill_folder_editor(window, cx);
         // main-only: stories open in the main window.
         self.resolve_pending_story_open(window, cx);
-        // `parity:platform-deep-links`: open the chat or box the deep link
-        // resolved to (take-once; render owns the `Window`).
-        // main-only: deep links arrive in the main window; the chat they
-        // name goes through the router.
-        self.run_resolved_deep_link(window, cx);
         self.pump_collectible_info(cx);
-        self.pump_promo_request(cx);
         // main-only: mini apps open over the main window.
         self.run_pending_mini_app_action(window, cx);
         // Phase 9.2: the `updateStoryPostSucceeded` reducer queued poster

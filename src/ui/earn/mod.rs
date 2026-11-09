@@ -340,8 +340,10 @@ impl QuillApp {
         if let Some(note) = notes.into_iter().last() {
             self.connection.set_note(StatusNote::info(note));
         }
+        // The revenue and affiliate pages are the main window's
+        // (`earn_frame_upkeep`): a Telegram link from them opens there.
         if let Some(url) = url {
-            self.open_link(&url, cx);
+            self.as_asked_by(None, |this| this.open_link(&url, cx));
         }
         if closed
             && matches!(

@@ -318,7 +318,7 @@ fn a_switch_closes_reply_in_another_chat(cx: &mut TestAppContext) {
     switch(&app, &mut vcx);
     app.read_with(&vcx, |app, _| {
         assert!(!app.share.reply_elsewhere_open);
-        assert!(!app.share.reply_quote_open);
+        assert!(!app.reply_quote_open());
     });
 }
 

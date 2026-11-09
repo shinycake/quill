@@ -124,6 +124,7 @@ impl QuillApp {
             })
             // Above the viewer or the topic list, like the main window's toast.
             .children(body_toast)
+            .children(self.custom_emoji_card(cx))
             .children(self.photo_editor_overlay(cx))
             // M1: right-click message context menu.
             .when_some(self.message_ui.menu, |this, menu| {
