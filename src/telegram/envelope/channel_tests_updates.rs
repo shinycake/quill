@@ -23,6 +23,8 @@ fn community_updates_parsed() {
                     can_change_info: true,
                     can_ban_members: true,
                     members_can_edit_chat_list: true,
+                    can_edit_chat_list: true,
+                    are_chats_collapsed: false,
                 }
             );
         }
@@ -49,6 +51,7 @@ fn community_updates_parsed() {
                     administrator_count: 3,
                     banned_count: 1,
                     add_chat_request_count: 0,
+                    notification_settings: Default::default(),
                 }
             );
         }

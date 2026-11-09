@@ -38,6 +38,8 @@ pub enum EnvelopePayload {
     Chats(ChatsPayload),
     /// Options, connection state and scalar answers shared by many requests.
     Common(CommonPayload),
+    /// Communities: joined list, add-chat requests and member chats (TDLib 1.8.70).
+    Communities(CommunitiesPayload),
     /// Groups and channels: members, admin rights, invite links, join requests, boosts, communities.
     Groups(GroupsPayload),
     /// Files, downloads, uploads and the shared-media gallery.
@@ -75,6 +77,7 @@ impl std::fmt::Debug for EnvelopePayload {
             Self::ChatList(inner) => inner.fmt(f),
             Self::Chats(inner) => inner.fmt(f),
             Self::Common(inner) => inner.fmt(f),
+            Self::Communities(inner) => inner.fmt(f),
             Self::Groups(inner) => inner.fmt(f),
             Self::Media(inner) => inner.fmt(f),
             Self::Messages(inner) => inner.fmt(f),
@@ -111,6 +114,7 @@ payload_domains!(
     ChatList(ChatListPayload),
     Chats(ChatsPayload),
     Common(CommonPayload),
+    Communities(CommunitiesPayload),
     Groups(GroupsPayload),
     Media(MediaPayload),
     Messages(MessagesPayload),
@@ -235,6 +239,9 @@ pub struct UserProfileExtras {
     pub groups_in_common: i32,
     /// B10: `personal_chat_id` (the user's personal channel); 0 = none.
     pub personal_chat_id: i64,
+    /// TDLib 1.8.70 `community_id`: the community a bot was added to;
+    /// 0 for none and for users.
+    pub community_id: i64,
     /// B10: the private `note` added to the contact (plain text).
     pub note: String,
     /// B10: `need_phone_number_privacy_exception` — the edit-contact box
@@ -335,6 +342,7 @@ pub(crate) fn parse_user_profile_extras(info: Option<&serde_json::Value>) -> Use
             .get("personal_chat_id")
             .and_then(|v| super::json_helpers::int53(Some(v)).ok())
             .unwrap_or(0),
+        community_id: super::json_helpers::int53_or_zero(info.get("community_id")),
         note: super::message_content::parse_formatted_text(info.get("note")),
         need_phone_exception: info
             .get("need_phone_number_privacy_exception")

@@ -50,6 +50,7 @@ const DOMAIN_PARSERS: &[DomainParser] = &[
     parse_users_payload,
     parse_common_payload,
     parse_groups_payload,
+    parse_communities_payload,
     parse_media_payload,
     parse_stories_payload,
     parse_stickers_payload,

@@ -66,6 +66,9 @@ impl Session {
             EnvelopePayload::Common(payload) => {
                 self.apply_common_payload(payload, pending, extra, seq)
             }
+            EnvelopePayload::Communities(payload) => {
+                self.apply_communities_payload(payload, pending, extra, seq)
+            }
             EnvelopePayload::Groups(payload) => {
                 self.apply_groups_payload(payload, pending, extra, seq)
             }
