@@ -111,26 +111,30 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.admin.community.flow.open = None;
-        self.admin.community.flow.awaiting_new_chat = Some(community_id);
+        // The chooser closes the way every community box does (a Pending
+        // Requests answer in its undo time goes), and the wait takes over.
+        self.flush_and_close_community_box(cx);
+        self.admin.community.flow.waiting = Some(super::CommunityWait::NewChat { community_id });
         self.open_new_chat(kind, window, cx);
     }
 
     /// The chat made for a community exists: its own steps end there and
     /// the visibility box opens (GroupInfoBox's `done` callback).
     pub(super) fn drain_new_community_chat(&mut self, cx: &mut Context<Self>) -> bool {
-        let Some(community_id) = self.admin.community.flow.awaiting_new_chat else {
+        let Some(super::CommunityWait::NewChat { community_id }) =
+            self.admin.community.flow.waiting
+        else {
             return false;
         };
         let Some(view) = self.new_chat_view() else {
-            self.admin.community.flow.awaiting_new_chat = None;
+            self.admin.community.flow.waiting = None;
             return true;
         };
         let chat = match view.step {
             NewChatStep::Type(chat) | NewChatStep::Done(chat) => chat,
             _ => return false,
         };
-        self.admin.community.flow.awaiting_new_chat = None;
+        self.admin.community.flow.waiting = None;
         self.close_new_chat(cx);
         self.choose_community_visibility(community_id, chat.0, None, cx);
         true

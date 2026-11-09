@@ -162,6 +162,17 @@ thread_local! {
     static VIDEO_OUTPUT: RefCell<Option<SharedOutput>> = const { RefCell::new(None) };
 }
 
+/// Whether a video soundtrack can start now (an output device is up, or
+/// its opening is not held back by a recent failure).
+pub(in crate::ui) fn video_output_up() -> bool {
+    VIDEO_OUTPUT.with(|slot| {
+        slot.borrow()
+            .as_ref()
+            .and_then(SharedOutput::outlet)
+            .is_some()
+    })
+}
+
 /// Let video soundtracks play on the app's one output.
 pub(super) fn share_output_with_video(output: &SharedOutput) {
     VIDEO_OUTPUT.with(|slot| *slot.borrow_mut() = Some(output.clone()));

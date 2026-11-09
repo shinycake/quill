@@ -8,7 +8,8 @@ use crate::state::{AdminLinksState, InviteLinkMembersState, LinkRequestsState};
 
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct InvitePages {
-    /// The chat every page below belongs to.
+    /// The chat every page below belongs to; `None` exactly when no page
+    /// is open (`drop_chat_if_empty`).
     chat: Option<i64>,
     admin_links: Option<AdminLinksState>,
     join_requests: Option<LinkRequestsState>,
@@ -36,6 +37,14 @@ impl InvitePages {
         self.chat == Some(chat)
     }
 
+    /// With its last page closed the value names no chat: `chat` is set
+    /// exactly while a page is open.
+    fn drop_chat_if_empty(&mut self) {
+        if self.admin_links.is_none() && self.join_requests.is_none() && self.members.is_none() {
+            self.chat = None;
+        }
+    }
+
     /// Every page goes.
     pub fn clear(&mut self) {
         *self = Self::default();
@@ -59,6 +68,7 @@ impl InvitePages {
     pub fn close_admin_links(&mut self, chat: i64) {
         if self.holds(chat) {
             self.admin_links = None;
+            self.drop_chat_if_empty();
         }
     }
 
@@ -80,6 +90,7 @@ impl InvitePages {
     pub fn close_join_requests(&mut self, chat: i64) {
         if self.holds(chat) {
             self.join_requests = None;
+            self.drop_chat_if_empty();
         }
     }
 
@@ -101,6 +112,7 @@ impl InvitePages {
     pub fn close_members(&mut self, chat: i64) {
         if self.holds(chat) {
             self.members = None;
+            self.drop_chat_if_empty();
         }
     }
 }
@@ -136,6 +148,15 @@ mod tests {
             "closing another chat's page is a no-op"
         );
         pages.clear();
+        assert_eq!(pages, InvitePages::default());
+    }
+
+    #[test]
+    fn closing_the_last_page_names_no_chat() {
+        let mut pages = InvitePages::default();
+        pages.set_admin_links(1, links(7));
+        pages.close_admin_links(1);
+        assert_eq!(pages.chat(), None);
         assert_eq!(pages, InvitePages::default());
     }
 }

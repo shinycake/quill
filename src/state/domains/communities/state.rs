@@ -157,6 +157,12 @@ impl CommunitiesState {
         }
     }
 
+    /// The account comes back on screen: what finished for the screen it
+    /// left is not reported on the new one.
+    pub fn forget_outcomes(&mut self) {
+        self.outcomes.clear();
+    }
+
     /// The next finished request for the UI to report.
     pub fn take_outcome(&mut self) -> Option<CommunityOutcome> {
         self.outcomes.pop_front()

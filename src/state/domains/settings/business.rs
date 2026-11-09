@@ -16,6 +16,11 @@ pub struct BusinessSettingsState {
     pub saving: Vec<BusinessSettingKind>,
     /// The last refused save, in words.
     pub error: Option<String>,
+    /// The own `getUserFullInfo` the Business screens wait for (their
+    /// saved values are in it): its answer, its error or a lost request
+    /// ends the wait, and a failure shows a Retry instead of "Loading…".
+    /// The info itself is in `users_state.user_full_infos`.
+    pub own_info: crate::state::fetch::Fetch<()>,
 }
 
 impl Session {
@@ -29,6 +34,25 @@ impl Session {
             pending.map(|p| p.purpose)
         {
             self.settings.business.saving.retain(|k| *k != kind);
+        }
+    }
+
+    /// The own full info arrived (an answer or an update): the Business
+    /// wait is over.
+    pub(crate) fn settle_own_full_info(&mut self, user_id: i64) {
+        if self.my_user_id == Some(user_id) {
+            self.settings.business.own_info.succeed(());
+        }
+    }
+
+    /// A failed `getUserFullInfo`: for the own user, the Business wait
+    /// fails with the reason (a lost request settles here too).
+    pub(crate) fn fail_own_full_info(&mut self, err: &TdError, pending: Option<&PendingRequest>) {
+        let Some(pending) = pending.filter(|p| p.purpose == RequestPurpose::GetUserFullInfo) else {
+            return;
+        };
+        if pending.user_id.is_some() && pending.user_id == self.my_user_id {
+            self.settings.business.own_info.fail(error_reason(err));
         }
     }
 

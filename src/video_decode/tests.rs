@@ -807,3 +807,26 @@ fn ffmpeg_opens_a_path_that_is_not_utf8() {
     let _ = std::fs::remove_dir_all(&dir);
     assert_eq!(opened.expect("open through the link").info().width, 96);
 }
+
+/// A soundtrack whose output let go of its tap (no device at attach, or
+/// the device was lost) can be tapped again once an output is up: the
+/// clip does not lose its sound for the rest of its run.
+#[test]
+fn a_let_go_soundtrack_is_tapped_again() {
+    let (mut player, _) = scripted_player(None, true, 3);
+    let mut tap = None;
+    assert!(wait_until(|| {
+        tap = player.take_audio_tap();
+        tap.is_some()
+    }));
+    assert!(
+        player.reattach_audio_tap().is_none(),
+        "no second tap while the first is held"
+    );
+    drop(tap);
+    assert!(!player.has_sound(), "the clip runs on its wall clock");
+    let again = player.reattach_audio_tap();
+    assert!(again.is_some(), "a new tap for the same sound");
+    assert!(player.has_sound(), "the sound is the clock again");
+    assert!(player.reattach_audio_tap().is_none());
+}

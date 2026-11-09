@@ -204,8 +204,6 @@ PremiumHub::tx_loading
 PrivacyData::network_loading
 PrivacyData::network_loading+error
 ProfileModal::closing
-ProgramList::loaded
-ProgramList::loading
 ProxyState::loading
 ProxyState::loading+error
 PublicForwardsList::loading
@@ -258,8 +256,6 @@ SignInUi::tick_armed+error_clock
 StageFacts::create_pending
 StageFacts::type_failed
 StageFacts::type_pending
-StarHistory::loaded
-StarHistory::loading
 StarPacksState::loaded
 StarPacksState::loading
 StarPacksState::loading+error
@@ -301,8 +297,6 @@ ThemeGifts::loaded
 ThemeGifts::loading
 ThreadView::reading_started
 ThreadWindow::loaded_complete
-TonHistory::loaded
-TonHistory::loading
 TonWalletState::explorer_url_requested
 TonWalletState::rates_requested
 TonWalletState::state_requested

@@ -11,6 +11,7 @@ impl Session {
         seq: u64,
     ) {
         self.settle_own_reaction(extra, true);
+        self.fail_own_full_info(&err, pending);
         if matches!(
             pending.map(|p| p.purpose),
             Some(

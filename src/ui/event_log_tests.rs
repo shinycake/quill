@@ -79,26 +79,26 @@ fn the_filter_box_applies_on_save_and_drops_on_cancel(cx: &mut TestAppContext) {
         app.open_event_log_filter(CHANNEL, cx);
         let view = app.admin.group_settings_dialog.as_ref().map(|d| d.view);
         assert_eq!(view, Some(GroupSettingsView::RecentActionsFilter));
-        let open = app.admin.event_log_filter.as_ref().expect("filter box");
+        let open = app.event_log_filter_box().expect("filter box");
         assert!(open.draft().all_actions() && open.draft().can_save());
 
         // Nothing ticked cannot be saved; one category can.
         app.edit_event_log_filter(cx, |draft, _| draft.set_all_actions(false));
-        let open = app.admin.event_log_filter.as_ref().expect("filter box");
+        let open = app.event_log_filter_box().expect("filter box");
         assert!(!open.draft().can_save());
         app.edit_event_log_filter(cx, |draft, _| {
             draft.toggle_category(FilterCategory::Edited, true);
         });
-        let open = app.admin.event_log_filter.as_ref().expect("filter box");
+        let open = app.event_log_filter_box().expect("filter box");
         assert!(open.draft().can_save());
 
         // Cancel: back on the list, the choices dropped.
         app.close_event_log_filter(cx);
-        assert!(app.admin.event_log_filter.is_none());
+        assert!(app.event_log_filter_box().is_none());
         let view = app.admin.group_settings_dialog.as_ref().map(|d| d.view);
         assert_eq!(view, Some(GroupSettingsView::RecentActions));
         app.open_event_log_filter(CHANNEL, cx);
-        let open = app.admin.event_log_filter.as_ref().expect("filter box");
+        let open = app.event_log_filter_box().expect("filter box");
         assert!(open.draft().all_actions());
     });
 }

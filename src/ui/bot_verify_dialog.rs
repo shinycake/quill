@@ -85,12 +85,16 @@ impl QuillApp {
         )
     }
 
-    fn open_bot_verify(&mut self, bot_id: i64, window: &mut Window, cx: &mut Context<Self>) {
-        let placeholder = self
-            .session()
+    /// The bot's default description, what each pick's field starts with.
+    fn bot_verify_default_description(&self, bot_id: i64) -> String {
+        self.session()
             .and_then(|s| s.bot_verification_parameters(bot_id))
             .map(|p| p.default_description.clone())
-            .unwrap_or_default();
+            .unwrap_or_default()
+    }
+
+    fn open_bot_verify(&mut self, bot_id: i64, window: &mut Window, cx: &mut Context<Self>) {
+        let placeholder = self.bot_verify_default_description(bot_id);
         let input = cx.new(|cx| {
             TextareaState::new(window, cx)
                 .placeholder(tr(keys::Q_MEDIA_DESCRIPTION_OPTIONAL))
@@ -112,8 +116,20 @@ impl QuillApp {
         cx.notify();
     }
 
-    fn set_bot_verify_step(&mut self, step: Step, cx: &mut Context<Self>) {
+    /// Move the box to `step`. Each Add starts from the bot's default
+    /// description (tdesktop makes the confirm box per pick): the text
+    /// typed for one chat is never sent for the next.
+    fn set_bot_verify_step(&mut self, step: Step, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(bot_id) = self.dialogs.bot_verify_dialog.as_ref().map(|d| d.bot_id) else {
+            return;
+        };
+        let default = self.bot_verify_default_description(bot_id);
         if let Some(dialog) = self.dialogs.bot_verify_dialog.as_mut() {
+            if matches!(step, Step::Add(_)) {
+                dialog
+                    .input
+                    .update(cx, |input, cx| input.set_value(default, window, cx));
+            }
             dialog.step = step;
         }
         cx.notify();
@@ -275,6 +291,7 @@ impl QuillApp {
                                         } else {
                                             Step::Add(id)
                                         },
+                                        window,
                                         cx,
                                     );
                                     window.refresh();
@@ -360,7 +377,7 @@ impl QuillApp {
                                 .label(tr(keys::Q_MEDIA_BACK))
                                 .ghost()
                                 .on_click(cx.listener(|this, _, window, cx| {
-                                    this.set_bot_verify_step(Step::Pick, cx);
+                                    this.set_bot_verify_step(Step::Pick, window, cx);
                                     window.refresh();
                                 })),
                         )
@@ -379,7 +396,7 @@ impl QuillApp {
                             };
                             button.on_click(cx.listener(move |this, _, window, cx| {
                                 if this.submit_bot_verify(remove, cx) {
-                                    this.set_bot_verify_step(Step::Pick, cx);
+                                    this.set_bot_verify_step(Step::Pick, window, cx);
                                     window.refresh();
                                 }
                             }))
@@ -428,3 +445,8 @@ crate::ui::shell::register_dialogs! {
     )
     .close(|app, _, cx| app.close_bot_verify(cx)),
 }
+
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+#[path = "bot_verify_dialog_tests.rs"]
+mod tests;

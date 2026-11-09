@@ -277,6 +277,8 @@ impl Render for CallWindowRoot {
             return div().into_any_element();
         };
         let disk_bar = owner.update(cx, |app, cx| app.disk_low_overlay(px(WINDOW_CONTROLS), cx));
+        // A second call ringing in is answered here too (`swap_call_window_card`).
+        let swap_card = owner.update(cx, |app, cx| app.swap_call_window_card(cx));
         let (drawn, ground) = owner.update(cx, |app, cx| {
             // The players follow the call before anything reads them.
             let remote = app.call_picture_player(CallPicture::Remote, cx);
@@ -352,6 +354,16 @@ impl Render for CallWindowRoot {
                     .child(self.panel.clone().cached(cached())),
             )
             .children(disk_bar)
+            .children(swap_card.map(|card| {
+                div()
+                    .absolute()
+                    .top(px(WINDOW_CONTROLS + 8.))
+                    .left_0()
+                    .right_0()
+                    .flex()
+                    .justify_center()
+                    .child(card)
+            }))
             .into_any_element()
     }
 }

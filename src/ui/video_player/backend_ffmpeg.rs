@@ -150,7 +150,15 @@ impl FfmpegBackend {
         if self.sound.is_some() {
             return;
         }
-        if let Some(tap) = self.player.take_audio_tap() {
+        // The first tap, or (once an output is up again) a new one for a
+        // sound whose tap was let go: a device that was missing at attach
+        // or lost mid-clip gives the clip its soundtrack back.
+        let tap = match self.player.take_audio_tap() {
+            Some(tap) => Some(tap),
+            None if crate::ui::audio::video_output_up() => self.player.reattach_audio_tap(),
+            None => None,
+        };
+        if let Some(tap) = tap {
             let running = self.player.is_playing();
             self.sound = StreamSound::start(tap, self.volume, self.want.rate, running);
         }

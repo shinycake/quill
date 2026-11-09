@@ -59,11 +59,10 @@ pub struct SettingsState {
     pub scope_notification_settings: HashMap<NotificationSettingsScope, ScopeNotificationSettings>,
     /// Parity slice: `getChatNotificationSettingsExceptions` answers —
     /// chat ids with non-default notification settings per scope (the
-    /// exceptions list view).
-    pub notification_exceptions: HashMap<NotificationSettingsScope, Vec<i64>>,
-    /// Parity slice: scopes with a `getChatNotificationSettingsExceptions`
-    /// in flight.
-    pub notification_exceptions_loading: HashSet<NotificationSettingsScope>,
+    /// exceptions list view). No entry: never asked, or dropped as stale
+    /// by `updateChatNotificationSettings`, so the page asks again; a
+    /// failure stays failed until its Retry.
+    pub notification_exceptions: HashMap<NotificationSettingsScope, Fetch<Vec<i64>>>,
     /// Parity slice: scopes with a `getScopeNotificationSettings` in flight.
     pub scope_settings_loading: HashSet<NotificationSettingsScope>,
     /// Parity slice: `updateReactionNotificationSettings` cache. No getter
@@ -267,7 +266,6 @@ impl SettingsState {
             tone_upload: crate::tone_upload::ToneUpload::Idle,
             scope_notification_settings: HashMap::new(),
             notification_exceptions: HashMap::new(),
-            notification_exceptions_loading: HashSet::new(),
             scope_settings_loading: HashSet::new(),
             reaction_notification_settings: None,
             storage_stats: None,

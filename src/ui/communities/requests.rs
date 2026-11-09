@@ -51,8 +51,7 @@ impl QuillApp {
         {
             self.set_note(StatusNote::error(user_error(&err)));
         }
-        self.admin.community.flow.requests_scroll = ScrollHandle::new();
-        self.admin.community.flow.requests_asked = Default::default();
+        self.admin.community.flow.requests_view.reset(community_id);
         self.show_community_box(
             CommunityBox::Requests {
                 community_id,
@@ -375,12 +374,10 @@ impl QuillApp {
         let loaded = fetch.data().map_or(0, |list| list.requests.len());
         let has_more = fetch.data().is_some_and(|list| list.next_offset.is_some())
             && (scrolled || fetch.error().is_none());
-        let flow = &self.admin.community.flow;
-        if !load_due(
-            scrolled_near_end(&flow.requests_scroll),
-            has_more,
-            fetch.is_loading(),
-        ) || !flow.requests_asked.allow(loaded, scrolled)
+        let loading = fetch.is_loading();
+        let view = self.admin.community.flow.requests_view.of(community_id);
+        if !load_due(scrolled_near_end(&view.scroll), has_more, loading)
+            || !view.asked.allow(loaded, scrolled)
         {
             return;
         }
@@ -469,7 +466,15 @@ impl QuillApp {
                 .flex_col()
                 .max_h(px(360.))
                 .overflow_y_scroll()
-                .track_scroll(&this.admin.community.flow.requests_scroll);
+                .track_scroll(
+                    &this
+                        .admin
+                        .community
+                        .flow
+                        .requests_view
+                        .of(community_id)
+                        .scroll,
+                );
             for request in &requests {
                 list = list.child(this.community_request_row(
                     community_id,

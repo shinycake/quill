@@ -257,3 +257,26 @@ fn show_as_one_chat_is_busy_while_its_toggle_is_in_flight() {
     );
     assert!(!session.community_collapse_in_flight(42));
 }
+
+/// What finished for the screen an account left is not reported on the
+/// screen it comes back to (`put_on_screen` calls `forget_outcomes`).
+#[test]
+fn outcomes_of_a_left_screen_are_forgotten() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    let extra = session.request_for_community(
+        RequestPurpose::Communities(CommunitiesPurpose::ToggleMemberBanned {
+            member: crate::state::CommunityMember::User(5),
+            is_banned: true,
+        }),
+        42,
+    );
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra.0),
+    );
+    session.communities.forget_outcomes();
+    assert_eq!(session.communities.take_outcome(), None::<CommunityOutcome>);
+}

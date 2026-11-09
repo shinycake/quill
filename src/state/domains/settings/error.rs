@@ -242,15 +242,17 @@ impl Session {
         {
             self.settings.scope_settings_loading.remove(&scope);
         }
-        // Parity slice: a failed
-        // `getChatNotificationSettingsExceptions` must not leave the
-        // scope in `notification_exceptions_loading` — otherwise every
-        // later dialog open skips the fetch and the exceptions stay
-        // unfetchable. Dropping it here means the next open retries.
+        // A failed `getChatNotificationSettingsExceptions` ends its
+        // loading stage: the list says so, with a Retry, and nothing asks
+        // again by itself.
         if pending.map(|p| p.purpose) == Some(RequestPurpose::GetChatNotificationSettingsExceptions)
             && let Some(scope) = pending.and_then(|p| p.scope)
         {
-            self.settings.notification_exceptions_loading.remove(&scope);
+            self.settings
+                .notification_exceptions
+                .entry(scope)
+                .or_default()
+                .fail(error_reason(err));
         }
     }
 }

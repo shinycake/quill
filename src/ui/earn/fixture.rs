@@ -180,7 +180,7 @@ pub(in crate::ui) fn seed_channel_monetization(
         ]}),
     );
     page.ton_history.rows = ton.transactions;
-    page.ton_history.loaded = true;
+    page.ton_history.load = quill::earn::PageLoad::Ready;
     page.history_mut(TxFilter::All)
         .apply(star_history(Some(DEMO_CHANNEL)), false);
     let earn = &mut session.payments.earn;
@@ -259,13 +259,13 @@ pub(in crate::ui) fn seed_affiliate_join(
     let mut join = JoinPage::new(peer);
     join.mine.programs = vec![joined_program()];
     join.mine.total_count = 1;
-    join.mine.loaded = true;
+    join.mine.load = quill::earn::PageLoad::Ready;
     join.found.programs = vec![
         found(FOUND_BOTS[0], 300, 0, 4),
         found(FOUND_BOTS[1], 120, 6, 1),
     ];
     join.found.total_count = 2;
-    join.found.loaded = true;
+    join.found.load = quill::earn::PageLoad::Ready;
     let earn = &mut session.payments.earn;
     earn.join = Some(join);
     earn.recipients = Some(vec![EarnPeer::User(777), EarnPeer::Chat(DEMO_CHANNEL)]);

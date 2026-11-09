@@ -20,7 +20,7 @@ use quill::telegram::envelope::MessageSender;
 const ADMIN_AVATAR: f32 = 28.;
 
 /// The open filter box: the choices so far and the administrators offered.
-pub(super) struct EventLogFilterBox {
+pub(in crate::ui) struct EventLogFilterBox {
     draft: FilterDraft,
     admins: Vec<i64>,
     is_channel: bool,
@@ -71,6 +71,23 @@ impl EventLogFilterBox {
 }
 
 impl QuillApp {
+    /// The open filter box, of the Group Settings box that shows it.
+    pub(super) fn event_log_filter_box(&self) -> Option<&EventLogFilterBox> {
+        self.admin
+            .group_settings_dialog
+            .as_ref()?
+            .event_log_filter
+            .as_ref()
+    }
+
+    fn event_log_filter_box_mut(&mut self) -> Option<&mut EventLogFilterBox> {
+        self.admin
+            .group_settings_dialog
+            .as_mut()?
+            .event_log_filter
+            .as_mut()
+    }
+
     /// The Filter button: open the box over what the chat filters by now.
     pub(super) fn open_event_log_filter(&mut self, chat_id: ChatId, cx: &mut Context<Self>) {
         let Some(session) = self.session() else {
@@ -89,23 +106,36 @@ impl QuillApp {
             .get(&chat_id.0)
             .is_some_and(|chat| chat.is_channel());
         let admins = self.event_log_admin_ids(chat_id, fetch.as_ref());
-        self.admin.event_log_filter = Some(EventLogFilterBox {
+        let open = EventLogFilterBox {
             draft: FilterDraft::open(stored, &stored_admins, &admins, is_channel),
             admins,
             is_channel,
-        });
+        };
         self.set_group_settings_view(GroupSettingsView::RecentActionsFilter, cx);
+        if let Some(dialog) = self
+            .admin
+            .group_settings_dialog
+            .as_mut()
+            .filter(|d| d.chat_id == chat_id)
+        {
+            dialog.event_log_filter = Some(open);
+        }
     }
 
     /// Cancel: back to the list, nothing changed.
     pub(super) fn close_event_log_filter(&mut self, cx: &mut Context<Self>) {
-        self.admin.event_log_filter = None;
         self.set_group_settings_view(GroupSettingsView::RecentActions, cx);
     }
 
     /// Save: store both lists and load the log again.
     pub(super) fn save_event_log_filter(&mut self, chat_id: ChatId, cx: &mut Context<Self>) {
-        let Some(open) = self.admin.event_log_filter.take() else {
+        let Some(open) = self
+            .admin
+            .group_settings_dialog
+            .as_mut()
+            .filter(|d| d.chat_id == chat_id)
+            .and_then(|d| d.event_log_filter.take())
+        else {
             return;
         };
         let choice = open.draft.choice(&open.admins);
@@ -122,7 +152,7 @@ impl QuillApp {
         cx: &mut Context<Self>,
         edit: impl FnOnce(&mut FilterDraft, &[i64]),
     ) {
-        if let Some(open) = self.admin.event_log_filter.as_mut() {
+        if let Some(open) = self.event_log_filter_box_mut() {
             edit(&mut open.draft, &open.admins);
         }
         cx.notify();
@@ -135,9 +165,7 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let can_save = self
-            .admin
-            .event_log_filter
-            .as_ref()
+            .event_log_filter_box()
             .is_some_and(|open| open.draft.can_save());
         div()
             .flex()
@@ -168,7 +196,7 @@ impl QuillApp {
             .flex_col()
             .w_full()
             .gap_2();
-        let Some(open) = self.admin.event_log_filter.as_ref() else {
+        let Some(open) = self.event_log_filter_box() else {
             return body.into_any_element();
         };
         let theme = cx.theme();

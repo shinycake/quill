@@ -1,6 +1,7 @@
 //! Methods moved out of `profile_panels.rs` to keep files under 1000 lines.
 
 use super::*;
+use crate::ui::dialogs::ContactNote;
 use crate::ui::status_note::StatusNote;
 use quill::lang::{keys, tr, tr_with};
 
@@ -51,15 +52,19 @@ impl QuillApp {
     ) {
         let Some((first, last, note)) = self.session().and_then(|s| {
             let user = s.user(user_id)?;
-            let note = s
-                .user_full_info(user_id)
-                .map(|i| i.extras.note.clone())
-                .unwrap_or_default();
+            let note = s.user_full_info(user_id).map(|i| i.extras.note.clone());
             Some((user.first_name.clone(), user.last_name.clone(), note))
         }) else {
             return;
         };
-        let dialog = EditContactDialog::new(window, cx, user_id, &first, &last, &note);
+        if note.is_none()
+            && let Some(live) = self.live.as_mut()
+        {
+            // The note lands with the full info; `edit_contact_note_upkeep`
+            // fills the field then.
+            let _ = live.driver.fetch_user_full_info(user_id);
+        }
+        let dialog = EditContactDialog::new(window, cx, user_id, &first, &last, note.as_deref());
         dialog
             .first_name_input
             .update(cx, |input, cx| input.focus(window, cx));
@@ -71,6 +76,42 @@ impl QuillApp {
     /// Save the edit-contact box. Only the note changed: `setUserNote`;
     /// otherwise `addContact` (add-or-edit) with the current note so the
     /// note is not cleared.
+    /// The edit-contact box opened before the full user info: its note
+    /// goes in at the first frame after the info lands, in the window that
+    /// hosts the box (the field needs that window). A note the user typed
+    /// meanwhile is kept.
+    pub(in crate::ui) fn edit_contact_note_upkeep(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(ProfileDialog::EditContact(dialog)) = &self.dialogs.profile_dialog else {
+            return;
+        };
+        if dialog.note == ContactNote::Seeded {
+            return;
+        }
+        let user_id = dialog.user_id;
+        let Some(note) = self
+            .session()
+            .and_then(|s| s.user_full_info(user_id))
+            .map(|i| i.extras.note.clone())
+        else {
+            return;
+        };
+        let Some(ProfileDialog::EditContact(dialog)) = &mut self.dialogs.profile_dialog else {
+            return;
+        };
+        dialog.note = ContactNote::Seeded;
+        dialog.note_input.update(cx, |input, cx| {
+            input.set_placeholder(tr(keys::Q_OPS_NOTE_ONLY_VISIBLE_TO_YOU), window, cx);
+            if input.value().trim().is_empty() {
+                input.set_value(&note, window, cx);
+            }
+        });
+        cx.notify();
+    }
+
     pub(super) fn submit_edit_contact(&mut self, cx: &mut Context<Self>) -> bool {
         let Some(ProfileDialog::EditContact(dialog)) = &self.dialogs.profile_dialog else {
             return false;
@@ -90,6 +131,16 @@ impl QuillApp {
             dialog.note_input.read(cx).value().trim().to_string(),
             dialog.share_phone,
         );
+        // An empty field before the note is known is not "no note": saving
+        // it would erase the contact's note. Ask again and wait.
+        if dialog.note == ContactNote::Waiting && note.is_empty() {
+            if let Some(live) = self.live.as_mut() {
+                let _ = live.driver.fetch_user_full_info(user_id);
+            }
+            self.set_note(StatusNote::silent(tr(keys::Q_PEOPLE_LOADING)));
+            cx.notify();
+            return false;
+        }
         if first.is_empty() && last.is_empty() {
             self.set_note(StatusNote::silent(tr(keys::Q_PEOPLE_ENTER_A_NAME_FOR_THE)));
             cx.notify();

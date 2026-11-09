@@ -231,3 +231,29 @@ fn the_lock_closes_the_ceremony_and_its_pin_field(cx: &mut TestAppContext) {
     });
     assert_ne!(shown_dialog(&shell, vcx), Some(DialogKind::PasskeyCeremony));
 }
+
+/// Under the lock the ceremony ticker does not run and a tick starts
+/// nothing: options that land after the lock never reach the key.
+#[gpui_kit::test]
+fn no_ceremony_ticks_under_the_lock(cx: &mut TestAppContext) {
+    let (app, shell, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    assert_eq!(shown_dialog(&shell, vcx), Some(DialogKind::PasskeyCeremony));
+    app.update_in(vcx, |app, window, cx| {
+        app.run_passkey_ticker(window, cx);
+        assert!(app.privacy.passkeys.ticker.is_some(), "unlocked, it ticks");
+        app.account.passcode.enabled = true;
+        app.lock_by_passcode(cx);
+        assert!(
+            app.privacy.passkeys.ticker.is_none(),
+            "the lock stops the ticker"
+        );
+        app.run_passkey_ticker(window, cx);
+        assert!(
+            app.privacy.passkeys.ticker.is_none(),
+            "no ticker starts while locked"
+        );
+        assert!(!app.tick_passkey_ceremony(window, cx), "a tick refuses");
+        assert!(app.privacy.passkeys.ceremony.is_none());
+    });
+}

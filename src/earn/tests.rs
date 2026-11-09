@@ -3,6 +3,37 @@ use crate::premium_hub::{StarAmount, TxFilter};
 use serde_json::json;
 
 #[test]
+fn a_failed_page_is_not_asked_again_by_itself() {
+    let mut list: ProgramList<FoundProgram> = ProgramList::default();
+    assert!(!list.load.has_first_page());
+    list.load.start(false);
+    list.next_offset = "next".into();
+    list.load = PageLoad::Ready;
+    assert!(list.may_page(), "a list with more pages asks at the end");
+    list.load.start(true);
+    assert_eq!(list.load, PageLoad::Loading { more: true });
+    assert!(!list.may_page());
+    // The next page's error arm (or its send) fails it: the offset stays
+    // for the Retry, and the end of the list asks nothing.
+    list.load.fail();
+    assert_eq!(list.load, PageLoad::Failed { more: true });
+    assert!(!list.may_page(), "no request every frame after an error");
+    assert!(list.load.has_first_page());
+    // Retry asks that page again.
+    list.load.start(true);
+    assert_eq!(list.load, PageLoad::Loading { more: true });
+}
+
+#[test]
+fn a_failed_first_page_retries_from_the_start() {
+    let mut load = PageLoad::Unasked;
+    load.start(true);
+    assert_eq!(load, PageLoad::Loading { more: false });
+    load.fail();
+    assert_eq!(load, PageLoad::Failed { more: false });
+}
+
+#[test]
 fn ton_amounts_print_like_tdesktop() {
     // MajorPart drops the fraction, MinorPart cuts it to two digits.
     assert_eq!(ton_major(12_345_678_901), "12");

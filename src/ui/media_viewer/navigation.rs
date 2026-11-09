@@ -265,7 +265,31 @@ impl QuillApp {
         self.viewer.rotated = None;
         self.viewer.hdr.reset();
         self.viewer.over_controls = false;
+        // A pan held when the viewer closed ends with it.
+        self.viewer.drag = None;
         cx.notify();
+    }
+
+    /// The pointer moved with a drag-pan anchored: pan while the left
+    /// button is held. The release can land off the picture (the backdrop,
+    /// the top bar), where the picture's mouse-up never fires, so the
+    /// button state ends the drag, not that handler alone.
+    pub(in crate::ui) fn viewer_drag_moved(
+        &mut self,
+        pos: (f32, f32),
+        held: bool,
+        cx: &mut Context<Self>,
+    ) {
+        let Some((lx, ly)) = self.viewer.drag else {
+            return;
+        };
+        if !held {
+            self.viewer.drag = None;
+            cx.notify();
+            return;
+        }
+        self.viewer_pan_drag(pos.0 - lx, pos.1 - ly, cx);
+        self.viewer.drag = Some(pos);
     }
 
     pub(in crate::ui) fn step_media_viewer(&mut self, delta: i32, cx: &mut Context<Self>) {

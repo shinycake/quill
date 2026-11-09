@@ -97,6 +97,9 @@ impl QuillApp {
             return;
         };
         dialog.view = view;
+        if view != GroupSettingsView::RecentActionsFilter {
+            dialog.event_log_filter = None;
+        }
         let chat_id = dialog.chat_id;
         if view == GroupSettingsView::Boosts {
             self.open_boosts_page(chat_id, false);

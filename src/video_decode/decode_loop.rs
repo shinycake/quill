@@ -1,12 +1,12 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::{
-    AUDIO_HIGH_SECS, AUDIO_LOW_SECS, AudioQueue, AudioShared, AudioTap, Clock, Demuxer, IDLE_WAIT,
-    Item, PixelOutput, PlayedMark, SYNC_TOLERANCE, Shared, State, VideoFrame, lock,
+    AUDIO_HIGH_SECS, AUDIO_LOW_SECS, AudioShared, AudioTap, Clock, Demuxer, IDLE_WAIT, Item,
+    PixelOutput, SYNC_TOLERANCE, Shared, State, VideoFrame, lock,
 };
 use std::collections::VecDeque;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::atomic::Ordering;
+use std::sync::{Arc, MutexGuard};
 use std::time::{Duration, Instant};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -105,29 +105,8 @@ impl Decoder {
         let has_video = info.has_video;
         let mut state = lock(&shared.state);
         if want_audio && info.has_audio {
-            let audio = Arc::new(AudioShared {
-                rate: info.sample_rate,
-                channels: info.channels.max(1),
-                queue: Mutex::new(AudioQueue::default()),
-                generation: AtomicU64::new(0),
-                origin: AtomicU64::new(0f64.to_bits()),
-                played: AtomicU64::new(PlayedMark::NOTHING.0),
-                detached: AtomicBool::new(false),
-                starved: AtomicBool::new(true),
-            });
-            state.tap = Some(AudioTap {
-                shared: audio.clone(),
-                wake: shared.clone(),
-                chunk: Vec::new(),
-                at: 0,
-                chunk_pts: 0.0,
-                end_pts: 0.0,
-                pts_shift: 0.0,
-                gap: 0,
-                gap_at: 0,
-                generation: 0,
-                sounding: false,
-            });
+            let audio = Arc::new(AudioShared::new(info.sample_rate, info.channels));
+            state.tap = Some(AudioTap::new(audio.clone(), shared.clone()));
             state.audio = Some(audio);
         }
         state.info = Some(info);

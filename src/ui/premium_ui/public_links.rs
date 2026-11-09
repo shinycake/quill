@@ -43,9 +43,27 @@ impl QuillApp {
                 return list
                     .child(
                         div()
-                            .text_xs()
-                            .text_color(muted)
-                            .child(tr(keys::Q_PEOPLE_COULDNT_SEND_THE_CHANGE_TRY)),
+                            .flex()
+                            .items_center()
+                            .gap_2()
+                            .child(
+                                div()
+                                    .text_xs()
+                                    .text_color(muted)
+                                    .child(tr(keys::Q_PEOPLE_COULDNT_SEND_THE_CHANGE_TRY)),
+                            )
+                            .child(
+                                Button::new("public-links-retry")
+                                    .label(tr(keys::Q_CHAT_RETRY))
+                                    .ghost()
+                                    .small()
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        if let Some(live) = this.live.as_mut() {
+                                            let _ = live.driver.retry_created_public_chats();
+                                        }
+                                        cx.notify();
+                                    })),
+                            ),
                     )
                     .into_any_element();
             }

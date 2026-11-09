@@ -58,18 +58,47 @@ impl PasscodeJob {
 /// How long the wrong-passcode shake runs.
 const SHAKE_MS: u64 = 420;
 
+/// Locked or not, with the number of locks so far (a locked start counts).
+/// Something parked for later records the count, and a lock in between
+/// drops it (`PasscodeUi::locked_since`), whether or not Quill is still
+/// locked when it lands.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum LockState {
+    Unlocked { locks: u64 },
+    Locked { locks: u64 },
+}
+
+impl LockState {
+    fn new(locked: bool) -> Self {
+        Self::Unlocked { locks: 0 }.set(locked)
+    }
+
+    fn locks(self) -> u64 {
+        match self {
+            Self::Unlocked { locks } | Self::Locked { locks } => locks,
+        }
+    }
+
+    /// A lock counts once, when it starts.
+    fn set(self, locked: bool) -> Self {
+        match (self, locked) {
+            (Self::Unlocked { locks }, true) => Self::Locked {
+                locks: locks.saturating_add(1),
+            },
+            (Self::Locked { locks }, false) => Self::Unlocked { locks },
+            (same, _) => same,
+        }
+    }
+}
+
 pub(crate) struct PasscodeUi {
     /// A passcode is set (cached from `passcode.json`; refreshed after each
     /// change instead of read per frame).
     pub(crate) enabled: bool,
-    /// Quill is locked: every window draws only the lock screen, or
-    /// nothing (`lock_layer`). Written only by `QuillApp::set_locked`.
-    locked: bool,
-    /// How many times Quill has locked (a locked start counts). Something
-    /// parked for later records it, and a lock in between drops it
-    /// (`locked_since`), whether or not Quill is still locked when it
-    /// lands. Moves only with `locked` (`set_lock_flag`).
-    locks: u64,
+    /// Whether Quill is locked (every window draws only the lock screen,
+    /// or nothing: `lock_layer`), with how many times it has locked. One
+    /// value, written only by `QuillApp::set_locked` (`set_lock_flag`).
+    lock_state: LockState,
     /// The account whose connection waits for the unlock: a locked start,
     /// or a reconnect asked under the lock. The unlock connects it only if
     /// it is still the account on screen, so a switch under the lock (the
@@ -158,8 +187,7 @@ impl PasscodeUi {
         Self {
             enabled,
             // The app starts locked when a passcode is set (tdesktop).
-            locked: enabled,
-            locks: u64::from(enabled),
+            lock_state: LockState::new(enabled),
             connect_at_unlock: if enabled {
                 root.as_deref().map(quill::settings::active_account)
             } else {
@@ -192,26 +220,22 @@ impl PasscodeUi {
 
     /// Whether Quill is locked.
     pub(crate) fn is_locked(&self) -> bool {
-        self.locked
+        matches!(self.lock_state, LockState::Locked { .. })
     }
 
     /// The lock count now, for something parked until later.
     pub(crate) fn lock_count(&self) -> u64 {
-        self.locks
+        self.lock_state.locks()
     }
 
     /// Quill is locked now, or locked at some point since `count` was
     /// read: what was parked then no longer applies.
     pub(crate) fn locked_since(&self, count: u64) -> bool {
-        self.locked || self.locks != count
+        self.is_locked() || self.lock_state.locks() != count
     }
 
-    /// The flag and its count, together.
     fn set_lock_flag(&mut self, locked: bool) {
-        if locked && !self.locked {
-            self.locks += 1;
-        }
-        self.locked = locked;
+        self.lock_state = self.lock_state.set(locked);
     }
 
     /// Set the flag alone, for tests that need a locked state without the
@@ -703,7 +727,7 @@ impl QuillApp {
     /// to time and the task parks until [`quill::wake::PASSCODE`].
     pub(crate) fn passcode_tick(&mut self, cx: &mut Context<Self>) -> Option<Duration> {
         let ui = &mut self.account.passcode;
-        if ui.locked {
+        if ui.is_locked() {
             if ui.flood_until.is_some_and(|t| Instant::now() >= t) {
                 ui.flood_until = None;
                 ui.lock_error = None;

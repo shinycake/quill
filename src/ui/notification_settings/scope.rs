@@ -586,13 +586,13 @@ impl QuillApp {
         let exceptions = self
             .session()
             .and_then(|s| s.settings.notification_exceptions.get(&scope));
-        let exceptions_loading = self
-            .session()
-            .is_some_and(|s| s.settings.notification_exceptions_loading.contains(&scope));
-        let exceptions_label = match (exceptions, exceptions_loading) {
-            (Some(ids), _) => trn(keys::FILTERS_CHATS_COUNT, ids.len()),
-            (None, true) => tr(keys::Q_PREFS_LOADING).to_string(),
-            (None, false) => "—".to_string(),
+        let exceptions_label = match exceptions {
+            Some(fetch) => match (fetch.data(), fetch.is_loading()) {
+                (Some(ids), _) => trn(keys::FILTERS_CHATS_COUNT, ids.len()),
+                (None, true) => tr(keys::Q_PREFS_LOADING).to_string(),
+                (None, false) => "—".to_string(),
+            },
+            None => "—".to_string(),
         };
         section = section.child(self.setting_spot(
             spot(&["notifications.exceptions"]),
@@ -628,24 +628,40 @@ impl QuillApp {
         scope: NotificationSettingsScope,
     ) -> AnyElement {
         let session = self.session();
-        let cached: Option<&Vec<i64>> = session
+        let fetch = session
             .as_ref()
             .and_then(|s| s.settings.notification_exceptions.get(&scope));
-        let loading = session
-            .as_ref()
-            .is_some_and(|s| s.settings.notification_exceptions_loading.contains(&scope));
+        let failed = fetch.is_some_and(|f| f.error().is_some());
         let mut list = div().flex().flex_col().gap_1().px_2().py_1();
-        let Some(ids) = cached else {
-            // Fetch failed or never fired — the next dialog open retries.
+        let Some(ids) = fetch.and_then(|f| f.data()) else {
+            // On its way (asked by the page, again after a drop), or failed:
+            // then a Retry, never a request every frame.
+            let muted = cx.theme().muted_foreground;
             return list
                 .child(
                     div()
-                        .text_xs()
-                        .text_color(cx.theme().muted_foreground)
-                        .child(if loading {
-                            tr(keys::Q_PREFS_LOADING)
-                        } else {
+                        .flex()
+                        .items_center()
+                        .gap_2()
+                        .child(div().text_xs().text_color(muted).child(if failed {
                             tr(keys::Q_PREFS_EXCEPTIONS_UNAVAILABLE_REOPEN_THE_DIALOG)
+                        } else {
+                            tr(keys::Q_PREFS_LOADING)
+                        }))
+                        .when(failed, |row| {
+                            row.child(
+                                Button::new(format!("scope-exceptions-retry-{scope:?}"))
+                                    .label(tr(keys::Q_CHAT_RETRY))
+                                    .ghost()
+                                    .small()
+                                    .on_click(cx.listener(move |this, _, _, cx| {
+                                        if let Some(live) = this.live.as_mut() {
+                                            let _ =
+                                                live.driver.retry_notification_exceptions(scope);
+                                        }
+                                        cx.notify();
+                                    })),
+                            )
                         }),
                 )
                 .into_any_element();
@@ -710,7 +726,9 @@ impl QuillApp {
                 chat.notification_settings = ChatNotificationSettings::default();
             }
             for list in session.settings.notification_exceptions.values_mut() {
-                list.retain(|id| *id != chat_id.0);
+                if let Some(list) = list.data_mut() {
+                    list.retain(|id| *id != chat_id.0);
+                }
             }
             self.set_note(StatusNote::silent(tr(keys::Q_PREFS_EXCEPTION_RESET_2)));
         }

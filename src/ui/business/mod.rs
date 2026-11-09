@@ -116,16 +116,14 @@ impl QuillApp {
             note: None,
         });
         self.open_box(crate::ui::shell::DialogKind::Business);
-        let me = self.session().and_then(|s| s.my_user_id);
         if let Some(live) = self.live.as_mut() {
             live.driver.session.settings.business.error = None;
             let _ = live.driver.ensure_quick_reply_shortcuts();
             // The hub's row order, and the clips of the feature previews.
             let _ = live.driver.maybe_fetch_business_features();
             let _ = live.driver.maybe_fetch_premium();
-            if let Some(me) = me {
-                let _ = live.driver.fetch_user_full_info(me);
-            }
+            // The screens that save wait for it (`business_waits_for_info`).
+            let _ = live.driver.fetch_business_own_info();
         }
         cx.notify();
     }
@@ -293,6 +291,21 @@ impl QuillApp {
         if self.business_waits_for_info(view) && self.business_fill_draft(view, window, cx) {
             cx.notify();
         }
+    }
+
+    /// Why the own full info a waiting screen needs did not come, when
+    /// its request failed: the screen shows it with a Retry.
+    pub(super) fn business_info_error(&self) -> Option<String> {
+        self.session()
+            .and_then(|s| s.settings.business.own_info.error().map(str::to_string))
+    }
+
+    /// A waiting screen's Retry: the own full info, asked again.
+    pub(super) fn retry_business_info(&mut self, cx: &mut Context<Self>) {
+        if let Some(live) = self.live.as_mut() {
+            let _ = live.driver.fetch_business_own_info();
+        }
+        cx.notify();
     }
 
     /// Whether this screen shows "Loading…" until the full info arrives.

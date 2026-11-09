@@ -315,3 +315,22 @@ fn ungroup_waits_while_show_as_one_chat_is_changing(cx: &mut TestAppContext) {
         "Enter on Ungroup does nothing while the toggle is in flight"
     );
 }
+
+#[gpui_kit::test]
+fn an_answer_in_its_undo_time_is_sent_when_the_account_leaves(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    frames(&mut vcx);
+    app.update(&mut vcx, |app, cx| app.open_community_requests(GUILD, cx));
+    frames(&mut vcx);
+    app.update(&mut vcx, |app, cx| {
+        app.answer_community_request(70, true, cx)
+    });
+    assert_eq!(pending_undo(&app, &mut vcx), Some(70));
+    // The account switch's goodbyes run with the leaving client still in
+    // place: the waiting answer goes through it then
+    // (`flush_and_close_community_box`), as closing the list does, instead
+    // of being dropped with the screen's timer.
+    app.update_in(&mut vcx, |app, window, cx| app.farewell_screen(window, cx));
+    let open = app.read_with(&vcx, |app, _| app.admin.community.flow.open.is_some());
+    assert!(!open, "the list closed and its answer was performed");
+}

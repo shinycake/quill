@@ -376,12 +376,10 @@ impl QuillApp {
                     .on_mouse_move(move |event, _window, cx| {
                         let pos = (f32::from(event.position.x), f32::from(event.position.y));
                         if let Some(view) = move_view.upgrade() {
+                            let held = event.pressed_button == Some(MouseButton::Left);
                             view.update(cx, |this, cx| {
                                 this.viewer_note_pointer(false, cx);
-                                if let Some((lx, ly)) = this.viewer.drag {
-                                    this.viewer_pan_drag(pos.0 - lx, pos.1 - ly, cx);
-                                    this.viewer.drag = Some(pos);
-                                }
+                                this.viewer_drag_moved(pos, held, cx);
                             });
                         }
                     })

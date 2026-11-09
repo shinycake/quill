@@ -67,11 +67,6 @@ impl<S: JsonSender> ConnectDriver<S> {
             .contains_key(&scope)
             || self
                 .session
-                .settings
-                .notification_exceptions_loading
-                .contains(&scope)
-            || self
-                .session
                 .requests
                 .has_purpose_for_scope(RequestPurpose::GetChatNotificationSettingsExceptions, scope)
         {
@@ -82,8 +77,10 @@ impl<S: JsonSender> ConnectDriver<S> {
             .request_for_scope(RequestPurpose::GetChatNotificationSettingsExceptions, scope);
         self.session
             .settings
-            .notification_exceptions_loading
-            .insert(scope);
+            .notification_exceptions
+            .entry(scope)
+            .or_default()
+            .begin();
         if let Err(err) = self
             .sender
             .send_json(&get_chat_notification_settings_exceptions(
@@ -91,13 +88,27 @@ impl<S: JsonSender> ConnectDriver<S> {
             ))
         {
             self.session.requests.take(extra);
-            self.session
-                .settings
-                .notification_exceptions_loading
-                .remove(&scope);
+            self.session.settings.notification_exceptions.remove(&scope);
             return Err(err);
         }
         Ok(())
+    }
+
+    /// The exceptions list's Retry after a failed fetch.
+    pub fn retry_notification_exceptions(
+        &mut self,
+        scope: NotificationSettingsScope,
+    ) -> Result<(), ConnectSendError> {
+        let failed = self
+            .session
+            .settings
+            .notification_exceptions
+            .get(&scope)
+            .is_some_and(|fetch| fetch.error().is_some());
+        if failed {
+            self.session.settings.notification_exceptions.remove(&scope);
+        }
+        self.maybe_fetch_notification_exceptions(scope)
     }
 
     /// Parity slice: reset a chat's notification settings to the scope
@@ -364,8 +375,9 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// Parity slice: `resetAllNotificationSettings` — resets all chat and
     /// scope notification settings to their default values. The new values
     /// arrive as `updateScopeNotificationSettings` /
-    /// `updateChatNotificationSettings`; the ok arm drops the cached scope
-    /// settings so the next fetch shows server-confirmed defaults.
+    /// `updateChatNotificationSettings`, all before the `ok` (TDLib resets
+    /// locally first), so the cached scope settings are already the new
+    /// ones when it lands.
     pub fn reset_all_notification_settings(&mut self) -> Result<RequestId, ConnectSendError> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);

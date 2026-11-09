@@ -942,6 +942,9 @@ pub(super) mod stream_volume;
 #[cfg(test)]
 #[cfg(feature = "demo-capture")]
 mod stream_volume_tests;
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+mod swap_window_tests;
 
 /// The status note after a camera toggle, read from the call's resulting
 /// `camera_on` rather than from what the toggle asked for: the driver may

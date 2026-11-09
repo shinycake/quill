@@ -91,13 +91,69 @@ impl EarnLimits {
     }
 }
 
+/// Where a paged list stands: one value, so a failed page is not taken
+/// for "ready, ask the next one" (a request every frame, round 16).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum PageLoad {
+    /// Nothing asked yet.
+    #[default]
+    Unasked,
+    /// A page is on its way; `more` when it follows pages already in.
+    Loading { more: bool },
+    /// Every page asked for is in.
+    Ready,
+    /// The last page failed (its error arm, or the send). Nothing asks
+    /// again by itself: the list shows a Retry.
+    Failed { more: bool },
+}
+
+impl PageLoad {
+    pub fn is_loading(self) -> bool {
+        matches!(self, Self::Loading { .. })
+    }
+
+    /// A first page answered (or failed): what the list shows is its own.
+    pub fn has_first_page(self) -> bool {
+        matches!(
+            self,
+            Self::Loading { more: true } | Self::Ready | Self::Failed { .. }
+        )
+    }
+
+    pub fn is_failed(self) -> bool {
+        matches!(self, Self::Failed { .. })
+    }
+
+    /// A page was asked for; `append` when it is the next page.
+    pub fn start(&mut self, append: bool) {
+        *self = Self::Loading {
+            more: append && self.has_first_page(),
+        };
+    }
+
+    /// The page asked for did not come.
+    pub fn fail(&mut self) {
+        *self = Self::Failed {
+            more: matches!(
+                self,
+                Self::Loading { more: true } | Self::Failed { more: true }
+            ),
+        };
+    }
+
+    /// Whether a scroll near the end may ask the next page: only once the
+    /// pages asked for are in, never after a failure.
+    pub fn may_page(self, next_offset: &str) -> bool {
+        self == Self::Ready && !next_offset.is_empty()
+    }
+}
+
 /// The TON history of a revenue page.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct TonHistory {
     pub rows: Vec<TonTx>,
     pub next_offset: String,
-    pub loading: bool,
-    pub loaded: bool,
+    pub load: PageLoad,
 }
 
 /// One Stars history list (All, Incoming or Outgoing).
@@ -105,8 +161,7 @@ pub struct TonHistory {
 pub struct StarHistory {
     pub rows: Vec<StarTx>,
     pub next_offset: String,
-    pub loading: bool,
-    pub loaded: bool,
+    pub load: PageLoad,
 }
 
 impl StarHistory {
@@ -116,8 +171,7 @@ impl StarHistory {
         }
         self.rows.extend(page.transactions);
         self.next_offset = page.next_offset;
-        self.loading = false;
-        self.loaded = true;
+        self.load = PageLoad::Ready;
     }
 }
 
@@ -317,8 +371,7 @@ pub struct ProgramList<T> {
     pub programs: Vec<T>,
     pub total_count: i32,
     pub next_offset: String,
-    pub loading: bool,
-    pub loaded: bool,
+    pub load: PageLoad,
 }
 
 impl<T> Default for ProgramList<T> {
@@ -327,9 +380,15 @@ impl<T> Default for ProgramList<T> {
             programs: Vec::new(),
             total_count: 0,
             next_offset: String::new(),
-            loading: false,
-            loaded: false,
+            load: PageLoad::Unasked,
         }
+    }
+}
+
+impl<T> ProgramList<T> {
+    /// A scroll near the end asks the next page (`join_upkeep`).
+    pub fn may_page(&self) -> bool {
+        self.load.may_page(&self.next_offset)
     }
 }
 

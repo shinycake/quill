@@ -74,6 +74,13 @@ impl QuillApp {
         self.pump_promo_request(cx);
         self.gift_boxes_upkeep(window, cx);
         self.checkout_prefill_upkeep(window, cx);
+        // An edit-contact box opened before the full user info: its note.
+        if self.windows.dialog_may_show_in(
+            crate::ui::shell::DialogKind::ProfilePanel,
+            self.windows.scope,
+        ) {
+            self.edit_contact_note_upkeep(window, cx);
+        }
         // A Business screen opened before the account's full info arrived
         // is built from it at the first frame after it lands, in the
         // window that hosts the box (its inputs need that window).

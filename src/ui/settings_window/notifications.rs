@@ -38,6 +38,14 @@ impl QuillApp {
     }
 
     pub(super) fn notifications_page(&mut self, cx: &mut Context<Self>) -> Div {
+        // An exceptions list dropped as stale (`updateChatNotificationSettings`)
+        // is asked again while the page shows it; one on its way, one in
+        // hand or a failed one asks nothing.
+        if let Some(live) = self.live.as_mut() {
+            for scope in NotificationSettingsScope::ALL {
+                let _ = live.driver.maybe_fetch_notification_exceptions(scope);
+            }
+        }
         self.ensure_scope_volume_sliders(cx);
         self.ensure_notification_volume_slider(cx);
         let saved_sounds: Vec<NotificationSound> = self

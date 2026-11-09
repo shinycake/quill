@@ -97,8 +97,7 @@ impl Session {
                     }
                     history.rows.extend(page_data.transactions);
                     history.next_offset = page_data.next_offset;
-                    history.loading = false;
-                    history.loaded = true;
+                    history.load = PageLoad::Ready;
                 }
             }
             (EarnPayload::StarStats(mut stats), Some(EarnPurpose::StarStats { peer })) => {
@@ -135,8 +134,7 @@ impl Session {
                     }
                     list.total_count = found.total_count;
                     list.next_offset = found.next_offset;
-                    list.loading = false;
-                    list.loaded = true;
+                    list.load = PageLoad::Ready;
                 }
             }
             (
@@ -154,8 +152,7 @@ impl Session {
                     }
                     list.total_count = found.total_count;
                     list.next_offset = found.next_offset;
-                    list.loading = false;
-                    list.loaded = true;
+                    list.load = PageLoad::Ready;
                 }
             }
             (
@@ -463,15 +460,12 @@ impl Session {
             }
             EarnPurpose::TonTransactions { peer, .. } => {
                 if let Some(page) = earn.page.as_mut().filter(|p| p.peer == peer) {
-                    page.ton_history.loading = false;
-                    page.ton_history.loaded = true;
+                    page.ton_history.load.fail();
                 }
             }
             EarnPurpose::StarTransactions { peer, filter, .. } => {
                 if let Some(page) = earn.page.as_mut().filter(|p| p.peer == peer) {
-                    let history = page.history_mut(filter);
-                    history.loading = false;
-                    history.loaded = true;
+                    page.history_mut(filter).load.fail();
                 }
             }
             // Settled either way, so the gates do not ask again each frame.
@@ -500,14 +494,12 @@ impl Session {
                     earn.join.as_mut().map(|j| &mut j.found)
                 };
                 if let Some(list) = list {
-                    list.loading = false;
-                    list.loaded = true;
+                    list.load.fail();
                 }
             }
             EarnPurpose::ConnectedPrograms { .. } => {
                 if let Some(join) = earn.join.as_mut() {
-                    join.mine.loading = false;
-                    join.mine.loaded = true;
+                    join.mine.load.fail();
                 }
             }
             EarnPurpose::ConnectedProgram {

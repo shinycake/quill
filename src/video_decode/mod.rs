@@ -383,6 +383,19 @@ struct AudioQueue {
 }
 
 impl AudioShared {
+    fn new(rate: u32, channels: u16) -> Self {
+        Self {
+            rate,
+            channels: channels.max(1),
+            queue: Mutex::new(AudioQueue::default()),
+            generation: AtomicU64::new(0),
+            origin: AtomicU64::new(0f64.to_bits()),
+            played: AtomicU64::new(PlayedMark::NOTHING.0),
+            detached: AtomicBool::new(false),
+            starved: AtomicBool::new(true),
+        }
+    }
+
     fn buffered_secs(&self) -> f64 {
         let buffered = lock(&self.queue).buffered;
         buffered as f64 / f64::from(self.channels.max(1)) / f64::from(self.rate.max(1))
@@ -452,6 +465,22 @@ pub struct AudioTap {
 }
 
 impl AudioTap {
+    fn new(shared: Arc<AudioShared>, wake: Arc<Shared>) -> Self {
+        Self {
+            shared,
+            wake,
+            chunk: Vec::new(),
+            at: 0,
+            chunk_pts: 0.0,
+            end_pts: 0.0,
+            pts_shift: 0.0,
+            gap: 0,
+            gap_at: 0,
+            generation: 0,
+            sounding: false,
+        }
+    }
+
     pub fn channels(&self) -> u16 {
         self.shared.channels.max(1)
     }
@@ -775,6 +804,27 @@ impl Player {
     /// it: undrained sound stalls decoding at [`AUDIO_HIGH_SECS`].
     pub fn take_audio_tap(&mut self) -> Option<AudioTap> {
         lock(&self.shared.state).tap.take()
+    }
+
+    /// The output let go of the sound (no device at attach, or the device
+    /// was lost): a new tap for the same sound, for an output that is up
+    /// again, and the clip restarts where it is so the two stay in step
+    /// (what was decoded meanwhile went to nobody). `None` while a tap is
+    /// out and attached, before the first one was taken, or with no sound.
+    pub fn reattach_audio_tap(&mut self) -> Option<AudioTap> {
+        let position = self.position();
+        let tap = {
+            let mut state = lock(&self.shared.state);
+            let old = state.audio.as_ref()?;
+            if state.tap.is_some() || !old.detached.load(Ordering::Relaxed) {
+                return None;
+            }
+            let audio = Arc::new(AudioShared::new(old.rate, old.channels));
+            state.audio = Some(audio.clone());
+            AudioTap::new(audio, self.shared.clone())
+        };
+        self.seek(position);
+        Some(tap)
     }
 
     fn audio(&self) -> Option<Arc<AudioShared>> {
