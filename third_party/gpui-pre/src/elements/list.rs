@@ -1,3 +1,5 @@
+// Changed by the Quill project (2026): `max_scroll_offset` counts the list's
+// padding; see QUILL-CHANGES.md.
 //! A list element that can be used to render a large number of differently sized elements
 //! efficiently. Clients of this API need to ensure that elements outside of the scrolled
 //! area do not change their height for this element to function correctly. If your elements
@@ -777,6 +779,27 @@ impl ListState {
         point(Pixels::ZERO, state.max_scroll_offset())
     }
 
+    /// Quill: how far the viewport's top is from the list's start and its
+    /// bottom from the list's end, counting each unmeasured item at the mean
+    /// height of the measured ones, and the viewport's height. `None` before
+    /// the first layout or while no item is measured.
+    pub fn estimated_distance_to_edges(&self) -> Option<(Pixels, Pixels, Pixels)> {
+        let state = self.0.borrow();
+        let viewport = state.last_layout_bounds?.size.height;
+        let total = state.items.summary();
+        if total.rendered_count == 0 {
+            return None;
+        }
+        let mean = total.height / total.rendered_count as f32;
+        let top = state.logical_scroll_top();
+        let mut cursor = state.items.cursor::<ListItemSummary>(());
+        let before: ListItemSummary = cursor.summary(&Count(top.item_ix), Bias::Right);
+        let above = before.height + mean * before.unrendered_count as f32 + top.offset_in_item;
+        let content = total.height + mean * total.unrendered_count as f32;
+        let below = content - above - viewport;
+        Some((above.max(Pixels::ZERO), below.max(Pixels::ZERO), viewport))
+    }
+
     /// Returns the current scroll offset adjusted for the scrollbar.
     ///
     /// The returned offset has a negative `y` component representing
@@ -850,7 +873,10 @@ impl StateInner {
         let height = self
             .scrollbar_drag_start_height
             .unwrap_or_else(|| self.items.summary().height);
-        (height - bounds.size.height).max(px(0.))
+        // Quill: the list's padding is part of the scroll range, as in
+        // `scroll` and `set_offset_from_scrollbar`.
+        let padding = self.last_padding.unwrap_or_default();
+        (height + padding.top + padding.bottom - bounds.size.height).max(px(0.))
     }
 
     fn visible_range(
@@ -880,6 +906,7 @@ impl StateInner {
             return;
         }
 
+        let view_before = self.scroll_view();
         let padding = self.last_padding.unwrap_or_default();
         let scroll_max =
             (self.items.summary().height + padding.top + padding.bottom - height).max(px(0.));
@@ -921,7 +948,21 @@ impl StateInner {
             );
         }
 
-        cx.notify(current_view);
+        // A list pushed against its end has nothing new to draw. Items past a
+        // measured edge still come in: the frame that reached the edge moved,
+        // and its layout measured the overdraw beyond it.
+        if self.scroll_view() != view_before {
+            cx.notify(current_view);
+        }
+    }
+
+    /// What a frame draws differently when a scroll changes it.
+    fn scroll_view(&self) -> (Option<(ListOffset, bool, bool)>, FollowState) {
+        (
+            self.scroll_anchor
+                .map(|anchor| (anchor.position, anchor.provisional, anchor.pending_end)),
+            self.follow_state,
+        )
     }
 
     fn logical_scroll_top(&self) -> ListOffset {

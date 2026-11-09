@@ -258,6 +258,28 @@ impl<T: Render> Entity<T> {
     pub fn cached(self, style: StyleRefinement) -> ViewElement<Entity<T>> {
         ViewElement::with_type_name(self, type_name::<T>()).cached(style)
     }
+
+    /// Quill: embed this entity as a view that can redraw on its own.
+    ///
+    /// When only live views are notified, the next frame renders those alone
+    /// and takes everything else from the last whole frame, ancestors
+    /// included ([`Window::draw`]). So nothing around a live view may depend
+    /// on its being rendered, and it can't change the window's layout, hit
+    /// tests, focus or accessibility tree: those stay as the last whole frame
+    /// left them, and what it builds in such a frame only paints. A live view
+    /// that builds hitboxes (a hover, a click, a tooltip) never redraws alone,
+    /// since only a whole frame's hit test answers for them: every notify of
+    /// it draws a whole frame. A cached view holding a live view that redrew
+    /// on its own renders again in the next whole frame rather than replay. A
+    /// live view inside another live view redraws with it, a cached view
+    /// between them included.
+    #[track_caller]
+    pub fn live(self) -> ViewElement<Entity<T>> {
+        let live = AnyView::from(self.clone());
+        let mut element = ViewElement::with_type_name(self, type_name::<T>());
+        element.live = Some(live);
+        element
+    }
 }
 
 /// The element type for [`View`] implementations. Wraps a `View` and hooks it
@@ -267,6 +289,10 @@ pub struct ViewElement<V: View> {
     view: Option<V>,
     entity_id: Option<EntityId>,
     cached_style: Option<StyleRefinement>,
+    /// Quill: the view, when it is a live one ([`Entity::live`]).
+    live: Option<AnyView>,
+    /// Quill: its entry in the frame's live views, once prepainted.
+    live_site: Option<usize>,
     #[cfg(feature = "profiler")]
     view_type_name: &'static str,
     #[cfg(debug_assertions)]
@@ -289,6 +315,8 @@ impl<V: View> ViewElement<V> {
         ViewElement {
             entity_id,
             cached_style: None,
+            live: None,
+            live_site: None,
             #[cfg(feature = "profiler")]
             view_type_name,
             view: Some(view),
@@ -320,7 +348,7 @@ impl<V: View> IntoElement for ViewElement<V> {
     }
 }
 
-struct ViewElementState {
+pub(crate) struct ViewElementState {
     prepaint_range: Range<PrepaintStateIndex>,
     paint_range: Range<PaintIndex>,
     cache_key: ViewElementCacheKey,
@@ -413,6 +441,9 @@ impl<V: View> Element for ViewElement<V> {
         window: &mut Window,
         cx: &mut App,
     ) -> Option<AnyElement> {
+        if let Some(view) = self.live.take() {
+            self.live_site = Some(window.note_live_view(view, bounds));
+        }
         if let Some(entity_id) = self.entity_id {
             // Stateful path.
             #[cfg(feature = "profiler")]
@@ -426,6 +457,9 @@ impl<V: View> Element for ViewElement<V> {
                 cx,
                 &mut |window, cx| render_view(self.view.take().unwrap(), window, cx),
             );
+            if let Some(site) = self.live_site {
+                window.live_view_prepainted(site);
+            }
             #[cfg(feature = "profiler")]
             window.window_profiler.end_view(
                 start,
@@ -453,6 +487,7 @@ impl<V: View> Element for ViewElement<V> {
             // Stateful path.
             #[cfg(feature = "profiler")]
             let start = window.window_profiler.begin_view();
+            let scene_start = window.next_frame.scene.len();
             paint_view(
                 entity_id,
                 self.cached_style.is_some(),
@@ -461,6 +496,9 @@ impl<V: View> Element for ViewElement<V> {
                 window,
                 cx,
             );
+            if let Some(site) = self.live_site {
+                window.live_view_painted(site, scene_start);
+            }
             #[cfg(feature = "profiler")]
             window.window_profiler.end_view(
                 start,
@@ -556,6 +594,7 @@ fn prepaint_view(
                     && element_state.cache_key.opacity.to_bits() == opacity.to_bits()
                     && !window.dirty_views.contains(&entity_id)
                     && !window.refreshing
+                    && !window.a11y_focus_moved(&element_state.prepaint_range)
                 {
                     let prepaint_start = window.prepaint_index();
                     window.reuse_prepaint(element_state.prepaint_range.clone());
@@ -644,7 +683,9 @@ fn paint_view(
                         window.refreshing = refreshing;
                         element_state.cache_key.opacity = opacity;
                     } else {
-                        window.reuse_paint(element_state.paint_range.clone());
+                        let replayed = element_state.paint_range.clone();
+                        window.reuse_paint(replayed.clone());
+                        window.replay_live_views(&global_id.unwrap()[..], &replayed, &paint_start);
                         if element_state.cache_key.opacity.to_bits() != opacity.to_bits() {
                             window.request_animation_frame();
                         }
