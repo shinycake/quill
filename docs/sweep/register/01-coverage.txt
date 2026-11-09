@@ -15,3 +15,16 @@ crates/webview-protocol/src/lib.rs	283	read
 crates/webview-protocol/src/lines.rs	106	read
 src/about.rs	80	read
 src/account_data.rs	185	read
+src/agent/cli/mod.rs	435	read
+src/agent/cli/setup_prompt.rs	237	read
+src/agent/cli/skill.rs	277	read
+src/agent/events.rs	422	read
+src/agent/grants.rs	385	read
+src/agent/guide.rs	68	read
+src/agent/link.rs	253	read
+src/agent/mcp.rs	298	read
+src/agent/mod.rs	49	read
+src/agent/pacing.rs	192	read
+src/agent/prompts.rs	236	read
+src/agent/server.rs	554	read
+src/agent/summary.rs	760	read
