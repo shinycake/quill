@@ -136,7 +136,7 @@ impl QuillApp {
             self.group_call_boxes.share_speaker = true;
             self.group_call_boxes.share_copied = false;
         } else {
-            self.connection.set_note(StatusNote::error(tr(
+            self.set_note(StatusNote::error(tr(
                 keys::Q_AV_COULDNT_GET_THE_INVITE_LINK,
             )));
         }

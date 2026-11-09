@@ -394,7 +394,7 @@ impl QuillApp {
     pub(super) fn pick_messages_policy(&mut self, policy: MessagesPolicy, cx: &mut Context<Self>) {
         self.paid_messages.charge = None;
         if !matches!(policy, MessagesPolicy::Everybody) && !self.can_restrict_new_chats() {
-            self.connection.set_note(StatusNote::info(tr(
+            self.set_note(StatusNote::info(tr(
                 keys::Q_MONEY_RESTRICTING_NEW_CHATS_NEEDS_TELEGRAM,
             )));
             cx.notify();
@@ -406,7 +406,7 @@ impl QuillApp {
     /// Opens the price slider on the saved price, or the default one.
     pub(super) fn open_charge_draft(&mut self, cx: &mut Context<Self>) {
         if !self.can_restrict_new_chats() {
-            self.connection.set_note(StatusNote::info(tr(
+            self.set_note(StatusNote::info(tr(
                 keys::Q_MONEY_CHARGING_FOR_MESSAGES_NEEDS_TELEGRAM,
             )));
             cx.notify();
@@ -450,7 +450,7 @@ impl QuillApp {
     fn apply_new_chat_settings(&mut self, settings: NewChatPrivacy, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
             if let Err(err) = live.driver.set_new_chat_settings(settings) {
-                self.connection.set_note(StatusNote::error(user_error_for(
+                self.set_note(StatusNote::error(user_error_for(
                     keys::Q_NOTES_FAILED_PRIVACY_UPDATE,
                     &err,
                 )));

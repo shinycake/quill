@@ -169,12 +169,12 @@ impl QuillApp {
                 .set_direct_messages_group(chat_id, boxed.enabled, stars)
                 .is_err()
             {
-                self.connection.set_note(StatusNote::error(tr(
+                self.set_note(StatusNote::error(tr(
                     keys::Q_MONEY_COULDNT_CHANGE_THE_DIRECT_MESSAGES,
                 )));
             }
         } else {
-            self.connection.set_note(StatusNote::info(tr(
+            self.set_note(StatusNote::info(tr(
                 keys::Q_MONEY_DIRECT_MESSAGES_NEED_A_LIVE,
             )));
         }
@@ -306,8 +306,7 @@ impl QuillApp {
                                 .small()
                                 .on_click(cx.listener(move |this, _, _, cx| {
                                     cx.write_to_clipboard(ClipboardItem::new_string(link.clone()));
-                                    this.connection
-                                        .set_note(StatusNote::info(tr(keys::Q_MONEY_LINK_COPIED)));
+                                    this.set_note(StatusNote::info(tr(keys::Q_MONEY_LINK_COPIED)));
                                     cx.notify();
                                 })),
                         ),

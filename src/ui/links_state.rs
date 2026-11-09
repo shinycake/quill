@@ -27,6 +27,46 @@ impl PendingOpen {
     }
 }
 
+/// A link waiting for the deep-link pump (`QuillApp::pending_deep_link`),
+/// with who queued it. One value, so a later link replaces its origin too.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct QueuedLink {
+    pub(super) link: String,
+    /// The account it was clicked in (`None`: from outside Quill, the
+    /// launch argument or the OS, which whichever account is on screen
+    /// takes). A link clicked in an account's chat names that account's
+    /// chats and bots: another account never follows it.
+    pub(super) account: Option<quill::ids::AccountKey>,
+    /// The chat window it was clicked in, or whose request it answers
+    /// (`None`: the main window).
+    pub(super) window: Option<ChatId>,
+    /// A step the UI driver injected queued it (`guard::injecting`): it
+    /// is checked as the agent's, not followed as the user's.
+    pub(super) by_agent: bool,
+}
+
+impl QueuedLink {
+    /// A link from outside Quill: the launch argument, the OS, a second
+    /// launch.
+    pub(crate) fn outside(link: String) -> Self {
+        Self {
+            link,
+            account: None,
+            window: None,
+            by_agent: false,
+        }
+    }
+
+    /// Whether the account on screen (`None`: none yet) may follow it.
+    pub(super) fn for_screen(&self, on_screen: Option<&quill::ids::AccountKey>) -> bool {
+        match (&self.account, on_screen) {
+            (None, _) => true,
+            (Some(asked), Some(on_screen)) => asked == on_screen,
+            (Some(_), None) => false,
+        }
+    }
+}
+
 pub(crate) struct LinkUi {
     /// `parity:platform-deep-links`: TDLib's info / error text for the
     /// deep link, shown in a dialog (`DialogKind::DeepLinkInfo`).
@@ -37,12 +77,6 @@ pub(crate) struct LinkUi {
     /// `parity:platform-deep-links`: resolved chat + action waiting for
     /// render (which owns the `Window`) to open it.
     pub(super) pending_deep_link_open: Option<PendingOpen>,
-    /// The link in `QuillApp::pending_deep_link` when a step the UI driver
-    /// injected queued it (`QuillApp::queue_deep_link`).
-    pub(super) agent_pending_link: Option<String>,
-    /// The link in `QuillApp::pending_deep_link` and the chat window it
-    /// was clicked in, when it was one (`QuillApp::queue_deep_link`).
-    pub(super) window_pending_link: Option<(String, ChatId)>,
     /// The chat window the link flow in progress was asked from. Taken
     /// with the flow's state at each step, as the agent origin is.
     pub(super) flow_window: Option<ChatId>,
@@ -81,8 +115,6 @@ impl LinkUi {
             deep_link_invite: None,
             pending_deep_link_ui: None,
             pending_deep_link_open: None,
-            agent_pending_link: None,
-            window_pending_link: None,
             flow_window: None,
             pending_flow_window: None,
             callback_password_dialog: None,

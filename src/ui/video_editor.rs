@@ -306,8 +306,7 @@ impl QuillApp {
         if for_set && !info.is_some_and(|info| quill::sticker_video::accepts_source(&info)) {
             self.close_video_editor(cx);
             self.close_kit_dialog_if_done(DialogKind::VideoEditor, window, cx);
-            self.connection
-                .set_note(StatusNote::error(quill::sticker_video::BAD_VIDEO_NOTE));
+            self.set_note(StatusNote::error(quill::sticker_video::BAD_VIDEO_NOTE));
             cx.notify();
             return;
         }
@@ -318,7 +317,7 @@ impl QuillApp {
         {
             self.close_video_editor(cx);
             self.close_kit_dialog_if_done(DialogKind::VideoEditor, window, cx);
-            self.connection.set_note(StatusNote::error(error.message()));
+            self.set_note(StatusNote::error(error.message()));
             cx.notify();
             return;
         }
@@ -597,7 +596,7 @@ impl QuillApp {
             }
             Some(EditorTarget::Set { .. } | EditorTarget::Avatar) | None => return,
         };
-        self.connection.set_note(StatusNote::silent(note));
+        self.set_note(StatusNote::silent(note));
         cx.notify();
     }
 

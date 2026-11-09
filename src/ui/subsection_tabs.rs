@@ -637,7 +637,7 @@ impl QuillApp {
             return;
         }
         let Some(live) = self.live.as_mut() else {
-            self.connection.set_note(StatusNote::info(tr(
+            self.set_note(StatusNote::info(tr(
                 keys::Q_MISC_TOPICS_NEED_A_LIVE_CONNECTION,
             )));
             cx.notify();
@@ -650,8 +650,7 @@ impl QuillApp {
             _ => Ok(None),
         };
         if result.is_err() {
-            self.connection
-                .set_note(StatusNote::error(tr(keys::Q_MISC_COULD_NOT_UPDATE_TOPIC)));
+            self.set_note(StatusNote::error(tr(keys::Q_MISC_COULD_NOT_UPDATE_TOPIC)));
         }
         cx.notify();
     }

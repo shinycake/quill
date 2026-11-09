@@ -63,4 +63,3 @@ HistoryUi.landing * | ended by the history's sync when the chat or topic shown c
 PickerUi.media_panel * | sticker set and emoji status ids; the reaction target carries its chat and message
 ViewerUi.photo_editor * | the editor's target carries its own chat or sticker set; it is not opened from a chat's history
 MessageUi.custom_emoji_tapped | a custom emoji's id, not a chat's: the card it shows is about that emoji and its set, the same in any chat
-ShareUi.reply_quote_for | the reply the quote picker was opened for; compared with the composer's reply on every read (reply_quote_open), so a stale value never shows

@@ -89,7 +89,7 @@ pub(in crate::ui) fn fact_check_block(
                     .tab_index(0)
                     .child(tr(keys::Q_MEDIA_WHATS_THIS))
                     .on_click(cx.listener(move |this, _, _, cx| {
-                        this.connection.set_note(StatusNote::info(about.clone()));
+                        this.set_note(StatusNote::info(about.clone()));
                         cx.notify();
                     })),
             )

@@ -150,7 +150,7 @@ impl QuillApp {
             apply_group(session, &self.demo_ui.sink, &self.demo_ui.seq);
         }
         self.open_info_panel_target(InfoPanelTarget::Supergroup(VIDEO_GROUP), window, cx);
-        self.connection.set_note(StatusNote::silent(
+        self.set_note(StatusNote::silent(
             "screenshot demo — group info panel, video group photo",
         ));
         cx.notify();
@@ -162,7 +162,7 @@ impl QuillApp {
             apply_user(session, &self.demo_ui.sink, &self.demo_ui.seq);
         }
         self.open_info_panel_target(InfoPanelTarget::User(VIDEO_USER), window, cx);
-        self.connection.set_note(StatusNote::silent(
+        self.set_note(StatusNote::silent(
             "screenshot demo — contact info panel, video profile photo",
         ));
         cx.notify();

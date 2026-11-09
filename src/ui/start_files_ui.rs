@@ -127,7 +127,7 @@ impl QuillApp {
             return;
         }
         if let Some(note) = self.start_files_refusal(chat) {
-            self.connection.set_note(StatusNote::error(note));
+            self.set_note(StatusNote::error(note));
             cx.notify();
             return;
         }
@@ -139,8 +139,7 @@ impl QuillApp {
         if self.open_chat_id() == Some(chat) {
             self.attach_dropped_files(&files, cx);
         } else {
-            self.connection
-                .set_note(StatusNote::silent(tr(keys::Q_MISC_OPEN_THE_CHAT_TO_ATTACH)));
+            self.set_note(StatusNote::silent(tr(keys::Q_MISC_OPEN_THE_CHAT_TO_ATTACH)));
         }
         cx.notify();
     }

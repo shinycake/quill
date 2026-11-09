@@ -40,15 +40,23 @@ use crate::ui::shell::{DialogKind, QuillShell};
 use quill::ids::ChatId;
 use std::collections::HashMap;
 
-/// The window a session-wide box belongs to.
+/// The window a session-wide box belongs to (`None`: the main window),
+/// and how far it got there.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-struct Host {
-    /// The window (`None`: the main window).
-    window: Option<ChatId>,
-    /// It showed there. An ask that has not shown yet waits for the answer
-    /// that sets its flag; one that showed is free again once its flag is
-    /// clear.
-    shown: bool,
+enum Host {
+    /// The window asked for it: it waits for the answer that sets its
+    /// flag, and shows there then.
+    Asked(Option<ChatId>),
+    /// It showed in the window: free again once its flag is clear.
+    Shown(Option<ChatId>),
+}
+
+impl Host {
+    fn window(self) -> Option<ChatId> {
+        match self {
+            Self::Asked(window) | Self::Shown(window) => window,
+        }
+    }
 }
 
 /// The windows of the session-wide kit dialogs.
@@ -61,7 +69,8 @@ pub(in crate::ui) struct DialogHosts {
 }
 
 /// Who asks for what the code running now opens: a box
-/// ([`QuillApp::open_box`]) or a link ([`QuillApp::queue_deep_link`]).
+/// ([`QuillApp::open_box`]), a link ([`QuillApp::queue_deep_link`]) or a
+/// toast ([`QuillApp::set_note`]).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(in crate::ui) enum Asker {
     /// The window whose state is in place: input runs with the window of
@@ -82,11 +91,7 @@ impl QuillApp {
     /// The window that asked for what runs now (`None`: the main window),
     /// or `None` when no window did ([`Asker::Nobody`]).
     pub(in crate::ui) fn asking_window(&self) -> Option<Option<ChatId>> {
-        match self.windows.asker {
-            Asker::InPlace => Some(self.windows.scope),
-            Asker::Window(window) => Some(window),
-            Asker::Nobody => None,
-        }
+        self.windows.asking_window()
     }
 
     /// The window showing `chat` (`None`: the main window), as the window
@@ -110,7 +115,7 @@ impl QuillApp {
     /// The window of the action running now, or the window of the last
     /// press where no window asked ([`Asker::Nobody`]).
     pub(in crate::ui) fn asking_window_or_last_press(&self) -> Option<ChatId> {
-        self.asking_window().unwrap_or(self.windows.last_press)
+        self.windows.asking_window_or_last_press()
     }
 
     /// Run `f`, the part of a flow that runs away from the window that
@@ -161,6 +166,21 @@ impl QuillApp {
 }
 
 impl ChatWindows {
+    /// [`QuillApp::asking_window`], for code that holds other parts of
+    /// the app borrowed (a note set with the client in hand).
+    pub(in crate::ui) fn asking_window(&self) -> Option<Option<ChatId>> {
+        match self.asker {
+            Asker::InPlace => Some(self.scope),
+            Asker::Window(window) => Some(window),
+            Asker::Nobody => None,
+        }
+    }
+
+    /// [`QuillApp::asking_window_or_last_press`].
+    pub(in crate::ui) fn asking_window_or_last_press(&self) -> Option<ChatId> {
+        self.asking_window().unwrap_or(self.last_press)
+    }
+
     /// The last press or key was in the window whose state is in place.
     pub(in crate::ui) fn pressed_here(&self) -> bool {
         self.last_press == self.scope
@@ -177,13 +197,7 @@ impl ChatWindows {
         // A window that closed asks for nothing.
         let window = window.filter(|chat| self.has(*chat));
         self.dialogs.left.retain(|left| *left != kind);
-        self.dialogs.hosts.insert(
-            kind,
-            Host {
-                window,
-                shown: false,
-            },
-        );
+        self.dialogs.hosts.insert(kind, Host::Asked(window));
     }
 
     /// The window that shows, or asked for, the session-wide box `kind`
@@ -192,7 +206,7 @@ impl ChatWindows {
     /// limit) opens its own box where that one is.
     pub(in crate::ui) fn window_of_box(&self, kind: DialogKind) -> Option<ChatId> {
         match self.dialogs.hosts.get(&kind) {
-            Some(owner) => owner.window,
+            Some(owner) => owner.window(),
             None => self.last_press,
         }
     }
@@ -209,7 +223,7 @@ impl ChatWindows {
             return false;
         }
         match self.dialogs.hosts.get(&kind) {
-            Some(owner) => owner.window == host,
+            Some(owner) => owner.window() == host,
             None => self.last_press == host,
         }
     }
@@ -220,23 +234,13 @@ impl ChatWindows {
         if QuillShell::is_per_window(kind) {
             return;
         }
-        self.dialogs.hosts.insert(
-            kind,
-            Host {
-                window: host,
-                shown: true,
-            },
-        );
+        self.dialogs.hosts.insert(kind, Host::Shown(host));
     }
 
     /// `host` showed `kind` and its flag is clear: it is free again. An
     /// ask from another window, or one still waiting for its answer, stays.
     pub(in crate::ui) fn dialog_closed_in(&mut self, kind: DialogKind, host: Option<ChatId>) {
-        let shown_here = Host {
-            window: host,
-            shown: true,
-        };
-        if self.dialogs.hosts.get(&kind) == Some(&shown_here) {
+        if self.dialogs.hosts.get(&kind) == Some(&Host::Shown(host)) {
             self.dialogs.hosts.remove(&kind);
         }
     }
@@ -246,7 +250,7 @@ impl ChatWindows {
         self.dialogs
             .hosts
             .iter()
-            .filter(|(_, owner)| owner.window == host && owner.shown)
+            .filter(|(_, owner)| **owner == Host::Shown(host))
             .map(|(kind, _)| *kind)
             .collect()
     }
@@ -257,7 +261,7 @@ impl ChatWindows {
         self.dialogs
             .hosts
             .iter()
-            .filter(|(_, owner)| owner.window == Some(chat))
+            .filter(|(_, owner)| owner.window() == Some(chat))
             .map(|(kind, _)| *kind)
             .collect()
     }
@@ -270,12 +274,12 @@ impl ChatWindows {
             .dialogs
             .hosts
             .iter()
-            .filter(|(_, owner)| owner.window == Some(chat_id))
+            .filter(|(_, owner)| owner.window() == Some(chat_id))
             .map(|(kind, owner)| (*kind, *owner))
             .collect();
         for (kind, owner) in mine {
             self.dialogs.hosts.remove(&kind);
-            if owner.shown && !self.dialogs.left.contains(&kind) {
+            if matches!(owner, Host::Shown(_)) && !self.dialogs.left.contains(&kind) {
                 self.dialogs.left.push(kind);
             }
         }

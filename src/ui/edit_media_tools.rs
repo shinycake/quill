@@ -120,8 +120,7 @@ impl QuillApp {
                 if let Some(edit) = self.chat_ui.pending_edit_mut() {
                     edit.media_edit.cover = None;
                 }
-                self.connection
-                    .set_note(StatusNote::silent(tr(keys::Q_MISC_COVER_CLEARED)));
+                self.set_note(StatusNote::silent(tr(keys::Q_MISC_COVER_CLEARED)));
                 cx.notify();
             }
         }
@@ -152,7 +151,7 @@ impl QuillApp {
                             this.viewer.photo_editor = Some(PhotoEditor::for_message_edit(pixels));
                         }
                     }
-                    Err(_) => this.connection.set_note(StatusNote::error(tr(
+                    Err(_) => this.set_note(StatusNote::error(tr(
                         keys::Q_MISC_COULDNT_OPEN_THIS_IMAGE_FOR,
                     ))),
                 }
@@ -179,7 +178,7 @@ impl QuillApp {
         if let (Some(file_id), Some(live)) = (file_id, self.live.as_mut()) {
             let _ = live.driver.ensure_media_files(&[file_id]);
         }
-        self.connection.set_note(StatusNote::silent(tr(
+        self.set_note(StatusNote::silent(tr(
             keys::Q_MISC_DOWNLOADING_CHOOSE_EDIT_IMAGE_AGAIN,
         )));
         cx.notify();
@@ -189,7 +188,7 @@ impl QuillApp {
     /// as the replacement, keeping the spoiler the photo had.
     pub(super) fn finish_edit_image(&mut self, saved: Option<PathBuf>, cx: &mut Context<Self>) {
         let Some(path) = saved else {
-            self.connection.set_note(StatusNote::error(tr(
+            self.set_note(StatusNote::error(tr(
                 keys::Q_MISC_COULDNT_SAVE_THE_EDITED_PHOTO,
             )));
             cx.notify();
@@ -241,15 +240,16 @@ impl QuillApp {
         };
         match cover_send_path(path) {
             Some(cover) => {
-                self.screen.connection.set_note(StatusNote::silent(tr_with(
-                    keys::Q_MISC_COVER_WILL_BE_SAVED_WITH,
-                    &[("shown_name", &(shown_name(&cover)).to_string())],
-                )));
+                self.screen.connection.set_note_for(
+                    &self.screen.windows,
+                    StatusNote::silent(tr_with(
+                        keys::Q_MISC_COVER_WILL_BE_SAVED_WITH,
+                        &[("shown_name", &(shown_name(&cover)).to_string())],
+                    )),
+                );
                 edit.media_edit.cover = Some(cover);
             }
-            None => self
-                .connection
-                .set_note(StatusNote::silent(EDIT_MEDIA_INVALID_FILE)),
+            None => self.set_note(StatusNote::silent(EDIT_MEDIA_INVALID_FILE)),
         }
         cx.notify();
     }

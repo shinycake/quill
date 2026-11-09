@@ -191,7 +191,7 @@ impl QuillApp {
                     Ok(tap) => this.start_mic_test(tap, cx),
                     Err(err) => {
                         this.call_boxes.mic_test = MicTestRun::Off;
-                        this.connection.set_note(StatusNote::error(err));
+                        this.set_note(StatusNote::error(err));
                     }
                 }
                 cx.notify();

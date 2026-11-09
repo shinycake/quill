@@ -206,7 +206,7 @@ impl QuillApp {
                     if let Some(live) = this.live.as_mut()
                         && live.driver.load_group_sticker_choices(chat_id).is_err()
                     {
-                        this.connection.set_note(StatusNote::error(tr(
+                        this.set_note(StatusNote::error(tr(
                             keys::Q_PEOPLE_COULD_NOT_LOAD_GROUP_PACKS,
                         )));
                     }
@@ -273,7 +273,7 @@ impl QuillApp {
                                 } else {
                                     live.driver.set_supergroup_sticker_set(chat_id, id)
                                 };
-                                this.connection.set_note(match result {
+                                this.set_note(match result {
                                     Ok(Some(_)) => StatusNote::silent(tr(
                                         keys::Q_PEOPLE_GROUP_PACK_CHANGE_REQUESTED,
                                     )),

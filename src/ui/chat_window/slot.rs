@@ -427,7 +427,6 @@ impl QuillApp {
     /// no window shows there.
     pub(super) fn note_window_press(&mut self, chat: Option<ChatId>) {
         self.windows.last_press = chat;
-        self.connection.note_window = chat;
         self.set_window_scope(chat);
     }
 

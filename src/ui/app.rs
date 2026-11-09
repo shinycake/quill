@@ -87,10 +87,14 @@ pub struct QuillApp {
     pub(super) group_call: super::group_call_state::GroupCallUi,
     /// Screen sharing: the source chooser, privacy box and paused tiles.
     pub(super) screen_share: super::screen_share_state::ScreenShareUi,
-    /// `parity:platform-deep-links`: launch link from the CLI (`t.me` /
-    /// `tg:`), set by `main.rs`. Fired once auth reaches Ready, then
-    /// cleared (`pub(crate)` so the binary can set it).
-    pub(crate) pending_deep_link: Option<String>,
+    /// `parity:platform-deep-links`: the link waiting for the deep-link
+    /// pump, with who queued it: the launch link from the CLI (`t.me` /
+    /// `tg:`, set by `main.rs`), the OS, or a click. Fired once auth
+    /// reaches Ready, then cleared (`pub(crate)` so the binary can set it).
+    /// The app's, as a link from outside waits for whichever account comes
+    /// on screen; one clicked in an account is dropped once another
+    /// account is on screen (`QueuedLink::for_screen`).
+    pub(crate) pending_deep_link: Option<super::links_state::QueuedLink>,
     /// The main window's handle and place, and the cascade of windows opened from it (`ui/chat_window`).
     pub(super) main_window: super::chat_window::MainWindow,
 }

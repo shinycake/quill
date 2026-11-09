@@ -187,7 +187,7 @@ impl QuillApp {
         match self.live.as_mut() {
             Some(live) => {
                 if let Err(err) = live.driver.remove_installed_background(background_id) {
-                    self.connection.set_note(StatusNote::error(user_error_for(
+                    self.set_note(StatusNote::error(user_error_for(
                         keys::Q_NOTES_FAILED_REMOVE_WALLPAPER,
                         &err,
                     )));

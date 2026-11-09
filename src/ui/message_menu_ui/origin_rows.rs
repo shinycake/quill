@@ -172,7 +172,7 @@ impl QuillApp {
             }
         };
         if let Some(name) = name {
-            self.connection.set_note(if sent {
+            self.set_note(if sent {
                 StatusNote::silent(tr_with(keys::NEW_CONTACT_BLOCK_DONE, &[("user", &name)]))
             } else {
                 StatusNote::error(tr(keys::Q_CHAT_COULDNT_BLOCK_THE_SENDER_TRY_AGAIN))

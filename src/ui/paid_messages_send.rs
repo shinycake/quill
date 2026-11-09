@@ -140,7 +140,7 @@ impl QuillApp {
                 && live.driver.held_paid_send().is_some()
                 && live.driver.release_paid_send(remember).is_err()
             {
-                self.connection.set_note(StatusNote::error(tr(
+                self.set_note(StatusNote::error(tr(
                     keys::Q_MONEY_COULDNT_SEND_THE_PAID_MESSAGE,
                 )));
             }
@@ -302,7 +302,7 @@ impl QuillApp {
                 .allow_unpaid_messages(boxed.user_id, refund)
                 .is_err()
             {
-                self.connection.set_note(StatusNote::error(tr(
+                self.set_note(StatusNote::error(tr(
                     keys::Q_MONEY_COULDNT_REMOVE_THE_FEE_TRY,
                 )));
             }

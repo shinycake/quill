@@ -109,10 +109,10 @@ impl QuillApp {
             && let Some(chat_id) = live.driver.session.open_chat
         {
             match live.driver.get_chat_scheduled_messages(chat_id) {
-                Ok(_) => self.connection.set_note(StatusNote::silent(tr(
+                Ok(_) => self.set_note(StatusNote::silent(tr(
                     keys::Q_CHAT_LOADING_SCHEDULED_MESSAGES,
                 ))),
-                Err(_) => self.connection.set_note(StatusNote::error(tr(
+                Err(_) => self.set_note(StatusNote::error(tr(
                     keys::Q_CHAT_COULD_NOT_LOAD_SCHEDULED_MESSAGES,
                 ))),
             }
@@ -142,11 +142,11 @@ impl QuillApp {
                     .messages
                     .scheduled_messages
                     .retain(|m| m.chat_id != chat_id || m.id != message_id);
-                self.connection.set_note(StatusNote::silent(tr(
+                self.set_note(StatusNote::silent(tr(
                     keys::Q_CHAT_SCHEDULED_MESSAGE_DELETED,
                 )));
             }
-            Err(_) => self.connection.set_note(StatusNote::error(tr(
+            Err(_) => self.set_note(StatusNote::error(tr(
                 keys::Q_CHAT_COULD_NOT_DELETE_SCHEDULED_MESSAGE,
             ))),
         }
@@ -462,11 +462,11 @@ impl QuillApp {
                         let markup = this.composer_markup(cx);
                         this.chat_ui.rich_editor_open = true;
                         this.set_composer_markup(&markup, window, cx);
-                        this.connection.set_note(StatusNote::silent(tr(
+                        this.set_note(StatusNote::silent(tr(
                             keys::Q_CHAT_RICH_EDITOR_MARKUP_BECOMES_BLOCKS,
                         )));
                     } else {
-                        this.connection.set_note(StatusNote::info(tr(
+                        this.set_note(StatusNote::info(tr(
                             keys::Q_CHAT_RICH_MESSAGES_REQUIRE_TELEGRAM_PREMIUM,
                         )));
                     }
@@ -492,21 +492,21 @@ impl QuillApp {
     ) {
         let text = self.composer_markup(cx);
         if text.trim().is_empty() {
-            self.connection.set_note(StatusNote::silent(tr(
+            self.set_note(StatusNote::silent(tr(
                 keys::Q_CHAT_TYPE_SOMETHING_FIRST_THE_AI,
             )));
         } else if let Some(live) = self.live.as_mut()
             && let Some(chat_id) = live.driver.session.open_chat
         {
-            self.screen
-                .connection
-                .set_note(match send(live, chat_id, &text) {
+            self.screen.connection.set_note_for(
+                &self.screen.windows,
+                match send(live, chat_id, &text) {
                     Ok(_) => StatusNote::silent(working_note),
                     Err(_) => StatusNote::info(tr(keys::Q_CHAT_AI_TOOLS_UNAVAILABLE_HERE)),
-                });
+                },
+            );
         } else {
-            self.connection
-                .set_note(StatusNote::info(tr(keys::Q_CHAT_AI_TOOLS_UNAVAILABLE_HERE)));
+            self.set_note(StatusNote::info(tr(keys::Q_CHAT_AI_TOOLS_UNAVAILABLE_HERE)));
         }
         cx.notify();
     }
@@ -680,15 +680,15 @@ impl QuillApp {
     /// all" action.
     pub(in crate::ui) fn unpin_all_messages(&mut self, chat_id: ChatId, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
-            self.screen
-                .connection
-                .set_note(match live.driver.unpin_all_chat_messages(chat_id) {
+            self.screen.connection.set_note_for(
+                &self.screen.windows,
+                match live.driver.unpin_all_chat_messages(chat_id) {
                     Ok(_) => StatusNote::silent(tr(keys::Q_CHAT_UNPINNING_ALL)),
                     Err(_) => StatusNote::error(tr(keys::Q_CHAT_COULD_NOT_UNPIN_ALL)),
-                });
+                },
+            );
         } else {
-            self.connection
-                .set_note(StatusNote::silent(tr(keys::Q_CHAT_NO_LIVE_CONNECTION)));
+            self.set_note(StatusNote::silent(tr(keys::Q_CHAT_NO_LIVE_CONNECTION)));
         }
         cx.notify();
     }
@@ -711,10 +711,9 @@ impl QuillApp {
                 }
                 Err(_) => StatusNote::error(tr(keys::Q_CHAT_COULD_NOT_RETRY)),
             };
-            self.connection.set_note(note);
+            self.set_note(note);
         } else {
-            self.connection
-                .set_note(StatusNote::silent(tr(keys::Q_CHAT_NO_LIVE_CONNECTION)));
+            self.set_note(StatusNote::silent(tr(keys::Q_CHAT_NO_LIVE_CONNECTION)));
         }
         cx.notify();
     }
@@ -730,15 +729,15 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         if let Some(live) = self.live.as_mut() {
-            self.screen.connection.set_note(
+            self.screen.connection.set_note_for(
+                &self.screen.windows,
                 match live.driver.get_message_link(chat_id, message_id) {
                     Ok(_) => StatusNote::info(tr(keys::Q_CHAT_FETCHING_MESSAGE_LINK)),
                     Err(_) => StatusNote::error(tr(keys::Q_CHAT_COULD_NOT_GET_MESSAGE_LINK)),
                 },
             );
         } else {
-            self.connection
-                .set_note(StatusNote::silent(tr(keys::Q_CHAT_NO_LIVE_CONNECTION)));
+            self.set_note(StatusNote::silent(tr(keys::Q_CHAT_NO_LIVE_CONNECTION)));
         }
         cx.notify();
     }

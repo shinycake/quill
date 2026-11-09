@@ -69,14 +69,12 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         let Some(live) = self.live.as_mut() else {
-            self.connection
-                .set_note(StatusNote::info(tr(keys::Q_MEDIA_DEMO_MODE_EDITING_A_BOT)));
+            self.set_note(StatusNote::info(tr(keys::Q_MEDIA_DEMO_MODE_EDITING_A_BOT)));
             cx.notify();
             return;
         };
         if live.driver.begin_bot_edit(bot_id).is_err() {
-            self.connection
-                .set_note(StatusNote::error(tr(keys::Q_MEDIA_COULD_NOT_LOAD_THE_BOT)));
+            self.set_note(StatusNote::error(tr(keys::Q_MEDIA_COULD_NOT_LOAD_THE_BOT)));
             cx.notify();
             return;
         }
@@ -209,7 +207,7 @@ impl QuillApp {
             && !changes.is_empty()
             && live.driver.save_bot_edit(bot_id, &changes).is_err()
         {
-            self.connection.set_note(StatusNote::error(tr(
+            self.set_note(StatusNote::error(tr(
                 keys::Q_MEDIA_COULD_NOT_SEND_THE_CHANGES,
             )));
         }
@@ -237,8 +235,7 @@ impl QuillApp {
 
     fn set_bot_photo_from(&mut self, bot_id: i64, path: &Path, cx: &mut Context<Self>) {
         if !is_photo_file(path) {
-            self.connection
-                .set_note(StatusNote::silent(tr(keys::Q_MEDIA_CHOOSE_A_JPEG_PNG_OR)));
+            self.set_note(StatusNote::silent(tr(keys::Q_MEDIA_CHOOSE_A_JPEG_PNG_OR)));
             cx.notify();
             return;
         }
@@ -248,7 +245,7 @@ impl QuillApp {
                 .set_bot_photo(bot_id, &path.to_string_lossy())
                 .is_err()
         {
-            self.connection.set_note(StatusNote::error(tr(
+            self.set_note(StatusNote::error(tr(
                 keys::Q_MEDIA_COULD_NOT_SEND_THE_PHOTO,
             )));
         }

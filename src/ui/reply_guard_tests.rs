@@ -118,8 +118,7 @@ fn a_sticker_sent_under_a_toast_still_consumes_the_reply(cx: &mut TestAppContext
     let (app, mut vcx) = app_with_a_deleted_reply(cx);
     let before = rows(&app, &vcx);
     app.update(&mut vcx, |app, cx| {
-        app.connection
-            .set_note(crate::ui::status_note::StatusNote::info("Link copied"));
+        app.set_note(crate::ui::status_note::StatusNote::info("Link copied"));
         app.send_sticker_pick(FileId(8), "x".into(), 100, 100, None, cx)
     });
     assert!(reply_is_gone(&app, &vcx), "the reply was consumed");

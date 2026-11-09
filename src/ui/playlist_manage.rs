@@ -134,8 +134,7 @@ impl QuillApp {
         let Some(file_id) = self.playback.playlist_remove.take() else {
             return;
         };
-        self.connection
-            .set_note(StatusNote::silent(removed_toast()));
+        self.set_note(StatusNote::silent(removed_toast()));
         match self.live.as_mut() {
             Some(live) => {
                 let _ = live.driver.remove_profile_audio_track(file_id);
@@ -164,7 +163,7 @@ impl QuillApp {
             if let Some(live) = self.live.as_mut() {
                 let _ = live.driver.ensure_media_files(&[file_id]);
             }
-            self.connection.set_note(StatusNote::silent(tr(
+            self.set_note(StatusNote::silent(tr(
                 keys::Q_AV_DOWNLOADING_CHOOSE_SAVE_AS_AGAIN,
             )));
             cx.notify();
@@ -193,7 +192,7 @@ impl QuillApp {
                 .spawn(async move { std::fs::copy(&path, &dest).map(|_| dest) })
                 .await;
             let _ = this.update(cx, |this, cx| {
-                this.connection.set_note(match copied {
+                this.set_note(match copied {
                     Ok(dest) => StatusNote::info(format!(
                         "saved to {}",
                         dest.file_name().and_then(|n| n.to_str()).unwrap_or("file")
@@ -215,7 +214,8 @@ impl QuillApp {
         };
         match self.live.as_mut() {
             Some(live) => {
-                self.screen.connection.set_note(
+                self.screen.connection.set_note_for(
+                    &self.screen.windows,
                     match live.driver.save_audio_to_profile(
                         file_id,
                         track.duration,
@@ -232,20 +232,23 @@ impl QuillApp {
                 if let Some(session) = self.demo_session.as_mut() {
                     session.local_save_profile_audio(track);
                 }
-                self.connection.set_note(StatusNote::silent(added_toast()));
+                self.set_note(StatusNote::silent(added_toast()));
             }
         }
         cx.notify();
     }
 
     fn save_playlist_track_to_saved_messages(&mut self, file_id: FileId, cx: &mut Context<Self>) {
-        self.screen.connection.set_note(match self.live.as_mut() {
-            Some(live) => match live.driver.send_track_to_saved_messages(file_id) {
-                Ok(_) => StatusNote::info(tr(keys::Q_AV_SAVED_TO_SAVED_MESSAGES)),
-                Err(_) => StatusNote::error(tr(keys::Q_AV_COULD_NOT_SAVE_TO_SAVED)),
+        self.screen.connection.set_note_for(
+            &self.screen.windows,
+            match self.live.as_mut() {
+                Some(live) => match live.driver.send_track_to_saved_messages(file_id) {
+                    Ok(_) => StatusNote::info(tr(keys::Q_AV_SAVED_TO_SAVED_MESSAGES)),
+                    Err(_) => StatusNote::error(tr(keys::Q_AV_COULD_NOT_SAVE_TO_SAVED)),
+                },
+                None => StatusNote::info(tr(keys::Q_AV_DEMO_SAVED_MESSAGES_NEEDS_LIVE)),
             },
-            None => StatusNote::info(tr(keys::Q_AV_DEMO_SAVED_MESSAGES_NEEDS_LIVE)),
-        });
+        );
         cx.notify();
     }
 

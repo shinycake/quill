@@ -150,7 +150,7 @@ impl QuillApp {
     /// "Export to File…": ask where, then write the workbook there.
     pub(super) fn export_statistics(&mut self, chat_id: i64, cx: &mut Context<Self>) {
         let Some((sheets, name)) = self.session().and_then(|s| page_workbook(s, chat_id)) else {
-            self.connection.set_note(StatusNote::silent(tr(
+            self.set_note(StatusNote::silent(tr(
                 keys::Q_MONEY_THE_STATISTICS_ARE_STILL_LOADING,
             )));
             cx.notify();
@@ -174,7 +174,7 @@ impl QuillApp {
                 })
                 .await;
             let _ = this.update(cx, |this, cx| {
-                this.connection.set_note(match written {
+                this.set_note(match written {
                     Ok(dest) => StatusNote::info(tr_with(
                         keys::STATS_EXPORT_DONE,
                         &[(

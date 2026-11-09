@@ -52,7 +52,7 @@ impl QuillApp {
         match result {
             Ok(()) => {
                 self.folders.editor = None;
-                self.connection.set_note(if folder_id.is_some() {
+                self.set_note(if folder_id.is_some() {
                     StatusNote::silent(tr(keys::Q_CHATLIST_FOLDER_UPDATED))
                 } else {
                     StatusNote::silent(tr(keys::Q_CHATLIST_FOLDER_CREATED))
@@ -95,7 +95,7 @@ impl QuillApp {
             && let Some(live) = self.live.as_mut()
             && let Err(err) = live.driver.fetch_chat_folder_chats_to_leave(folder_id)
         {
-            self.connection.set_note(StatusNote::error(user_error_for(
+            self.set_note(StatusNote::error(user_error_for(
                 keys::Q_NOTES_FAILED_FOLDER_CHATS,
                 &err,
             )));
@@ -132,7 +132,7 @@ impl QuillApp {
                 Ok(())
             }
         };
-        self.connection.set_note(match result {
+        self.set_note(match result {
             Ok(()) => StatusNote::silent(tr(keys::Q_CHATLIST_FOLDER_DELETED)),
             Err(err) => StatusNote::error(user_error_for(keys::Q_NOTES_FAILED_DELETE_FOLDER, &err)),
         });
@@ -177,7 +177,7 @@ impl QuillApp {
                 Ok(())
             }
         };
-        self.connection.set_note(match result {
+        self.set_note(match result {
             Ok(()) => StatusNote::silent(tr(keys::Q_CHATLIST_FOLDERS_REORDERED)),
             Err(err) => {
                 StatusNote::error(user_error_for(keys::Q_NOTES_FAILED_REORDER_FOLDERS, &err))
@@ -200,7 +200,7 @@ impl QuillApp {
                 Ok(())
             }
         };
-        self.connection.set_note(match result {
+        self.set_note(match result {
             Ok(()) if enabled => StatusNote::info(tr(keys::Q_CHATLIST_FOLDER_TAGS_ON)),
             Ok(()) => StatusNote::info(tr(keys::Q_CHATLIST_FOLDER_TAGS_OFF)),
             Err(err) => StatusNote::error(user_error_for(keys::Q_NOTES_FAILED_FOLDER_TAGS, &err)),
@@ -216,7 +216,7 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut()
             && let Err(err) = live.driver.fetch_chat_lists_to_add_chat(chat_id)
         {
-            self.connection.set_note(StatusNote::error(user_error_for(
+            self.set_note(StatusNote::error(user_error_for(
                 keys::Q_NOTES_FAILED_FOLDER_OPTIONS,
                 &err,
             )));
@@ -264,7 +264,7 @@ impl QuillApp {
             None => Ok(()),
         };
         let toast = self.membership_toast(chat_id, folder_id, true);
-        self.connection.set_note(match result {
+        self.set_note(match result {
             Ok(()) => StatusNote::info(toast),
             Err(err) => StatusNote::error(user_error_for(keys::Q_NOTES_FAILED_ADD_TO_FOLDER, &err)),
         });
@@ -283,7 +283,7 @@ impl QuillApp {
             None => Ok(()),
         };
         let toast = self.membership_toast(chat_id, folder_id, false);
-        self.connection.set_note(match result {
+        self.set_note(match result {
             Ok(()) => StatusNote::info(toast),
             Err(err) => StatusNote::error(user_error_for(
                 keys::Q_NOTES_FAILED_REMOVE_FROM_FOLDER,
@@ -374,7 +374,7 @@ impl QuillApp {
                             if let Some(live) = this.live.as_mut()
                                 && let Err(err) = live.driver.unarchive_chat(chat_id)
                             {
-                                this.connection.set_note(StatusNote::error(user_error_for(
+                                this.set_note(StatusNote::error(user_error_for(
                                     keys::Q_NOTES_FAILED_MOVE_CHAT,
                                     &err,
                                 )));
@@ -386,7 +386,7 @@ impl QuillApp {
                             if let Some(live) = this.live.as_mut()
                                 && let Err(err) = live.driver.archive_chat(chat_id)
                             {
-                                this.connection.set_note(StatusNote::error(user_error_for(
+                                this.set_note(StatusNote::error(user_error_for(
                                     keys::Q_NOTES_FAILED_ARCHIVE_CHAT,
                                     &err,
                                 )));

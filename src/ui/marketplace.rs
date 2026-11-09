@@ -21,7 +21,7 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         let Some(chat) = chat else {
-            self.connection.set_note(StatusNote::silent(tr(
+            self.set_note(StatusNote::silent(tr(
                 keys::Q_NAVIGATION_OPEN_A_PRIVATE_CHAT_OR,
             )));
             cx.notify();

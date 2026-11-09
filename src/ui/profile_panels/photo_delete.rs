@@ -15,14 +15,14 @@ impl QuillApp {
             return;
         };
         let Some(live) = self.live.as_mut() else {
-            self.connection.set_note(StatusNote::info(tr(
+            self.set_note(StatusNote::info(tr(
                 keys::Q_PEOPLE_PROFILE_PHOTO_CHANGES_NEED_A,
             )));
             cx.notify();
             return;
         };
         if live.driver.delete_photo(delete, revoke).is_err() {
-            self.connection.set_note(StatusNote::error(tr(
+            self.set_note(StatusNote::error(tr(
                 keys::Q_PEOPLE_COULDNT_REACH_TELEGRAM_TRY_AGAIN,
             )));
         }

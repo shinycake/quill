@@ -140,12 +140,12 @@ impl QuillApp {
                 let username = name.trim_start_matches('@');
                 if self.live.is_some() {
                     self.queue_deep_link(format!("https://t.me/{username}"));
-                    self.connection.set_note(StatusNote::silent(tr_with(
+                    self.set_note(StatusNote::silent(tr_with(
                         keys::Q_OPS_OPENING,
                         &[("username", username)],
                     )));
                 } else {
-                    self.connection.set_note(StatusNote::error(tr(
+                    self.set_note(StatusNote::error(tr(
                         keys::Q_OPS_CANT_OPEN_MENTIONS_WITHOUT_A,
                     )));
                 }
@@ -187,8 +187,7 @@ impl QuillApp {
     /// Copy `text` and say so (Telegram Desktop's "Text copied" toast).
     pub(super) fn copy_entity_text(&mut self, text: String, cx: &mut Context<Self>) {
         cx.write_to_clipboard(ClipboardItem::new_string(text));
-        self.connection
-            .set_note(StatusNote::info(tr(keys::Q_OPS_TEXT_COPIED_TO_CLIPBOARD)));
+        self.set_note(StatusNote::info(tr(keys::Q_OPS_TEXT_COPIED_TO_CLIPBOARD)));
         cx.notify();
     }
 
@@ -287,15 +286,16 @@ impl QuillApp {
         }
         if let Some(live) = self.live.as_mut() {
             let snapshot = ComposerSnapshot::capture(chat_id, view_generation, text);
-            self.screen
-                .connection
-                .set_note(match live.driver.send_snapshot(&snapshot) {
+            self.screen.connection.set_note_for(
+                &self.screen.windows,
+                match live.driver.send_snapshot(&snapshot) {
                     Ok(_) => StatusNote::silent(tr(keys::Q_OPS_SENDING)),
                     Err(_) => StatusNote::error(tr(keys::Q_OPS_COULD_NOT_SEND_THE_COMMAND)),
-                });
+                },
+            );
         } else {
             self.apply_demo_outgoing(text, None, None);
-            self.connection.set_note(StatusNote::silent(tr(
+            self.set_note(StatusNote::silent(tr(
                 keys::Q_OPS_DEMO_SEND_APPLIED_LOCALLY_NO,
             )));
         }
@@ -327,8 +327,7 @@ impl QuillApp {
             .flatten()
             .find_map(|message| Some((message, seek_target(&message.content, seconds)?)));
         let Some((target, kind)) = target else {
-            self.connection
-                .set_note(StatusNote::silent(tr(keys::Q_OPS_NOTHING_TO_SEEK)));
+            self.set_note(StatusNote::silent(tr(keys::Q_OPS_NOTHING_TO_SEEK)));
             return;
         };
         let target_id = target.id;

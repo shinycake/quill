@@ -162,12 +162,11 @@ impl QuillApp {
     ) {
         // The window that asked, before the OS answers: by then the pointer
         // may be over another one.
-        let host = self.connection.note_window;
+        let host = self.asking_window_or_last_press();
         self.when_os_answers(open, cx, move |this, opened, cx| {
             if !opened {
                 let host = host.filter(|chat| this.windows.has(*chat));
-                this.connection
-                    .set_note_in(host, StatusNote::error(failure));
+                this.as_asked_by(host, |this| this.set_note(StatusNote::error(failure)));
                 cx.notify();
             }
         });

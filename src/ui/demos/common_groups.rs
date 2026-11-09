@@ -66,8 +66,7 @@ impl QuillApp {
             apply_common_groups(session, &self.demo_ui.sink, &self.demo_ui.seq);
         }
         self.open_info_panel_target(InfoPanelTarget::User(USER), window, cx);
-        self.connection
-            .set_note(StatusNote::silent("screenshot demo — 45 groups in common"));
+        self.set_note(StatusNote::silent("screenshot demo — 45 groups in common"));
         cx.notify();
     }
 }

@@ -112,7 +112,7 @@ impl QuillApp {
             },
             None => tr(keys::Q_PEOPLE_CHAT_ACTIONS_NEED_A_LIVE).to_string(),
         };
-        self.connection.set_note(StatusNote::info(note));
+        self.set_note(StatusNote::info(note));
         cx.notify();
     }
 }

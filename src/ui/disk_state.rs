@@ -301,8 +301,7 @@ impl QuillApp {
             let _ = live.driver.note_disk(after, free, &floors);
         }
         if repaused > 0 {
-            self.connection
-                .set_note(StatusNote::silent(tr(keys::Q_DISK_DOWNLOAD_NO_ROOM)));
+            self.set_note(StatusNote::silent(tr(keys::Q_DISK_DOWNLOAD_NO_ROOM)));
         }
         let room = free.is_some_and(|free| free >= floors.open);
         let retry_starts = self.disk.start_refused && room;
@@ -416,7 +415,7 @@ impl QuillApp {
         self.close_video_pip(cx);
         self.close_chat_windows_for_switch(cx);
         self.close_screen_client(cx);
-        self.connection.set_note(StatusNote::silent(""));
+        self.set_note(StatusNote::silent(""));
     }
 
     /// The full-disk screen, under the title bar and over whatever else

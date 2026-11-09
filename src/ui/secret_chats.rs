@@ -68,12 +68,12 @@ impl QuillApp {
         };
         if let Some(live) = self.live.as_mut() {
             let result = live.driver.close_secret_chat(chat_id);
-            self.connection.set_note(match result {
+            self.set_note(match result {
                 Ok(_) => StatusNote::silent(tr(keys::Q_OPS_CLOSING_SECRET_CHAT)),
                 Err(_) => StatusNote::error(tr(keys::Q_OPS_COULD_NOT_CLOSE_SECRET_CHAT)),
             });
         } else if self.demo_session.is_some() {
-            self.connection.set_note(StatusNote::silent(tr(
+            self.set_note(StatusNote::silent(tr(
                 keys::Q_OPS_DEMO_SECRET_CHAT_CLOSE_NO,
             )));
         }
@@ -94,12 +94,12 @@ impl QuillApp {
     pub(super) fn start_secret_chat_for_user(&mut self, user_id: i64, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
             let result = live.driver.start_secret_chat(user_id);
-            self.connection.set_note(match result {
+            self.set_note(match result {
                 Ok(_) => StatusNote::silent(tr(keys::Q_OPS_CREATING_SECRET_CHAT)),
                 Err(_) => StatusNote::error(tr(keys::Q_OPS_COULD_NOT_START_SECRET_CHAT)),
             });
         } else if self.demo_session.is_some() {
-            self.connection.set_note(StatusNote::silent(tr(
+            self.set_note(StatusNote::silent(tr(
                 keys::Q_OPS_DEMO_SECRET_CHAT_CREATE_NO,
             )));
         }
@@ -169,7 +169,7 @@ impl QuillApp {
         self.notify.ttl_picker = None;
         if let Some(live) = self.live.as_mut() {
             let result = live.driver.set_chat_message_auto_delete_time(chat_id, secs);
-            self.connection.set_note(match result {
+            self.set_note(match result {
                 Ok(_) if secs == 0 => StatusNote::silent(tr(keys::Q_OPS_TURNING_OFF_TIMER)),
                 Ok(_) => StatusNote::silent(tr(keys::Q_OPS_SETTING_TIMER)),
                 Err(_) => StatusNote::error(tr(keys::Q_OPS_COULD_NOT_CHANGE_TIMER)),
@@ -181,7 +181,7 @@ impl QuillApp {
             if let Some(chat) = session.chats.get_mut(&chat_id.0) {
                 chat.message_auto_delete_time = secs;
             }
-            self.connection.set_note(if secs == 0 {
+            self.set_note(if secs == 0 {
                 StatusNote::silent(tr(keys::Q_OPS_TIMER_OFF))
             } else {
                 StatusNote::silent(tr_with(

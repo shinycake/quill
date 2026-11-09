@@ -85,7 +85,7 @@ impl QuillApp {
             // `showPremiumPromo`: the lock explains instead of opening.
             button
                 .on_click(cx.listener(|this, _, _, cx| {
-                    this.connection.set_note(StatusNote::info(tr(
+                    this.set_note(StatusNote::info(tr(
                         keys::Q_MISC_SUBSCRIBE_TO_TELEGRAM_PREMIUM_TO_2,
                     )));
                     cx.notify();

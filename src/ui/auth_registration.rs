@@ -110,21 +110,24 @@ impl QuillApp {
         );
         first.zeroize();
         last.zeroize();
-        self.screen.connection.set_note(match result {
-            Ok(_) => {
-                self.screen
-                    .auth_ui
-                    .registration_first_input
-                    .update(cx, |input, cx| input.set_value("", window, cx));
-                self.screen
-                    .auth_ui
-                    .registration_last_input
-                    .update(cx, |input, cx| input.set_value("", window, cx));
-                self.screen.auth_ui.accepted_registration_terms = None;
-                StatusNote::silent(tr(keys::Q_MISC_REGISTRATION_SUBMITTED_WAITING_FOR_TELEGRAM))
-            }
-            Err(_) => StatusNote::error(tr(keys::Q_MISC_COULD_NOT_REGISTER_CHECK_YOUR)),
-        });
+        self.screen.connection.set_note_for(
+            &self.screen.windows,
+            match result {
+                Ok(_) => {
+                    self.screen
+                        .auth_ui
+                        .registration_first_input
+                        .update(cx, |input, cx| input.set_value("", window, cx));
+                    self.screen
+                        .auth_ui
+                        .registration_last_input
+                        .update(cx, |input, cx| input.set_value("", window, cx));
+                    self.screen.auth_ui.accepted_registration_terms = None;
+                    StatusNote::silent(tr(keys::Q_MISC_REGISTRATION_SUBMITTED_WAITING_FOR_TELEGRAM))
+                }
+                Err(_) => StatusNote::error(tr(keys::Q_MISC_COULD_NOT_REGISTER_CHECK_YOUR)),
+            },
+        );
         cx.notify();
     }
 }

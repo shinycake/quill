@@ -114,8 +114,7 @@ impl QuillApp {
                 .is_some_and(|chat| matches!(chat.kind, ChatKind::Secret { .. }))
         });
         if secret {
-            self.connection
-                .set_note(StatusNote::info(tr(keys::Q_CHAT_AI_TOOLS_UNAVAILABLE_HERE)));
+            self.set_note(StatusNote::info(tr(keys::Q_CHAT_AI_TOOLS_UNAVAILABLE_HERE)));
             cx.notify();
             return;
         }

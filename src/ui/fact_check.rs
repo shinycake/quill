@@ -79,7 +79,8 @@ impl QuillApp {
         }
         match self.live.as_mut() {
             Some(live) => {
-                self.screen.connection.set_note(
+                self.screen.connection.set_note_for(
+                    &self.screen.windows,
                     match live
                         .driver
                         .set_fact_check(dialog.chat_id, dialog.message_id, &text)
@@ -109,8 +110,7 @@ impl QuillApp {
                         quill::telegram::envelope::FactCheck::plain(text.clone(), country)
                     });
                 }
-                self.connection
-                    .set_note(StatusNote::silent(tr(keys::Q_MISC_FACT_CHECK_SAVED_DEMO)));
+                self.set_note(StatusNote::silent(tr(keys::Q_MISC_FACT_CHECK_SAVED_DEMO)));
             }
         }
         cx.notify();

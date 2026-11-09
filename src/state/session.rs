@@ -12,6 +12,46 @@ pub struct ComposerLinkPreview {
     pub preview: Option<Option<LinkPreview>>,
 }
 
+/// The composers' link previews, one per URL asked (each window's
+/// composer has its own URL, and its chip reads its own), the last
+/// [`Self::KEPT`] asked.
+#[derive(Debug, Clone, Default)]
+pub struct ComposerLinkPreviews(Vec<ComposerLinkPreview>);
+
+impl ComposerLinkPreviews {
+    /// Enough for every open window's composer.
+    pub const KEPT: usize = 8;
+
+    /// The preview asked for `url`.
+    pub fn get(&self, url: &str) -> Option<&ComposerLinkPreview> {
+        self.0.iter().find(|preview| preview.url == url)
+    }
+
+    /// A request for `url` went out: its chip shows "Getting link info"
+    /// until the answer.
+    pub fn asked(&mut self, url: &str) {
+        self.0.retain(|preview| preview.url != url);
+        self.0.push(ComposerLinkPreview {
+            url: url.to_string(),
+            preview: None,
+        });
+        let over = self.0.len().saturating_sub(Self::KEPT);
+        self.0.drain(..over);
+    }
+
+    /// The answer for `url` (`None`: TDLib has no preview for it). An
+    /// answer for a URL no longer kept is dropped, and a failure never
+    /// replaces a preview already loaded.
+    pub fn answered(&mut self, url: &str, preview: Option<LinkPreview>) {
+        let Some(slot) = self.0.iter_mut().find(|slot| slot.url == url) else {
+            return;
+        };
+        if preview.is_some() || slot.preview.is_none() {
+            slot.preview = Some(preview);
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ShutdownPhase {
     Running,

@@ -31,15 +31,26 @@ use quill::lang::{keys, tr};
 use quill::rich::RichDraft;
 use quill::state::Session;
 
+/// The rich draft's box open for the chat shown: "discard this message?"
+/// or "Remove Formatting". A field of `ChatUi`, so it goes when the
+/// window shows another chat (its buttons act on the draft of the chat
+/// it was opened for).
+#[derive(Default, Debug, Clone, PartialEq, Eq)]
+pub(in crate::ui) enum RichDraftBox {
+    #[default]
+    Closed,
+    /// "Discard this message?".
+    Discard,
+    /// "Remove Formatting", with the draft flattened to message markup
+    /// for "Send Without Formatting".
+    PremiumChoice(String),
+}
+
 /// The composer's rich draft surfaces that are not the stored draft
-/// itself: the discard and Premium boxes, the preview's scroll position
-/// and the paste notice.
+/// itself and not its boxes (`ChatUi::rich_draft_box`): the preview's
+/// scroll position and the paste notice.
 #[derive(Default)]
 pub(in crate::ui) struct RichDraftUi {
-    discard_confirm: bool,
-    /// "Remove Formatting" is open; holds the draft flattened to message
-    /// markup for "Send Without Formatting".
-    premium_choice: Option<String>,
     preview_scroll: ScrollHandle,
     paste: paste::PasteNotice,
     pub(in crate::ui) preview: preview::RichPreview,
@@ -150,7 +161,7 @@ impl QuillApp {
                     if event.modifiers().secondary(cx) {
                         this.discard_rich_draft(cx);
                     } else {
-                        this.composer_ui.rich_draft.discard_confirm = true;
+                        this.chat_ui.rich_draft_box = RichDraftBox::Discard;
                         cx.notify();
                     }
                 }))
@@ -167,8 +178,7 @@ impl QuillApp {
         // The editor's markup has no media: editing such a draft would
         // drop its photos and files on the next save.
         if rich.input().is_none() {
-            self.connection
-                .set_note(StatusNote::info(tr(keys::Q_RICH_DRAFT_UNEDITABLE)));
+            self.set_note(StatusNote::info(tr(keys::Q_RICH_DRAFT_UNEDITABLE)));
             cx.notify();
             return;
         }
@@ -245,8 +255,7 @@ impl QuillApp {
             return false;
         };
         if rich.input().is_none() {
-            self.connection
-                .set_note(StatusNote::info(tr(keys::Q_RICH_DRAFT_UNEDITABLE)));
+            self.set_note(StatusNote::info(tr(keys::Q_RICH_DRAFT_UNEDITABLE)));
             cx.notify();
             return true;
         }
@@ -280,7 +289,7 @@ impl QuillApp {
         });
         match plain {
             Some(plain) => {
-                self.composer_ui.rich_draft.premium_choice = Some(plain);
+                self.chat_ui.rich_draft_box = RichDraftBox::PremiumChoice(plain);
                 cx.notify();
             }
             None => self.show_rich_premium_toast(window, cx),

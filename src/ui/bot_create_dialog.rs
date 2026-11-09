@@ -76,7 +76,7 @@ impl QuillApp {
             return true;
         }
         if !user.can_manage_bots {
-            self.connection.set_note(StatusNote::silent(format!(
+            self.set_note(StatusNote::silent(format!(
                 "@{} doesn't have Bot Management Mode enabled.",
                 user.username
             )));
@@ -251,8 +251,7 @@ impl QuillApp {
         }
         let full = owned_bots::full_username(&typed);
         let Some(live) = self.live.as_mut() else {
-            self.connection
-                .set_note(StatusNote::info(tr(keys::Q_MEDIA_DEMO_MODE_CREATING_A_BOT)));
+            self.set_note(StatusNote::info(tr(keys::Q_MEDIA_DEMO_MODE_CREATING_A_BOT)));
             cx.notify();
             return;
         };
@@ -261,7 +260,7 @@ impl QuillApp {
             .create_managed_bot(manager_id, &name, &full, via_link)
             .is_err()
         {
-            self.connection.set_note(StatusNote::error(tr(
+            self.set_note(StatusNote::error(tr(
                 keys::Q_MEDIA_COULD_NOT_SEND_THE_REQUEST,
             )));
             cx.notify();
@@ -339,7 +338,7 @@ impl QuillApp {
                     story_id: None,
                 });
             }
-            self.connection.set_note(StatusNote::silent(tr_with(
+            self.set_note(StatusNote::silent(tr_with(
                 keys::Q_MEDIA_CREATED_WILL_MANAGE_THIS_BOT,
                 &[("name", name), ("manager", &manager.to_string())],
             )));

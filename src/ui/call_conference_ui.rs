@@ -228,7 +228,7 @@ impl QuillApp {
                                 .ghost()
                                 .on_click(cx.listener(move |this, _, _, cx| {
                                     cx.write_to_clipboard(ClipboardItem::new_string(link.clone()));
-                                    this.connection.set_note(StatusNote::silent(tr(
+                                    this.set_note(StatusNote::silent(tr(
                                         super::group_call_share::LINK_COPIED,
                                     )));
                                     cx.notify();
@@ -261,14 +261,12 @@ impl QuillApp {
         match self.live.as_mut() {
             Some(live) => {
                 if live.driver.join_conference_link(link).is_err() {
-                    self.connection.set_note(StatusNote::error(tr(
+                    self.set_note(StatusNote::error(tr(
                         keys::Q_AV_COULDNT_JOIN_THE_VOICE_CHAT,
                     )));
                 }
             }
-            None => self
-                .connection
-                .set_note(StatusNote::info(tr(keys::Q_AV_VOICE_CHATS_NEED_A_LIVE))),
+            None => self.set_note(StatusNote::info(tr(keys::Q_AV_VOICE_CHATS_NEED_A_LIVE))),
         }
         cx.notify();
     }

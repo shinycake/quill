@@ -49,13 +49,16 @@ pub(crate) fn link_uses_label(member_count: i32, member_limit: i32) -> String {
 
 impl QuillApp {
     pub(super) fn open_admin_links(&mut self, chat_id: ChatId, admin: i64, cx: &mut Context<Self>) {
-        self.screen.connection.set_note(match self.live.as_mut() {
-            Some(live) => match live.driver.open_admin_invite_links(chat_id, admin) {
-                Ok(_) => StatusNote::default(),
-                Err(_) => StatusNote::error(tr(keys::Q_OPS_COULD_NOT_LOAD_INVITE_LINKS)),
+        self.screen.connection.set_note_for(
+            &self.screen.windows,
+            match self.live.as_mut() {
+                Some(live) => match live.driver.open_admin_invite_links(chat_id, admin) {
+                    Ok(_) => StatusNote::default(),
+                    Err(_) => StatusNote::error(tr(keys::Q_OPS_COULD_NOT_LOAD_INVITE_LINKS)),
+                },
+                None => StatusNote::info(tr(keys::Q_OPS_INVITE_LINKS_NEED_A_LIVE)),
             },
-            None => StatusNote::info(tr(keys::Q_OPS_INVITE_LINKS_NEED_A_LIVE)),
-        });
+        );
         cx.notify();
     }
 
@@ -126,16 +129,22 @@ impl QuillApp {
                 .show_cancel(true)
                 .on_ok(move |_, _, cx| {
                     let _ = app.update(cx, |this, cx| {
-                        this.screen.connection.set_note(match this.live.as_mut() {
-                            Some(live) => match live.driver.delete_all_revoked_admin_links(chat_id)
-                            {
-                                Ok(_) => StatusNote::info(tr(keys::Q_OPS_DELETING_REVOKED_LINKS)),
-                                Err(_) => StatusNote::error(tr(
-                                    keys::Q_OPS_COULD_NOT_DELETE_REVOKED_LINKS,
-                                )),
+                        this.screen.connection.set_note_for(
+                            &this.screen.windows,
+                            match this.live.as_mut() {
+                                Some(live) => {
+                                    match live.driver.delete_all_revoked_admin_links(chat_id) {
+                                        Ok(_) => {
+                                            StatusNote::info(tr(keys::Q_OPS_DELETING_REVOKED_LINKS))
+                                        }
+                                        Err(_) => StatusNote::error(tr(
+                                            keys::Q_OPS_COULD_NOT_DELETE_REVOKED_LINKS,
+                                        )),
+                                    }
+                                }
+                                None => StatusNote::info(tr(keys::Q_OPS_INVITE_LINKS_NEED_A_LIVE)),
                             },
-                            None => StatusNote::info(tr(keys::Q_OPS_INVITE_LINKS_NEED_A_LIVE)),
-                        });
+                        );
                         cx.notify();
                     });
                     true
@@ -315,13 +324,16 @@ impl QuillApp {
     }
 
     fn process_link_requests(&mut self, chat_id: ChatId, approve: bool, cx: &mut Context<Self>) {
-        self.screen.connection.set_note(match self.live.as_mut() {
-            Some(live) => match live.driver.process_link_join_requests(chat_id, approve) {
-                Ok(_) => StatusNote::default(),
-                Err(_) => StatusNote::error(tr(keys::Q_OPS_COULD_NOT_PROCESS_JOIN_REQUESTS)),
+        self.screen.connection.set_note_for(
+            &self.screen.windows,
+            match self.live.as_mut() {
+                Some(live) => match live.driver.process_link_join_requests(chat_id, approve) {
+                    Ok(_) => StatusNote::default(),
+                    Err(_) => StatusNote::error(tr(keys::Q_OPS_COULD_NOT_PROCESS_JOIN_REQUESTS)),
+                },
+                None => StatusNote::info(tr(keys::Q_OPS_JOIN_REQUESTS_NEED_A_LIVE)),
             },
-            None => StatusNote::info(tr(keys::Q_OPS_JOIN_REQUESTS_NEED_A_LIVE)),
-        });
+        );
         cx.notify();
     }
 

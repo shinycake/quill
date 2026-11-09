@@ -127,7 +127,7 @@ pub(super) static ESC_LAYERS: &[EscLayer] = &[
         |app| app.story_reply_recording_active(),
         |app, _, cx| {
             if app.recording.locked {
-                app.connection.set_note(StatusNote::silent(tr(
+                app.set_note(StatusNote::silent(tr(
                     keys::Q_MISC_RECORDING_IS_LOCKED_UNLOCK_IT,
                 )));
                 cx.notify();
@@ -191,7 +191,7 @@ pub(super) static ESC_LAYERS: &[EscLayer] = &[
     ),
     layer!("recording", |app| app.recording_here(), |app, _, cx| {
         if app.recording.locked {
-            app.connection.set_note(StatusNote::silent(tr(
+            app.set_note(StatusNote::silent(tr(
                 keys::Q_MISC_RECORDING_IS_LOCKED_UNLOCK_IT,
             )));
             cx.notify();
@@ -316,7 +316,7 @@ pub(super) static ESC_LAYERS: &[EscLayer] = &[
         |app| app.share.forward_result.is_some(),
         |app, _, cx| {
             app.share.forward_result = None;
-            app.connection.set_note(StatusNote::silent(tr(
+            app.set_note(StatusNote::silent(tr(
                 keys::Q_MISC_FORWARD_RESULT_DISMISSED,
             )));
             cx.notify();

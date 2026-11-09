@@ -791,7 +791,7 @@ impl QuillApp {
                     live.driver.terminate_all_other_sessions().map(|_| ())
                 }
             };
-            self.connection.set_note(match result {
+            self.set_note(match result {
                 Ok(()) => StatusNote::silent(tr(keys::Q_PREFS_TERMINATING_SESSION)),
                 Err(_) => StatusNote::error(tr(keys::Q_PREFS_COULD_NOT_TERMINATE_THE_SESSION)),
             });

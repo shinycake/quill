@@ -39,8 +39,7 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut() {
             live.driver.set_sticker_manager_open(true);
             if live.driver.open_mask_sets().is_err() {
-                self.connection
-                    .set_note(StatusNote::error(tr(keys::Q_MISC_COULD_NOT_LOAD_MASKS)));
+                self.set_note(StatusNote::error(tr(keys::Q_MISC_COULD_NOT_LOAD_MASKS)));
             }
         } else if let Some(session) = self.demo_session.as_mut() {
             session.stickers.masks.open = true;
@@ -61,7 +60,8 @@ impl QuillApp {
             masks.confirm_remove = None;
         }
         if let Some(live) = self.live.as_mut() {
-            self.screen.connection.set_note(
+            self.screen.connection.set_note_for(
+                &self.screen.windows,
                 match live.driver.change_mask_set(set_id, installed, archived) {
                     Ok(Some(_)) => StatusNote::silent(tr(keys::Q_MISC_UPDATING_MASKS)),
                     Ok(None) => StatusNote::silent(tr(keys::Q_MISC_A_MASK_UPDATE_IS_ALREADY)),

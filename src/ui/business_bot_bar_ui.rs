@@ -113,7 +113,7 @@ impl QuillApp {
                 .toggle_business_bot_paused(chat_id, paused)
                 .is_err()
         {
-            self.connection.set_note(StatusNote::error(tr(
+            self.set_note(StatusNote::error(tr(
                 keys::Q_MEDIA_COULD_NOT_CHANGE_THE_BOT,
             )));
         }
@@ -124,7 +124,7 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut()
             && live.driver.remove_business_bot_from_chat(chat_id).is_err()
         {
-            self.connection.set_note(StatusNote::error(tr(
+            self.set_note(StatusNote::error(tr(
                 keys::Q_MEDIA_COULD_NOT_REMOVE_THE_BOT,
             )));
         }

@@ -24,7 +24,7 @@ impl QuillApp {
                 .reaction_notification_settings
                 .clone()
             else {
-                self.connection.set_note(StatusNote::silent(tr(
+                self.set_note(StatusNote::silent(tr(
                     keys::Q_PREFS_REACTION_SETTINGS_STILL_LOADING,
                 )));
                 cx.notify();
@@ -36,7 +36,7 @@ impl QuillApp {
                 ReactionSourceKind::PollVote => settings.poll_vote_source = source,
             }
             let result = live.driver.send_reaction_notification_settings(&settings);
-            self.connection.set_note(match result {
+            self.set_note(match result {
                 Ok(_) => {
                     StatusNote::silent(tr(keys::Q_PREFS_REACTION_NOTIFICATION_SETTING_UPDATED))
                 }
@@ -57,7 +57,7 @@ impl QuillApp {
                 ReactionSourceKind::PollVote => settings.poll_vote_source = source,
             }
             session.settings.reaction_notification_settings = Some(settings);
-            self.connection.set_note(StatusNote::silent(tr(
+            self.set_note(StatusNote::silent(tr(
                 keys::Q_PREFS_REACTION_NOTIFICATION_SETTING_UPDATED_2,
             )));
         }
@@ -79,7 +79,7 @@ impl QuillApp {
                 .reaction_notification_settings
                 .clone()
             else {
-                self.connection.set_note(StatusNote::silent(tr(
+                self.set_note(StatusNote::silent(tr(
                     keys::Q_PREFS_REACTION_SETTINGS_STILL_LOADING,
                 )));
                 cx.notify();
@@ -87,7 +87,7 @@ impl QuillApp {
             };
             settings.sound_id = sound_id;
             let result = live.driver.send_reaction_notification_settings(&settings);
-            self.connection.set_note(match result {
+            self.set_note(match result {
                 Ok(_) => StatusNote::silent(tr(keys::Q_PREFS_REACTION_SOUND_UPDATED)),
                 Err(_) => StatusNote::error(tr(keys::Q_PREFS_COULD_NOT_CHANGE_REACTION_SOUND)),
             });
@@ -100,7 +100,7 @@ impl QuillApp {
                 .unwrap_or_default();
             settings.sound_id = sound_id;
             session.settings.reaction_notification_settings = Some(settings);
-            self.connection.set_note(StatusNote::silent(tr(
+            self.set_note(StatusNote::silent(tr(
                 keys::Q_PREFS_REACTION_SOUND_UPDATED_2,
             )));
         }
@@ -125,7 +125,7 @@ impl QuillApp {
                 .reaction_notification_settings
                 .clone()
             else {
-                self.connection.set_note(StatusNote::silent(tr(
+                self.set_note(StatusNote::silent(tr(
                     keys::Q_PREFS_REACTION_SETTINGS_STILL_LOADING,
                 )));
                 cx.notify();
@@ -133,7 +133,7 @@ impl QuillApp {
             };
             settings.show_preview = show_preview;
             let result = live.driver.send_reaction_notification_settings(&settings);
-            self.connection.set_note(match result {
+            self.set_note(match result {
                 Ok(_) => StatusNote::silent(tr(keys::Q_PREFS_REACTION_PREVIEW_UPDATED)),
                 Err(_) => StatusNote::error(tr(keys::Q_PREFS_COULD_NOT_CHANGE_REACTION_PREVIEW)),
             });
@@ -146,7 +146,7 @@ impl QuillApp {
                 .unwrap_or_default();
             settings.show_preview = show_preview;
             session.settings.reaction_notification_settings = Some(settings);
-            self.connection.set_note(StatusNote::silent(tr(
+            self.set_note(StatusNote::silent(tr(
                 keys::Q_PREFS_REACTION_PREVIEW_UPDATED_2,
             )));
         }

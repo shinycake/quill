@@ -227,6 +227,29 @@ impl QuillApp {
         true
     }
 
+    /// The first window (the main one, then the chat windows) whose state
+    /// `shows` now, with that window's state in place, and its handle:
+    /// `None` for the main window. For work whose own window is gone that
+    /// still owes something to whichever window shows its target now (a
+    /// send whose chat was reopened in another window clears that
+    /// window's composer).
+    pub(in crate::ui) fn window_where(
+        &mut self,
+        cx: &mut Context<Self>,
+        shows: impl Fn(&Self) -> bool,
+    ) -> Option<(Option<ChatId>, AnyWindowHandle)> {
+        let main = self.main_window.handle.map(|handle| (None, handle));
+        let chats: Vec<(Option<ChatId>, AnyWindowHandle)> = self
+            .windows
+            .open_windows()
+            .map(|(chat, handle)| (Some(chat), handle))
+            .collect();
+        main.into_iter().chain(chats).find(|(scope, _)| {
+            self.in_window_scope(*scope, cx, |app, _| shows(app))
+                .unwrap_or(false)
+        })
+    }
+
     pub(in crate::ui) fn defer_screen(
         &self,
         cx: &mut Context<Self>,

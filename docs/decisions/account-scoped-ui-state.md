@@ -2793,3 +2793,121 @@ seam). The other twenty were fixed.
 - **Not done.** The Business screens still show the empty state until the
   full info arrives. Nothing is written from it now, but the screen is not
   rebuilt when the info lands.
+
+### Phase 15 (area B: the Asker decides toasts too, and boxes go with their chat)
+
+Round 15 of the review, area B, on `claude/sm-review15-b`. The numbers are
+the review's ranked findings; the three "dodges" are round-14 state the
+implicit-state check did not catch.
+
+**Toasts and the Asker (finding 7, first dodge).** A toast's window was a
+copy: `ConnectionUi::note_window`, written beside `ChatWindows::last_press`
+in `note_window_press` and cleared by hand on window close. Boxes of the
+same flow went to the Asker (`asking_window`), toasts to the last press,
+so a bot's answer to a button pressed in a chat window toasted in the main
+window once the user had clicked there. The copy is gone. `set_note` is a
+`QuillApp` method that takes the window from the Asker, as `open_box`
+does (`asking_window_or_last_press`): the window of the press, of the
+frame, of the deferred work, or the one a flow carried under
+`as_asked_by`; with nobody asking, the last press. The 1,300 note sites
+call it. Where the client is borrowed, they call
+`connection.set_note_for(&windows, note)`, which reads the same Asker
+(`ChatWindows::asking_window_or_last_press`). `set_note_in` (a window
+named by hand) stays for the seam and the forward result, which names the
+window it puts in place. `report_failed_open` keeps the asking window
+across the OS's answer and sets the note under `as_asked_by`.
+
+*Designs considered.* (a) Keep `note_window` and write it whenever the
+Asker changes (`with_asker`, the scope swaps): still two fields kept in
+step by hand. Rejected. (b) Give each toast a "resolve later" host and
+place it at the end of the update: the Asker can change several times in
+one update, so the place would be wrong. Rejected. (c, chosen) The note's
+window is read from the Asker when the note is set, in one function.
+
+*Guard.* `scripts/note_hosts.py`, run by `check-window-scope.py`, fails
+on `set_note_in(` or `toasts.push_in(` outside `connection_state.rs`, and
+on a read of `windows.last_press` outside `src/ui/chat_window/`, unless a
+`// note-host: <why>` marker says why (two sites: the forward result and
+the sticker fly's cell). Offline tests: `scripts/test_note_hosts.py` (CI
+step "window scope check tests"). `lock-surfaces.txt` lists `poll_live ->
+set_note` as runs-locked, as the old `connection.set_note` was.
+
+**Box hosts (second dodge).** `dialog_hosts::Host { window, shown: bool }`
+is `enum Host { Asked(window), Shown(window) }`.
+
+**What was built, by finding.**
+
+1. *The rich draft's boxes acted on the chat shown now.* "Discard" and
+   "Remove Formatting" are one `RichDraftBox` (`Closed`, `Discard`,
+   `PremiumChoice(plain)`) in `ChatUi` (third dodge: the
+   `premium_choice: Option<String>` flag and `discard_confirm` are gone
+   from the per-window `RichDraftUi`). A chat or topic change replaces
+   `ChatUi`, so the box closes. A click that lands between the chat
+   change and that frame does nothing: both buttons ask
+   `chat_ui_is_current()` first.
+2. *The AI compose box and the apply-in-place shortcut advanced only on
+   main-window frames.* `ai_compose_window_upkeep` is a step of
+   `per_window_upkeep`. In the box's own window's frame it closes the box
+   when that window shows another chat, takes the box's answer, the style
+   editor's answer, the style refresh and the saved-style pick. In the
+   asking window's frame it takes the shortcut's answer and rewrites that
+   composer in place, with no defer. A box or a request whose window
+   closed is dropped in any frame. The button's blink, the style link's
+   preview and notices, and the emoji files stay in the main upkeep.
+3. *AI error toasts showed in the main window.* They follow from 2: each
+   push uses the `Window` of the frame that took the answer.
+4. *A prep that ended through the fallback left the sent caption on
+   screen.* When the window Send was tapped in is gone, the fallback asks
+   `window_where` for a window that shows the slot now (the chat reopened
+   in a new window, or the account back on screen in the main window).
+   It finishes there with that `Window`, so the composer, reply and
+   options are cleared as they would have been. With no such window it
+   clears the stored draft, as before.
+5. *The app-wide pending link outlived its account.* The link and its
+   origin are one `QueuedLink { link, account, window, by_agent }`
+   (`LinkUi::agent_pending_link` and `window_pending_link` are gone). A
+   link from outside Quill (`QueuedLink::outside`: the launch argument,
+   the OS through `queue_outside_link`) has no account, and whichever
+   account is on screen takes it. A link clicked in an account is followed
+   only by that account (`for_screen`) and is dropped once another account
+   is on screen. So a t.me/c post link or a bot start link of account A
+   never resolves on B, and an agent's link is still the agent's.
+6. *The quote picker came back after a normal send.* The picker is part of
+   the reply bar: `ChatUi`'s reply is a `ReplyBar { reply, quote_picker }`.
+   Every way a reply goes (a send's `set_reply(None)`, Escape, a reply to
+   another message) takes the picker with it; a new quote for the same
+   message keeps it open. `ShareUi::reply_quote_for` is gone.
+7. *Toasts ignored the Asker.* Above.
+8. *Re-entering the GIF tab dropped the emoji section.* Each window keeps
+   what its tab asks for: `PickerUi::gif_wanted: GifWanted` (`Saved` or
+   `Search(query)`; trending is the empty query). A footer emoji empties
+   the field but stays the window's section. Entering the tab asks for the
+   window's own section again when the session's one list holds another.
+   With two windows' tabs open, the window of the last press asks for its
+   own (`gif_tab_upkeep`, per window), and the other window's tab shows
+   none of those GIFs until a press there. A request that cannot be sent
+   leaves the window on what the list holds, so nothing asks every frame.
+9. *A chat window's link-preview chip never loaded.* The session keeps a
+   preview per URL (`ComposerLinkPreviews`, the last eight asked), and
+   `maybe_prefetch_link_preview` runs in every window's upkeep for that
+   window's composer. A composer with no URL clears nothing: each chip
+   reads its own URL's preview.
+
+**Tests.** `rich_draft_tests.rs` (`a_rich_draft_box_goes_with_its_chat`),
+`ai_compose/dialog_tests.rs` (a chat window's box takes its answer and
+toasts with no main-window frame), `composer/bars_tests.rs` (a text send
+closes the picker), `chat_window/tests.rs` (a note toasts in the window
+that asked, in the window's own frame, and at the last press when nobody
+asked), `chat_window/asker_tests.rs` (queued links' origin, each window's
+GIF section, `window_where`), `deep_links.rs` (`QueuedLink::for_screen`)
+and `connect/tests/message_ops` (previews by URL).
+
+**Not done, or not tested.**
+
+- The prep fallback (4) needs a live client to send; only `window_where`
+  is tested. The account round trip was not run live.
+- A window whose GIF tab shows another window's list shows the empty
+  state until a press there; tdesktop keeps a list per window. The
+  session's one search is unchanged.
+- The style link's preview box (`AiStylePreview`) and its notices still
+  run in the main frame.

@@ -171,7 +171,7 @@ impl QuillApp {
                 session.apply(owned);
             }
         }
-        self.connection.set_note(StatusNote::silent(
+        self.set_note(StatusNote::silent(
             "screenshot demo — pictures sent as files",
         ));
     }
@@ -195,7 +195,7 @@ impl QuillApp {
         if let Some(owned) = copy_and_parse(&json, &self.demo_ui.seq, &sink) {
             session.apply(owned);
         }
-        self.connection.set_note(StatusNote::silent(
+        self.set_note(StatusNote::silent(
             "screenshot demo — an HDR picture sent as a file",
         ));
     }

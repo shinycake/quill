@@ -121,8 +121,7 @@ impl QuillApp {
         });
         self.open_box(DialogKind::Stars);
         if let Some(Err(_)) = sent {
-            self.connection
-                .set_note(StatusNote::error(tr(keys::Q_MONEY_COULD_NOT_LOAD_STARS)));
+            self.set_note(StatusNote::error(tr(keys::Q_MONEY_COULD_NOT_LOAD_STARS)));
         }
         cx.notify();
     }
@@ -272,8 +271,7 @@ impl QuillApp {
             .as_mut()
             .map(|live| live.driver.open_received_gifts(owner));
         if let Some(Err(_)) = sent {
-            self.connection
-                .set_note(StatusNote::error(tr(keys::Q_MONEY_COULD_NOT_LOAD_GIFTS)));
+            self.set_note(StatusNote::error(tr(keys::Q_MONEY_COULD_NOT_LOAD_GIFTS)));
         }
         self.open_box(crate::ui::shell::DialogKind::ReceivedGifts);
         cx.notify();
@@ -328,7 +326,7 @@ impl QuillApp {
             .as_mut()
             .map(|live| live.driver.toggle_gift_saved(&id, saved));
         if let Some(Err(_)) = sent {
-            self.connection.set_note(StatusNote::error(tr(
+            self.set_note(StatusNote::error(tr(
                 keys::Q_MONEY_COULD_NOT_UPDATE_THE_GIFT,
             )));
         }
@@ -341,7 +339,7 @@ impl QuillApp {
             .as_mut()
             .map(|live| live.driver.convert_gift_to_stars(&id));
         if let Some(Err(_)) = sent {
-            self.connection.set_note(StatusNote::error(tr(
+            self.set_note(StatusNote::error(tr(
                 keys::Q_MONEY_COULD_NOT_CONVERT_THE_GIFT,
             )));
         }

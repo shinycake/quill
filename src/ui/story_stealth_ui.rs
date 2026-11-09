@@ -131,12 +131,12 @@ impl QuillApp {
             StealthPress::Activate => {
                 if let Some(live) = self.live.as_mut() {
                     if live.driver.activate_story_stealth_mode().is_err() {
-                        self.connection.set_note(StatusNote::error(tr(
+                        self.set_note(StatusNote::error(tr(
                             keys::Q_MEDIA_COULD_NOT_ENABLE_STEALTH_MODE,
                         )));
                     }
                 } else if self.demo_session.is_some() {
-                    self.connection.set_note(StatusNote::info(tr(
+                    self.set_note(StatusNote::info(tr(
                         keys::Q_MEDIA_DEMO_STEALTH_MODE_NEEDS_LIVE,
                     )));
                 }

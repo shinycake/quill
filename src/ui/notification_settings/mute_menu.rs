@@ -58,7 +58,7 @@ impl QuillApp {
         self.notify.mute_chat = None;
         if let Some(live) = self.live.as_mut() {
             let result = live.driver.set_chat_mute_for(chat_id, mute_for);
-            self.connection.set_note(match result {
+            self.set_note(match result {
                 Ok(_) if mute_for == 0 => StatusNote::silent(tr(keys::Q_PREFS_UNMUTING)),
                 Ok(_) => StatusNote::silent(tr(keys::Q_PREFS_MUTING)),
                 Err(_) => StatusNote::error(tr(keys::Q_PREFS_COULD_NOT_CHANGE_MUTE)),
@@ -74,7 +74,7 @@ impl QuillApp {
                 },
                 cx,
             );
-            self.connection.set_note(if mute_for == 0 {
+            self.set_note(if mute_for == 0 {
                 StatusNote::silent(tr(keys::Q_LEFTOVERS_UNMUTED))
             } else {
                 StatusNote::silent(tr(keys::Q_LEFTOVERS_MUTED))

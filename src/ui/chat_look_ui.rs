@@ -233,8 +233,7 @@ impl QuillApp {
             {
                 let _ = this.update(cx, |this, cx| {
                     if !is_wallpaper_image(&path) {
-                        this.connection
-                            .set_note(StatusNote::silent(tr(keys::Q_MISC_CHOOSE_A_JPEG_PNG_OR)));
+                        this.set_note(StatusNote::silent(tr(keys::Q_MISC_CHOOSE_A_JPEG_PNG_OR)));
                     } else if let Some(d) = this.dialogs.chat_look_dialog.as_mut() {
                         d.file = Some(path);
                         d.background = None;

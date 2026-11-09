@@ -27,7 +27,7 @@ impl QuillApp {
         }
         let cancel = Arc::new(AtomicBool::new(false));
         self.sticker_box.encoding = Some(cancel.clone());
-        self.connection.set_note(StatusNote::silent(ENCODING_NOTE));
+        self.set_note(StatusNote::silent(ENCODING_NOTE));
         let kind = create.kind;
         let worker = cx.background_spawn(async move {
             encode_sticker(&job.source, &job.edits, &job.info, kind, &cancel)
@@ -57,7 +57,7 @@ impl QuillApp {
                     Ok(_) => {}
                     Err(error) => {
                         if let Some(note) = error.note().filter(|_| current) {
-                            this.connection.set_note(StatusNote::error(note));
+                            this.set_note(StatusNote::error(note));
                         }
                     }
                 }

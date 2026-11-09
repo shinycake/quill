@@ -65,7 +65,7 @@ impl QuillApp {
             player.seek(5.0);
             player.seek(0.0);
         }
-        self.connection.set_note(StatusNote::silent(
+        self.set_note(StatusNote::silent(
             "screenshot demo — in-viewer video playback",
         ));
         match demo {

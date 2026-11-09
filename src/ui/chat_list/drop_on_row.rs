@@ -265,8 +265,7 @@ impl QuillApp {
         .route();
         match route {
             Drop::Cannot => {
-                self.connection
-                    .set_note(StatusNote::error(tr(keys::FORWARD_CANT)));
+                self.set_note(StatusNote::error(tr(keys::FORWARD_CANT)));
                 return;
             }
             Drop::ChooseTopic => {
@@ -275,7 +274,7 @@ impl QuillApp {
                 } else {
                     // A direct messages group an administrator reads has
                     // conversations, not topics; Quill has no chooser for them.
-                    self.connection.set_note(StatusNote::silent(tr(
+                    self.set_note(StatusNote::silent(tr(
                         keys::Q_CHATLIST_OPEN_THE_DIRECT_MESSAGES_AND_FORWARD,
                     )));
                 }
@@ -285,7 +284,7 @@ impl QuillApp {
         }
         // Secret chats and slow mode refuse with their own notes.
         if let Some(note) = self.share_dest_refusal(chat_id, cx) {
-            self.connection.set_note(StatusNote::error(note));
+            self.set_note(StatusNote::error(note));
             return;
         }
         // The forward rides with the open, to the window that shows the
@@ -368,7 +367,7 @@ impl QuillApp {
         }
         // tdesktop checks before it opens the chat (`filesOrForwardDrop`).
         if let Some(note) = self.start_files_refusal(chat_id) {
-            self.connection.set_note(StatusNote::error(note));
+            self.set_note(StatusNote::error(note));
             return;
         }
         // A forum asks for a topic first (`ShowDropMediaBox`).
@@ -382,7 +381,7 @@ impl QuillApp {
                 };
                 self.open_drop_topic(chat_id, payload, window, cx);
             } else {
-                self.connection.set_note(StatusNote::silent(tr(
+                self.set_note(StatusNote::silent(tr(
                     keys::Q_CHATLIST_OPEN_THE_DIRECT_MESSAGES_AND_DROP,
                 )));
             }

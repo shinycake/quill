@@ -67,8 +67,7 @@ impl QuillApp {
     pub(in crate::ui) fn start_grams_withdraw(&mut self, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
             if live.driver.start_gram_withdrawal().is_err() {
-                self.connection
-                    .set_note(StatusNote::error(tr(keys::Q_MONEY_COULD_NOT_OPEN_FRAGMENT)));
+                self.set_note(StatusNote::error(tr(keys::Q_MONEY_COULD_NOT_OPEN_FRAGMENT)));
             }
         } else if let Some(grams) = self.grams_mut() {
             // The demo has no password state: the password box.
@@ -107,9 +106,7 @@ impl QuillApp {
                     *withdraw = GramWithdraw::idle(Some(ExportError::Other(String::new())));
                 }
             }
-            None => self
-                .connection
-                .set_note(StatusNote::info(tr(keys::Q_MONEY_DEMO_MODE_THIS_NEEDS_A))),
+            None => self.set_note(StatusNote::info(tr(keys::Q_MONEY_DEMO_MODE_THIS_NEEDS_A))),
         }
         cx.notify();
     }

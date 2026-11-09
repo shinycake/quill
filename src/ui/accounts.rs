@@ -93,7 +93,7 @@ impl QuillApp {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.connection.set_note(StatusNote::error(message));
+        self.set_note(StatusNote::error(message));
         cx.notify();
     }
 

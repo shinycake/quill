@@ -359,8 +359,7 @@ impl QuillApp {
                         MediaAction::CopyFilename => {
                             if let Some(name) = target.copy_name.clone() {
                                 cx.write_to_clipboard(ClipboardItem::new_string(name));
-                                this.connection
-                                    .set_note(StatusNote::info(tr(keys::Q_CHAT_FILENAME_COPIED)));
+                                this.set_note(StatusNote::info(tr(keys::Q_CHAT_FILENAME_COPIED)));
                             }
                         }
                     }
@@ -426,7 +425,7 @@ impl QuillApp {
             if let Some(live) = self.live.as_mut() {
                 let _ = live.driver.ensure_media_files(&[target.file_id]);
             }
-            self.connection.set_note(StatusNote::silent(tr(
+            self.set_note(StatusNote::silent(tr(
                 keys::Q_CHAT_DOWNLOADING_CHOOSE_SAVE_AS_AGAIN,
             )));
             cx.notify();
@@ -450,7 +449,7 @@ impl QuillApp {
                 .spawn(async move { std::fs::copy(&path, &dest).map(|_| dest) })
                 .await;
             let _ = this.update(cx, |this, cx| {
-                this.connection.set_note(match copied {
+                this.set_note(match copied {
                     Ok(dest) => StatusNote::info(format!(
                         "saved to {}",
                         dest.file_name().and_then(|n| n.to_str()).unwrap_or("file")
@@ -477,7 +476,7 @@ impl QuillApp {
             return;
         }
         let Some((_, path)) = self.menu_media_local(chat_id, message_id) else {
-            self.connection.set_note(StatusNote::silent(tr(
+            self.set_note(StatusNote::silent(tr(
                 keys::Q_CHAT_DOWNLOAD_THE_PHOTO_FIRST_TO,
             )));
             cx.notify();
@@ -492,10 +491,9 @@ impl QuillApp {
                         cx.write_to_clipboard(ClipboardItem::new_image(
                             &gpui_kit::Image::from_bytes(gpui_kit::ImageFormat::Png, bytes),
                         ));
-                        this.connection
-                            .set_note(StatusNote::info(tr(keys::Q_CHAT_PHOTO_COPIED)));
+                        this.set_note(StatusNote::info(tr(keys::Q_CHAT_PHOTO_COPIED)));
                     }
-                    Err(note) => this.connection.set_note(StatusNote::error(note)),
+                    Err(note) => this.set_note(StatusNote::error(note)),
                 }
                 cx.notify();
             },
@@ -507,7 +505,7 @@ impl QuillApp {
     fn save_message_gif(&mut self, file_id: FileId, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
             let sent = live.driver.set_gif_saved(file_id, true);
-            self.connection.set_note(match sent {
+            self.set_note(match sent {
                 Ok(_) => StatusNote::silent(tr(keys::Q_CHAT_SAVING_GIF)),
                 Err(_) => StatusNote::error(tr(keys::Q_CHAT_COULD_NOT_SAVE_GIF)),
             });
@@ -515,7 +513,7 @@ impl QuillApp {
                 self.note_gif_replaced(cx);
             }
         } else {
-            self.connection.set_note(StatusNote::silent(tr(
+            self.set_note(StatusNote::silent(tr(
                 keys::Q_CHAT_DEMO_GIFS_SAVE_WITH_LIVE,
             )));
         }
@@ -525,15 +523,15 @@ impl QuillApp {
     /// "Save for Notifications" (`addSavedNotificationSound`).
     fn save_message_tone(&mut self, file_id: FileId, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
-            self.screen
-                .connection
-                .set_note(match live.driver.save_notification_tone(file_id) {
+            self.screen.connection.set_note_for(
+                &self.screen.windows,
+                match live.driver.save_notification_tone(file_id) {
                     Ok(_) => StatusNote::silent(tr(keys::Q_CHAT_SAVING_SOUND)),
                     Err(_) => StatusNote::error(tr(keys::Q_CHAT_COULD_NOT_SAVE_THE_SOUND)),
-                });
+                },
+            );
         } else {
-            self.connection
-                .set_note(StatusNote::silent(tr(keys::Q_CHAT_SOUND_ADDED)));
+            self.set_note(StatusNote::silent(tr(keys::Q_CHAT_SOUND_ADDED)));
         }
         cx.notify();
     }
@@ -547,7 +545,7 @@ impl QuillApp {
     ) {
         if let Some(live) = self.live.as_mut() {
             let sent = live.driver.set_favorite_sticker(file_id, favorite);
-            self.connection.set_note(match sent {
+            self.set_note(match sent {
                 Ok(_) if favorite => StatusNote::silent(tr(keys::Q_CHAT_ADDED_TO_FAVORITES)),
                 Ok(_) => StatusNote::silent(tr(keys::Q_CHAT_REMOVED_FROM_FAVORITES)),
                 Err(_) => StatusNote::error(tr(keys::Q_CHAT_COULD_NOT_CHANGE_FAVORITES)),
@@ -556,7 +554,7 @@ impl QuillApp {
                 self.note_faved_replaced(file_id, cx);
             }
         } else {
-            self.connection.set_note(StatusNote::silent(tr(
+            self.set_note(StatusNote::silent(tr(
                 keys::Q_CHAT_DEMO_FAVORITES_CHANGE_WITH_LIVE,
             )));
         }
@@ -571,17 +569,18 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         if let Some(live) = self.live.as_mut() {
-            self.screen
-                .connection
-                .set_note(match live.driver.cancel_upload(chat_id, message_id) {
+            self.screen.connection.set_note_for(
+                &self.screen.windows,
+                match live.driver.cancel_upload(chat_id, message_id) {
                     Ok(_) => {
                         self.begin_vanish(chat_id, &[message_id]);
                         StatusNote::silent(tr(keys::Q_CHAT_UPLOAD_CANCELED))
                     }
                     Err(_) => StatusNote::error(tr(keys::Q_CHAT_COULD_NOT_CANCEL_THE_UPLOAD)),
-                });
+                },
+            );
         } else {
-            self.connection.set_note(StatusNote::silent(tr(
+            self.set_note(StatusNote::silent(tr(
                 keys::Q_CHAT_DEMO_UPLOADS_CANCEL_WITH_LIVE,
             )));
         }

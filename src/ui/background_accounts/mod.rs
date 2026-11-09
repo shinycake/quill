@@ -566,7 +566,7 @@ impl QuillApp {
             self.deliver_background(&key, drain, cx);
         }
         for note in export_notes {
-            self.connection.set_note(note);
+            self.set_note(note);
             changed = true;
         }
         self.drain_account_clicks(cx);

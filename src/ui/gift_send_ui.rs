@@ -66,8 +66,7 @@ impl QuillApp {
         if matches!(opened, Some(Ok(()))) {
             self.reset_send_gift_inputs(window, cx);
         } else {
-            self.connection
-                .set_note(StatusNote::silent(tr(keys::Q_MONEY_OPEN_A_CHAT_WITH_A)));
+            self.set_note(StatusNote::silent(tr(keys::Q_MONEY_OPEN_A_CHAT_WITH_A)));
         }
         cx.notify();
     }
@@ -97,8 +96,7 @@ impl QuillApp {
         if opened {
             self.reset_send_gift_inputs(window, cx);
         } else {
-            self.connection
-                .set_note(StatusNote::error(tr(keys::Q_MONEY_COULDNT_OPEN_THE_GIFTS)));
+            self.set_note(StatusNote::error(tr(keys::Q_MONEY_COULDNT_OPEN_THE_GIFTS)));
         }
         cx.notify();
     }
@@ -149,8 +147,7 @@ impl QuillApp {
             .as_mut()
             .map(|live| live.driver.send_star_gift(gift_id, &text, hide, upgrade));
         if let Some(Err(_)) = sent {
-            self.connection
-                .set_note(StatusNote::error(tr(keys::Q_MONEY_COULD_NOT_SEND_THE_GIFT)));
+            self.set_note(StatusNote::error(tr(keys::Q_MONEY_COULD_NOT_SEND_THE_GIFT)));
         }
         cx.notify();
     }

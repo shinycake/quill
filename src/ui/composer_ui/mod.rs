@@ -155,8 +155,7 @@ impl QuillApp {
     /// closes it.
     pub(super) fn close_gif_panel(&mut self, cx: &mut Context<Self>) {
         if self.close_media_panel(cx) {
-            self.connection
-                .set_note(StatusNote::silent(tr(keys::Q_CHAT_GIFS_CLOSED)));
+            self.set_note(StatusNote::silent(tr(keys::Q_CHAT_GIFS_CLOSED)));
         }
     }
 
@@ -198,7 +197,7 @@ impl QuillApp {
                 },
             );
             let ok = result.is_ok();
-            self.connection.set_note(if ok {
+            self.set_note(if ok {
                 StatusNote::silent(tr(keys::Q_CHAT_SENDING_GIF))
             } else {
                 StatusNote::error(tr(keys::Q_CHAT_COULD_NOT_SEND_GIF))
@@ -206,7 +205,7 @@ impl QuillApp {
             ok
         } else if self.demo_session.is_some() {
             self.apply_demo_gif(chat_id, file_id, duration, width, height, reply);
-            self.connection.set_note(StatusNote::silent(tr(
+            self.set_note(StatusNote::silent(tr(
                 keys::Q_CHAT_DEMO_GIF_APPLIED_LOCALLY_NO,
             )));
             true
@@ -240,23 +239,22 @@ impl QuillApp {
         } else if let Some(session) = self.demo_session.as_mut() {
             session.stickers.stickers.close();
         }
-        self.connection
-            .set_note(StatusNote::silent(tr(keys::Q_CHAT_STICKERS_CLOSED)));
+        self.set_note(StatusNote::silent(tr(keys::Q_CHAT_STICKERS_CLOSED)));
         cx.notify();
     }
 
     pub(super) fn select_sticker_set(&mut self, set_id: i64, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
-            self.screen
-                .connection
-                .set_note(match live.driver.select_sticker_set(set_id) {
+            self.screen.connection.set_note_for(
+                &self.screen.windows,
+                match live.driver.select_sticker_set(set_id) {
                     Ok(_) => StatusNote::silent(tr(keys::Q_CHAT_STICKER_SET)),
                     Err(_) => StatusNote::error(tr(keys::Q_CHAT_COULD_NOT_OPEN_STICKER_SET)),
-                });
+                },
+            );
         } else if let Some(session) = self.demo_session.as_mut() {
             session.select_sticker_set(set_id);
-            self.connection
-                .set_note(StatusNote::silent(tr(keys::Q_CHAT_STICKER_SET)));
+            self.set_note(StatusNote::silent(tr(keys::Q_CHAT_STICKER_SET)));
         }
         cx.notify();
     }

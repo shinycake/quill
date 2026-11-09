@@ -93,7 +93,7 @@ impl QuillApp {
             return;
         }
         let Some(live) = self.live.as_mut() else {
-            self.connection.set_note(StatusNote::info(tr(
+            self.set_note(StatusNote::info(tr(
                 keys::Q_MISC_TOPICS_NEED_A_LIVE_CONNECTION,
             )));
             cx.notify();
@@ -135,7 +135,7 @@ impl QuillApp {
             ),
             TopicExtra::Edit => return,
         };
-        self.connection.set_note(if result.is_ok() {
+        self.set_note(if result.is_ok() {
             StatusNote::info(done)
         } else {
             StatusNote::error(failed)

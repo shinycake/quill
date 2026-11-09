@@ -246,7 +246,7 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut()
             && let Err(err) = live.driver.fetch_contacts()
         {
-            self.connection.set_note(StatusNote::error(user_error_for(
+            self.set_note(StatusNote::error(user_error_for(
                 keys::Q_NOTES_FAILED_CONTACTS,
                 &err,
             )));
@@ -345,16 +345,19 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut() {
             live.driver.session.settings.contact_prefs.sync_enabled = next;
             if let Err(err) = live.driver.save_contact_prefs() {
-                self.screen.connection.set_note(StatusNote::error(tr_with(
-                    keys::Q_PEOPLE_COULDNT_SAVE_CONTACT_PREFS,
-                    &[("err", &err.to_string())],
-                )));
+                self.screen.connection.set_note_for(
+                    &self.screen.windows,
+                    StatusNote::error(tr_with(
+                        keys::Q_PEOPLE_COULDNT_SAVE_CONTACT_PREFS,
+                        &[("err", &err.to_string())],
+                    )),
+                );
             }
             if next && live.driver.session.users_state.contacts.is_none() {
                 // Re-enable refetches the server list so the tab
                 // converges with TDLib immediately.
                 if let Err(err) = live.driver.fetch_contacts() {
-                    self.connection.set_note(StatusNote::error(user_error_for(
+                    self.set_note(StatusNote::error(user_error_for(
                         keys::Q_NOTES_FAILED_CONTACTS,
                         &err,
                     )));
@@ -517,8 +520,7 @@ impl QuillApp {
             .as_ref()
             .and_then(|dialog| dialog.draft(cx));
         let Some((user_id, phone, first, last)) = draft else {
-            self.connection
-                .set_note(StatusNote::silent(tr(keys::Q_PEOPLE_ENTER_A_NAME_OR_PHONE)));
+            self.set_note(StatusNote::silent(tr(keys::Q_PEOPLE_ENTER_A_NAME_OR_PHONE)));
             cx.notify();
             return;
         };
@@ -526,11 +528,10 @@ impl QuillApp {
             match live.driver.add_contact(user_id, &phone, &first, &last) {
                 Ok(_) => {
                     self.dialogs.add_contact_dialog = None;
-                    self.connection
-                        .set_note(StatusNote::silent(tr(keys::Q_PEOPLE_CONTACT_ADD_REQUESTED)));
+                    self.set_note(StatusNote::silent(tr(keys::Q_PEOPLE_CONTACT_ADD_REQUESTED)));
                 }
                 Err(err) => {
-                    self.connection.set_note(StatusNote::error(user_error_for(
+                    self.set_note(StatusNote::error(user_error_for(
                         keys::Q_NOTES_FAILED_ADD_CONTACT,
                         &err,
                     )));
@@ -539,8 +540,7 @@ impl QuillApp {
         } else {
             // Demo: no driver — just close.
             self.dialogs.add_contact_dialog = None;
-            self.connection
-                .set_note(StatusNote::silent(tr(keys::Q_PEOPLE_CONTACT_ADD_REQUESTED)));
+            self.set_note(StatusNote::silent(tr(keys::Q_PEOPLE_CONTACT_ADD_REQUESTED)));
         }
         let _ = window;
         cx.notify();

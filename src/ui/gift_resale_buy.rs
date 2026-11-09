@@ -92,12 +92,11 @@ impl QuillApp {
         match self.live.as_mut() {
             Some(live) => {
                 if live.driver.buy_gift_resale(price, &text, hide).is_err() {
-                    self.connection
-                        .set_note(StatusNote::error(tr(keys::Q_MONEY_COULDNT_BUY_THE_GIFT)));
+                    self.set_note(StatusNote::error(tr(keys::Q_MONEY_COULDNT_BUY_THE_GIFT)));
                 }
             }
             None => {
-                self.connection.set_note(StatusNote::info(tr(
+                self.set_note(StatusNote::info(tr(
                     keys::Q_MONEY_BUYING_GIFTS_NEEDS_A_SIGNED,
                 )));
             }

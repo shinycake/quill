@@ -38,7 +38,7 @@ impl QuillApp {
 
     pub(super) fn open_share_contact_panel(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.share_target().is_none() {
-            self.connection.set_note(StatusNote::error(tr(
+            self.set_note(StatusNote::error(tr(
                 keys::Q_OPS_YOU_CANT_SEND_CONTACTS_HERE,
             )));
             cx.notify();
@@ -77,7 +77,7 @@ impl QuillApp {
         let options = self.send_options_to(chat_id);
         let Some(live) = self.live.as_mut() else {
             self.share.content_dialog = None;
-            self.connection.set_note(StatusNote::info(tr(
+            self.set_note(StatusNote::info(tr(
                 keys::Q_OPS_SHARING_NEEDS_A_LIVE_CONNECTION,
             )));
             cx.notify();
@@ -90,10 +90,9 @@ impl QuillApp {
             Ok(_) => {
                 self.share.content_dialog = None;
                 self.chat_ui.set_reply(None);
-                self.connection
-                    .set_note(StatusNote::silent(tr(keys::Q_OPS_SENDING_CONTACT)));
+                self.set_note(StatusNote::silent(tr(keys::Q_OPS_SENDING_CONTACT)));
             }
-            Err(_) => self.connection.set_note(StatusNote::error(tr(
+            Err(_) => self.set_note(StatusNote::error(tr(
                 keys::Q_OPS_COULD_NOT_SEND_THE_CONTACT,
             ))),
         }
@@ -111,8 +110,7 @@ impl QuillApp {
         let reply_to = self.send_reply_for(chat_id, cx);
         let options = self.send_options_to(chat_id);
         let Some(live) = self.live.as_mut() else {
-            self.connection
-                .set_note(StatusNote::info(tr(keys::Q_OPS_SENDING_DICE_NEEDS_A_LIVE)));
+            self.set_note(StatusNote::info(tr(keys::Q_OPS_SENDING_DICE_NEEDS_A_LIVE)));
             cx.notify();
             return;
         };
@@ -122,12 +120,9 @@ impl QuillApp {
         {
             Ok(_) => {
                 self.chat_ui.set_reply(None);
-                self.connection
-                    .set_note(StatusNote::silent(tr(keys::Q_OPS_ROLLING)));
+                self.set_note(StatusNote::silent(tr(keys::Q_OPS_ROLLING)));
             }
-            Err(_) => self
-                .connection
-                .set_note(StatusNote::error(tr(keys::Q_OPS_COULD_NOT_SEND_THE_DICE))),
+            Err(_) => self.set_note(StatusNote::error(tr(keys::Q_OPS_COULD_NOT_SEND_THE_DICE))),
         }
         cx.notify();
     }

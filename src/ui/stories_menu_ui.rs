@@ -51,7 +51,7 @@ impl QuillApp {
                     .live
                     .as_mut()
                     .map(|live| live.driver.set_chat_active_stories_list(id, hide));
-                self.connection.set_note(match sent {
+                self.set_note(match sent {
                     Some(Ok(_)) if hide => StatusNote::silent(tr(keys::Q_MEDIA_HIDING_STORIES)),
                     Some(Ok(_)) => StatusNote::silent(tr(keys::Q_MEDIA_SHOWING_STORIES)),
                     Some(Err(_)) => {

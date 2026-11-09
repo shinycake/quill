@@ -103,7 +103,7 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut() {
             match live.driver.import_contacts(&contacts) {
                 Ok(Some(_)) => {
-                    self.connection.set_note(if skipped == 0 && truncated == 0 {
+                    self.set_note(if skipped == 0 && truncated == 0 {
                         StatusNote::silent(tr(keys::Q_PEOPLE_IMPORTING_CONTACTS))
                     } else {
                         let mut details = Vec::new();
@@ -124,14 +124,14 @@ impl QuillApp {
                     });
                 }
                 Ok(None) => {
-                    self.connection.set_note(StatusNote::silent(tr(
+                    self.set_note(StatusNote::silent(tr(
                         keys::Q_PEOPLE_REQUEST_ALREADY_IN_FLIGHT,
                     )));
                     cx.notify();
                     return;
                 }
                 Err(err) => {
-                    self.connection.set_note(StatusNote::error(user_error_for(
+                    self.set_note(StatusNote::error(user_error_for(
                         keys::Q_NOTES_FAILED_IMPORT_CONTACTS,
                         &err,
                     )));

@@ -152,12 +152,10 @@ impl QuillApp {
         match (outcome, target) {
             (ToneUpload::Added { sound_id }, Some(target)) => {
                 self.apply_sound_choice(target, SoundChoice::Custom(sound_id), cx);
-                self.connection
-                    .set_note(StatusNote::info(tr(keys::RINGTONES_TOAST_ADDED)));
+                self.set_note(StatusNote::info(tr(keys::RINGTONES_TOAST_ADDED)));
             }
             (ToneUpload::Added { .. }, None) => {
-                self.connection
-                    .set_note(StatusNote::info(tr(keys::RINGTONES_TOAST_ADDED)));
+                self.set_note(StatusNote::info(tr(keys::RINGTONES_TOAST_ADDED)));
             }
             (ToneUpload::Failed(problem), _) => self.tell_tone_problem(problem),
             (ToneUpload::Idle | ToneUpload::Uploading { .. }, _) => {}
@@ -170,8 +168,7 @@ impl QuillApp {
             .session()
             .map(|s| s.messages.tone_limits)
             .unwrap_or_default();
-        self.connection
-            .set_note(StatusNote::error(problem_message(problem, limits)));
+        self.set_note(StatusNote::error(problem_message(problem, limits)));
     }
 
     /// A saved sound's row menu: tdesktop's right click offers "Delete".

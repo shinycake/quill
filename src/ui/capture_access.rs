@@ -152,13 +152,12 @@ impl QuillApp {
             match access(device) {
                 Access::Granted => {}
                 Access::Denied => {
-                    self.connection
-                        .set_note(StatusNote::error(denied_note(device)));
+                    self.set_note(StatusNote::error(denied_note(device)));
                     cx.notify();
                     return;
                 }
                 Access::Undetermined => {
-                    self.connection.set_note(StatusNote::silent(tr(if device {
+                    self.set_note(StatusNote::silent(tr(if device {
                         keys::Q_LEFTOVERS_ALLOW_CAMERA
                     } else {
                         keys::Q_LEFTOVERS_ALLOW_MICROPHONE
@@ -184,8 +183,7 @@ impl QuillApp {
                             if granted {
                                 this.with_device_access(devices, start, cx);
                             } else {
-                                this.connection
-                                    .set_note(StatusNote::error(denied_note(device)));
+                                this.set_note(StatusNote::error(denied_note(device)));
                                 cx.notify();
                             }
                         });

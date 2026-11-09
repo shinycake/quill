@@ -208,7 +208,7 @@ impl QuillApp {
         match self.live.as_mut() {
             Some(live) => {
                 if let Err(err) = live.driver.switch_language(info) {
-                    self.connection.set_note(StatusNote::error(user_error_for(
+                    self.set_note(StatusNote::error(user_error_for(
                         keys::Q_NOTES_FAILED_SWITCH_LANGUAGE,
                         &err,
                     )));
@@ -264,7 +264,7 @@ impl QuillApp {
             if let Some(live) = self.live.as_mut() {
                 let _ = live.driver.restore_language_option();
             }
-            self.connection.set_note(StatusNote::error(error));
+            self.set_note(StatusNote::error(error));
         }
         progressed
     }

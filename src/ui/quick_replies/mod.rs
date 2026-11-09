@@ -418,13 +418,16 @@ impl QuillApp {
     }
 
     fn send_quick_reply_to(&mut self, chat_id: ChatId, shortcut_id: i32, cx: &mut Context<Self>) {
-        self.screen.connection.set_note(match self.live.as_mut() {
-            Some(live) => match live.driver.send_quick_reply(chat_id, shortcut_id) {
-                Ok(()) => StatusNote::silent(tr(keys::Q_OPS_SENDING_QUICK_REPLY)),
-                Err(_) => StatusNote::error(tr(keys::Q_OPS_COULD_NOT_SEND_THE_QUICK)),
+        self.screen.connection.set_note_for(
+            &self.screen.windows,
+            match self.live.as_mut() {
+                Some(live) => match live.driver.send_quick_reply(chat_id, shortcut_id) {
+                    Ok(()) => StatusNote::silent(tr(keys::Q_OPS_SENDING_QUICK_REPLY)),
+                    Err(_) => StatusNote::error(tr(keys::Q_OPS_COULD_NOT_SEND_THE_QUICK)),
+                },
+                None => StatusNote::info(tr(keys::Q_OPS_DEMO_MODE_SENDING_A_QUICK)),
             },
-            None => StatusNote::info(tr(keys::Q_OPS_DEMO_MODE_SENDING_A_QUICK)),
-        });
+        );
         cx.notify();
     }
 }

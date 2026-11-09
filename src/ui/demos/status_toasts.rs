@@ -58,31 +58,26 @@ register_demos![
 
 impl QuillApp {
     fn demo_status_toast_info(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {
-        self.connection
-            .set_note(StatusNote::info(tr(keys::TEXT_COPIED)));
+        self.set_note(StatusNote::info(tr(keys::TEXT_COPIED)));
     }
 
     fn demo_status_toast_error(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {
-        self.connection
-            .set_note(StatusNote::error(user_error(&ConnectSendError::Native)));
+        self.set_note(StatusNote::error(user_error(&ConnectSendError::Native)));
     }
 
     fn demo_status_toast_partly_sent(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {
-        self.connection
-            .set_note(crate::ui::send_prep::partly_sent_note(2, 5));
+        self.set_note(crate::ui::send_prep::partly_sent_note(2, 5));
     }
 
     fn demo_status_toast_long_error(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {
-        self.connection.set_note(StatusNote::error(
+        self.set_note(StatusNote::error(
             "Couldn't send the file. The connection dropped while it was uploading, so nothing was sent. Check your network and try again.",
         ));
     }
 
     fn demo_status_toast_queued(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {
-        self.connection
-            .set_note(StatusNote::error(user_error(&ConnectSendError::Native)));
-        self.connection
-            .set_note(StatusNote::info(tr(keys::TEXT_COPIED)));
+        self.set_note(StatusNote::error(user_error(&ConnectSendError::Native)));
+        self.set_note(StatusNote::info(tr(keys::TEXT_COPIED)));
     }
 
     fn demo_status_toast_viewer(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
@@ -91,7 +86,6 @@ impl QuillApp {
             apply_ready_video_viewer(session, &self.demo_ui.sink, &self.demo_ui.seq);
         }
         self.open_media_viewer(ChatId(11), MessageId(204), cx);
-        self.connection
-            .set_note(StatusNote::info(tr(keys::TEXT_COPIED)));
+        self.set_note(StatusNote::info(tr(keys::TEXT_COPIED)));
     }
 }

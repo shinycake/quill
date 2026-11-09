@@ -101,7 +101,7 @@ impl QuillApp {
             seed_chats(session, &self.demo_ui.sink, &self.demo_ui.seq);
         }
         self.open_invite_link_box(ChatId(chat), link, window, cx);
-        self.connection.set_note(StatusNote::silent(note));
+        self.set_note(StatusNote::silent(note));
         cx.notify();
     }
 

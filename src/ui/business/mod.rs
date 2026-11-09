@@ -153,7 +153,7 @@ impl QuillApp {
                 return false;
             }
             if let Some(line) = self.business_mut().and_then(|d| d.local_error.take()) {
-                self.connection.set_note(StatusNote::error(line));
+                self.set_note(StatusNote::error(line));
             }
         }
         self.close_business(cx);

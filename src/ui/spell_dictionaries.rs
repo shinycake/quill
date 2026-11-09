@@ -194,7 +194,7 @@ impl QuillApp {
             return;
         };
         if let Err(err) = remove(&dir, code) {
-            self.connection.set_note(StatusNote::error(tr_with(
+            self.set_note(StatusNote::error(tr_with(
                 keys::Q_MISC_COULDNT_REMOVE_THE_DICTIONARY,
                 &[("err", &err.to_string())],
             )));

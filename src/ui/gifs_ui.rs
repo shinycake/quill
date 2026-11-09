@@ -46,25 +46,56 @@ fn empty_tile(color: Hsla) -> AnyElement {
 
 /// What the footer's sections choose.
 #[derive(Clone, PartialEq, Eq)]
-enum GifSection {
+pub(super) enum GifSection {
     Saved,
     Trending,
     Emoji(String),
 }
 
 impl GifSection {
-    /// The section the panel shows: saved GIFs, or a search for nothing
-    /// (trending) or for one of the provider's emoji. Typed text is none.
-    fn shown(panel: &GifPanel) -> Option<Self> {
-        if !panel.search_mode {
-            Some(Self::Saved)
-        } else if panel.search_query.is_empty() {
-            Some(Self::Trending)
-        } else {
-            panel
+    /// The section a window's GIF tab asks for: saved GIFs, or a search
+    /// for nothing (trending) or for one of the provider's emoji. Typed
+    /// text is none.
+    fn of(wanted: &GifWanted, panel: &GifPanel) -> Option<Self> {
+        match wanted {
+            GifWanted::Saved => Some(Self::Saved),
+            GifWanted::Search(query) if query.is_empty() => Some(Self::Trending),
+            GifWanted::Search(query) => panel
                 .provider_emojis
-                .contains(&panel.search_query)
-                .then(|| Self::Emoji(panel.search_query.clone()))
+                .contains(query)
+                .then(|| Self::Emoji(query.clone())),
+        }
+    }
+}
+
+/// What one window's GIF tab asks the session's one GIF list for: the
+/// saved GIFs, or a search (empty: trending; a footer emoji; typed text).
+/// Each window has its own (`PickerUi::gif_wanted`), as each tdesktop
+/// window has its own `GifsListWidget`: a footer emoji empties the field
+/// but stays the window's section, and another window's search is not
+/// this window's.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(in crate::ui) enum GifWanted {
+    #[default]
+    Saved,
+    Search(String),
+}
+
+impl GifWanted {
+    fn of_section(section: &GifSection) -> Self {
+        match section {
+            GifSection::Saved => Self::Saved,
+            GifSection::Trending => Self::Search(String::new()),
+            GifSection::Emoji(emoji) => Self::Search(emoji.clone()),
+        }
+    }
+
+    /// What the session's list holds now.
+    fn shown(panel: &GifPanel) -> Self {
+        if panel.search_mode {
+            Self::Search(panel.search_query.clone())
+        } else {
+            Self::Saved
         }
     }
 }
@@ -99,46 +130,58 @@ impl QuillApp {
     }
 
     fn search_gifs_for(&mut self, query: &str, cx: &mut Context<Self>) {
+        self.request_gifs(GifWanted::Search(query.trim().to_string()), cx);
+    }
+
+    /// Put `wanted` in the session's GIF list, from the top, as this
+    /// window's. A request that cannot be sent leaves the window on what
+    /// the list holds, so nothing asks again every frame.
+    fn request_gifs(&mut self, wanted: GifWanted, cx: &mut Context<Self>) {
         self.pickers.gif_scroll.set_offset(point(px(0.), px(0.)));
-        if let Some(live) = self.live.as_mut() {
-            if live.driver.search_gifs(query).is_err() {
-                self.connection
-                    .set_note(StatusNote::error(tr(keys::Q_MISC_COULD_NOT_SEARCH_GIFS)));
+        self.pickers.gif_wanted = wanted.clone();
+        let sent = if let Some(live) = self.live.as_mut() {
+            match &wanted {
+                GifWanted::Saved => live.driver.show_saved_gifs().is_ok(),
+                GifWanted::Search(query) => live.driver.search_gifs(query).is_ok(),
             }
         } else if let Some(session) = self.demo_session.as_mut() {
-            // No search bot offline: the demo finds nothing.
             let gifs = &mut session.stickers.gifs;
-            gifs.search_mode = true;
-            gifs.search_query = query.trim().to_string();
-            gifs.search_results.clear();
+            match &wanted {
+                GifWanted::Saved => gifs.search_mode = false,
+                GifWanted::Search(query) => {
+                    // No search bot offline: the demo finds nothing.
+                    gifs.search_mode = true;
+                    gifs.search_query = query.clone();
+                    gifs.search_results.clear();
+                }
+            }
+            true
+        } else {
+            false
+        };
+        if !sent {
+            if let Some(panel) = self.session().map(|session| &session.stickers.gifs) {
+                self.pickers.gif_wanted = GifWanted::shown(panel);
+            }
+            if matches!(wanted, GifWanted::Search(_)) && self.live.is_some() {
+                self.set_note(StatusNote::error(tr(keys::Q_MISC_COULD_NOT_SEARCH_GIFS)));
+            }
         }
         cx.notify();
     }
 
     /// A footer section was picked: the field empties (tdesktop cancels its
     /// search) and the section's GIFs show from the top.
-    fn choose_gif_section(&mut self, section: GifSection, cx: &mut Context<Self>) {
+    pub(super) fn choose_gif_section(&mut self, section: GifSection, cx: &mut Context<Self>) {
         // Typing that was waiting no longer searches.
         self.pickers.gif_keystroke = self.pickers.gif_keystroke.wrapping_add(1);
-        match section {
-            GifSection::Saved => {
-                self.pickers.gif_scroll.set_offset(point(px(0.), px(0.)));
-                if let Some(live) = self.live.as_mut() {
-                    let _ = live.driver.show_saved_gifs();
-                } else if let Some(session) = self.demo_session.as_mut() {
-                    session.stickers.gifs.search_mode = false;
-                }
-                cx.notify();
-            }
-            GifSection::Trending => self.search_gifs_for("", cx),
-            GifSection::Emoji(emoji) => self.search_gifs_for(&emoji, cx),
-        }
+        self.request_gifs(GifWanted::of_section(&section), cx);
     }
 
     /// The GIF tab shows in the window in place: the session keeps one
-    /// search for every window, and each window has its own field, so the
-    /// results follow this window's field (an empty field shows the saved
-    /// GIFs, not another window's search).
+    /// list for every window, and each window has its own field and
+    /// section (`PickerUi::gif_wanted`), so the list follows this
+    /// window's. Typed text that has not searched yet searches now.
     pub(super) fn follow_gif_field(&mut self, cx: &mut Context<Self>) {
         let field = self
             .pickers
@@ -147,20 +190,38 @@ impl QuillApp {
             .value()
             .trim()
             .to_string();
+        if !field.is_empty() && self.pickers.gif_wanted != GifWanted::Search(field.clone()) {
+            self.search_gifs_for(&field, cx);
+            return;
+        }
+        self.follow_gif_wanted(cx);
+    }
+
+    /// The session's list holds another window's GIFs: ask for this
+    /// window's again.
+    fn follow_gif_wanted(&mut self, cx: &mut Context<Self>) {
         let Some(panel) = self.session().map(|session| &session.stickers.gifs) else {
             return;
         };
-        let searched = panel
-            .search_mode
-            .then(|| panel.search_query.clone())
-            .filter(|query| !query.is_empty());
-        if field.is_empty() {
-            if searched.is_some() {
-                self.choose_gif_section(GifSection::Saved, cx);
-            }
-        } else if searched.as_deref() != Some(field.as_str()) {
-            self.search_gifs_for(&field, cx);
+        if GifWanted::shown(panel) != self.pickers.gif_wanted {
+            let wanted = self.pickers.gif_wanted.clone();
+            self.request_gifs(wanted, cx);
         }
+    }
+
+    /// Frame upkeep: two windows with the GIF tab open share the session's
+    /// one list. The window the user last pressed in has its own GIFs in
+    /// it (another window's tab shows nothing of them meanwhile,
+    /// `gif_picker_panel`).
+    pub(in crate::ui) fn gif_tab_upkeep(&mut self, cx: &mut Context<Self>) {
+        if self.windows.pressed_here() && self.pickers.media_panel.shows_gifs() {
+            self.follow_gif_wanted(cx);
+        }
+    }
+
+    /// The session's list holds what this window's tab asks for.
+    pub(super) fn gif_list_is_mine(&self, panel: &GifPanel) -> bool {
+        GifWanted::shown(panel) == self.pickers.gif_wanted
     }
 
     fn clear_gif_search_field(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -191,19 +252,19 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut()
             && live.driver.more_gif_search_results().is_err()
         {
-            self.connection
-                .set_note(StatusNote::error(tr(keys::Q_MISC_COULD_NOT_LOAD_MORE_GIFS)));
+            self.set_note(StatusNote::error(tr(keys::Q_MISC_COULD_NOT_LOAD_MORE_GIFS)));
         }
     }
 
     fn save_gif_pick(&mut self, file_id: FileId, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
-            self.screen
-                .connection
-                .set_note(match live.driver.set_gif_saved(file_id, true) {
+            self.screen.connection.set_note_for(
+                &self.screen.windows,
+                match live.driver.set_gif_saved(file_id, true) {
                     Ok(_) => StatusNote::silent(tr(keys::Q_MISC_SAVING_GIF)),
                     Err(_) => StatusNote::error(tr(keys::Q_MISC_COULD_NOT_SAVE_GIF)),
-                });
+                },
+            );
         }
         cx.notify();
     }
@@ -232,7 +293,13 @@ impl QuillApp {
                 .when(loading, |input| input.suffix(Spinner::new().small()))
                 .aria_label(tr(keys::GIFS_SEARCH)),
         );
-        let animations = panel.visible_animations();
+        let animations: &[AnimationItem] = if self.gif_list_is_mine(panel) {
+            panel.visible_animations()
+        } else {
+            // Another window's GIFs: none here until this window asks
+            // again (a press in it, `gif_tab_upkeep`).
+            &[]
+        };
         let body = if animations.is_empty() {
             self.gif_panel_status(panel, cx)
         } else {
@@ -253,7 +320,7 @@ impl QuillApp {
     /// Why the grid is empty. Nothing while the first answer is on its way
     /// (the field's spinner says so).
     fn gif_panel_status(&self, panel: &GifPanel, cx: &mut Context<Self>) -> AnyElement {
-        let text = if panel.loading || panel.search_loading {
+        let text = if panel.loading || panel.search_loading || !self.gif_list_is_mine(panel) {
             None
         } else if panel.search_mode && panel.search_failed && panel.search_bot_username.is_empty() {
             Some(tr(keys::Q_MISC_GIF_SEARCH_IS_NOT_AVAILABLE))
@@ -468,7 +535,7 @@ impl QuillApp {
     /// The footer: saved GIFs, trending and the search provider's emoji,
     /// like the sticker and emoji tabs' section strip.
     fn gif_sections(&self, panel: &GifPanel, cx: &mut Context<Self>) -> AnyElement {
-        let shown = GifSection::shown(panel);
+        let shown = GifSection::of(&self.pickers.gif_wanted, panel);
         let glyph = |icon| Icon::new(icon).size(px(18.)).into_any_element();
         let mut sections = vec![
             (

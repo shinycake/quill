@@ -59,7 +59,7 @@ impl QuillApp {
         let path = viewer_display_path(&item, files, &roots);
         let Some(path) = path else {
             self.viewer.reorient_pending = None;
-            self.connection.set_note(StatusNote::silent(tr(
+            self.set_note(StatusNote::silent(tr(
                 keys::Q_AV_DOWNLOAD_THE_PHOTO_FIRST_TO,
             )));
             cx.notify();
@@ -97,9 +97,7 @@ impl QuillApp {
                 self.viewer.orientation = target;
                 self.viewer.rotated = Some((path, target.code(), image.into()));
             }
-            None => self
-                .connection
-                .set_note(StatusNote::error(tr(keys::Q_AV_COULDNT_ROTATE_THIS_PHOTO))),
+            None => self.set_note(StatusNote::error(tr(keys::Q_AV_COULDNT_ROTATE_THIS_PHOTO))),
         }
         cx.notify();
     }
@@ -197,14 +195,14 @@ impl QuillApp {
                     self.show_saved_toast(dest, item.plays_clip(), cx);
                 }
                 Err(err) => {
-                    self.connection.set_note(StatusNote::error(tr_with(
+                    self.set_note(StatusNote::error(tr_with(
                         keys::Q_AV_COULDNT_SAVE,
                         &[("err", &err.to_string())],
                     )));
                 }
             },
             None => {
-                self.connection.set_note(StatusNote::silent(tr(
+                self.set_note(StatusNote::silent(tr(
                     keys::Q_AV_DOWNLOAD_THE_MEDIA_FIRST_TO,
                 )));
             }
@@ -352,8 +350,7 @@ impl QuillApp {
             return;
         };
         if !item.kind.is_picture() {
-            self.connection
-                .set_note(StatusNote::info(tr(keys::Q_AV_ONLY_PHOTOS_CAN_BE_COPIED)));
+            self.set_note(StatusNote::info(tr(keys::Q_AV_ONLY_PHOTOS_CAN_BE_COPIED)));
             cx.notify();
             return;
         }
@@ -365,7 +362,7 @@ impl QuillApp {
         let roots = self.media_display_roots();
         let orientation = self.viewer.orientation;
         let Some(path) = viewer_display_path(&item, files, &roots) else {
-            self.connection.set_note(StatusNote::error(tr(
+            self.set_note(StatusNote::error(tr(
                 keys::Q_AV_DOWNLOAD_THE_PHOTO_FIRST_TO_2,
             )));
             cx.notify();
@@ -391,12 +388,11 @@ impl QuillApp {
                         cx.write_to_clipboard(ClipboardItem::new_image(
                             &gpui_kit::Image::from_bytes(gpui_kit::ImageFormat::Png, bytes),
                         ));
-                        this.connection
-                            .set_note(StatusNote::info(tr(keys::Q_AV_PHOTO_COPIED)));
+                        this.set_note(StatusNote::info(tr(keys::Q_AV_PHOTO_COPIED)));
                     }
-                    None => this
-                        .connection
-                        .set_note(StatusNote::error(tr(keys::Q_AV_COULDNT_COPY_THIS_PHOTO))),
+                    None => {
+                        this.set_note(StatusNote::error(tr(keys::Q_AV_COULDNT_COPY_THIS_PHOTO)))
+                    }
                 }
                 cx.notify();
             });
@@ -443,10 +439,9 @@ impl QuillApp {
                     gpui_kit::ImageFormat::Png,
                     bytes,
                 )));
-                self.connection
-                    .set_note(StatusNote::info(tr(keys::Q_AV_FRAME_COPIED)));
+                self.set_note(StatusNote::info(tr(keys::Q_AV_FRAME_COPIED)));
             }
-            Err(note) => self.connection.set_note(StatusNote::error(note)),
+            Err(note) => self.set_note(StatusNote::error(note)),
         }
         cx.notify();
     }
@@ -664,7 +659,7 @@ impl QuillApp {
             && live.driver.fetch_attached_sticker_sets(file_id).is_err()
         {
             self.message_ui.menu_ui.sticker_set_open = false;
-            self.connection.set_note(StatusNote::error(tr(
+            self.set_note(StatusNote::error(tr(
                 keys::Q_AV_COULD_NOT_LOAD_THE_ATTACHED,
             )));
         }
@@ -745,8 +740,7 @@ impl QuillApp {
             .and_then(|s| s.chats.get(&chat_id.0))
             .is_some_and(|chat| chat.can_pin_messages());
         if !can_pin {
-            self.connection
-                .set_note(StatusNote::error(tr(keys::Q_AV_YOU_CANT_PIN_MESSAGES_IN)));
+            self.set_note(StatusNote::error(tr(keys::Q_AV_YOU_CANT_PIN_MESSAGES_IN)));
             cx.notify();
             return;
         }
@@ -773,14 +767,12 @@ impl QuillApp {
                     self.apply_demo_pin_toggle(chat_id, *id);
                 }
             }
-            self.connection
-                .set_note(StatusNote::silent(tr(keys::Q_AV_DEMO_ALBUM_PIN_UPDATED)));
+            self.set_note(StatusNote::silent(tr(keys::Q_AV_DEMO_ALBUM_PIN_UPDATED)));
             cx.notify();
             return;
         }
         let Some(live) = self.live.as_mut() else {
-            self.connection
-                .set_note(StatusNote::silent(tr(keys::Q_AV_NO_LIVE_CONNECTION)));
+            self.set_note(StatusNote::silent(tr(keys::Q_AV_NO_LIVE_CONNECTION)));
             cx.notify();
             return;
         };
@@ -791,7 +783,7 @@ impl QuillApp {
                     failed += 1;
                 }
             }
-            self.connection.set_note(if failed == 0 {
+            self.set_note(if failed == 0 {
                 StatusNote::silent(tr(keys::Q_AV_PINNING_ALBUM))
             } else {
                 StatusNote::error(tr_with(
@@ -805,7 +797,7 @@ impl QuillApp {
                     failed += 1;
                 }
             }
-            self.connection.set_note(if failed == 0 {
+            self.set_note(if failed == 0 {
                 StatusNote::silent(tr(keys::Q_AV_UNPINNING_ALBUM))
             } else {
                 StatusNote::error(tr_with(

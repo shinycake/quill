@@ -217,8 +217,7 @@ impl QuillApp {
             return;
         };
         let Some(live) = self.live.as_mut() else {
-            self.connection
-                .set_note(StatusNote::info(tr(keys::Q_OPS_SHARING_WITH_A_BOT_NEEDS)));
+            self.set_note(StatusNote::info(tr(keys::Q_OPS_SHARING_WITH_A_BOT_NEEDS)));
             cx.notify();
             return;
         };
@@ -275,7 +274,7 @@ impl QuillApp {
         if hide_keyboard {
             self.dismiss_custom_keyboard(share.chat_id, share.message_id, cx);
         }
-        self.connection.set_note(match result {
+        self.set_note(match result {
             Ok(()) => StatusNote::silent(tr_with(
                 keys::Q_OPS_SHARED_WITH,
                 &[("bot_name", &share.bot_name.to_string())],

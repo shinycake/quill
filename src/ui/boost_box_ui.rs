@@ -47,14 +47,14 @@ impl QuillApp {
         match self.live.as_mut() {
             Some(live) => match live.driver.open_boost_box(chat_id) {
                 Ok(true) => {}
-                Ok(false) => self.connection.set_note(StatusNote::error(tr(
+                Ok(false) => self.set_note(StatusNote::error(tr(
                     keys::Q_MONEY_THIS_CHAT_CANT_BE_BOOSTED,
                 ))),
-                Err(_) => self.connection.set_note(StatusNote::error(tr(
+                Err(_) => self.set_note(StatusNote::error(tr(
                     keys::Q_MONEY_COULD_NOT_LOAD_BOOST_STATUS,
                 ))),
             },
-            None => self.connection.set_note(StatusNote::info(tr(
+            None => self.set_note(StatusNote::info(tr(
                 keys::Q_MONEY_BOOSTS_NEED_A_LIVE_CONNECTION,
             ))),
         }
@@ -79,8 +79,7 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut()
             && live.driver.request_chat_boost(chat_id).is_err()
         {
-            self.connection
-                .set_note(StatusNote::error(tr(keys::Q_MONEY_COULD_NOT_BOOST)));
+            self.set_note(StatusNote::error(tr(keys::Q_MONEY_COULD_NOT_BOOST)));
         }
         cx.notify();
     }
@@ -118,7 +117,7 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut()
             && live.driver.reassign_boosts().is_err()
         {
-            self.connection.set_note(StatusNote::error(tr(
+            self.set_note(StatusNote::error(tr(
                 keys::Q_MONEY_COULD_NOT_REASSIGN_THE_BOOST,
             )));
         }

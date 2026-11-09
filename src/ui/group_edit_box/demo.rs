@@ -153,7 +153,7 @@ impl QuillApp {
     ) {
         self.seed_edit_box();
         self.open_group_edit_box(ChatId(chat), window, cx);
-        self.connection.set_note(StatusNote::silent(note));
+        self.set_note(StatusNote::silent(note));
         cx.notify();
     }
 

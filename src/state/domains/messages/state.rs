@@ -91,10 +91,9 @@ pub struct MessagesState {
     /// MED4: pending `getWebPageInstantView` URLs by `RequestId`
     /// (`RequestPurpose` stays `Copy`, so the URL rides here).
     pub instant_view_urls: HashMap<RequestId, String>,
-    /// MED4b: composer `getLinkPreview` prefetch state — the chip reads
-    /// this. Replaced on every new request; cleared when the composer's
-    /// detected URL changes away or the composer is submitted.
-    pub composer_preview: Option<ComposerLinkPreview>,
+    /// MED4b: composer `getLinkPreview` prefetch state, by URL: each
+    /// window's chip reads the preview of its own composer's URL.
+    pub composer_previews: crate::state::ComposerLinkPreviews,
     /// MED4b: pending `getLinkPreview` URLs by `RequestId` (same
     /// `Copy`-purpose pattern as `instant_view_urls`).
     pub composer_preview_urls: HashMap<RequestId, String>,
@@ -213,7 +212,7 @@ impl MessagesState {
             instant_view_fallback_from_agent: false,
             instant_view_agent_requests: HashSet::new(),
             instant_view_urls: HashMap::new(),
-            composer_preview: None,
+            composer_previews: Default::default(),
             composer_preview_urls: HashMap::new(),
             recognize_speech_error: None,
             resend_error: None,

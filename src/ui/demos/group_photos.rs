@@ -107,7 +107,7 @@ impl QuillApp {
             apply_group_photos(session, &self.demo_ui.sink, &self.demo_ui.seq);
         }
         self.open_info_panel_target(InfoPanelTarget::Supergroup(PHOTO_GROUP), window, cx);
-        self.connection.set_note(StatusNote::silent(
+        self.set_note(StatusNote::silent(
             "screenshot demo — group info panel, three group photos",
         ));
         cx.notify();

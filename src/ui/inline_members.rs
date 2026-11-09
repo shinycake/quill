@@ -102,8 +102,7 @@ impl QuillApp {
                 .map(|_| ())
         };
         if result.is_err() {
-            self.connection
-                .set_note(StatusNote::error(tr(keys::Q_MEDIA_COULD_NOT_LOAD_MEMBERS)));
+            self.set_note(StatusNote::error(tr(keys::Q_MEDIA_COULD_NOT_LOAD_MEMBERS)));
             cx.notify();
         }
     }

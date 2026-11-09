@@ -109,7 +109,7 @@ impl QuillApp {
             && live.driver.view_sticker_set(set_id).is_err()
         {
             self.message_ui.menu_ui.sticker_set_open = false;
-            self.connection.set_note(StatusNote::error(tr(
+            self.set_note(StatusNote::error(tr(
                 keys::Q_MEDIA_COULD_NOT_OPEN_THE_STICKER,
             )));
         }
@@ -129,18 +129,18 @@ impl QuillApp {
                 // The box closes in every window that shows the set, and
                 // its pending pick goes with it.
                 self.close_sticker_set_dialog(cx);
-                self.connection.set_note(if install {
+                self.set_note(if install {
                     StatusNote::silent(tr(keys::Q_MEDIA_STICKER_SET_ADDED))
                 } else {
                     StatusNote::silent(tr(keys::Q_MEDIA_STICKER_SET_REMOVED))
                 });
             } else {
-                self.connection.set_note(StatusNote::error(tr(
+                self.set_note(StatusNote::error(tr(
                     keys::Q_MEDIA_COULD_NOT_CHANGE_THE_STICKER,
                 )));
             }
         } else {
-            self.connection.set_note(StatusNote::silent(tr(
+            self.set_note(StatusNote::silent(tr(
                 keys::Q_MEDIA_DEMO_STICKER_SETS_CHANGE_WITH,
             )));
         }
@@ -159,8 +159,7 @@ impl QuillApp {
         self.close_sticker_set_dialog(cx);
         self.close_kit_dialog_if_done(DialogKind::StickerSet, window, cx);
         self.share.link_text = Some(link);
-        self.connection
-            .set_note(StatusNote::silent(tr(keys::Q_MEDIA_CHOOSE_A_CHAT_TO_SHARE)));
+        self.set_note(StatusNote::silent(tr(keys::Q_MEDIA_CHOOSE_A_CHAT_TO_SHARE)));
         cx.notify();
     }
 
@@ -172,8 +171,7 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         cx.write_to_clipboard(ClipboardItem::new_string(link));
-        self.connection
-            .set_note(StatusNote::info(copied_note(kind)));
+        self.set_note(StatusNote::info(copied_note(kind)));
         cx.notify();
     }
 
@@ -189,15 +187,15 @@ impl QuillApp {
             match live.driver.manage_sticker_set(set_id, false, true) {
                 Ok(_) => {
                     self.close_sticker_set_dialog(cx);
-                    self.connection.set_note(StatusNote::info(ARCHIVED_NOTE));
+                    self.set_note(StatusNote::info(ARCHIVED_NOTE));
                     self.close_kit_dialog_if_done(DialogKind::StickerSet, window, cx);
                 }
-                Err(_) => self.connection.set_note(StatusNote::error(tr(
+                Err(_) => self.set_note(StatusNote::error(tr(
                     keys::Q_MEDIA_COULD_NOT_ARCHIVE_THE_STICKER,
                 ))),
             }
         } else {
-            self.connection.set_note(StatusNote::silent(tr(
+            self.set_note(StatusNote::silent(tr(
                 keys::Q_MEDIA_DEMO_STICKER_SETS_ARCHIVE_WITH,
             )));
         }

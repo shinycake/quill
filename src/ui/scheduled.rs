@@ -373,7 +373,7 @@ impl QuillApp {
                 });
                 // Sending now would send another chat's text.
                 let send_after = send_after && open.as_ref() == Some(&slot);
-                self.connection.set_note(match (scheduling, kind) {
+                self.set_note(match (scheduling, kind) {
                     (ComposerScheduling::SendAtDate(date), ScheduleKind::Reminder) => {
                         StatusNote::silent(tr_with(
                             keys::Q_OPS_REMINDER_SET_FOR,
@@ -440,14 +440,14 @@ impl QuillApp {
             .edit_scheduled_message(chat_id, message_id, scheduling)
         {
             Ok(_) => {
-                self.connection.set_note(if sending_now {
+                self.set_note(if sending_now {
                     StatusNote::silent(tr(keys::Q_OPS_SENDING))
                 } else {
                     StatusNote::silent(tr(keys::Q_OPS_RESCHEDULING))
                 });
             }
             Err(_) => {
-                self.connection.set_note(if sending_now {
+                self.set_note(if sending_now {
                     StatusNote::error(tr(keys::Q_OPS_COULD_NOT_SEND_THE_MESSAGE))
                 } else {
                     StatusNote::error(tr(keys::Q_OPS_COULD_NOT_RESCHEDULE_THE_MESSAGE))

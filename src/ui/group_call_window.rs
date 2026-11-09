@@ -244,7 +244,7 @@ impl QuillApp {
                         app.group_call.stream.window_is_stream = stream;
                         app.sync_group_call_large_tile();
                     }
-                    Err(_) => app.connection.set_note(StatusNote::error(tr(
+                    Err(_) => app.set_note(StatusNote::error(tr(
                         keys::Q_AV_COULDNT_OPEN_THE_VIDEO_CHAT,
                     ))),
                 }

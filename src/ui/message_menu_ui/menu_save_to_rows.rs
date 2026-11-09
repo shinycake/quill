@@ -45,7 +45,8 @@ impl QuillApp {
                     let target = target.clone();
                     move |this, _, cx| {
                         if let Some(live) = this.live.as_mut() {
-                            this.screen.connection.set_note(
+                            this.screen.connection.set_note_for(
+                                &this.screen.windows,
                                 match live.driver.save_audio_to_profile(
                                     target.file_id,
                                     target.duration,
@@ -60,7 +61,7 @@ impl QuillApp {
                                 },
                             );
                         } else {
-                            this.connection.set_note(StatusNote::info(tr(
+                            this.set_note(StatusNote::info(tr(
                                 keys::Q_CHAT_DEMO_SAVING_TO_THE_PROFILE,
                             )));
                         }
@@ -85,7 +86,8 @@ impl QuillApp {
                     let draft =
                         quill::composer::ForwardDraft::from_message(chat_id, message_id, false);
                     if let (Some(live), Some(me), Some(draft)) = (this.live.as_mut(), me, draft) {
-                        this.screen.connection.set_note(
+                        this.screen.connection.set_note_for(
+                            &this.screen.windows,
                             match live.driver.forward_messages(ChatId(me), &draft) {
                                 Ok(_) => StatusNote::info(tr(keys::Q_CHAT_SAVED_TO_SAVED_MESSAGES)),
                                 Err(_) => {
@@ -94,7 +96,7 @@ impl QuillApp {
                             },
                         );
                     } else {
-                        this.connection.set_note(StatusNote::info(tr(
+                        this.set_note(StatusNote::info(tr(
                             keys::Q_CHAT_DEMO_SAVED_MESSAGES_NEEDS_LIVE,
                         )));
                     }
@@ -661,7 +663,7 @@ impl QuillApp {
                 .is_err()
             {
                 self.message_ui.menu_ui.report_open = false;
-                self.connection.set_note(StatusNote::error(tr(
+                self.set_note(StatusNote::error(tr(
                     keys::Q_CHAT_COULD_NOT_START_THE_REPORT,
                 )));
             }
@@ -710,7 +712,7 @@ impl QuillApp {
                 )
                 .is_err()
         {
-            self.connection.set_note(StatusNote::error(tr(
+            self.set_note(StatusNote::error(tr(
                 keys::Q_CHAT_COULD_NOT_SEND_THE_REPORT,
             )));
         }
@@ -746,8 +748,7 @@ impl QuillApp {
                 .to_string()
         };
         if text.is_empty() && !is_optional {
-            self.connection
-                .set_note(StatusNote::silent(tr(keys::Q_CHAT_ADD_A_COMMENT_TO_SEND)));
+            self.set_note(StatusNote::silent(tr(keys::Q_CHAT_ADD_A_COMMENT_TO_SEND)));
             cx.notify();
             return;
         }
@@ -757,7 +758,7 @@ impl QuillApp {
                 .report_messages(flow.chat_id, &flow.message_ids, &option_id, &text, None)
                 .is_err()
         {
-            self.connection.set_note(StatusNote::error(tr(
+            self.set_note(StatusNote::error(tr(
                 keys::Q_CHAT_COULD_NOT_SEND_THE_REPORT,
             )));
         }

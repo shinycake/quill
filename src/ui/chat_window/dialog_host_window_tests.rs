@@ -223,7 +223,9 @@ fn a_pointer_move_is_not_a_press(cx: &mut TestAppContext) {
         app.note_window_press(None);
         app.note_window_pointer(Some(OTHER));
         assert_eq!(app.windows.last_press, None);
-        assert_eq!(app.connection.note_window, None, "toasts stay too");
+        app.unasked(|app| {
+            assert_eq!(app.asking_window_or_last_press(), None, "toasts stay too");
+        });
         app.set_window_scope(None);
         app.links.deep_link_dialog = Some("TDLib's text".into());
     });
