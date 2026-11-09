@@ -317,9 +317,11 @@ impl QuillApp {
                                 gpui_kit::assets::IconName::MessageSquare,
                                 tr(keys::Q_AV_SHOW_IN_CHAT_2),
                             )
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.show_viewer_in_chat(cx);
-                            })),
+                            .on_click(cx.listener(
+                                |this, _, window, cx| {
+                                    this.show_viewer_in_chat(window, cx);
+                                },
+                            )),
                         )
                     })
                     .when_some(album_pin_label, |this, label| {

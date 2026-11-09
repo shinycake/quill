@@ -100,7 +100,10 @@ pub(crate) struct ViewerUi {
 
 /// The PiP window plays the old account's video: it closes. A window
 /// the viewer made full screen for a video goes back: the next screen's
-/// viewer starts `Off` and would never give it back.
+/// viewer starts `Off` and would never give it back. The OS Now Playing
+/// widget lets go of the old account's clip, and media keys pressed for
+/// it are dropped: the viewer's media-session tick is the old screen's,
+/// so it never runs again to clear them.
 impl super::on_screen::Farewell for ViewerUi {
     fn farewell(
         app: &mut super::app::QuillApp,
@@ -110,6 +113,7 @@ impl super::on_screen::Farewell for ViewerUi {
         app.close_video_pip(cx);
         app.viewer_leave_video_fullscreen();
         app.viewer_follow_window_fullscreen(window);
+        quill::media_session::clear();
     }
 }
 
