@@ -7,8 +7,9 @@ Build-only and dev-only crates are excluded. Do not edit by hand.
 
 Native libraries shipped next to the binary (TDLib, OpenSSL, zlib, FFmpeg,
 the call library libquill_calls, the Visual C++ runtime), the C++ code
-compiled into it (ThorVG with RapidJSON) and bundled data files are listed in
-`THIRD_PARTY.md`, with their license texts under `licenses/`.
+compiled into it (ThorVG with RapidJSON, the message widget runtime) and
+bundled data files are listed in `THIRD_PARTY.md`, with their license texts
+under `licenses/`.
 
 ## Overview
 
@@ -13477,6 +13478,39 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
+
+````
+
+### MIT License
+
+Used by:
+- [quill 0.1.0](https://github.com/shinycake/quill)
+
+````text
+The MIT License (MIT)
+ 
+Copyright (c) 2017-2026 Fabrice Bellard
+Copyright (c) 2017-2024 Charlie Gordon
+Copyright (c) 2023-2026 Ben Noordhuis
+Copyright (c) 2023-2026 Saúl Ibarra Corretgé
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
+THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
 
 ````
 

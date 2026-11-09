@@ -1,8 +1,9 @@
 # Changes made by the Quill project
 
 This directory is what `scripts/vendor-widgets.sh` copies from the upstream
-commits in `VERSION`: widget-sandbox (BSD-3-Clause), its pinned QuickJS fork
-(MIT) and twidget (BSD-3-Clause), each with its own `LICENSE`. The script then
+commits in `VERSION`: widget-sandbox (no license file published at this tag,
+see the decision doc), its pinned QuickJS fork (MIT, `quickjs/LICENSE`) and
+twidget (BSD-3-Clause, `twidget/LICENSE`). The script then
 applies `native/patches/twidget-quill.patch`, which is every change to the
 upstream files; changed code is marked `QUILL`. This file stays across a bump.
 Background: `docs/decisions/message-widgets.md`.
