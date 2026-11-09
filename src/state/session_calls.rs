@@ -15,6 +15,20 @@ impl Session {
     ///   we never saw pending) still records a summary so the end
     ///   screen can show "Missed call".
     pub(crate) fn accept_call_update(&mut self, call: &ParsedCall) {
+        // A call declined as busy is no one's: its end must not become
+        // the call window's summary, and a late `Pending` must not take
+        // the window or be declined twice.
+        if let Some(at) = self
+            .calls
+            .busy_declined_calls
+            .iter()
+            .position(|id| *id == call.id)
+        {
+            if call.state.is_terminal() {
+                self.calls.busy_declined_calls.remove(at);
+            }
+            return;
+        }
         if let Some(active) = self.calls.active_call.as_mut()
             && active.id == call.id
         {
@@ -50,14 +64,7 @@ impl Session {
                 }
                 return;
             }
-            if !call.is_outgoing
-                && matches!(call.state, CallState::Pending { .. })
-                && !self
-                    .calls
-                    .busy_decline_queue
-                    .iter()
-                    .any(|(id, _, _)| *id == call.id)
-            {
+            if !call.is_outgoing && matches!(call.state, CallState::Pending { .. }) {
                 let note = if self.calls.second_call == SecondCall::None {
                     self.calls.second_call = SecondCall::Prompt {
                         call_id: call.id,
@@ -66,9 +73,7 @@ impl Session {
                     };
                     "incoming-while-active-swap-prompt"
                 } else {
-                    self.calls
-                        .busy_decline_queue
-                        .push((call.id, call.user_id, call.is_video));
+                    self.queue_busy_decline(call);
                     "incoming-while-active-busy-decline"
                 };
                 self.diagnostics.record(Diagnostic {
@@ -98,6 +103,22 @@ impl Session {
         ));
         self.calls.summary = None;
         self.calls.error = None;
+    }
+
+    /// Queue an incoming call for the driver to decline as busy, and
+    /// remember it so its later updates are dropped (`accept_call_update`).
+    pub(crate) fn queue_busy_decline(&mut self, call: &ParsedCall) {
+        const BUSY_DECLINED_CALLS_MAX: usize = 16;
+        if self.calls.busy_declined_calls.contains(&call.id) {
+            return;
+        }
+        self.calls
+            .busy_decline_queue
+            .push((call.id, call.user_id, call.is_video));
+        if self.calls.busy_declined_calls.len() >= BUSY_DECLINED_CALLS_MAX {
+            self.calls.busy_declined_calls.pop_front();
+        }
+        self.calls.busy_declined_calls.push_back(call.id);
     }
 
     /// Phase C2b: `updateNewCallSignalingData`. The driver also feeds these

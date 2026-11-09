@@ -775,7 +775,7 @@ crate::ui::shell::register_dialogs! {
 
 mod build_payment_dialog;
 pub(crate) mod card_form;
-mod card_form_demo;
+pub(in crate::ui) mod card_form_demo;
 #[cfg(test)]
 #[cfg(feature = "demo-capture")]
 mod card_form_tests;

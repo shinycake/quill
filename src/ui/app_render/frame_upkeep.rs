@@ -35,16 +35,6 @@ impl QuillApp {
         self.rtmp_start_frame_upkeep(window, cx);
         // Starting a video chat: the "join as" list, a refused create.
         self.group_call_create_frame_upkeep(window, cx);
-        // Slice P1 fix-up: the checkout dialog opens on Buy press before
-        // the form arrives — prefill the saved order info once, on the
-        // first frame after the form answer lands. (This can't live in
-        // `poll_live`: prefill needs a `&mut Window` for the inputs.)
-        if self.payments.dialog.as_ref().is_some_and(|d| !d.prefilled) {
-            let payment_form = self.session().and_then(|s| s.payments.form.clone());
-            if let (Some(dialog), Some(form)) = (self.payments.dialog.as_mut(), payment_form) {
-                dialog.prefill_from_form(&form, window, cx);
-            }
-        }
         // main-only: the AI compose box carries the window it was opened in.
         self.ai_compose_frame_upkeep(window, cx);
         self.premium_limit_toast_upkeep(window, cx);

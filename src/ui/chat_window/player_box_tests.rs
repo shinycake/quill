@@ -219,3 +219,175 @@ fn a_closed_boxs_video_pick_opens_no_editor(cx: &mut TestAppContext) {
         assert!(app.composer_ui.send_box.video_editor.is_none());
     });
 }
+
+/// A photo editor making a sticker for set 78 in a chat window closes when
+/// the main window views another set: its Done would fill the "New
+/// Sticker" box of the set shown now, and the sticker would go there.
+#[gpui_kit::test]
+fn viewing_another_set_closes_the_other_windows_sticker_editor(cx: &mut TestAppContext) {
+    use crate::ui::photo_editor::PhotoEditor;
+    use quill::sticker_set_box::SetKind;
+    let h = new_app(cx);
+    let chat_window = h.open_in_new_window(OTHER, cx);
+    in_window(&h, chat_window, Some(OTHER), cx, |app, _, cx| {
+        app.view_message_sticker_set(78, cx);
+        let pixels = image::RgbaImage::from_pixel(300, 300, image::Rgba([1, 2, 3, 255]));
+        app.viewer.photo_editor = PhotoEditor::for_set(pixels, 78, SetKind::Stickers);
+        assert!(app.viewer.photo_editor.is_some());
+    });
+    in_window(&h, h.main, None, cx, |app, _, cx| {
+        app.view_message_sticker_set(2, cx);
+    });
+    let editor_open = h
+        .app
+        .update(cx, |app, cx| {
+            app.in_window_scope(Some(OTHER), cx, |app, _| app.viewer.photo_editor.is_some())
+        })
+        .unwrap_or(true);
+    assert!(!editor_open, "the old set's editor closed");
+}
+
+/// "Attached Stickers" in the main window's viewer takes the box from a
+/// chat window, as View Sticker Set does, rather than switch its set.
+#[gpui_kit::test]
+fn attached_stickers_close_the_box_in_the_other_window(cx: &mut TestAppContext) {
+    use quill::ids::FileId;
+    use quill::media_viewer::{MediaViewer, MediaViewerItem, MediaViewerKind};
+    let h = new_app(cx);
+    let chat_window = h.open_in_new_window(OTHER, cx);
+    in_window(&h, chat_window, Some(OTHER), cx, |app, _, cx| {
+        app.view_message_sticker_set(1, cx);
+    });
+    in_window(&h, h.main, None, cx, |app, _, cx| {
+        app.viewer.state = MediaViewer::open(
+            vec![MediaViewerItem {
+                group: None,
+                file_name: None,
+                chat_id: OPEN,
+                message_id: MessageId(3),
+                kind: MediaViewerKind::Photo,
+                display_file_ids: vec![FileId(1)],
+                download_file_id: FileId(1),
+                play_file_id: None,
+                duration_secs: None,
+                mime_type: None,
+                start_timestamp: None,
+                caption: String::new(),
+                caption_entities: Vec::new(),
+                duration_label: None,
+                natural_size: None,
+                quality_options: Vec::new(),
+            }],
+            0,
+        );
+        app.show_viewer_attached_stickers(cx);
+    });
+    let open_in = |chat: Option<ChatId>, cx: &mut TestAppContext| {
+        h.app
+            .update(cx, |app, cx| {
+                app.in_window_scope(chat, cx, |app, _| app.message_ui.menu_ui.sticker_set_open)
+            })
+            .unwrap_or(false)
+    };
+    assert!(open_in(None, cx), "the main window shows the attached sets");
+    assert!(!open_in(Some(OTHER), cx), "the chat window's box closed");
+}
+
+/// Deleting the chat of the playing voice note (`deleteChat` removes the
+/// chat, with no message update) stops the player, and the player lets go
+/// of the chat's history.
+#[gpui_kit::test]
+fn deleting_the_tracks_chat_stops_the_player_and_releases_its_history(cx: &mut TestAppContext) {
+    let h = new_app(cx);
+    in_window(&h, h.main, None, cx, |app, _, cx| {
+        app.playback.playing_voice = Some(OTHER_LAST);
+        app.playback.player.chat = Some(OTHER);
+        app.sync_history_holds();
+        assert!(app.session().is_some_and(|s| s.chat_history_in_use(OTHER)));
+        app.check_playing_track(cx);
+        assert_eq!(
+            app.playback.playing_voice,
+            Some(OTHER_LAST),
+            "the chat is there"
+        );
+        app.demo_session.as_mut().unwrap().chats.remove(&OTHER.0);
+        app.check_playing_track(cx);
+        assert_eq!(app.playback.playing_voice, None, "the player stopped");
+        assert_eq!(app.playback.player.chat, None, "its claim went");
+        app.sync_history_holds();
+        assert!(!app.session().is_some_and(|s| s.chat_history_in_use(OTHER)));
+    });
+}
+
+/// A closed chat window's GIF autoplay marks go, so the chat's GIFs
+/// autoplay on its first visit in the main window.
+#[gpui_kit::test]
+fn a_closed_chat_windows_gif_marks_go(cx: &mut TestAppContext) {
+    let h = new_app(cx);
+    let chat_window = h.open_in_new_window(OTHER, cx);
+    in_window(&h, chat_window, Some(OTHER), cx, |app, _, _| {
+        app.playback
+            .autoplayed_gifs
+            .insert(ChatMessage::new(OTHER, MessageId(7)));
+        app.playback
+            .autoplayed_gifs
+            .insert(ChatMessage::new(OPEN, MessageId(3)));
+    });
+    h.app
+        .update(cx, |app, cx| app.chat_window_closed(OTHER, None, cx));
+    h.app.read_with(cx, |app, _| {
+        let marks = &app.playback.autoplayed_gifs;
+        assert!(!marks.contains(&ChatMessage::new(OTHER, MessageId(7))));
+        assert!(
+            marks.contains(&ChatMessage::new(OPEN, MessageId(3))),
+            "another chat's marks stay"
+        );
+    });
+}
+
+/// A Buy pressed in a chat window: the saved info and card go in at that
+/// window's frame once the form lands, not at the main window's.
+#[gpui_kit::test]
+fn the_checkout_prefills_in_the_window_that_hosts_it(cx: &mut TestAppContext) {
+    use crate::ui::dialogs::PaymentCredentialChoice;
+    let h = new_app(cx);
+    let chat_window = h.open_in_new_window(OTHER, cx);
+    in_window(&h, chat_window, Some(OTHER), cx, |app, window, cx| {
+        if let Some(session) = app.demo_session.as_mut() {
+            session.payments.form = None;
+        }
+        app.open_payment_dialog(window, cx);
+        app.windows
+            .dialog_opened_in(crate::ui::shell::DialogKind::PaymentForm, Some(OTHER));
+    });
+    h.app.update(cx, |app, _| {
+        if let Some(session) = app.demo_session.as_mut() {
+            session.payments.form = Some(crate::ui::payments::card_form_demo::stripe_checkout(
+                true, false,
+            ));
+        }
+    });
+    let prefilled = |cx: &mut TestAppContext| {
+        h.app.read_with(cx, |app, _| {
+            app.payments
+                .dialog
+                .as_ref()
+                .map(|d| (d.prefilled, d.credential_choice.clone()))
+        })
+    };
+    in_window(&h, h.main, None, cx, |app, window, cx| {
+        app.per_window_upkeep(window, cx);
+    });
+    assert_eq!(
+        prefilled(cx),
+        Some((false, PaymentCredentialChoice::NewCard)),
+        "the main window does not host the box"
+    );
+    in_window(&h, chat_window, Some(OTHER), cx, |app, window, cx| {
+        app.per_window_upkeep(window, cx);
+    });
+    assert_eq!(
+        prefilled(cx),
+        Some((true, PaymentCredentialChoice::Saved("saved-1".into())))
+    );
+}

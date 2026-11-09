@@ -33,6 +33,7 @@ impl Session {
         self.apply_owned_bots_ok(pending);
         self.apply_privacy_data_ok(pending);
         self.apply_business_ok(pending);
+        self.apply_quick_replies_ok(pending);
         self.apply_business_extra_ok(pending);
         self.apply_sticker_creator_ok(pending);
         self.apply_suggested_post_ok(pending);

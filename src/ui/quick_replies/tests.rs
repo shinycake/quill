@@ -219,6 +219,66 @@ fn adding_a_message_without_a_live_session_says_so(cx: &mut TestAppContext) {
     );
 }
 
+#[gpui_kit::test]
+fn opening_the_box_clears_the_last_refusal_and_retries_a_failed_load(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    seed(&app, vcx);
+    app.update(vcx, |app, _| {
+        let state = &mut app.demo_session.as_mut().unwrap().settings.quick_replies;
+        state.error = Some("Quick replies: FLOOD_WAIT".into());
+        state.messages_requested.insert(1);
+        state.messages_failed.insert(1);
+    });
+    open(&app, vcx);
+    app.read_with(vcx, |app, _| {
+        let state = &app.demo_session.as_ref().unwrap().settings.quick_replies;
+        assert!(state.error.is_none());
+        assert!(!state.messages_requested.contains(&1));
+        assert!(!state.messages_settled(1));
+    });
+}
+
+#[gpui_kit::test]
+fn one_poll_runs_at_a_time_and_closing_the_box_ends_it(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    seed(&app, vcx);
+    open(&app, vcx);
+    go(
+        &app,
+        vcx,
+        View::Shortcut {
+            name: "hours".into(),
+            id: Some(1),
+        },
+    );
+    let watch = |app: &Entity<QuillApp>, vcx: &mut VisualTestContext| {
+        vcx.update(|window, cx| {
+            app.update(cx, |app, cx| {
+                app.quick_replies_watch(window, cx);
+                app.dialogs
+                    .quick_replies_dialog
+                    .as_ref()
+                    .unwrap()
+                    .watch
+                    .clone()
+                    .unwrap()
+            })
+        })
+    };
+    let first = watch(&app, vcx);
+    let second = watch(&app, vcx);
+    assert!(
+        std::rc::Rc::ptr_eq(&first, &second),
+        "a second submit stacks no loop"
+    );
+    let poll = std::rc::Rc::downgrade(&first);
+    drop((first, second));
+    app.update(vcx, |app, cx| app.close_quick_replies(cx));
+    assert!(poll.upgrade().is_none(), "the poll goes with its box");
+}
+
 /// Open a private chat with a person and type `/` in the composer.
 fn type_slash(app: &Entity<QuillApp>, cx: &mut VisualTestContext, text: &str) {
     cx.update(|window, cx| {

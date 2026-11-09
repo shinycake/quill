@@ -374,10 +374,11 @@ impl QuillApp {
     }
 
     /// After updates land: the track's message was deleted (a tombstone:
-    /// deleted by anyone, a cleared history, a deleted chat), so the track
-    /// stops and the bar goes, as tdesktop stops on `itemRemoved`. A
-    /// message only paged out of the loaded history plays on, and so does
-    /// a profile's saved track, which is no message.
+    /// deleted by anyone, a cleared history, a deleted chat), or its chat
+    /// is gone (`deleteChat` removes the chat with no message update), so
+    /// the track stops and the bar goes, as tdesktop stops on
+    /// `itemRemoved`. A message only paged out of the loaded history plays
+    /// on, and so does a profile's saved track, which is no message.
     pub(in crate::ui) fn check_playing_track(&mut self, cx: &mut Context<Self>) {
         let Some(key) = self.active_playback_key() else {
             return;
@@ -385,10 +386,13 @@ impl QuillApp {
         if self.playing_saved_track() {
             return;
         }
-        let deleted = self
-            .session()
-            .and_then(|session| session.histories.get(&key.chat.0))
-            .is_some_and(|history| history.is_tombstone(key.message));
+        let deleted = self.session().is_some_and(|session| {
+            !session.chats.contains_key(&key.chat.0)
+                || session
+                    .histories
+                    .get(&key.chat.0)
+                    .is_some_and(|history| history.is_tombstone(key.message))
+        });
         if deleted {
             self.close_player(cx);
         }

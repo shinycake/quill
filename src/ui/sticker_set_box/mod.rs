@@ -66,16 +66,45 @@ impl Render for StickerCellDrag {
 }
 
 impl QuillApp {
-    /// "View Sticker Set" / "Add Stickers": the set in a dialog. The
-    /// session holds one viewed set and one editing state, so a box open
-    /// in another window closes rather than switch to this set under its
-    /// edit.
-    pub(in crate::ui) fn view_message_sticker_set(&mut self, set_id: i64, cx: &mut Context<Self>) {
-        self.in_every_window(cx, |app, _| {
+    /// The box opens in this window for `set_id` (`None` until the set is
+    /// known, as for "Attached Stickers"). The session holds one viewed
+    /// set and one editing state, so a box open in another window closes
+    /// rather than switch sets under its edit, and every window's photo or
+    /// video editor making a sticker for another set closes too: its Done
+    /// would fill the "New Sticker" box of the set shown now.
+    pub(in crate::ui) fn claim_sticker_set_box(
+        &mut self,
+        set_id: Option<i64>,
+        cx: &mut Context<Self>,
+    ) {
+        self.in_every_window(cx, |app, cx| {
             app.message_ui.menu_ui.sticker_set_open = false;
+            app.close_set_editors_not_for(set_id, cx);
         });
         self.sticker_box.reset();
         self.message_ui.menu_ui.sticker_set_open = true;
+    }
+
+    /// This window's photo or video editor closes when it makes a sticker
+    /// for a set other than `set_id`.
+    fn close_set_editors_not_for(&mut self, set_id: Option<i64>, cx: &mut Context<Self>) {
+        let other = |target: i64| Some(target) != set_id;
+        if self.viewer.photo_editor.as_ref().is_some_and(|editor| {
+            matches!(editor.purpose, super::photo_editor::EditorPurpose::Set { set_id, .. } if other(set_id))
+        }) {
+            self.close_photo_editor(cx);
+        }
+        if self.composer_ui.send_box.video_editor.as_ref().is_some_and(|editor| {
+            matches!(editor.target, super::video_editor::EditorTarget::Set { set_id, .. } if other(set_id))
+        }) {
+            self.close_video_editor(cx);
+        }
+    }
+
+    /// "View Sticker Set" / "Add Stickers": the set in a dialog, in this
+    /// window only (`claim_sticker_set_box`).
+    pub(in crate::ui) fn view_message_sticker_set(&mut self, set_id: i64, cx: &mut Context<Self>) {
+        self.claim_sticker_set_box(Some(set_id), cx);
         if let Some(live) = self.live.as_mut()
             && live.driver.view_sticker_set(set_id).is_err()
         {

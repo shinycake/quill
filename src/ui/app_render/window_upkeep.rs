@@ -45,6 +45,27 @@ impl QuillApp {
         // A clicked mention, hashtag, command or link (`entity_links`).
         self.run_pending_link(window, cx);
         self.gift_boxes_upkeep(window, cx);
+        self.checkout_prefill_upkeep(window, cx);
+    }
+
+    /// Slice P1 fix-up: the checkout opens on Buy before the form arrives;
+    /// the saved order info and card go in once, at the first frame after
+    /// the form lands, of the window that hosts the box (a Buy in a chat
+    /// window does not wait for a main window that may be minimized). It
+    /// can't live in `poll_live`: the inputs need a `&mut Window`.
+    fn checkout_prefill_upkeep(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let here = self.windows.scope;
+        if !self.payments.dialog.as_ref().is_some_and(|d| !d.prefilled)
+            || !self
+                .windows
+                .dialog_may_show_in(crate::ui::shell::DialogKind::PaymentForm, here)
+        {
+            return;
+        }
+        let payment_form = self.session().and_then(|s| s.payments.form.clone());
+        if let (Some(dialog), Some(form)) = (self.payments.dialog.as_mut(), payment_form) {
+            dialog.prefill_from_form(&form, window, cx);
+        }
     }
 
     /// The gift and Grams boxes' follow-ups, each in the window that hosts

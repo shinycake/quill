@@ -116,16 +116,7 @@ impl Session {
         if !ringing_in {
             return false;
         }
-        if !self
-            .calls
-            .busy_decline_queue
-            .iter()
-            .any(|(id, _, _)| *id == call.id)
-        {
-            self.calls
-                .busy_decline_queue
-                .push((call.id, call.user_id, call.is_video));
-        }
+        self.queue_busy_decline(call);
         true
     }
 

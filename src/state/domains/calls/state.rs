@@ -25,6 +25,10 @@ pub struct CallsState {
     /// Entries are `(call_id, user_id, is_video)` so the decline
     /// reports the actual call kind rather than a hardcoded one.
     pub busy_decline_queue: Vec<(i32, i64, bool)>,
+    /// Ids of the calls declined as busy (newest last, at most 16).
+    /// Their later `updateCall`s, the terminal one included, belong to no
+    /// call window; the terminal one drops the id.
+    pub busy_declined_calls: std::collections::VecDeque<i32>,
     /// Phase C2i: incoming calls auto-declined while busy, kept as
     /// `(user_id, is_video)` so the UI can say so honestly instead of
     /// declining silently. Drained by the UI banner.
@@ -191,6 +195,7 @@ impl CallsState {
             error: None,
             group_call_error: None,
             busy_decline_queue: Vec::new(),
+            busy_declined_calls: std::collections::VecDeque::new(),
             busy_declined: Vec::new(),
             second_call: SecondCall::None,
             hang_up: None,
