@@ -66,6 +66,7 @@ fn an_invitation_after_an_ended_call_rings_in_the_call_window(cx: &mut TestAppCo
         session.calls.conference_invite = Some(ConferenceInvite {
             chat_id: ChatId(41),
             message_id: MessageId(90 << 20),
+            unique_id: 7001,
             user_id: 41,
             is_video: false,
             others: Vec::new(),
