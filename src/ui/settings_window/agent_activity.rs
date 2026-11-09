@@ -78,11 +78,21 @@ impl QuillApp {
         let session = self.session()?;
         let chat = ChatId(action.chat_id);
         if SENDS.contains(&action.tool.as_str()) {
+            // Only the user's own messages: a logged id that is someone
+            // else's message is never offered for deletion. One that is
+            // not loaded is refused by the delete itself
+            // (`ConnectDriver::delete_selected` needs it in the history).
+            let history = session.histories.get(&action.chat_id);
             let alive: Vec<i64> = action
                 .message_ids
                 .iter()
                 .copied()
                 .filter(|id| !session.message_deleted(chat, MessageId(*id)))
+                .filter(|id| {
+                    history
+                        .and_then(|history| history.messages.get(id))
+                        .is_none_or(|message| message.is_outgoing)
+                })
                 .collect();
             return (!alive.is_empty()).then_some(Undo::Delete(alive));
         }

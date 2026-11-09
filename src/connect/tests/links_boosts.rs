@@ -317,7 +317,7 @@ fn a_late_link_requests_page_for_another_link_is_ignored() {
         .unwrap();
     assert_eq!(state.invite_link, "https://t.me/+b");
     assert!(state.requests.is_empty());
-    assert!(state.loading);
+    assert!(state.loading());
 }
 
 fn boosts_json(extra: u64, total: i32, next: &str, ids: &[i64]) -> String {

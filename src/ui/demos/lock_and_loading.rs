@@ -61,11 +61,8 @@ impl QuillApp {
         if info == "failed"
             && let Some(session) = self.demo_session.as_mut()
         {
-            session
-                .settings
-                .business
-                .own_info
-                .fail(quill::lang::tr(quill::lang::keys::Q_NOTES_NO_CONNECTION));
+            session.settings.business.own_info_error =
+                Some(quill::lang::tr(quill::lang::keys::Q_NOTES_NO_CONNECTION).to_string());
         }
         if landed && let Some(session) = self.demo_session.as_mut() {
             session.users_state.user_full_infos.insert(

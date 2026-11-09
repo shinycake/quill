@@ -341,7 +341,7 @@ impl QuillApp {
             .w_full()
             .gap_1()
             .pl_2();
-        if state.requests.is_empty() && state.loading {
+        if state.requests.is_empty() && state.loading() {
             return Some(
                 block
                     .child(
@@ -451,7 +451,7 @@ impl QuillApp {
         if let Some(error) = state.error.clone() {
             block = block.child(div().text_xs().text_color(muted).child(error));
         }
-        if state.loading {
+        if state.loading() {
             block = block.child(
                 div()
                     .text_xs()
