@@ -43,6 +43,10 @@ pub enum GroupsPayload {
         /// line 2746) — a forum whose topics show as tabs, the way
         /// Telegram Desktop shows them (`ChannelData::useSubsectionTabs`).
         has_forum_tabs: bool,
+        /// `supergroup.has_forum_sidebar` (schema 1.8.70): topics shown in a
+        /// sidebar. Telegram Desktop has no sidebar layout yet; Quill only
+        /// keeps the flag so toggling topics doesn't clear it.
+        has_forum_sidebar: bool,
         /// `supergroup.has_automatic_translation` (schema 1.8.67, line
         /// 2746): the channel shows its messages translated for everyone.
         has_automatic_translation: bool,
@@ -140,6 +144,10 @@ pub enum GroupsPayload {
         /// Subsection tabs: `supergroup.has_forum_tabs` (schema 1.8.67,
         /// line 2746).
         has_forum_tabs: bool,
+        /// `supergroup.has_forum_sidebar` (schema 1.8.70): topics shown in a
+        /// sidebar. Telegram Desktop has no sidebar layout yet; Quill only
+        /// keeps the flag so toggling topics doesn't clear it.
+        has_forum_sidebar: bool,
         /// `supergroup.has_automatic_translation` (schema 1.8.67, line
         /// 2746): the channel shows its messages translated for everyone.
         has_automatic_translation: bool,

@@ -1,0 +1,13 @@
+# TDLib 1.8.70 communities (addCommunityChat and friends)
+parity:communities-add-chat
+# New items this slice completes; they need STATUS.md anchors first
+# (proposed ids, add with the parity dashboard sync):
+#   communities-remove-chat         removeCommunityChat from the manage screen and the info panel
+#   communities-add-requests        pending requests list, approve/decline with undo, Add All / Decline All
+#   communities-show-as-one         "Show as One Chat" switch and the collapsed chat-list row with its menu
+#   communities-notifications       community notification settings (row menu mute, chats fall back to them)
+#   communities-ban                 "Ban from the Community" in the moderation box, owned-chats warning
+#   communities-joined-list         joined communities in the "Add to an existing community" picker
+# Still blocked in 1.8.70: communities-admin-rights (no method sets
+# communityMemberStatusAdministrator), communities-chat-visibility (is_hidden
+# is chosen once in addCommunityChat; nothing changes it later).

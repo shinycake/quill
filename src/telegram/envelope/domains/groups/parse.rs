@@ -81,6 +81,10 @@ pub(crate) fn parse_groups_payload(
                     .get("has_forum_tabs")
                     .and_then(Value::as_bool)
                     .unwrap_or(false),
+                has_forum_sidebar: supergroup
+                    .get("has_forum_sidebar")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false),
                 has_automatic_translation: supergroup
                     .get("has_automatic_translation")
                     .and_then(Value::as_bool)
@@ -152,6 +156,10 @@ pub(crate) fn parse_groups_payload(
                 .unwrap_or(false),
             has_forum_tabs: value
                 .get("has_forum_tabs")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+            has_forum_sidebar: value
+                .get("has_forum_sidebar")
                 .and_then(Value::as_bool)
                 .unwrap_or(false),
             has_automatic_translation: value

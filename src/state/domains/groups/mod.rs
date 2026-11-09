@@ -8,6 +8,7 @@ mod new_chat;
 mod private_sharing;
 mod purpose;
 mod state;
+mod supergroup_answer;
 
 pub use group_type::*;
 pub use new_chat::*;

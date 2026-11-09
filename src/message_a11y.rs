@@ -396,6 +396,10 @@ fn media_parts(
             }
             String::new()
         }
+        MessageContent::Widget(widget) => {
+            parts.push("Widget".to_string());
+            widget.caption.clone()
+        }
         MessageContent::Game(game) => {
             if !game.title.is_empty() {
                 parts.push(game.title.clone());

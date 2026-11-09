@@ -465,16 +465,12 @@ impl<S: JsonSender> ConnectDriver<S> {
                 }
                 _ => None,
             });
-        // Slice (communities backend core): the `createCommunity` answer
-        // is `communityId`; `updateCommunity` for the new community is
-        // guaranteed to have arrived first, so the id chains straight
-        // into `getCommunityFullInfo` after apply.
-        let created_community_id: Option<i64> = match &owned.envelope.payload {
-            EnvelopePayload::Groups(GroupsPayload::CommunityId { id }) => owned
-                .envelope
-                .extra
-                .and_then(|id| self.session.requests.purpose(id))
-                .and_then(|purpose| (purpose == RequestPurpose::CreateCommunity).then_some(*id)),
+        // `createCommunity` answers `communityId` after its `updateCommunity`;
+        // `community_created` chains it on after apply.
+        let created_community = match &owned.envelope.payload {
+            EnvelopePayload::Groups(GroupsPayload::CommunityId { id }) => {
+                self.created_community(owned.envelope.extra, *id)
+            }
             _ => None,
         };
         // Slice (communities backend core): a confirmed `setCommunityName`
@@ -668,8 +664,8 @@ impl<S: JsonSender> ConnectDriver<S> {
         // community id into its full-info pack. `let _` on purpose: the
         // community is already in the model; a failed send must not
         // fail the ingest.
-        if let Some(community_id) = created_community_id {
-            let _ = self.get_community_full_info(community_id);
+        if let Some((community_id, extra)) = created_community {
+            self.community_created(community_id, extra);
         }
         // Slice (communities backend core): refetch the full-info pack
         // the state dropped after a confirmed `setCommunityName`.

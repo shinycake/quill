@@ -556,6 +556,9 @@ impl Render for QuillApp {
             .when_some(self.chat_list.archive_menu, |this, position| {
                 this.child(self.archive_menu_overlay(position, cx))
             })
+            .when_some(self.admin.community.flow.row_menu, |this, menu| {
+                this.child(self.community_row_menu_overlay(menu, cx))
+            })
             .when_some(self.folders.tab_menu, |this, menu| {
                 this.child(self.folder_tab_menu_overlay(menu, cx))
             })

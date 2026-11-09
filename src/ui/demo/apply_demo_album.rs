@@ -352,6 +352,7 @@ impl QuillApp {
                         | MessageContent::RichMessage(_)
                         // B1: games carry no editable caption.
                         | MessageContent::Game(_)
+                        | MessageContent::Widget(_)
                         // Slice P1: invoices and payment notices carry no
                         // editable caption.
                         | MessageContent::Invoice(_)

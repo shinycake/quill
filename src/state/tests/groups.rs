@@ -314,6 +314,7 @@ fn set_community_name_ok_drops_full_info_for_refetch() {
             administrator_count: 3,
             banned_count: 0,
             add_chat_request_count: 0,
+            notification_settings: Default::default(),
         },
     );
     let extra = session.request_for_community(RequestPurpose::SetCommunityName, 42);
@@ -332,6 +333,7 @@ fn set_community_name_ok_drops_full_info_for_refetch() {
             administrator_count: 3,
             banned_count: 0,
             add_chat_request_count: 0,
+            notification_settings: Default::default(),
         },
     );
     let extra = session.request_for_community(RequestPurpose::SetCommunityName, 42);

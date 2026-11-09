@@ -201,6 +201,9 @@ impl Session {
                 self.apply_chat_list_error(&err, pending, extra, seq)
             }
             Some(RequestPurpose::Chats(_)) => self.apply_chats_error(&err, pending, extra, seq),
+            Some(RequestPurpose::Communities(_)) => {
+                self.apply_communities_error(&err, pending, extra, seq)
+            }
             Some(
                 RequestPurpose::Groups(_)
                 | RequestPurpose::GetChatBoosts { .. }

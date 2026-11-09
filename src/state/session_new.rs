@@ -47,6 +47,7 @@ impl Session {
             shutdown: ShutdownPhase::Running,
             last_seq: 0,
             bots: Box::new(BotsState::new()),
+            communities: Box::new(CommunitiesState::new()),
             payments: Box::new(PaymentsState::new()),
             ton_wallet: Default::default(),
             location: Default::default(),

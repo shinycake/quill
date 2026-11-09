@@ -389,7 +389,6 @@
 "qll_ops_chat_2" = "Chat";
 "qll_ops_chat_automation" = "Chat Automation";
 "qll_ops_chat_types" = "Chat types";
-"qll_ops_chats" = "Chats ({len})";
 "qll_ops_chats_could_not_be_read" = "{failed_chats} chats could not be read and have no messages in the export.";
 "qll_ops_chats_selected#one" = "{count} chat selected";
 "qll_ops_chats_selected#other" = "{count} chats selected";
@@ -1049,6 +1048,7 @@
 "lng_in_dlg_file" = "File";
 "lng_in_dlg_poll" = "Poll";
 "lng_in_dlg_audio" = "Voice message";
+"lng_in_dlg_widget" = "Widget";
 "lng_duration_and_size" = "{duration}, {size}";
 "lng_date_and_duration" = "{date}, {duration}";
 "qll_ops_gif" = "GIF";

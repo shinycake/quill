@@ -251,6 +251,38 @@ fn topics_respect_the_member_floor_and_the_linked_channel() {
 }
 
 #[test]
+fn topics_toggle_keeps_the_forum_sidebar_flag() {
+    let (dir, prepared) = prepared_tmp(&MemorySecretStore::new());
+    let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+    let recorder = Arc::new(RecordingSender::new());
+    let seq = AtomicU64::new(0);
+    let mut driver = ready_driver(&recorder, prepared, &sink, &seq);
+    megagroup(&mut driver, &seq, &sink, 13, CREATOR, "");
+    // TDLib 1.8.70: a supergroup whose topics show in a sidebar.
+    ingest(
+        &mut driver,
+        &format!(
+            r#"{{"@type":"updateSupergroup","supergroup":{{"@type":"supergroup","id":113,"member_count":500,"status":{CREATOR},"is_forum":true,"has_forum_sidebar":true}}}}"#
+        ),
+        &seq,
+        &sink,
+    );
+    assert!(
+        driver
+            .set_group_topics(ChatId(13), true, true)
+            .unwrap()
+            .is_some()
+    );
+    let forum = recorder
+        .snapshot()
+        .into_iter()
+        .find(|j| j.contains("toggleSupergroupIsForum"))
+        .expect("topics toggle sent");
+    assert!(forum.contains(r#""has_forum_sidebar":true"#));
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
 fn basic_group_topics_upgrade_first_then_enable() {
     let (dir, prepared) = prepared_tmp(&MemorySecretStore::new());
     let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());

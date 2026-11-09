@@ -52,7 +52,7 @@ FOOTER = (
 HELD_MAJORS = {
     "moxcms": ("0.9", "waits for `image` and `jxl-oxide` to move to moxcms 0.9"),
     "x11rb": ("0.14", "waits for the vendored `gpui-pre-linux` to move to x11rb 0.14"),
-    "zbus": ("6", "`ashpd` 0.14 is on zbus 6 now, but `ksni`, `accesskit_unix` and GPUI are not yet"),
+    "zbus": ("6", "`ksni`, `accesskit_unix` and GPUI (through `ashpd` 0.13) are still on zbus 5; Quill's `ashpd` 0.14 brings zbus 6 alongside"),
 }
 # Gap between crates.io requests (their crawler policy asks for at most 1/s).
 CRATES_DELAY = 1.0

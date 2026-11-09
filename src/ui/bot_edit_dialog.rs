@@ -423,6 +423,7 @@ impl QuillApp {
                         .child(tr(keys::Q_MEDIA_THESE_OPEN_BOTFATHER_WITH_THIS)),
                 );
             }
+            body = body.children(this.community_manage_section(bot_id, cx));
             let footer = div()
                 .flex()
                 .justify_end()

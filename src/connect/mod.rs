@@ -23,6 +23,7 @@ mod chat_appearance;
 mod chat_list;
 mod chat_window;
 mod closing;
+mod communities;
 mod composer;
 mod connect_flow;
 mod contacts;
