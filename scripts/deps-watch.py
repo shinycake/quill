@@ -45,6 +45,15 @@ FOOTER = (
     f"_Opened by `.github/workflows/deps-watch.yml` (see `{DOC}`). It updates this issue "
     "on later runs and closes it when the update lands._"
 )
+# Newer majors we hold on purpose until upstream is ready: crate -> (held major, why).
+# The crates issue lists them under "Held" instead of as open work. A newer major
+# than the held one is reported normally, so a hold never hides a later release.
+# Remove an entry when the crate is adopted or the blocker moves.
+HELD_MAJORS = {
+    "moxcms": ("0.9", "waits for `image` and `jxl-oxide` to move to moxcms 0.9"),
+    "x11rb": ("0.14", "waits for the vendored `gpui-pre-linux` to move to x11rb 0.14"),
+    "zbus": ("6", "`ashpd` 0.14 is on zbus 6 now, but `ksni`, `accesskit_unix` and GPUI are not yet"),
+}
 # Gap between crates.io requests (their crawler policy asks for at most 1/s).
 CRATES_DELAY = 1.0
 
@@ -230,6 +239,18 @@ def find_majors(deps: dict, latest_of) -> list:
     return rows
 
 
+def split_held(majors: list, held: dict = HELD_MAJORS) -> tuple:
+    """(open, held) rows; held rows gain the reason as a fourth field."""
+    open_rows, held_rows = [], []
+    for name, locked, latest in majors:
+        hold = held.get(name)
+        if hold and breaking_key(latest) == breaking_key(hold[0]):
+            held_rows.append((name, locked, latest, hold[1]))
+        else:
+            open_rows.append((name, locked, latest))
+    return open_rows, held_rows
+
+
 def src_crates():
     proc = subprocess.run(
         ["cargo", "update", "--dry-run"], cwd=ROOT, capture_output=True, text=True, check=True
@@ -238,11 +259,14 @@ def src_crates():
     meta = subprocess.run(
         ["cargo", "metadata", "--format-version", "1"], cwd=ROOT, capture_output=True, text=True, check=True
     )
-    majors = find_majors(direct_registry_deps(json.loads(meta.stdout)), crate_latest)
-    if not compat and not majors:
+    majors, held = split_held(find_majors(direct_registry_deps(json.loads(meta.stdout)), crate_latest))
+    if not compat and not majors and not held:
         print("crates: nothing to update")
         return None
-    parts = [f"{len(compat)} semver-compatible update(s) and {len(majors)} newer major(s) among direct dependencies."]
+    parts = [
+        f"{len(compat)} semver-compatible update(s) and {len(majors)} newer major(s) among direct dependencies"
+        + (f", plus {len(held)} major(s) held on purpose." if held else ".")
+    ]
     if compat:
         parts.append(
             "### Compatible (`cargo update`)\n\nRun `cargo update`, gate, commit `Cargo.lock`.\n\n"
@@ -257,7 +281,14 @@ def src_crates():
                 [(f"`{n}`", o, t, f"https://crates.io/crates/{n}/{t}") for n, o, t in majors],
             )
         )
-    title = f"Cargo dependency updates available ({len(compat)} compatible, {len(majors)} major)"
+    if held:
+        parts.append(
+            "### Held on purpose\n\nNot open work: each waits on upstream. Drop the entry from `HELD_MAJORS` in "
+            "`scripts/deps-watch.py` once the blocker moves.\n\n"
+            + table(["crate", "locked", "latest", "held because"], [(f"`{n}`", o, t, why) for n, o, t, why in held])
+        )
+    title = f"Cargo dependency updates available ({len(compat)} compatible, {len(majors)} major"
+    title += f", {len(held)} held)" if held else ")"
     return Issue("crates", title, "\n\n".join(parts))
 
 

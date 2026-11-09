@@ -78,6 +78,15 @@ class Cargo(unittest.TestCase):
             [("rand", "0.8.5", "0.10.3"), ("serde", "1.0.1", "2.0.0")],
         )
 
+    def test_held_majors_split_out(self):
+        held = {"zbus": ("6", "waits"), "x11rb": ("0.14", "waits")}
+        majors = [("rand", "0.8.5", "0.10.3"), ("x11rb", "0.13.2", "0.15.0"), ("zbus", "5.19.0", "6.2.1")]
+        # x11rb 0.15 is past the held 0.14, so it shows up as open work again.
+        self.assertEqual(
+            dw.split_held(majors, held),
+            ([("rand", "0.8.5", "0.10.3"), ("x11rb", "0.13.2", "0.15.0")], [("zbus", "5.19.0", "6.2.1", "waits")]),
+        )
+
     def test_parse_uses(self):
         text = (
             "      - uses: actions/checkout@v4\n"
