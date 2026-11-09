@@ -225,6 +225,7 @@ fn on_app(
     app: WeakEntity<QuillApp>,
     f: impl FnOnce(&mut QuillApp, &mut Window, &mut Context<QuillApp>) + 'static,
 ) {
+    // screen-scope: a menu-bar or Dock command acts for the account on screen.
     cx.defer(move |cx| {
         let _ = handle.update(cx, |_, window, cx| {
             let _ = app.update(cx, |this, cx| this.as_main_window_command(window, cx, f));
