@@ -301,16 +301,11 @@ fn data_dir(account: &str, bot_id: i64) -> Option<std::path::PathBuf> {
     Some(quill::account_data::webview_dir(&root, account).join(format!("bot-{bot_id}")))
 }
 
-/// 16 bytes (as hex) naming the WebKit data store of one bot of one
-/// account: a hash, so the id carries nothing readable.
+/// The WebKit data store of one bot of one account, salted per signed-in
+/// user ([`quill::account_data::webview_store_id`]).
 fn data_store_id(account: &str, bot_id: i64) -> String {
-    use sha2::{Digest, Sha256};
-    let digest = Sha256::digest(format!("quill-webview/{account}/{bot_id}").as_bytes());
-    digest
-        .iter()
-        .take(16)
-        .map(|byte| format!("{byte:02x}"))
-        .collect()
+    let root = quill::settings::safe_app_root();
+    quill::account_data::webview_store_id(root.as_deref(), account, bot_id)
 }
 
 fn hsla_rgb(color: Hsla) -> Rgb {
@@ -947,21 +942,8 @@ mod spawn_mini_app_window;
 #[cfg(test)]
 mod tests {
     // No `super::*`: the kit's glob brings its own `test` attribute.
-    use super::{data_store_id, hsla_rgb, popup};
+    use super::{hsla_rgb, popup};
     use quill::web_app::theme::Rgb;
-
-    #[test]
-    fn data_store_id_has_a_fixed_value() {
-        assert_eq!(data_store_id("acc", 42), "102fe38356554b7ac86a7cb24cb5087f");
-    }
-
-    #[test]
-    fn data_store_ids_are_stable_per_account_and_bot() {
-        assert_eq!(data_store_id("acc", 42), data_store_id("acc", 42));
-        assert_ne!(data_store_id("acc", 42), data_store_id("acc", 43));
-        assert_ne!(data_store_id("acc", 42), data_store_id("other", 42));
-        assert_eq!(data_store_id("acc", 42).len(), 32);
-    }
 
     #[test]
     fn popup_helper_keeps_button_order() {

@@ -170,3 +170,37 @@ fn turn_it_on_messages_point_at_the_advanced_switch() {
         "quill agent help"
     );
 }
+
+/// Locked, every resource but the guide is refused: `quill://grants` names
+/// the granted chats, and `quill_status` (the same object) is refused too.
+#[test]
+fn a_locked_quill_reads_out_only_the_guide() {
+    let _guard = crate::locks::lock_or_recover(&access::TEST_LOCK);
+    let read = |uri: &str| {
+        let request = json!({"method": "resources/read", "params": {"uri": uri}});
+        serde_json::from_str::<Value>(&super::answer(&request, &json!(1), "Test agent", 0))
+            .unwrap_or(Value::Null)
+    };
+    access::set_paused_by_lock(true);
+    for uri in [
+        crate::agent::guide::GRANTS_URI,
+        crate::agent::guide::UNREAD_URI,
+        "quill://nothing",
+    ] {
+        let answer = read(uri);
+        assert_eq!(
+            answer["error"]["message"],
+            access::LOCKED_MESSAGE,
+            "{uri}: {answer}"
+        );
+    }
+    let guide = read(crate::agent::guide::GUIDE_URI);
+    assert!(guide["result"]["contents"].is_array(), "{guide}");
+    access::set_paused_by_lock(false);
+    let grants = read(crate::agent::guide::GRANTS_URI);
+    assert_ne!(
+        grants["error"]["message"],
+        access::LOCKED_MESSAGE,
+        "{grants}"
+    );
+}

@@ -422,7 +422,9 @@ impl Session {
                             .default_backgrounds
                             .insert(self.chats_state.background_set_for_dark, background);
                     }
-                    Some(RequestPurpose::SearchBackground) => {
+                    Some(RequestPurpose::SearchBackground)
+                        if pending.map(|p| p.id) == self.chats_state.background_search =>
+                    {
                         self.chats_state.searched_background = Some(background);
                     }
                     _ => {}

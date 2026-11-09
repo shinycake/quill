@@ -31,14 +31,27 @@ impl Session {
                     self.fail_sticker_set_view(0);
                 }
             }
+            // The lookup's ids are asked for again; the note shows only
+            // where it is read, in the status picker.
+            Some(RequestPurpose::GetCustomEmojiStickers) => {
+                let emoji = &mut self.stickers.emoji;
+                if let Some(pending) = pending {
+                    emoji.custom_emoji_lookup_failed(pending.id);
+                }
+                if emoji.status_open || emoji.chat_status_open {
+                    emoji.status_note = Some(call_request_error_line(
+                        err,
+                        "Could not update emoji statuses. Retry the action",
+                    ));
+                }
+            }
             Some(
                 RequestPurpose::SetEmojiStatus
                 | RequestPurpose::ClearRecentEmojiStatuses
                 | RequestPurpose::GetRecentEmojiStatuses
                 | RequestPurpose::GetThemedEmojiStatuses
                 | RequestPurpose::GetDefaultEmojiStatuses
-                | RequestPurpose::GetDefaultChatEmojiStatuses
-                | RequestPurpose::GetCustomEmojiStickers,
+                | RequestPurpose::GetDefaultChatEmojiStatuses,
             ) => {
                 self.stickers.emoji.status_note = Some(call_request_error_line(
                     err,

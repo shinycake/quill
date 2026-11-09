@@ -2203,9 +2203,11 @@ A new sign-in in the slot took all of them over. tdesktop's
 - Writing the test turned up lost updates in `grants::update` and in
   web app trust, where read, change and write were separate steps. Both
   now change under one lock.
-- Kept on purpose: `exports/` (call logs and exports the user saved),
-  device preferences (tdesktop keeps app settings too), and the macOS
-  WKWebView store, which is keyed by a hash of account and bot.
+- Kept on purpose: `exports/` (call logs and exports the user saved)
+  and device preferences (tdesktop keeps app settings too). (This line
+  also listed the macOS WKWebView store as safe because it is keyed by
+  account and bot. It was not: the account key is what gets reused.
+  Phase 14 (area A) salts it.)
 
 **The lock holds for a whole agent call (2).** `set_paused_by_lock`
 counts locks and wakes every `wait_for`. A wait checks the lock each
@@ -2519,3 +2521,59 @@ edit's window).
   - A deleted chat's history is trimmed to its closed tail, not
     forgotten (`chat_is_gone` needs the chat entry).
   - The video editor branch of 15 has no test.
+
+### Phase 14 (area A)
+
+Round 14 of the review, area A (core: state, connect, telegram, agent,
+`account_data`). All seven findings were fixed.
+
+**The macOS mini app store follows the slot's user (1).** WKWebView keeps
+cookies, local storage and IndexedDB per data-store identifier, under
+`~/Library/WebKit`, not in Quill's folder. The identifier was a hash of
+the account key and the bot, and the key is reused, so a new user in the
+slot opened the last user's mini app sessions. Deleting `webview/<key>/`
+did nothing on macOS. `account_data::webview_store_id` now mixes in a
+random salt saved as `webview/<key>/store-salt.key`. `forget` deletes it
+with the folder, so a log-out, a removal, or a new user's `claim` gives
+the next sign-in new stores. When the salt can't be saved, every launch
+gets a fresh one and keeps nothing. WebView2 and WebKitGTK were already
+fine, since they take the deleted folder. The old stores are left on disk.
+Removing them needs `WKWebsiteDataStore.remove(forIdentifier:)` in the
+helper process, which has no hook for it yet.
+
+**The lock (2-5).** The `quill://unread` watcher no longer spins a core
+while locked. Writes asleep in the paced queue, `download_file`'s copy and
+`resources/read quill://grants` now ask the lock. Details are in
+`lock-is-a-render-state.md` ("The agent socket"), and check 5 of
+`scripts/lock_surfaces.py` holds them in place.
+
+**A bg link preview shows only its own search (6).**
+`chats_state.background_search` holds the `RequestId` of the search the
+preview waits for. `apply` stores a `background` answer only for that id,
+and the error arm shows only that search's error. Closing the preview
+clears it, so a late answer for link A never shows, or gets applied, under
+link B.
+
+**A failed custom emoji lookup asks again (7).** Every
+`getCustomEmojiStickers` now goes out through
+`ConnectDriver::lookup_custom_emoji`. It marks the ids attempted and
+records them per request (`emoji::custom_lookup`). A lookup that was not
+sent, failed, or was swept unanswered unmarks its ids, so the next resolve
+pass asks again. An id stops being asked after three failures, so a
+lasting error can't turn every pass into a request. A rate limit waits and
+re-sends instead (`getCustomEmojiStickers` joined `RETRYABLE_TYPES`). The
+status note shows only while the status picker is open. The status
+picker's earlier path also marked ids attempted when the lookup was
+deduped and never sent. The seam dedupes before it marks.
+
+**Guards.** Check 5 of `lock_surfaces.py`, and the test
+`custom_emoji_lookups_go_out_through_one_seam`.
+
+**Tests.** `a_reused_slot_opens_other_mini_app_stores`
+(`account_data_tests.rs`), `a_lock_while_a_write_waits_stops_it` and
+`a_locked_watch_look_fails_without_waiting` (`agent/tools`),
+`a_locked_quill_reads_out_only_the_guide` (`agent/server_tests.rs`),
+`a_late_background_search_answer_never_lands_under_another_link`
+(`state/tests/chat_list_more.rs`), `a_failed_custom_emoji_lookup_asks_again`
+(`emoji/tests.rs`), and the `emoji/custom_lookup.rs` unit tests. None of
+them waits on time.

@@ -180,9 +180,23 @@ stream PiP, the kit close, the export quit, the media session and the connection
 The agent server runs on its own threads, so its gate is a process-wide flag: `agent::access::paused_by_lock`.
 `set_locked` sets the flag, and the demo apps never set it, so UI tests share the process safely. While it is
 set, every tool returns `LOCKED_MESSAGE` as an error. That includes `quill_status` (it reads `getMe`) and
-`td_call`. The unread resource is refused too. tdesktop has no agent socket. The lock is the user's "nothing
-of mine is readable now", and an agent at a locked machine is no different from a person there. The error
-tells the agent to ask the user to unlock.
+`td_call`. Every resource but `quill://guide` is refused too (`quill://grants` names the granted chats).
+tdesktop has no agent socket. The lock is the user's "nothing of mine is readable now", and an agent at a
+locked machine is no different from a person there. The error tells the agent to ask the user to unlock.
+
+Round 14 closed what still ran past the gate, because hiding a call's answer does not undo its effects:
+
+- A write still asleep in the paced queue (up to 30 s) asks the lock at its turn. `still_allowed` refuses
+  once Quill locked since the call began (`tools::LOCKS_AT_START`), with
+  `LOCKED_BEFORE_SENDING_MESSAGE` ("nothing was sent"), which the call returns as is.
+- `download_file` with `to` checks `locked_since_call_began()` after the download and before the copy, so
+  a chat's file never lands at the agent's path while locked.
+- The `quill://unread` watcher's look fails at once while locked, so the watcher sleeps between looks.
+  Before, the round-13 lock check in `wait_for` returned at once and the watcher spun a core for the whole
+  lock.
+- Check 5 of `scripts/lock_surfaces.py` holds these in place: every queue turn is followed by
+  `still_allowed()`, every `copy_new(` is gated on `locked_since_call_began()`, and `resources/read` tests
+  `paused_by_lock()` before `read_resource(`.
 
 ### The guard (`scripts/lock_surfaces.py`)
 
@@ -204,6 +218,8 @@ even in a comment.
   - the main window draws only the lock screen;
   - an armed push-to-talk or shortcut capture is disarmed, and a key typed while locked binds nothing.
 - `agent::access` `a_locked_quill_answers_no_tool_and_no_resource`.
+- Round 14: `agent::tools` `a_lock_while_a_write_waits_stops_it` and
+  `a_locked_watch_look_fails_without_waiting`, and `agent::server` `a_locked_quill_reads_out_only_the_guide`.
 - `chat_window::dialog_host_tests::a_chat_windows_box_stays_there_through_a_lock`.
 - Round 13, what runs while locked: `passcode::lock_waits_tests` (a late link and a Grams withdrawal open
   after the unlock, Log out drops what waited, a locked window is not looked at, a lock during a passcode

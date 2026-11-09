@@ -139,6 +139,43 @@ fn a_new_user_in_a_reused_slot_inherits_nothing() {
     assert!(!claim(&root, &key, 200));
 }
 
+/// The macOS mini app store lives outside Quill's folder, so its id must
+/// change when the slot does: the same user keeps it, while a log-out (or a
+/// new user's claim) hands the next sign-in under that key other stores.
+#[test]
+fn a_reused_slot_opens_other_mini_app_stores() {
+    let _serial = crate::locks::lock_or_recover(&SERIAL);
+    let root = root();
+    let key = AccountKey::new("account-935").unwrap();
+    let _ = std::fs::remove_dir_all(AccountPaths::for_root(&root, &key).root);
+    let account = key.0.as_str();
+    let id = |bot| webview_store_id(Some(&root), account, bot);
+    let first = id(42);
+    assert_eq!(first.len(), 32);
+    assert_eq!(id(42), first, "kept while the same user stays");
+    assert_ne!(id(43), first, "one store per bot");
+    assert_ne!(
+        webview_store_id(Some(&root), "account-936", 42),
+        first,
+        "one store per account"
+    );
+    forget(&root, &key);
+    let after_logout = id(42);
+    assert_ne!(after_logout, first, "a log-out drops the store");
+    assert!(!claim(&root, &key, 300));
+    assert_eq!(id(42), after_logout);
+    assert!(claim(&root, &key, 400), "another user");
+    assert_ne!(id(42), after_logout, "another user gets other stores");
+    assert_ne!(
+        webview_store_id(None, account, 42),
+        webview_store_id(None, account, 42),
+        "with nowhere to keep a salt, nothing is shared"
+    );
+    forget(&root, &key);
+    let _ = std::fs::remove_dir_all(AccountPaths::for_root(&root, &key).root);
+    let _ = std::fs::remove_dir_all(webview_dir(&root, "account-936"));
+}
+
 /// A prompt an agent filed for an account that then logged out is
 /// answered Denied, so a later Allow can't reach the next user.
 #[test]
@@ -175,6 +212,7 @@ const DROPPED: &[&str] = &[
     "recent_hashtags.json",
     "paid_trust.json",
     "launch-lines.bin",
+    "store-salt.key",
 ];
 
 /// Every other file name production code reads or writes, and why a

@@ -43,6 +43,18 @@ drawn. It claims exactly this, and no more:
    A listed step that is gone fails too. The locked frames (`LOCKED_FRAMES`)
    must not run the per-window or main frame upkeep at all.
 
+5. Agent effects after a wait. `withheld_if_locked` hides only an agent
+   call's answer, so a step with an effect that runs after the call may
+   have waited must ask the lock itself. In the production code under
+   src/agent/: every function that takes a paced queue turn
+   (`pacing::take_turn(`) must call `still_allowed()` after it (that
+   check refuses once Quill locked since the call began), and every
+   function that copies a file to an agent's path (`copy_new(`, outside
+   its own definition) must test `locked_since_call_began()` in a
+   condition before it. In `agent/server.rs::answer`, the `resources/read`
+   arm must test `paused_by_lock()` before `read_resource(`, so no resource
+   but the guide answers while locked.
+
 It does not prove that a listed `via` function is the only caller, nor that
 a gate's answer is used correctly beyond being tested in a condition, nor
 what a `runs-locked` step calls in turn: those are read in review.
@@ -228,6 +240,47 @@ def upkeep_problems(bodies, steps):
     return out
 
 
+AGENT_SERVER = "src/agent/server.rs"
+
+
+def agent_problems(files):
+    out = []
+    for path, text in files.items():
+        if not path.startswith("src/agent/"):
+            continue
+        for name, start, end, body in functions(text):
+            turn = body.find("pacing::take_turn(")
+            if turn != -1 and "still_allowed()" not in body[turn:]:
+                out.append(
+                    f"{path}::{name}: a write that waited its queue turn must call "
+                    f"`still_allowed()` after `pacing::take_turn(`, which refuses once Quill locked"
+                )
+            if name == "copy_new":
+                continue
+            copy = body.find("copy_new(")
+            if copy != -1 and not gated_by(body[:copy], r"locked_since_call_began\(\)"):
+                out.append(
+                    f"{path}::{name}: `copy_new(` writes a chat's file to the agent's path; test "
+                    f"`locked_since_call_began()` in a condition first"
+                )
+    answer = next(
+        (body for name, _, _, body in functions(files.get(AGENT_SERVER, "")) if name == "answer"),
+        None,
+    )
+    arm = answer.find('"resources/read"') if answer else -1
+    read = answer.find("read_resource(", arm) if arm != -1 else -1
+    if read == -1 or not gated_by(answer[arm:read], r"paused_by_lock\(\)"):
+        out.append(
+            f"{AGENT_SERVER}::answer: the `resources/read` arm must test `paused_by_lock()` "
+            f"before `read_resource(`"
+        )
+    return out
+
+
+def gated_by(text, gate):
+    return re.search(r"\bif\b[^{;]*" + gate + r"|\breturn\b[^;]*" + gate, text) is not None
+
+
 def listed(path=LIST):
     out, problems = {}, []
     steps = {}
@@ -317,6 +370,8 @@ def problems():
                 out.append(f"{path}::{name}: writes `passcode.locked`; only `set_locked` may")
     # What runs while locked.
     out += upkeep_problems(bodies, steps)
+    # Agent effects after a wait.
+    out += agent_problems(files)
     # The render gate is mounted.
     if "register_plugin::<LockLayer>" not in files.get(LAYER_FILE, ""):
         out.append(f"{LAYER_FILE}: `LockLayer` is not registered as a root plugin")

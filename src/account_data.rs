@@ -39,6 +39,51 @@ pub fn webview_dir(app_root: &Path, account: &str) -> PathBuf {
     app_root.join("webview").join(account)
 }
 
+/// The salt in [`webview_dir`] that [`webview_store_id`] mixes in.
+const WEBVIEW_SALT: &str = "store-salt.key";
+
+/// 16 bytes (as hex) naming the WebKit data store of one bot of one
+/// account. WKWebView keeps that store under `~/Library/WebKit`, outside
+/// Quill's folder, so deleting [`webview_dir`] cannot drop it. The id
+/// mixes in a random salt kept in that folder instead: [`forget`] deletes
+/// the salt with the folder, so whoever signs in next under the same key
+/// gets new stores. When the salt can't be saved, a fresh one per call
+/// keeps the store private at the cost of keeping nothing.
+pub fn webview_store_id(app_root: Option<&Path>, account: &str, bot_id: i64) -> String {
+    use sha2::{Digest, Sha256};
+    let salt = app_root
+        .and_then(|root| webview_salt(&webview_dir(root, account)))
+        .unwrap_or_else(new_salt);
+    let digest = Sha256::digest(format!("quill-webview/{salt}/{account}/{bot_id}").as_bytes());
+    hex(digest.iter().take(16))
+}
+
+fn hex<'a>(bytes: impl Iterator<Item = &'a u8>) -> String {
+    bytes.map(|byte| format!("{byte:02x}")).collect()
+}
+
+fn new_salt() -> String {
+    use rand::Rng;
+    let mut bytes = [0u8; 16];
+    rand::rng().fill_bytes(&mut bytes);
+    hex(bytes.iter())
+}
+
+/// The salt saved in `dir`, made and saved first when there is none.
+fn webview_salt(dir: &Path) -> Option<String> {
+    let file = dir.join(WEBVIEW_SALT);
+    if let Ok(saved) = std::fs::read_to_string(&file) {
+        let saved = saved.trim();
+        if saved.len() == 32 && saved.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+            return Some(saved.to_owned());
+        }
+    }
+    let salt = new_salt();
+    std::fs::create_dir_all(dir).ok()?;
+    crate::settings::write_bytes_atomic(&file, salt.as_bytes()).ok()?;
+    Some(salt)
+}
+
 /// `key`'s account logged out or was removed: drop everything Quill kept
 /// for it outside TDLib's database, so nobody who signs in next under the
 /// same key inherits it. Safe to run more than once.

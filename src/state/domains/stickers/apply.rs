@@ -157,6 +157,9 @@ impl Session {
                 } else if purpose == Some(RequestPurpose::GetCustomEmojiStickers) {
                     // Slice S10: bare `stickers` land in the emoji panel (see emoji.rs).
                     self.accept_custom_emoji_stickers(stickers);
+                    if let Some(pending) = pending {
+                        self.stickers.emoji.custom_emoji_lookup_answered(pending.id);
+                    }
                 } else if purpose == Some(RequestPurpose::GetForumTopicDefaultIcons) {
                     self.accept_topic_default_icons(stickers);
                 } else if purpose == Some(RequestPurpose::GetBackgroundEmojiIcons) {
