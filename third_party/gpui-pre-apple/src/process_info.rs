@@ -114,7 +114,7 @@ impl Drop for ProcessInfoObserver {
     }
 }
 
-#[cfg(all(test, feature = "test-support"))]
+#[cfg(test)]
 mod tests {
     use super::*;
     use std::{cell::Cell, rc::Rc};

@@ -1,4 +1,4 @@
-// Modified for gpui-pre (snapshot of zed@f816e1f): the gpui sources it reads are vendored under `vendor/gpui`.
+// Modified for gpui-pre (snapshot of zed@d2a4fb6): the gpui sources it reads are vendored under `vendor/gpui`.
 #![allow(clippy::disallowed_methods, reason = "build scripts are exempt")]
 
 fn main() {
@@ -8,6 +8,7 @@ fn main() {
 
 #[cfg(any(target_os = "macos", target_os = "ios"))]
 mod apple_build {
+    #[cfg(not(feature = "runtime_shaders"))]
     use std::ffi::OsString;
     use std::{
         env,
@@ -21,23 +22,8 @@ mod apple_build {
 
         #[cfg(feature = "runtime_shaders")]
         emit_stitched_shaders(&header_path);
-        // Quill: gpui-kit turns `runtime_shaders` on for every build, which
-        // cost a new user half a second of main thread at first launch. So
-        // the metallib is tried whatever the feature says. A machine without
-        // the Metal toolchain falls back to compiling the source at run time,
-        // and the release build sets QUILL_REQUIRE_METALLIB to rule that out.
-        println!("cargo:rerun-if-env-changed=QUILL_REQUIRE_METALLIB");
-        println!("cargo::rustc-check-cfg=cfg(quill_metallib)");
-        let required = cfg!(not(feature = "runtime_shaders"))
-            || env::var_os("QUILL_REQUIRE_METALLIB").is_some();
-        match compile_metal_shaders(&header_path) {
-            Ok(()) => println!("cargo:rustc-cfg=quill_metallib"),
-            Err(error) if required => {
-                println!("cargo::error={error}");
-                std::process::exit(1);
-            }
-            Err(_) => {}
-        }
+        #[cfg(not(feature = "runtime_shaders"))]
+        compile_metal_shaders(&header_path);
     }
 
     fn generate_shader_bindings() -> PathBuf {
@@ -139,8 +125,9 @@ mod apple_build {
         println!("cargo:rerun-if-changed={shader_source_path}");
     }
 
-    fn compile_metal_shaders(header_path: &Path) -> Result<(), String> {
-        use std::process::Command;
+    #[cfg(not(feature = "runtime_shaders"))]
+    fn compile_metal_shaders(header_path: &Path) {
+        use std::process::{self, Command};
 
         println!("cargo:rerun-if-env-changed=SDKROOT");
         println!("cargo:rerun-if-env-changed=DEVELOPER_DIR");
@@ -157,9 +144,10 @@ mod apple_build {
             ("ios", "sim") => ("iphonesimulator", "-mios-simulator-version-min=15.0"),
             ("ios", "") => ("iphoneos", "-mios-version-min=15.0"),
             _ => {
-                return Err(format!(
-                    "unsupported Metal shader target: target_os={target_os}, target_env={target_env}"
-                ));
+                println!(
+                    "cargo::error=unsupported Metal shader target: target_os={target_os}, target_env={target_env}"
+                );
+                process::exit(1);
             }
         };
 
@@ -200,13 +188,14 @@ mod apple_build {
             .args(["-include", header_path.to_str().unwrap(), "-o"])
             .arg(&air_output_path)
             .output()
-            .map_err(|error| format!("could not run xcrun metal: {error}"))?;
+            .unwrap();
 
         if !output.status.success() {
-            return Err(format!(
-                "metal shader compilation failed:\n{}",
+            println!(
+                "cargo::error=metal shader compilation failed:\n{}",
                 String::from_utf8_lossy(&output.stderr)
-            ));
+            );
+            process::exit(1);
         }
 
         let output = Command::new("xcrun")
@@ -218,17 +207,17 @@ mod apple_build {
             .arg("-o")
             .arg(metallib_output_path)
             .output()
-            .map_err(|error| format!("could not run xcrun metallib: {error}"))?;
+            .unwrap();
 
         if !output.status.success() {
-            return Err(format!(
-                "metallib compilation failed:\n{}",
+            println!(
+                "cargo::error=metallib compilation failed:\n{}",
                 String::from_utf8_lossy(&output.stderr)
-            ));
+            );
+            process::exit(1);
         }
 
         // Nothing reads the .air intermediate after this point.
         std::fs::remove_file(&air_output_path).unwrap();
-        Ok(())
     }
 }
