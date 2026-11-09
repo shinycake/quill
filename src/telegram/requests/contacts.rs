@@ -71,9 +71,11 @@ pub fn add_contact(
     phone_number: &str,
     first_name: &str,
     last_name: &str,
-    note: &str,
+    note: Option<&str>,
     share_phone_number: bool,
 ) -> String {
+    // `None` sends a null note: TDLib keeps the contact's current one.
+    let note = note.map(|text| json!({ "@type": "formattedText", "text": text, "entities": [] }));
     json!({
         "@type": "addContact",
         "@extra": extra.as_extra(),
@@ -83,7 +85,7 @@ pub fn add_contact(
             "phone_number": phone_number,
             "first_name": first_name,
             "last_name": last_name,
-            "note": { "@type": "formattedText", "text": note, "entities": [] },
+            "note": note,
         },
         "share_phone_number": share_phone_number,
     })

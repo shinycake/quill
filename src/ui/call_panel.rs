@@ -230,10 +230,18 @@ impl QuillApp {
 
     /// Open, raise or close the call window to follow the call: it opens
     /// for a new call (and comes to the front when one rings in), stays
-    /// shut if you closed it, and lingers briefly on "call ended".
+    /// shut if you closed it, and lingers briefly on "call ended". A second
+    /// call ringing during the call opens and raises it even when you
+    /// closed it: its Decline and End & Answer are there
+    /// (`swap_call_window_card`), and a minimized main window shows none.
     pub(super) fn sync_call_window(&mut self, cx: &mut Context<Self>) {
         self.close_stale_call_add_people();
-        let (call_id, incoming, ended, busy) = self.call_window_target();
+        let (call_id, ringing, ended, busy) = self.call_window_target();
+        let second = self
+            .session()
+            .and_then(|session| session.calls.second_call.prompt())
+            .map(|(id, _, _)| id);
+        let ringing = second.or(ringing);
         // The window's call, and when it ended.
         if ended {
             if self
@@ -251,12 +259,13 @@ impl QuillApp {
             .ended_at
             .is_some_and(|(_, at)| busy || at.elapsed() < ENDED_LINGER);
         let wanted = call_id.filter(|id| {
-            (!ended || lingering) && self.call_screen.window_closed_by_user != Some(*id)
+            (!ended || lingering)
+                && (self.call_screen.window_closed_by_user != Some(*id) || second.is_some())
         });
         match (wanted, self.calls.window) {
             (Some(_), Some(handle)) => {
-                if incoming && !self.calls.window_raised {
-                    self.calls.window_raised = true;
+                if ringing.is_some() && self.calls.raised_for != ringing {
+                    self.calls.raised_for = ringing;
                     let _ = handle.update(cx, |_, window, _| window.activate_window());
                 }
             }
@@ -300,9 +309,9 @@ impl QuillApp {
     }
 
     /// The call the 1:1 window shows: the active call, its ended summary,
-    /// or a ringing conference invite; with whether it rings in, has ended,
-    /// and the other side was busy.
-    fn call_window_target(&self) -> (Option<i32>, bool, bool, bool) {
+    /// or a ringing conference invite; with the call that rings in (if
+    /// any), whether it has ended, and whether the other side was busy.
+    fn call_window_target(&self) -> (Option<i32>, Option<i32>, bool, bool) {
         match self.session() {
             Some(session) => match (
                 &session.calls.active_call,
@@ -310,17 +319,18 @@ impl QuillApp {
             ) {
                 (Some(call), _) => (
                     Some(call.id),
-                    matches!(call.state, CallState::Pending { .. }) && !call.is_outgoing,
+                    (matches!(call.state, CallState::Pending { .. }) && !call.is_outgoing)
+                        .then_some(call.id),
                     false,
                     false,
                 ),
-                (None, Some(summary)) => (Some(summary.call_id), false, true, summary.busy),
+                (None, Some(summary)) => (Some(summary.call_id), None, true, summary.busy),
                 _ => match super::call_conference_ui::ringing_invite_key(session) {
-                    Some(key) => (Some(key), true, false, false),
-                    None => (None, false, false, false),
+                    Some(key) => (Some(key), Some(key), false, false),
+                    None => (None, None, false, false),
                 },
             },
-            None => (None, false, false, false),
+            None => (None, None, false, false),
         }
     }
 
@@ -329,7 +339,7 @@ impl QuillApp {
             return;
         }
         self.calls.window_opening = true;
-        self.calls.window_raised = false;
+        self.calls.raised_for = None;
         let owner = cx.entity();
         // screen-scope: the call window is the app's; its failure note goes to whichever account is on screen.
         cx.defer(move |cx| {
@@ -897,27 +907,28 @@ impl Render for CallPanel {
                 .into_any_element()
         };
 
-        // The device menu closes with the call's active phase.
-        let device_menu = self
-            .devices_menu
-            .filter(|_| snap.phase == CallPhase::Active)
-            .map(|target| {
-                let sections = owner.update(cx, |app, _| app.call_device_sections(target));
-                let app = self.owner.clone();
-                devices::menu_overlay(
-                    sections,
-                    cx,
-                    move |this, kind, id, _, cx| {
-                        this.devices_menu = None;
-                        let _ = app.update(cx, |app, cx| app.select_call_device(kind, &id, cx));
-                        cx.notify();
-                    },
-                    |this, _, cx| {
-                        this.devices_menu = None;
-                        cx.notify();
-                    },
-                )
-            });
+        // The device menu closes with the call's active phase, for good:
+        // the window is reused, and the next call must not open on it.
+        if snap.phase != CallPhase::Active {
+            self.devices_menu = None;
+        }
+        let device_menu = self.devices_menu.map(|target| {
+            let sections = owner.update(cx, |app, _| app.call_device_sections(target));
+            let app = self.owner.clone();
+            devices::menu_overlay(
+                sections,
+                cx,
+                move |this, kind, id, _, cx| {
+                    this.devices_menu = None;
+                    let _ = app.update(cx, |app, cx| app.select_call_device(kind, &id, cx));
+                    cx.notify();
+                },
+                |this, _, cx| {
+                    this.devices_menu = None;
+                    cx.notify();
+                },
+            )
+        });
 
         let _ = cx.theme();
         div()

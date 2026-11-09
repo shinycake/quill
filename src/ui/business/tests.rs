@@ -822,3 +822,27 @@ fn a_chat_windows_sticker_click_is_not_the_start_pages(cx: &mut TestAppContext) 
     });
     assert!(taken, "the main window's click is the start page's");
 }
+
+/// Round 17 C finding 11: the start page's sticker pick opens the account's
+/// sticker panel; leaving the pick closes it, so the main window's Esc is
+/// not eaten by a panel nobody sees.
+#[gpui_kit::test]
+fn leaving_the_sticker_pick_closes_the_sticker_panel(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    seed(&app, vcx, true);
+    open(&app, vcx);
+    go(&app, vcx, View::StartPage);
+    go(&app, vcx, View::StickerPick);
+    app.update(vcx, |app, _| {
+        if let Some(session) = app.demo_session.as_mut() {
+            session.stickers.stickers.open = true;
+        }
+    });
+    go(&app, vcx, View::StartPage);
+    let open = app.read_with(vcx, |app, _| {
+        app.session()
+            .is_some_and(|session| session.stickers.stickers.open)
+    });
+    assert!(!open, "the pick's panel closed with it");
+}

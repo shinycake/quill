@@ -129,7 +129,10 @@ impl QuillApp {
     }
 
     pub(super) fn close_business(&mut self, cx: &mut Context<Self>) {
-        if self.dialogs.business_dialog.take().is_some() {
+        if let Some(closed) = self.dialogs.business_dialog.take() {
+            if closed.view == View::StickerPick {
+                self.close_start_page_stickers();
+            }
             cx.notify();
         }
     }
@@ -187,6 +190,9 @@ impl QuillApp {
 
     /// Show another screen, building its draft from the saved values.
     pub(super) fn business_go(&mut self, view: View, window: &mut Window, cx: &mut Context<Self>) {
+        if self.business_view() == Some(View::StickerPick) && view != View::StickerPick {
+            self.close_start_page_stickers();
+        }
         let missing = self.business_draft_missing(view);
         match view {
             View::Greeting | View::Away | View::Location | View::StartPage | View::Hours => {

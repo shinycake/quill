@@ -137,6 +137,43 @@ fn a_reset_keeps_the_open_chat_the_dialog_and_the_session(cx: &mut TestAppContex
     assert!(new.update(|window, cx| window.has_active_dialog(cx)));
 }
 
+/// A new window shares its picture by default: the capture block a secret
+/// chat put on the old window is handed to the new one again.
+#[gpui_kit::test]
+fn a_reset_hands_the_capture_block_to_the_new_window(cx: &mut TestAppContext) {
+    use crate::ui::capture_block::SHARING_APPLIED;
+    use quill::ids::UserId;
+    use quill::telegram::envelope::ChatKind;
+    let opened = open(cx);
+    let mut old = VisualTestContext::from_window(opened.window, cx);
+    old.update(|_, cx| {
+        app_of(&opened).update(cx, |app, _| {
+            let open = app.open_chat_id();
+            let chat = app
+                .demo_session
+                .as_mut()
+                .zip(open)
+                .and_then(|(session, open)| session.chats.get_mut(&open.0));
+            if let Some(chat) = chat {
+                chat.kind = ChatKind::Secret {
+                    secret_chat_id: 9,
+                    user_id: UserId(1),
+                };
+            }
+        })
+    });
+    old.update(|window, cx| window.render_frame(cx));
+    old.run_until_parked();
+    let before = SHARING_APPLIED.with(|applied| applied.borrow().clone());
+    assert_eq!(before.last(), Some(&true), "the secret chat blocks capture");
+    let mut new = reset(&opened, cx);
+    new.update(|window, cx| window.render_frame(cx));
+    new.run_until_parked();
+    let after = SHARING_APPLIED.with(|applied| applied.borrow().clone());
+    assert!(after.len() > before.len(), "applied to the new window too");
+    assert_eq!(after.last(), Some(&true));
+}
+
 #[gpui_kit::test]
 fn what_was_subscribed_before_a_reset_fires_once_in_the_new_window(cx: &mut TestAppContext) {
     let opened = open(cx);

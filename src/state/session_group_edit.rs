@@ -87,6 +87,13 @@ impl Session {
                 GroupInfoField::Photo,
                 super::request_errors::error_reason(err),
             ),
+            RequestPurpose::UpgradeBasicGroup
+            | RequestPurpose::ToggleSupergroupIsAllHistoryAvailable
+            | RequestPurpose::ToggleSupergroupAutoTranslate
+            | RequestPurpose::ToggleSupergroupSignMessages => (
+                GroupInfoField::Settings,
+                super::request_errors::error_reason(err),
+            ),
             RequestPurpose::SetSupergroupUsername if err.premium_limit.is_some() => return,
             RequestPurpose::SetSupergroupUsername => {
                 match crate::group_type::username_save_problem(err.server_type.as_deref()) {

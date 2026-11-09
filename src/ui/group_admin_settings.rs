@@ -60,7 +60,7 @@ impl QuillApp {
             .as_ref()
             .is_some_and(|d| d.chat_id == chat_id);
         if !same_chat {
-            self.set_group_settings_dialog(Some(GroupSettingsDialog::new(chat_id, view)));
+            self.set_group_settings_dialog(Some(GroupSettingsDialog::new(chat_id, view.clone())));
         }
         self.open_box(DialogKind::GroupSettings);
         self.set_group_settings_view(view, cx);
@@ -96,10 +96,8 @@ impl QuillApp {
         let Some(dialog) = self.admin.group_settings_dialog.as_mut() else {
             return;
         };
-        dialog.view = view;
-        if view != GroupSettingsView::RecentActionsFilter {
-            dialog.event_log_filter = None;
-        }
+        // A filter box goes with its page: another page replaces it.
+        dialog.view = view.clone();
         let chat_id = dialog.chat_id;
         if view == GroupSettingsView::Boosts {
             self.open_boosts_page(chat_id, false);
@@ -699,7 +697,7 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) -> Option<(String, AnyElement, AnyElement)> {
         let dialog = self.admin.group_settings_dialog.as_ref()?;
-        let (chat_id, view) = (dialog.chat_id, dialog.view);
+        let (chat_id, view) = (dialog.chat_id, dialog.view.clone());
         let session = self.session()?;
         let controls = session.group_admin_controls(chat_id);
         let close = |id: &'static str, label: &'static str, cx: &mut Context<Self>| {
@@ -759,7 +757,7 @@ impl QuillApp {
                 section(self.event_log_section(chat_id, cx)),
                 done,
             ),
-            GroupSettingsView::RecentActionsFilter => (
+            GroupSettingsView::RecentActionsFilter(_) => (
                 tr(keys::MANAGE_PEER_RECENT_ACTIONS).to_string(),
                 self.event_log_filter_body(cx),
                 self.event_log_filter_footer(chat_id, cx),

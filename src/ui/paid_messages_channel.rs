@@ -207,8 +207,11 @@ impl QuillApp {
                 boxed.price.steps.last().copied().unwrap_or(0),
             );
             let price = boxed.price.price;
-            let saving = paid.saving;
-            let error = paid.error.clone();
+            let saving = paid.save.is_saving();
+            let error = paid
+                .save
+                .error_for(quill::paid_messages::PaidTarget::Channel(chat_id.0))
+                .map(str::to_string);
             let known = current.and_then(|s| s.price);
             let was_enabled = current.is_some_and(|s| s.enabled);
             // Without the price the channel has now, only a deliberate

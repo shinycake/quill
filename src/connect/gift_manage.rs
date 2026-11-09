@@ -531,6 +531,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             RequestPurpose::Payments(PaymentsPurpose::GetAvailableGifts),
             None,
         );
+        self.session.payments.gifts_manage.send.gifts_request = Some(extra);
         if self
             .send_json_request(extra, &rq::get_available_gifts(extra))
             .is_err()
@@ -544,6 +545,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 RequestPurpose::Payments(PaymentsPurpose::GetPremiumGiftOptions),
                 None,
             );
+            self.session.payments.gifts_manage.send.premium_request = Some(extra);
             let _ = self.send_json_request(extra, &rq::get_premium_gift_payment_options(extra));
         }
         if self.session.payments.gift_text_length_max.is_none()

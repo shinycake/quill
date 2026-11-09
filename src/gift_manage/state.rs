@@ -36,6 +36,11 @@ pub struct SendGiftState {
     pub selected: Option<i64>,
     pub premium_options: Vec<PremiumGiftOption>,
     pub premium_loaded: bool,
+    /// The `getAvailableGifts` and `getPremiumGiftPaymentOptions` this
+    /// dialog asked. The dialog is rebuilt for each recipient, so an
+    /// earlier box's answer (or failure) is dropped, not shown here.
+    pub gifts_request: Option<crate::ids::RequestId>,
+    pub premium_request: Option<crate::ids::RequestId>,
     pub sending: bool,
     /// The `sendGift` this dialog waits for. The dialog is rebuilt for
     /// each recipient, so an earlier recipient's answer is dropped.
@@ -48,6 +53,16 @@ impl SendGiftState {
     /// Whether `pending` is the `sendGift` this dialog waits for.
     pub(crate) fn waits_for(&self, pending: Option<&crate::state::PendingRequest>) -> bool {
         pending.is_some_and(|pending| self.request == Some(pending.id))
+    }
+
+    /// Whether `pending` is the gift list request of this dialog.
+    pub(crate) fn asked_gifts(&self, pending: Option<&crate::state::PendingRequest>) -> bool {
+        pending.is_some_and(|pending| self.gifts_request == Some(pending.id))
+    }
+
+    /// Whether `pending` is the Premium options request of this dialog.
+    pub(crate) fn asked_premium(&self, pending: Option<&crate::state::PendingRequest>) -> bool {
+        pending.is_some_and(|pending| self.premium_request == Some(pending.id))
     }
 
     pub fn selected_gift(&self) -> Option<&AvailableGift> {

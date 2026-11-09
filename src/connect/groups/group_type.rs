@@ -140,6 +140,9 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
+        // A new Save starts with no refusal shown (the upgrade path sends
+        // no `save_group_info`, which clears it otherwise).
+        self.session.groups.info_edit_errors.remove(&chat_id.0);
         if kind.first() == Some(&GroupTypeEdit::Upgrade) {
             if !self.session.chat_is_owner(chat_id) {
                 return Err(ConnectSendError::InvalidRequest);

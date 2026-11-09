@@ -190,3 +190,35 @@ fn the_basic_group_description_is_kept() {
     );
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// Round 17 C finding 9: a refused upgrade, which the name and description
+/// wait on, keeps the Edit box open with its error, like a refused title.
+#[test]
+fn a_refused_upgrade_is_recorded_for_the_box() {
+    use crate::group_type::GroupTypeEdit;
+    let (mut driver, _recorder, seq, sink, dir) = basic_group_driver();
+    let sent = driver
+        .save_group_type(
+            ChatId(9),
+            &[GroupTypeEdit::Upgrade],
+            &[GroupInfoEdit::Title("Hikers".into())],
+        )
+        .unwrap();
+    let id = *sent.first().unwrap();
+    driver
+        .ingest(
+            copy_and_parse(
+                &format!(
+                    r#"{{"@type":"error","@extra":"{}","code":400,"message":"CHAT_NOT_MODIFIED"}}"#,
+                    id.0
+                ),
+                &seq,
+                &sink,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+    let error = driver.session.groups.info_edit_errors.get(&9).unwrap();
+    assert_eq!(error.field, GroupInfoField::Settings);
+    let _ = std::fs::remove_dir_all(&dir);
+}

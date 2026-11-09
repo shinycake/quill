@@ -125,16 +125,20 @@ impl QuillApp {
     fn after_market_pop(&mut self, popped: Option<MarketBox>) {
         let stack = &self.gift_market.stack;
         let still = |kind: &MarketBox| stack.contains(kind);
+        // A purchase in flight keeps its `buy` past the box: its answer
+        // still toasts, takes the listing out and fills a craft slot
+        // (`apply_gift_market_purchase` matches it by request), and a
+        // failure still says so. The Stars are spent either way.
         match popped {
             Some(MarketBox::Buy) if !still(&MarketBox::Buy) => {
                 if let Some(market) = self.gift_market_mut() {
-                    market.buy = None;
+                    market.buy.take_if(|buy| !buy.sending);
                 }
             }
             Some(MarketBox::Resale) if !still(&MarketBox::Resale) => {
                 if let Some(market) = self.gift_market_mut() {
                     market.resale = None;
-                    market.buy = None;
+                    market.buy.take_if(|buy| !buy.sending);
                 }
             }
             Some(MarketBox::AuctionBid { .. }) => {
@@ -146,6 +150,8 @@ impl QuillApp {
         if self.gift_market.stack.is_empty() {
             self.gift_market.recipient = None;
             self.gift_market.pending_auction = false;
+            // "Hide My Name" is one bid's choice, never the next auction's.
+            self.gift_market.hide_name = false;
         }
         self.after_craft_pop();
     }

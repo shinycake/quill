@@ -48,11 +48,15 @@ fn note_and_contact_edits_carry_the_note_and_share_flag() {
         "",
         "Ada",
         "Lovelace",
-        "likes engines",
+        Some("likes engines"),
         true,
     ));
     assert_eq!(v["contact"]["note"]["text"], "likes engines");
     assert_eq!(v["share_phone_number"], true);
+    // Round 17 C finding 24: a note never learned is sent as null, which
+    // TDLib reads as "keep the current note".
+    let v = parse(&add_contact(RequestId(9), 31, "", "Ada", "L", None, false));
+    assert!(v["contact"]["note"].is_null());
 }
 
 #[test]

@@ -70,7 +70,7 @@ fn add_contact_shape_matches_1_8_67() {
         "+15550131",
         "CANARY-first",
         "CANARY-last",
-        "",
+        Some(""),
         false,
     );
     let v: serde_json::Value = serde_json::from_str(&json).unwrap();

@@ -3444,3 +3444,132 @@ is, since tdesktop does the same.
   - None of them waits on time.
 - **The flaky `settings::media` test** was already fixed on the merged
   base (`Start the media prefs test from an empty folder`).
+
+### Phase 17 (area C)
+
+Round 17 of the review, area C (the rest of `src/ui`), on
+`claude/sm-review17-c`. The numbers are the review's finding numbers. All
+twenty-four were fixed, along with the three dodges the review named and
+the gift-box answers it flagged outside the area. Two of the findings
+(1, 22) were regressions from round 16's let-go soundtrack fix. Several
+shared one shape: a chat window's ask queued for a frame only the main
+window draws. Those are now fixed at the seam, and a guard checks the
+seam.
+
+- **Clip audio asks only when it can help (1, 22).** The FFmpeg backend
+  reattaches a tap only when the player's sound is detached
+  (`Player::sound_detached`: a soundtrack exists and its tap was let go).
+  A silent clip never asks. The output answers through
+  `SharedOutput::ready_or_wake`, which says yes only once a device is up.
+  Before this, every frame opened the device for a silent clip, and with
+  no device a clip with sound reattached (and so seeked) every 5 s.
+- **Admin rights are asked afresh (2).** Opening the rights editor drops
+  a `Loaded` answer and asks again (`refresh_admin_rights`), and the
+  editor seeds from the cache only in demo mode. Save no longer writes
+  back rights changed elsewhere since the first load.
+- **A new native window gets the capture block (3).** Attaching a main
+  window (`attach_main_window`) forgets what the old native window was
+  given (`FrameUi::forget_native_window`). The block is applied again
+  after a Windows GPU-loss reopen.
+- **Main-window queues raise the main window (4, 13).** Mini app actions
+  (t.me links, the link confirm, inline switch, bot chat, invoices) and
+  video chat "Share to" queue work for the main frame. They now go
+  through `raise_main_window_later`, which restores a minimized or hidden
+  main window, instead of `cx.activate`. The video chat's private
+  `raise_main_window` is gone.
+- **The location picker is a box with a host (5).** It opens through
+  `open_box(DialogKind::LocationPicker)`, and its own `opened_in` field
+  is gone. A second window that asks moves the picker there, and sends go
+  to that window's chat.
+- **A call that fails to start reports where Call was pressed (6).**
+  `CallBoxes::card_window` holds the pressing window
+  (`asking_window_or_last_press`), and the call card draws only in that
+  window (chat windows draw `call_overlay` too).
+- **A second call reopens a closed call window (7).** The call window
+  remembers which ringing call it was raised for (`raised_for:
+  Option<i32>`, replacing `window_raised: bool`). A new ringing id raises
+  it once, even after the user closed it.
+- **Gift market boxes keep a purchase in flight (8) and start clean (16).**
+  Popping the Buy or Resale box keeps a buy that is sending. An empty
+  stack resets "Hide My Name".
+- **Group Edit reports non-field failures (9).** Upgrades and the
+  history, auto-translate and sign-messages toggles record their failure
+  as `GroupInfoField::Settings`, shown under the form, so the box no
+  longer closes as saved. Saving the type clears earlier errors first.
+- **The paid-messages save names its target (10).** `PaidSave { Idle,
+  Saving(target), Failed { target, line } }` replaces `saving` and
+  `error`. The error shows only in the chat or channel it was for.
+- **Business sticker pick closes the sticker panel (11),** on a pick, on
+  leaving the page, and when Business closes.
+- **A refused chatbot save is forgotten (12).** The connected bot is
+  cleared on the error, so the next visit asks the server again.
+- **Secret-chat clips stay out of PiP (14).** `viewer_may_pip` refuses a
+  secret chat's item, and the PiP button is hidden for it.
+- **Mini-app answers carry their bot (15).** The `found` and
+  `attachment_menu_bot` answers hold the bot id from the purpose, and the
+  poll takes only the answer for the bot it asked about.
+- **A refused invite link create keeps the box (17).** Only `Ok(Some)`
+  counts as sent. Otherwise the box comes back with an error note.
+- **Opening Hours Back retries the zones (18).** Leaving with no zone
+  list asks for it again. The page shows both the local line and the
+  server's error.
+- **A mini app's data send is reported when it answers (19).**
+  `Session::web_app_answer_due` keeps the mini-app poll alive while a data
+  send or a menu toggle is pending.
+- **The call device menu closes outside an active call (20).**
+- **A sticker-set video pick opens in its own window's frame (21).**
+  `sticker_box_window_upkeep` runs per window and drops picks whose
+  window closed. It replaces the main-only `sticker_box_frame_upkeep`.
+- **New passkey options drop unstarted ones (23).** `begin_register`
+  clears the ceremony before asking, so options that landed after the lock
+  never start a second sheet.
+- **Edit contact saves without the note (24).** A note the box never
+  learned is sent as null, which TDLib reads as keeping the current note.
+  Save works after a failed full-info fetch, and a contact whose names
+  and note are unchanged sends nothing.
+- **Dodges from round 16.**
+  - `GroupSettingsDialog::event_log_filter` is gone. The filter box is the
+    payload of `GroupSettingsView::RecentActionsFilter(Box<…>)`, so it
+    cannot outlive its page (the view is `Clone`, no longer `Copy`).
+  - `EmojiStatusFlow::asking` + `granting` -> `AccessStage { Idle, Asking,
+    Granting }`.
+  - `CommunityWait` is gone. A waiting ban (`ban_wait`) and a new chat for
+    a community (`new_chat_for`) are separate slots, so starting a new chat
+    no longer drops a ban waiting for the member's chats.
+- **Gift box answers belong to their box (outside item).**
+  `SendGiftState::{gifts_request, premium_request}` hold the ids the box
+  asked with. An earlier box's gift list, Premium options or their
+  failure are dropped (`asked_gifts`, `asked_premium`).
+- **Guards.**
+  - `scripts/main_frame_queues.py`, run by `check-window-scope.py`: a
+    write to `mini_apps.render_action` or `links.pending_deep_link_open`
+    needs `raise_main_window_later` (or `hold_resolved_link`) within 12
+    lines, or a `// main-frame:` marker that says why not.
+  - Capture-block tests read what was handed to the native window through
+    a test-only probe (`SHARING_APPLIED`).
+  - The baseline lost `PaidMessages::saving` and
+    `PaidMessages::trust_loaded+error`.
+- **Tests.**
+  - `a_silent_clip_has_no_detached_sound`
+  - `ready_says_no_while_the_device_opens_or_after_it_failed`
+  - `refreshing_admin_rights_drops_a_loaded_answer_and_asks_again`
+  - `a_reset_hands_the_capture_block_to_the_new_window`
+  - `an_invoice_request_brings_the_main_window_forward`
+  - `a_location_picker_opened_again_moves_to_the_window_that_asked`
+  - `a_call_that_fails_to_start_reports_in_the_window_that_pressed_call`
+  - `a_second_call_reopens_a_call_window_you_closed`
+  - `closing_the_buy_box_mid_purchase_keeps_the_purchase`
+  - `hide_my_name_does_not_carry_to_the_next_auction`
+  - `a_refused_upgrade_is_recorded_for_the_box`
+  - the paid-messages tests, moved to `PaidSave`
+  - `leaving_the_sticker_pick_closes_the_sticker_panel`
+  - `a_refused_bot_save_is_forgotten_and_asked_for_again`
+  - `a_secret_chats_clip_never_goes_to_picture_in_picture`
+  - `a_search_answer_names_its_bot_even_when_refused`
+  - `a_data_send_is_due_until_it_answers`
+  - `a_new_options_request_drops_unstarted_options`
+  - the Edit contact note tests (a null note keeps the current one)
+  - `an_earlier_boxs_gift_answers_are_dropped`
+  - None of them waits on time.
+  - No test for 13, 17, 18 and 20. They need a live connection or a
+    native window that the offline harness lacks.

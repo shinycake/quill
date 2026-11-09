@@ -212,6 +212,10 @@ impl Session {
                 format!("Couldn't load the chatbot: {reason}")
             }
             SettingsPurpose::SaveConnectedBot => {
+                // The save wrote its bot ahead of the answer: forget it, so
+                // the next visit asks TDLib what is connected instead of
+                // showing the refused bot as saved.
+                extra.connected_bot = None;
                 extra.connected_bot_requested = false;
                 format!("Couldn't save the chatbot: {reason}")
             }

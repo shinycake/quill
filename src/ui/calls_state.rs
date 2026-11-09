@@ -29,10 +29,11 @@ pub(crate) struct CallUi {
     pub(super) panel_view: Rc<Cell<Option<EntityId>>>,
     /// The call window (tdesktop's call panel), and its bookkeeping: a
     /// call whose window you closed stays closed until the call bar
-    /// reopens it; an incoming call raises it once.
+    /// reopens it or a second call rings; each call that rings in raises
+    /// it once (`raised_for`: the last one that did).
     pub(super) window: Option<AnyWindowHandle>,
     pub(super) window_opening: bool,
-    pub(super) window_raised: bool,
+    pub(super) raised_for: Option<i32>,
     pub(super) sounds: super::call_sounds::CallSounds,
 }
 
@@ -92,6 +93,11 @@ pub(crate) struct CallBoxes {
     /// A conference call's link waiting on "Join Group Call"
     /// (`ui::call_conference_ui`).
     pub(super) conference_link: Option<String>,
+    /// The window that pressed Call (`None`: the main window): a failure
+    /// to start and the rating afterwards show there
+    /// (`QuillApp::call_card_window`). An answered call's card is the
+    /// main window's.
+    pub(super) card_window: Option<quill::ids::ChatId>,
 }
 
 impl CallBoxes {
@@ -106,6 +112,7 @@ impl CallBoxes {
             open_mic_test: super::call_audio_ui::open_default_mic_test(),
             add_people: None,
             conference_link: None,
+            card_window: None,
         }
     }
 }
@@ -149,7 +156,7 @@ impl CallUi {
             panel_view: Rc::default(),
             window: None,
             window_opening: false,
-            window_raised: false,
+            raised_for: None,
             sounds: super::call_sounds::CallSounds::new(audio_output),
         }
     }

@@ -93,8 +93,10 @@ impl QuillApp {
     }
 
     /// Phase D3b: open the rights editor for one administrator. The
-    /// dialog reads cached rights once the `getChatMember` lookup lands;
-    /// checkbox toggles are staged locally until Save.
+    /// dialog reads the rights once the `getChatMember` lookup lands;
+    /// checkbox toggles are staged locally until Save. Every open asks
+    /// again: TDLib tells only bots when another admin changes these, so a
+    /// cached answer could be stale, and Save would write it back.
     pub(super) fn open_rights_editor(
         &mut self,
         chat_id: ChatId,
@@ -103,6 +105,7 @@ impl QuillApp {
     ) {
         let cached = self
             .session()
+            .filter(|_| self.live.is_none())
             .and_then(|session| session.groups.admin_rights.get(&(chat_id.0, user_id)))
             .and_then(|fetch| match fetch {
                 AdminRightsFetch::Loaded(rights) => Some(*rights),
@@ -110,7 +113,7 @@ impl QuillApp {
             });
         self.admin.admin_dialog = Some(AdminDialog::edit_rights(chat_id, user_id, cached));
         if let Some(live) = self.live.as_mut()
-            && live.driver.fetch_admin_rights(chat_id, user_id).is_err()
+            && live.driver.refresh_admin_rights(chat_id, user_id).is_err()
         {
             self.set_note(StatusNote::error(tr(
                 keys::Q_PEOPLE_COULD_NOT_LOAD_ADMIN_RIGHTS,

@@ -158,22 +158,16 @@ impl CommunitiesUi {
     }
 }
 
-/// A community step waiting for an answer with no box of its own: one
-/// value, so a newer step replaces the older one whole and nothing keeps
-/// two waits in step.
-#[derive(Clone)]
-pub(crate) enum CommunityWait {
-    /// A ban waits for the member's chats (`drain_pending_ban`).
-    Ban(PendingBan),
-    /// "Create a New Chat" from this community's chooser: the new chat
-    /// goes to the visibility box once made (`drain_new_community_chat`).
-    NewChat { community_id: i64 },
-}
-
 #[derive(Default)]
 pub(crate) struct CommunitiesUi {
     pub(crate) open: Option<CommunityBox>,
-    pub(crate) waiting: Option<CommunityWait>,
+    /// A ban waiting for the member's chats, with no box of its own
+    /// (`drain_pending_ban`). A newer ban replaces it.
+    pub(crate) ban_wait: Option<PendingBan>,
+    /// "Create a New Chat" from this community's chooser: the new chat goes
+    /// to the visibility box once made (`drain_new_community_chat`). Its own
+    /// slot: starting it never drops a ban still waiting for its answer.
+    pub(crate) new_chat_for: Option<i64>,
     pub(crate) row_menu: Option<RowMenu>,
     /// The pending requests list's scroll, for the community it shows.
     pub(crate) requests_view: RequestsView,
@@ -452,11 +446,11 @@ impl QuillApp {
         let asking = ban::answer_coming(&live.driver.session, community_id, member);
         match ban::ban_start(sent, asking) {
             ban::BanStart::Wait => {
-                self.admin.community.flow.waiting = Some(CommunityWait::Ban(PendingBan {
+                self.admin.community.flow.ban_wait = Some(PendingBan {
                     community_id,
                     member,
                     name,
-                }));
+                });
             }
             ban::BanStart::Refused => {
                 self.set_note(StatusNote::error(tr(keys::Q_COMMUNITY_BAN_UNAVAILABLE)))

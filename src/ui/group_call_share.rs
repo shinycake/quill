@@ -85,17 +85,6 @@ impl QuillApp {
         invite_row_action(self.group_call_link_facts(call))
     }
 
-    /// Bring the main window forward, past the call windows (its passcode
-    /// screen, or the chat a link was shared to).
-    fn raise_main_window(&self, cx: &mut Context<Self>) {
-        let call_windows = [self.group_call.window, self.calls.window];
-        for window in cx.windows() {
-            if !call_windows.contains(&Some(window)) {
-                let _ = window.update(cx, |_, window, _| window.activate_window());
-            }
-        }
-    }
-
     /// While the passcode lock is on, the invite picker and the share box
     /// wait for the unlock in the main window (tdesktop
     /// `ShowUnlockPasscodeBox` before `addMembers` and the share action).
@@ -103,7 +92,7 @@ impl QuillApp {
         if !self.account.passcode.is_locked() {
             return false;
         }
-        self.raise_main_window(cx);
+        self.raise_main_window_later(cx);
         true
     }
 
@@ -175,7 +164,7 @@ impl QuillApp {
             DeepLinkAction::ShareDraft { text },
         ));
         self.group_call_boxes.share_open = false;
-        self.raise_main_window(cx);
+        self.raise_main_window_later(cx);
         cx.notify();
     }
 

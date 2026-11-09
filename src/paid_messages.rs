@@ -443,10 +443,59 @@ pub struct PaidMessages {
     pub trust_loaded: bool,
     /// The trusted prices changed and are not written yet.
     pub trust_dirty: bool,
-    /// A paid-message request is in flight.
-    pub saving: bool,
-    /// The last paid-message request failed with this line.
-    pub error: Option<String>,
+    /// The Remove Fee or Direct Messages save, and what it was for.
+    pub save: PaidSave,
+}
+
+/// Whom a paid-message save is for: its failure shows there only, never
+/// in another chat's bar or another channel's box.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PaidTarget {
+    /// `allowUnpaidMessagesFromUser`.
+    User(i64),
+    /// `setChatDirectMessagesGroup` (the channel's chat id).
+    Channel(i64),
+}
+
+/// The paid-message save (Remove Fee, a channel's Direct Messages).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum PaidSave {
+    #[default]
+    Idle,
+    Saving(PaidTarget),
+    Failed {
+        target: PaidTarget,
+        line: String,
+    },
+}
+
+impl PaidSave {
+    pub fn is_saving(&self) -> bool {
+        matches!(self, Self::Saving(_))
+    }
+
+    /// The failure line of a save for `target`.
+    pub fn error_for(&self, target: PaidTarget) -> Option<&str> {
+        match self {
+            Self::Failed {
+                target: failed,
+                line,
+            } if *failed == target => Some(line),
+            _ => None,
+        }
+    }
+
+    /// The failure line of a Remove Fee for any user (the privacy page's
+    /// exceptions).
+    pub fn user_error(&self) -> Option<&str> {
+        match self {
+            Self::Failed {
+                target: PaidTarget::User(_),
+                line,
+            } => Some(line),
+            _ => None,
+        }
+    }
 }
 
 impl PaidMessages {

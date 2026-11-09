@@ -91,6 +91,8 @@ impl QuillApp {
         is_video: bool,
         cx: &mut Context<Self>,
     ) {
+        // A failure to start, and the rating, show where Call was pressed.
+        self.call_boxes.card_window = self.asking_window_or_last_press();
         // tdesktop asks for the microphone (and the camera for video)
         // before calling, so a refusal never becomes a silent call.
         if self.live.is_some() {

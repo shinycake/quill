@@ -36,6 +36,20 @@ impl AudioTap {
 }
 
 impl Player {
+    /// The output let go of the sound and no tap is out: the one case
+    /// [`Self::reattach_audio_tap`] answers. False for a clip with no
+    /// soundtrack (or one not asked for), before the first tap was taken,
+    /// and while a tap is attached. Touches nothing, so a caller can ask
+    /// every frame.
+    pub fn sound_detached(&self) -> bool {
+        let state = lock(&self.shared.state);
+        state.tap.is_none()
+            && state
+                .audio
+                .as_ref()
+                .is_some_and(|audio| audio.detached.load(Ordering::Relaxed))
+    }
+
     /// The output let go of the sound (no device at attach, or the device
     /// was lost): a new tap for the same sound, for an output that is up
     /// again, and the clip restarts where it is so the two stay in step

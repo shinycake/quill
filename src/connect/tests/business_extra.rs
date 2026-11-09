@@ -200,6 +200,29 @@ fn a_bot_is_saved_and_asked_for_again() {
     );
 }
 
+/// Round 17 C finding 12: a refused chatbot save does not leave the bot as
+/// connected for the next visit, which asks TDLib again.
+#[test]
+fn a_refused_bot_save_is_forgotten_and_asked_for_again() {
+    let (mut driver, recorder, sink, seq) = driver_parts();
+    let bot = ConnectedBot {
+        bot_user_id: 42,
+        recipients: BusinessRecipients::everyone(),
+        rights: BotRights::default(),
+    };
+    driver.save_connected_bot(Some(&bot), None).unwrap();
+    let extra = extra_of(&recorder, "setBusinessConnectedBot");
+    feed(
+        &mut driver,
+        &seq,
+        &sink,
+        &format!(r#"{{"@type":"error","@extra":"{extra}","code":400,"message":"BOT_INVALID"}}"#),
+    );
+    assert_eq!(driver.session.settings.business_extra.connected_bot, None);
+    driver.ensure_connected_bot().unwrap();
+    assert_eq!(count_sent(&recorder, "getBusinessConnectedBot"), 1);
+}
+
 #[test]
 fn the_bot_lookup_collects_three_answers() {
     let (mut driver, recorder, sink, seq) = driver_parts();

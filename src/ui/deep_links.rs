@@ -312,8 +312,13 @@ impl QuillApp {
     }
 
     /// Bring the main window forward at the end of this update, restoring
-    /// it when minimized or hidden, so its next frame runs.
-    fn raise_main_window_later(&self, cx: &mut Context<Self>) {
+    /// it when minimized or hidden, so its next frame runs. Every queue
+    /// that only the main window's frame drains calls this when it fills
+    /// for a press that may have come from another window (a chat window,
+    /// a mini app, a call window): a minimized or hidden main window draws
+    /// no frame, and `cx.activate` alone does not restore it
+    /// (`scripts/check-window-scope.py`, "main-frame queues").
+    pub(in crate::ui) fn raise_main_window_later(&self, cx: &mut Context<Self>) {
         let Some(main) = self.main_window.handle else {
             return;
         };

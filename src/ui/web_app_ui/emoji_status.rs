@@ -26,11 +26,19 @@ const RESOLVE_TIMEOUT: StdDuration = StdDuration::from_secs(15);
 /// The emoji status prompts of the open mini app.
 #[derive(Default)]
 pub(super) struct EmojiStatusFlow {
-    /// "Allow" was pressed and `toggleBotCanManageEmojiStatus` is in flight.
-    granting: bool,
-    /// The access prompt is up.
-    asking: bool,
+    access: AccessStage,
     set: Option<SetRequest>,
+}
+
+/// Where the access request stands: one at a time.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+enum AccessStage {
+    #[default]
+    Idle,
+    /// The access prompt is up.
+    Asking,
+    /// "Allow" was pressed and `toggleBotCanManageEmojiStatus` is in flight.
+    Granting,
 }
 
 impl EmojiStatusFlow {
@@ -104,7 +112,7 @@ impl QuillApp {
             (
                 window.launch.bot_user_id,
                 window.launch.bot_name.clone(),
-                window.emoji.asking || window.emoji.granting,
+                window.emoji.access != AccessStage::Idle,
             )
         }) else {
             return;
@@ -122,7 +130,7 @@ impl QuillApp {
             return;
         }
         self.with_window(|window| {
-            window.emoji.asking = true;
+            window.emoji.access = AccessStage::Asking;
             window.show_popup(PopupPurpose::EmojiStatusAccess, access_popup(&bot_name));
         });
         cx.notify();
@@ -140,7 +148,7 @@ impl QuillApp {
         };
         if button != "allow" {
             self.with_window(|window| {
-                window.emoji.asking = false;
+                window.emoji.access = AccessStage::Idle;
                 window.emit(BridgeReply::emoji_status_access_requested(false));
             });
             return;
@@ -154,8 +162,7 @@ impl QuillApp {
             return;
         }
         self.with_window(|window| {
-            window.emoji.asking = false;
-            window.emoji.granting = true;
+            window.emoji.access = AccessStage::Granting;
         });
         let sent = self
             .live
@@ -163,7 +170,7 @@ impl QuillApp {
             .map(|live| live.driver.set_bot_emoji_status_access(bot_id, true));
         if !matches!(sent, Some(Ok(_))) {
             self.with_window(|window| {
-                window.emoji.granting = false;
+                window.emoji.access = AccessStage::Idle;
                 window.emit(BridgeReply::emoji_status_access_requested(false));
             });
         }
@@ -257,13 +264,12 @@ impl QuillApp {
             .as_mut()
             .and_then(|live| live.driver.session.bots.web_apps.emoji_access.take());
         if let Some((bot_id, done)) = access {
-            let waiting =
-                self.mini_apps.window.as_ref().is_some_and(|window| {
-                    window.launch.bot_user_id == bot_id && window.emoji.granting
-                });
+            let waiting = self.mini_apps.window.as_ref().is_some_and(|window| {
+                window.launch.bot_user_id == bot_id && window.emoji.access == AccessStage::Granting
+            });
             if waiting {
                 self.with_window(|window| {
-                    window.emoji.granting = false;
+                    window.emoji.access = AccessStage::Idle;
                     window.emit(BridgeReply::emoji_status_access_requested(done));
                 });
             }
