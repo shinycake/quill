@@ -401,6 +401,9 @@ impl Session {
                         .forget_deleted_latest(&message_ids);
                 }
                 for id in message_ids.iter().copied() {
+                    if is_permanent {
+                        self.forget_deleted_widget(chat_id, id);
+                    }
                     // Permanent or "became inaccessible": either way the
                     // row must not come back from a stale page.
                     if let Some(history) = self.histories.get_mut(&chat_id.0) {

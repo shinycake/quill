@@ -153,6 +153,24 @@ Measured on an M-series Mac, 2026-11-09:
   (`widgets_window_closed`), unless another window's last pass showed them;
   they move to that window.
 
+## Bounds against a hostile widget
+
+- Blur (CSS `filter`, box and drop shadows) stops at 200 device px
+  (`effects::MAX_BLUR_SIGMA`): each pass costs the box width per line, and
+  a bot's CSS can ask for any size.
+- At most 16 off-screen widgets keep their entry and last frame
+  (`KEEP_HIDDEN`); older ones are dropped and start over from their stored
+  data. A permanently deleted widget message drops its storage file, as
+  Telegram Desktop's `DeleteMessageStorage` does.
+- The theme goes to a runtime only when it changed: each set re-sanitises
+  the widget's CSS and rebuilds its layout.
+- Font families a widget names are looked up in the installed set read once;
+  nothing grows per name.
+- Query answers carry Quill's own token, mapped to the asking runtime's;
+  a restarted runtime never gets the answer meant for the one before.
+- A logout drops what widgets still had to write, so nothing lands back in
+  the deleted folder.
+
 ## Verification
 
 - Unit tests: lifecycle, pool, failure mapping, poll periods, heights,

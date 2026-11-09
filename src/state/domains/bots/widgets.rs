@@ -72,4 +72,27 @@ impl Session {
         self.bots.widget_answers.extend(answer);
         true
     }
+
+    /// A deleted message that was a widget: the UI drops its storage
+    /// (Telegram Desktop's `DeleteMessageStorage`).
+    pub(crate) fn forget_deleted_widget(&mut self, chat_id: ChatId, message_id: MessageId) {
+        let was_widget = self
+            .histories
+            .get(&chat_id.0)
+            .and_then(|history| history.messages.get(&message_id.0))
+            .is_some_and(|message| {
+                matches!(
+                    message.content,
+                    crate::telegram::envelope::MessageContent::Widget(_)
+                )
+            });
+        if was_widget {
+            self.bots.widget_answers.push(WidgetAnswer::Deleted {
+                key: WidgetKey {
+                    chat_id,
+                    message_id,
+                },
+            });
+        }
+    }
 }

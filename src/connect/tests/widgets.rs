@@ -165,3 +165,42 @@ fn one_public_data_poll_at_a_time_and_its_period_is_held_to_bounds() {
         }]
     );
 }
+
+#[test]
+fn a_deleted_widget_message_tells_the_ui_to_drop_its_storage() {
+    let (mut driver, _recorder, sink, seq) = driver_parts();
+    let widget = |id: i64| {
+        json!({"@type": "updateNewMessage", "message": {
+            "id": id, "chat_id": -100, "is_outgoing": false, "date": 1_700_000_000,
+            "content": {
+                "@type": "messageWidget", "width": 0, "height": 0, "html": "<p>hi</p>",
+                "public_data": "", "chat_data": "", "widget_id": "0",
+                "caption": {"@type": "formattedText", "text": "", "entities": []},
+                "show_caption_above_media": false, "is_copy": false,
+                "can_send_queries": false, "can_send_background_queries": false,
+            },
+        }})
+    };
+    feed(&mut driver, &seq, &sink, widget(7 << 20));
+    feed(&mut driver, &seq, &sink, widget(8 << 20));
+    let _ = driver.take_widget_answers();
+    feed(
+        &mut driver,
+        &seq,
+        &sink,
+        json!({"@type": "updateDeleteMessages", "chat_id": -100, "message_ids": [7 << 20],
+            "is_permanent": true, "from_cache": false}),
+    );
+    // Only dropped from TDLib's memory: it can come back, its data stays.
+    feed(
+        &mut driver,
+        &seq,
+        &sink,
+        json!({"@type": "updateDeleteMessages", "chat_id": -100, "message_ids": [8 << 20],
+            "is_permanent": false, "from_cache": true}),
+    );
+    assert_eq!(
+        driver.take_widget_answers(),
+        vec![WidgetAnswer::Deleted { key: KEY }]
+    );
+}

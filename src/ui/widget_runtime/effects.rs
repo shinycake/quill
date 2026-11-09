@@ -27,11 +27,18 @@ pub fn take_masked(target: &mut Pixmap, drawn: &Pixmap, mask: &Mask) {
     }
 }
 
+/// The widest blur drawn, device px. A bot's CSS can ask for any size
+/// (`blur(1e7px)`), and each pass costs the box width per line; past this
+/// the picture is a flat wash anyway. Canvas `shadowBlur` stops at 100 CSS
+/// px upstream, so 2x screens get the same reach.
+pub const MAX_BLUR_SIGMA: f32 = 200.0;
+
 /// Blurs `pixmap` (premultiplied) with standard deviation `sigma`, px.
 pub fn blur(pixmap: &mut Pixmap, sigma: f32) {
     if sigma.is_nan() || sigma <= 0.4 || !sigma.is_finite() {
         return;
     }
+    let sigma = sigma.min(MAX_BLUR_SIGMA);
     let (width, height) = (pixmap.width() as usize, pixmap.height() as usize);
     // Three box widths whose passes add up to the Gaussian (W3C filter spec).
     let d = ((sigma * 3.0 * (2.0 * std::f32::consts::PI).sqrt() / 4.0) + 0.5)

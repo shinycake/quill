@@ -187,6 +187,8 @@ pub enum WidgetAnswer {
         key: WidgetKey,
         data: Option<(String, Duration)>,
     },
+    /// The widget message was deleted: what the widget kept goes too.
+    Deleted { key: WidgetKey },
 }
 
 /// Seconds between public data polls when the server names none.

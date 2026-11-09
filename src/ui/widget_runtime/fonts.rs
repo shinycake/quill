@@ -7,7 +7,7 @@ use cosmic_text::{
     Attrs, Buffer, CacheKey, CacheKeyFlags, Command, Family, FeatureTag, FontFeatures, FontSystem,
     Metrics, Shaping, Style, SwashCache, SwashContent, Weight, Wrap,
 };
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Mutex, OnceLock};
 use tiny_skia::{Path, PathBuilder};
 
@@ -15,7 +15,9 @@ struct System {
     fonts: FontSystem,
     glyphs: SwashCache,
     /// Named families looked up already: whether the system has them.
-    known: HashMap<String, bool>,
+    /// Every installed family, lowercased: read once, so a widget naming
+    /// new families never grows anything or scans the font list again.
+    installed: HashSet<String>,
 }
 
 fn first_present(fonts: &FontSystem, candidates: &[&str]) -> Option<String> {
@@ -50,10 +52,19 @@ fn system() -> &'static Mutex<System> {
         if let Some(mono) = mono {
             db.set_monospace_family(mono);
         }
+        let installed = fonts
+            .db()
+            .faces()
+            .flat_map(|face| {
+                face.families
+                    .iter()
+                    .map(|(family, _)| family.to_lowercase())
+            })
+            .collect();
         Mutex::new(System {
             fonts,
             glyphs: SwashCache::new(),
-            known: HashMap::new(),
+            installed,
         })
     })
 }
@@ -104,16 +115,7 @@ fn resolve(system: &mut System, families: &str) -> FamilyName {
         if let Some(generic) = generic(name) {
             return generic;
         }
-        let key = name.to_ascii_lowercase();
-        let fonts = &system.fonts;
-        let present = *system.known.entry(key).or_insert_with(|| {
-            fonts.db().faces().any(|face| {
-                face.families
-                    .iter()
-                    .any(|(family, _)| family.eq_ignore_ascii_case(name))
-            })
-        });
-        if present {
+        if system.installed.contains(&name.to_lowercase()) {
             return FamilyName::Named(name.to_owned());
         }
     }

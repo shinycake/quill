@@ -81,9 +81,15 @@ impl Render for QuillApp {
         self.report_visible_sponsored(
             window.is_window_active() && !self.account.passcode.is_locked(),
         );
+        // A main window that drew no history (no chat open, a gated pane)
+        // shows none of its widgets.
+        if !self.slices.window.conversation_shown() {
+            self.widgets_left_window(None);
+        }
         let history_drawn = self.slices.window.history_drawn();
         self.players.inline_videos.set_scale(window.scale_factor());
         self.widgets.scale = window.scale_factor();
+        self.widgets_frame_start(None, cx);
         // Picture-in-Picture outlives neither its message, the account
         // nor an unlocked app.
         self.check_video_pip(cx);

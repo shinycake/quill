@@ -61,11 +61,19 @@ pub(super) struct WidgetEntry {
     pub unsaved: bool,
     /// The widget claims long presses of the current press (a context menu of its own).
     pub hold: bool,
-    pub pressed: bool,
+    /// The button of the press the widget took (0 primary, 2 secondary)
+    /// until its release.
+    pub pressed: Option<i32>,
     /// The mouse is over it (it was told so).
     pub hovered: bool,
     /// The selected text, read after a press.
     pub selection: String,
+    /// Queries with TDLib: Quill's token for each, to the token the
+    /// running runtime gave it. A new runtime starts empty, so a late
+    /// answer to the runtime before never reaches it.
+    pub queries: HashMap<u64, u64>,
+    /// The theme and bubble color the runtime has, to send only changes.
+    pub theme: Option<(String, [u8; 3])>,
 }
 
 impl WidgetEntry {
@@ -90,9 +98,11 @@ impl WidgetEntry {
             stored,
             unsaved: false,
             hold: false,
-            pressed: false,
+            pressed: None,
             hovered: false,
             selection: String::new(),
+            queries: HashMap::new(),
+            theme: None,
         }
     }
 }
@@ -125,4 +135,6 @@ pub(crate) struct WidgetsUi {
     pub(super) save_timer: Option<Task<()>>,
     /// The scale of the window drawn last: widgets start at it (0 before a frame).
     pub(super) scale: f32,
+    /// The last token Quill gave a widget query (`WidgetEntry::queries`).
+    pub(super) last_query: u64,
 }

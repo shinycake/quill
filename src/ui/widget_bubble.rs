@@ -8,7 +8,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
-use super::widget_runtime::{Input, clock_ms};
+use super::widget_runtime::Input;
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
@@ -56,16 +56,6 @@ impl QuillApp {
                 (_, false) => Look::Placeholder,
             },
         };
-        // An animating widget draws with the history's frame clock while it
-        // asks for frames, and only then.
-        if let Some(entry) = entry
-            && entry.wants_frames
-            && entry.visible
-            && let Some(runtime) = &entry.runtime
-        {
-            runtime.tick(clock_ms());
-            self.request_animation_tick(60, cx);
-        }
         let height = entry.map_or_else(
             || quill::message_widget::initial_height(content.height, None),
             |entry| entry.height,
@@ -149,12 +139,15 @@ impl QuillApp {
                 });
                 let up = app.clone();
                 window.on_mouse_event(move |event: &MouseUpEvent, phase, _, cx| {
-                    if phase != DispatchPhase::Bubble || event.button != MouseButton::Left {
+                    if phase != DispatchPhase::Bubble {
                         return;
                     }
                     let (x, y) = at(event.position);
                     let modifiers = modifier_bits(event.modifiers);
-                    let _ = up.update(cx, |this, _| this.widget_pointer_up(key, x, y, modifiers));
+                    let button = event.button;
+                    let _ = up.update(cx, |this, _| {
+                        this.widget_pointer_up(key, button, x, y, modifiers)
+                    });
                 });
             },
         )
@@ -185,9 +178,7 @@ impl QuillApp {
             MouseButton::Right if entry.hold => 2,
             _ => return false,
         };
-        if button == 0 {
-            entry.pressed = true;
-        }
+        entry.pressed = Some(button);
         runtime.input(Input::Pointer {
             action: 0,
             x,
@@ -205,13 +196,13 @@ impl QuillApp {
         let Some(runtime) = &entry.runtime else {
             return;
         };
-        if entry.pressed {
+        if let Some(button) = entry.pressed {
             runtime.input(Input::Pointer {
                 action: 1,
                 x,
                 y,
                 modifiers,
-                button: 0,
+                button,
             });
         } else if over {
             entry.hovered = true;
@@ -231,21 +222,38 @@ impl QuillApp {
         }
     }
 
-    fn widget_pointer_up(&mut self, key: WidgetKey, x: f64, y: f64, modifiers: i32) {
+    /// The release of the press the widget took, whichever button it was.
+    fn widget_pointer_up(
+        &mut self,
+        key: WidgetKey,
+        button: MouseButton,
+        x: f64,
+        y: f64,
+        modifiers: i32,
+    ) {
         let Some(entry) = self.widgets.entries.get_mut(&key) else {
             return;
         };
         let Some(runtime) = &entry.runtime else {
             return;
         };
-        if std::mem::take(&mut entry.pressed) {
-            runtime.input(Input::Pointer {
-                action: 2,
-                x,
-                y,
-                modifiers,
-                button: 0,
-            });
+        let released = match button {
+            MouseButton::Left => 0,
+            MouseButton::Right => 2,
+            _ => return,
+        };
+        if entry.pressed != Some(released) {
+            return;
+        }
+        entry.pressed = None;
+        runtime.input(Input::Pointer {
+            action: 2,
+            x,
+            y,
+            modifiers,
+            button: released,
+        });
+        if released == 0 {
             // What the press selected, for the message menu's copy.
             runtime.selection(false);
         }

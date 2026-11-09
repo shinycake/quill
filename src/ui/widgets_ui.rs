@@ -48,6 +48,8 @@ impl QuillApp {
     }
 
     fn widget_dir(&self) -> Option<std::path::PathBuf> {
+        // No account, no folder: never `widgets/default`.
+        self.session()?;
         let root = quill::settings::safe_app_root()?;
         Some(quill::account_data::widget_dir(
             &root,
@@ -64,8 +66,15 @@ impl QuillApp {
         passes.seen.insert(window, Default::default());
         passes.views.insert(window, view);
         if passes.queued.insert(window) {
-            // window-scope: the widgets are the screen's; each entry names its window.
-            self.defer_screen(cx, move |this, cx| this.reconcile_widgets(window, cx));
+            // The pass's window's state in place: its chat's theme colors
+            // the widgets it shows.
+            self.defer_screen(cx, move |this, cx| {
+                let ran =
+                    this.in_window_scope(window, cx, |this, cx| this.reconcile_widgets(window, cx));
+                if ran.is_none() {
+                    this.widgets.passes.borrow_mut().queued.remove(&window);
+                }
+            });
         }
     }
 
@@ -79,6 +88,72 @@ impl QuillApp {
             .entry(window)
             .or_default()
             .insert(key, width);
+    }
+
+    /// A frame of the window `window` (`None`: the main one) starts: its
+    /// animating widgets take one display frame each, and ask for the next.
+    /// Each widget ticks in the window it is drawn in, once a frame.
+    pub(super) fn widgets_frame_start(&self, window: Option<ChatId>, cx: &mut Context<Self>) {
+        let mut views = Vec::new();
+        for entry in self.widgets.entries.values() {
+            if entry.window != window || !entry.visible || !entry.wants_frames {
+                continue;
+            }
+            if let Some(runtime) = &entry.runtime {
+                runtime.tick(super::widget_runtime::clock_ms());
+                views.push(entry.view);
+            }
+        }
+        views.dedup();
+        for view in views {
+            self.request_animation_tick_for(view, 60, cx);
+        }
+    }
+
+    /// The widget message `key` was deleted: its entry, runtime, session
+    /// and stored data go.
+    fn forget_widget(&mut self, key: WidgetKey) {
+        self.widgets.entries.remove(&key);
+        self.widgets.session.remove(&key);
+        if let Some(dir) = self.widget_dir() {
+            storage::remove(&dir, key);
+        }
+    }
+
+    /// Off-screen widgets kept with their last frame (a few MB each), so
+    /// scrolling back shows them at once; older ones are dropped and start
+    /// over from their stored data when they come back.
+    const KEEP_HIDDEN: usize = 16;
+
+    /// Drops the hidden widgets past [`Self::KEEP_HIDDEN`], oldest first,
+    /// writing what they still had to keep.
+    fn prune_hidden_widgets(&mut self) {
+        let mut hidden: Vec<(u64, WidgetKey)> = self
+            .widgets
+            .entries
+            .iter()
+            .filter(|(_, entry)| !entry.visible)
+            .map(|(key, entry)| (entry.hidden_at, *key))
+            .collect();
+        let Some(excess) = hidden.len().checked_sub(Self::KEEP_HIDDEN) else {
+            return;
+        };
+        if excess == 0 {
+            return;
+        }
+        hidden.sort_unstable();
+        let dir = self.widget_dir();
+        for (_, key) in hidden.into_iter().take(excess) {
+            let Some(entry) = self.widgets.entries.remove(&key) else {
+                continue;
+            };
+            if entry.unsaved
+                && let Some(dir) = &dir
+                && let Err(err) = storage::save(dir, key, &entry.stored)
+            {
+                eprintln!("quill: could not save a widget's storage: {err}");
+            }
+        }
     }
 
     /// The widgets `keys` went off screen: they stop drawing and drop
@@ -97,12 +172,21 @@ impl QuillApp {
                 }
             }
         }
+        self.prune_hidden_widgets();
     }
 
-    /// The chat window of `chat_id` closed: its widgets are off screen now,
-    /// not at the next pass of some other window.
-    pub(super) fn widgets_window_closed(&mut self, chat_id: ChatId) {
-        let window = Some(chat_id);
+    /// The window `window` (`None`: the main one) closed or shows no
+    /// history: its widgets are off screen now, not at the next pass of
+    /// some other window.
+    pub(super) fn widgets_left_window(&mut self, window: Option<ChatId>) {
+        if !self
+            .widgets
+            .entries
+            .values()
+            .any(|entry| entry.window == window && entry.visible)
+        {
+            return;
+        }
         // Others' last passes: a widget one of them showed stays on, theirs.
         let shown_elsewhere = {
             let mut passes = self.widgets.passes.borrow_mut();
@@ -195,7 +279,11 @@ impl QuillApp {
                 if came_back {
                     runtime.set_visible(true);
                 }
-                runtime.set_theme(theme.0.clone(), theme.1);
+                // Each set re-sanitises the widget's CSS: only changes go.
+                if entry.theme.as_ref() != Some(&theme) {
+                    runtime.set_theme(theme.0.clone(), theme.1);
+                    entry.theme = Some(theme.clone());
+                }
             }
             if came_back
                 && has_id
@@ -347,6 +435,8 @@ impl QuillApp {
                 "chatType": if content.is_copy { "" } else { chat_type.unwrap_or("") },
             },
         });
+        entry.queries.clear();
+        entry.theme = Some((theme, background));
         entry.runtime = Some(Runtime::start(Launch {
             html: content.html,
             options: options.to_string(),
@@ -403,7 +493,18 @@ impl QuillApp {
                     event,
                     RuntimeEvent::Height(_) | RuntimeEvent::Stopped(_) | RuntimeEvent::Failed(_)
                 );
-                self.widget_event(key, event, cx);
+                // The widget's own window answers it: its link box, its
+                // chat's theme (`None` once that window has gone).
+                let window = self.widgets.entries.get(&key).and_then(|e| e.window);
+                let mut event = Some(event);
+                self.in_window_scope(window, cx, |this, cx| {
+                    if let Some(event) = event.take() {
+                        this.widget_event(key, event, cx);
+                    }
+                });
+                if let Some(event) = event {
+                    self.widget_event(key, event, cx);
+                }
             }
             if changed && let Some(entry) = self.widgets.entries.get(&key) {
                 views.push(entry.view);
@@ -479,24 +580,25 @@ impl QuillApp {
                 }
             }
             RuntimeEvent::Request { token, data } => {
+                self.widgets.last_query = self.widgets.last_query.wrapping_add(1);
+                let ours = self.widgets.last_query;
+                let Some(entry) = self.widgets.entries.get_mut(&key) else {
+                    return;
+                };
+                entry.queries.insert(ours, token);
                 let sent = self
                     .live
                     .as_mut()
                     .map(|live| {
                         live.driver
-                            .send_widget_query(key, token, data.as_bytes())
+                            .send_widget_query(key, ours, data.as_bytes())
                             .is_ok()
                     })
                     .unwrap_or(false);
-                if !sent
-                    && let Some(runtime) = self
-                        .widgets
-                        .entries
-                        .get(&key)
-                        .and_then(|e| e.runtime.as_ref())
-                {
-                    runtime.respond(
-                        token,
+                if !sent {
+                    self.answer_widget_query(
+                        key,
+                        ours,
                         Err(quill::message_widget::QueryFailure::Failed.code()),
                     );
                 }
@@ -557,22 +659,15 @@ impl QuillApp {
                     key,
                     token,
                     outcome,
-                } => {
-                    if let Some(runtime) = self
-                        .widgets
-                        .entries
-                        .get(&key)
-                        .and_then(|e| e.runtime.as_ref())
-                    {
-                        runtime.respond(
-                            token,
-                            match outcome {
-                                QueryOutcome::Answered(data) => Ok(data),
-                                QueryOutcome::Failed(failure) => Err(failure.code()),
-                            },
-                        );
-                    }
-                }
+                } => self.answer_widget_query(
+                    key,
+                    token,
+                    match outcome {
+                        QueryOutcome::Answered(data) => Ok(data),
+                        QueryOutcome::Failed(failure) => Err(failure.code()),
+                    },
+                ),
+                WidgetAnswer::Deleted { key } => self.forget_widget(key),
                 WidgetAnswer::PublicData { key, data } => {
                     let Some(entry) = self.widgets.entries.get_mut(&key) else {
                         continue;
@@ -592,6 +687,20 @@ impl QuillApp {
         }
         self.sync_widget_data();
         self.schedule_widget_polls(cx);
+    }
+
+    /// The answer to Quill's query `token`, for the runtime that asked:
+    /// dropped when that runtime is gone (a restart starts a new list).
+    fn answer_widget_query(&mut self, key: WidgetKey, token: u64, outcome: Result<String, i32>) {
+        let Some(entry) = self.widgets.entries.get_mut(&key) else {
+            return;
+        };
+        let Some(theirs) = entry.queries.remove(&token) else {
+            return;
+        };
+        if let Some(runtime) = &entry.runtime {
+            runtime.respond(theirs, outcome);
+        }
     }
 
     /// Polls what is due on screen and sets the timer for the next one.
@@ -665,6 +774,21 @@ impl QuillApp {
     }
 
     /// Writes the storage of every widget that changed.
+    /// `account` logged out and its widget folder went: what its widgets
+    /// still had to write goes nowhere (the account's goodbye would write it
+    /// back), and `sessionStorage` goes with them.
+    pub(super) fn forget_widget_storage(&mut self, account: &quill::ids::AccountKey) {
+        if self.web_app_account() != account.to_string() {
+            return;
+        }
+        for entry in self.widgets.entries.values_mut() {
+            entry.unsaved = false;
+            entry.stored = Default::default();
+        }
+        self.widgets.session.clear();
+        self.widgets.save_timer = None;
+    }
+
     pub(super) fn save_widget_storage(&mut self) {
         let Some(dir) = self.widget_dir() else { return };
         for (key, entry) in &mut self.widgets.entries {

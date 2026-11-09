@@ -487,7 +487,10 @@ qw_widget *qw_create(const char *html, size_t html_len, const char *options, siz
                                                          std::move(resources), factory, std::move(intl));
         // Quill draws "Widget stopped" itself (centred, as Telegram Desktop does); the renderer's own badge stays empty.
         w->host->stoppedLabel.clear();
-        wire(raw);
+        // The host thread already runs (the validator's and renderer's
+        // diagnostics post to it) and reads these callbacks there: set them
+        // on that thread, never next to a read.
+        w->host->onHostThread([raw] { wire(raw); });
         return w.release();
     } catch (const std::exception &e) {
         if (error) *error = dup_string(e.what());

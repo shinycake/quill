@@ -142,3 +142,13 @@ fn a_masked_take_changes_only_what_the_mask_covers() {
     assert_eq!(rgb(&target, 2, 15), (255, 0, 0));
     assert_eq!(rgb(&target, 30, 2), (255, 0, 0));
 }
+
+#[test]
+fn a_huge_blur_costs_no_more_than_the_widest_one() {
+    let mut huge = Pixmap::new(40, 40).unwrap();
+    huge.fill(tiny_skia::Color::from_rgba8(255, 0, 0, 255));
+    let mut widest = huge.clone();
+    effects::blur(&mut huge, 1.0e9);
+    effects::blur(&mut widest, effects::MAX_BLUR_SIGMA);
+    assert_eq!(huge.data(), widest.data());
+}
