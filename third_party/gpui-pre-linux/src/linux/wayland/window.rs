@@ -1,3 +1,5 @@
+// Modified by the Quill project (2026) from gpui-pre-linux 0.3.9 (Apache-2.0):
+// `capture_image` through `WgpuRenderer::capture_scene`. See third_party/gpui-pre-linux/QUILL-CHANGES.md.
 use std::{
     cell::{Cell, Ref, RefCell, RefMut},
     ffi::c_void,
@@ -33,7 +35,10 @@ use wayland_protocols_plasma::blur::client::org_kde_kwin_blur;
 use wayland_protocols_wlr::layer_shell::v1::client::zwlr_layer_surface_v1;
 
 use crate::linux::wayland::{display::WaylandDisplay, serial::SerialKind};
-use crate::linux::{Globals, Output, PendingActivation, WaylandClientStatePtr, get_window};
+use crate::linux::{
+    Globals, Output, PendingActivation, RecoveryTimers, TimerKind, WaylandClientStatePtr,
+    get_window,
+};
 use gpui::{
     AnyWindowHandle, Bounds, Capslock, Corners, Decorations, DevicePixels, ExternalDragPayload,
     FrameRequestSource, GpuSpecs, Modifiers, Pixels, PlatformAtlas, PlatformDisplay,
@@ -45,7 +50,7 @@ use gpui::{
     popup::PopupOptions,
     px, size,
 };
-use gpui_wgpu::{CompositorGpuHint, WgpuRenderer, WgpuSurfaceConfig, wgpu};
+use gpui_wgpu::{CompositorGpuHint, Recovery, WgpuRenderer, WgpuSurfaceConfig, wgpu};
 
 #[derive(Default)]
 pub(crate) struct Callbacks {
@@ -134,6 +139,8 @@ pub struct WaylandWindowState {
     active: bool,
     hovered: bool,
     redraw_requested: bool,
+    // Quill: the GPU recovery timers this window has armed.
+    recovery_timers: RecoveryTimers,
     presentation: PresentationState,
     pending_frame_callback: Option<wl_callback::WlCallback>,
     in_progress_configure: Option<InProgressConfigure>,
@@ -638,6 +645,7 @@ impl WaylandWindowState {
             active: false,
             hovered: false,
             redraw_requested: false,
+            recovery_timers: RecoveryTimers::default(),
             presentation: PresentationState::Unpresented,
             pending_frame_callback: None,
             in_progress_window_controls: None,
@@ -980,6 +988,13 @@ impl WaylandWindowStatePtr {
             return;
         }
 
+        // Quill: the GPU recovery timer wakes the window when an attempt is
+        // due; nothing is drawn before then.
+        if state.recovery_timers.retry_pending() {
+            self.frame_loop.set(FrameLoop::Parked);
+            return;
+        }
+
         if state.presentation.requires_presentation() {
             // Before the first present, or when throttling skipped draw, a
             // callback may never arrive. Otherwise let the compositor pace
@@ -1061,6 +1076,41 @@ impl WaylandWindowStatePtr {
             // A wake is already armed: a ping or retry timer is in flight, or a
             // presented buffer guarantees a compositor frame callback.
             _ => {}
+        }
+    }
+
+    /// Quill: look for the GPU while on the software renderer recovery fell
+    /// back to (`WgpuRenderer::probe_hardware`), and look again later.
+    pub fn probe_hardware(&self, armed_for: Instant) {
+        let mut guard = self.state.borrow_mut();
+        let state = &mut *guard;
+        if !state.recovery_timers.probe_fired(armed_for) {
+            return;
+        }
+        let Some(backend) = state.surface.backend().upgrade() else {
+            return;
+        };
+        let raw_window = RawWindow {
+            window: state.surface.id().as_ptr().cast::<std::ffi::c_void>(),
+            display: backend.display_ptr().cast::<std::ffi::c_void>(),
+        };
+        let Some(renderer) = state.renderer.as_mut() else {
+            return;
+        };
+        let next = renderer.probe_hardware(&raw_window);
+        let redraw = renderer.needs_redraw();
+        schedule_hardware_probe(state, next);
+        drop(guard);
+        if redraw {
+            self.request_redraw();
+        }
+    }
+
+    /// Quill: the GPU recovery attempt armed for `at` is due
+    /// (`run_for_window_at`).
+    pub fn recovery_retry_due(&self, at: Instant) {
+        if self.state.borrow_mut().recovery_timers.retry_fired(at) {
+            self.request_redraw();
         }
     }
 
@@ -2029,24 +2079,50 @@ impl PlatformWindow for WaylandWindow {
         };
 
         if renderer.device_lost() {
+            let Some(backend) = state.surface.backend().upgrade() else {
+                return;
+            };
             let raw_window = RawWindow {
                 window: state.surface.id().as_ptr().cast::<std::ffi::c_void>(),
-                display: state
-                    .surface
-                    .backend()
-                    .upgrade()
-                    .unwrap()
-                    .display_ptr()
-                    .cast::<std::ffi::c_void>(),
+                display: backend.display_ptr().cast::<std::ffi::c_void>(),
             };
+            // Each attempt asks for one frame (`recovery_retry_due`), not a
+            // frame every refresh until the next.
+            state.redraw_requested = false;
             match renderer.recover(&raw_window) {
-                Ok(()) => {}
-                Err(err) => {
-                    log::warn!("GPU recovery failed, will retry on next frame: {err}");
+                Recovery::Recovered => {
+                    state.recovery_timers.clear_retry();
+                    state.redraw_requested = true;
+                    let at = renderer.hardware_probe_at();
+                    schedule_hardware_probe(state, at);
+                }
+                Recovery::RetryAt(at) => {
+                    let surface_id = state.surface.id();
+                    if state.recovery_timers.arm_retry(at)
+                        && !state.client.run_for_window_at(&surface_id, at, move |window| {
+                            window.recovery_retry_due(at)
+                        })
+                    {
+                        // No timer: ask again from the next frame.
+                        state.recovery_timers.not_armed(TimerKind::Retry);
+                        state.redraw_requested = true;
+                    }
+                }
+                Recovery::GaveUp => state.recovery_timers.clear_retry(),
+                Recovery::CloseWindow => {
+                    let surface_id = state.surface.id();
+                    if state.recovery_timers.arm_close()
+                        && !state
+                            .client
+                            .run_for_window_at(&surface_id, Instant::now(), |window| {
+                                window.close()
+                            })
+                    {
+                        state.recovery_timers.not_armed(TimerKind::Close);
+                        state.redraw_requested = true;
+                    }
                 }
             }
-
-            state.redraw_requested = true;
             return;
         }
 
@@ -2067,6 +2143,26 @@ impl PlatformWindow for WaylandWindow {
         if renderer.needs_redraw() {
             state.redraw_requested = true;
         }
+        // Quill: a window that opened on, or adopted, a software fallback
+        // looks for the GPU too, in case the one that recreated it closes.
+        let probe_at = renderer.hardware_probe_at();
+        schedule_hardware_probe(state, probe_at);
+    }
+
+    // Quill: `Window::capture_frame`, offscreen with this window's renderer.
+    fn capture_image(&self, scene: &Scene) -> anyhow::Result<image::RgbaImage> {
+        let mut state = self
+            .0
+            .state
+            .try_borrow_mut()
+            .map_err(|_| anyhow::anyhow!("the window is busy"))?;
+        let renderer = state
+            .renderer
+            .as_mut()
+            .ok_or_else(|| anyhow::anyhow!("the window has no renderer"))?;
+        let (width, height, pixels) = renderer.capture_scene(scene)?;
+        image::RgbaImage::from_raw(width, height, pixels)
+            .ok_or_else(|| anyhow::anyhow!("the capture had the wrong size"))
     }
 
     fn schedule_frame(&self) {
@@ -2598,4 +2694,17 @@ fn inset_by_tiling(mut bounds: Bounds<Pixels>, inset: Pixels, tiling: Tiling) ->
     }
 
     bounds
+}
+
+/// Quill: arm the window's probe timer for `at` unless it already is.
+fn schedule_hardware_probe(state: &mut WaylandWindowState, at: Option<Instant>) {
+    if let Some(at) = at.filter(|&at| state.recovery_timers.arm_probe(Some(at))) {
+        let surface_id = state.surface.id();
+        if !state
+            .client
+            .run_for_window_at(&surface_id, at, move |window| window.probe_hardware(at))
+        {
+            state.recovery_timers.not_armed(TimerKind::Probe);
+        }
+    }
 }
