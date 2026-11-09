@@ -113,7 +113,8 @@ crate::ui::shell::register_dialogs! {
         1420,
         QuillApp::archive_mute_suggested,
         QuillApp::build_archive_mute_suggestion_dialog,
-    ),
+    )
+    .close(|app, _, cx| app.dismiss_archive_mute_suggestion(cx)),
 }
 
 crate::ui::screenshot_demo::register_demos![

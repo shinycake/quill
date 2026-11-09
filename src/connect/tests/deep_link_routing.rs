@@ -124,6 +124,36 @@ fn failed_links_use_tdesktop_wording() {
     std::fs::remove_dir_all(dir).unwrap();
 }
 
+/// Subscribe's link to the Premium bot fails to resolve (offline): its
+/// `/start` is dropped with it, so a later link to that bot sends nothing
+/// by itself.
+#[test]
+fn a_failed_premium_bot_link_drops_its_auto_start() {
+    let (dir, prepared) = prepared_tmp(&MemorySecretStore::new());
+    let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+    let recorder = Arc::new(RecordingSender::new());
+    let seq = AtomicU64::new(0);
+    let mut driver = ready_driver(&recorder, prepared, &sink, &seq);
+    driver.session.payments.hub.auto_start = Some(("premiumbot".into(), "ref".into()));
+    let extra = driver
+        .resolve_deep_link(DeepLinkAction::OpenUsername {
+            domain: "PremiumBot".into(),
+            start_param: Some("ref".into()),
+            post: None,
+            story_id: None,
+        })
+        .unwrap()
+        .unwrap();
+    feed(
+        &mut driver,
+        &seq,
+        &sink,
+        json!({"@type": "error", "@extra": extra.as_extra(), "code": 500, "message": "Network"}),
+    );
+    assert_eq!(driver.session.payments.hub.auto_start, None);
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
 #[test]
 fn a_web_link_tdlib_cannot_type_opens_in_the_browser() {
     let (dir, prepared) = prepared_tmp(&MemorySecretStore::new());

@@ -488,5 +488,6 @@ crate::ui::shell::register_dialogs! {
         2920,
         |app| app.session().is_some_and(|s| s.settings.language_link.is_some()),
         QuillApp::build_language_link_dialog,
-    ),
+    )
+    .close(|app, _, cx| app.close_language_box(cx)),
 }

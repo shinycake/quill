@@ -163,6 +163,18 @@ impl QuillApp {
         });
     }
 
+    /// The viewer of the window in place starts a clip now: drop what
+    /// this window parked and a parked voice note or song (the clip
+    /// stops those players). A clip parked in another window waits on
+    /// its own download.
+    pub(super) fn drop_play_intents_for_viewer_here(&mut self) {
+        let here = self.windows.scope;
+        self.playback.intent.take_if(|intent| {
+            matches!(intent.target.kind(), PlayKind::Voice | PlayKind::Audio)
+                || intent.target.window() == here
+        });
+    }
+
     /// Drop a target parked for `message` (its track stopped).
     pub(super) fn drop_play_intent_for_message(&mut self, message: MessageId) {
         self.playback

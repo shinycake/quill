@@ -439,6 +439,26 @@ impl<S: JsonSender> ConnectDriver<S> {
     }
 }
 
+impl<S: JsonSender> ConnectDriver<S> {
+    /// Taking another call while an invitation rings ends the invitation,
+    /// declined, as tdesktop's `hangup` of its invite call does
+    /// (`declineIncomingConferenceInvites`). `keep` is the invitation
+    /// being accepted, which stays until its join goes out.
+    pub(crate) fn decline_ringing_invite(&mut self, keep: Option<(i64, i64)>) {
+        let Some(invite) = self.session.calls.conference_invite.as_ref() else {
+            return;
+        };
+        let (chat_id, message_id) = (invite.chat_id.0, invite.message_id.0);
+        if keep == Some((chat_id, message_id)) {
+            return;
+        }
+        // A send fails only while the client closes; it stops ringing
+        // either way.
+        self.session.calls.conference_invite = None;
+        let _ = self.decline_group_call_invitation(chat_id, message_id);
+    }
+}
+
 /// Why a self-mute change did not fully go through.
 #[derive(Debug)]
 pub enum SelfMuteError {

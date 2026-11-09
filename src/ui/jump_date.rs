@@ -264,5 +264,11 @@ crate::ui::shell::register_dialogs! {
         7100,
         |app| app.session().is_some_and(|s| s.search.history_calendar.is_some()),
         QuillApp::build_jump_date_dialog,
-    ),
+    )
+    .close(|app, _, cx| app.close_jump_date_ui(cx)),
 }
+
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+#[path = "jump_date_tests.rs"]
+mod tests;

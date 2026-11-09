@@ -248,10 +248,10 @@ fn your_level_comes_from_the_call_microphone() {
     let (dir, mut driver, _engine, _mics) = group_driver();
     driver.session.calls.active_group_call = Some(joined_group_call(false));
     pump_until_mic_answers(&mut driver);
-    driver.pump_call_audio().unwrap();
+    driver.pump_call_audio(std::time::Instant::now()).unwrap();
     assert!(driver.call_audio.is_open());
     driver.call_capture().level().record(1.3);
-    driver.pump_call_audio().unwrap();
+    driver.pump_call_audio(std::time::Instant::now()).unwrap();
     assert_eq!(driver.group_call_self_level(), (1.3, true));
     std::fs::remove_dir_all(dir).ok();
 }
@@ -407,7 +407,11 @@ fn a_lost_microphone_needs_no_telegram_update() {
     assert_eq!(mics.opened.lock().unwrap().len(), 2);
     assert!(driver.call_capture().target().is_some());
     assert_eq!(driver.call_capture().error, None);
-    assert_eq!(driver.next_deadline(t0, 0), None);
+    assert_eq!(
+        driver.next_deadline(t2, 0),
+        Some(Duration::from_millis(92)),
+        "no reopen is due; only your level's next read"
+    );
     std::fs::remove_dir_all(dir).ok();
 }
 

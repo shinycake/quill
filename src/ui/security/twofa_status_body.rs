@@ -50,7 +50,8 @@ impl QuillApp {
                 .session()
                 .is_some_and(|s| s.settings.privacy_data.check_password_suggested)
         {
-            body = body.child(self.password_check_card(cx));
+            let field = self.twofa.status_check_password.clone();
+            body = body.child(self.password_check_card(&field, cx));
         }
         body = body.child(
             div()
@@ -440,6 +441,10 @@ impl QuillApp {
         }
         self.privacy.websites_open = true;
         self.privacy.websites_confirm = None;
+        // The last open's failure line goes: a cached list skips the fetch.
+        if let Some(session) = self.session_mut() {
+            session.settings.websites_error = None;
+        }
         if let Some(live) = self.live.as_mut() {
             let _ = live.driver.maybe_fetch_connected_websites();
         }

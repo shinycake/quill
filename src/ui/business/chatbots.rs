@@ -112,27 +112,15 @@ impl QuillApp {
         }
     }
 
-    /// Wait for `getBusinessConnectedBot` while the screen is open.
+    /// Wait for `getBusinessConnectedBot` until it answers or the screen
+    /// goes: a cap would leave "Loading…" up after a late answer.
     pub(super) fn business_bot_watch(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.spawn_screen_in(window, cx, async move |this, cx| {
-            for _ in 0..50 {
+            loop {
                 cx.background_executor()
                     .timer(Duration::from_millis(200))
                     .await;
-                let Ok(done) = this.update(cx, |this, cx| {
-                    let Some(mut draft) = this.business_mut().and_then(|d| d.chatbot.take()) else {
-                        return true;
-                    };
-                    if !draft.loaded {
-                        this.fill_chatbot_draft(&mut draft);
-                    }
-                    let done = draft.loaded;
-                    if let Some(d) = this.business_mut() {
-                        d.chatbot = Some(draft);
-                    }
-                    cx.notify();
-                    done
-                }) else {
+                let Ok(done) = this.update(cx, |this, cx| this.business_bot_pump(cx)) else {
                     break;
                 };
                 if done {
@@ -141,6 +129,27 @@ impl QuillApp {
             }
         })
         .detach();
+    }
+
+    /// Take the connected bot into the open Chatbots screen. `true` when
+    /// nothing is left to wait for: the screen is gone, the bot arrived,
+    /// or the request failed (its error line shows).
+    pub(super) fn business_bot_pump(&mut self, cx: &mut Context<Self>) -> bool {
+        let Some(mut draft) = self.business_mut().and_then(|d| d.chatbot.take()) else {
+            return true;
+        };
+        if !draft.loaded {
+            self.fill_chatbot_draft(&mut draft);
+        }
+        let failed = self
+            .session()
+            .is_none_or(|s| !s.settings.business_extra.connected_bot_requested);
+        let done = draft.loaded || failed;
+        if let Some(d) = self.business_mut() {
+            d.chatbot = Some(draft);
+        }
+        cx.notify();
+        done
     }
 
     fn business_bot_usable(&self, user_id: i64) -> bool {

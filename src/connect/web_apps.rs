@@ -5,7 +5,7 @@
 use super::*;
 use crate::composer::SendOptions;
 use crate::ids::{ChatId, RequestId};
-use crate::state::{BotsPurpose, RequestPurpose, WebAppPending};
+use crate::state::{BotsPurpose, RequestPurpose, WebAppOpenResult, WebAppPending};
 use crate::telegram::requests::{
     ContactShare, allow_bot_to_send_messages, can_bot_send_messages, close_web_app,
     get_attachment_menu_bot, get_grossing_web_app_bots, get_main_web_app, get_web_app_link_url,
@@ -180,6 +180,28 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.session.bots.web_apps.found = None;
         let json = search_web_app(extra, bot_user_id, short_name);
         self.send_json_request(extra, &json)
+    }
+
+    /// The account leaves the screen: its launches still waiting for an
+    /// answer are dropped, and an answer not yet shown is closed, so
+    /// nothing opens later behind an unrelated action.
+    pub fn forget_web_app_launches(&mut self) {
+        let apps = &mut self.session.bots.web_apps;
+        apps.pending.clear();
+        if let Some(WebAppOpenResult::Opened { launch_id, .. }) = apps.open_result.take() {
+            apps.dropped_launches.push(launch_id);
+        }
+        self.close_dropped_web_apps();
+    }
+
+    /// `closeWebApp` for the launches whose open call was dropped.
+    pub(crate) fn close_dropped_web_apps(&mut self) {
+        if self.session.bots.web_apps.dropped_launches.is_empty() {
+            return;
+        }
+        for launch_id in std::mem::take(&mut self.session.bots.web_apps.dropped_launches) {
+            let _ = self.close_web_app(launch_id);
+        }
     }
 
     /// `closeWebApp` once the window is gone (`launch_id` from

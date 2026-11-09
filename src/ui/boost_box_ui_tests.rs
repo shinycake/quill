@@ -161,3 +161,22 @@ fn closing_clears_the_box_without_a_connection(cx: &mut TestAppContext) {
         assert_ne!(shell.open_dialog, Some(DialogKind::BoostBox));
     });
 }
+
+/// The window-close path runs the spec's close: the box's state clears.
+#[gpui_kit::test]
+fn the_dialog_close_clears_the_open_box(cx: &mut TestAppContext) {
+    let (app, shell, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    open_box(&app, vcx);
+    vcx.run_until_parked();
+    shell.read_with(vcx, |shell, _| {
+        assert_eq!(shell.open_dialog, Some(DialogKind::BoostBox));
+    });
+    app.update_in(vcx, |app, _, cx| app.close_boost_box_state(cx));
+    vcx.run_until_parked();
+    let open = app.read_with(vcx, |app, _| {
+        app.session().is_some_and(|s| s.groups.boost_box.is_some())
+    });
+    assert!(!open);
+    shell.read_with(vcx, |shell, _| assert_eq!(shell.open_dialog, None));
+}

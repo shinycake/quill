@@ -141,5 +141,6 @@ crate::ui::shell::register_dialogs! {
         6151,
         |app| app.sharing_request_box_chat().is_some(),
         QuillApp::build_sharing_request_dialog,
-    ),
+    )
+    .close(|app, _, cx| app.close_sharing_request_box(cx)),
 }

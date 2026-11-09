@@ -31,19 +31,10 @@ impl QuillApp {
         // Revenue and affiliate pages: the amount field, the setup
         // sliders, program photos and pages, profile balances.
         self.earn_frame_upkeep(window, cx);
-        // Gift market: an auction whose state arrived, the followed
-        // auction, toasts and sticker downloads.
-        self.gift_market_frame_upkeep(window, cx);
         // "Stream with...": the server error of a failed request.
         self.rtmp_start_frame_upkeep(window, cx);
         // Starting a video chat: the "join as" list, a refused create.
         self.group_call_create_frame_upkeep(window, cx);
-        // Gift transfer: Fragment's export page, the transferred toast.
-        // main-only: a box of the main window.
-        self.gift_transfer_frame_upkeep(window, cx);
-        // Grams: Fragment's withdrawal page, the password field.
-        // main-only: a box of the main window.
-        self.grams_withdraw_frame_upkeep(window, cx);
         // Slice P1 fix-up: the checkout dialog opens on Buy press before
         // the form arrives — prefill the saved order info once, on the
         // first frame after the form answer lands. (This can't live in

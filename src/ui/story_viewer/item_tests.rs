@@ -126,6 +126,7 @@ fn a_finished_page_op_goes_with_the_story(cx: &mut TestAppContext) {
         Some(StoryPageOp {
             label: "Saving".into(),
             state,
+            request: None,
         })
     };
     app.update(&mut vcx, |app, cx| {
@@ -153,5 +154,59 @@ fn a_finished_page_op_goes_with_the_story(cx: &mut TestAppContext) {
             .as_deref()
             .map(|s| s.stories.page_op.is_some());
         assert_eq!(kept, Some(false), "a failed op's line was about this story");
+    });
+}
+
+/// A story edit, or a Hide, answered after its story was left never shows
+/// under the next story, and does not hold the next story's buttons.
+#[gpui_kit::test]
+fn a_late_story_answer_stays_with_its_story(cx: &mut TestAppContext) {
+    let (app, mut vcx) = open_app(cx, "ready-story-viewer");
+    let request = quill::ids::RequestId(900);
+    app.update(&mut vcx, |app, cx| {
+        app.stories
+            .with_viewer_ui(|open| open.page_op = Some(request));
+        if let Some(session) = app.demo_session.as_deref_mut() {
+            let manage = &mut session.stories.manage;
+            manage.pending = true;
+            manage.story = Some((LEO.0, 3));
+            manage.request = Some(request);
+            session.stories.page_op = Some(StoryPageOp {
+                label: "hiding stories".into(),
+                state: StoryPageOpState::Sending,
+                request: Some(request),
+            });
+        }
+        assert!(app.story_manage_status().is_some(), "Saving… under story 3");
+        assert!(app.viewer_story_page_op().is_some());
+        app.step_story_viewer(1, cx);
+    });
+    frames(&mut vcx);
+    app.update(&mut vcx, |app, _| {
+        let Some((chat_id, story_id)) = app.stories.viewer.current().map(|item| item.key()) else {
+            panic!("the viewer moved on");
+        };
+        assert_ne!(chat_id, LEO);
+        let busy = app
+            .session()
+            .is_some_and(|s| s.stories.manage.pending_for(chat_id.0, story_id));
+        assert!(
+            !busy,
+            "the next story's Edit, Cover and Privacy stay enabled"
+        );
+        // Both answers land now, as errors.
+        if let Some(session) = app.demo_session.as_deref_mut() {
+            let manage = &mut session.stories.manage;
+            manage.pending = false;
+            manage.request = None;
+            manage.error = Some("Story update failed: STORY_ID_INVALID".into());
+            session.stories.page_op = Some(StoryPageOp {
+                label: "hiding stories".into(),
+                state: StoryPageOpState::Failed("PEER_ID_INVALID".into()),
+                request: Some(request),
+            });
+        }
+        assert_eq!(app.story_manage_status(), None);
+        assert!(app.viewer_story_page_op().is_none());
     });
 }

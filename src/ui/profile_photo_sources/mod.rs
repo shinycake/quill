@@ -259,6 +259,31 @@ impl QuillApp {
         cx.notify();
     }
 
+    /// The passcode lock turns off every camera panel (the profile's, a
+    /// group's Edit box, New Group): the stream goes, and with it the
+    /// helper process and the camera light. A start on its way is
+    /// dropped when it lands (`serial`).
+    pub(in crate::ui) fn close_cameras_for_lock(&mut self, cx: &mut Context<Self>) {
+        fn close(sources: &mut PhotoSources) {
+            if sources.mode == SourceMode::Camera {
+                sources.mode = SourceMode::Closed;
+                sources.camera = CameraDraft::default();
+                sources.busy = false;
+                sources.serial = sources.serial.wrapping_add(1);
+            }
+        }
+        if let Some(edit) = self.group_edit_box_mut() {
+            close(&mut edit.sources);
+        }
+        if let Some(dialog) = self.new_chat_dialog_mut() {
+            close(&mut dialog.sources);
+        }
+        if let Some(dialog) = self.dialogs.edit_profile_dialog.as_mut() {
+            close(&mut dialog.sources);
+        }
+        cx.notify();
+    }
+
     fn close_photo_source(&mut self, cx: &mut Context<Self>) {
         if let Some(sources) = self.sources_mut() {
             sources.mode = SourceMode::Closed;

@@ -137,7 +137,8 @@ crate::ui::shell::register_dialogs! {
         3900,
         |app| app.session().is_some_and(|s| s.payments.hub.gifts_open),
         QuillApp::build_gifts_dialog,
-    ),
+    )
+    .close(|app, _, cx| app.close_gifts(cx)),
 
     /// Read-only Premium features explainer.
     PremiumFeatures => DialogSpec::new(

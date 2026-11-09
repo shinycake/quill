@@ -161,10 +161,12 @@ impl QuillApp {
     }
 
     /// Poll for the id and the messages of a shortcut the server is about to
-    /// report (the updates arrive on the poll, not as an answer).
+    /// report (the updates arrive on the poll, not as an answer), until both
+    /// are in or the shortcut's screen goes. A cap left a late id unset, so
+    /// the shortcut's messages never listed.
     pub(super) fn quick_replies_watch(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.spawn_screen_in(window, cx, async move |this, cx| {
-            for _ in 0..40 {
+            loop {
                 cx.background_executor()
                     .timer(Duration::from_millis(200))
                     .await;

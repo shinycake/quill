@@ -14,7 +14,7 @@ use crate::ui::user_error::user_error_for;
 use gpui_kit::component::button::*;
 use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::dialog::Dialog;
-use gpui_kit::component::input::{Input, InputContentType, Textarea, TextareaState};
+use gpui_kit::component::input::{Input, InputContentType, InputState, Textarea, TextareaState};
 use gpui_kit::component::switch::Switch;
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
@@ -769,7 +769,13 @@ impl QuillApp {
     /// The password check card (tdesktop's "Your password" suggestion):
     /// a password field, "Check" and "Dismiss". A right password shows
     /// the finish step; "Done" tells the server to stop suggesting it.
-    pub(crate) fn password_check_card(&self, cx: &mut Context<Self>) -> AnyElement {
+    /// `field` is the card's own password field: the Privacy page and the
+    /// 2FA box each pass theirs, so no field is drawn twice in a frame.
+    pub(crate) fn password_check_card(
+        &self,
+        field: &Entity<InputState>,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let check = self
             .session()
             .map(|s| s.settings.privacy_data.password_check)
@@ -823,7 +829,7 @@ impl QuillApp {
                     .child(tr(keys::Q_PREFS_YOUR_ACCOUNT_IS_PROTECTED_BY)),
             )
             .child(
-                Input::new(&self.twofa.check_password)
+                Input::new(field)
                     .aria_label(tr(keys::Q_PREFS_YOUR_TWO_STEP_VERIFICATION_PASSWORD))
                     .content_type(InputContentType::Password)
                     .h(px(40.)),
@@ -865,9 +871,12 @@ impl QuillApp {
                         .label(tr(keys::Q_PREFS_CHECK))
                         .primary()
                         .disabled(check == PasswordCheck::Checking)
-                        .on_click(cx.listener(|this, _, window, cx| {
-                            this.submit_password_check(window, cx);
-                        })),
+                        .on_click({
+                            let field = field.clone();
+                            cx.listener(move |this, _, window, cx| {
+                                this.submit_password_check(&field, window, cx);
+                            })
+                        }),
                 ),
         )
         .into_any_element()
@@ -875,11 +884,14 @@ impl QuillApp {
 
     /// Send the typed password to be verified; the field is cleared and
     /// the string zeroized right away.
-    fn submit_password_check(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let mut password = self.twofa.check_password.read(cx).value().to_string();
-        self.twofa
-            .check_password
-            .update(cx, |input, cx| input.set_value("", window, cx));
+    fn submit_password_check(
+        &mut self,
+        field: &Entity<InputState>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let mut password = field.read(cx).value().to_string();
+        field.update(cx, |input, cx| input.set_value("", window, cx));
         if password.is_empty() {
             return;
         }
@@ -1189,13 +1201,21 @@ mod dispatch_tests {
                 window,
                 cx,
             );
-            set(&app.twofa.check_password.clone(), "checked", window, cx);
-            app.submit_password_check(window, cx);
+            set(
+                &app.twofa.status_check_password.clone(),
+                "in the box's card",
+                window,
+                cx,
+            );
+            let page = app.twofa.check_password.clone();
+            set(&page, "checked", window, cx);
+            app.submit_password_check(&page, window, cx);
             let read = |input: &Entity<gpui_kit::component::input::InputState>| {
                 input.read(cx).value().to_string()
             };
             assert_eq!(read(&app.twofa.check_password), "", "the check cleared");
             assert_eq!(read(&app.twofa.current_password), "in the box");
+            assert_eq!(read(&app.twofa.status_check_password), "in the box's card");
         });
     }
 }

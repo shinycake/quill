@@ -49,6 +49,9 @@ pub(crate) struct StoryViewerUi {
     pub(super) pause: quill::story_extras::StoryUserPause,
     pub(super) close_friends_edit: Option<quill::story_extras::CloseFriendsEdit>,
     pub(super) close_friends_saving: bool,
+    /// The story-page call sent from here (Hide, the profile toggle, the
+    /// close-friends list): only its status line shows under the story.
+    pub(super) page_op: Option<quill::ids::RequestId>,
     pub(super) share_open: bool,
     pub(super) notice: Option<String>,
     /// The ⋯ menu is open: the story holds still under it, and its entries
@@ -166,9 +169,13 @@ impl StoryUi {
             return;
         };
         if self.viewer.is_open() {
+            // The close-friends editor is about the list, not the story,
+            // so it stays, and with it the call that loads or saves it.
+            let close_friends = open.close_friends_edit.is_some();
             self.open = Some(StoryViewerUi {
                 close_friends_edit: open.close_friends_edit,
                 close_friends_saving: open.close_friends_saving,
+                page_op: open.page_op.filter(|_| close_friends),
                 ..StoryViewerUi::default()
             });
         }

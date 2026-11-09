@@ -124,7 +124,7 @@ impl QuillApp {
     /// window, and before the account is signed in.
     pub(super) fn shortcut_blocked(&self, window: &mut Window, cx: &mut Context<Self>) -> bool {
         self.pane_mode() != PaneMode::Ready
-            || self.account.passcode.locked
+            || self.account.passcode.is_locked()
             || self.viewer.state.is_open()
             || self.stories.viewer.is_open()
             || window.has_active_dialog(cx)

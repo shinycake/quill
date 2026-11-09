@@ -52,6 +52,14 @@ fn queued_by_agent(agent_link: &mut Option<String>, link: &str) -> bool {
     agent_link.take().is_some_and(|queued| queued == link)
 }
 
+/// The chat window `link`, taken from `QuillApp::pending_deep_link`, was
+/// clicked in. Taken once; a link queued anywhere else has none.
+fn queued_in_window(window_link: &mut Option<(String, ChatId)>, link: &str) -> Option<ChatId> {
+    window_link
+        .take()
+        .and_then(|(queued, window)| (queued == link).then_some(window))
+}
+
 impl QuillApp {
     /// Driver-facing half of the deep-link flow, run from `poll_live`.
     /// Fires `getDeepLinkInfo` once auth is Ready, then turns each
@@ -88,6 +96,8 @@ impl QuillApp {
             && let Some(link) = self.pending_deep_link.take()
         {
             let from_agent = queued_by_agent(&mut self.screen.links.agent_pending_link, &link);
+            self.screen.links.flow_window =
+                queued_in_window(&mut self.screen.links.window_pending_link, &link);
             let _ = live.driver.request_deep_link_info_from(&link, from_agent);
         }
         // Consume terminal states once, retaining the invite preview until a decision.
@@ -97,11 +107,18 @@ impl QuillApp {
         // after an error or a closed box) leaves none behind.
         let from_agent = std::mem::take(&mut live.driver.session.chats_state.deep_link_from_agent)
             && state.is_some();
+        let from_window = self
+            .screen
+            .links
+            .flow_window
+            .take()
+            .filter(|_| state.is_some());
         if !deep_link_step_redraws(state.as_ref(), self.screen.links.deep_link_invite.as_ref()) {
             // Nothing new (this runs on every poll): put the state back and
             // don't redraw.
             live.driver.session.chats_state.deep_link = state;
             live.driver.session.chats_state.deep_link_from_agent = from_agent;
+            self.screen.links.flow_window = from_window;
             return;
         }
         match state {
@@ -110,6 +127,7 @@ impl QuillApp {
             | Some(DeepLinkState::ResolvingChat { .. }) => {
                 live.driver.session.chats_state.deep_link = state;
                 live.driver.session.chats_state.deep_link_from_agent = from_agent;
+                self.screen.links.flow_window = from_window;
             }
             Some(DeepLinkState::Info {
                 text,
@@ -125,6 +143,7 @@ impl QuillApp {
                     }
                     (false, Some(action)) => {
                         live.driver.session.chats_state.deep_link_from_agent = from_agent;
+                        self.screen.links.flow_window = from_window;
                         let _ = live.driver.continue_deep_link(action);
                     }
                     // Unknown link: TDLib's info text is the confirmation
@@ -140,6 +159,12 @@ impl QuillApp {
                 live.driver.session.chats_state.deep_link = Some(preview);
             }
             Some(DeepLinkState::ChatReady { chat_id, action }) => {
+                // Clicked in a chat window, for a chat with no window of
+                // its own: the main window opens it, so it comes forward
+                // now. Its next frame opens the chat, even from minimized.
+                if from_window.is_some() && !self.screen.windows.has_window(chat_id) {
+                    self.raise_main_window_later(cx);
+                }
                 self.links.pending_deep_link_open = Some(PendingOpen {
                     chat_id,
                     action,
@@ -163,6 +188,7 @@ impl QuillApp {
             // TDLib has no type for it: `getDeepLinkInfo` explains it.
             Some(DeepLinkState::Unknown { link }) => {
                 live.driver.session.chats_state.deep_link_from_agent = from_agent;
+                self.screen.links.flow_window = from_window;
                 let _ = live.driver.request_deep_link_text(&link);
             }
         }
@@ -192,8 +218,22 @@ impl QuillApp {
     /// (`ChatsState::deep_link_from_agent`).
     pub(super) fn queue_deep_link(&mut self, link: String) {
         self.links.agent_pending_link = guard::injecting().then(|| link.clone());
+        self.links.window_pending_link = self.windows.scope.map(|window| (link.clone(), window));
         self.pending_deep_link = Some(link);
         quill::wake::UPDATES.poke();
+    }
+
+    /// Bring the main window forward at the end of this update, restoring
+    /// it when minimized or hidden, so its next frame runs.
+    fn raise_main_window_later(&self, cx: &mut Context<Self>) {
+        let Some(main) = self.main_window.handle else {
+            return;
+        };
+        cx.defer(move |cx| {
+            let _ = main.update(cx, |_, window, cx| {
+                super::link_inbox::raise_main_window(window, cx);
+            });
+        });
     }
 
     /// Render-time half: open the resolved chat (has the `Window` for
@@ -563,6 +603,25 @@ mod pump_tests {
         let mut agent = Some("https://t.me/agentpick".to_string());
         assert!(!queued_by_agent(&mut agent, "https://t.me/userpick"));
         assert_eq!(agent, None);
+    }
+
+    /// A link clicked in a chat window keeps that window as its origin
+    /// only while it is the link being resolved: the main window comes
+    /// forward for it, not for a later link queued from elsewhere.
+    #[test]
+    fn a_queued_link_keeps_the_chat_window_it_was_clicked_in() {
+        use quill::ids::ChatId;
+        let mut origin = Some(("https://t.me/pick".to_string(), ChatId(12)));
+        assert_eq!(
+            super::queued_in_window(&mut origin, "https://t.me/pick"),
+            Some(ChatId(12))
+        );
+        assert_eq!(origin, None, "taken once");
+        let mut origin = Some(("https://t.me/pick".to_string(), ChatId(12)));
+        assert_eq!(
+            super::queued_in_window(&mut origin, "https://t.me/os"),
+            None
+        );
     }
 
     #[test]

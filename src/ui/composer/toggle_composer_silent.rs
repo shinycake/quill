@@ -36,6 +36,18 @@ impl QuillApp {
         }
     }
 
+    /// `messageSendOptions` for a send that is not the composer's message
+    /// (a shared story, a contact, a die, a location): `chat_id`'s own
+    /// "send silently" state, and none of the composer's one-shot choices
+    /// (schedule, effect, silent-once, link preview), which stay with the
+    /// composer's next message.
+    pub(in crate::ui) fn send_options_to(&self, chat_id: ChatId) -> SendOptions {
+        SendOptions {
+            disable_notification: self.chat_sends_silent(chat_id),
+            ..SendOptions::default()
+        }
+    }
+
     /// M1: apply a formatting action to the composer selection. The field
     /// shows formatting (codex:composer-input), so the selection gets the
     /// format, or loses it when it has it already; with nothing selected the

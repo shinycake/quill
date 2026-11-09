@@ -43,7 +43,7 @@ fn the_microphone_opens_on_a_worker_and_the_pump_picks_it_up() {
     });
     driver.session.calls.active_group_call = Some(joined_unmuted_call(4242));
 
-    driver.pump_call_audio().unwrap();
+    driver.pump_call_audio(std::time::Instant::now()).unwrap();
     assert!(!driver.call_audio.is_open(), "the pump does not wait");
     assert_ne!(
         on_thread.recv().unwrap(),
@@ -55,7 +55,7 @@ fn the_microphone_opens_on_a_worker_and_the_pump_picks_it_up() {
     let (worker, opening) = std::sync::mpsc::channel();
     worker.send(answer).unwrap();
     driver.call_audio.opening = Some(opening);
-    driver.pump_call_audio().unwrap();
+    driver.pump_call_audio(std::time::Instant::now()).unwrap();
     assert!(driver.call_audio.is_open(), "the pump took the source");
     let _ = std::fs::remove_dir_all(dir);
 }
@@ -75,15 +75,15 @@ fn a_tap_opened_after_the_call_stopped_wanting_it_is_dropped() {
         }
     });
     driver.session.calls.active_group_call = Some(joined_unmuted_call(4242));
-    driver.pump_call_audio().unwrap();
+    driver.pump_call_audio(std::time::Instant::now()).unwrap();
 
     driver.session.calls.active_group_call = None;
-    driver.pump_call_audio().unwrap();
+    driver.pump_call_audio(std::time::Instant::now()).unwrap();
     release.send(()).unwrap();
     was_answered.recv().unwrap();
 
     driver.session.calls.active_group_call = Some(joined_unmuted_call(4242));
-    driver.pump_call_audio().unwrap();
+    driver.pump_call_audio(std::time::Instant::now()).unwrap();
     assert_eq!(driver.call_audio.error, None, "nobody waits for that open");
     let _ = std::fs::remove_dir_all(dir);
 }
@@ -123,25 +123,25 @@ fn speaking_is_sent_to_tdlib_and_withdrawn_on_mute() {
         .inject(Box::new(SharedLevel(level.clone())));
 
     // No call: nothing opens, nothing is sent.
-    driver.pump_call_audio().unwrap();
+    driver.pump_call_audio(std::time::Instant::now()).unwrap();
     assert!(!driver.call_audio.is_open());
     assert!(sent().is_empty());
 
     // Joined and unmuted: the tap opens; a quiet window sends nothing.
     driver.session.calls.active_group_call = Some(joined_unmuted_call(4242));
     *level.0.lock().unwrap() = Some(0.05);
-    driver.pump_call_audio().unwrap();
+    driver.pump_call_audio(std::time::Instant::now()).unwrap();
     assert!(driver.call_audio.is_open());
     assert!(sent().is_empty());
     assert_eq!(driver.group_call_self_level(), (0.05, false));
 
     // A pump without a completed window changes nothing.
-    driver.pump_call_audio().unwrap();
+    driver.pump_call_audio(std::time::Instant::now()).unwrap();
     assert_eq!(driver.group_call_self_level(), (0.05, false));
 
     // Voice: speaking, sent once with your audio source.
     *level.0.lock().unwrap() = Some(1.3);
-    driver.pump_call_audio().unwrap();
+    driver.pump_call_audio(std::time::Instant::now()).unwrap();
     assert_eq!(driver.group_call_self_level(), (1.3, true));
     let requests = sent();
     assert_eq!(requests.len(), 1);
@@ -157,7 +157,7 @@ fn speaking_is_sent_to_tdlib_and_withdrawn_on_mute() {
         .as_mut()
         .unwrap()
         .is_muted_self = true;
-    driver.pump_call_audio().unwrap();
+    driver.pump_call_audio(std::time::Instant::now()).unwrap();
     assert!(!driver.call_audio.is_open());
     assert_eq!(driver.group_call_self_level(), (0.0, false));
     let requests = sent();
@@ -166,7 +166,7 @@ fn speaking_is_sent_to_tdlib_and_withdrawn_on_mute() {
 
     // Muted: a loud window is never read.
     *level.0.lock().unwrap() = Some(2.0);
-    driver.pump_call_audio().unwrap();
+    driver.pump_call_audio(std::time::Instant::now()).unwrap();
     assert_eq!(sent().len(), 2);
     std::fs::remove_dir_all(dir).ok();
 }
@@ -177,7 +177,7 @@ fn an_unknown_audio_source_sends_nothing() {
     let level = Arc::new(TestLevel(Mutex::new(Some(1.5))));
     driver.call_audio.inject(Box::new(SharedLevel(level)));
     driver.session.calls.active_group_call = Some(joined_unmuted_call(0));
-    driver.pump_call_audio().unwrap();
+    driver.pump_call_audio(std::time::Instant::now()).unwrap();
     assert_eq!(
         driver.group_call_self_level(),
         (1.5, true),
@@ -207,12 +207,11 @@ impl LevelSource for SharedLevel {
 }
 
 /// The peer's microphone on/off (the engine's remote audio state)
-/// lands on the tracked 1:1 call through the driver pump, and only on
-/// that call.
+/// lands on the tracked 1:1 call at the next poll, with no Telegram
+/// update, and only on that call.
 #[test]
 fn peer_microphone_state_follows_the_engine_hook() {
-    let (dir, mut driver, handle, sink, seq) = ready_call_driver();
-    let pump = r#"{"@type":"updateAuthorizationState","authorization_state":{"@type":"authorizationStateReady"}}"#;
+    let (dir, mut driver, handle, _sink, _seq) = ready_call_driver();
     let muted = |driver: &ConnectDriver<Arc<RecordingSender>>| {
         driver
             .session
@@ -224,15 +223,90 @@ fn peer_microphone_state_follows_the_engine_hook() {
     };
     assert!(!muted(&driver));
     handle.emit_remote_audio_muted(77, true);
-    ingest_call_json(&mut driver, &seq, &sink, pump);
+    driver.request_tick(std::time::Instant::now());
     assert!(muted(&driver));
     // Another call's state is dropped.
     handle.emit_remote_audio_muted(78, false);
-    ingest_call_json(&mut driver, &seq, &sink, pump);
+    driver.request_tick(std::time::Instant::now());
     assert!(muted(&driver));
     handle.emit_remote_audio_muted(77, false);
-    ingest_call_json(&mut driver, &seq, &sink, pump);
+    driver.request_tick(std::time::Instant::now());
     assert!(!muted(&driver));
+    std::fs::remove_dir_all(dir).ok();
+}
+
+/// Your level and speaking state follow the microphone on polls alone:
+/// no Telegram update arrives in this test. The poll loop wakes one level
+/// window after each read, a loud window marks you speaking and tells
+/// TDLib, and with no voice after that the mark and the halo run out
+/// after tdesktop's 1.5 s and TDLib hears you stopped.
+#[test]
+fn your_level_and_speaking_move_on_polls_without_updates() {
+    use std::time::{Duration, Instant};
+    let (dir, recorder, mut driver, _seq) = group_call_test_driver();
+    let speaking_sent = || {
+        recorder
+            .snapshot()
+            .iter()
+            .map(|s| serde_json::from_str::<Value>(s).unwrap())
+            .filter(|v| v["@type"] == "setGroupCallParticipantIsSpeaking")
+            .map(|v| v["is_speaking"].as_bool().unwrap())
+            .collect::<Vec<_>>()
+    };
+    let level = Arc::new(TestLevel(Mutex::new(None)));
+    driver
+        .call_audio
+        .inject(Box::new(SharedLevel(level.clone())));
+    driver.session.calls.active_group_call = Some(joined_unmuted_call(4242));
+    let t0 = Instant::now();
+    let at = |ms: u64| t0 + Duration::from_millis(ms);
+
+    // A quiet window: the halo follows it, nobody is told anything.
+    *level.0.lock().unwrap() = Some(0.1);
+    assert!(!driver.request_tick(at(0)), "not speaking yet");
+    assert_eq!(driver.group_call_self_level(), (0.1, false));
+    assert_eq!(
+        driver.next_deadline(at(0), 0),
+        Some(Duration::from_millis(92)),
+        "the poll loop wakes for the next level window"
+    );
+
+    // Voice: speaking, shown and sent at once.
+    *level.0.lock().unwrap() = Some(1.3);
+    assert!(driver.request_tick(at(92)), "your row starts speaking");
+    assert_eq!(driver.group_call_self_level(), (1.3, true));
+    assert_eq!(speaking_sent(), vec![true]);
+
+    // Still talking: the level moves and the state is sent again after
+    // 500 ms, as tdesktop refreshes its speaking action.
+    *level.0.lock().unwrap() = Some(1.1);
+    assert!(!driver.request_tick(at(600)));
+    assert_eq!(driver.group_call_self_level(), (1.1, true));
+    assert_eq!(speaking_sent(), vec![true, true]);
+
+    // Silence (no window completes, as when the capture stops): still
+    // speaking inside the kept-for time.
+    assert!(!driver.request_tick(at(1500)));
+    assert_eq!(driver.group_call_self_level(), (1.1, true));
+
+    // Past 1.5 s since the last voice: the mark and the halo go, and
+    // TDLib hears you stopped.
+    assert!(driver.request_tick(at(2200)), "your row stops speaking");
+    assert_eq!(driver.group_call_self_level(), (0.0, false));
+    assert_eq!(speaking_sent(), vec![true, true, false]);
+    assert!(!driver.request_tick(at(2300)));
+    assert_eq!(speaking_sent(), vec![true, true, false], "sent once");
+
+    // Muted: the tap closes and the poll loop no longer wakes for it.
+    driver
+        .session
+        .calls
+        .active_group_call
+        .as_mut()
+        .unwrap()
+        .is_muted_self = true;
+    driver.request_tick(at(2400));
+    assert!(driver.call_audio_deadline(at(2400)).is_none());
     std::fs::remove_dir_all(dir).ok();
 }
 

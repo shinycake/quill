@@ -249,6 +249,16 @@ pub enum WithdrawStep {
 pub struct Withdraw {
     pub target: WithdrawTarget,
     pub step: WithdrawStep,
+    /// The URL request this withdrawal waits for. An answer to another
+    /// one (sent before a Cancel) neither opens Fragment nor touches this
+    /// attempt.
+    pub request: Option<crate::ids::RequestId>,
+}
+
+impl Withdraw {
+    pub fn waits_for(&self, request: Option<crate::ids::RequestId>) -> bool {
+        request.is_some() && self.request == request
+    }
 }
 
 /// The bot setup page (tdesktop `BotStarRef::Setup`).

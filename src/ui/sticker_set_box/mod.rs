@@ -66,8 +66,14 @@ impl Render for StickerCellDrag {
 }
 
 impl QuillApp {
-    /// "View Sticker Set" / "Add Stickers": the set in a dialog.
+    /// "View Sticker Set" / "Add Stickers": the set in a dialog. The
+    /// session holds one viewed set and one editing state, so a box open
+    /// in another window closes rather than switch to this set under its
+    /// edit.
     pub(in crate::ui) fn view_message_sticker_set(&mut self, set_id: i64, cx: &mut Context<Self>) {
+        self.in_every_window(cx, |app, _| {
+            app.message_ui.menu_ui.sticker_set_open = false;
+        });
         self.sticker_box.reset();
         self.message_ui.menu_ui.sticker_set_open = true;
         if let Some(live) = self.live.as_mut()
@@ -91,9 +97,9 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut() {
             let result = live.driver.manage_sticker_set(set_id, install, false);
             if result.is_ok() {
-                // The dialog stays; the set's state follows TDLib's update.
-                live.driver.session.stickers.sticker_set_view = None;
-                self.message_ui.menu_ui.sticker_set_open = false;
+                // The box closes in every window that shows the set, and
+                // its pending pick goes with it.
+                self.close_sticker_set_dialog(cx);
                 self.connection.set_note(if install {
                     StatusNote::silent(tr(keys::Q_MEDIA_STICKER_SET_ADDED))
                 } else {
@@ -153,8 +159,7 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut() {
             match live.driver.manage_sticker_set(set_id, false, true) {
                 Ok(_) => {
-                    live.driver.session.stickers.sticker_set_view = None;
-                    self.message_ui.menu_ui.sticker_set_open = false;
+                    self.close_sticker_set_dialog(cx);
                     self.connection.set_note(StatusNote::info(ARCHIVED_NOTE));
                     self.close_kit_dialog_if_done(DialogKind::StickerSet, window, cx);
                 }

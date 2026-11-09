@@ -247,8 +247,7 @@ impl Session {
                 | RequestPurpose::Calls(CallsPurpose::InviteGroupCallParticipant { .. })
                 | RequestPurpose::Calls(CallsPurpose::InviteVideoChatParticipants { .. })
                 | RequestPurpose::Calls(CallsPurpose::BanGroupCallParticipants { .. })
-                | RequestPurpose::Calls(CallsPurpose::SetGroupCallParticipantVolumeLevel { .. })
-                | RequestPurpose::Calls(CallsPurpose::DeclineGroupCallInvitation { .. }),
+                | RequestPurpose::Calls(CallsPurpose::SetGroupCallParticipantVolumeLevel { .. }),
             ) => {
                 self.calls.group_call_error =
                     Some(call_request_error_line(err, "Voice chat request failed"));
@@ -270,6 +269,10 @@ impl Session {
                         Some(call_request_error_line(err, "Couldn't get the invite link"));
                 }
             }
+            // A declined invitation has left the screen, and a decline sent
+            // because you were busy is not about the voice chat you are
+            // in: nothing shows (tdesktop sends it with no fail handler).
+            Some(RequestPurpose::Calls(CallsPurpose::DeclineGroupCallInvitation { .. })) => {}
             // The "join as" list is optional: a failure just leaves the
             // picker out and the join goes ahead as yourself.
             Some(RequestPurpose::Calls(CallsPurpose::GetVideoChatAvailableParticipants {

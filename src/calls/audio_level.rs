@@ -100,6 +100,8 @@ pub struct SpeakingTracker {
     last_sound_ms: Option<u64>,
     last_voice_ms: Option<u64>,
     last_sent: Option<(u64, bool)>,
+    /// When the latest level window was applied.
+    last_level_ms: Option<u64>,
     /// The latest level, for the UI.
     level: f32,
 }
@@ -110,6 +112,7 @@ impl SpeakingTracker {
     pub fn update(&mut self, level: f32, muted: bool, now_ms: u64) -> SpeakingUpdate {
         let level = if muted { 0.0 } else { level };
         self.level = level;
+        self.last_level_ms = Some(now_ms);
         if level > SPEAK_LEVEL_THRESHOLD {
             self.last_sound_ms = Some(now_ms);
             if level >= VOICE_LEVEL {
@@ -123,6 +126,28 @@ impl SpeakingTracker {
             Some(_) => None,
             None if speaking => Some(true),
             None => None,
+        };
+        if let Some(value) = send {
+            self.last_sent = Some((now_ms, value));
+        }
+        SpeakingUpdate { speaking, send }
+    }
+
+    /// No level window arrived by `now_ms`: let sounding and speaking run
+    /// out as tdesktop's kept-for timer does. The level drops to 0 once
+    /// no window has come for the kept-for time. Sends only a change to
+    /// not speaking; the 500 ms refresh follows measured sound.
+    pub fn idle(&mut self, now_ms: u64) -> SpeakingUpdate {
+        if self
+            .last_level_ms
+            .is_none_or(|at| at.saturating_add(SOUND_STATUS_KEPT_MS) < now_ms)
+        {
+            self.level = 0.0;
+        }
+        let speaking = self.is_speaking(now_ms);
+        let send = match self.last_sent {
+            Some((_, true)) if !speaking => Some(false),
+            _ => None,
         };
         if let Some(value) = send {
             self.last_sent = Some((now_ms, value));

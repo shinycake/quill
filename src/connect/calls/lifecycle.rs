@@ -46,6 +46,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session.requests.take(extra);
             return Err(err);
         }
+        self.decline_ringing_invite(None);
         Ok(extra)
     }
 

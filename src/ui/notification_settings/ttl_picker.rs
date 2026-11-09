@@ -29,7 +29,7 @@ impl QuillApp {
         self.set_step_slider(StepSlider::AutoDelete, start, cx);
         // One of a chat's setting dialogs at a time.
         self.close_mute_menu(cx);
-        self.folders.menu_open = false;
+        self.folders.menu_chat = None;
         self.notify.ttl_picker = Some(chat_id);
         cx.notify();
     }

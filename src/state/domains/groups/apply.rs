@@ -600,6 +600,14 @@ impl Session {
             }
             GroupsPayload::FailedToAddMembers { failed_count } => {
                 if let Some(chat_id) = pending.and_then(|p| p.chat_id) {
+                    // The add stands in for `updateChatMember`, which
+                    // TDLib sends to bots only.
+                    if matches!(
+                        pending.map(|p| p.purpose),
+                        Some(RequestPurpose::AddChatMembers | RequestPurpose::AddChatMember)
+                    ) {
+                        self.groups.members_added(chat_id.0);
+                    }
                     match pending.map(|p| p.purpose) {
                         // Slice G1: the bulk `addChatMembers` answer is a
                         // single response — it replaces the count.

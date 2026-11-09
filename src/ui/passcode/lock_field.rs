@@ -33,6 +33,10 @@ enum FieldTask {
 
 pub(crate) struct LockField {
     pub(crate) input: Entity<InputState>,
+    /// The window's lock screen as one focus scope: while locked the
+    /// focus stays inside it, so a box or a field opened under the lock
+    /// (and not drawn) cannot take the keys typed for the passcode.
+    pub(crate) screen: FocusHandle,
     task: FieldTask,
 }
 
@@ -59,6 +63,7 @@ impl LockField {
         .detach();
         Self {
             input,
+            screen: cx.focus_handle(),
             task: if locked {
                 FieldTask::Reset
             } else {
@@ -89,6 +94,14 @@ impl LockField {
     /// only a clear runs: the field is not on screen to take the focus.
     pub(crate) fn frame(&mut self, locked: bool, window: &mut Window, cx: &mut App) {
         let task = std::mem::take(&mut self.task);
+        // Focus that left the lock screen (to something opened under it,
+        // which is not drawn) comes back to the field.
+        let task = if locked && task == FieldTask::None && !self.screen.contains_focused(window, cx)
+        {
+            FieldTask::Focus
+        } else {
+            task
+        };
         if task == FieldTask::None || (!locked && task != FieldTask::Clear) {
             return;
         }

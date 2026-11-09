@@ -269,9 +269,14 @@ impl Session {
         let earn = &mut self.payments.earn;
         match earn_purpose(pending) {
             Some(EarnPurpose::WithdrawalUrl { .. }) => {
-                earn.withdraw = None;
-                if !url.is_empty() {
-                    earn.open_url = Some(url);
+                // An answer to an attempt the user cancelled (or one
+                // before this attempt) opens nothing.
+                let id = pending.map(|p| p.id);
+                if earn.withdraw.as_ref().is_some_and(|w| w.waits_for(id)) {
+                    earn.withdraw = None;
+                    if !url.is_empty() {
+                        earn.open_url = Some(url);
+                    }
                 }
                 true
             }
@@ -414,7 +419,12 @@ impl Session {
     }
 
     /// A failed revenue or affiliate request.
-    pub(crate) fn apply_earn_error(&mut self, err: &TdError, purpose: EarnPurpose) {
+    pub(crate) fn apply_earn_error(
+        &mut self,
+        err: &TdError,
+        purpose: EarnPurpose,
+        request: Option<RequestId>,
+    ) {
         let reason = error_reason(err);
         let earn = &mut self.payments.earn;
         match purpose {
@@ -463,7 +473,9 @@ impl Session {
             | EarnPurpose::StarBalance { .. }
             | EarnPurpose::AdAccountUrl { .. } => {}
             EarnPurpose::WithdrawalUrl { with_password } => {
-                Self::apply_withdrawal_error(earn, err, with_password, &reason);
+                if earn.withdraw.as_ref().is_some_and(|w| w.waits_for(request)) {
+                    Self::apply_withdrawal_error(earn, err, with_password, &reason);
+                }
             }
             EarnPurpose::SetProgram { .. } => {
                 if let Some(setup) = earn.setup.as_mut() {

@@ -74,14 +74,21 @@ impl PrivacyExceptionKind {
 impl QuillApp {
     /// Settings → Privacy, with nothing open over it, freshly fetched.
     pub(crate) fn open_privacy(&mut self, cx: &mut Context<Self>) {
+        self.close_privacy_layers();
+        self.open_settings(Some(quill::settings_catalog::Page::Privacy));
+        self.fetch_privacy();
+        cx.notify();
+    }
+
+    /// Close what the Privacy page opens over itself: the rule editor, its
+    /// exceptions list and their pickers, and the Unblock confirmation.
+    /// They belong to the page, so leaving it (or Settings) closes them.
+    pub(crate) fn close_privacy_layers(&mut self) {
         self.privacy.editor = None;
         self.privacy.exceptions = None;
         self.privacy.exception_picker_open = false;
         self.privacy.block_picker_open = false;
         self.privacy.unblock_confirm = None;
-        self.open_settings(Some(quill::settings_catalog::Page::Privacy));
-        self.fetch_privacy();
-        cx.notify();
     }
 
     /// Live: all privacy rules, the read-date setting, the first blocked

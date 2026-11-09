@@ -439,10 +439,12 @@ impl Session {
                 filter,
                 ..
             })) => {
+                // A failed page of the list shown can be asked for again.
                 if let Some(pending) = pending
                     && let Some(chat_id) = pending.chat_id
+                    && self.groups.take_member_more((chat_id.0, filter), pending)
                 {
-                    self.groups.take_member_more((chat_id.0, filter), pending);
+                    self.groups.member_more_failed.insert((chat_id.0, filter));
                 }
             }
             Some(RequestPurpose::Groups(GroupsPurpose::GetSupergroupMembers { filter })) => {

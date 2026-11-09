@@ -310,9 +310,10 @@ impl QuillApp {
         let Some(cover) = self.stories.viewer_ui().cover.as_ref() else {
             return div().into_any_element();
         };
-        // Review fix-up: shared `story_manage.pending` slot — no second
-        // op while one is in flight.
-        let manage_busy = self.session().is_some_and(|s| s.stories.manage.pending);
+        // No second call for this story while one is in flight.
+        let manage_busy = self
+            .session()
+            .is_some_and(|s| s.stories.manage.pending_for(cover.chat_id, cover.story_id));
         let chrome_text = || chrome::secondary();
         let ready = cover.duration_ms.is_some();
         let fraction = cover
@@ -504,8 +505,11 @@ impl QuillApp {
         // — management calls need live TDLib.
         if self.live.is_none() {
             if let Some(demo) = self.demo_session.as_mut() {
-                demo.stories.manage.error =
-                    Some(tr(keys::Q_MEDIA_DEMO_EDITING_RUNS_WITH_LIVE).into());
+                demo.stories.manage.fail_locally(
+                    chat_id,
+                    story_id,
+                    tr(keys::Q_MEDIA_DEMO_EDITING_RUNS_WITH_LIVE).into(),
+                );
             }
             cx.notify();
             return;
@@ -521,8 +525,11 @@ impl QuillApp {
                     }
                 }
                 Err(_) => {
-                    live.driver.session.stories.manage.error =
-                        Some(tr(keys::Q_MEDIA_COULD_NOT_SEND_THE_COVER).into());
+                    live.driver.session.stories.manage.fail_locally(
+                        chat_id,
+                        story_id,
+                        tr(keys::Q_MEDIA_COULD_NOT_SEND_THE_COVER).into(),
+                    );
                 }
             }
         }

@@ -81,3 +81,40 @@ fn a_switch_closes_the_boxes_whose_flag_is_the_sessions(cx: &mut TestAppContext)
         assert!(session.payments.hub.collectible.is_none(), "Collectible");
     });
 }
+
+/// The earn layer's flag is the session's info column, its back stack and
+/// covered column the screen's: a switch closes it, so it does not return
+/// without them.
+#[gpui_kit::test]
+fn a_switch_closes_the_earn_layer(cx: &mut TestAppContext) {
+    use quill::earn::{EarnPanel, EarnPeer, EarnScreen};
+    use quill::state::InfoPanelTarget;
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    frames(vcx);
+    app.update_in(vcx, |app, window, cx| {
+        // Opened from Settings (My Stars), with no chat whose leave would
+        // take the column.
+        if let Some(session) = app.demo_session.as_mut() {
+            session.open_chat = None;
+        }
+        let panel = EarnPanel::Revenue {
+            peer: EarnPeer::User(11),
+            screen: EarnScreen::Stars,
+        };
+        app.open_earn(panel, window, cx);
+        assert!(app.earn_layer_open());
+    });
+    app.update_in(vcx, |app, window, cx| {
+        app.switch_account(&AccountKey("other".into()), "", window, cx);
+    });
+    frames(vcx);
+    app.read_with(vcx, |app, _| {
+        // The layer is not what the session shows on switch-back.
+        let open = app
+            .session()
+            .and_then(|session| session.users_state.open_info_panel);
+        assert!(!matches!(open, Some(InfoPanelTarget::Earn(_))));
+        assert!(!app.earn_layer_open());
+    });
+}

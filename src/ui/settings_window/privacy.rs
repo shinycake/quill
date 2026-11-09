@@ -16,7 +16,10 @@ impl QuillApp {
         let password_check = self
             .session()
             .is_some_and(|s| s.settings.privacy_data.check_password_suggested)
-            .then(|| self.password_check_card(cx));
+            .then(|| {
+                let field = self.twofa.check_password.clone();
+                self.password_check_card(&field, cx)
+            });
         let passkeys = self.passkeys_settings_row(cx);
         let passcode = self.nav_row(Nav::Passcode, tr(keys::SETTINGS_PASSCODE_TITLE), None, cx);
         let two_step = self.nav_row(

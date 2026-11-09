@@ -175,16 +175,21 @@ impl QuillApp {
                 ..
             } => (true, tr(keys::Q_PEOPLE_SELECT_A_MEMBER_FIRST).to_string()),
             AdminDialogKind::EditRights { user_id, rights } => {
-                let Some(rights) = rights else {
-                    let failed = self.session().is_some_and(|session| {
-                        matches!(
-                            session
-                                .groups
-                                .admin_rights
-                                .get(&(dialog.chat_id.0, *user_id)),
-                            Some(AdminRightsFetch::Failed(_))
-                        )
-                    });
+                let fetch = self.session().and_then(|session| {
+                    session
+                        .groups
+                        .admin_rights
+                        .get(&(dialog.chat_id.0, *user_id))
+                        .cloned()
+                });
+                // Untouched checkboxes save the rights the lookup brought
+                // in after the editor opened, as the panel draws them.
+                let fetched = match &fetch {
+                    Some(AdminRightsFetch::Loaded(rights)) => Some(*rights),
+                    _ => None,
+                };
+                let Some(rights) = (*rights).or(fetched) else {
+                    let failed = matches!(fetch, Some(AdminRightsFetch::Failed(_)));
                     self.admin.admin_dialog = Some(dialog);
                     self.connection.set_note(StatusNote::silent(tr(if failed {
                         keys::Q_PEOPLE_COULD_NOT_LOAD_ADMIN_RIGHTS
@@ -198,7 +203,7 @@ impl QuillApp {
                     Some(live) => {
                         match live
                             .driver
-                            .edit_admin_rights(dialog.chat_id, *user_id, rights)
+                            .edit_admin_rights(dialog.chat_id, *user_id, &rights)
                         {
                             Ok(_) => (false, tr(keys::Q_PEOPLE_ADMIN_RIGHTS_UPDATED).to_string()),
                             Err(_) => (
@@ -674,6 +679,9 @@ crate::ui::shell::register_dialogs! {
 mod add_special;
 mod permissions_box;
 mod promote_dialog_panel;
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+mod rights_editor_tests;
 mod stops_slider;
 #[cfg(test)]
 #[cfg(feature = "demo-capture")]

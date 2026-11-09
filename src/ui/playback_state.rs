@@ -77,7 +77,9 @@ pub(crate) struct PlaybackUi {
     /// History row whose `image/gif` file is looping (`inline_playback`),
     /// with the window and chat it plays in.
     pub(super) playing_animation: Option<PlayingGif>,
-    pub(super) autoplayed_gifs: std::collections::HashSet<MessageId>,
+    /// GIFs that autoplayed once, by chat: leaving a chat resets only
+    /// its own, so another window's GIF does not start over.
+    pub(super) autoplayed_gifs: std::collections::HashSet<ChatMessage>,
     /// The playing GIF's held pictures (`gif_clip`), once decoded. Shared
     /// with the history row (and its animation layer) that draws it.
     pub(super) gif: Option<std::sync::Arc<super::gif_clip::GifClip>>,

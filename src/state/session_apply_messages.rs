@@ -168,7 +168,7 @@ impl Session {
                             list.push(id);
                         }
                     }
-                    self.clear_story_page_op(RequestPurpose::GetStoryAlbumStories);
+                    self.clear_story_page_op(pending);
                 }
             }
             Some(RequestPurpose::GetChatArchivedStories) => {
@@ -184,7 +184,7 @@ impl Session {
                     }
                     entry.total_count = total_count;
                     entry.next_from_story_id = entry.story_ids.iter().copied().min();
-                    self.clear_story_page_op(RequestPurpose::GetChatArchivedStories);
+                    self.clear_story_page_op(pending);
                 }
             }
             Some(RequestPurpose::GetChatPostedToChatPageStories) => {
@@ -201,7 +201,7 @@ impl Session {
                     if !pinned_story_ids.is_empty() {
                         entry.pinned_story_ids = pinned_story_ids;
                     }
-                    self.clear_story_page_op(RequestPurpose::GetChatPostedToChatPageStories);
+                    self.clear_story_page_op(pending);
                     // The shared-media gallery's Stories tab lists the same
                     // chat-page stories.
                     self.apply_profile_stories(chat_id, total_count);

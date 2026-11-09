@@ -32,7 +32,7 @@ impl QuillApp {
         let preview = std::env::var_os("QUILL_DEBUG_NOTIFICATION_PHOTO")
             .map(PathBuf::from)
             .filter(|path| path.is_file());
-        let locked = self.account.passcode.locked;
+        let locked = self.account.passcode.is_locked();
         let notification = quill::notify::OsNotification {
             chat_id: ChatId(0),
             message_id: Some(quill::ids::MessageId(1)),

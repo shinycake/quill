@@ -152,8 +152,9 @@ impl QuillApp {
             None => StatusNote::info(tr(keys::Q_PEOPLE_ADDING_MEMBERS_NEEDS_A_LIVE)),
         };
         self.connection.set_note(note);
-        // `updateChatMember` drops the cached member list and marks the
-        // chat stale; `poll_live` refetches the open dialog's page.
+        // TDLib sends `updateChatMember` to bots only: the add's own answer
+        // (`failedToAddMembers`) drops the cached pages and marks the chat
+        // stale, and `poll_live` refetches the open dialog's page then.
         self.refresh_member_dialog(cx);
     }
 

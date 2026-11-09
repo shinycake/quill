@@ -288,7 +288,7 @@ impl QuillApp {
 /// The window's root: the panel alone, or for a live stream the picture
 /// under the panel as two cached views, so a new frame redraws only the
 /// picture and the panel's chrome replays.
-struct GroupCallRoot {
+pub(in crate::ui) struct GroupCallRoot {
     owner: WeakEntity<QuillApp>,
     _observe: Subscription,
     panel: Entity<GroupCallPanel>,
@@ -436,6 +436,10 @@ impl Render for GroupCallPanel {
                 };
                 let key = event.keystroke.key.clone();
                 let exits = quill::calls::tile_pin::exits_fullscreen(&key);
+                if exits && owner.update(cx, |app, cx| app.group_call_window_escape(cx)) {
+                    cx.stop_propagation();
+                    return;
+                }
                 if owner.read(cx).group_call_is_stream() {
                     // Esc closes an open box first; then the live keys
                     // (Esc leaves full screen or the maximized window,

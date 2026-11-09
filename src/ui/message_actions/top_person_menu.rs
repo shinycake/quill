@@ -52,7 +52,7 @@ impl QuillApp {
                 cx.notify();
             }),
         )
-        .layer(|layer| layer.track_focus(&self.frame.context_menu_focus))
+        .layer(|layer| layer.track_focus(&self.frame.menu.focus))
         .anchored(
             position,
             div()
@@ -61,7 +61,7 @@ impl QuillApp {
                 .a11y_tag(quill::agent::ui_driver::redact::chat_tag(chat_id.0))
                 .child(panel),
         )
-        .focus_trap("chat-menu-focus", &self.frame.context_menu_focus)
+        .focus_trap("chat-menu-focus", &self.frame.menu.focus)
     }
 
     pub(in crate::ui) fn top_person_menu_overlay(
@@ -90,7 +90,7 @@ impl QuillApp {
                     false,
                     hover,
                     row_key(5),
-                    &self.frame.context_menu_items,
+                    &self.frame.menu.items,
                     cx,
                 )
                 .on_hover(cx.listener(|this, hovered, _, cx| {
@@ -116,7 +116,7 @@ impl QuillApp {
                 false,
                 hover,
                 row_key(10),
-                &self.frame.context_menu_items,
+                &self.frame.menu.items,
                 cx,
             )
             .on_hover(cx.listener(|this, hovered, _, cx| {
@@ -141,7 +141,7 @@ impl QuillApp {
                 false,
                 hover,
                 row_key(50),
-                &self.frame.context_menu_items,
+                &self.frame.menu.items,
                 cx,
             )
             .on_hover(cx.listener(|this, hovered, _, cx| {
@@ -169,7 +169,7 @@ impl QuillApp {
                 true,
                 hover,
                 row_key(60),
-                &self.frame.context_menu_items,
+                &self.frame.menu.items,
                 cx,
             )
             .on_hover(cx.listener(|this, hovered, _, cx| {
@@ -190,7 +190,7 @@ impl QuillApp {
                 true,
                 hover,
                 row_key(70),
-                &self.frame.context_menu_items,
+                &self.frame.menu.items,
                 cx,
             )
             .on_hover(cx.listener(|this, hovered, _, cx| {

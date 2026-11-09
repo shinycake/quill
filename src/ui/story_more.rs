@@ -306,6 +306,7 @@ impl QuillApp {
             live.driver
                 .set_chat_active_stories_list(item.chat_id, archive)
         });
+        self.note_story_page_op(sent.as_ref());
         self.set_story_notice(match sent {
             Some(Ok(_)) if archive => tr(keys::Q_MEDIA_HIDING_STORIES).into(),
             Some(Ok(_)) => tr(keys::Q_MEDIA_SHOWING_STORIES).into(),
@@ -328,6 +329,7 @@ impl QuillApp {
             live.driver
                 .toggle_story_is_posted_to_chat_page(item.chat_id, item.story_id, !posted)
         });
+        self.note_story_page_op(sent.as_ref());
         self.set_story_notice(match sent {
             Some(Ok(_)) if posted => tr(keys::Q_MEDIA_REMOVING_FROM_PROFILE).into(),
             Some(Ok(_)) => tr(keys::Q_MEDIA_POSTING_TO_PROFILE).into(),
@@ -430,7 +432,7 @@ impl QuillApp {
         let Some(item) = self.stories.viewer.current().cloned() else {
             return;
         };
-        let options = self.composer_send_options();
+        let options = self.send_options_to(dest);
         let sent = self.live.as_mut().map(|live| {
             live.driver
                 .share_story_to_chat(dest, item.chat_id, item.story_id, &options)
@@ -452,9 +454,13 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if let Some(live) = self.live.as_mut() {
-            let _ = live.driver.get_close_friends();
+        let loading = self.live.as_mut().and_then(|live| {
             let _ = live.driver.fetch_contacts();
+            live.driver.get_close_friends().ok().flatten()
+        });
+        if let Some(request) = loading {
+            self.stories
+                .with_viewer_ui(|open| open.page_op = Some(request));
         }
         let current = self
             .session()
@@ -496,9 +502,10 @@ impl QuillApp {
         let ids = edit.ids();
         match self.live.as_mut() {
             Some(live) => match live.driver.set_close_friends(&ids) {
-                Ok(_) => self
-                    .stories
-                    .with_viewer_ui(|open| open.close_friends_saving = true),
+                Ok(request) => self.stories.with_viewer_ui(|open| {
+                    open.close_friends_saving = true;
+                    open.page_op = Some(request);
+                }),
                 Err(_) => {
                     self.set_story_notice(tr(keys::Q_MEDIA_COULD_NOT_SAVE_CLOSE_FRIENDS).into())
                 }
@@ -510,13 +517,37 @@ impl QuillApp {
         cx.notify();
     }
 
+    /// A story-page call went out from the viewer: its status line is the
+    /// one shown under the story.
+    fn note_story_page_op(
+        &mut self,
+        sent: Option<&Result<quill::ids::RequestId, quill::connect::ConnectSendError>>,
+    ) {
+        if let Some(Ok(request)) = sent {
+            let request = *request;
+            self.stories
+                .with_viewer_ui(|open| open.page_op = Some(request));
+        }
+    }
+
+    /// The story-page op the viewer sent for what it shows; any other
+    /// (the story page's own, or one sent for a story left behind) stays
+    /// off the viewer.
+    pub(super) fn viewer_story_page_op(&self) -> Option<quill::story_page::StoryPageOp> {
+        let request = self.stories.viewer_ui().page_op?;
+        self.session()?
+            .stories
+            .page_op
+            .clone()
+            .filter(|op| op.request == Some(request))
+    }
+
     /// Per-tick upkeep of the editor: adopt the loaded list while the user
     /// has not touched it, close after a confirmed save.
     pub(super) fn tick_close_friends(&mut self, cx: &mut Context<Self>) {
         let loaded = self.session().and_then(|s| s.stories.close_friends.clone());
         let failed = self
-            .session()
-            .and_then(|s| s.stories.page_op.as_ref())
+            .viewer_story_page_op()
             .is_some_and(|op| matches!(op.state, quill::story_page::StoryPageOpState::Failed(_)));
         let Some(loaded) = loaded else {
             return;
@@ -562,7 +593,7 @@ impl QuillApp {
                     .child(notice),
             );
         }
-        if let Some(op) = self.session().and_then(|s| s.stories.page_op.clone()) {
+        if let Some(op) = self.viewer_story_page_op() {
             use quill::story_page::StoryPageOpState as S;
             match op.state {
                 S::Sending | S::Checking => {

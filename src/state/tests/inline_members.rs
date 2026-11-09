@@ -119,3 +119,50 @@ fn next_page_after_the_cache_was_dropped_is_ignored() {
             .contains_key(&(13, MemberListFilter::Recent))
     );
 }
+
+fn failed(extra: u64) -> String {
+    format!(
+        r#"{{"@type":"error","@extra":"{extra}","code":429,"message":"Too Many Requests: retry after 3"}}"#
+    )
+}
+
+/// A failed next page of the list shown is marked, so the panel can ask
+/// for it again; a failed page of an older query is not.
+#[test]
+fn a_failed_next_page_can_be_asked_for_again() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    let key = (13, MemberListFilter::Recent);
+    let purpose = RequestPurpose::Groups(GroupsPurpose::GetSupergroupMembers {
+        filter: MemberListFilter::Recent,
+    });
+    let more_purpose = RequestPurpose::Groups(GroupsPurpose::GetSupergroupMembersMore {
+        filter: MemberListFilter::Recent,
+        offset: 3,
+    });
+    let first = session.request(purpose, Some(ChatId(13)));
+    session
+        .groups
+        .supergroup_member_queries
+        .insert(key, (first, String::new()));
+    apply_json(&mut session, &seq, &sink, &page(&[1, 2, 3], 6, first.0));
+    let more = session.request(more_purpose, Some(ChatId(13)));
+    session.groups.note_member_more(key, more);
+    apply_json(&mut session, &seq, &sink, &failed(more.0));
+    assert!(session.groups.member_more_failed.contains(&key));
+    assert_eq!(loaded_ids(&session), (vec![1, 2, 3], 6), "the list stays");
+
+    session.groups.member_more_failed.clear();
+    let stale = session.request(more_purpose, Some(ChatId(13)));
+    session.groups.note_member_more(key, stale);
+    let second = session.request(purpose, Some(ChatId(13)));
+    session
+        .groups
+        .supergroup_member_queries
+        .insert(key, (second, "bob".into()));
+    apply_json(&mut session, &seq, &sink, &failed(stale.0));
+    assert!(
+        session.groups.member_more_failed.is_empty(),
+        "another query's page says nothing about the list shown"
+    );
+}

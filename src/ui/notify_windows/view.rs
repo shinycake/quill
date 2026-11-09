@@ -67,7 +67,7 @@ pub(super) enum ViewEvent {
     HideAll,
 }
 
-pub(super) struct NotifyView {
+pub(in crate::ui) struct NotifyView {
     pub(super) id: u64,
     pub(super) content: Content,
     pub(super) opacity: f32,

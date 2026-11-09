@@ -90,8 +90,9 @@ pub(super) static ESC_LAYERS: &[EscLayer] = &[
         |app| app.chat_list.preview.is_some() || app.chat_list.preview_press.is_some(),
         |app, _, cx| app.close_chat_preview(cx)
     ),
-    // The voice-chat rename box sits on the group-call panel; the panel
-    // itself is a live call and never closes on Escape.
+    // Drawn in the call windows, not the main window: Esc there closes
+    // them (`CALL_WINDOW_LAYERS`). The call panel itself is a live call
+    // and never closes on Escape.
     layer!(
         "screen-privacy",
         |app| app.screen_share.privacy_for.is_some(),
@@ -369,11 +370,16 @@ pub(super) struct LayerFocus {
 }
 
 impl QuillApp {
+    /// Whether a tracked layer is open in the window in place. A chat
+    /// window counts only the layers it draws (`WINDOW_LAYERS`).
     fn focus_return_layer_open(&self) -> bool {
+        let in_window = self.windows.in_window();
         self.pickers.media_panel.open
-            || ESC_LAYERS
-                .iter()
-                .any(|layer| FOCUS_RETURN_LAYERS.contains(&layer.name) && (layer.is_open)(self))
+            || ESC_LAYERS.iter().any(|layer| {
+                FOCUS_RETURN_LAYERS.contains(&layer.name)
+                    && (!in_window || WINDOW_LAYERS.contains(&layer.name))
+                    && (layer.is_open)(self)
+            })
     }
 
     /// One shared focus return for the hand-drawn layers. Runs every frame:
@@ -383,7 +389,7 @@ impl QuillApp {
     pub(super) fn track_layer_focus(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let open = self.focus_return_layer_open();
         let focused = window.focused(cx);
-        let state = &mut self.frame.layer_focus;
+        let state = &mut self.frame.menu.layers;
         if open {
             state.open_focus = focused.map(|handle| handle.downgrade());
         } else if state.was_open {
@@ -397,7 +403,7 @@ impl QuillApp {
         } else {
             state.base = focused.map(|handle| handle.downgrade());
         }
-        self.frame.layer_focus.was_open = open;
+        self.frame.menu.layers.was_open = open;
     }
 }
 
@@ -424,6 +430,14 @@ pub(super) static WINDOW_LAYERS: &[&str] = &[
     "forward-result",
 ];
 
+/// The layers drawn in a call window: the screen privacy box (over the
+/// 1:1 call or the video chat window) and the video chat's Settings and
+/// rename boxes. Esc in that window closes them
+/// (`group_call_window_escape`, `CallWindowRoot`); the main window's
+/// Escape never does, since the box is out of its sight.
+pub(super) static CALL_WINDOW_LAYERS: &[&str] =
+    &["screen-privacy", "group-call-settings", "group-call-title"];
+
 impl QuillApp {
     /// Escape in a chat window, with its state in place: close the
     /// topmost of its layers ([`WINDOW_LAYERS`]). Returns whether one was
@@ -433,7 +447,7 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
-        if self.account.passcode.locked {
+        if self.account.passcode.is_locked() {
             return false;
         }
         let Some(layer) = ESC_LAYERS
@@ -447,9 +461,12 @@ impl QuillApp {
         true
     }
 
-    /// The topmost open layer, if any.
+    /// The main window's topmost open layer, if any.
     pub(super) fn topmost_esc_layer(&self) -> Option<&'static EscLayer> {
-        ESC_LAYERS.iter().find(|layer| (layer.is_open)(self))
+        ESC_LAYERS
+            .iter()
+            .filter(|layer| !CALL_WINDOW_LAYERS.contains(&layer.name))
+            .find(|layer| (layer.is_open)(self))
     }
 
     /// Escape: close the topmost open layer and nothing else. Returns
@@ -459,7 +476,7 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
-        if self.account.passcode.locked {
+        if self.account.passcode.is_locked() {
             return false;
         }
         let Some(layer) = self.topmost_esc_layer() else {
@@ -474,7 +491,7 @@ impl QuillApp {
 mod table_tests {
     #[test]
     fn every_window_layer_is_a_layer() {
-        for name in super::WINDOW_LAYERS {
+        for name in super::WINDOW_LAYERS.iter().chain(super::CALL_WINDOW_LAYERS) {
             assert!(
                 super::ESC_LAYERS.iter().any(|layer| layer.name == *name),
                 "{name} is not an Escape layer"
@@ -576,11 +593,6 @@ mod dispatch_tests {
                 app.stories.page =
                     Some(crate::ui::story_page::StoryPage::new(ChatId(1), window, cx));
             }),
-            ("group-call-title", |app, window, cx| {
-                app.group_call_screen.title_dialog = Some(
-                    crate::ui::dialogs::group_call::GroupCallTitleDialog::new(window, cx, "x"),
-                );
-            }),
             ("link-popup", |app, _, _| {
                 app.chat_ui.link_popup = Some(crate::ui::entity_links::LinkPopup {
                     position: point(px(10.), px(10.)),
@@ -614,6 +626,30 @@ mod dispatch_tests {
         }
     }
 
+    /// The video chat window's boxes are drawn in that window: the main
+    /// window's Escape leaves them alone and closes its own layer.
+    #[gpui_kit::test]
+    fn main_window_escape_skips_the_call_windows_boxes(cx: &mut TestAppContext) {
+        let (app, mut vcx) = new_app(cx);
+        let vcx = &mut vcx;
+        app.update_in(vcx, |app, window, cx| {
+            app.group_call_screen.title_dialog = Some(
+                crate::ui::dialogs::group_call::GroupCallTitleDialog::new(window, cx, "x"),
+            );
+            app.group_call_screen.settings_open = true;
+            app.screen_share.privacy_for = Some(crate::ui::screen_share_state::ScreenFor::Group);
+            app.stories.page = Some(crate::ui::story_page::StoryPage::new(ChatId(1), window, cx));
+        });
+        assert_eq!(top(&app, vcx), Some("story-page"));
+        vcx.simulate_keystrokes("escape");
+        assert_eq!(top(&app, vcx), None, "the main window's own layer closed");
+        app.read_with(vcx, |app, _| {
+            assert!(app.group_call_screen.title_dialog.is_some());
+            assert!(app.group_call_screen.settings_open);
+            assert!(app.screen_share.privacy_for.is_some());
+        });
+    }
+
     #[gpui_kit::test]
     fn escape_closes_only_the_topmost(cx: &mut TestAppContext) {
         let (app, mut vcx) = new_app(cx);
@@ -642,11 +678,14 @@ mod dispatch_tests {
         let vcx = &mut vcx;
         app.update_in(vcx, |app, _, _| {
             app.privacy.editor = Some(any_rule());
-            app.account.passcode.locked = true;
+            app.account.passcode.force_locked(true);
         });
         vcx.simulate_keystrokes("escape");
         let (still_open, still_locked) = app.read_with(vcx, |app, _| {
-            (app.privacy.editor.is_some(), app.account.passcode.locked)
+            (
+                app.privacy.editor.is_some(),
+                app.account.passcode.is_locked(),
+            )
         });
         assert!(still_open, "Escape must not touch layers under the lock");
         assert!(still_locked, "Escape must never unlock");

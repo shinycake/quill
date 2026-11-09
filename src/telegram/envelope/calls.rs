@@ -403,6 +403,9 @@ pub struct ParsedGroupCall {
     /// `invite_link`: a conference call's link (empty for a video chat,
     /// or a call you may not share), joined with `inputGroupCallLink`.
     pub invite_link: String,
+    /// `unique_id`: the call across messages, as an invitation's
+    /// `messageGroupCall.unique_id` names it.
+    pub unique_id: i64,
 }
 
 pub(crate) fn parse_group_call(value: Option<&Value>) -> Option<ParsedGroupCall> {
@@ -537,6 +540,7 @@ pub(crate) fn parse_group_call(value: Option<&Value>) -> Option<ParsedGroupCall>
             .and_then(Value::as_str)
             .unwrap_or("")
             .to_string(),
+        unique_id: int64(value.get("unique_id")).unwrap_or(0),
     })
 }
 

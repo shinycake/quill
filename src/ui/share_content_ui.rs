@@ -74,7 +74,7 @@ impl QuillApp {
             return;
         };
         let reply_to = self.send_reply_for(chat_id, cx);
-        let options = self.composer_send_options();
+        let options = self.send_options_to(chat_id);
         let Some(live) = self.live.as_mut() else {
             self.share.content_dialog = None;
             self.connection.set_note(StatusNote::info(tr(
@@ -109,7 +109,7 @@ impl QuillApp {
             return;
         }
         let reply_to = self.send_reply_for(chat_id, cx);
-        let options = self.composer_send_options();
+        let options = self.send_options_to(chat_id);
         let Some(live) = self.live.as_mut() else {
             self.connection
                 .set_note(StatusNote::info(tr(keys::Q_OPS_SENDING_DICE_NEEDS_A_LIVE)));

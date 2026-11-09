@@ -339,7 +339,8 @@ impl QuillApp {
         if self.viewer.state.is_open() {
             self.reset_viewer_item_state(cx);
         } else {
-            self.stop_viewer_video();
+            // Emptied: the same close as Esc (full screen, caption, seek).
+            self.close_media_viewer(cx);
         }
         cx.notify();
     }
@@ -453,9 +454,17 @@ impl QuillApp {
     /// "View all" is offered for a chat's media in the main window's
     /// viewer only: the gallery is that window's (`SessionView`), and a
     /// chat window draws no Shared Media, so from there it would open
-    /// nowhere.
+    /// nowhere. The gallery opens on the open chat, so the item must be of
+    /// that chat (a viewer back from Picture-in-Picture may show another
+    /// chat's).
     pub(in crate::ui) fn viewer_can_view_all(&self) -> bool {
-        self.viewer.state.source() == ViewerSource::Chat && self.windows.scope.is_none()
+        self.viewer.state.source() == ViewerSource::Chat
+            && self.windows.scope.is_none()
+            && self
+                .viewer
+                .state
+                .current()
+                .is_some_and(|item| self.open_chat_id() == Some(item.chat_id))
     }
 
     /// "View all media": close the viewer and open the chat's Shared
@@ -662,14 +671,25 @@ impl QuillApp {
     }
 
     /// MED1: "Show in chat" — close the viewer and jump to the source
-    /// message (the reply-jump machinery, reused).
-    pub(in crate::ui) fn show_viewer_in_chat(&mut self, cx: &mut Context<Self>) {
+    /// message. In the open chat it is the reply jump; an item of another
+    /// chat (a viewer back from Picture-in-Picture) opens that chat at the
+    /// message, in the window that shows it (`route_chat_open`).
+    pub(in crate::ui) fn show_viewer_in_chat(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let Some(item) = self.viewer.state.current() else {
             return;
         };
-        let message_id = item.message_id;
+        let (chat_id, message_id) = (item.chat_id, item.message_id);
         self.close_media_viewer(cx);
-        self.jump_to_replied_message(message_id, cx);
+        if self.open_chat_id() == Some(chat_id) {
+            self.jump_to_replied_message(message_id, cx);
+        } else {
+            let open = crate::ui::chat_window::ChatOpen::new(chat_id).at(message_id);
+            self.select_chat_request(open, window, cx);
+        }
     }
 
     /// Whether the viewer offers Reply for `item`: a sent message of the

@@ -435,7 +435,9 @@ impl Session {
                 | RequestPurpose::EditStoryCover
                 | RequestPurpose::SetStoryPrivacySettings,
             ) => {
-                self.stories.manage.pending = false;
+                if let Some(pending) = pending {
+                    self.stories.manage.settle(pending.id, None);
+                }
             }
             // Phase 9.7: `reorderStoryAlbums` confirmed — apply
             // the sent album order (correlated via
@@ -459,7 +461,7 @@ impl Session {
                     }
                     *albums = reordered;
                 }
-                self.succeed_story_page_op(RequestPurpose::ReorderStoryAlbums);
+                self.succeed_story_page_op(pending);
             }
             // Phase 9.7: `deleteStoryAlbum` confirmed — drop the
             // album (correlated via
@@ -474,7 +476,7 @@ impl Session {
                     }
                     self.stories.album_stories.remove(&(chat_id.0, album_id));
                 }
-                self.succeed_story_page_op(RequestPurpose::DeleteStoryAlbum);
+                self.succeed_story_page_op(pending);
             }
             // Phase 9.7: `setChatPinnedStories` confirmed — the
             // sent story ids (correlated via
@@ -490,7 +492,7 @@ impl Session {
                         .or_default()
                         .pinned_story_ids = ids;
                 }
-                self.succeed_story_page_op(RequestPurpose::SetChatPinnedStories);
+                self.succeed_story_page_op(pending);
             }
             // B14: `setCloseFriends` confirmed — the staged ids are the
             // new list.
@@ -498,16 +500,16 @@ impl Session {
                 if let Some(ids) = self.stories.close_friends_pending.take() {
                     self.stories.close_friends = Some(ids);
                 }
-                self.succeed_story_page_op(RequestPurpose::SetCloseFriends);
+                self.succeed_story_page_op(pending);
             }
             // B14: hide / unhide and post-to-profile ride on TDLib's own
             // `updateChatActiveStories` / `updateStory`; `ok` only ends the
             // status line.
             Some(RequestPurpose::SetChatActiveStoriesList) => {
-                self.succeed_story_page_op(RequestPurpose::SetChatActiveStoriesList);
+                self.succeed_story_page_op(pending);
             }
             Some(RequestPurpose::ToggleStoryIsPostedToChatPage) => {
-                self.succeed_story_page_op(RequestPurpose::ToggleStoryIsPostedToChatPage);
+                self.succeed_story_page_op(pending);
             }
             _ => {}
         }
@@ -672,6 +674,13 @@ impl Session {
         // processed request from the cached list. The count is
         // approximate per the schema; `updateChatPendingJoinRequests`
         // is the authoritative badge source.
+        // An approved request adds a member: the member lists ask again.
+        if let Some(RequestPurpose::Groups(GroupsPurpose::ProcessChatJoinRequest { .. })) =
+            pending.map(|p| p.purpose)
+            && let Some(chat_id) = pending.and_then(|p| p.chat_id)
+        {
+            self.groups.members_added(chat_id.0);
+        }
         if let Some(RequestPurpose::Groups(GroupsPurpose::ProcessChatJoinRequest { user_id })) =
             pending.map(|p| p.purpose)
             && let Some(chat_id) = pending.and_then(|p| p.chat_id)

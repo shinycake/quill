@@ -1,28 +1,79 @@
-# What the passcode lock does with each surface that opens an OS window,
-# starts a helper process or starts a recording. Checked by
-# scripts/lock_surfaces.py (run by scripts/check-screen-state.py).
+# What the passcode lock does with each start that does not test a lock
+# gate itself: an OS window, a helper process, a capture, an app-wide key
+# hook or action handler, an account switch that skips the lock. Checked by
+# scripts/lock_surfaces.py (run by scripts/check-screen-state.py), which
+# says exactly what it proves.
 #
-# <fn> | <closer> | <reason>
+# <path::fn> | <closer> | <reason>
 # closer: a method `close_for_lock` (src/ui/passcode/lock_gate.rs) calls;
+# `via:fn` when the start runs only through `fn`, which tests a gate;
 # `-` when the lock need not reach it (say why); `refuses` for a function
-# that must call `refused_while_locked()` itself.
+# that must keep testing a gate itself.
 
 # Closed by the lock.
-open_pip_window | close_every_video_pip | a video PiP plays the account's media over the lock screen; it opens only from a viewer, which the lock closes too
-open_popup | close_all_notify_windows | Quill's notification windows show senders and text; one shown while locked hides the sender (`hide_sender`)
-start | clear_device_qr | the device-linking camera scanner is a helper window with the camera on, opened from Settings > Devices
+src/ui/video_player/controls/pip/open.rs::open_pip_window | close_every_video_pip | a video PiP plays the account's media; it opens only from a viewer, which the lock closes too
+src/ui/notify_windows/mod.rs::open_popup | close_all_notify_windows | Quill's notification windows show senders and text; one shown while locked hides the sender (`hide_sender`)
+src/ui/device_qr.rs::start | clear_device_qr | the device-linking camera scanner is a helper window with the camera on, opened from Settings > Devices
+src/profile_photo_camera.rs::start | close_cameras_for_lock | the profile or group photo camera; `start_camera` refuses a new start while locked
+src/media_tools.rs::spawn_capture | via:start_video_capture | the round video recorder; the lock cancels a running one (`cancel_recording`)
 
-# Refused while locked (they call `refused_while_locked()`).
-pump_deep_link | refuses | a launch or OS link waits for the unlock, as tdesktop's start links (`checkStartUrls`)
-run_resolved_deep_link | refuses | the chat or box a link resolved to opens after the unlock
-spawn_mini_app_window | refuses | a mini app whose URL lands while locked would show, usable, over the lock; TDLib closes the launch
+# Refused while locked (they test a gate in a condition).
+src/ui/deep_links.rs::pump_deep_link | refuses | a launch or OS link waits for the unlock, as tdesktop's start links (`checkStartUrls`)
+src/ui/deep_links.rs::run_resolved_deep_link | refuses | the chat or box a link resolved to opens after the unlock
+src/ui/web_app_ui/spawn_mini_app_window.rs::spawn_mini_app_window | refuses | a mini app whose URL lands while locked would show, usable, over the lock; TDLib closes the launch
+src/ui/accounts.rs::switch_account | refuses | nothing behind the lock changes account; tdesktop empties the tray and Dock account items while locked
+src/ui/os_open.rs::open_link | refuses | nothing opens in the browser or mail client while locked
+src/ui/os_open.rs::open_web_link | refuses | as open_link
+src/ui/os_open.rs::open_file | refuses | a file opened by a late answer would show over the lock
+src/ui/os_open.rs::open_file_then | refuses | as open_file; the caller hears it did not open
+src/ui/os_open.rs::reveal_in_folder_or | refuses | as open_file
+src/ui/os_open.rs::reveal_from | refuses | as open_file
+src/ui/passcode/lock_gate.rs::intercept_keys_unlocked | refuses | the app's key interceptors all go through it: no shortcut, capture or viewer key acts on a key typed on the lock screen
 
 # Not the lock's.
-open_chat_window | - | a chat window draws the lock screen itself (`lock_overlay`, with its own `LockField`), as tdesktop locks every window
-reopen_main_window | - | the main window, which draws the lock screen
-open_call_window | - | the call window shows the call, not the chats; tdesktop leaves its call panel up while locked (`closeAdditionalWindows` does not close it), so a call can be answered
-open_group_call_window | - | as the 1:1 call window: tdesktop leaves the group call panel up while locked
-open_screen_chooser_window | - | opened from a call window's Share Screen, which the lock leaves usable
-open_window | - | the platform wrapper every window opens through (interface zoom), and the What's New window, which shows release notes only
-show_alert | - | the startup failure alert, shown before any account or lock exists
-demo_starting_camera | - | screenshot demo only
+src/ui/chat_window/view.rs::open_chat_window | - | a chat window draws the lock screen itself (`render_locked`, with its own `LockField`), as tdesktop locks every window
+src/ui/startup_failure/device_loss.rs::reopen_main_window | - | the main window, which draws the lock screen
+src/main.rs::open_main_window | - | the main window, which draws the lock screen
+src/main.rs::run_screenshot_demo | - | screenshot demo only
+src/ui/call_panel.rs::open_call_window | - | the call window shows the call, not the chats; tdesktop leaves its call panel up while locked (`closeAdditionalWindows` does not close it), so a call can be answered
+src/ui/group_call_window.rs::open_group_call_window | - | as the 1:1 call window: tdesktop leaves the group call panel up while locked
+src/ui/screen_chooser.rs::open_screen_chooser_window | - | opened from a call window's Share Screen, which the lock leaves usable
+src/ui/interface_zoom/mod.rs::open_window | - | the platform wrapper every window opens through (interface zoom); a window type the lock layer does not name draws nothing while locked
+src/ui/whats_new.rs::open_window | - | the What's New window shows release notes only; while locked it draws nothing (`lock_layer`, `LockRole::Blank`)
+src/ui/startup_failure.rs::show_alert | - | the startup failure alert, shown before any account or lock exists
+src/ui/demos/media.rs::demo_starting_camera | - | screenshot demo only
+src/ui/sticker_set_box/demo.rs::demo_owned_sticker_set | - | screenshot demo only
+src/ui/background_accounts/calls.rs::answer_background_call | - | a ringing call's Answer switches to the call's account even while locked: calls stay usable under the lock, as tdesktop's call panel does
+src/ui/chat_window/mod.rs::new | - | the interceptor only notes the window an input came from; it acts on nothing, and the lock field uses the note
+src/ui/agent_takeover_state.rs::new | - | Esc ends an agent's takeover of the window: it gives control back to the user and shows nothing
+src/ui/keybindings/mod.rs::trace_keys | - | prints keys only with QUILL_TRACE_KEYS set, a debug switch
+src/ui/keybindings/pinned_chat_rows.rs::setup_app_menus | - | Hide, Hide Others and Show All: window management only
+src/ui/os_menus/mod.rs::register_actions | - | every Dock and menu-bar item runs through `on_app` into a method that tests the gate (`run_window_menu` through `os_menu_session_usable`, `open_dock_account`) or touches no account (notifications toggle, player, Quit, as tdesktop's Dock menu)
+src/ui/profile_photo_sources/mod.rs::run_ffmpeg | - | converts a photo or video the user picked into the profile picture; no device, no window
+src/composer/media_options.rs::photo_size_of | - | ffprobe on a file being sent: no device, no window
+src/composer/media_options.rs::scaled_photo_for_send | - | converts a photo being sent: no device, no window
+src/sticker_video.rs::encode_sticker | - | encodes a sticker the user made: no device, no window
+src/video/mod.rs::extract_frames | - | reads frames from a video file: no device, no window
+src/video/mod.rs::probe_with_ffprobe | - | ffprobe on a video file: no device, no window
+src/video/mod.rs::write_video_note_thumbnail | - | a recorded round video's thumbnail: no device, no window
+src/video_edit.rs::probe_source | - | ffprobe on a video being edited: no device, no window
+src/video_edit.rs::run_h264 | - | encodes an edited video: no device, no window
+src/video_encoder.rs::encoders_of | - | lists ffmpeg's encoders: no device, no window
+src/video_encoder.rs::quiet_command_for | - | builds an ffmpeg command for the conversions above
+src/media_tools.rs::command | - | builds an ffmpeg or ffprobe command for the conversions above
+src/media_tools.rs::runs | - | checks that a media tool runs
+src/child_timeout.rs::stdout_within | - | runs a short probe command and reads its output
+src/platform.rs::os_open_now | - | every open goes through src/ui/os_open.rs (clippy.toml disallows the raw opens elsewhere), whose opens refuse while locked, listed above
+src/platform.rs::reveal_now | - | as os_open_now
+src/link_handler.rs::run_xdg_mime | - | registers Quill as the tg: link handler on Linux at startup
+src/notify/mod.rs::run_notification_command | - | a Linux notification; its text follows the lock (the sender hidden while locked, `deliver.rs`)
+src/notify_call.rs::run_call_command | - | an incoming call's Linux notification: calls stay usable under the lock
+src/proxy_carrier/helper.rs::spawn | - | the proxy carrier helper process: networking only, nothing shown
+src/agent/link.rs::launch_quill | - | `quill --mcp` starting Quill for an agent; a locked Quill starts locked
+src/cli_shim.rs::main | - | the command-line shim that starts Quill
+src/update_install.rs::launch_helper | - | the updater's install helper: nothing of the account
+src/update_install.rs::probe_binary | - | the updater checks a downloaded binary runs
+src/update_install.rs::spawn_app | - | the updater restarts Quill, which starts locked
+src/update_install/macos.rs::hdiutil_mounts | - | the updater lists mounted images
+src/update_install/macos.rs::launch | - | the updater restarts Quill, which starts locked
+src/update_install/macos.rs::unpack | - | the updater unpacks a download

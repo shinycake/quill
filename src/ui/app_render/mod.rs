@@ -77,10 +77,12 @@ impl Render for QuillApp {
         // Rows the history list painted last frame are what the user saw.
         self.passcode_frame(window, cx);
         self.report_visible_history(
-            window.is_window_active() && !self.account.passcode.locked,
+            window.is_window_active() && !self.account.passcode.is_locked(),
             cx,
         );
-        self.report_visible_sponsored(window.is_window_active() && !self.account.passcode.locked);
+        self.report_visible_sponsored(
+            window.is_window_active() && !self.account.passcode.is_locked(),
+        );
         let history_drawn = self.slices.window.history_drawn();
         self.players.inline_videos.set_scale(window.scale_factor());
         // Picture-in-Picture outlives neither its message, the account
@@ -104,27 +106,17 @@ impl Render for QuillApp {
             .viewer_cover
             .set(cover.follow(opening, cx.background_executor().now()));
         // Spoiler specks painted last frame keep drifting.
-        if super::spoiler_fx::take_text_painted() || super::spoiler_fx::revealing() {
+        if super::spoiler_fx::take_text_painted(window) || super::spoiler_fx::revealing() {
             self.request_animation_tick(30, cx);
         }
         let status_toast = self.status_toast_in(None, cx);
-        self.frame.context_menu_items.begin();
-        let menu_open = self.context_menu_open();
-        if menu_open && !self.frame.context_menu_was_open {
-            self.frame.context_menu_previous_focus = window.focused(cx);
-            window.focus(&self.frame.context_menu_focus, cx);
-        } else if !menu_open && self.frame.context_menu_was_open {
-            // A menu action may already have focused an editor or a dialog.
-            if self.frame.context_menu_focus.contains_focused(window, cx)
-                && let Some(previous) = self.frame.context_menu_previous_focus.as_ref()
-            {
-                window.focus(previous, cx);
-            }
-            self.frame.context_menu_previous_focus = None;
-        }
-        self.frame.context_menu_was_open = menu_open;
-        self.track_layer_focus(window, cx);
+        // The menus' and layers' focus hand-off runs first in
+        // `per_window_upkeep`, so a chat window's frame runs its own.
         self.frame_upkeep(window, cx);
+        // Locked: the lock screen is all this window builds.
+        if self.account.passcode.is_locked() {
+            return self.locked_root(outer_scope, cx);
+        }
         let auth_state = self.current_auth();
         let auth = view_for(&auth_state);
         let inputs_live =
@@ -592,10 +584,6 @@ impl Render for QuillApp {
         // ends the mode (`ListWidget::mousePressEvent`).
         let root = self.autoscroll_layer(cx).on(root, cx.weak_entity());
         let root = root.children(self.disk_full_cover(&auth, cx));
-        // The lock screen covers the whole window, above every overlay.
-        let root = root.when(self.account.passcode.locked, |this| {
-            this.child(self.lock_overlay(cx))
-        });
         // An agent driving the window: the glow, the ghost cursor and the
         // pill, deferred above everything (`agent_takeover`).
         let root = root
@@ -605,9 +593,7 @@ impl Render for QuillApp {
             Some(cache) => super::image_budget::CacheScope::new(cache, root).into_any_element(),
             None => root.into_any_element(),
         };
-        self.frame
-            .context_menu_items
-            .apply_pending_focus(window, cx);
+        self.frame.menu.items.apply_pending_focus(window, cx);
         // Back to the scope this draw interrupted; the layout and paint of
         // the root run as the main window's again.
         self.set_window_scope(outer_scope);
@@ -616,6 +602,7 @@ impl Render for QuillApp {
 }
 
 mod frame_upkeep;
+mod locked_root;
 mod status_toast;
 mod window_upkeep;
 #[cfg(test)]

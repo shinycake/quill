@@ -228,6 +228,20 @@ impl QuillApp {
         })
     }
 
+    /// The Contacts tab is open over a list a contact change invalidated
+    /// (add, delete, import, clear set it to `None`): fetch it again, so
+    /// the tab does not sit on "Loading contacts..." with nothing in
+    /// flight. Without sync the tab keeps its last list, but it still
+    /// needs one. A send that fails ends the loading with Retry.
+    pub(in crate::ui) fn refetch_open_contacts(&mut self) {
+        if !self.chat_list.contacts_tab_open {
+            return;
+        }
+        if let Some(live) = self.live.as_mut() {
+            live.driver.refetch_invalidated_contacts();
+        }
+    }
+
     pub(super) fn retry_contacts(&mut self, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut()
             && let Err(err) = live.driver.fetch_contacts()
@@ -481,6 +495,9 @@ impl QuillApp {
 
     pub(super) fn close_add_contact_dialog(&mut self, cx: &mut Context<Self>) {
         self.dialogs.add_contact_dialog = None;
+        if let Some(live) = self.live.as_mut() {
+            live.driver.forget_new_contact();
+        }
         cx.notify();
     }
 

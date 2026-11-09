@@ -210,7 +210,7 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
-        if self.account.passcode.locked {
+        if self.account.passcode.is_locked() {
             return false;
         }
         self.reopen_last_closed_chat_window(window, cx)

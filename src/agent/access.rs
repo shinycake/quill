@@ -11,7 +11,7 @@ use rand::Rng;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::sync::RwLock;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 const SETTINGS_FILE: &str = "agent_access.json";
 const TOKEN_FILE: &str = "agent-token";
@@ -132,6 +132,24 @@ fn save(change: impl FnOnce(&mut Stored)) {
     if let Ok(mut guard) = STORED.write() {
         *guard = Some(next);
     }
+}
+
+/// Quill is locked by its passcode: agents read and send nothing until
+/// the unlock (docs/decisions/lock-is-a-render-state.md). Set by the UI.
+static PAUSED_BY_LOCK: AtomicBool = AtomicBool::new(false);
+
+/// What an agent reads while Quill is locked.
+pub const LOCKED_MESSAGE: &str = "Quill is locked. Nothing can be read or sent until the user unlocks Quill. Ask the user to unlock it, then retry.";
+
+/// Pause or resume every agent tool and resource for the passcode lock.
+pub fn set_paused_by_lock(locked: bool) {
+    PAUSED_BY_LOCK.store(locked, Ordering::SeqCst);
+    crate::wake::AGENT.poke();
+}
+
+/// Whether agent tools and resources are paused because Quill is locked.
+pub fn paused_by_lock() -> bool {
+    PAUSED_BY_LOCK.load(Ordering::SeqCst)
 }
 
 /// Whether agents may connect.
@@ -446,5 +464,28 @@ mod tests {
         assert!(super::token_matches(&after));
         assert!(super::generation() > generation, "open connections end");
         assert!(!super::token_matches(""));
+    }
+
+    #[test]
+    fn a_locked_quill_answers_no_tool_and_no_resource() {
+        let _guard = crate::locks::lock_or_recover(&super::TEST_LOCK);
+        let locked = |result: &serde_json::Value| {
+            result["isError"] == serde_json::json!(true)
+                && result["content"][0]["text"] == serde_json::json!(super::LOCKED_MESSAGE)
+        };
+        super::set_paused_by_lock(true);
+        for tool in [
+            "quill_status",
+            "list_chats",
+            "send_message",
+            "td_call",
+            "read_ui_tree",
+        ] {
+            let result = crate::agent::tools::call(tool, &serde_json::json!({}), "test");
+            assert!(locked(&result), "{tool} answered while locked: {result}");
+        }
+        super::set_paused_by_lock(false);
+        let result = crate::agent::tools::call("list_chats", &serde_json::json!({}), "test");
+        assert!(!locked(&result), "the unlock resumes the tools");
     }
 }

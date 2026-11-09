@@ -38,6 +38,10 @@ pub struct PaymentsState {
     /// to an earlier one (another invoice, opened before) is not this
     /// checkout's form.
     pub form_request: Option<RequestId>,
+    /// The `validateOrderInfo` the checkout waits for. An answer to one
+    /// sent from a checkout since closed (another invoice) is not this
+    /// checkout's shipping options or order id.
+    pub validate_request: Option<RequestId>,
     /// Slice P1: the `sendPaymentForm`s in flight, each with the invoice
     /// and form it pays (tdesktop keeps one checkout process per invoice).
     /// An answer goes to its own payment: the checkout on screen takes the
@@ -189,6 +193,7 @@ impl PaymentsState {
             receipt_open: false,
             note: None,
             form_request: None,
+            validate_request: None,
             paying: Vec::new(),
             form_paid: false,
             unlocked_notice: None,

@@ -18,14 +18,40 @@ use gpui_kit::component::button::{Button, ButtonVariants};
 use gpui_kit::component::dialog::Dialog;
 use gpui_kit::*;
 use quill::lang::{keys, tr, tr_with, trn_with};
-use quill::state::Session;
+use quill::state::{CallSummary, Session};
 
 /// The call window's key for a ringing invitation: never a call id (those
-/// are positive), and stable for the invitation's message.
+/// are positive), and stable for the invitation's chat and message, so
+/// two invitations from different chats with the same server message id
+/// get different windows.
 pub(super) fn ringing_invite_key(session: &Session) -> Option<i32> {
     let invite = session.calls.conference_invite.as_ref()?;
-    let server_id = (invite.message_id.0 >> 20) & 0x3fff_ffff;
-    Some(-i32::try_from(server_id).unwrap_or(0) - 1)
+    Some(invite_key(invite.chat_id.0, invite.message_id.0))
+}
+
+/// A negative 31-bit mix of the chat and message ids (FNV-1a over both).
+fn invite_key(chat_id: i64, message_id: i64) -> i32 {
+    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+    for byte in chat_id
+        .to_le_bytes()
+        .into_iter()
+        .chain(message_id.to_le_bytes())
+    {
+        hash ^= u64::from(byte);
+        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    let folded = (hash ^ (hash >> 32)) & 0x3fff_ffff;
+    -i32::try_from(folded).unwrap_or(0) - 1
+}
+
+/// The ended call's summary the call window shows: only while no call
+/// goes on and no invitation rings. What happens now outranks an older
+/// call's end screen (tdesktop shows the invitation as a new call).
+pub(super) fn shown_call_summary(session: &Session) -> Option<&CallSummary> {
+    if session.calls.active_call.is_some() || session.calls.conference_invite.is_some() {
+        return None;
+    }
+    session.calls.summary.as_ref()
 }
 
 /// tdesktop `lng_confcall_already_joined_*`: up to three names, then a
@@ -354,7 +380,21 @@ pub(super) fn joined_line_element(line: &str) -> Div {
 
 #[cfg(test)]
 mod tests {
-    use super::joined_line;
+    use super::{invite_key, joined_line};
+
+    /// Two invitations with the same server message id from different
+    /// chats open different windows; neither key can be a call id.
+    #[test]
+    fn an_invitation_key_names_its_chat_and_message() {
+        let message = 7 << 20;
+        let first = invite_key(41, message);
+        assert_ne!(first, invite_key(42, message));
+        assert_ne!(first, invite_key(41, 8 << 20));
+        assert_eq!(first, invite_key(41, message), "stable while it rings");
+        for (chat, message) in [(41, message), (i64::MIN, 0), (-1, i64::MAX), (0, 0)] {
+            assert!(invite_key(chat, message) < 0);
+        }
+    }
 
     #[test]
     fn up_to_three_names_then_a_count() {

@@ -117,6 +117,14 @@ pub fn publish(info: Option<&NowPlaying>) {
     set_backend(info);
 }
 
+/// Clear the widget and drop the commands not yet applied: the account
+/// they were for left the screen. A player that still plays publishes
+/// itself again on its next tick.
+pub fn clear() {
+    COMMANDS.lock_or_recover().clear();
+    publish(None);
+}
+
 #[cfg(all(feature = "ui", any(target_os = "macos", target_os = "linux", windows)))]
 fn set_backend(info: Option<&NowPlaying>) {
     backend::set(info);
@@ -133,11 +141,16 @@ mod tests {
     #[cfg(all(feature = "ui", any(target_os = "macos", target_os = "linux", windows)))]
     #[test]
     fn a_key_is_queued_and_wakes_a_paused_tick() {
-        use super::{Command, push_command, take_commands};
+        use super::{Command, clear, push_command, take_commands};
         let seen = crate::wake::CHROME.epoch();
         push_command(Command::Play);
         assert_ne!(crate::wake::CHROME.epoch(), seen);
         assert_eq!(take_commands(), [Command::Play]);
+        // One test for the queue: tests run in parallel and share it.
+        // A key pressed before an account switch applies to nothing after.
+        push_command(Command::Toggle);
+        clear();
+        assert_eq!(take_commands(), []);
     }
 
     fn playing(position: f64) -> NowPlaying {

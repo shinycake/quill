@@ -85,7 +85,9 @@ pub(crate) struct DialogUi {
 }
 
 /// The Business page saves its edits through the old client before it
-/// goes (`close_business_saving`); the other boxes hold only flags.
+/// goes (`close_business_saving`); the profile modal gives the session's
+/// info column back, which would otherwise come back on switch-back as the
+/// member's profile; the other boxes hold only flags.
 impl crate::ui::on_screen::Farewell for DialogUi {
     fn farewell(
         app: &mut QuillApp,
@@ -93,6 +95,11 @@ impl crate::ui::on_screen::Farewell for DialogUi {
         cx: &mut gpui_kit::Context<QuillApp>,
     ) {
         let _ = app.close_business_saving(false, window, cx);
+        app.dismiss_profile_modal();
+        // The New Contact box's import opens no chat once the box is gone.
+        if let Some(live) = app.live.as_mut() {
+            live.driver.forget_new_contact();
+        }
         // The appearance box's status choices are resolved while the
         // session's `chat_status_open` is set.
         app.close_chat_appearance_dialog(cx);

@@ -104,6 +104,10 @@ pub struct UsersState {
     /// belongs to a Telegram user and otherwise shows "not joined". Keyed by
     /// the import it answers: only the box that sent it applies it.
     pub new_contact_outcome: Option<(RequestId, NewContactOutcome)>,
+    /// The `importContacts` the open New Contact box waits for. Closing the
+    /// box forgets it: its answer then opens no chat, and the next box's
+    /// Create is sent instead of waiting for it.
+    pub new_contact_request: Option<RequestId>,
     /// Phase 6: the open user / supergroup info panel, if any.
     pub open_info_panel: Option<InfoPanelTarget>,
     /// The QR box's backdrops, contact link and free-code answers.
@@ -174,6 +178,7 @@ impl UsersState {
             secret_chat_fetch_queue: Vec::new(),
             user_chat_to_open: None,
             new_contact_outcome: None,
+            new_contact_request: None,
             open_info_panel: None,
             peer_qr: crate::peer_qr::session::PeerQrData::default(),
         }

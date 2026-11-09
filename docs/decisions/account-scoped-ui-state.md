@@ -95,10 +95,10 @@ views), `appearance`, `chat_prefs`, `language`, `start_files`, `first_run`,
 | `NotifyUi` (19) | `mute_menu_open`, `mute_chat`, `mute_custom_open`, `mute_time`, `ttl_picker_open`, sound pickers, `tone_upload_target`, `defaults_*`, `notifications_confirm`, sliders | `notify_clicks`, `notify_inflight`, `reply_targets`, `preview_waits` (keyed), `notification_sounds`, `polled_redraw`, `windows` |
 | `CallUi` (22) | players, `window*`, `ended_at`, `confirm`, `dialing`, `history_*`, `mic_test*`, `add_people`, `conference_link` | `notify_clicks`, `notified` (keyed), `tick_active`, `panel_view`, `sounds`, `sound_marks` |
 | `PlaybackUi` (30) | `player`, `playing_*`, `intent`, `playlist_*`, `track_length`, seek fields, `tick*`, `positions`, `playing_animation`, `autoplayed_gifs`, `gif*`, `gif_decodes`, `pending_media_seek`, `error` | `audio` (engine), `stickers` (shared player), `emoji_plays`, `inline_videos`, `userpic_videos`, `speed`, `volume`, `unmuted_volume` |
-| `GroupCallUi` (31) | dialogs, `composer`, `window*`, `chat_shown`, `pin`, levels, scrolls, `stream`, `rtmp_start`, `live_pip` | `ptt`, `ptt_clock`, `ptt_capture`, `ptt_delay_slider`, `global_ptt*` |
+| `GroupCallUi` (31) | dialogs, `composer`, `window*`, `chat_shown`, `pin`, levels, scrolls, `stream`, `rtmp_start`, `live_pip` | `ptt`, `ptt_clock`, `ptt_capture`, `global_ptt*` |
 | `AgentUi` (5) | `picked`, `consent`, `page` | `activity_shown`, `ui_send` |
 | `ConnectionUi` (9) | `status`, `generation`, `closed_noted_generation`, `note`, `note_window`, `status_traced`, `presence` | `toasts`, `toast_wake` |
-| `ChatWindows` (12) | `open`, `scope`, `last_input`, `dialog_host`, `closed`, `restore`, `save_pending` | `main`, `main_place`, `cascade`, `main_dialogs_closed`, `_key_scope` |
+| `ChatWindows` (12) | `open`, `scope`, `last_input`, `dialogs` (the owner of each kit dialog), `closed`, `restore`, `save_pending` | `main`, `main_place`, `cascade`, `main_dialogs_closed`, `_key_scope` |
 | `AuthUi` (18) | everything else | `demo_inputs` (synthetic mode) |
 
 Dialog registry (`register_dialogs!`): 189 entries; 163 `.closes(..)`, 24
@@ -1815,6 +1815,357 @@ PTT slider; nothing here overlaps it.
     (only the checkout stays); tdesktop opens it too.
   - Mini apps still have one `open_result` slot; a second answer before
     the first is drawn replaces it.
-  - The `group_call.ptt_delay_slider` entry in
-    `scripts/app-wide-fields.txt` belongs to part 1, which moved the
-    slider to `SettingsUi`.
+
+### Phase 12 (area C, part 1)
+
+Round 12 of the review, area C, findings 1 to 30, the lock findings, and
+the two part-2 findings that need a dialog host per window (47's other
+half, 53), on `claude/sm-review12-c1`.
+
+- **The lock is a render state** (docs/decisions/lock-is-a-render-state.md).
+  - A kit root plugin, `passcode::lock_layer::LockLayer`, runs last in
+    every window. While locked it drops the built surface, the kit's
+    dialog, sheet, popover and tooltip layers included, and draws the lock
+    screen alone, or nothing for a window type it does not name. Call
+    windows and notification windows stay as they are.
+  - While locked, the main window and each chat window build only their
+    lock screen (`locked_root`, `render_locked`), so no deferred overlay
+    exists to paint over it.
+  - The shell does not sync dialogs while locked, so a box neither opens,
+    closes nor moves under the lock. It is back after the unlock, in its
+    own window.
+  - `set_locked` is the one writer of the flag. `refused_while_locked` is
+    the one gate for what is not drawn: app key interceptors
+    (`intercept_keys_unlocked`), account switches, OS opens, the Dock and
+    the window menu.
+  - `close_for_lock` now also turns off the profile photo camera and
+    disarms both key captures.
+- **The agent socket pauses while locked.** Every tool and the unread
+  resource return `LOCKED_MESSAGE` (`agent::access::paused_by_lock`, a
+  process flag that only a real lock sets).
+- **Nothing switches account behind the lock.** `switch_account` refuses.
+  A notification click from another account only shows the window, and
+  a stale Dock account item only raises it. A ringing call's Answer
+  still switches (`switch_account_even_locked`).
+- **`lock_surfaces.py` covers all of `src/`.** It checks windows, helper
+  processes, captures, app-wide key hooks and action handlers. A gate
+  must be tested in a condition. Entries are keyed by `path::fn`, and a
+  `via:` entry names a function that gates. The guard also checks that
+  `set_locked` is the only writer and that `LockLayer` is registered.
+- **Each window shows its own kit dialog** (`chat_window/dialog_hosts.rs`).
+  - A kind is owned by the window that showed it. One with no owner opens
+    in the window of the last input.
+  - A chat window's boxes close with it, each with its spec's close,
+    instead of moving to the main window. Every spec now has a close,
+    except the call swap and agent request prompts, which must be
+    answered.
+  - New Topic or Edit Topic from a chat window claims the manage box for
+    that window (`claim_dialog`), so the main window's box does not turn
+    into another forum's editor.
+- **What Settings opens belongs to its page.** Closing Settings leaves the
+  page on screen, Account when none was chosen (`shown_settings_page`).
+  Account drops Log out?, and Privacy drops its rule editor, exceptions
+  list, pickers and Unblock confirmation (`close_privacy_layers`).
+  Settings is the main window's: a chat window's ⋮ actions leave it open,
+  and Agent access from a chat window hands off to the main window.
+- **The 2FA status card has its own password field**
+  (`TwoStepUi::status_check_password`), so one field is not drawn twice in
+  a frame.
+- **A box keeps the chat it was opened for.** Add to folder carries
+  `FolderUi::menu_chat`. Profile › Auto-Delete opens the picker for the
+  profile's chat. The Business start page takes a sticker only from the
+  window that shows its box.
+- **Polls wait for an answer or their screen.** The Chatbots poll and the
+  quick reply poll no longer stop after a count. The error lines that
+  outlived their box are cleared where the box opens.
+- **App prefs live outside the accounts.** The appearance, chat,
+  spellcheck, translation and settings-search prefs, the recent hashtags
+  and the custom themes moved from `accounts/primary/`, which removing
+  the first account deleted, to `<app root>/app`
+  (`settings::app_prefs_paths`). The move runs once, on first use. Each
+  item moves on its own, the app folder wins a conflict, and a marker is
+  written last.
+- **Calls and stories.**
+  - A call window's target is decided by what happens now: an active
+    call, then a ringing conference invite, then an ended call's summary.
+  - Boxes drawn in a call window take Esc there (`CALL_WINDOW_LAYERS`).
+  - The story viewer plays only while the main window is active.
+  - Story edit, cover, privacy and page ops match answers by request id.
+  - Shares that are not the composer's message use
+    `send_options_to(chat)`.
+- **The viewer acts on its item's chat.**
+  - Show in Chat and View all follow the item's chat.
+  - A viewer emptied by deletes closes through `close_media_viewer`.
+  - An account switch clears the OS media session.
+  - A chat window's viewer hold and parked intents are that window's.
+- **Not done, or not tested.**
+  - Finding 10 (recent hashtags per account) needs `composer_suggest.rs`,
+    which belongs to another area.
+  - Finding 6 was not confirmed: the link inbox retries while a link is
+    pending. The unlock pokes `wake::LINKS` anyway.
+  - The camera's close on lock, the notification-click and Dock
+    refusals, the Settings polls, the error lines and the media session
+    clear have no tests: they need ffmpeg, a second signed-in account or
+    a live driver.
+
+### Phase 12 (area A)
+
+Round 12 of the review, area A, on `claude/sm-review12-a`. Both material
+findings held up in code.
+
+**Your own level ran only on updates (1).** `pump_call_audio` is the
+only reader of your microphone level and the only caller of the
+speaking tracker. It ran from `run_post_ingest_pumps`, so it moved only
+when a TDLib envelope arrived. In a call where nobody else speaks, the
+halo froze at the peak of the last gap. Your row kept its speaking mark
+after you stopped. TDLib heard "speaking" once per envelope, not every
+500 ms.
+
+- `pump_call_audio(now)` now runs in `request_tick`, as
+  `pump_call_engine_reports` does. It no longer runs on ingest. The poll
+  ticks run after every ingest pass, so a mute in an update still closes
+  the tap in that pass.
+- The capture writes the level cell without waking the poll loop. While
+  the tap is open and the microphone runs (or you are still marked
+  speaking), `next_deadline` wakes the loop one level window (92 ms)
+  after the last read: `ConnectDriver::call_audio_deadline`. The panel
+  redraws at 30 fps during a call (unless power saving stills it), so the
+  level is not a redraw.
+  `request_tick` asks for one only when your speaking state changes.
+- A poll with no new window calls `SpeakingTracker::idle`. Speaking runs
+  out after tdesktop's 1.5 s, "stopped" is sent once, and the level drops
+  to 0 once no window has come for 1.5 s. Before, a stopped capture or a
+  rejoin left `speaking` as it was.
+- The tracker's clock is the poll's `now`, not `Instant::elapsed`, so
+  tests drive it with fixed times.
+- The pump checks the source's error on every read, not only after a
+  level arrived.
+
+**The other post-ingest pumps, checked.**
+
+| Pump | Inputs that change with no update | Moved |
+| --- | --- | --- |
+| `pump_call_engine` | engine reports (already polled through `pump_call_engine_reports`) | no |
+| `pump_group_call_transport` | the picked camera, a device list landing, an engine mute or camera switch to retry | added per poll for connected calls |
+| `pump_call_media` | already in `request_tick` | no |
+| `maybe_send_parameters` | auth state only | no |
+| `maybe_probe_channel_membership` | the open chat (its opener calls it), `my_user_id`, answers | no |
+
+`pump_connected_group_calls` runs `pump_one_group_call` per poll for
+each call whose transport is up. A call still connecting is left to
+ingest: its join answer is an update, and a failing `connect_group_call`
+would otherwise be retried on every 92 ms wake. Teardown stays on
+ingest, because it needs the ids from before the update.
+
+**A ringing invitation is the current call (2).** As tdesktop's invite
+`Call` is `_currentCall` (`Instance::inCall`, `calls_instance.cpp:842`):
+
+- An incoming 1:1 call while it rings goes to `busy_decline_queue`
+  (`Session::decline_call_while_invite_rings`, from `accept_call_update`)
+  and never becomes `active_call`. The busy banner names the caller, as
+  for a second call during a call (tdesktop `:705-713`).
+- A second invitation is declined (tdesktop `:1194`).
+- `start_call` (once `createCall` goes out), `join_video_chat`, and a
+  conference join that is not this invitation call
+  `decline_ringing_invite`. It clears the invitation and sends
+  `declineGroupCallInvitation`, as tdesktop's `hangup` of the invite call
+  does. tdesktop asks first ("leave your active voice chat?"). Quill's
+  call window offers no join while the invitation rings, so these come
+  from a chat's Join button or a link.
+
+**Smaller items on the same paths.**
+
+- A failed `declineGroupCallInvitation` shows nothing. Before, it set
+  "Voice chat request failed" on whatever voice chat you were in.
+  tdesktop sends it with no fail handler, and the invitation has already
+  left the screen.
+- An invitation to the conference you are in, or a repeat of the one
+  ringing (same message, or same `unique_id`), is left alone, as in
+  tdesktop `:1179-1186`. `ActiveGroupCall::unique_id` and
+  `ConferenceInvite::unique_id` are new for this.
+- `ringing_invite_key` mixes the chat id into the window key (FNV-1a,
+  folded to a negative 31-bit value). Two invitations from different
+  chats with the same server message id get different windows.
+
+**Tests.**
+
+- `connect/tests/call_audio.rs`,
+  `your_level_and_speaking_move_on_polls_without_updates`, runs with no
+  envelope at all. It checks the 92 ms wake, the level per poll,
+  speaking and its send, the 500 ms re-send, the kept-for time, the run
+  out with one "stopped", and the wake ending on mute. With the per-poll
+  call taken out of `request_tick` (the old, ingest-only pump), it fails
+  at its first step: the level stays at 0 instead of 0.1.
+- `connect/tests/group_calls/ringing_invite.rs`: busy decline of a 1:1
+  call, a second invitation, repeats left alone, placing a call, joining
+  a voice chat, joining another conference, accepting the invitation
+  itself, an invitation to your own conference, and a failed busy
+  decline that leaves `group_call_error` empty.
+- `state/conference_invite_tests.rs` covers the reducer side, and the
+  `call_conference_ui` tests cover the window key.
+
+**Not done.**
+
+- tdesktop's "leave the current call?" confirm before joining over a
+  ringing invitation. Quill declines it without asking.
+- The raw level tap (non-UI builds) still keeps a stale error after a
+  call ends, as round 12 noted. UI builds do not take that path.
+- Not run on real hardware.
+
+### Phase 12 (area B)
+
+Round 12 of the review, area B, on `claude/sm-review12-b`. The findings
+share one shape: state that every window shares, written by whichever
+window drew or acted last.
+
+- **Copy protection checks its own window's selection.** The selected
+  message and the selected emoji moved from two thread-locals into one
+  map keyed by `WindowId` (`selectable_text.rs`). Paint writes the
+  painting window's entry and `selected_message_text` reads the asking
+  window's. Before, the main window repainting after a chat window's
+  drag replaced the selection, so Copy in the chat window checked the
+  main window's chat and could copy a protected chat's text.
+- **Each window's message menu has its own focus.** The menu's focus
+  handle, item registry, open flag, previous focus and layer focus
+  moved into `MenuFocus` (`context_menu_keys.rs`). `FrameState` and
+  `WindowSlot` each hold one, and `swap_slot` exchanges them. The
+  hand-off (focus into the menu on open, back on close) is the first
+  step of `per_window_upkeep`, so a chat window's menu takes the keys
+  and gives the focus back to its own composer. `focus_return_layer_open`
+  counts only the window's own layers in a chat window.
+- **A link from a chat window brings the main window forward.** A
+  queued link remembers the window it was clicked in (`flow_window`,
+  carried through `pump_deep_link` the way the agent origin is). When
+  it opens a chat that has no window of its own, the main window is
+  raised after the open. A chat with its own window opens there.
+- **The media panel reads only its window.** `story_reply_panel_active`
+  and `group_title_emoji_active` are false in a chat window, so the
+  main window's story reply or group title emoji no longer hides a chat
+  window's panel or takes its picks. A Business Start Page sticker step
+  takes only a pick made in the main window
+  (`route_business_start_page_sticker`).
+- **A failed members page can be asked for again.** The members-more
+  error marks `(chat, filter)` in `GroupsState::member_more_failed`.
+  The inline members list takes the mark and, at the next user scroll,
+  clears `failed_offset` so the page is asked for again. A frame alone
+  does not retry, so a failing server is not asked in a loop. An empty
+  page still stops the list.
+- **Recent hashtags are the account's.** The list moved from the
+  composer's `SuggestUi` (one per window, loaded from the app root) to
+  `OnScreen::recent_hashtags`, an `OwnedBy` list loaded lazily from the
+  account's own `AccountPaths`. Every window offers the tags sent from
+  any of them, and another account keeps its own.
+- **Same shape, found in the sweep.**
+  - The sticker send flight names its window. Only that window draws
+    it, so the main window no longer draws a copy in the chat window's
+    coordinates (`send_fly.rs`).
+  - The spoiler specks' "painted this frame" flag is a set of
+    `WindowId`s. Each window's frame takes its own and asks for its
+    tick, so a chat window's spoilers keep moving while the main window
+    is not drawn.
+- **The guard.** `scripts/ui_statics.py`, run by
+  `check-window-scope.py`, lists every production `thread_local!`
+  static and static atomic or lock in src/ui. Each one has a type that
+  names `WindowId` or an entry in `scripts/ui-statics.txt` with the
+  reason it may be shared (scoped and restored around one draw, keyed
+  by something that is in one window at a time, a cache, or the app's
+  own). An entry whose static is gone fails too.
+
+Tests: `selectable_text_window_tests.rs` (two windows, two selections),
+`chat_window/window_menu_tests.rs` (a chat window's menu takes Down and
+gives the focus back), `chat_window/window_pick_tests.rs` (title emoji,
+Business sticker step, send flight, hashtags across windows and
+accounts), `spoiler_fx_window_tests.rs`, `inline_members_retry_tests.rs`,
+`state/tests/inline_members.rs` (the failed mark) and the deep link
+pump test (a queued link keeps its window).
+
+Not done, or not tested:
+- The main window raise has only a pump test; the open itself needs a
+  live client.
+- The members retry test drives the state and `maybe_load_more_inline`,
+  not a real scroll.
+- A typed link box (`DeepLinkState::Ui`) opened from a chat window does
+  not raise the main window.
+- The review's items marked not material are untouched.
+
+### Phase 12 (area C, part 2)
+
+Round 12 of the review, area C, findings 31 to 61, on
+`claude/sm-review12-c2`. Part 1 (`claude/sm-review12-c1`) took findings
+1 to 30, the lock, and the per-window dialog host; the findings here that
+need that structure are listed at the end.
+
+- **An answer acts for the request it answers.**
+  - An Earn withdrawal keeps the id of the `getChatRevenueWithdrawalUrl`
+    it waits for (`Withdraw::request`). An answer or error after Cancel
+    opens nothing and leaves the next attempt alone.
+  - A checkout keeps the id of its `validateOrderInfo`
+    (`PaymentsState::validate_request`). Closing the checkout or opening
+    another form drops it, so a late answer lands nowhere.
+  - New Contact keeps the id of its import (`new_contact_request`).
+    Closing the box forgets it (`forget_new_contact`), so a closed box
+    opens no chat, and the next box's Create is sent.
+  - A failed Premium bot link drops `hub.auto_start`, so a later link
+    does not send `/start` by itself.
+  - A mini app launch dropped by an account switch opens nothing. The
+    farewell clears the session's pending launches
+    (`forget_web_app_launches`). An answer that arrives later, or one
+    that landed but was not shown yet, gets `closeWebApp`
+    (`WebApps::dropped_launches`, closed after each ingest).
+  - A setting saved with a basic group's type change (History: Visible)
+    joins the upgrade already in flight (`upgrade_with` queues its step
+    on that request), and every step queued on one request runs.
+- **What is drawn per window acts in its window.**
+  - The player bar's title jumps in the track's own window
+    (`select_chat_request` with the message), and a saved track's
+    Playlist opens in the main window (`hand_to_main_window`).
+  - A main-window chat change stops only that window's GIF, and the
+    autoplay marks are kept per chat (`HashSet<ChatMessage>`).
+  - The gift market, craft and transfer follow-ups run in the frame of
+    the window that hosts the box (`gift_boxes_upkeep`), not only in the
+    main window's.
+  - A post's Statistics from a chat window hands the whole open to the
+    main window, so the post page is set after the panel opens.
+  - The sticker set box is open in one window at a time: viewing a set
+    closes the box in the other windows, and Add, Remove and Archive
+    close it everywhere (`close_sticker_set_dialog`).
+- **A box belongs to what it was opened for.**
+  - "Don't ask me again" for a paid send is tied to the chat and price
+    it was ticked for (`confirm_trust`); Cancel drops it.
+  - Picking another gift drops the first gift's Upgrade or resale
+    confirmation.
+  - "Buy a collectible by name" from Send Gift buys for that box's
+    recipient (`marketplace_chat`), not the chat open behind it.
+  - The profile modal gives the info column back as soon as it closes,
+    including when a button inside it navigates. A target opened over
+    it replaces it, and a switch closes it.
+  - Deleting or leaving a group from its Edit box closes the box. An
+    upgrade closes the old group's Edit box and moves its chat window to
+    the new supergroup (`move_upgraded_chat_window`).
+  - The rights editor's Save with untouched checkboxes saves the rights
+    its lookup brought in after it opened.
+  - Mini app consent is kept per account (`web_app_trust.json` keyed by
+    account). Logging out or removing an account drops it. The old
+    app-wide list is not read, so each account asks once more.
+  - The Earn layer closes on a switch and gives its column back.
+- **Error arms end loading, and a poll gives up only when its box
+  closes.**
+  - A deleted voice note or song stops the player bar.
+  - The Contacts tab fetches its list again after a contact change
+    invalidates it (`refetch_invalidated_contacts`).
+  - An ownership transfer, added members and an approved join request
+    mark the member list stale.
+  - The bot-create poll is screen-scoped and leaves the dialog to the
+    shell. The Edit Bot fill poll has no cap, and Save waits for the
+    fill, so it cannot clear the about text.
+  - A sticker set's video pick is dropped when its box is closed in the
+    pick's window, so no editor opens with no box.
+- **Skipped for part 1.**
+  - Finding 53 (New Topic from a chat window retargets the main window's
+    manage box) needs the dialog host per window.
+  - Finding 47's other half: a Create Bot box in a chat window that
+    closes moves to the main window. That is the box-moves-on-close
+    structure. Only the poll was fixed here.
+- **Not tested.** The bot-create and Edit Bot polls, the Edit box
+  closing on delete or upgrade, and the upgraded chat window's move all
+  need a live driver. They have no tests.

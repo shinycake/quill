@@ -212,7 +212,11 @@ impl QuillApp {
         };
         let label = one_line_preview(&label);
         div()
-            .id(("search-media-item", message_id.0 as u64))
+            .id(super::search_hit_id(
+                "search-media-item",
+                chat_id,
+                message_id,
+            ))
             .flex()
             .items_center()
             .gap_3()

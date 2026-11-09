@@ -139,11 +139,12 @@ pub(crate) struct DialogSpec {
     /// not here.
     is_open: fn(&QuillApp) -> bool,
     build: DialogBuilder,
-    /// How the shell closes the dialog without the kit, for a dialog
-    /// agents never use (`agent_driver_surface::HARD_DIALOGS`): when an
-    /// agent's step opened it, before it shows. An account switch needs
-    /// none: a flag held by the account's UI (`ui/on_screen.rs`) is gone
-    /// with it, one read from the session is the next account's own.
+    /// How the shell closes the dialog without the kit, as its own Cancel
+    /// does: when the chat window that shows it closes (`dialog_hosts`),
+    /// and for a dialog agents never use (`agent_driver_surface::HARD_DIALOGS`)
+    /// when an agent's step opened it, before it shows. An account switch
+    /// needs none: a flag held by the account's UI (`ui/on_screen.rs`) is
+    /// gone with it, one read from the session is the next account's own.
     close: Option<DialogClose>,
 }
 
@@ -228,7 +229,7 @@ fn registry() -> &'static [&'static DialogSpec] {
 
 pub struct QuillShell {
     pub(super) app: Entity<QuillApp>,
-    /// The kit dialog is modal: at most one is shown at a time.
+    /// The kit dialog is modal: this window shows at most one at a time.
     /// `None` means no kit dialog is currently open.
     pub(super) open_dialog: Option<DialogKind>,
 }
@@ -245,7 +246,7 @@ impl QuillShell {
     /// the render-time overlay conditions the hand-rolled dialogs used.
     fn dialog_is_open(app: &QuillApp, kind: DialogKind) -> bool {
         // The lock screen covers everything: no dialog stays above it.
-        if app.account.passcode.locked {
+        if app.account.passcode.is_locked() {
             return false;
         }
         registry()
@@ -257,7 +258,7 @@ impl QuillShell {
     /// The open dialog that wins by priority (first open flag in
     /// registry order), or `None` when none is open or the app is locked.
     fn first_open(app: &QuillApp) -> Option<&'static DialogSpec> {
-        if app.account.passcode.locked {
+        if app.account.passcode.is_locked() {
             return None;
         }
         registry().iter().find(|r| (r.is_open)(app)).copied()
@@ -317,9 +318,40 @@ impl QuillShell {
         }
     }
 
-    /// Keep the single kit dialog in sync with the app-side open flags.
-    /// The kit dialog is modal, so at most one flag wins, by registry
-    /// priority. A flag cleared without a kit close (e.g. an action
+    /// Whether `kind`'s flag is set, with the state in place now.
+    fn flag_open(app: &QuillApp, kind: DialogKind) -> bool {
+        registry()
+            .iter()
+            .find(|spec| spec.kind == kind)
+            .is_some_and(|spec| (spec.is_open)(app))
+    }
+
+    /// Close the boxes of a chat window that closed (`dialog_hosts`), each
+    /// with its own close, so none moves to this window. One with no close
+    /// is free and shows in the window of the last input.
+    fn close_left_dialogs(app: &Entity<QuillApp>, window: &mut Window, cx: &mut App) {
+        let left = app.update(cx, |app, _| app.windows.take_left_dialogs());
+        for kind in left {
+            let Some(spec) = registry().iter().find(|spec| spec.kind == kind) else {
+                continue;
+            };
+            let Some(close) = spec.close else {
+                continue;
+            };
+            // A close that steps back (a stacked page) runs again until
+            // the flag is clear.
+            for _ in 0..8 {
+                if !(spec.is_open)(app.read(cx)) {
+                    break;
+                }
+                app.update(cx, |app, cx| close(app, window, cx));
+            }
+        }
+    }
+
+    /// Keep this window's kit dialog in sync with the app-side open flags.
+    /// The kit dialog is modal, so at most one flag wins in a window, by
+    /// registry priority, among the boxes the window may show. A flag cleared without a kit close (e.g. an action
     /// button that only clears state) closes the kit dialog on the next
     /// render; a flag set while another dialog shows closes the old one
     /// first, so dialogs never stack.
@@ -336,9 +368,9 @@ impl QuillShell {
     }
 
     /// [`Self::sync_kit_dialogs`] for the window `host` (`None`: the main
-    /// window, `Some(chat)`: that chat's own window). The flags are
-    /// app-wide; the dialog opens in the window whose input asked for it
-    /// and stays there (`ChatWindows::dialog_may_open_in`). Runs with the
+    /// window, `Some(chat)`: that chat's own window). Each window has its
+    /// own kit dialog: a box opens in the window whose input asked for it,
+    /// stays there and closes with it (`chat_window::dialog_hosts`). Runs with the
     /// host window's state in place, so the builders read it.
     pub(super) fn sync_kit_dialogs_in(
         &mut self,
@@ -365,11 +397,15 @@ impl QuillShell {
         cx: &mut Context<Self>,
     ) {
         let app = self.app.clone();
+        // Locked, the kit dialogs stay as they are, in the window that
+        // shows them: none is drawn (`passcode::lock_layer`), and none
+        // opens, closes or moves until the unlock.
+        if app.read(cx).account.passcode.is_locked() {
+            return;
+        }
         let shell = cx.entity();
         Self::close_blocked_dialogs(&app, window, cx);
-        // Snapshot the flags once; the app is not leased here.
-        let winner = Self::first_open(app.read(cx));
-        let first_open = winner.map(|r| r.kind);
+        Self::close_left_dialogs(&app, window, cx);
         // An account switch already closed the kit dialog this shell showed.
         if host.is_none()
             && app.update(cx, |app, _| {
@@ -378,23 +414,43 @@ impl QuillShell {
         {
             self.open_dialog = None;
         }
-        if self.open_dialog.is_none() {
-            // Closed by the kit (Esc, backdrop, ✕): the host is free again.
-            app.update(cx, |app, _| app.windows.dialog_closed_in(host));
-        }
-        let may_open = app.read(cx).windows.dialog_may_open_in(host);
-        let first_open = first_open.filter(|_| may_open);
+        // A box this window owns whose flag is clear (its own close, or
+        // the kit's Esc, backdrop or close button) is free again.
+        let shown = self.open_dialog;
+        app.update(cx, |app, _| {
+            for kind in app.windows.dialogs_of(host) {
+                if Some(kind) != shown && !Self::flag_open(app, kind) {
+                    app.windows.dialog_closed_in(kind, host);
+                }
+            }
+        });
+        // The open box that wins by priority among those this window may
+        // show (`ChatWindows::dialog_may_show_in`); another window's box
+        // is not this window's to show.
+        let winner = {
+            let app = app.read(cx);
+            registry()
+                .iter()
+                .find(|spec| app.windows.dialog_may_show_in(spec.kind, host) && (spec.is_open)(app))
+                .copied()
+        };
+        let first_open = winner.map(|spec| spec.kind);
         if self.open_dialog != first_open {
             // Close the currently shown dialog (if any) before opening
             // the next one, so a transition (e.g. folder manager ->
             // editor) never stacks two kit dialogs.
-            if self.open_dialog.is_some() {
+            if let Some(shown) = self.open_dialog {
                 window.close_dialog(cx);
-                app.update(cx, |app, _| app.windows.dialog_closed_in(host));
+                app.update(cx, |app, _| {
+                    if !Self::flag_open(app, shown) {
+                        app.windows.dialog_closed_in(shown, host);
+                    }
+                });
             }
             self.open_dialog = first_open;
-            if let Some(spec) = winner.filter(|_| may_open) {
-                app.update(cx, |app, _| app.windows.dialog_opened_in(host));
+            if let Some(spec) = winner {
+                let kind = spec.kind;
+                app.update(cx, |app, _| app.windows.dialog_opened_in(kind, host));
                 let build = spec.build;
                 let app_c = app.clone();
                 let shell_c = shell.clone();

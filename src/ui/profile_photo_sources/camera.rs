@@ -39,6 +39,9 @@ impl QuillApp {
     /// Open the camera on a worker thread (some systems list devices
     /// first) and keep the stream once it runs.
     pub(super) fn start_camera(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.refused_while_locked() {
+            return;
+        }
         let Some(sources) = self.sources_mut() else {
             return;
         };

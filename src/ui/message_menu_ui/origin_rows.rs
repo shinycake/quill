@@ -75,7 +75,7 @@ impl QuillApp {
             "menu-send-another-gift",
             tr(keys::CONTEXT_GIFT_SEND),
             false,
-            &self.frame.context_menu_items,
+            &self.frame.menu.items,
             cx,
             move |this, window, cx| {
                 this.message_ui.menu = None;
@@ -125,7 +125,7 @@ impl QuillApp {
             "menu-block-sender",
             tr(keys::PROFILE_BLOCK_USER),
             false,
-            &self.frame.context_menu_items,
+            &self.frame.menu.items,
             cx,
             move |this, _, cx| {
                 this.message_ui.menu = None;
@@ -290,7 +290,8 @@ crate::ui::shell::register_dialogs! {
         3951,
         |app| app.session().is_some_and(|s| s.users_state.replies_block.is_some()),
         QuillApp::build_replies_block_dialog,
-    ),
+    )
+    .close(|app, _, cx| app.close_replies_block(cx)),
 }
 
 /// The chats of the `ready-origin-menus` demo.

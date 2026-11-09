@@ -633,7 +633,7 @@ impl Session {
             if !matches!(purpose, RequestPurpose::SetStoryAlbumName) {
                 self.stories.album_stories.remove(&(chat_id.0, album.id));
             }
-            self.succeed_story_page_op(purpose);
+            self.succeed_story_page_op(pending);
         }
     }
 

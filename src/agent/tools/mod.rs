@@ -440,6 +440,11 @@ pub fn call_on(conn: u64, name: &str, arguments: &Value, agent: &str) -> Value {
     let _ = CONN.try_with(|current| current.set(conn));
     let _ = ui_shot::take_attached();
     let result = match all_tools().find(|tool| tool.name == name) {
+        // Locked: no read, send or window step, `quill_status` included
+        // (it reads the account).
+        Some(_) if crate::agent::access::paused_by_lock() => {
+            Err(ToolError::new(crate::agent::access::LOCKED_MESSAGE))
+        }
         Some(tool) => {
             crate::agent::activity::note_tool(conn, tool.name);
             (tool.run)(arguments)

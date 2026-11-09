@@ -7,7 +7,6 @@
 use super::action_row::ProfileTarget;
 use crate::ui::GroupSettingsView;
 use crate::ui::app::QuillApp;
-use crate::ui::status_note::StatusNote;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::menu::{PopupMenu, PopupMenuItem};
 use gpui_kit::*;
@@ -160,7 +159,7 @@ impl QuillApp {
         .then_some(direct)
     }
 
-    fn run_profile_menu_entry(
+    pub(super) fn run_profile_menu_entry(
         &mut self,
         entry: ProfileMenuEntry,
         target: ProfileTarget,
@@ -171,7 +170,13 @@ impl QuillApp {
         let chat = target.chat;
         let user = target.user;
         match entry {
-            E::AutoDelete => self.open_profile_auto_delete(chat, window, cx),
+            // The picker carries its chat, so it opens over the profile
+            // (tdesktop `AutoDeleteSettingsBox`) whatever chat is on screen.
+            E::AutoDelete => {
+                if let Some(id) = chat {
+                    self.open_ttl_picker(id, cx);
+                }
+            }
             E::AddContact => {
                 if let Some(id) = user {
                     self.open_add_contact_dialog(id, window, cx);
@@ -301,30 +306,6 @@ impl QuillApp {
             }
         }
         cx.notify();
-    }
-
-    /// Auto-Delete: the timer picker lives on the chat's own screen, so the
-    /// profile's chat opens first when another one is on screen.
-    fn open_profile_auto_delete(
-        &mut self,
-        chat: Option<ChatId>,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        let Some(chat_id) = chat else {
-            return;
-        };
-        if self.session().and_then(|s| s.open_chat) != Some(chat_id) {
-            self.dismiss_profile_modal();
-            self.select_listed_chat(chat_id, window, cx);
-        }
-        if self.session().and_then(|s| s.open_chat) != Some(chat_id) {
-            self.connection.set_note(StatusNote::error(tr(
-                keys::Q_PEOPLE_COULDNT_REACH_TELEGRAM_TRY_AGAIN,
-            )));
-            return;
-        }
-        self.open_ttl_picker(chat_id, cx);
     }
 }
 

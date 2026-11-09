@@ -68,7 +68,7 @@ fn locking_stops_a_voice_recording_without_sending_it(cx: &mut TestAppContext) {
     app.read_with(&vcx, |app, _| assert!(app.recording_active(), "recording"));
     lock(&app, &mut vcx);
     app.read_with(&vcx, |app, _| {
-        assert!(app.account.passcode.locked);
+        assert!(app.account.passcode.is_locked());
         assert!(!app.recording_busy(), "the microphone is off");
     });
 }
@@ -108,7 +108,7 @@ fn a_link_resolved_while_locked_opens_after_the_unlock(cx: &mut TestAppContext) 
         );
     });
     app.update(&mut vcx, |app, cx| {
-        app.account.passcode.locked = false;
+        app.account.passcode.force_locked(false);
         cx.notify();
     });
     frame(&mut vcx);

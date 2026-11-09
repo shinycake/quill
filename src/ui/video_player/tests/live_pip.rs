@@ -264,7 +264,7 @@ fn locking_quill_closes_the_live_pip(cx: &mut TestAppContext) {
     let mut stream = open_stream(&app, main, cx);
     let _pip = open_stream_pip(&app, &mut stream, main, cx);
     app.update_in(main, |app, _, cx| {
-        app.account.passcode.locked = true;
+        app.account.passcode.force_locked(true);
         app.check_video_pip(cx);
     });
     settle(main);

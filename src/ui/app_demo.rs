@@ -146,7 +146,7 @@ impl QuillApp {
         // The element `on_key_down` also stops propagation for keys that
         // reach the bubble phase.
         let capture_app = cx.weak_entity();
-        cx.intercept_keystrokes(move |event, _window, cx| {
+        super::passcode::intercept_keys_unlocked(cx, move |event, _window, cx| {
             let keystroke = event.keystroke.clone();
             let armed = capture_app
                 .update(cx, |this, _| this.keybinding_capture_active())
@@ -164,7 +164,7 @@ impl QuillApp {
         .detach();
         // Settings > Calls > Push-to-talk: the next key becomes the shortcut.
         let ptt_app = cx.weak_entity();
-        cx.intercept_keystrokes(move |event, _window, cx| {
+        super::passcode::intercept_keys_unlocked(cx, move |event, _window, cx| {
             let armed = ptt_app
                 .update(cx, |this, _| this.group_call.ptt_capture)
                 .unwrap_or(false);
@@ -182,7 +182,7 @@ impl QuillApp {
         // (Telegram Desktop). The textarea binds Up to a cursor move, and
         // bindings match before `on_key_down`, so intercept the keystroke.
         let edit_app = cx.weak_entity();
-        cx.intercept_keystrokes(move |event, window, cx| {
+        super::passcode::intercept_keys_unlocked(cx, move |event, window, cx| {
             let keystroke = &event.keystroke;
             if keystroke.key != "up" || keystroke.modifiers.modified() {
                 return;
@@ -198,7 +198,7 @@ impl QuillApp {
         // Backspace right after `**bold**` turned into formatting puts the
         // markers back (Telegram Desktop's reverse markdown replacement).
         let revert_app = cx.weak_entity();
-        cx.intercept_keystrokes(move |event, window, cx| {
+        super::passcode::intercept_keys_unlocked(cx, move |event, window, cx| {
             let keystroke = &event.keystroke;
             if keystroke.key != "backspace" || keystroke.modifiers.modified() {
                 return;
@@ -215,7 +215,7 @@ impl QuillApp {
         // Fast buttons mode: keys 1 to 9 in an empty composer press the
         // last message's inline buttons (tdesktop `setupFastButtonMode`).
         let fast_app = cx.weak_entity();
-        cx.intercept_keystrokes(move |event, window, cx| {
+        super::passcode::intercept_keys_unlocked(cx, move |event, window, cx| {
             let keystroke = &event.keystroke;
             let Some(index) =
                 quill::fast_buttons::index_for_key(&keystroke.key, keystroke.modifiers.modified())

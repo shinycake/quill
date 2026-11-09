@@ -303,7 +303,7 @@ impl QuillApp {
         if self.pane_mode() != PaneMode::Ready {
             return blocked("the sign-in screen");
         }
-        if self.account.passcode.locked {
+        if self.account.passcode.is_locked() {
             return blocked("the passcode lock screen");
         }
         if !matches!(self.first_run, FirstRun::Done) {
@@ -373,6 +373,21 @@ mod tests {
             .iter()
             .filter(|name| !matches!(**name, "AgentRequest" | "AgentConsent"))
             .filter(|name| !closable.contains(name))
+            .collect();
+        assert!(missing.is_empty(), "no close: {missing:?}");
+    }
+
+    /// A close runs when a chat window that owns the box closes. These two
+    /// have no dismissal that sends nothing: Esc on an agent's request
+    /// answers it "no", Esc on the call swap declines the incoming call.
+    const WITHOUT_CLOSE: &[&str] = &["AgentRequest", "CallSwap"];
+
+    #[test]
+    fn every_dialog_spec_has_a_close() {
+        let closable = QuillShell::closable_dialog_names();
+        let missing: Vec<_> = QuillShell::dialog_names()
+            .into_iter()
+            .filter(|name| !closable.contains(name) && !WITHOUT_CLOSE.contains(name))
             .collect();
         assert!(missing.is_empty(), "no close: {missing:?}");
     }

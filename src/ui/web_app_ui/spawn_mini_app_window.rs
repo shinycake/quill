@@ -23,11 +23,7 @@ impl QuillApp {
             );
             return;
         };
-        let account = self
-            .live
-            .as_ref()
-            .map(|live| live.driver.session.account.to_string())
-            .unwrap_or_else(|| "default".into());
+        let account = self.web_app_account();
         let mut command = Command::new(path);
         command
             .arg("--title")
@@ -313,7 +309,12 @@ impl QuillApp {
                         .is_some_and(|user| user.verification.is_verified);
                     if app.skip_confirmation
                         || (!app.request_write_access
-                            && !trust::needs_confirmation(bot_id, verified, false))
+                            && !trust::needs_confirmation(
+                                &self.web_app_account(),
+                                bot_id,
+                                verified,
+                                false,
+                            ))
                     {
                         self.request_web_app(then, false, cx);
                     } else {

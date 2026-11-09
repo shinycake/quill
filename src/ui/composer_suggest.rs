@@ -69,7 +69,6 @@ pub(super) struct SuggestUi {
     /// stay closed until the text changes (tdesktop hides its autocomplete
     /// on Esc until the next field change).
     pub stickers_dismissed: Option<(Option<ChatId>, String)>,
-    pub hashtags: RecentHashtags,
     /// The keyword answers' generation `active` was built from.
     built_generation: u64,
     /// The lone word whose delay ran out.
@@ -78,15 +77,6 @@ pub(super) struct SuggestUi {
     /// Installed emoji sets with contents when `active` was built.
     built_custom: usize,
     pub bar: EmojiBarUi,
-}
-
-impl SuggestUi {
-    pub fn load() -> Self {
-        Self {
-            hashtags: quill::settings::load_recent_hashtags(&QuillApp::appearance_paths()),
-            ..Self::default()
-        }
-    }
 }
 
 /// The text the keyword packs are searched with, and whether only whole
@@ -306,6 +296,14 @@ impl QuillApp {
     /// `active` from the query at the caret and what is known about it.
     fn rebuild_suggest_menu(&mut self, cx: &mut Context<Self>) {
         let generation = self.keyword_generation();
+        // The account's one list, shared by every window's composer.
+        self.recent_hashtags();
+        let empty = RecentHashtags::default();
+        let account = self.session().map(|session| session.account.clone());
+        let hashtags = account
+            .as_ref()
+            .and_then(|account| self.screen.recent_hashtags.of(account))
+            .unwrap_or(&empty);
         let ui = &self.composer_ui.suggest;
         let active = ui
             .query
@@ -319,7 +317,7 @@ impl QuillApp {
                 let recent = session
                     .map(|s| s.settings.media_prefs.recent_emoji.as_slice())
                     .unwrap_or_default();
-                let items = suggest_items(query, &ui.hashtags, keywords, recent);
+                let items = suggest_items(query, hashtags, keywords, recent);
                 (!items.is_empty()).then(|| ActiveSuggest {
                     query: query.clone(),
                     items,
@@ -545,17 +543,6 @@ impl QuillApp {
         let new_text = self.composer.read(cx).value().to_string();
         self.sync_composer_typing(&new_text);
         cx.notify();
-    }
-
-    /// Remember the hashtags of a message that is being sent.
-    pub(super) fn remember_sent_hashtags(&mut self, text: &str) {
-        if !self.composer_ui.suggest.hashtags.record_message(text) {
-            return;
-        }
-        quill::settings::save_recent_hashtags(
-            &Self::appearance_paths(),
-            &self.composer_ui.suggest.hashtags,
-        );
     }
 
     /// The popup above the composer: a list of hashtags, or a strip of

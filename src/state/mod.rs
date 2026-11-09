@@ -19,9 +19,7 @@ use crate::settings::{
     CallPrefs, ContactPrefs, LanguagePrefs, MediaPrefs,
 };
 use crate::sticker_suggest::StickerSuggestMode;
-use crate::story_page::{
-    ArchivedStories, ChatPageStories, StoryPageOp, StoryPageOpState, story_page_op_label,
-};
+use crate::story_page::{ArchivedStories, ChatPageStories, StoryPageOp, StoryPageOpState};
 use crate::telegram::client::OwnedEnvelope;
 use crate::telegram::envelope::{
     AnimationItem, AuthorizationState, Background, BotCommand, BotInfo, CallbackQueryAnswer,

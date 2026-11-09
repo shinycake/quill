@@ -70,11 +70,7 @@ frame.surfaces * | fade-out presences of bars, toasts and corners: what the last
 frame.window_state_save_pending | the window place save is due, for the main window
 frame.capture_blocked | screen capture protection is on, for the process
 frame.capture_notice_dismissed | its notice was dismissed, for the run
-frame.context_menu_focus | the context menu's focus handle, one menu at a time
-frame.context_menu_items * | focus handles and keys of the open menu's items, rebuilt with every menu
-frame.context_menu_was_open | the menu was open last frame
-frame.context_menu_previous_focus | the focus to give back when the menu closes
-frame.layer_focus * | weak focus handles of the open layer, restored when it closes
+frame.menu * | the window's menu focus hand-off (focus, items, open flag, focus to give back, layer focus); each chat window swaps in its own (WindowSlot::menu)
 frame.draft_timer * | the one debounced draft timer: a token the driver on screen ignores unless it issued it (`commit_debounced_draft`)
 language.open * | the language box: languages are the app's
 language.writes * | language file write counters

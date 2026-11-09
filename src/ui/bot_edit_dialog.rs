@@ -103,18 +103,32 @@ impl QuillApp {
             filled: false,
             local_error: None,
         });
-        // The texts arrive from the session on the poll; fill the fields once.
-        self.spawn_screen_in(window, cx, async move |this, cx| {
-            for _ in 0..100 {
+        // The texts arrive from the session on the poll; fill the fields
+        // once. Watched until they arrive or the box closes, however slow
+        // the link: Save stays off until then. The fields are filled with
+        // the window the box opened in, or the main window once that one
+        // closed (the box goes on there).
+        let opened_in = window.window_handle();
+        self.spawn_screen(cx, async move |this, cx| {
+            loop {
                 cx.background_executor()
                     .timer(Duration::from_millis(150))
                     .await;
-                let Ok(done) =
-                    this.update_in(cx, |this, window, cx| this.fill_bot_edit(window, cx))
-                else {
+                let Ok(main) = this.update(cx, |this, _| this.main_window.handle) else {
                     break;
                 };
-                if done {
+                let filled = [Some(opened_in), main]
+                    .into_iter()
+                    .flatten()
+                    .find_map(|handle| {
+                        handle
+                            .update(cx, |_, window, cx| {
+                                this.update(cx, |this, cx| this.fill_bot_edit(window, cx))
+                            })
+                            .ok()
+                            .and_then(Result::ok)
+                    });
+                if filled != Some(false) {
                     break;
                 }
             }
@@ -160,7 +174,12 @@ impl QuillApp {
     }
 
     fn save_bot_edit(&mut self, cx: &mut Context<Self>) {
-        let Some(dialog) = self.dialogs.bot_edit_dialog.as_ref() else {
+        let Some(dialog) = self
+            .dialogs
+            .bot_edit_dialog
+            .as_ref()
+            .filter(|dialog| dialog.filled)
+        else {
             return;
         };
         let bot_id = dialog.bot_id;
@@ -274,9 +293,12 @@ impl QuillApp {
             let muted = cx.theme().muted_foreground;
             let danger = cx.theme().danger;
             let edit = this.session().and_then(|s| s.bots.owned.edit.clone());
-            let loaded = edit
-                .as_ref()
-                .is_some_and(|e| e.name.is_some() && e.about.is_some());
+            // Save diffs the fields against the bot's texts: until the
+            // fields hold them, an empty field would clear the bot's.
+            let loaded = state.filled
+                && edit
+                    .as_ref()
+                    .is_some_and(|e| e.name.is_some() && e.about.is_some());
             let load_failed = edit.as_ref().is_some_and(|e| e.load_failed);
             let saving = edit.as_ref().is_some_and(|e| e.saving > 0);
             let saved = edit.as_ref().is_some_and(|e| e.saved > 0);

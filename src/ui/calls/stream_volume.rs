@@ -84,7 +84,7 @@ impl VolumePill {
 /// `on_key_down`. Only the window that holds the story viewer.
 pub(crate) fn intercept_live_story_volume_keys(cx: &mut Context<QuillApp>) {
     let app = cx.weak_entity();
-    cx.intercept_keystrokes(move |event, window, cx| {
+    crate::ui::passcode::intercept_keys_unlocked(cx, move |event, window, cx| {
         let keystroke = &event.keystroke;
         // Read at each key: a reset gives the main window a new id.
         let main = crate::ui::link_inbox::main_window_id(cx);

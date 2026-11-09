@@ -535,7 +535,7 @@ fn the_passcode_box_covers_a_chat_window_too(cx: &mut TestAppContext) {
     let h = new_app(cx);
     let chat_window = h.open_in_new_window(OTHER, cx);
     h.app
-        .update(cx, |app, _| app.account.passcode.locked = true);
+        .update(cx, |app, _| app.account.passcode.force_locked(true));
     cx.update_window(chat_window, |_, window, cx| {
         window.render_frame(cx);
         assert!(
@@ -549,7 +549,7 @@ fn the_passcode_box_covers_a_chat_window_too(cx: &mut TestAppContext) {
     })
     .unwrap();
     h.app
-        .update(cx, |app, _| app.account.passcode.locked = false);
+        .update(cx, |app, _| app.account.passcode.force_locked(false));
     cx.update_window(chat_window, |_, window, cx| {
         window.render_frame(cx);
         assert!(window.try_find("lock-submit").is_none());

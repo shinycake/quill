@@ -36,6 +36,12 @@ pub trait LevelSource {
 /// After a failed open, try the microphone again after this long.
 const REOPEN_AFTER: Duration = Duration::from_secs(5);
 
+/// How often the poll reads your level while the tap is open: one
+/// tgcalls window ([`crate::calls::audio_level::LEVEL_WINDOW_SAMPLES`]
+/// at 48 kHz, 91.7 ms). The capture writes the level without waking the
+/// poll loop, so the loop wakes for it.
+const READ_EVERY: Duration = Duration::from_millis(92);
+
 type Opened = Result<Box<dyn LevelSource + Send>, String>;
 
 /// Driver-side state of the level tap and the speaking decision.
@@ -54,6 +60,8 @@ pub struct CallAudio {
     /// The last open error, for the call window's note.
     pub error: Option<String>,
     speaking: bool,
+    /// When the poll last read the open source.
+    read_at: Option<Instant>,
 }
 
 impl Default for CallAudio {
@@ -69,6 +77,7 @@ impl Default for CallAudio {
             failed_at: None,
             error: None,
             speaking: false,
+            read_at: None,
         }
     }
 }
@@ -79,9 +88,23 @@ impl CallAudio {
         self.injected = Some(source);
     }
 
-    /// Milliseconds since the driver started, for the tracker.
-    fn now_ms(&self) -> u64 {
-        u64::try_from(self.clock.elapsed().as_millis()).unwrap_or(u64::MAX)
+    /// `at` in milliseconds on the tracker's clock.
+    fn ms(&self, at: Instant) -> u64 {
+        u64::try_from(at.saturating_duration_since(self.clock).as_millis()).unwrap_or(u64::MAX)
+    }
+
+    /// When the poll loop should wake to read the level: one level window
+    /// after the last read while the tap is open and `measuring`, or while
+    /// you are marked speaking (so the mark runs out on time).
+    pub(crate) fn deadline(&self, now: Instant, measuring: bool) -> Option<Duration> {
+        self.source.as_ref()?;
+        if !measuring && !self.speaking {
+            return None;
+        }
+        let since = self
+            .read_at
+            .map_or(READ_EVERY, |at| now.saturating_duration_since(at));
+        Some(READ_EVERY.saturating_sub(since))
     }
 
     /// The latest level and whether you count as speaking.
@@ -152,6 +175,7 @@ impl CallAudio {
     /// Close the microphone; an injected source goes back to waiting.
     fn close(&mut self) {
         self.opening = None;
+        self.read_at = None;
         let source = self.source.take();
         if self.injected_open {
             self.injected = source;
@@ -279,10 +303,14 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
     }
 
-    /// Run the level tap for the tracked group call and tell TDLib when
-    /// your speaking state changes. Called from the driver pump.
-    pub(crate) fn pump_call_audio(&mut self) -> Result<(), ConnectSendError> {
+    /// Per poll: run the level tap for the tracked group call and tell
+    /// TDLib when your speaking state changes. The level comes from the
+    /// microphone, not from Telegram, so this must not wait for an
+    /// update; a poll with no new level window still lets the speaking
+    /// state run out. Returns whether your speaking state changed.
+    pub(crate) fn pump_call_audio(&mut self, now: Instant) -> Result<bool, ConnectSendError> {
         self.drain_remote_audio_state();
+        let was_speaking = self.call_audio.speaking;
         let wanted = self
             .session
             .calls
@@ -306,42 +334,46 @@ impl<S: JsonSender> ConnectDriver<S> {
                     self.send_speaking(group_call_id, audio_source, false)?;
                 }
             }
-            return Ok(());
+            return Ok(was_speaking);
         };
         let capture_level = self
             .call_capture
             .enabled()
             .then(|| self.call_capture.level());
         self.call_audio.open(capture_level);
-        let Some(level) = self
-            .call_audio
-            .source
-            .as_ref()
-            .and_then(|source| source.take_level())
-        else {
-            return Ok(());
+        let Some(source) = self.call_audio.source.as_ref() else {
+            return Ok(false);
         };
-        if let Some(err) = self
-            .call_audio
-            .source
-            .as_ref()
-            .and_then(|source| source.error())
-        {
+        let (level, error) = (source.take_level(), source.error());
+        if let Some(err) = error {
             // The device went away: drop the tap and try again later.
             self.call_audio.close();
             self.call_audio.failed_at = Some(Instant::now());
             self.call_audio.error = Some(err);
-            return Ok(());
+            return Ok(false);
         }
-        let now = self.call_audio.now_ms();
-        let update = self.call_audio.tracker.update(level, false, now);
+        self.call_audio.read_at = Some(now);
+        let now_ms = self.call_audio.ms(now);
+        let update = match level {
+            Some(level) => self.call_audio.tracker.update(level, false, now_ms),
+            // No window since the last read (the poll ran early, or the
+            // capture stopped): the kept-for time still runs out.
+            None => self.call_audio.tracker.idle(now_ms),
+        };
         self.call_audio.speaking = update.speaking;
         if let Some(is_speaking) = update.send
             && audio_source != 0
         {
             self.send_speaking(group_call_id, audio_source, is_speaking)?;
         }
-        Ok(())
+        Ok(was_speaking != update.speaking)
+    }
+
+    /// [`CallAudio::deadline`]: the call microphone measures only while it
+    /// runs; the raw tap measures whenever it is open.
+    pub(crate) fn call_audio_deadline(&self, now: Instant) -> Option<Duration> {
+        let measuring = !self.call_capture.enabled() || self.call_capture.target().is_some();
+        self.call_audio.deadline(now, measuring)
     }
 
     /// Your own level and speaking state, for the call window.

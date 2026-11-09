@@ -175,6 +175,16 @@ impl<S: JsonSender> ConnectDriver<S> {
         if self.session.calls.active_group_call.is_some() {
             self.drop_group_call_locally();
         }
+        // Another conference takes over from a ringing invitation; the one
+        // being accepted stays until its join goes out.
+        let accepting = match &origin {
+            ConferenceOrigin::Invitation {
+                chat_id,
+                message_id,
+            } => Some((*chat_id, *message_id)),
+            _ => None,
+        };
+        self.decline_ringing_invite(accepting);
         self.forget_conference_crypto();
         let crypto = Arc::new(GroupCallCrypto::new(link));
         let extra = self.session.request(RequestPurpose::JoinConference, None);

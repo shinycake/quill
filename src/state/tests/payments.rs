@@ -52,6 +52,7 @@ fn payment_request_survives_form_and_validated_answers() {
     );
     // Continue: `validateOrderInfo` sent, request context refreshed.
     let extra = session.request(RequestPurpose::ValidateOrderInfo, Some(ChatId(51)));
+    session.payments.validate_request = Some(extra);
     session.payments.request = Some(PaymentRequest {
         invoice: crate::payment_invoice::InputInvoice::Message {
             chat_id: ChatId(51),

@@ -166,6 +166,50 @@ fn a_click_on_the_bars_in_full_screen_plays_or_pauses(cx: &mut TestAppContext) {
     assert_eq!(playing(vcx), before);
 }
 
+/// Every item of the viewer is deleted while its clip is in full screen
+/// (Delete, the sender, a self-destruct): the viewer closes the way Esc
+/// closes it, so the window leaves full screen and no timestamp start
+/// waits for the next open.
+#[gpui_kit::test]
+fn deleting_the_last_item_in_full_screen_gives_the_window_back(cx: &mut TestAppContext) {
+    let (app, mut vcx) = ready_viewer(cx);
+    let vcx = &mut vcx;
+    enter_fullscreen(&app, vcx);
+    assert_eq!(mode(&app, vcx), VideoFullscreen::Active);
+    app.update(vcx, |app, cx| {
+        let deleted: Vec<_> = app
+            .viewer
+            .state
+            .items()
+            .iter()
+            .map(|item| (item.chat_id, item.message_id))
+            .collect();
+        let item = app.viewer.state.current().cloned().expect("an item");
+        app.viewer.pending_seek = Some((
+            quill::ids::ChatMessage::new(item.chat_id, item.message_id),
+            5.0,
+        ));
+        let session = app.demo_session.as_mut().expect("the demo session");
+        for (chat, message) in deleted {
+            if let Some(history) = session.histories.get_mut(&chat.0) {
+                history.tombstones.insert(message.0);
+            }
+        }
+        cx.notify();
+    });
+    settle(vcx);
+    assert!(!is_open(&app, vcx), "the emptied viewer closed");
+    assert!(!mode(&app, vcx).is_on());
+    assert!(
+        !vcx.update(|window, _| window.is_fullscreen()),
+        "the window left full screen"
+    );
+    assert!(
+        app.read_with(vcx, |app, _| app.viewer.pending_seek.is_none()),
+        "a timestamp start does not wait for the next open"
+    );
+}
+
 /// Out of full screen the black around the media is the backdrop: a
 /// click there closes the viewer.
 #[gpui_kit::test]

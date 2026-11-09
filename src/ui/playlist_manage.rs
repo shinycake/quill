@@ -282,7 +282,7 @@ impl QuillApp {
                 label,
                 color.into(),
                 true,
-                &self.frame.context_menu_items,
+                &self.frame.menu.items,
                 cx,
             )
         };
@@ -448,9 +448,9 @@ impl QuillApp {
                 cx.notify();
             }),
         )
-        .layer(|layer| layer.track_focus(&self.frame.context_menu_focus))
+        .layer(|layer| layer.track_focus(&self.frame.menu.focus))
         .anchored(position, panel)
-        .focus_trap("playlist-menu-focus", &self.frame.context_menu_focus)
+        .focus_trap("playlist-menu-focus", &self.frame.menu.focus)
     }
 
     fn build_remove_playlist_track_dialog(

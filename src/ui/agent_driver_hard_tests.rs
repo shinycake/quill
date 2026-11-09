@@ -75,7 +75,7 @@ fn the_settings_and_lock_chords_open_nothing_for_an_agent(cx: &mut TestAppContex
         refusals.iter().any(|r| r.contains("lock Quill")),
         "{refusals:?}"
     );
-    assert!(!vcx.update(|_, cx| app.read(cx).account.passcode.locked));
+    assert!(!vcx.update(|_, cx| app.read(cx).account.passcode.is_locked()));
 
     // Minimise: the chord list refuses Cmd+M before the step runs, and off
     // macOS the handler refuses Ctrl+M, which the list does not name.
@@ -146,7 +146,7 @@ fn menu_routes_to_hard_surfaces_refuse_while_injecting(cx: &mut TestAppContext) 
         assert!(!app.account.accounts.open, "accounts");
         assert!(!app.account.passcode.open, "passcode");
         assert!(!app.twofa.open, "two-step verification");
-        assert!(!app.account.passcode.locked, "lock");
+        assert!(!app.account.passcode.is_locked(), "lock");
     });
 
     // Not injecting, the same entry opens.

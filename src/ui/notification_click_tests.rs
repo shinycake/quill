@@ -93,7 +93,7 @@ fn behind_the_passcode_a_click_opens_nothing(cx: &mut TestAppContext) {
     let vcx = &mut vcx;
     let chat = other_chat(&app, vcx);
     let before = app.update(vcx, |app, _| {
-        app.account.passcode.locked = true;
+        app.account.passcode.force_locked(true);
         app.open_chat_id()
     });
     click(&app, vcx, chat);

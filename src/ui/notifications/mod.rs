@@ -498,6 +498,10 @@ impl QuillApp {
         self.drain_account_notices();
         if ingested {
             self.check_video_pip(cx);
+            // A deleted voice note or song stops with its message.
+            self.check_playing_track(cx);
+            // A contact change invalidated the list the Contacts tab shows.
+            self.refetch_open_contacts();
             // The tray, the badge and the OS menus follow what was applied.
             quill::wake::CHROME.poke();
         }

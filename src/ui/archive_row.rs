@@ -260,7 +260,7 @@ impl QuillApp {
                 label,
                 text_menu().into(),
                 true,
-                &self.frame.context_menu_items,
+                &self.frame.menu.items,
                 cx,
             )
             .on_click(cx.listener(move |this, _, _, cx| {
@@ -339,7 +339,7 @@ impl QuillApp {
                 cx.notify();
             }),
         )
-        .layer(|layer| layer.track_focus(&self.frame.context_menu_focus))
+        .layer(|layer| layer.track_focus(&self.frame.menu.focus))
         .anchored(
             position,
             div()
@@ -348,6 +348,6 @@ impl QuillApp {
                 .a11y_tag(quill::agent::ui_driver::redact::REGION_MENU)
                 .child(panel),
         )
-        .focus_trap("archive-menu-focus", &self.frame.context_menu_focus)
+        .focus_trap("archive-menu-focus", &self.frame.menu.focus)
     }
 }

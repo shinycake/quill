@@ -12,6 +12,9 @@ use quill::lang::{keys, tr};
 impl QuillApp {
     /// One window's frame upkeep, with that window's state in place.
     pub(in crate::ui) fn per_window_upkeep(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        // The window's menus and layers take and give back its focus, and
+        // the menu's items claim their handles afresh for this frame.
+        self.menu_focus_upkeep(window, cx);
         // A resolved comment thread moves the view into its discussion group.
         self.advance_thread(window, cx);
         // A deleted message's reply or edit bar goes.
@@ -41,6 +44,38 @@ impl QuillApp {
         self.ensure_live_location_tick(cx);
         // A clicked mention, hashtag, command or link (`entity_links`).
         self.run_pending_link(window, cx);
+        self.gift_boxes_upkeep(window, cx);
+    }
+
+    /// The gift and Grams boxes' follow-ups, each in the window that hosts
+    /// its kit dialog (`dialog_may_show_in`): a box opened in a chat window
+    /// goes on while the main window is minimized or closed, and its
+    /// toasts and password field are that window's.
+    fn gift_boxes_upkeep(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        use crate::ui::shell::DialogKind;
+        let here = self.windows.scope;
+        // Gift market: an auction whose state arrived, the followed
+        // auction, the forge, toasts and sticker downloads.
+        if self
+            .windows
+            .dialog_may_show_in(DialogKind::GiftMarket, here)
+        {
+            self.gift_market_frame_upkeep(window, cx);
+        }
+        // Gift transfer: Fragment's export page, the transferred toast.
+        if self
+            .windows
+            .dialog_may_show_in(DialogKind::GiftTransfer, here)
+        {
+            self.gift_transfer_frame_upkeep(window, cx);
+        }
+        // Grams: Fragment's withdrawal page, the password field.
+        if self
+            .windows
+            .dialog_may_show_in(DialogKind::GramsWithdraw, here)
+        {
+            self.grams_withdraw_frame_upkeep(window, cx);
+        }
     }
 
     /// The per-window half of the poll loop, run once for every window

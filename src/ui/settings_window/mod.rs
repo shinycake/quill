@@ -78,10 +78,10 @@ impl QuillApp {
         quill::wake::UPDATES.poke();
     }
 
+    /// The one way Settings closes: the page on screen is left, so what it
+    /// opened over Settings (Log out?, the privacy rule editor) goes with it.
     pub(super) fn close_settings(&mut self) {
-        if let Some(page) = self.settings.page {
-            self.leave_settings_page(page);
-        }
+        self.leave_settings_page(self.shown_settings_page());
         self.settings.search.close();
         self.settings.arrival = None;
         self.settings.page_scroll.set_offset(point(px(0.), px(0.)));
@@ -103,9 +103,7 @@ impl QuillApp {
         if self.settings.page == Some(page) {
             return;
         }
-        if let Some(old) = self.settings.page {
-            self.leave_settings_page(old);
-        }
+        self.leave_settings_page(self.shown_settings_page());
         self.settings.arrival = None;
         self.settings.page_scroll.set_offset(point(px(0.), px(0.)));
         self.settings.page = Some(page);
@@ -118,7 +116,7 @@ impl QuillApp {
             }
             Page::Devices => self.fetch_sessions(),
             Page::Connection => self.fetch_proxy_list(),
-            Page::DataStorage => self.forget_storage_sliders(),
+            Page::DataStorage => self.arrive_data_storage(),
             // A box left from another account's visit (a switch leaves no
             // page) goes: the next render makes a fresh one, which asks
             // this account's TDLib for its packs.
@@ -141,8 +139,17 @@ impl QuillApp {
         }
     }
 
+    /// The page a wide window shows: Account until one is chosen. Leaving
+    /// it on a narrow window, which shows the list then, drops nothing.
+    fn shown_settings_page(&self) -> Page {
+        self.settings.page.unwrap_or(Page::Account)
+    }
+
+    /// What a page opened over Settings goes when the page does.
     pub(super) fn leave_settings_page(&mut self, page: Page) {
         match page {
+            Page::Account => self.settings.log_out_confirm = false,
+            Page::Privacy => self.close_privacy_layers(),
             Page::Notifications => self.leave_notification_settings(),
             Page::Language => self.leave_language_settings(),
             Page::Devices => self.leave_devices(),
@@ -452,3 +459,7 @@ impl QuillApp {
 #[cfg(test)]
 #[cfg(feature = "demo-capture")]
 mod tests;
+
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+mod close_tests;

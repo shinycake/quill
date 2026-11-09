@@ -87,6 +87,7 @@ import re
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import ui_statics  # noqa: E402
 import view_reads  # noqa: E402
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent / "src" / "ui"
@@ -526,6 +527,15 @@ def main() -> int:
             "(src/state/session_views.rs); or, when the view in place is the right one,\n"
             "add `// view-in-place: <why>` on the line or one of the three above.\n"
         )
+    shared_statics = ui_statics.problems(root.parent.parent)
+    if shared_statics:
+        print("\n".join(shared_statics))
+        print(
+            f"\n{len(shared_statics)} static(s) in src/ui are shared by every window unchecked.\n"
+            "State that paint or a frame writes for its window goes in a map keyed by\n"
+            "WindowId (src/ui/selectable_text.rs, src/ui/spoiler_fx.rs); state that is\n"
+            "safe to share is listed in scripts/ui-statics.txt with the reason.\n"
+        )
     unrouted = unrouted_opens(root, texts)
     if unrouted:
         print("\n".join(unrouted))
@@ -567,11 +577,12 @@ def main() -> int:
             "docs/contributing/structure.md (Window scope)."
         )
         return 1
-    if screen_failures or main_only or view_failures or unrouted:
+    if screen_failures or main_only or view_failures or unrouted or shared_statics:
         return 1
     print("window scope: OK")
     print("screen scope: OK")
     print("core view reads: OK")
+    print("ui statics: OK")
     return 0
 
 
