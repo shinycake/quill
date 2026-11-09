@@ -70,3 +70,33 @@ fn a_failed_page_is_asked_for_again_at_the_next_scroll(cx: &mut TestAppContext) 
     });
     assert_eq!(failed_offset(&app, cx), Some(20));
 }
+
+/// Recent members failed, so the block falls back to the administrators.
+/// That fallback is asked once per open, not on every frame, so a list that
+/// fails too does not loop; Retry asks again (round 12, area B2, finding 1).
+#[gpui_kit::test]
+fn the_administrators_fallback_is_asked_once_until_retry(cx: &mut TestAppContext) {
+    let app = demo(cx);
+    let chat = open_group_panel(&app, cx);
+    let asked = |app: &Entity<QuillApp>, cx: &mut TestAppContext| {
+        app.read_with(cx, |app, _| app.inline_members.admins_asked)
+    };
+    app.update(cx, |app, cx| {
+        if let Some(session) = app.session_mut() {
+            for filter in [MemberListFilter::Recent, MemberListFilter::Administrators] {
+                session.groups.supergroup_members.insert(
+                    (chat, filter),
+                    quill::state::SupergroupMembersFetch::Failed("CHANNEL_PRIVATE".into()),
+                );
+            }
+        }
+        app.maybe_load_more_inline(false, cx);
+    });
+    assert!(asked(&app, cx), "the fallback was asked");
+    app.update(cx, |app, cx| {
+        app.inline_members.admins_asked = true;
+        app.maybe_load_more_inline(false, cx);
+        app.inline_members_stale(&[chat], cx);
+    });
+    assert!(!asked(&app, cx), "Retry may ask again");
+}

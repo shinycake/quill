@@ -116,6 +116,7 @@ impl QuillApp {
         };
         if stale.contains(&shape.chat.0) {
             self.inline_members.failed_offset = None;
+            self.inline_members.admins_asked = false;
             self.inline_members_fetch(shape, cx);
             cx.notify();
         }
@@ -180,15 +181,20 @@ impl QuillApp {
             self.inline_members.retry_at_scroll = false;
             self.inline_members.failed_offset = None;
         }
-        // Members hidden from the viewer: show the administrators.
+        // Members hidden from the viewer: show the administrators, asked
+        // once per open (or Retry), so a failing list is not asked every
+        // frame.
         if self.inline_members_filter(shape) == MemberListFilter::Administrators
-            && let Some(live) = self.live.as_mut()
+            && !self.inline_members.admins_asked
         {
-            let _ = live.driver.fetch_supergroup_members(
-                shape.chat,
-                MemberListFilter::Administrators,
-                "",
-            );
+            self.inline_members.admins_asked = true;
+            if let Some(live) = self.live.as_mut() {
+                let _ = live.driver.fetch_supergroup_members(
+                    shape.chat,
+                    MemberListFilter::Administrators,
+                    "",
+                );
+            }
         }
         let Some((loaded, total, filter)) = self.inline_members_counts(shape) else {
             return;

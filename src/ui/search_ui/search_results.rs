@@ -369,7 +369,7 @@ impl QuillApp {
                 for (chat_id, message_id, title, preview, date) in messages {
                     let photo = self.chat_photo_for_row(chat_id);
                     let row = search_result_row(
-                        ("search-msg", message_id.0 as u64),
+                        super::search_hit_id("search-msg", chat_id, message_id),
                         title,
                         preview,
                         Some(date),

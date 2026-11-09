@@ -27,6 +27,10 @@ pub(crate) struct InlineMembersUi {
     /// `member_more_failed`): the next scroll asks for it again. A page
     /// that came back empty stays at `failed_offset`.
     pub(super) retry_at_scroll: bool,
+    /// The Administrators fallback was asked for this group since the block
+    /// opened or Retry was pressed: a failed answer is not asked again on
+    /// every frame.
+    pub(super) admins_asked: bool,
     pub(super) snapshot: RefCell<Option<MembersSnapshot>>,
 }
 
@@ -40,6 +44,7 @@ impl InlineMembersUi {
             chat: None,
             failed_offset: None,
             retry_at_scroll: false,
+            admins_asked: false,
             snapshot: RefCell::new(None),
         }
     }
@@ -50,6 +55,7 @@ impl InlineMembersUi {
         self.chat = chat;
         self.failed_offset = None;
         self.retry_at_scroll = false;
+        self.admins_asked = false;
         self.snapshot.replace(None);
     }
 }

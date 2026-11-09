@@ -41,11 +41,19 @@ use quill::telegram::client::copy_and_parse;
 use quill::telegram::envelope::MessageSender;
 use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
+/// A search hit's element id. Message ids are per chat in supergroups and
+/// channels, so the chat is part of it: two hits that share a message id
+/// must not share GPUI element state (the first row's click capture would
+/// take the other's mouse-down).
+pub(super) fn search_hit_id(prefix: &str, chat: ChatId, message: MessageId) -> ElementId {
+    ElementId::Name(format!("{prefix}-{}-{}", chat.0, message.0).into())
+}
+
 /// One search hit: avatar, title with the date (message hits), and the
 /// preview with the query's matches highlighted — the chat-row anatomy.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn search_result_row(
-    id: (&'static str, u64),
+    id: impl Into<ElementId>,
     title: String,
     preview: String,
     date: Option<i32>,
