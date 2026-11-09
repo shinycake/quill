@@ -235,7 +235,7 @@ x11rb = { version = "0.13", default-features = false, features = ["record", "com
 # Screen sharing (src/calls/capture/screen_linux.rs): the screen cast portal on
 # Wayland (async-io and futures-lite are declared above);
 # libpipewire is loaded at run time (pipewire_dl.rs), so no build dependency.
-ashpd = { version = "0.13", optional = true, default-features = false, features = ["async-io", "screencast"] }
+ashpd = { version = "0.14", optional = true, default-features = false, features = ["async-io", "screencast"] }
 # A GPU lost for good ends in the launch failure alert (src/ui/startup_failure.rs):
 # the renderer GPUI's Linux backend already links reports it.
 gpui_wgpu = { package = "gpui-pre-wgpu", version = "=0.3.11", optional = true, default-features = false }

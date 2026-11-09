@@ -30,7 +30,7 @@ ignore = [
   { id = "RUSTSEC-2026-0192", reason = "ttf-parser: only via GPUI's fontdb and usvg" },
   # Through syntect 5.3 (GPUI Kit's `syntect` feature, which reads its syntax set with bincode 1).
   { id = "RUSTSEC-2025-0141", reason = "bincode: only via syntect" },
-  # Folded into zbus 6; held at zbus 5 with ashpd, ksni and GPUI (docs/dependency-updates.md).
+  # Folded into zbus 6; Quill's own zbus stays on 5 with ksni, accesskit_unix and GPUI (docs/dependency-updates.md).
   { id = "RUSTSEC-2026-0371", reason = "zbus_names: zbus 5, held" },
   { id = "RUSTSEC-2026-0370", reason = "zvariant: zbus 5, held" },
   { id = "RUSTSEC-2026-0372", reason = "zvariant_derive: zbus 5, held" },
