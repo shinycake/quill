@@ -3329,3 +3329,118 @@ go far enough. This round fixes them at their source.
   - None of them waits on time.
 - **Not tested.** Redial (it needs a live driver to dial). The rewiring of
   the two buttons is covered only by the build.
+
+### Phase 16 (area C)
+
+Round 16 of the review, area C (the rest of `src/ui`), on
+`claude/sm-review16-c`. The numbers are the review's finding numbers. All
+thirteen were fixed. Three of them (4, 8, 9) were round-15 fixes that
+stopped short, and this round finishes them at the source. The parked
+voice note or song that resumes under the lock (round 15, #7) stays as it
+is, since tdesktop does the same.
+
+- **Edit Contact waits for the note (1).** The box knows whether its note
+  is known (`ContactNote::{Waiting, Seeded}`). Opened before the contact's
+  full info, it asks for it, shows "Loading…" as the note's placeholder,
+  and the frame upkeep of the window hosting it seeds the note when the
+  info lands (`edit_contact_note_upkeep`), keeping anything typed
+  meanwhile. Save while waiting with an empty note asks again and keeps
+  the box open, so an unknown note is never saved over the real one.
+- **The account's farewell flushes the community undo (2).** `AdminUi`'s
+  farewell calls `flush_and_close_community_box` first, so an answer to a
+  Pending Requests entry still in its undo time is sent for the account
+  that made it, as closing the box does.
+- **Earn paging is one state (3).** `PageLoad { Unasked, Loading, Ready,
+  Failed }` replaces the `loaded`/`loading` bools of the TON and Stars
+  histories and the affiliate program lists. A failed page is not asked
+  again by the scroll upkeep (`may_page`); the program list shows a Retry
+  row (`programs_retry_row`), and a failed first page retries from the
+  start.
+- **The passkey tick refuses under the lock (4).** The tick is a task the
+  passkeys state holds (`PasskeysUi::ticker`), not a bool. No tick starts
+  while locked, `tick_passkey_ceremony` refuses and closes the ceremony,
+  and the lock drops the task and the session's ceremony state with the
+  box (`close_passkey_ceremony_for_lock`).
+- **Reset All keeps the scopes (5).** TDLib answers
+  `resetAllNotificationSettings` after sending the updates with the reset
+  scope settings, so clearing the scope cache at the `ok` dropped the
+  fresh values. The `ok` now changes nothing.
+- **A drag-pan ends with its button (6).** A move with no left button
+  held ends the viewer's drag (`viewer_drag_moved`), for a release off the
+  picture whose mouse-up never fired, and closing the viewer drops it.
+- **The public links box lists afresh (7).** Opening the limit box resets
+  the created public chats unless a load is running, the "too many public
+  links" error opens the box the same way, and a failed load shows Retry
+  (`retry_created_public_chats`) instead of an empty list.
+- **The Business wait is a Fetch (8).** `BusinessSettingsState::own_info`
+  is a `Fetch<()>`: begun when a Business screen opens without the own
+  full info, settled when the info lands (`settle_own_full_info`), failed
+  by the error answer or a send error (`fail_own_full_info`). The waiting
+  screen shows the error with a Retry button (`retry_business_info`), so
+  it no longer says "Loading…" forever.
+- **The call window answers a second call (9).** The swap box is
+  session-wide and shows in the window of the last press, which can be a
+  main window hidden to the tray or behind the call. The call window now
+  draws the swap card too (`swap_call_window_card`, from the same builder
+  as the lock card), locked or not.
+- **Notification exceptions are a Fetch per scope (10).**
+  `notification_exceptions: HashMap<Scope, Fetch<Vec<i64>>>` replaces the
+  list plus the `loading` set. A failed load shows its reason and Retry
+  (`retry_notification_exceptions`), and the Notifications page asks for
+  every scope it shows.
+- **The bot verify box starts clean per chat (11).** Moving to the Add
+  step resets the description to the bot's default
+  (`set_bot_verify_step`), so text typed for one chat does not carry to
+  the next.
+- **Community outcomes stay with their screen (12).** `put_on_screen`
+  drops the communities' finished-request outcomes
+  (`forget_outcomes`), so a toast for the account that left does not show
+  on the next one.
+- **A let-go soundtrack is tapped again (13).** A clip whose audio output
+  let go of its tap (no device at attach, or the device was lost) gets a
+  new tap once an output is up (`Player::reattach_audio_tap`, called from
+  `attach_sound`), instead of running silent on its wall clock.
+- **Fields kept in step by hand.**
+  - `PasscodeUi::locked` + `locks` -> `LockState { Unlocked { locks },
+    Locked { locks } }`; `set_lock_flag` is still the only writer, and
+    `lock_surfaces.py` checks writes to `lock_state`.
+  - `CommunitiesUi::pending_ban` + `awaiting_new_chat` -> one
+    `waiting: Option<CommunityWait>`; the chooser closes through
+    `flush_and_close_community_box`.
+  - `CommunitiesUi::requests_scroll` + `requests_asked` ->
+    `RequestsView`, keyed by community (`of`, `reset`).
+  - `AdminUi::event_log_filter` moved into the Group Settings box
+    (`GroupSettingsDialog::event_log_filter`), dropped with any other page.
+  - `InvitePages` names no chat once its last page closes
+    (`drop_chat_if_empty`).
+  - `GroupSettingsDialog::revoked_open`: its doc now says it is the
+    disclosure only (the fetch is `InviteLinkFetch`).
+  - Not converted this round: the media viewer clip and controls fields,
+    the Premium hub's parallel fetch fields, `AudioEngine`, `PlaybackUi`,
+    `ThemeGifts`, `ton_unavailable`, the Open QR bools,
+    `BotCreateDialog::submitted`, `BotEditDialog::filled`, the mute box
+    and `tone_upload_target`, and the groups-in-common maps. They stay in
+    `scripts/implicit-state-baseline.txt`.
+- **Guards.** `scripts/lock-surfaces.txt` pins `tick_passkey_ceremony` as
+  `refuses`. `scripts/lock_surfaces.py` treats a write to `lock_state` as
+  a lock-flag write. The baseline lost the earn `loaded`/`loading` lines.
+- **Tests.**
+  - `edit_contact_waits_for_the_note_before_saving`
+  - `a_note_typed_while_waiting_is_kept`
+  - `an_answer_in_its_undo_time_is_sent_when_the_account_leaves`
+  - `a_failed_page_is_not_asked_again_by_itself`
+  - `a_failed_first_page_retries_from_the_start`
+  - `no_ceremony_ticks_under_the_lock`
+  - `reset_all_notification_settings_keeps_the_scopes_its_updates_set`
+  - `a_drag_released_off_the_picture_stops_panning`
+  - `the_public_links_box_lists_the_chats_afresh_each_time`
+  - `the_business_wait_ends_with_the_own_full_info_error_or_answer`
+  - `the_call_window_answers_a_second_call`
+  - the notification exception tests, moved to `Fetch`
+  - `a_description_typed_for_one_chat_does_not_carry_to_the_next`
+  - `outcomes_of_a_left_screen_are_forgotten`
+  - `a_let_go_soundtrack_is_tapped_again`
+  - `closing_the_last_page_names_no_chat`
+  - None of them waits on time.
+- **The flaky `settings::media` test** was already fixed on the merged
+  base (`Start the media prefs test from an empty folder`).

@@ -42,9 +42,11 @@ impl QuillApp {
     /// `ready-business-loading`: the Greeting screen opened before the own
     /// account's full info arrived. `QUILL_DEMO_BUSINESS_INFO=landed`: the
     /// info lands and the next frame fills the screen in with the saved
-    /// settings (`business_info_upkeep`).
+    /// settings (`business_info_upkeep`). `=failed`: the info's request
+    /// failed; the screen shows the error and Retry.
     fn demo_business_loading(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let landed = std::env::var("QUILL_DEMO_BUSINESS_INFO").is_ok_and(|v| v == "landed");
+        let info = std::env::var("QUILL_DEMO_BUSINESS_INFO").unwrap_or_default();
+        let landed = info == "landed";
         if let Some(session) = self.demo_session.as_mut() {
             session.payments.premium_option = Some(true);
             session.my_user_id = Some(777);
@@ -56,6 +58,15 @@ impl QuillApp {
         }
         self.open_business(window, cx);
         self.business_go(View::Greeting, window, cx);
+        if info == "failed"
+            && let Some(session) = self.demo_session.as_mut()
+        {
+            session
+                .settings
+                .business
+                .own_info
+                .fail(quill::lang::tr(quill::lang::keys::Q_NOTES_NO_CONNECTION));
+        }
         if landed && let Some(session) = self.demo_session.as_mut() {
             session.users_state.user_full_infos.insert(
                 777,

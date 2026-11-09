@@ -4,7 +4,8 @@
 //! disabled. `QUILL_DEMO_QUERY=<text>` types a search: the contacts are
 //! filtered by name and two people outside your contacts come from the
 //! "server". The call window opens beside the main window; capture it
-//! with `QUILL_DEMO_CAPTURE_WINDOWS=1`.
+//! with `QUILL_DEMO_CAPTURE_WINDOWS=1`. `QUILL_DEMO_SECOND_CALL=1` skips
+//! the box and rings a second call in, answerable from the call window.
 #![deny(clippy::indexing_slicing)]
 
 use super::call_video_demo::{CALL, PEER, seed_video_call};
@@ -77,7 +78,19 @@ impl QuillApp {
             }
             seed_people(session, &query, &sink, &self.demo_ui.seq);
         }
-        self.call_boxes.add_people = Some(AddPeopleBox::with_query(CALL, query));
+        // `QUILL_DEMO_SECOND_CALL=1`: no box; a second call rings in and
+        // the call window shows its card (`swap_call_window_card`).
+        if std::env::var("QUILL_DEMO_SECOND_CALL").is_ok_and(|v| v == "1") {
+            if let Some(session) = self.demo_session.as_mut() {
+                session.calls.second_call = quill::state::SecondCall::Prompt {
+                    call_id: CALL + 1,
+                    user_id: 4511,
+                    is_video: false,
+                };
+            }
+        } else {
+            self.call_boxes.add_people = Some(AddPeopleBox::with_query(CALL, query));
+        }
         cx.notify();
     }
 }

@@ -28,6 +28,7 @@ src/ui/os_open.rs::open_file | refuses | a file opened by a late answer would sh
 src/ui/os_open.rs::open_file_then | refuses | as open_file; the caller hears the answer after the unlock
 src/ui/os_open.rs::reveal_in_folder_or | refuses | as open_file
 src/ui/os_open.rs::reveal_from | refuses | as open_file
+src/ui/security/passkey_ceremony.rs::tick_passkey_ceremony | refuses | the passkey ceremony's tick: under the lock it closes the ceremony instead of driving the key (round 16)
 src/ui/os_open.rs::open_mail_to | refuses | as open_link
 src/ui/os_open.rs::open_system_settings | refuses | as open_link
 src/ui/call_add_people.rs::open_call_add_people | refuses | the call window stays answerable under the lock, but Add People would list the contacts; tdesktop asks for the passcode first (`Panel::addPeople`)

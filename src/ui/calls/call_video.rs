@@ -357,7 +357,7 @@ impl Render for CallWindowRoot {
             .children(swap_card.map(|card| {
                 div()
                     .absolute()
-                    .top(px(WINDOW_CONTROLS + 8.))
+                    .top(px(WINDOW_CONTROLS + 24.))
                     .left_0()
                     .right_0()
                     .flex()
