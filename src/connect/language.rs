@@ -49,10 +49,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         let extra = self
             .session
             .request(purpose(LanguagePurpose::TargetInfo), None);
-        self.session.settings.language.packs_loading = true;
+        self.session.settings.language.packs.begin();
         let result = self.send_json_request(extra, &get_localization_target_info(extra, false));
         if result.is_err() {
-            self.session.settings.language.packs_loading = false;
+            self.session.settings.language.packs.cancel();
         }
         result
     }

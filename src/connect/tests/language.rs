@@ -299,7 +299,7 @@ fn startup_points_tdlib_at_tdesktop_strings_and_restores_the_saved_pack() {
 fn the_pack_list_comes_from_the_localization_target() {
     let mut f = Fixture::new();
     let extra = f.driver.request_language_packs().unwrap();
-    assert!(f.driver.session.settings.language.packs_loading);
+    assert!(f.driver.session.settings.language.packs.is_loading());
     assert_eq!(f.sent()[0]["@type"], "getLocalizationTargetInfo");
     f.feed(
         json!({"@type":"localizationTargetInfo","@extra":extra.as_extra(),"language_packs":[
@@ -307,8 +307,18 @@ fn the_pack_list_comes_from_the_localization_target() {
          "plural_code":"en","is_official":true}]}),
     );
     let state = &f.driver.session.settings.language;
-    assert!(!state.packs_loading);
-    assert_eq!(state.packs.len(), 1);
+    assert!(!state.packs.is_loading());
+    assert_eq!(state.packs.data().map(Vec::len), Some(1));
+}
+
+#[test]
+fn a_refused_pack_list_stops_loading_and_says_why() {
+    let mut f = Fixture::new();
+    let extra = f.driver.request_language_packs().unwrap();
+    f.feed(json!({"@type":"error","@extra":extra.as_extra(),"code":500,"message":"Timeout"}));
+    let packs = &f.driver.session.settings.language.packs;
+    assert!(!packs.is_loading());
+    assert!(packs.error().is_some());
 }
 
 fn position(chat: i64, source: Value) -> Value {

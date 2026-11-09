@@ -117,6 +117,21 @@ pub struct StoryManageState {
     pub story: Option<(i64, i32)>,
     /// The call in flight.
     pub request: Option<RequestId>,
+    /// The last call to settle and its failure, so whoever sent it can
+    /// tell its own answer from a later call's.
+    pub settled: Option<(RequestId, Option<String>)>,
+}
+
+/// What became of one management call (`StoryManageState::outcome`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StoryManageOutcome {
+    /// Still on its way.
+    InFlight,
+    Saved,
+    /// Refused; the reason is in `StoryManageState::error`.
+    Failed,
+    /// Let go without an answer (another call took the slot).
+    Lost,
 }
 
 impl StoryManageState {
@@ -136,7 +151,21 @@ impl StoryManageState {
         }
         self.pending = false;
         self.request = None;
+        self.settled = Some((request, error.clone()));
         self.error = error;
+    }
+
+    /// What became of `request`, matched by its id: a later call's
+    /// answer is never taken for it.
+    pub fn outcome(&self, request: RequestId) -> StoryManageOutcome {
+        if self.request == Some(request) {
+            return StoryManageOutcome::InFlight;
+        }
+        match &self.settled {
+            Some((id, None)) if *id == request => StoryManageOutcome::Saved,
+            Some((id, Some(_))) if *id == request => StoryManageOutcome::Failed,
+            _ => StoryManageOutcome::Lost,
+        }
     }
 
     /// The story's call could not be made: `error` says why. Any call in

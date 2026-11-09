@@ -89,7 +89,7 @@ impl QuillApp {
             .chats
             .get(&chat_id.0)
             .is_some_and(|chat| chat.kind.is_channel());
-        let current = session.current_call_for_create(self.group_call_screen.stream_joining);
+        let current = session.current_call_for_create(self.group_call_screen.joining_call());
         match before_create(current, chat_id, to_channel) {
             BeforeCreate::Proceed => self.continue_group_call_create(chat_id, kind, window, cx),
             BeforeCreate::ShowCurrent => {
@@ -413,7 +413,7 @@ impl QuillApp {
     /// nothing, and TDLib would refuse the leave with an error that lands
     /// on the new call.
     pub(in crate::ui) fn end_current_call_for_create(&mut self, cx: &mut Context<Self>) {
-        let joining = self.group_call_screen.stream_joining;
+        let joining = self.group_call_screen.joining_call();
         let Some(session) = self.session() else {
             return;
         };

@@ -249,6 +249,16 @@ fn channel_auto_translate_is_parsed_gated_and_toggled() {
     );
     h.ingest(&json);
     assert!(h.driver.session.chat_auto_translate(ChatId(13)));
+    // The Edit box that asked for it keeps its Settings error, so it does
+    // not close as saved.
+    let error = h
+        .driver
+        .session
+        .groups
+        .info_edit_errors
+        .get(&13)
+        .expect("the refusal is recorded for the Edit box");
+    assert_eq!(error.field, crate::state::GroupInfoField::Settings);
 }
 
 /// `updateMessageContent` of message 42 with `text`.

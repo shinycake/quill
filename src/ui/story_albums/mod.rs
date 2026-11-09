@@ -546,7 +546,7 @@ impl QuillApp {
             open.privacy_edit = value;
         }
         if let Some(open) = self.stories.viewer_ui_mut() {
-            open.privacy_sent = false;
+            open.privacy_request = None;
         }
         self.stories
             .privacy_user_search
@@ -661,7 +661,7 @@ impl QuillApp {
                     .child(list),
             );
         }
-        let busy = self.stories.viewer_ui().privacy_sent;
+        let busy = self.stories.viewer_ui().privacy_request.is_some();
         // No second call for this story while one is in flight.
         let manage_busy = self
             .stories
@@ -709,7 +709,7 @@ impl QuillApp {
     /// `can_set_privacy_settings`; the tick closes the panel on
     /// success.
     pub(super) fn story_privacy_save(&mut self, cx: &mut Context<Self>) {
-        if self.stories.viewer_ui().privacy_sent {
+        if self.stories.viewer_ui().privacy_request.is_some() {
             return;
         }
         let Some(edit) = self.stories.viewer_ui().privacy_edit.clone() else {
@@ -746,9 +746,9 @@ impl QuillApp {
                 edit.story_id,
                 settings,
             ) {
-                Ok(_) => {
+                Ok(request) => {
                     if let Some(open) = self.stories.viewer_ui_mut() {
-                        open.privacy_sent = true;
+                        open.privacy_request = Some(request);
                     }
                 }
                 Err(_) => {

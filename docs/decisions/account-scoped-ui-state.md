@@ -3941,3 +3941,59 @@ lost the four `SendGiftState` lines and `SettingsState::read_date_loading`.
 Neither fix has a visible result in the offline demos: both are races
 between two TDLib answers, which the demos do not replay. None of the
 tests waits on time.
+
+### Phase 18 (area C)
+
+Round 18 review of the rest of `src/ui`. Fixed here: findings 1, 4, 6, 7, 9
+and 11 and the listed dodges outside the widget code (findings 2, 3, 5, 8
+and 10 are widget items another fixer owns).
+
+- **Stream boxes belong to their call (1).** `StreamWindow::close_boxes`
+  closes the box over the stream window and hides the revealed key. It runs
+  from `sync_group_call_boxes` when the call tracked changes, beside the
+  other boxes the call owns, and from `StreamWindow::clear`. End, Revoke and
+  the key warning therefore never act on the stream that replaced the one
+  they were opened for.
+- **Stream photo (6).** A chat without a photo now clears the blurred photo
+  instead of returning early and leaving the previous chat's behind it.
+  (The cache is keyed by the photo's file path, which is already unique per
+  photo, so no chat id was added to the key.)
+- **Auto-translate refusal (4).** `ToggleSupergroupAutoTranslate` is a
+  Messages purpose, so `apply_messages_error` now also calls
+  `record_group_info_edit_error`; the Edit box keeps its Settings error
+  instead of closing as saved.
+- **Proxy list box (7).** The box is the sign-in pane's: its dialog is
+  drawn only while `pane_mode() == Connecting` (`proxy_list_box_shown`),
+  and `sync_proxy_list_box` clears the bool each frame once the pane is
+  gone, so it neither covers the chat list nor returns on a later
+  reconnect.
+- **Agent filter (9).** `AgentUi::pick_account` is the one way to change
+  the picked account; a different account resets the activity filter.
+- **Premium preview files (11).** The two polling tasks are gone.
+  `sync_premium_preview_files` runs each main frame while a preview page
+  shows and asks for the clip and the example stickers that are not on
+  disk (`download_file` skips requested and finished files), so a slow
+  answer is picked up whenever it lands.
+- **Dodges converted.**
+  - `stream_joining` + `stream_join_timeout` are one field,
+    `Option<StreamJoining { call, timeout task }>`; dropping it ends the
+    wait.
+  - `hide_armed` + `hide_task` are `StreamWindow::hide_timer`, the task
+    itself.
+  - `StoryViewerUi::cover_sent` / `privacy_sent` are `cover_request` /
+    `privacy_request` (the request id). `StoryManageState` keeps the last
+    settled call, and `outcome(request)` says InFlight, Saved, Failed or
+    Lost, so another call's answer never closes the panel.
+  - `language.packs` + `packs_loading` are `Fetch<Vec<LanguagePackInfoData>>`;
+    a refused list now ends the wait and keeps its reason.
+  - `SendGiftState` was converted by area A.
+- **Baseline.** Lost `LanguageState::packs_loading` (and `+error`),
+  `StoryViewerUi::cover_sent`, `StoryViewerUi::privacy_sent` and
+  `StreamWindow::hide_armed`.
+- **Tests.** `a_switch_to_another_stream_closes_the_boxes`,
+  `the_proxy_list_box_ends_with_the_sign_in_screen`,
+  `picking_another_account_resets_the_activity_filter`,
+  `a_refused_pack_list_stops_loading_and_says_why`, and the Auto-translate
+  refusal assertion in `channel_auto_translate_is_parsed_gated_and_toggled`.
+  None waits on time. No test for 6 and 11 (they need a photo file and a
+  download answer the offline harness cannot produce).
