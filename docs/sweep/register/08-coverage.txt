@@ -48,3 +48,16 @@ src/ui/background_accounts/clicks.rs 230 read
 src/ui/background_accounts/closing.rs 212 read
 src/ui/background_accounts/deleting.rs 343 read
 src/ui/background_accounts/mod.rs 595 read
+src/ui/calls/lock_layers.rs 131 read
+src/ui/calls/mod.rs 965 read
+src/ui/calls/stream_title.rs 100 read
+src/ui/calls/stream_view.rs 320 read
+src/ui/calls/stream_volume.rs 256 read
+src/ui/calls_clear.rs 130 read
+src/ui/calls_state.rs 163 read
+src/ui/capture_access.rs 198 read
+src/ui/capture_block.rs 172 read
+src/ui/chat.rs 121 read
+src/ui/chat_appearance_dialog.rs 842 read
+src/ui/chat_appearance_extras.rs 205 read
+src/ui/chat_bars.rs 691 read
