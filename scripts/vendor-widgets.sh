@@ -3,9 +3,11 @@
 # third_party/widgets/ and record the upstream commits in
 # third_party/widgets/VERSION. build.rs compiles them with `cc` (ui feature).
 #
-#   widget-sandbox  BSD-3-Clause  the QuickJS sandbox, the trusted validator and
+#   widget-sandbox  no LICENSE    the QuickJS sandbox, the trusted validator and
 #                                 WidgetHost (packages/desktop/sandbox), the JS
 #                                 bundles with their bytecode (WidgetJS)
+#                                 (upstream publishes no license file at v0.6.1;
+#                                 docs/decisions/message-widgets.md, Licenses)
 #   quickjs         MIT           TelegramMessenger/quickjs (quickjs-ng fork), the
 #                                 submodule widget-sandbox pins
 #   twidget         BSD-3-Clause  TwidgetCore and its litehtml fork (with gumbo)
@@ -78,7 +80,7 @@ copy $S sandbox packages/desktop/sandbox/src -name '*.cpp'
 copy $S sandbox packages/desktop/WidgetJS \( -name '*.js' -o -name '*.qbc' \)
 copy $S sandbox packages/ios/Sources/CQuickJS/include -name qjs_shim.h
 copy $S sandbox packages/ios/Sources/CQuickJS/shim -name '*.c'
-# Smoke-test widgets for the native test (src/ui/widget_runtime/native_tests.rs)
+# Smoke-test widgets for the native test (src/ui/widget_runtime/smoke_tests.rs)
 # and the demo fixtures.
 copy $S sandbox corpus/compat -name '*.html'
 
