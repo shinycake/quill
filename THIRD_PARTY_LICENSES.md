@@ -12,7 +12,7 @@ compiled into it (ThorVG with RapidJSON) and bundled data files are listed in
 
 ## Overview
 
-- MIT License: 682
+- MIT License: 683
 - Apache License 2.0: 43
 - Unicode License v3: 26
 - ISC License: 22
@@ -10891,6 +10891,7 @@ SOFTWARE.
 
 Used by:
 - [ashpd 0.13.13](https://github.com/bilelmoussaoui/ashpd)
+- [ashpd 0.14.0](https://github.com/bilelmoussaoui/ashpd)
 
 ````text
 MIT License
