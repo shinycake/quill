@@ -146,3 +146,16 @@ src/ui/story_video_state.rs 170 read
 src/ui/story_viewer/chrome.rs 143 read
 src/ui/story_viewer/demo.rs 195 read
 src/ui/story_viewer/ensure_story_download.rs 527 read
+src/ui/touch_bar/mac/draw.rs 232 read
+src/ui/touch_bar/mac/mod.rs 277 read
+src/ui/touch_bar/mac/picker.rs 256 read
+src/ui/touch_bar/mac/pinned.rs 529 read
+src/ui/touch_bar/mac/preview.rs 85 read
+src/ui/touch_bar/mod.rs 403 read
+src/ui/touch_bar/model.rs 483 read
+src/ui/translate_ui/demo.rs 110 read
+src/ui/translate_ui/mod.rs 910 read
+src/ui/translate_ui/pump_scan.rs 181 read
+src/ui/translate_ui/translate_bar_view.rs 518 read
+src/ui/tray_settings.rs 145 read
+src/ui/twofa_state.rs 98 read
