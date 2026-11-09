@@ -105,13 +105,60 @@ impl StoryStealthMode {
 
 /// `editStoryCover` / `setStoryPrivacySettings` — all `= Ok` calls, so
 /// success only clears the spinner (the edited story itself arrives via
-/// `updateStory`); failures surface the sanitized TDLib error. One
-/// shared slot: the viewer disables its management buttons while
-/// `pending`, so only one call is ever in flight.
+/// `updateStory`); failures surface the sanitized TDLib error. One slot:
+/// a new call takes it over, and only the answer to the call it holds
+/// (`request`) settles it. `story` is the story the call or the error is
+/// about, so the viewer shows them under that story only.
 #[derive(Debug, Clone, Default)]
 pub struct StoryManageState {
     pub pending: bool,
     pub error: Option<String>,
+    /// `(chat_id, story_id)` of the story the call or error is about.
+    pub story: Option<(i64, i32)>,
+    /// The call in flight.
+    pub request: Option<RequestId>,
+}
+
+impl StoryManageState {
+    /// A call for the story went out as `request`.
+    pub(crate) fn start(&mut self, request: RequestId, chat_id: ChatId, story_id: i32) {
+        self.pending = true;
+        self.error = None;
+        self.story = Some((chat_id.0, story_id));
+        self.request = Some(request);
+    }
+
+    /// The answer to `request` landed; `error` is its failure. An answer
+    /// to a call the slot no longer holds changes nothing.
+    pub(crate) fn settle(&mut self, request: RequestId, error: Option<String>) {
+        if self.request != Some(request) {
+            return;
+        }
+        self.pending = false;
+        self.request = None;
+        self.error = error;
+    }
+
+    /// The story's call could not be made: `error` says why. Any call in
+    /// flight for another story is let go, so its answer stays silent.
+    pub fn fail_locally(&mut self, chat_id: i64, story_id: i32, error: String) {
+        self.pending = false;
+        self.request = None;
+        self.story = Some((chat_id, story_id));
+        self.error = Some(error);
+    }
+
+    /// A call for this story is in flight.
+    pub fn pending_for(&self, chat_id: i64, story_id: i32) -> bool {
+        self.pending && self.story == Some((chat_id, story_id))
+    }
+
+    /// This story's failure line.
+    pub fn error_for(&self, chat_id: i64, story_id: i32) -> Option<&str> {
+        self.error
+            .as_deref()
+            .filter(|_| self.story == Some((chat_id, story_id)))
+    }
 }
 
 /// Phase 6: which info panel is open in the side panel.

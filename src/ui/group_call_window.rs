@@ -436,6 +436,10 @@ impl Render for GroupCallPanel {
                 };
                 let key = event.keystroke.key.clone();
                 let exits = quill::calls::tile_pin::exits_fullscreen(&key);
+                if exits && owner.update(cx, |app, cx| app.group_call_window_escape(cx)) {
+                    cx.stop_propagation();
+                    return;
+                }
                 if owner.read(cx).group_call_is_stream() {
                     // Esc closes an open box first; then the live keys
                     // (Esc leaves full screen or the maximized window,

@@ -724,7 +724,11 @@ impl QuillApp {
     /// into this same predicate when they land (they live on their own
     /// parity branch; not touched here).
     pub(super) fn story_playback_paused(&self) -> bool {
-        self.stories.viewer_ui().reaction_picker_open
+        // tdesktop `Controller::updatePlayingAllowed` needs `_windowActive`:
+        // with the main window behind another app, minimized, or a chat
+        // window in front, nothing plays, advances or gets marked viewed.
+        !self.frame.main_active.get()
+            || self.stories.viewer_ui().reaction_picker_open
             || self.stories.viewer_ui().reply_open
             || self.stories.viewer_ui().pause.is_paused()
             // A repost's press waits for its story's answer.
@@ -861,6 +865,9 @@ mod tick_notify_tests;
 #[cfg(test)]
 #[cfg(feature = "demo-capture")]
 mod video_wait_tests;
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+mod window_active_tests;
 
 pub(in crate::ui) use live_state::LiveStoryUi;
 pub(in crate::ui) use open::PendingStoryOpen;

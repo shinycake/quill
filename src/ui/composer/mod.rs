@@ -983,4 +983,7 @@ mod command_menu;
 mod copy_inline_text;
 mod field_placeholder;
 mod send_bot_command;
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+mod send_options_to_tests;
 mod toggle_composer_silent;

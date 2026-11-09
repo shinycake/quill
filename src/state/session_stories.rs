@@ -23,51 +23,48 @@ impl Session {
         crate::story_ring::StoryRing::from_active(self.stories.tray.get(&chat_id)?)
     }
 
-    /// Phase 9.7: start tracking a story-page mutation (`Sending`).
-    pub fn begin_story_page_op(&mut self, label: impl Into<String>) {
+    /// Phase 9.7: start tracking a story-page mutation (`Sending`) sent as
+    /// `request`.
+    pub fn begin_story_page_op(&mut self, label: impl Into<String>, request: RequestId) {
         self.stories.page_op = Some(StoryPageOp {
             label: label.into(),
             state: StoryPageOpState::Sending,
+            request: Some(request),
         });
     }
 
-    /// Phase 9.7: start tracking a story-page read (`Checking`).
-    pub fn begin_story_page_check(&mut self, label: impl Into<String>) {
+    /// Phase 9.7: start tracking a story-page read (`Checking`) sent as
+    /// `request`.
+    pub fn begin_story_page_check(&mut self, label: impl Into<String>, request: RequestId) {
         self.stories.page_op = Some(StoryPageOp {
             label: label.into(),
             state: StoryPageOpState::Checking,
+            request: Some(request),
         });
     }
 
-    /// Phase 9.7: mark the story-page op `Succeeded` when its answer
-    /// lands — only if the op was sent for this purpose (the driver sets
-    /// the label from the same purpose).
-    pub(crate) fn succeed_story_page_op(&mut self, purpose: RequestPurpose) {
-        if self
-            .stories
+    /// The op tracking the call `pending` answers, if it is still the one
+    /// tracked: an answer to an earlier call of the same kind (another
+    /// story's Hide, say) never settles a later one.
+    fn story_page_op_for(&mut self, pending: Option<&PendingRequest>) -> Option<&mut StoryPageOp> {
+        let pending = pending?;
+        self.stories
             .page_op
-            .as_ref()
-            .is_some_and(|op| op.label == story_page_op_label(purpose))
-        {
-            self.stories.page_op = Some(StoryPageOp {
-                label: story_page_op_label(purpose),
-                state: StoryPageOpState::Succeeded,
-            });
+            .as_mut()
+            .filter(|op| op.request == Some(pending.id))
+    }
+
+    /// Phase 9.7: mark the story-page op `Succeeded` when its answer lands.
+    pub(crate) fn succeed_story_page_op(&mut self, pending: Option<&PendingRequest>) {
+        if let Some(op) = self.story_page_op_for(pending) {
+            op.state = StoryPageOpState::Succeeded;
         }
     }
 
     /// Phase 9.7: mark the story-page op `Failed` on a TDLib error.
-    pub(crate) fn fail_story_page_op(&mut self, purpose: RequestPurpose, reason: String) {
-        if self
-            .stories
-            .page_op
-            .as_ref()
-            .is_some_and(|op| op.label == story_page_op_label(purpose))
-        {
-            self.stories.page_op = Some(StoryPageOp {
-                label: story_page_op_label(purpose),
-                state: StoryPageOpState::Failed(reason),
-            });
+    pub(crate) fn fail_story_page_op(&mut self, pending: Option<&PendingRequest>, reason: String) {
+        if let Some(op) = self.story_page_op_for(pending) {
+            op.state = StoryPageOpState::Failed(reason);
         }
     }
 
@@ -88,13 +85,8 @@ impl Session {
 
     /// Phase 9.7: clear the story-page op once its load answer landed (the
     /// loaded list itself is the honest state — no status line needed).
-    pub(crate) fn clear_story_page_op(&mut self, purpose: RequestPurpose) {
-        if self
-            .stories
-            .page_op
-            .as_ref()
-            .is_some_and(|op| op.label == story_page_op_label(purpose))
-        {
+    pub(crate) fn clear_story_page_op(&mut self, pending: Option<&PendingRequest>) {
+        if self.story_page_op_for(pending).is_some() {
             self.stories.page_op = None;
         }
     }

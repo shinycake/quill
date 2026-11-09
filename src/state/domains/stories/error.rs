@@ -102,9 +102,12 @@ impl Session {
                 | RequestPurpose::EditStoryCover
                 | RequestPurpose::SetStoryPrivacySettings,
             ) => {
-                self.stories.manage.pending = false;
-                self.stories.manage.error =
-                    Some(format!("Story update failed: {}", error_reason(err)));
+                if let Some(pending) = pending {
+                    self.stories.manage.settle(
+                        pending.id,
+                        Some(format!("Story update failed: {}", error_reason(err))),
+                    );
+                }
             }
             // Phase 9.5 (review fix-up): `getChatsToPostStories`
             // failed — surface a transient error so the "Post as"
@@ -138,7 +141,7 @@ impl Session {
                 if purpose == RequestPurpose::SetCloseFriends {
                     self.stories.close_friends_pending = None;
                 }
-                self.fail_story_page_op(purpose, error_reason(err).to_string());
+                self.fail_story_page_op(pending, error_reason(err).to_string());
             }
             _ => {}
         }

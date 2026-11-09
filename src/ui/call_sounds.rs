@@ -188,8 +188,9 @@ impl super::app::QuillApp {
         };
         let (call, summary) = (
             session.calls.active_call.clone(),
-            session.calls.summary.clone(),
+            super::call_conference_ui::shown_call_summary(session).cloned(),
         );
+        let invite_rings = session.calls.conference_invite.is_some();
         let enabled = session.settings.inapp_sounds_enabled;
         let background_ring = self.background_ring_audible();
         let marks = &mut self.screen.call_screen.sound_marks;
@@ -238,10 +239,12 @@ impl super::app::QuillApp {
                     });
                 }
             }
-            // A call ringing on an account in the background rings here
-            // too (`background_accounts::calls`).
+            // A conference invitation rings like an incoming call; a call
+            // ringing on an account in the background rings here too
+            // (`background_accounts::calls`).
             (None, None) => {
-                sounds.keep_looping(background_ring.then_some(CallSound::Incoming));
+                sounds
+                    .keep_looping((invite_rings || background_ring).then_some(CallSound::Incoming));
             }
         }
     }
