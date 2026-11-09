@@ -179,6 +179,10 @@ pub(crate) struct ScrollDate {
     pub(crate) top_label: Option<String>,
     /// The top row starts its day, so an inline separator is on screen.
     pub(crate) separator_at_top: bool,
+    /// The row whose own day pill the floating one stands in for while it
+    /// shows: that row draws its pill's place empty, so one pill shows
+    /// (tdesktop paints the top row's date once, sticky).
+    pub(crate) covered_row: Option<usize>,
 }
 
 impl ScrollDate {
@@ -359,6 +363,15 @@ impl QuillApp {
     /// The floating pill, absolutely positioned at the top center.
     pub(super) fn scroll_date_pill(&mut self, cx: &mut Context<Self>) -> Option<AnyElement> {
         self.refresh_scroll_date_top();
+        let pill = self.floating_date_pill(cx);
+        self.history.scroll_date.covered_row = pill
+            .is_some()
+            .then(|| self.history.scroll_top_probe.get().map(|(ix, _)| ix))
+            .flatten();
+        pill
+    }
+
+    fn floating_date_pill(&mut self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let now = cx.background_executor().now();
         let motion = self.history.scroll_date.motion(now);
         if motion == DateMotion::Hidden {
