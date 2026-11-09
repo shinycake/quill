@@ -72,6 +72,10 @@ the `=` pinned crates. Updates there are deliberate and visually verified.
   out a crate that breaks something.
 - Newer majors: bump one crate per PR, read its changelog, fix call sites, gate.
 - Crates with an `=` pin stay pinned until a reason to move is written down.
+- A major held until upstream is ready goes in `HELD_MAJORS` in
+  `scripts/deps-watch.py` with the reason. The crates issue then lists it under
+  "Held on purpose"; a later major than the held one is reported as normal work.
+  Remove the entry when the crate is adopted.
 
 ## Native dependencies
 
