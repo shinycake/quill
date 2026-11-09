@@ -992,18 +992,18 @@ mod build_passcode_dialog;
 mod lock_field;
 mod lock_gate;
 mod lock_logout;
-#[cfg(test)]
-#[cfg(feature = "demo-capture")]
-mod lock_waits_tests;
 mod unlock_intents;
 pub(in crate::ui) use unlock_intents::UnlockIntents;
-#[cfg(test)]
-#[cfg(feature = "demo-capture")]
-mod lock_gate_tests;
 pub(crate) mod lock_layer;
-#[cfg(test)]
-#[cfg(feature = "demo-capture")]
-mod lock_layer_tests;
 mod system_unlock_wait;
 pub(crate) use lock_field::LockField;
 pub(in crate::ui) use lock_gate::intercept_keys_unlocked;
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+mod lock_gate_tests;
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+mod lock_layer_tests;
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+mod lock_waits_tests;

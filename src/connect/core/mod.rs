@@ -421,13 +421,9 @@ impl<S: JsonSender> ConnectDriver<S> {
                 }),
             _ => None,
         };
-        // MED4b: a failed `getLinkPreview`. TDLib's 404 (no preview for
-        // this URL) and an answer that is no preview are "no link info"
-        // (TGX `LinkPreview.isNotFound`) — never a card, never a crash.
-        // Any other error (FLOOD_WAIT, a timeout, a 5xx) says nothing about
-        // the URL: it is `Failed`, which the composer asks again for once
-        // the URL is typed again. Every answer of the request ends its
-        // "Getting link info", so none is left loading.
+        // MED4b: a 404/400 or an empty answer is "no link info" (TGX
+        // `isNotFound`); any other error is `Failed`, asked again when the URL
+        // is typed again. Every answer ends "Getting link info".
         let link_preview_failed: Option<(String, LinkPreviewFetch)> = match &owned.envelope.payload
         {
             EnvelopePayload::Messages(MessagesPayload::LinkPreview { .. }) => None,

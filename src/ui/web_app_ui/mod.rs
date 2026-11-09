@@ -967,6 +967,16 @@ mod invoice;
 mod phone;
 mod spawn_mini_app_window;
 
+crate::ui::shell::register_dialogs! {
+    /// Mini apps: the first-open terms box / add to the attachment menu.
+    WebAppConfirm => DialogSpec::new(
+        2550,
+        |app| app.mini_apps.confirm.is_some(),
+        QuillApp::build_web_app_confirm_dialog,
+    )
+    .close(|app, _, cx| { app.mini_apps.confirm = None; cx.notify(); }),
+}
+
 #[cfg(test)]
 mod tests {
     // No `super::*`: the kit's glob brings its own `test` attribute.
@@ -993,14 +1003,4 @@ mod tests {
         assert_eq!(hsla_rgb(gpui_kit::white()), Rgb(255, 255, 255));
         assert_eq!(hsla_rgb(gpui_kit::black()), Rgb(0, 0, 0));
     }
-}
-
-crate::ui::shell::register_dialogs! {
-    /// Mini apps: the first-open terms box / add to the attachment menu.
-    WebAppConfirm => DialogSpec::new(
-        2550,
-        |app| app.mini_apps.confirm.is_some(),
-        QuillApp::build_web_app_confirm_dialog,
-    )
-    .close(|app, _, cx| { app.mini_apps.confirm = None; cx.notify(); }),
 }
