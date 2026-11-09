@@ -31,6 +31,9 @@ fn the_command_line_reaches_quill_and_names_each_refusal() {
     };
 
     let _reset = Reset(app_root.clone());
+    // `quill agent` reads the switch from disk, so say it there too: a
+    // test elsewhere may have saved it on.
+    std::fs::write(app_root.join("agent_access.json"), r#"{"enabled": false}"#).unwrap_or_default();
     access::set_enabled(false);
     assert_eq!(
         call(&endpoint, "quill_status").err().map(|f| f.exit),

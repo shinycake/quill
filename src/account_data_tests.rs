@@ -145,6 +145,8 @@ fn a_new_user_in_a_reused_slot_inherits_nothing() {
 fn a_waiting_prompt_of_a_forgotten_account_is_denied() {
     let _serial = crate::locks::lock_or_recover(&SERIAL);
     let _guard = crate::locks::lock_or_recover(&crate::agent::access::TEST_LOCK);
+    // The switch stays in memory: `quill agent` tests read it from disk.
+    crate::fast_buttons::set_persistence(false);
     crate::agent::access::set_enabled(true);
     let key = AccountKey::new("account-934").unwrap();
     let (_, rx) = crate::agent::prompts::file(
@@ -160,6 +162,7 @@ fn a_waiting_prompt_of_a_forgotten_account_is_denied() {
         Some(crate::agent::prompts::Decision::Denied)
     );
     assert!(crate::agent::prompts::current_for(&key).is_none());
+    crate::agent::access::set_enabled(false);
 }
 
 /// What a log-out drops ([`forget`]). Each is checked by the tests above.
