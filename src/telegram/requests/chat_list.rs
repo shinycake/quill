@@ -415,6 +415,10 @@ pub fn join_chat_by_invite_link(extra: RequestId, invite_link: &str) -> String {
 pub fn topic_id_json(topic: &TopicId) -> Value {
     match topic {
         TopicId::None => Value::Null,
+        TopicId::Thread { message_thread_id } => json!({
+            "@type": "messageTopicThread",
+            "message_thread_id": message_thread_id,
+        }),
         TopicId::Forum { forum_topic_id } => json!({
             "@type": "messageTopicForum",
             "forum_topic_id": forum_topic_id,

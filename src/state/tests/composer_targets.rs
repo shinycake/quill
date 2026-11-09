@@ -81,8 +81,10 @@ fn a_message_that_is_only_not_loaded_is_not_gone() {
 #[test]
 fn a_selected_message_stops_counting_when_it_is_deleted() {
     let (mut session, sink, seq) = seeded();
-    let mut draft = ForwardDraft::from_message(ChatId(7), MessageId(50), false).expect("sent id");
-    draft.toggle(ChatId(7), MessageId(51), false);
+    let mut draft =
+        ForwardDraft::from_message(ChatId(7), crate::ids::TopicId::None, MessageId(50), false)
+            .expect("sent id");
+    draft.toggle(ChatId(7), crate::ids::TopicId::None, MessageId(51), false);
     let alive = |session: &Session, draft: &ForwardDraft| {
         draft
             .clone()
@@ -109,8 +111,10 @@ const NEWER: &str = r#"{"@type":"updateNewMessage","message":{"id":60,"chat_id":
 fn a_selection_survives_the_window_trim_and_a_window_reset() {
     let (mut session, sink, seq) = seeded();
     apply_json(&mut session, &seq, &sink, NEWER);
-    let mut draft = ForwardDraft::from_message(ChatId(7), MessageId(50), false).expect("sent id");
-    draft.toggle(ChatId(7), MessageId(60), false);
+    let mut draft =
+        ForwardDraft::from_message(ChatId(7), crate::ids::TopicId::None, MessageId(50), false)
+            .expect("sent id");
+    draft.toggle(ChatId(7), crate::ids::TopicId::None, MessageId(60), false);
     let alive = |session: &Session, draft: &ForwardDraft| {
         draft
             .clone()

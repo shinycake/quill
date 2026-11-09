@@ -167,4 +167,14 @@ impl ChatsState {
             deep_link_from_agent: false,
         }
     }
+
+    /// The account leaves the screen: the link flow it was running ends
+    /// with it, as the queued link does. Its answers then find no flow and
+    /// are dropped, so switching back never reopens a Join box or a chat
+    /// by itself (tdesktop ties the flow to the session's window).
+    pub fn end_deep_link_flow(&mut self) {
+        self.deep_link = None;
+        self.deep_link_from_agent = false;
+        self.deep_link_original.clear();
+    }
 }

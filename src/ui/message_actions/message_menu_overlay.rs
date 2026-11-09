@@ -367,9 +367,13 @@ impl QuillApp {
                 );
             }
         }
-        let selectable =
-            quill::composer::ForwardDraft::from_message(chat_id, message_id, message.pending())
-                .is_some();
+        let selectable = quill::composer::ForwardDraft::from_message(
+            chat_id,
+            quill::ids::TopicId::None,
+            message_id,
+            message.pending(),
+        )
+        .is_some();
         if !is_secret && !protected && allows(true, |a| a.can_be_forwarded) && selectable {
             item!(
                 50,

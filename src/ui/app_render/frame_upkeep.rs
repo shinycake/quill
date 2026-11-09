@@ -1,7 +1,11 @@
-//! Per-frame upkeep that `render` runs before building the window: things
-//! that need `&mut Window` (inputs, notifications, deep links, story and
-//! payment follow-ups) or keep timers ticking. Only notification delivery
-//! runs while Quill is locked.
+//! Per-frame upkeep that only the main window's `render` runs: things the
+//! main window alone draws or owns (notifications, restored chat windows,
+//! stories, sign-in, the info panel's earn pages). What every window needs
+//! is `per_window_upkeep` (`window_upkeep.rs`), called from here with the
+//! main window's state in place. Every other step here says why it is the
+//! main window's with `// main-only: <why>` in the comment right above it
+//! (`scripts/check-window-scope.py`). Only notification delivery runs while
+//! Quill is locked.
 
 use super::*;
 use crate::ui::status_note::StatusNote;
@@ -37,24 +41,28 @@ impl QuillApp {
         self.sticker_box_frame_upkeep(window, cx);
         // Revenue and affiliate pages: the amount field, the setup
         // sliders, program photos and pages, profile balances.
+        // main-only: they are pages of the session's info panel, which only
+        // the main window's right column draws (chat windows have none).
         self.earn_frame_upkeep(window, cx);
-        // "Stream with...": the server error of a failed request.
-        self.rtmp_start_frame_upkeep(window, cx);
-        // Starting a video chat: the "join as" list, a refused create.
-        self.group_call_create_frame_upkeep(window, cx);
-        // main-only: the AI button's blink, the style link's preview and
-        // the emoji files are the session's; the box and the shortcut are
-        // their window's (`ai_compose_window_upkeep`).
-        self.ai_compose_frame_upkeep(window, cx);
-        self.premium_limit_toast_upkeep(window, cx);
-        // Parity slice: prefill the folder editor once its `getChatFolder`
-        // spec arrives.
-        self.maybe_prefill_folder_editor(window, cx);
+        // main-only: the composer button's blink follows the main window's
+        // field; the box, the shortcut, the style notices and their emoji
+        // are their window's (`ai_compose_window_upkeep`).
+        self.ai_compose_frame_upkeep(cx);
         // main-only: stories open in the main window.
         self.resolve_pending_story_open(window, cx);
-        self.pump_collectible_info(cx);
         // main-only: mini apps open over the main window.
         self.run_pending_mini_app_action(window, cx);
+        // main-only: the story tray, viewer and composer are the main
+        // window's (`story_frame_upkeep`).
+        self.story_frame_upkeep(cx);
+        // main-only: the sign-in screen is the main window's.
+        self.sync_signin(window, cx);
+    }
+
+    /// The stories' follow-ups: refreshed trays, the composer's check,
+    /// post and save answers, the viewer's editors and a deleted story.
+    /// Only the main window draws the story tray, viewer and composer.
+    fn story_frame_upkeep(&mut self, cx: &mut Context<Self>) {
         // Phase 9.2: the `updateStoryPostSucceeded` reducer queued poster
         // chats whose active stories should be refreshed (an own story
         // posted from another client appears in the tray this way).
@@ -150,9 +158,5 @@ impl QuillApp {
         }
         self.follow_story_tray(cx);
         self.story_viewers_scrolled(cx);
-        // Phase 4.6: push the playback clock into the seek slider entity so
-        // the thumb follows elapsed time (the tick has no `&mut Window`).
-        self.sync_seek_slider(window, cx);
-        self.sync_signin(window, cx);
     }
 }

@@ -197,7 +197,10 @@ fn a_box_opened_in_a_chat_window_survives_the_main_windows_frames(cx: &mut TestA
     .expect("the chat window is open");
     frames(&mut main);
     let open = app.read_with(&main, |app, _| {
-        app.ai_compose.open.as_ref().map(|open| open.chat_id)
+        app.ai_compose
+            .open
+            .as_ref()
+            .map(|open| open.conversation.chat_id)
     });
     assert_eq!(open, Some(chat), "the main window's frames keep it");
 }
@@ -284,7 +287,11 @@ fn a_chat_windows_style_preview_takes_its_answer_in_its_own_frame(cx: &mut TestA
     })
     .expect("the chat window is open");
     app.update(cx, |app, cx| {
-        let token = app.ai_compose.preview.as_ref().map(|p| p.token);
+        let token = app
+            .ai_compose
+            .preview
+            .as_ref()
+            .and_then(|p| p.lookup_token());
         if let (Some(token), Some(session)) = (token, app.demo_session.as_mut()) {
             session.messages.ai_compose.style_lookup = Some(quill::state::StyleLookup {
                 token,
@@ -311,4 +318,64 @@ fn a_chat_windows_style_preview_takes_its_answer_in_its_own_frame(cx: &mut TestA
         0,
         "not in the main window"
     );
+}
+
+/// Moves the view in place to another topic of the chat it shows: a
+/// forum's topics share the chat id.
+fn switch_topic(app: &Entity<QuillApp>, vcx: &mut VisualTestContext, topic: i32) {
+    app.update(vcx, |app, cx| {
+        if let Some(session) = app.demo_session.as_mut() {
+            session.open_topic = Some(topic);
+        }
+        cx.notify();
+    });
+}
+
+/// Round 16 (area B, finding 2): the box is its conversation's. Another
+/// topic of the same chat closes it, so Apply or Send never writes one
+/// topic's rewrite into the next topic's draft.
+#[gpui_kit::test]
+fn the_box_closes_when_the_view_moves_to_another_topic(cx: &mut TestAppContext) {
+    let (app, mut main) = open_main(cx);
+    assert!(card(&app, &mut main).is_some(), "the demo opens the box");
+    switch_topic(&app, &mut main, 5);
+    frames(&mut main);
+    assert!(card(&app, &mut main).is_none(), "it was the other topic's");
+}
+
+/// Round 16 (area B, finding 2): the apply-in-place shortcut's answer
+/// lands only in the conversation that asked; in another topic of the same
+/// chat it is dropped, and that topic's draft stays.
+#[gpui_kit::test]
+fn the_shortcuts_answer_skips_another_topic(cx: &mut TestAppContext) {
+    use crate::ui::ai_compose_state::ApplyInPlace;
+    use quill::state::ApplyInPlaceAnswer;
+    let (app, mut main) = open_main(cx);
+    close_box(&app, &mut main);
+    set_draft(&app, &mut main, "the topic's own draft");
+    app.update(&mut main, |app, _| {
+        let conversation = app.open_conversation().expect("a chat is open");
+        app.ai_compose.apply_in_place = Some(ApplyInPlace {
+            token: 41,
+            conversation,
+            window: None,
+            selection: None,
+            cursor: 0,
+        });
+    });
+    switch_topic(&app, &mut main, 5);
+    frames(&mut main);
+    set_draft(&app, &mut main, "the next topic's draft");
+    app.update(&mut main, |app, cx| {
+        if let Some(session) = app.demo_session.as_mut() {
+            session.messages.ai_compose.apply_in_place = Some(ApplyInPlaceAnswer {
+                token: 41,
+                outcome: Ok(("Rewritten for the first topic".into(), Vec::new())),
+            });
+        }
+        cx.notify();
+    });
+    frames(&mut main);
+    let composer = app.read_with(&main, |app, cx| app.composer.read(cx).value().to_string());
+    assert_eq!(composer, "the next topic's draft");
 }

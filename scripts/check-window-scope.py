@@ -72,6 +72,18 @@ window's with
 
 on one of the three lines above the call.
 
+`frame_upkeep` is held to more (round 16): every step in it is one
+`self.step(..)` call with its own `// main-only: <why>` in the comment
+block right above it, whatever state the step touches. Steps that served
+chat windows from the main window's frame kept coming back (the video chat
+and stream boxes, the AI style notices, the Premium limit toasts), because
+the per-window test above only sees the swapped fields, and a box flag
+that is the screen's (`group_call_boxes`) or the session's passes it.
+Inline work (`self.field`, `self.session()...` written in the body) fails
+too: it goes in a step method that says why it is the main window's. The
+lock gate, the profiler tick and the `per_window_upkeep` call itself are
+the only unmarked lines.
+
 The dialog host rule (scripts/dialog_hosts.py, round 13): every kit
 dialog open names the window it belongs to. A box whose flag is the
 window's own is `.per_window()`; every other open calls
@@ -174,6 +186,11 @@ MAIN_ONLY_UPKEEP = [
     (pathlib.Path("notifications") / "mod.rs", "flush_notifications"),
 ]
 MAIN_ONLY_MARKER = re.compile(r"//\s*main-only:\s*\S")
+# `frame_upkeep`: every step says why it is the main window's (round 16).
+EVERY_STEP_MARKED = (pathlib.Path("app_render") / "frame_upkeep.rs", "frame_upkeep")
+# The calls in `frame_upkeep` that are no step of their own.
+NOT_A_STEP = {"frame_profile_tick", "lock_waits", "asked_in_place"}
+SELF_FIELD = re.compile(r"\bself\s*\.\s*([a-z_0-9]+)\b(?!\s*\()")
 
 
 def block_after(text: str, at: int) -> str:
@@ -425,6 +442,58 @@ def main_only_failures(
     return failures
 
 
+def comment_block_above(lines: list[str], line: int) -> list[str]:
+    """The `//` comment lines directly above 1-based `line` (attributes
+    between them and the call are skipped)."""
+    block = []
+    i = line - 2
+    while i >= 0:
+        stripped = lines[i].strip()
+        if stripped.startswith("//"):
+            block.append(stripped)
+        elif not stripped.startswith("#["):
+            break
+        i -= 1
+    return block
+
+
+def unmarked_steps(root: pathlib.Path, texts: dict[pathlib.Path, str]) -> list[str]:
+    """Every step of `frame_upkeep` is a `self.step(..)` call that says
+    why it is the main window's (`// main-only: <why>` in the comment block
+    right above it); inline work in the body fails."""
+    rel, fn = EVERY_STEP_MARKED
+    path = root / rel
+    text = texts.get(path)
+    if text is None:
+        sys.exit(f"{path} is missing: `{fn}` is checked for main-only upkeep")
+    at = re.search(rf"\bfn\s+{fn}\s*\(", text)
+    if at is None:
+        sys.exit(f"{path} has no `fn {fn}`")
+    start = text.find("{", at.end())
+    body = block_after(text, at.end())
+    lines = text.split("\n")
+    rel_path = path.relative_to(root.parent.parent)
+    failures = []
+    code = re.sub(r"//[^\n]*", lambda m: " " * len(m.group(0)), body)
+    for m in re.finditer(r"\bself\s*\.\s*([a-z_0-9]+)\s*\(", code):
+        name = m.group(1)
+        if name in NOT_A_STEP:
+            continue
+        line = text.count("\n", 0, start + m.start()) + 1
+        if any(MAIN_ONLY_MARKER.search(l) for l in comment_block_above(lines, line)):
+            continue
+        failures.append(
+            f"{rel_path}:{line}: `{fn}` runs `{name}()` with no `// main-only: <why>` right above it"
+        )
+    for m in SELF_FIELD.finditer(code):
+        line = text.count("\n", 0, start + m.start()) + 1
+        failures.append(
+            f"{rel_path}:{line}: `{fn}` does inline work (`self.{m.group(1)}`): "
+            "put it in a step method with its `// main-only: <why>`, or in `per_window_upkeep`"
+        )
+    return failures
+
+
 # A driver call that makes a chat the session's open one (round 11).
 DRIVER_OPEN = re.compile(
     r"\bdriver\s*\.\s*(select_search_chat_open|select_chat_open|select_search_message"
@@ -487,7 +556,7 @@ def main() -> int:
         lambda b: bool(screen_field_hits(b, receivers(b), fields)),
         lambda b: calls_on(b, receivers(b)),
     )
-    main_only = main_only_failures(root, texts, touching)
+    main_only = main_only_failures(root, texts, touching) + unmarked_steps(root, texts)
     failures = []
     screen_failures = []
     for path, text in texts.items():
@@ -578,10 +647,11 @@ def main() -> int:
     if main_only:
         print("\n".join(main_only))
         print(
-            f"\n{len(main_only)} main-window upkeep step(s) touch per-window state.\n"
-            "Move each to `per_window_upkeep` (src/ui/app_render/window_upkeep.rs), which\n"
-            "every window's frame runs with its own state in place, or say why it serves\n"
-            "the main window alone with `// main-only: <why>` on one of the three lines above.\n"
+            f"\n{len(main_only)} main-window upkeep step(s) touch per-window state or do not say why\n"
+            "they are the main window's. Move each to `per_window_upkeep`\n"
+            "(src/ui/app_render/window_upkeep.rs), which every window's frame runs with its\n"
+            "own state in place (gate a box's step with `dialog_may_show_in`), or say why it\n"
+            "serves the main window alone with `// main-only: <why>` right above the call.\n"
         )
     if screen_failures:
         print("\n".join(screen_failures))

@@ -56,7 +56,9 @@ fn forwarding_to_two_chats_keeps_both_results_and_options() {
     }
     ingest(&mut driver, SOURCE_MESSAGE, &seq, &sink);
     driver.select_chat(ChatId(7)).unwrap();
-    let draft = ForwardDraft::from_message(ChatId(7), MessageId(50), false).unwrap();
+    let draft =
+        ForwardDraft::from_message(ChatId(7), crate::ids::TopicId::None, MessageId(50), false)
+            .unwrap();
     let silent = SendOptions {
         disable_notification: true,
         ..SendOptions::default()
@@ -115,7 +117,9 @@ fn scheduled_forward_carries_the_send_date() {
     }
     ingest(&mut driver, SOURCE_MESSAGE, &seq, &sink);
     driver.select_chat(ChatId(7)).unwrap();
-    let draft = ForwardDraft::from_message(ChatId(7), MessageId(50), false).unwrap();
+    let draft =
+        ForwardDraft::from_message(ChatId(7), crate::ids::TopicId::None, MessageId(50), false)
+            .unwrap();
     let options = SendOptions {
         scheduling: ComposerScheduling::SendAtDate(1_900_000_000),
         ..SendOptions::default()
@@ -322,7 +326,9 @@ fn a_forward_goes_to_the_topic_its_draft_picked_and_not_to_the_open_one() {
     }
     ingest(&mut driver, SOURCE_MESSAGE, &seq, &sink);
     driver.select_chat(ChatId(7)).unwrap();
-    let mut draft = ForwardDraft::from_message(ChatId(7), MessageId(50), false).unwrap();
+    let mut draft =
+        ForwardDraft::from_message(ChatId(7), crate::ids::TopicId::None, MessageId(50), false)
+            .unwrap();
     driver.select_chat(ChatId(8)).unwrap();
     // Another topic is open when Send runs.
     driver.session.open_topic = Some(6);

@@ -336,8 +336,10 @@ fn driver_forward_messages_shape_and_dest_result() {
             )
             .unwrap();
 
-    let mut draft = ForwardDraft::from_message(ChatId(7), MessageId(50), false).unwrap();
-    draft.toggle(ChatId(7), MessageId(60), false);
+    let mut draft =
+        ForwardDraft::from_message(ChatId(7), crate::ids::TopicId::None, MessageId(50), false)
+            .unwrap();
+    draft.toggle(ChatId(7), crate::ids::TopicId::None, MessageId(60), false);
     let extra = driver.forward_messages(ChatId(8), &draft).unwrap();
     let json = recorder
         .snapshot()

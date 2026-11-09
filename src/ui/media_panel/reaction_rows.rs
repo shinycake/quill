@@ -31,6 +31,7 @@ impl QuillApp {
                         .stickers
                         .emoji
                         .keyword_emojis
+                        .for_query(query)
                         .iter()
                         .map(|e| strip(e)),
                 )

@@ -206,3 +206,123 @@ fn a_create_bot_box_closes_with_its_chat_window(cx: &mut TestAppContext) {
         assert!(app.dialogs.bot_create_dialog.is_none(), "its own close ran");
     });
 }
+
+/// Round 16 (area B, finding 4): a flow that carried a chat window which
+/// has closed since (a mini app opened from it, a file picker's answer)
+/// asks as the main window. Its toast shows there, at once, instead of
+/// queuing for a window that never draws again and holding up the toasts
+/// behind it.
+#[gpui_kit::test]
+fn a_closed_windows_flow_asks_as_the_main_window(cx: &mut TestAppContext) {
+    use crate::ui::status_note::StatusNote;
+    let h = new_app(cx);
+    let chat_window = h.open_in_new_window(OTHER, cx);
+    h.app.update(cx, |app, cx| {
+        app.windows.last_press = Some(OTHER);
+        app.in_window_scope(Some(OTHER), cx, |app, cx| app.ensure_mini_app_poll(cx));
+    });
+    cx.update_window(chat_window, |_, window, _| window.remove_window())
+        .unwrap();
+    cx.run_until_parked();
+    h.app.update(cx, |app, _| {
+        assert_eq!(
+            app.as_asked_by(Some(OTHER), |app| app.asking_window()),
+            Some(None),
+            "the closed window asks for nothing"
+        );
+        assert_eq!(app.mini_app_window(), None, "the mini app forgot it");
+        app.as_asked_by(Some(OTHER), |app| {
+            app.set_note(StatusNote::info("Added to the attachment menu"))
+        });
+        assert_eq!(
+            app.connection.toasts.visible_host(),
+            Some(None),
+            "the toast shows in the main window"
+        );
+    });
+}
+
+/// Round 16 (area B, finding 6): "Start video chat" pressed in a chat
+/// window's header goes on in that window's frames. The "join as" answer
+/// moves the box past its hidden waiting step with only the chat window
+/// drawing (the main window minimized), and the main window's frames do
+/// not take it.
+#[gpui_kit::test]
+fn a_chat_windows_video_chat_start_goes_on_in_its_own_frames(cx: &mut TestAppContext) {
+    use crate::ui::dialogs::group_call_create::{CreateStep, GroupCallCreate};
+    use quill::calls::group_call_create::{CreateJoinAs, CreateKind};
+    use quill::ids::RequestId;
+    let h = new_app(cx);
+    let chat_window = h.open_in_new_window(OTHER, cx);
+    let request = RequestId(77);
+    let waiting = |app: &crate::ui::app::QuillApp| {
+        matches!(
+            app.group_call_boxes
+                .start_dialog
+                .as_ref()
+                .map(|flow| &flow.step),
+            Some(CreateStep::Waiting(_))
+        )
+    };
+    h.app.update(cx, |app, _| {
+        app.group_call_boxes.start_dialog = Some(GroupCallCreate {
+            chat_id: OTHER,
+            kind: CreateKind::Now,
+            step: CreateStep::Waiting(request),
+            join_as: None,
+        });
+        app.windows
+            .open_box_in(DialogKind::GroupCallStart, Some(OTHER));
+        let session = app.demo_session.as_mut().expect("a demo session");
+        session.calls.create_join_as = Some(CreateJoinAs {
+            chat_id: OTHER.0,
+            request,
+            answer: Some(Ok(Vec::new())),
+        });
+    });
+    draw(h.main, cx);
+    assert!(
+        h.app.read_with(cx, |app, _| waiting(app)),
+        "the main window's frame leaves it"
+    );
+    draw(chat_window, cx);
+    h.app.read_with(cx, |app, _| {
+        assert!(!waiting(app), "the chat window's frame took the answer");
+    });
+}
+
+/// Round 16 (area B, finding 11): a Premium limit's toast (a full GIF
+/// list) shows in the window whose action hit the limit, from its own
+/// frame, not behind it in the main window.
+#[gpui_kit::test]
+fn a_premium_limit_toast_shows_in_the_window_that_hit_it(cx: &mut TestAppContext) {
+    use quill::premium_limits::PremiumLimitKind;
+    let h = new_app(cx);
+    let chat_window = h.open_in_new_window(OTHER, cx);
+    let toasts = |window: AnyWindowHandle, cx: &mut TestAppContext| {
+        cx.update_window(window, |_, window, cx| {
+            gpui_kit::component::WindowExt::notifications(window, cx).len()
+        })
+        .unwrap()
+    };
+    let (main_before, chat_before) = (toasts(h.main, cx), toasts(chat_window, cx));
+    h.app.update(cx, |app, _| {
+        app.windows.last_press = Some(OTHER);
+        let session = app.demo_session.as_mut().expect("a demo session");
+        session.open_premium_limit(PremiumLimitKind::SavedGifs, 0);
+        assert!(session.payments.hub.limit_toast.is_some(), "a toast kind");
+    });
+    draw(h.main, cx);
+    assert!(
+        h.app.read_with(cx, |app, _| app.session().is_some_and(|s| s
+            .payments
+            .hub
+            .limit_toast
+            .is_some())),
+        "the main window's frame leaves it"
+    );
+    draw(chat_window, cx);
+    draw(chat_window, cx);
+    assert_eq!(toasts(h.main, cx), main_before);
+    assert_eq!(toasts(chat_window, cx), chat_before + 1);
+}

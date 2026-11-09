@@ -14,8 +14,10 @@ impl QuillApp {
         use quill::composer::ForwardDraft;
         use quill::ids::MessageId;
         self.demo_seed_share_chats();
-        if let Some(mut draft) = ForwardDraft::from_message(ChatId(11), MessageId(101), false) {
-            draft.toggle(ChatId(11), MessageId(102), false);
+        if let Some(mut draft) =
+            ForwardDraft::from_message(ChatId(11), quill::ids::TopicId::None, MessageId(101), false)
+        {
+            draft.toggle(ChatId(11), quill::ids::TopicId::None, MessageId(102), false);
             self.share.pending_forward = Some(draft);
         }
         self.open_forward_picker(window, cx);
