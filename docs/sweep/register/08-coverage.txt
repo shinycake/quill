@@ -115,3 +115,17 @@ src/ui/chat_window/body.rs 163 read
 src/ui/chat_window/cover.rs 310 read
 src/ui/chat_window/dialog_hosts.rs 297 read
 src/ui/chat_window/mod.rs 676 read
+src/ui/collectible_info_ui.rs 279 read
+src/ui/command_shortcuts.rs 300 read
+src/ui/communities/ban.rs 168 read
+src/ui/communities/boxes.rs 561 read
+src/ui/communities/chooser.rs 405 read
+src/ui/communities/create.rs 232 read
+src/ui/communities/demo.rs 288 read
+src/ui/communities/info.rs 281 read
+src/ui/communities/manage.rs 126 read
+src/ui/communities/mod.rs 462 read
+src/ui/communities/mute_for.rs 105 read
+src/ui/communities/outcomes.rs 141 read
+src/ui/communities/requests.rs 549 read
+src/ui/communities/row.rs 473 read
