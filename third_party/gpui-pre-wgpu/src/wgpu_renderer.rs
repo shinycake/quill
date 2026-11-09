@@ -1,4 +1,11 @@
 // Modified for gpui-pre (snapshot of zed@d2a4fb6): adapt device queues and sRGB detection to wgpu 30.0.1.
+// Modified by the Quill project (2026) from gpui-pre-wgpu 0.3.9 (Apache-2.0):
+// `WgpuRenderer::capture_scene` renders a scene offscreen and reads it back; NV12 video
+// surfaces (`yuv_surfaces`). See third_party/gpui-pre-wgpu/QUILL-CHANGES.md.
+use crate::device_recovery::{
+    install_once_built, Adapters, Attempt, Losses, Next, ProbeStep, Recovering, Shared, SharedRecovery, Target,
+};
+use crate::yuv_surfaces::{SURFACE_PARAMS_SIZE, YuvSurfaces};
 use crate::{CompositorGpuHint, DeviceErrorState, WgpuAtlas, WgpuContext};
 use anyhow::{Context as _, Result};
 use bytemuck::{Pod, Zeroable};
@@ -16,6 +23,7 @@ use std::num::NonZeroU64;
 use std::ops::Range;
 use std::rc::Rc;
 use std::sync::Arc;
+use std::time::Instant;
 
 const MAX_INSTANCE_BUFFER_SIZE: u64 = 256 * 1024 * 1024;
 
@@ -66,29 +74,6 @@ struct GlobalParams {
 
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
-struct PodBounds {
-    origin: [f32; 2],
-    size: [f32; 2],
-}
-
-impl From<Bounds<ScaledPixels>> for PodBounds {
-    fn from(bounds: Bounds<ScaledPixels>) -> Self {
-        Self {
-            origin: [bounds.origin.x.0, bounds.origin.y.0],
-            size: [bounds.size.width.0, bounds.size.height.0],
-        }
-    }
-}
-
-#[repr(C)]
-#[derive(Clone, Copy, Pod, Zeroable)]
-struct SurfaceParams {
-    bounds: PodBounds,
-    content_mask: PodBounds,
-}
-
-#[repr(C)]
-#[derive(Clone, Copy, Pod, Zeroable)]
 struct GammaParams {
     gamma_ratios: [f32; 4],
     grayscale_enhanced_contrast: f32,
@@ -133,7 +118,6 @@ struct WgpuPipelines {
     mono_sprites: wgpu::RenderPipeline,
     subpixel_sprites: Option<wgpu::RenderPipeline>,
     poly_sprites: wgpu::RenderPipeline,
-    #[allow(dead_code)]
     surfaces: wgpu::RenderPipeline,
 }
 
@@ -165,7 +149,29 @@ struct WgpuBindGroupLayouts {
 }
 
 /// Shared GPU context reference, used to coordinate device recovery across multiple windows.
-pub type GpuContext = Rc<RefCell<Option<WgpuContext>>>;
+pub type GpuContext = Rc<GpuSlot>;
+
+/// Quill: the GPU context the windows share, and what they know about its
+/// recovery (see `device_recovery`).
+#[derive(Default)]
+pub struct GpuSlot {
+    context: RefCell<Option<WgpuContext>>,
+    recovery: RefCell<SharedRecovery>,
+    /// The answer of the look for the GPU running on its thread: whether
+    /// it saw a GPU adapter.
+    #[cfg(not(target_family = "wasm"))]
+    look: RefCell<Option<std::sync::mpsc::Receiver<bool>>>,
+}
+
+impl GpuSlot {
+    pub fn borrow(&self) -> std::cell::Ref<'_, Option<WgpuContext>> {
+        self.context.borrow()
+    }
+
+    pub fn borrow_mut(&self) -> std::cell::RefMut<'_, Option<WgpuContext>> {
+        self.context.borrow_mut()
+    }
+}
 
 enum InstanceData {
     Storage(wgpu::Buffer),
@@ -195,6 +201,7 @@ struct WgpuResources {
     path_intermediate_view: Option<wgpu::TextureView>,
     path_msaa_texture: Option<wgpu::Texture>,
     path_msaa_view: Option<wgpu::TextureView>,
+    yuv_surfaces: YuvSurfaces,
 }
 
 struct CachedTextureBindGroup {
@@ -263,6 +270,8 @@ pub struct WgpuRenderer {
     observed_error_generation: u64,
     last_surface_error: Option<String>,
     needs_redraw: bool,
+    // Quill: from the first `recover` after a device loss until it succeeds.
+    recovering: Recovering,
 }
 
 impl WgpuRenderer {
@@ -516,6 +525,7 @@ impl WgpuRenderer {
             observed_error_generation: 0,
             last_surface_error: None,
             needs_redraw: false,
+            recovering: Recovering::default(),
         })
     }
 }
@@ -610,10 +620,8 @@ impl WgpuRendererCore {
                     visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
                     ty: wgpu::BindingType::Buffer {
                         ty: wgpu::BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: NonZeroU64::new(
-                            std::mem::size_of::<SurfaceParams>() as u64
-                        ),
+                        has_dynamic_offset: true,
+                        min_binding_size: NonZeroU64::new(SURFACE_PARAMS_SIZE),
                     },
                     count: None,
                 },
@@ -1235,6 +1243,141 @@ impl WgpuRenderer {
         core.resources.queue.present(frame);
         true
     }
+
+    /// Quill: `scene` rendered offscreen at the surface's size with this
+    /// renderer's device, pipelines and atlas, and read back as RGBA rows
+    /// (width, height, pixels). Nothing is presented and the screen is not
+    /// read. Backs `Window::capture_frame` on Linux.
+    #[cfg(not(target_family = "wasm"))]
+    pub fn capture_scene(&mut self, scene: &Scene) -> anyhow::Result<(u32, u32, Vec<u8>)> {
+        let width = self.surface_config.width;
+        let height = self.surface_config.height;
+        // The pipelines blend for the surface's alpha mode, so the capture
+        // renders in that same mode, as `draw` does. Either way the target
+        // ends premultiplied: straight-alpha blending onto the transparent
+        // clear premultiplies, and the premultiplied mode already is.
+        let premultiplied_alpha =
+            self.surface_config.alpha_mode == wgpu::CompositeAlphaMode::PreMultiplied;
+        let core = self
+            .core_mut()
+            .ok_or_else(|| anyhow::anyhow!("the renderer was released"))?;
+        let format = core.target_format;
+        let swap_red_blue = match format {
+            wgpu::TextureFormat::Bgra8Unorm => true,
+            wgpu::TextureFormat::Rgba8Unorm => false,
+            other => anyhow::bail!("cannot read back a {other:?} surface"),
+        };
+        let device = Arc::clone(&core.resources.device);
+        let queue = Arc::clone(&core.resources.queue);
+        let texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("capture_target"),
+            size: wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
+        });
+        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let size = Size {
+            width: DevicePixels(i32::try_from(width).unwrap_or(i32::MAX)),
+            height: DevicePixels(i32::try_from(height).unwrap_or(i32::MAX)),
+        };
+        core.render_frame(
+            scene,
+            &view,
+            size,
+            premultiplied_alpha,
+            wgpu::Color::TRANSPARENT,
+        )?;
+
+        let bytes_per_row = width
+            .checked_mul(4)
+            .ok_or_else(|| anyhow::anyhow!("capture row size overflowed"))?;
+        let padded_bytes_per_row = bytes_per_row
+            .checked_next_multiple_of(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT)
+            .ok_or_else(|| anyhow::anyhow!("capture padded row size overflowed"))?;
+        let buffer_size = u64::from(padded_bytes_per_row)
+            .checked_mul(u64::from(height))
+            .ok_or_else(|| anyhow::anyhow!("capture buffer size overflowed"))?;
+        anyhow::ensure!(
+            buffer_size <= device.limits().max_buffer_size,
+            "capture buffer size {buffer_size} exceeds the device's maximum"
+        );
+        let readback = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("capture_readback"),
+            size: buffer_size,
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        });
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("capture_readback_encoder"),
+        });
+        encoder.copy_texture_to_buffer(
+            wgpu::TexelCopyTextureInfo {
+                texture: &texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            wgpu::TexelCopyBufferInfo {
+                buffer: &readback,
+                layout: wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(padded_bytes_per_row),
+                    rows_per_image: Some(height),
+                },
+            },
+            wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+        );
+        let submission = queue.submit(std::iter::once(encoder.finish()));
+        let (sender, receiver) = std::sync::mpsc::channel();
+        readback
+            .slice(..)
+            .map_async(wgpu::MapMode::Read, move |result| {
+                let _ = sender.send(result);
+            });
+        device
+            .poll(wgpu::PollType::Wait {
+                submission_index: Some(submission),
+                timeout: Some(std::time::Duration::from_secs(5)),
+            })
+            .map_err(|error| anyhow::anyhow!("waiting for the capture failed: {error}"))?;
+        receiver
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .map_err(|error| anyhow::anyhow!("the capture was never mapped: {error}"))?
+            .map_err(|error| anyhow::anyhow!("mapping the capture failed: {error}"))?;
+
+        let row = usize::try_from(bytes_per_row)?;
+        let padded_row = usize::try_from(padded_bytes_per_row)?;
+        let rows = usize::try_from(height)?;
+        let mut pixels = Vec::with_capacity(row.saturating_mul(rows));
+        {
+            let mapped = readback
+                .slice(..)
+                .get_mapped_range()
+                .map_err(|error| anyhow::anyhow!("reading the capture failed: {error}"))?;
+            for chunk in mapped.chunks_exact(padded_row).take(rows) {
+                pixels.extend_from_slice(chunk.get(..row).unwrap_or_default());
+            }
+        }
+        readback.unmap();
+        if swap_red_blue {
+            for pixel in pixels.chunks_exact_mut(4) {
+                pixel.swap(0, 2);
+            }
+        }
+        Ok((width, height, pixels))
+    }
 }
 
 impl WgpuRendererCore {
@@ -1361,6 +1504,7 @@ impl WgpuRendererCore {
             ],
         });
         let max_texture_size = device.limits().max_texture_dimension_2d;
+        let yuv_surfaces = YuvSurfaces::new(&device);
 
         Self {
             resources: WgpuResources {
@@ -1378,6 +1522,7 @@ impl WgpuRendererCore {
                 path_intermediate_view: None,
                 path_msaa_texture: None,
                 path_msaa_view: None,
+                yuv_surfaces,
             },
             atlas,
             path_globals_offset,
@@ -1522,6 +1667,13 @@ impl WgpuRendererCore {
                 )
             })?;
         self.prepare_texture_bind_groups(scene);
+        let resources = &mut self.resources;
+        resources.yuv_surfaces.prepare(
+            &resources.device,
+            &resources.queue,
+            &resources.bind_group_layouts.surfaces,
+            &scene.surfaces,
+        );
 
         let mut encoder =
             self.resources()
@@ -1634,9 +1786,15 @@ impl WgpuRendererCore {
                             &mut pass,
                         )?;
                     }
-                    // Surfaces are macOS-only for video playback and are not
-                    // implemented by the WGPU renderer.
-                    PrimitiveBatch::Surfaces(_surfaces) => {}
+                    PrimitiveBatch::Surfaces(range) => {
+                        let resources = self.resources();
+                        resources.yuv_surfaces.draw(
+                            range,
+                            &resources.pipelines.surfaces,
+                            &resources.globals_bind_group,
+                            &mut pass,
+                        );
+                    }
                 }
             }
         }
@@ -1645,6 +1803,7 @@ impl WgpuRendererCore {
             .resources()
             .queue
             .submit(std::iter::once(encoder.finish()));
+        self.resources.yuv_surfaces.end_frame();
         Ok(submission)
     }
 
@@ -2232,23 +2391,211 @@ impl WgpuRenderer {
     /// This method coordinates recovery across multiple windows:
     /// - The first window to call this will recreate the shared context
     /// - Subsequent windows will adopt the already-recovered context
+    ///
+    /// Quill: never sleeps. Until an attempt is due (`device_recovery`) it
+    /// returns [`Recovery::RetryAt`] at once; the caller asks again then.
     #[cfg(not(target_family = "wasm"))]
-    pub fn recover<W>(&mut self, window: &W) -> anyhow::Result<()>
+    pub fn recover<W>(&mut self, window: &W) -> Recovery
     where
         W: HasWindowHandle + HasDisplayHandle + std::fmt::Debug + Send + Sync + Clone + 'static,
     {
-        let gpu_context = self.context.as_ref().expect("recover requires gpu_context");
+        let Some(gpu_context) = self.context.clone() else {
+            return Recovery::GaveUp;
+        };
+        let now = Instant::now();
+        // Check if another window already recovered the context. `lost`:
+        // whether the lost context is still in the slot, and was a CPU one.
+        let lost = match gpu_context.borrow().as_ref() {
+            Some(ctx) if !ctx.device_lost() => None,
+            Some(ctx) => Some(Some(is_software(ctx))),
+            None => Some(None),
+        };
+        // The first window to see the context lost counts the loss.
+        let counting = matches!(lost, Some(Some(_)));
+        let losses = if counting {
+            gpu_context.recovery.borrow_mut().lost(now)
+        } else {
+            gpu_context.recovery.borrow().losses_now()
+        };
+        if lost.is_some() && losses == Losses::GiveUp {
+            self.state = RendererState::Released;
+            *gpu_context.borrow_mut() = None;
+            if counting {
+                device_gone("the GPU device keeps getting lost");
+            }
+            return Recovery::GaveUp;
+        }
+        let shared = match lost {
+            None => Shared::Healthy,
+            Some(was_software) => Shared::Lost {
+                adapters: losses.adapters(was_software),
+            },
+        };
+        if self.recovering.begin(now, shared) {
+            log::warn!("GPU device lost, recreating context...");
+            // Drop old resources to release Arc<Device>/Arc<Queue> and GPU resources
+            self.state = RendererState::Released;
+            *gpu_context.borrow_mut() = None;
+        }
+        let attempt = match self.recovering.next(now) {
+            Next::Wait(at) => return Recovery::RetryAt(at),
+            Next::GiveUp(target) => return gave_up(target),
+            Next::Attempt(attempt) => attempt,
+        };
+        let target = self.recovering.target();
+        match self.try_recover(window, &gpu_context, attempt) {
+            Ok(()) => {
+                self.recovering.succeeded();
+                let on_software = gpu_context.borrow().as_ref().is_some_and(is_software);
+                gpu_context
+                    .recovery
+                    .borrow_mut()
+                    .recovered(now, target, on_software);
+                log::info!("GPU recovery complete");
+                Recovery::Recovered
+            }
+            Err(err) => match self.recovering.failed(now) {
+                Next::GiveUp(target) => {
+                    match target {
+                        Target::Recreate { .. } => device_gone(&format!("{err:#}")),
+                        Target::Adopt => log::error!(
+                            "GPU context could not be used by this window, closing it: {err:#}"
+                        ),
+                    }
+                    gave_up(target)
+                }
+                Next::Wait(at) => {
+                    log::warn!("GPU recovery failed, retrying: {err:#}");
+                    Recovery::RetryAt(at)
+                }
+                Next::Attempt(_) => Recovery::RetryAt(now),
+            },
+        }
+    }
 
-        // Check if another window already recovered the context
-        let needs_new_context = gpu_context
+    /// Quill: when to call [`Self::probe_hardware`], while on a CPU adapter
+    /// that recovery fell back to from a lost GPU.
+    pub fn hardware_probe_at(&self) -> Option<Instant> {
+        let slot = self.context.as_ref()?;
+        let probe = slot.recovery.borrow().probe();
+        probe.map(|probe| probe.next_at())
+    }
+
+    /// Quill: on a CPU adapter that recovery fell back to, look for the GPU
+    /// and move this window onto it when it is back. Any window on the
+    /// context may look; the look is the context's. The other windows
+    /// follow on their next draw: the CPU context is retired, so they
+    /// recover and adopt the new one. Returns when to look again, or `None`
+    /// when there is no more looking to do. A frame is due afterwards when
+    /// [`Self::needs_redraw`] says so.
+    #[cfg(not(target_family = "wasm"))]
+    pub fn probe_hardware<W>(&mut self, window: &W) -> Option<Instant>
+    where
+        W: HasWindowHandle + HasDisplayHandle + std::fmt::Debug + Send + Sync + Clone + 'static,
+    {
+        let gpu_context = self.context.clone()?;
+        let mut probe = gpu_context.recovery.borrow().probe()?;
+        let now = Instant::now();
+        if let ProbeStep::Wait(due) = probe.step(now) {
+            return Some(due);
+        }
+        if self.device_lost() {
+            return None;
+        }
+        let on_software = gpu_context
             .borrow()
             .as_ref()
-            .is_none_or(|ctx| ctx.device_lost());
+            .is_some_and(|ctx| is_software(ctx) && !ctx.device_lost());
+        if !on_software {
+            gpu_context.recovery.borrow_mut().set_probe(None);
+            *gpu_context.look.borrow_mut() = None;
+            return None;
+        }
+        let seen = match probe.step(now) {
+            ProbeStep::Wait(due) => return Some(due),
+            ProbeStep::Look => {
+                *gpu_context.look.borrow_mut() = Some(look_for_gpu());
+                probe.started(now);
+                gpu_context.recovery.borrow_mut().set_probe(Some(probe));
+                return Some(probe.next_at());
+            }
+            ProbeStep::Await(check) if now < check => return Some(check),
+            ProbeStep::Await(_) => {
+                let mut look = gpu_context.look.borrow_mut();
+                match look.as_ref().map(|answer| answer.try_recv()) {
+                    Some(Err(std::sync::mpsc::TryRecvError::Empty)) => {
+                        probe.polled(now);
+                        gpu_context.recovery.borrow_mut().set_probe(Some(probe));
+                        return Some(probe.next_at());
+                    }
+                    Some(Ok(seen)) => {
+                        *look = None;
+                        seen
+                    }
+                    Some(Err(std::sync::mpsc::TryRecvError::Disconnected)) | None => {
+                        *look = None;
+                        false
+                    }
+                }
+            }
+        };
+        // The surface check needs this window, so it stays here; it only
+        // runs once a GPU adapter is back.
+        if !seen || !gpu_can_present(window) {
+            probe.missed(now);
+            gpu_context.recovery.borrow_mut().set_probe(Some(probe));
+            return Some(probe.due());
+        }
+        // A window holds one swapchain at a time: let go of the CPU one
+        // before the GPU's is configured.
+        let software = gpu_context.borrow_mut().take();
+        self.state = RendererState::Released;
+        let hardware = Attempt::Recreate {
+            adapters: Adapters::HardwareOnly,
+        };
+        match self.try_recover(window, &gpu_context, hardware) {
+            Ok(()) => {
+                if let Some(software) = software {
+                    software.errors().retire();
+                }
+                gpu_context.recovery.borrow_mut().set_probe(None);
+                log::info!("GPU is back, leaving the software renderer");
+                self.needs_redraw = true;
+                None
+            }
+            Err(err) => {
+                log::warn!("GPU seen but not usable yet, staying on software: {err:#}");
+                *gpu_context.borrow_mut() = software;
+                self.state = RendererState::Released;
+                if let Err(err) = self.try_recover(window, &gpu_context, Attempt::Adopt) {
+                    log::error!("cannot return to the software renderer: {err:#}");
+                    // Recovery adopts it again, with its backoff.
+                    self.device_errors = Arc::new(DeviceErrorState::default());
+                    self.device_errors.retire();
+                }
+                probe.missed(now);
+                gpu_context.recovery.borrow_mut().set_probe(Some(probe));
+                self.needs_redraw = true;
+                Some(probe.due())
+            }
+        }
+    }
 
+    /// One attempt: adopt the context another window recreated, or make a
+    /// new one on the adapters the attempt admits ([`install_once_built`]).
+    #[cfg(not(target_family = "wasm"))]
+    fn try_recover<W>(
+        &mut self,
+        window: &W,
+        gpu_context: &GpuContext,
+        attempt: Attempt,
+    ) -> anyhow::Result<()>
+    where
+        W: HasWindowHandle + HasDisplayHandle + std::fmt::Debug + Send + Sync + Clone + 'static,
+    {
         let window_handle = window
             .window_handle()
             .map_err(|e| anyhow::anyhow!("Failed to get window handle: {e}"))?;
-
         let config = WgpuSurfaceConfig {
             size: gpui::Size {
                 width: gpui::DevicePixels(self.surface_config.width as i32),
@@ -2258,56 +2605,136 @@ impl WgpuRenderer {
             preferred_present_mode: Some(self.surface_config.present_mode),
         };
 
-        let surface = if needs_new_context {
-            log::warn!("GPU device lost, recreating context...");
-
-            // Drop old resources to release Arc<Device>/Arc<Queue> and GPU resources
-            self.state = RendererState::Released;
-            *gpu_context.borrow_mut() = None;
-
-            // Wait briefly for the GPU driver to stabilize, then try to
-            // recreate the context without software renderers. If this fails
-            // the caller should request another frame and retry — the real GPU
-            // may need more time to come back (e.g. after suspend/resume).
-            std::thread::sleep(std::time::Duration::from_millis(350));
-
+        if let Attempt::Recreate { adapters } = attempt {
             let instance = WgpuContext::instance(Some(Box::new(window.clone())));
             let surface = create_surface(&instance, window_handle.as_raw())?;
-            let new_context = WgpuContext::new_rejecting_software(
-                instance,
-                &surface,
-                &config,
-                self.compositor_gpu,
-            )?;
-            *gpu_context.borrow_mut() = Some(new_context);
-            surface
-        } else {
-            let ctx_ref = gpu_context.borrow();
-            let instance = &ctx_ref.as_ref().unwrap().instance;
-            create_surface(instance, window_handle.as_raw())?
-        };
+            let context =
+                WgpuContext::new_on(instance, &surface, &config, self.compositor_gpu, adapters)?;
+            return install_once_built(
+                context,
+                |context| self.rebuild(gpu_context, context, surface, config, true),
+                |context| *gpu_context.borrow_mut() = Some(context),
+            );
+        }
 
         let gpu_context = Rc::clone(gpu_context);
         let ctx_ref = gpu_context.borrow();
-        let context = ctx_ref.as_ref().expect("context should exist");
+        let Some(context) = ctx_ref.as_ref() else {
+            anyhow::bail!("the recovered GPU context is gone");
+        };
+        let surface = create_surface(&context.instance, window_handle.as_raw())?;
+        self.rebuild(&gpu_context, context, surface, config, false)
+    }
 
+    /// Replace this renderer with one on `context`, keeping its atlas and
+    /// subpixel layout.
+    #[cfg(not(target_family = "wasm"))]
+    fn rebuild(
+        &mut self,
+        gpu_context: &GpuContext,
+        context: &WgpuContext,
+        surface: wgpu::Surface<'static>,
+        config: WgpuSurfaceConfig,
+        surface_configured: bool,
+    ) -> anyhow::Result<()> {
         self.state = RendererState::Released;
         self.atlas.handle_device_lost(context);
-
         let is_bgr = self.is_bgr;
         *self = Self::new_internal(
-            Some(gpu_context.clone()),
+            Some(Rc::clone(gpu_context)),
             context,
             surface,
             config,
-            needs_new_context,
+            surface_configured,
             self.compositor_gpu,
             self.atlas.clone(),
         )?;
         self.set_subpixel_layout(is_bgr);
-
-        log::info!("GPU recovery complete");
         Ok(())
+    }
+}
+
+/// What the application does once the renderer gives up: on Linux, Quill
+/// shows the alert it shows when no GPU works at launch, and exits.
+static DEVICE_GONE: std::sync::OnceLock<fn(&str)> = std::sync::OnceLock::new();
+
+/// Set the handler for a GPU that could not be recovered. The first call
+/// wins.
+pub fn on_device_gone(handler: fn(&str)) {
+    let _ = DEVICE_GONE.set(handler);
+}
+
+fn device_gone(detail: &str) {
+    log::error!("GPU device lost and could not be recreated: {detail}");
+    if let Some(handler) = DEVICE_GONE.get() {
+        handler(detail);
+    }
+}
+
+/// Quill: what [`WgpuRenderer::recover`] did.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Recovery {
+    Recovered,
+    /// Draw a frame again at this instant (call `recover` then).
+    RetryAt(Instant),
+    /// No GPU came back; stop drawing.
+    GaveUp,
+    /// Other windows draw with the recovered context but this one cannot:
+    /// close it, outside the draw.
+    CloseWindow,
+}
+
+fn is_software(context: &WgpuContext) -> bool {
+    context.adapter.get_info().device_type == wgpu::DeviceType::Cpu
+}
+
+/// Quill: start looking for a GPU adapter on a thread of its own: making a
+/// Vulkan instance and listing the adapters takes tens of milliseconds,
+/// and a look ran on the UI thread every 10 s to 2 minutes for as long as
+/// the GPU stayed away. The answer is whether a non-CPU adapter is listed;
+/// a thread that cannot start answers no.
+#[cfg(not(target_family = "wasm"))]
+fn look_for_gpu() -> std::sync::mpsc::Receiver<bool> {
+    let (answer, receiver) = std::sync::mpsc::channel();
+    let _ = std::thread::Builder::new()
+        .name("quill-gpu-look".into())
+        .spawn(move || {
+            let instance = WgpuContext::instance(None);
+            let seen = gpui::block_on(instance.enumerate_adapters(wgpu::Backends::all()))
+                .iter()
+                .any(|adapter| adapter.get_info().device_type != wgpu::DeviceType::Cpu);
+            let _ = answer.send(seen);
+        });
+    receiver
+}
+
+/// Quill: whether a GPU, not a CPU adapter, says it can present to
+/// `window`. Cheap next to making a context, so a probe that finds nothing
+/// leaves the window's renderer alone.
+#[cfg(not(target_family = "wasm"))]
+fn gpu_can_present<W>(window: &W) -> bool
+where
+    W: HasWindowHandle + HasDisplayHandle + std::fmt::Debug + Send + Sync + Clone + 'static,
+{
+    let Ok(handle) = window.window_handle() else {
+        return false;
+    };
+    let instance = WgpuContext::instance(Some(Box::new(window.clone())));
+    let Ok(surface) = create_surface(&instance, handle.as_raw()) else {
+        return false;
+    };
+    gpui::block_on(instance.enumerate_adapters(wgpu::Backends::all()))
+        .iter()
+        .any(|adapter| {
+            adapter.get_info().device_type != wgpu::DeviceType::Cpu
+                && adapter.is_surface_supported(&surface)
+        })
+}
+
+fn gave_up(target: Target) -> Recovery {
+    match target {
+        Target::Recreate { .. } => Recovery::GaveUp,
+        Target::Adopt => Recovery::CloseWindow,
     }
 }
 
@@ -2410,6 +2837,12 @@ impl WgpuHeadlessRenderer {
         let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
         self.render_target = Some(HeadlessRenderTarget { texture, view });
         Ok(())
+    }
+
+    /// Quill: the NV12 texture pairs this renderer holds.
+    #[cfg(test)]
+    pub(crate) fn yuv_slot_count(&self) -> usize {
+        self.core.resources.yuv_surfaces.slot_count()
     }
 
     fn check_gpu_errors(&mut self) -> anyhow::Result<()> {
