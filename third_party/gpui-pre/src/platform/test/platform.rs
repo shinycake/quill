@@ -58,7 +58,6 @@ pub(crate) struct TestPlatform {
     weak: Weak<Self>,
     menus: RefCell<Vec<OwnedMenu>>,
     pub(crate) app_lifecycle_callback: RefCell<Option<Box<dyn FnMut(AppLifecyclePhase)>>>,
-    pub(crate) quit_request_callback: RefCell<Option<Box<dyn FnMut() -> crate::QuitAnswer>>>,
     pub(crate) memory_warning_callback: RefCell<Option<Box<dyn FnMut()>>>,
 }
 
@@ -127,6 +126,11 @@ pub(crate) struct TestPrompts {
 }
 
 impl TestPlatform {
+    #[cfg(test)]
+    pub(crate) fn cursor_style(&self) -> CursorStyle {
+        *self.active_cursor.lock()
+    }
+
     #[cfg(any(test, feature = "test-support"))]
     pub fn new(executor: BackgroundExecutor, foreground_executor: ForegroundExecutor) -> Rc<Self> {
         Self::with_platform(
@@ -263,7 +267,6 @@ impl TestPlatform {
             headless_renderer_factory,
             menus: Default::default(),
             app_lifecycle_callback: Default::default(),
-            quit_request_callback: Default::default(),
             memory_warning_callback: Default::default(),
         })
     }
@@ -692,10 +695,6 @@ impl Platform for TestPlatform {
     }
 
     fn on_quit(&self, _callback: Box<dyn FnMut() -> bool>) {}
-
-    fn on_quit_request(&self, callback: Box<dyn FnMut() -> crate::QuitAnswer>) {
-        *self.quit_request_callback.borrow_mut() = Some(callback);
-    }
 
     fn on_reopen(&self, _callback: Box<dyn FnMut()>) {
         unimplemented!()
