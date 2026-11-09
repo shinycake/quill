@@ -304,6 +304,23 @@ impl QuillApp {
         quill::wake::UPDATES.poke();
     }
 
+    /// Resolve `action` (a box's or toast's "open @username") as a flow of
+    /// the window that asks, as [`Self::queue_deep_link`] does for a link:
+    /// the chat it resolves opens there, and the main window comes forward
+    /// for it when another window asked (`hold_resolved_link`). The one way
+    /// UI code starts a resolve; `scripts/main_frame_queues.py` rejects a
+    /// bare `driver.resolve_deep_link` elsewhere in src/ui (round 18 B #8).
+    /// `None` without a live session, else whether the request went out.
+    pub(in crate::ui) fn resolve_deep_link_here(&mut self, action: DeepLinkAction) -> Option<bool> {
+        let window = self.asking_window().flatten();
+        let live = self.live.as_mut()?;
+        let sent = live.driver.resolve_deep_link(action).is_ok();
+        if sent {
+            self.screen.links.flow_window = window;
+        }
+        Some(sent)
+    }
+
     /// A link from outside Quill (the OS, a second launch): whichever
     /// account is on screen takes it, in the main window.
     pub(super) fn queue_outside_link(&mut self, link: String) {

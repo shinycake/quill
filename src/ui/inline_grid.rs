@@ -453,19 +453,17 @@ impl QuillApp {
                 // its chat is open and remembers where to come back to
                 // (`inline_return.rs`).
                 self.begin_inline_return(bot_id, &username, &parameter);
-                if let Some(live) = self.live.as_mut() {
-                    let sent = live.driver.resolve_deep_link(DeepLinkAction::OpenUsername {
-                        domain: username,
-                        start_param: None,
-                        post: None,
-                        story_id: None,
-                    });
-                    if sent.is_err() {
-                        self.set_status_note(
-                            StatusNote::error(tr(keys::Q_MEDIA_COULDNT_OPEN_THE_BOTS_CHAT)),
-                            cx,
-                        );
-                    }
+                let sent = self.resolve_deep_link_here(DeepLinkAction::OpenUsername {
+                    domain: username,
+                    start_param: None,
+                    post: None,
+                    story_id: None,
+                });
+                if sent == Some(false) {
+                    self.set_status_note(
+                        StatusNote::error(tr(keys::Q_MEDIA_COULDNT_OPEN_THE_BOTS_CHAT)),
+                        cx,
+                    );
                 }
             }
             ButtonAction::WebApp { url } => self.open_inline_results_web_app(bot_id, &url, cx),

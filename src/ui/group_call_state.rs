@@ -81,12 +81,12 @@ pub(crate) struct GroupCallScreen {
         super::group_call_stream_layout::StreamJoinIntent,
         Option<i32>,
     )>,
-    /// The stream call whose join was sent (the Join button waits): call
-    /// ids repeat across clients, and the timeout below is a task of this
-    /// screen, so a wait left over would never end on the next account.
-    pub(super) stream_joining: Option<i32>,
-    /// Gives up on a join that neither lands nor fails.
-    pub(super) stream_join_timeout: Option<Task<()>>,
+    /// The stream call whose join was sent (the Join button waits), with
+    /// the task that gives up on it: call ids repeat across clients, and
+    /// the task belongs to this screen, so a wait left over would never
+    /// end on the next account. One field, so the wait and its way out
+    /// cannot part.
+    pub(super) stream_joining: Option<StreamJoining>,
     /// The call the boxes above and [`GroupCallBoxes`]' invite and share
     /// boxes were opened for (`sync_group_call_boxes`): another call, or
     /// none, closes them, so a rename typed for one call cannot rename the
@@ -94,7 +94,28 @@ pub(crate) struct GroupCallScreen {
     pub(super) boxes_call: Option<i32>,
 }
 
+/// A stream join on its way: the call and the task that gives up on it
+/// when it neither lands nor fails. Dropping it ends the wait.
+pub(super) struct StreamJoining {
+    pub(super) call: i32,
+    _timeout: Task<()>,
+}
+
+impl StreamJoining {
+    pub(super) fn new(call: i32, timeout: Task<()>) -> Self {
+        Self {
+            call,
+            _timeout: timeout,
+        }
+    }
+}
+
 impl GroupCallScreen {
+    /// The call whose join is on its way, if any.
+    pub(super) fn joining_call(&self) -> Option<i32> {
+        self.stream_joining.as_ref().map(|joining| joining.call)
+    }
+
     pub(super) fn new(
         send_key_mode: quill::composer::SendKeyMode,
         window: &mut Window,
@@ -131,7 +152,6 @@ impl GroupCallScreen {
             pin: quill::calls::tile_pin::TilePin::default(),
             stream_join: None,
             stream_joining: None,
-            stream_join_timeout: None,
             boxes_call: None,
         }
     }
@@ -190,6 +210,7 @@ impl QuillApp {
             self.group_call_screen.title_dialog = None;
             self.group_call_screen.settings_open = false;
             self.group_call_screen.pin = Default::default();
+            self.group_call.stream.close_boxes();
             self.group_call_boxes.invite_open = false;
             self.group_call_boxes.share_open = false;
             self.group_call_boxes.share_copied = false;

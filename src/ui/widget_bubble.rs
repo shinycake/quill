@@ -49,7 +49,7 @@ impl QuillApp {
             Some(entry) => match (&entry.lifecycle, entry.frame.is_some()) {
                 (Lifecycle::Failed { .. }, _) => Look::Fallback,
                 (Lifecycle::Stopped { .. }, true) => Look::Frame {
-                    stopped: entry.crashes >= MAX_CRASHES || entry.runtime.is_none(),
+                    stopped: entry.crashes >= MAX_CRASHES || entry.runtime().is_none(),
                 },
                 (Lifecycle::Stopped { .. }, false) => Look::Fallback,
                 (_, true) => Look::Frame { stopped: false },
@@ -58,25 +58,36 @@ impl QuillApp {
         };
         let height = entry.map_or_else(
             || quill::message_widget::initial_height(content.height, None),
-            |entry| entry.height,
+            |entry| entry.height * frame_scale(entry.presence.width(), width),
         );
         let card = match (look, entry.and_then(|entry| entry.frame.as_ref())) {
-            (Look::Frame { stopped }, Some((image, w, h))) => div()
-                .id(("widget-frame", id))
-                .relative()
-                .w(px(*w))
-                .h(px(*h))
-                .overflow_hidden()
-                .child(
-                    img(ImageSource::Render((**image).clone()))
-                        .w(px(*w))
-                        .h(px(*h)),
-                )
-                .when(!stopped, |card| {
-                    card.child(self.widget_input_layer(key, entry.map(|e| e.cursor.as_str()), cx))
-                })
-                .when(stopped, |card| card.child(stopped_pill(cx)))
-                .into_any_element(),
+            (Look::Frame { stopped }, Some((image, w, h))) => {
+                // The frame is laid out at the owner window's width: a
+                // narrower card here draws it scaled down to fit.
+                let scale = frame_scale(*w, width);
+                let (w, h) = (*w * scale, *h * scale);
+                div()
+                    .id(("widget-frame", id))
+                    .relative()
+                    .w(px(w))
+                    .h(px(h))
+                    .overflow_hidden()
+                    .child(
+                        img(ImageSource::Render((**image).clone()))
+                            .w(px(w))
+                            .h(px(h)),
+                    )
+                    .when(!stopped, |card| {
+                        card.child(self.widget_input_layer(
+                            key,
+                            entry.map(|e| e.cursor.as_str()),
+                            scale,
+                            cx,
+                        ))
+                    })
+                    .when(stopped, |card| card.child(stopped_pill(cx)))
+                    .into_any_element()
+            }
             (Look::Fallback, _) => fallback_card(id),
             _ => div()
                 .id(("widget-placeholder", id))
@@ -94,6 +105,7 @@ impl QuillApp {
         &self,
         key: WidgetKey,
         cursor: Option<&str>,
+        scale: f32,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let cursor = cursor.and_then(cursor_style);
@@ -104,10 +116,11 @@ impl QuillApp {
                 if let Some(cursor) = cursor {
                     window.set_cursor_style(cursor, &hitbox);
                 }
+                // CSS px of the frame as the runtime laid it out.
                 let at = move |position: Point<Pixels>| {
                     (
-                        f64::from(f32::from(position.x - bounds.origin.x)),
-                        f64::from(f32::from(position.y - bounds.origin.y)),
+                        f64::from(f32::from(position.x - bounds.origin.x) / scale),
+                        f64::from(f32::from(position.y - bounds.origin.y) / scale),
                     )
                 };
                 let down = (app.clone(), hitbox.clone());
@@ -167,10 +180,11 @@ impl QuillApp {
         y: f64,
         modifiers: i32,
     ) -> bool {
+        let window = self.windows.scope;
         let Some(entry) = self.widgets.entries.get_mut(&key) else {
             return false;
         };
-        let Some(runtime) = &entry.runtime else {
+        let Some(runtime) = entry.lifecycle.runtime() else {
             return false;
         };
         let button = match button {
@@ -179,6 +193,8 @@ impl QuillApp {
             _ => return false,
         };
         entry.pressed = Some(button);
+        // What this press opens (a link, a copy) shows in this window.
+        entry.input_window = window;
         runtime.input(Input::Pointer {
             action: 0,
             x,
@@ -193,7 +209,7 @@ impl QuillApp {
         let Some(entry) = self.widgets.entries.get_mut(&key) else {
             return;
         };
-        let Some(runtime) = &entry.runtime else {
+        let Some(runtime) = entry.lifecycle.runtime() else {
             return;
         };
         if let Some(button) = entry.pressed {
@@ -234,7 +250,7 @@ impl QuillApp {
         let Some(entry) = self.widgets.entries.get_mut(&key) else {
             return;
         };
-        let Some(runtime) = &entry.runtime else {
+        let Some(runtime) = entry.lifecycle.runtime() else {
             return;
         };
         let released = match button {
@@ -266,6 +282,17 @@ fn modifier_bits(modifiers: Modifiers) -> i32 {
         | i32::from(modifiers.control) << 1
         | i32::from(modifiers.platform) << 2
         | i32::from(modifiers.shift) << 3
+}
+
+/// How much a frame laid out `frame_width` CSS px wide shrinks to fit a
+/// card `card_width` wide: 1 when it fits (it is never drawn larger).
+/// Another window showing the same widget is narrower than its owner.
+pub(super) fn frame_scale(frame_width: f32, card_width: f32) -> f32 {
+    if frame_width > 0.0 && card_width > 0.0 && card_width < frame_width {
+        card_width / frame_width
+    } else {
+        1.0
+    }
 }
 
 /// A CSS cursor as GPUI's; `None` leaves the history's.

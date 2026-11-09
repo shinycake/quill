@@ -182,7 +182,15 @@ impl QuillApp {
     /// The official packs: TDLib's list, or the demo fixture.
     fn official_language_packs(&self) -> Vec<LanguagePackInfoData> {
         match self.live.as_ref() {
-            Some(live) => live.driver.session.settings.language.packs.clone(),
+            Some(live) => live
+                .driver
+                .session
+                .settings
+                .language
+                .packs
+                .data()
+                .cloned()
+                .unwrap_or_default(),
             None => super::language_demo::demo_packs(),
         }
     }
@@ -501,7 +509,7 @@ impl QuillApp {
             && self
                 .live
                 .as_ref()
-                .is_some_and(|l| l.driver.session.settings.language.packs_loading);
+                .is_some_and(|l| l.driver.session.settings.language.packs.is_loading());
         let border = cx.theme().border;
         let muted = cx.theme().muted_foreground;
         let empty = recent.is_empty() && official.is_empty() && !loading;

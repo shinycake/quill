@@ -225,9 +225,10 @@ impl QuillApp {
         self.in_window_scope(window, cx, |app, cx| app.present_forward_result(result, cx));
     }
 
-    /// Show `result` in the window in place. What that window was
-    /// building for this forward (its selection, bar and picker) goes;
-    /// another forward being built there stays.
+    /// Show `result` in the window in place. The forward it answers ended
+    /// when it was sent (the share box and the bar's Send end the stage),
+    /// so whatever the window builds now is a newer forward, even from the
+    /// same chat and topic: the answer leaves it alone (round 18 B #5).
     pub(super) fn present_forward_result(&mut self, result: ForwardResult, cx: &mut Context<Self>) {
         let label = result.success_label();
         let host = self.windows.scope;
@@ -241,16 +242,6 @@ impl QuillApp {
                 StatusNote::info(label)
             },
         );
-        // A newer selection made in another conversation of the same chat
-        // (another forum topic) is not this forward's.
-        let this_forward = self
-            .share
-            .forward
-            .draft()
-            .is_none_or(|draft| draft.is_from(result.from_chat_id, result.from_topic));
-        if this_forward {
-            self.share.forward = ForwardStage::None;
-        }
         self.share.forward_result = Some(result);
         cx.notify();
     }

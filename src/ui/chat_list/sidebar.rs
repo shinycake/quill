@@ -115,6 +115,15 @@ impl QuillApp {
         window: &Window,
         cx: &mut Context<Self>,
     ) -> Stateful<Div> {
+        // A pinned drag lives in the chat rows, which end it on release.
+        // Contacts, Calls or search in their place: the release can never
+        // reach them, so the drag ends now, unsaved (round 18 B #2).
+        if self.chat_list.contacts_tab_open
+            || self.chat_list.calls_tab_open
+            || self.search_is_open()
+        {
+            self.chat_list.pin_reorder = None;
+        }
         if self.chat_list.contacts_tab_open {
             return list.child(self.contacts_panel(cx));
         }
@@ -249,9 +258,10 @@ impl QuillApp {
             // A live pinned drag shows its swapped order (tdesktop moves
             // rows while dragging); stable, so unpinned rows keep their
             // place.
-            if let Some(reorder) = self.chat_list.pin_reorder.as_ref()
+            if let Some(drag) = self.chat_list.pin_reorder.as_ref()
+                && !drag.archived
+                && let reorder = &drag.reorder
                 && reorder.dragging().is_some()
-                && !self.chat_list.pin_reorder_archived
             {
                 chats.sort_by_key(|chat| reorder.position(chat.id.0).unwrap_or(usize::MAX));
             }
@@ -298,9 +308,10 @@ impl QuillApp {
         // more" button: paging is automatic, not user-triggered.
         if folder.is_none() && matches!(filter, ChatListFilter::Archived | ChatListFilter::Unread) {
             if filter != ChatListFilter::Unread
-                && let Some(reorder) = self.chat_list.pin_reorder.as_ref()
+                && let Some(drag) = self.chat_list.pin_reorder.as_ref()
+                && drag.archived
+                && let reorder = &drag.reorder
                 && reorder.dragging().is_some()
-                && self.chat_list.pin_reorder_archived
             {
                 archived.sort_by_key(|chat| reorder.position(chat.id.0).unwrap_or(usize::MAX));
             }
@@ -322,7 +333,12 @@ impl QuillApp {
         }
         // Pinned-drag animation: keep frames coming while rows slide, drop
         // the state once everything settled.
-        if let Some(reorder) = self.chat_list.pin_reorder.as_ref() {
+        if let Some(reorder) = self
+            .chat_list
+            .pin_reorder
+            .as_ref()
+            .map(|drag| &drag.reorder)
+        {
             let now = std::time::Instant::now();
             if reorder.settled(now)
                 || (!self.frame.window_active.get() && reorder.dragging().is_none())
@@ -466,7 +482,7 @@ impl QuillApp {
             .chat_list
             .pin_reorder
             .as_ref()
-            .is_some_and(|reorder| reorder.dragging().is_some());
+            .is_some_and(|drag| drag.reorder.dragging().is_some());
         div()
             .id("chat-rows")
             .role(gpui_kit::Role::Group)

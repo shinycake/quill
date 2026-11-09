@@ -139,6 +139,21 @@ impl Session {
         id
     }
 
+    /// Like `request`, but stamps the invite link a link-scoped request
+    /// acts on (`PendingRequest::invite_link`); its `ok` carries none.
+    pub fn request_for_invite_link(
+        &mut self,
+        purpose: RequestPurpose,
+        chat_id: ChatId,
+        invite_link: &str,
+    ) -> RequestId {
+        let id = self.request(purpose, Some(chat_id));
+        if let Some(pending) = self.requests.pending.get_mut(&id.0) {
+            pending.invite_link = Some(invite_link.to_owned());
+        }
+        id
+    }
+
     /// Phase B1: like `request`, but stamps the secret chat id for
     /// `GetSecretChat` / `CloseSecretChat` correlation
     /// (`PendingRequest::secret_chat_id`) — the `secretChat` response and

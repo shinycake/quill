@@ -3,6 +3,7 @@
 use super::super::*;
 use super::*;
 use crate::diagnostics::{DiagnosticSink, MemorySink};
+use crate::gift_manage::GiftListFetch;
 use crate::ids::ChatId;
 use crate::platform::MemorySecretStore;
 use crate::premium_hub::StarAmount;
@@ -491,7 +492,7 @@ fn sending_a_gift_needs_an_open_dialog_a_sendable_gift_and_enough_stars() {
 
     open_send_dialog(&mut p);
     let send = &p.0.session.payments.gifts_manage.send;
-    assert!(send.open && send.gifts_loaded && send.gifts.len() == 2);
+    assert!(send.open && send.gifts_fetch == GiftListFetch::Answered && send.gifts.len() == 2);
     assert_eq!(count(&p.1, "getPremiumGiftPaymentOptions"), 1);
     // A sold-out gift and an unknown gift are refused.
     assert!(p.0.send_star_gift(56, "", false, false).is_err());
@@ -525,7 +526,7 @@ fn sending_a_gift_needs_an_open_dialog_a_sendable_gift_and_enough_stars() {
     assert_eq!(count(&p.1, "sendGift"), 1);
     feed(&mut p, json!({"@type": "ok", "@extra": extra.as_extra()}));
     let send = &p.0.session.payments.gifts_manage.send;
-    assert!(!send.sending);
+    assert!(!send.sending());
     assert_eq!(send.done.as_deref(), Some("Gift sent."));
 }
 
@@ -539,7 +540,7 @@ fn a_failed_send_releases_the_dialog_and_says_so() {
         json!({"@type": "error", "@extra": extra.as_extra(), "code": 400, "message": "STARGIFT_USAGE_LIMITED"}),
     );
     let send = &p.0.session.payments.gifts_manage.send;
-    assert!(!send.sending && send.done.is_none());
+    assert!(!send.sending() && send.done.is_none());
     assert!(
         send.error
             .as_deref()
@@ -604,7 +605,10 @@ fn a_send_answer_for_an_earlier_dialog_does_not_land_in_the_open_one() {
     let second = p.0.send_star_gift(55, "", false, false).unwrap();
     feed(&mut p, json!({"@type": "ok", "@extra": first.as_extra()}));
     let send = &p.0.session.payments.gifts_manage.send;
-    assert!(send.sending, "the open dialog still waits for its own send");
+    assert!(
+        send.sending(),
+        "the open dialog still waits for its own send"
+    );
     assert!(send.done.is_none());
     assert!(
         p.0.send_star_gift(55, "", false, false).is_err(),
@@ -617,7 +621,7 @@ fn a_send_answer_for_an_earlier_dialog_does_not_land_in_the_open_one() {
     assert!(p.0.session.payments.gifts_manage.send.error.is_none());
     feed(&mut p, json!({"@type": "ok", "@extra": second.as_extra()}));
     let send = &p.0.session.payments.gifts_manage.send;
-    assert!(!send.sending);
+    assert!(!send.sending());
     assert_eq!(send.done.as_deref(), Some("Gift sent."));
 }
 
@@ -644,8 +648,8 @@ fn an_earlier_boxs_gift_answers_are_dropped() {
         json!({"@type": "error", "@extra": first_premium["@extra"], "code": 400, "message": "FLOOD"}),
     );
     let send = &p.0.session.payments.gifts_manage.send;
-    assert!(send.gifts_loading && !send.gifts_loaded && send.error.is_none());
-    assert!(!send.premium_loaded);
+    assert!(send.gifts_fetch.is_loading() && send.error.is_none());
+    assert!(send.premium_fetch.is_loading());
     let second = sent_request(&p.1, "getAvailableGifts");
     feed(
         &mut p,
@@ -655,5 +659,5 @@ fn an_earlier_boxs_gift_answers_are_dropped() {
         ]}),
     );
     let send = &p.0.session.payments.gifts_manage.send;
-    assert!(send.gifts_loaded && !send.gifts_loading && send.gifts.len() == 1);
+    assert!(send.gifts_fetch == GiftListFetch::Answered && send.gifts.len() == 1);
 }

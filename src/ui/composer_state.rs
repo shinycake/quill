@@ -58,10 +58,12 @@ pub(crate) struct ComposerUi {
     /// B5: "Send as a document" for the replacement file while editing
     /// media (tdesktop `EditCaptionBox::_asFile`).
     pub(super) edit_replace_as_file: bool,
-    /// MED4b: debounce token for the `getLinkPreview` prefetch — each
-    /// keystroke bumps it so only the latest quiet window fires (schema:
-    /// "Do not call this function too often"; TGX rate-limits 400ms).
-    pub(super) preview_token: u64,
+    /// MED4b: the `getLinkPreview` prefetch waiting for its URL to settle:
+    /// the URL and its 500 ms timer. Armed once per new URL; a frame with
+    /// the same URL leaves it running (round 18 B #7: re-arming every frame
+    /// put the request off for as long as the app redrew). Schema: "Do not
+    /// call this function too often"; TGX rate-limits 400ms.
+    pub(super) preview_timer: Option<(String, gpui_kit::Task<()>)>,
     /// The composer text before the last keystroke, for "Replace emoji
     /// automatically" (it only reacts to one typed character).
     pub(super) prev_text: gpui_kit::SharedString,
@@ -136,7 +138,7 @@ impl ComposerUi {
             inline_scroll: gpui_kit::ScrollHandle::new(),
             inline_return: None,
             edit_replace_as_file: false,
-            preview_token: 0,
+            preview_timer: None,
             prev_text: gpui_kit::SharedString::default(),
             markdown_revert: None,
             send_silent_once: false,

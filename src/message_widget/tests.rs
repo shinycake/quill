@@ -87,20 +87,22 @@ fn a_card_takes_the_bots_width_within_the_bubble() {
 #[test]
 fn stopped_and_failed_both_show_the_stopped_label() {
     assert!(
-        Lifecycle::Stopped {
+        Lifecycle::<()>::Stopped {
             reason: "cpu".into()
         }
         .is_stopped()
     );
     assert!(
-        Lifecycle::Failed {
+        Lifecycle::<()>::Failed {
             reason: "bundle".into()
         }
         .is_stopped()
     );
-    assert!(!Lifecycle::Released.is_stopped());
-    assert!(Lifecycle::Loading.is_live() && Lifecycle::Running.is_live());
-    assert!(!Lifecycle::Waiting.is_live());
+    assert!(!Lifecycle::<()>::Released.is_stopped());
+    assert!(Lifecycle::Loading(()).is_live() && Lifecycle::Running(()).is_live());
+    assert!(!Lifecycle::<()>::Waiting.is_live());
+    assert_eq!(Lifecycle::Loading(7).started(), Lifecycle::Running(7));
+    assert_eq!(Lifecycle::<u8>::Released.started(), Lifecycle::Released);
 }
 
 fn temp_dir(name: &str) -> std::path::PathBuf {

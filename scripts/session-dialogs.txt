@@ -48,6 +48,7 @@ PaymentForm | close_payment_dialog | `payments.dialog` (screen) over the session
 PaymentReceipt | close_payment_receipt | `payments.receipt_open`
 PremiumFeatures | close_premium | `payments.hub.premium_open`
 PremiumLimit | dismiss_premium_limit | `payments.hub.limit_box`
+ProxyList | - | the open flag is `proxy.list_box` (screen, dropped with it); the predicate reads the session only to draw it while the sign-in pane shows
 ReceivedGifts | close_gifts | `payments.hub.gifts_open`
 RtmpStart | close_rtmp_start | `calls.rtmp_start`
 SendGift | close_send_gift_dialog | `payments.gifts_manage.send.open`

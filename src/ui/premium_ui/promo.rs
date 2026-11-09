@@ -76,36 +76,12 @@ impl QuillApp {
             .unwrap_or_default()
     }
 
-    /// Ask for the example stickers and fetch their files as they arrive
-    /// (the answer lands a moment later, so this checks a few times).
-    fn start_sticker_examples(&mut self, cx: &mut Context<Self>) {
+    /// Ask for the example stickers; their files are fetched by
+    /// [`Self::sync_premium_preview_files`] once the answer is in.
+    fn start_sticker_examples(&mut self) {
         if let Some(live) = self.live.as_mut() {
             let _ = live.driver.maybe_fetch_premium_stickers();
         }
-        self.spawn_screen(cx, async move |this, cx| {
-            for _ in 0..10 {
-                cx.background_executor()
-                    .timer(std::time::Duration::from_millis(600))
-                    .await;
-                let _ = this.update(cx, |this, cx| {
-                    let ids: Vec<FileId> = this
-                        .session()
-                        .map(|s| {
-                            preview_stickers(&s.payments.hub)
-                                .filter_map(|st| st.display_file_id())
-                                .collect()
-                        })
-                        .unwrap_or_default();
-                    if let Some(live) = this.live.as_mut() {
-                        for id in ids {
-                            let _ = live.driver.download_file(id, 16);
-                        }
-                    }
-                    cx.notify();
-                });
-            }
-        })
-        .detach();
     }
 
     /// A Premium sticker was chosen without Premium: show the Premium
@@ -134,11 +110,10 @@ impl QuillApp {
     pub(super) fn set_promo_page(&mut self, page: PromoPage, cx: &mut Context<Self>) {
         // A new page starts without the old clip; a preview asks for its own.
         self.premium_preview.stop();
-        if let PromoPage::Preview { feature, .. } = page {
-            self.fetch_preview_clip(feature, cx);
-            if feature == PromoFeature::Premium(PremiumFeature::UniqueStickers) {
-                self.start_sticker_examples(cx);
-            }
+        if let PromoPage::Preview { feature, .. } = page
+            && feature == PromoFeature::Premium(PremiumFeature::UniqueStickers)
+        {
+            self.start_sticker_examples();
         }
         if let Some(hub) = self.hub_mut() {
             hub.promo_page = page;
@@ -146,55 +121,41 @@ impl QuillApp {
         cx.notify();
     }
 
-    /// Download the promotion clip of `feature`: at once when the Premium
-    /// state is known, else as soon as it arrives while the preview shows.
-    fn fetch_preview_clip(&mut self, feature: PromoFeature, cx: &mut Context<Self>) {
-        let clip = move |this: &Self| -> Option<Option<i32>> {
-            let state = this.session()?.payments.hub.premium_state.as_ref()?;
-            Some(animation_for(&state.animations, feature).map(|a| a.file_id))
+    /// While a preview shows, fetch what it draws that is not on disk:
+    /// the promotion clip once the Premium state is known, and the example
+    /// stickers once their answer is in. Derived from the state each frame
+    /// (a download already asked for or done is skipped), so a slow answer
+    /// is picked up whenever it lands. Run at every main frame.
+    pub(in crate::ui) fn sync_premium_preview_files(&mut self) {
+        let Some(session) = self.session() else {
+            return;
         };
-        let download = |this: &mut Self, id: i32| {
-            if let Some(live) = this.live.as_mut() {
-                let _ = live.driver.download_file(FileId(id), 32);
-            }
+        let hub = &session.payments.hub;
+        let PromoPage::Preview { feature, .. } = hub.promo_page else {
+            return;
         };
-        if let Some(found) = clip(self) {
-            if let Some(id) = found {
-                download(self, id);
-            }
+        if !hub.premium_open {
             return;
         }
-        self.spawn_screen(cx, async move |this, cx| {
-            for _ in 0..24 {
-                cx.background_executor()
-                    .timer(std::time::Duration::from_millis(250))
-                    .await;
-                let done = this
-                    .update(cx, |this, cx| {
-                        let showing = matches!(
-                            this.promo_page(),
-                            PromoPage::Preview { feature: shown, .. } if shown == feature
-                        );
-                        if !showing || !this.session().is_some_and(|s| s.payments.hub.premium_open)
-                        {
-                            return true;
-                        }
-                        let Some(found) = clip(this) else {
-                            return false;
-                        };
-                        if let Some(id) = found {
-                            download(this, id);
-                            cx.notify();
-                        }
-                        true
-                    })
-                    .unwrap_or(true);
-                if done {
-                    break;
-                }
+        let clip = hub
+            .premium_state
+            .as_ref()
+            .and_then(|state| animation_for(&state.animations, feature))
+            .map(|animation| (animation.file_id, 32));
+        let stickers: Vec<(i32, i32)> =
+            if feature == PromoFeature::Premium(PremiumFeature::UniqueStickers) {
+                preview_stickers(hub)
+                    .filter_map(|sticker| sticker.display_file_id())
+                    .map(|id| (id.0, 16))
+                    .collect()
+            } else {
+                Vec::new()
+            };
+        if let Some(live) = self.live.as_mut() {
+            for (id, priority) in clip.into_iter().chain(stickers) {
+                let _ = live.driver.download_file(FileId(id), priority);
             }
-        })
-        .detach();
+        }
     }
 
     /// The body of the Premium dialog for the current page.

@@ -25,31 +25,59 @@ pub enum GiftFlow {
     DeleteCollection(i32),
 }
 
+/// One list the send-gift dialog asks for when it opens. The dialog is
+/// rebuilt for each recipient, so only the answer (or failure) of the
+/// request named here lands; an earlier box's is dropped.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum GiftListFetch {
+    /// Not asked (the demo, or Premium options for yourself or a channel).
+    #[default]
+    NotAsked,
+    /// The request in flight.
+    Asking(crate::ids::RequestId),
+    /// The answer landed.
+    Answered,
+    /// The request failed or could not be sent.
+    Failed,
+}
+
+impl GiftListFetch {
+    /// Whether `pending` is the request this list waits for.
+    pub(crate) fn asked_by(self, pending: Option<&crate::state::PendingRequest>) -> bool {
+        matches!((self, pending), (Self::Asking(id), Some(pending)) if id == pending.id)
+    }
+
+    pub fn is_loading(self) -> bool {
+        matches!(self, Self::Asking(_))
+    }
+}
+
 /// The send-gift dialog (`GiftBox` in tdesktop).
 #[derive(Debug, Clone, Default)]
 pub struct SendGiftState {
     pub open: bool,
     pub recipient: Option<GiftRecipient>,
     pub gifts: Vec<AvailableGift>,
-    pub gifts_loading: bool,
-    pub gifts_loaded: bool,
+    /// `getAvailableGifts` for `gifts`.
+    pub gifts_fetch: GiftListFetch,
     pub selected: Option<i64>,
     pub premium_options: Vec<PremiumGiftOption>,
-    pub premium_loaded: bool,
-    /// The `getAvailableGifts` and `getPremiumGiftPaymentOptions` this
-    /// dialog asked. The dialog is rebuilt for each recipient, so an
-    /// earlier box's answer (or failure) is dropped, not shown here.
-    pub gifts_request: Option<crate::ids::RequestId>,
-    pub premium_request: Option<crate::ids::RequestId>,
-    pub sending: bool,
-    /// The `sendGift` this dialog waits for. The dialog is rebuilt for
-    /// each recipient, so an earlier recipient's answer is dropped.
+    /// `getPremiumGiftPaymentOptions` for `premium_options`.
+    pub premium_fetch: GiftListFetch,
+    /// The `sendGift` this dialog waits for; set while it is in flight.
+    /// The dialog is rebuilt for each recipient, so an earlier
+    /// recipient's answer is dropped.
     pub request: Option<crate::ids::RequestId>,
     pub error: Option<String>,
     pub done: Option<String>,
 }
 
 impl SendGiftState {
+    /// A `sendGift` is in flight.
+    pub fn sending(&self) -> bool {
+        self.request.is_some()
+    }
+
     /// Whether `pending` is the `sendGift` this dialog waits for.
     pub(crate) fn waits_for(&self, pending: Option<&crate::state::PendingRequest>) -> bool {
         pending.is_some_and(|pending| self.request == Some(pending.id))
@@ -57,12 +85,12 @@ impl SendGiftState {
 
     /// Whether `pending` is the gift list request of this dialog.
     pub(crate) fn asked_gifts(&self, pending: Option<&crate::state::PendingRequest>) -> bool {
-        pending.is_some_and(|pending| self.gifts_request == Some(pending.id))
+        self.gifts_fetch.asked_by(pending)
     }
 
     /// Whether `pending` is the Premium options request of this dialog.
     pub(crate) fn asked_premium(&self, pending: Option<&crate::state::PendingRequest>) -> bool {
-        pending.is_some_and(|pending| self.premium_request == Some(pending.id))
+        self.premium_fetch.asked_by(pending)
     }
 
     pub fn selected_gift(&self) -> Option<&AvailableGift> {

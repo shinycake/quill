@@ -487,11 +487,11 @@ fn a_forward_bar_into_the_selections_forum_is_no_selection_mode(cx: &mut TestApp
     });
 }
 
-/// Round 17 (area B, finding 7): a forward's answer ends the selection it
-/// was sent from, not a newer one made since in another topic of the same
-/// chat.
+/// Round 17 (area B, finding 7) and round 18 (area B, finding 5): a
+/// forward's answer arrives after its send ended the stage, so a selection
+/// it finds is a newer forward, from another topic or from the same one.
 #[gpui_kit::test]
-fn a_forward_answer_keeps_a_newer_selection_of_another_topic(cx: &mut TestAppContext) {
+fn a_forward_answer_keeps_a_newer_selection(cx: &mut TestAppContext) {
     use crate::ui::demos::composer::{FORUM_CHAT, RELEASES_TOPIC};
     use quill::ids::TopicId;
     let (app, mut vcx) = forum_with_selection(cx);
@@ -517,6 +517,10 @@ fn a_forward_answer_keeps_a_newer_selection_of_another_topic(cx: &mut TestAppCon
         app.present_forward_result(answer(TopicId::forum(1)), cx);
     });
     app.read_with(&vcx, |app, _| {
-        assert!(!app.selecting_in(FORUM_CHAT), "its own answer ends it");
+        assert!(
+            app.selecting_in(FORUM_CHAT),
+            "a late answer from the same topic does not end the newer selection"
+        );
+        assert!(app.share.forward_result.is_some(), "the answer still shows");
     });
 }

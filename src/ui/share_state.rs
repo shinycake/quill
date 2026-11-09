@@ -8,11 +8,10 @@ use quill::lang::{keys, tr};
 use quill::state::ForwardResult;
 
 pub(crate) struct ShareUi {
-    /// The forward being built: the selection, the share box over it, or
+    /// The forward being built: the selection, the share box over it, the
+    /// "Reply in Another Chat" chooser over it, or
     /// the forward bar it became (`ForwardStage`).
     pub(super) forward: super::forward_stage::ForwardStage,
-    /// "Reply in Another Chat": the chat chooser for the composer's reply.
-    pub(super) reply_elsewhere_open: bool,
     /// Destinations ticked in the share box.
     pub(super) selection: quill::share_box::ShareSelection,
     /// The share box's optional comment, sent before the forwards.
@@ -43,7 +42,6 @@ impl ShareUi {
         });
         Self {
             forward: Default::default(),
-            reply_elsewhere_open: false,
             selection: quill::share_box::ShareSelection::default(),
             comment_input: share_comment_input,
             search_input: forward_search_input,

@@ -111,6 +111,21 @@ impl QuillApp {
         cx.notify();
     }
 
+    /// The box is the sign-in screen's: it is drawn only while that
+    /// screen is, so a box left open when the account reaches Ready never
+    /// lands over the chat list.
+    pub(super) fn proxy_list_box_shown(&self) -> bool {
+        self.settings.proxy.list_box && self.pane_mode() == super::app::PaneMode::Connecting
+    }
+
+    /// Forget the box once its owner (the sign-in screen) is gone, so it
+    /// does not come back if the pane connects again.
+    pub(super) fn sync_proxy_list_box(&mut self) {
+        if self.settings.proxy.list_box && !self.proxy_list_box_shown() {
+            self.settings.proxy.list_box = false;
+        }
+    }
+
     pub(crate) fn fetch_proxy_list(&mut self) {
         self.settings.proxy.notice = None;
         if let Some(live) = self.live.as_mut() {
@@ -869,7 +884,7 @@ crate::ui::shell::register_dialogs! {
     /// boxes it opens.
     ProxyList => DialogSpec::new(
         3200,
-        |app| app.settings.proxy.list_box,
+        |app| app.proxy_list_box_shown(),
         QuillApp::build_proxy_list_dialog,
     )
     .close(|app, _, cx| app.close_proxy_list_box(cx)),

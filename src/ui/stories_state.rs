@@ -38,12 +38,15 @@ pub(crate) struct StoryViewerUi {
     /// Phase 9.5: cover-frame picker (viewer) — open on a video story
     /// with `can_be_edited`: a preview over a strip of frames.
     pub(super) cover: Option<super::story_albums::CoverPicker>,
-    pub(super) cover_sent: bool,
+    /// The `editStoryCover` call on its way; its answer closes the picker.
+    pub(super) cover_request: Option<quill::ids::RequestId>,
     /// Phase 9.5: privacy editor (viewer) — open on a story with
     /// `can_set_privacy_settings`; reuses the 4-way privacy selector
     /// + contact checkboxes.
     pub(super) privacy_edit: Option<StoryPrivacyEdit>,
-    pub(super) privacy_sent: bool,
+    /// The `setStoryPrivacySettings` call on its way; its answer closes
+    /// the editor.
+    pub(super) privacy_request: Option<quill::ids::RequestId>,
     /// B14: the press-and-hold / Space pause, and the viewer's extra
     /// panels (close friends, share) with their last result line.
     pub(super) pause: quill::story_extras::StoryUserPause,

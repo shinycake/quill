@@ -4,6 +4,30 @@
 use crate::state::fetch::Fetch;
 use crate::state::*;
 
+/// The read-date privacy round-trip. A get and a set are told apart, so
+/// a get answered after a set went out never overwrites the set value:
+/// only the answer to the request named here lands.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum ReadDateStage {
+    /// Nothing in flight; the last request (if any) succeeded.
+    #[default]
+    Idle,
+    /// `getReadDatePrivacySettings` is in flight.
+    Getting(RequestId),
+    /// `setReadDatePrivacySettings` is in flight; `read_date_show` holds
+    /// the value it sent.
+    Setting(RequestId),
+    /// The last get or set failed.
+    Failed,
+}
+
+impl ReadDateStage {
+    /// A get or set is in flight.
+    pub fn in_flight(self) -> bool {
+        matches!(self, Self::Getting(_) | Self::Setting(_))
+    }
+}
+
 pub struct SettingsState {
     /// Mirror of `settings::Preferences::notify_view` (tdesktop "Name" /
     /// "Text"), loaded from `prefs.json` at connect time.
@@ -170,10 +194,8 @@ pub struct SettingsState {
     /// Slice S3: `readDatePrivacySettings.show_read_date` (schema 1.8.67,
     /// :9026) — `None` while never fetched.
     pub read_date_show: Option<bool>,
-    /// A read-date get/set round-trip is in flight.
-    pub read_date_loading: bool,
-    /// The last read-date get/set failed.
-    pub read_date_error: bool,
+    /// Which read-date request is in flight, or how the last one ended.
+    pub read_date_stage: ReadDateStage,
     /// Slice S3: blocked user ids from `getBlockedMessageSenders`
     /// (schema 1.8.67, :14505); idle while never fetched.
     /// A blocked-senders page in flight or a failed get/set shows in the
@@ -299,8 +321,7 @@ impl SettingsState {
             pending_sound_plays: Vec::new(),
             privacy: HashMap::new(),
             read_date_show: None,
-            read_date_loading: false,
-            read_date_error: false,
+            read_date_stage: ReadDateStage::Idle,
             blocked_senders: Fetch::Idle,
             blocked_total: 0,
             media_prefs: MediaPrefs::default(),

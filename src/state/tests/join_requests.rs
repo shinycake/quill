@@ -70,9 +70,10 @@ fn approve_all_for_a_link_drops_its_page_in_flight() {
             request: Some(page),
         },
     );
-    let all = session.request(
+    let all = session.request_for_invite_link(
         RequestPurpose::Groups(GroupsPurpose::ProcessLinkJoinRequests { approve: false }),
-        Some(ChatId(13)),
+        ChatId(13),
+        "https://t.me/+abc",
     );
     apply_json(&mut session, &seq, &sink, &ok_json(all));
     apply_json(&mut session, &seq, &sink, &requests_json(page, 4, &[3, 4]));
@@ -81,6 +82,42 @@ fn approve_all_for_a_link_drops_its_page_in_flight() {
     };
     assert!(state.requests.is_empty());
     assert_eq!(state.total_count, 0);
+    assert!(!state.loading());
+}
+
+/// Approve all on one link, answered after another link's list opened,
+/// leaves that list alone: its first page still lands.
+#[test]
+fn approve_all_for_one_link_keeps_another_links_list() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    let all = session.request_for_invite_link(
+        RequestPurpose::Groups(GroupsPurpose::ProcessLinkJoinRequests { approve: true }),
+        ChatId(13),
+        "https://t.me/+first",
+    );
+    let page = session.request(
+        RequestPurpose::GetLinkJoinRequests { append: false },
+        Some(ChatId(13)),
+    );
+    session.groups.invite_pages.set_join_requests(
+        13,
+        LinkRequestsState {
+            invite_link: "https://t.me/+second".into(),
+            total_count: 0,
+            requests: Vec::new(),
+            error: None,
+            request: Some(page),
+        },
+    );
+    apply_json(&mut session, &seq, &sink, &ok_json(all));
+    apply_json(&mut session, &seq, &sink, &requests_json(page, 2, &[5, 6]));
+    let Some(state) = session.groups.invite_pages.join_requests(13) else {
+        panic!("the second link's list stays open");
+    };
+    assert_eq!(state.invite_link, "https://t.me/+second");
+    assert_eq!(state.requests.len(), 2);
+    assert_eq!(state.total_count, 2);
     assert!(!state.loading());
 }
 

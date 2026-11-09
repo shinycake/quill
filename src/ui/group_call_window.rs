@@ -97,7 +97,6 @@ impl QuillApp {
         if wanted.is_none_or(|(_, stream)| !stream) && !self.live_pip_keeps_stream() {
             self.group_call.stream.clear(cx);
             self.group_call_screen.stream_joining = None;
-            self.group_call_screen.stream_join_timeout = None;
         }
         match (wanted, self.group_call.window) {
             (Some((_, stream)), None) => self.open_group_call_window(stream, cx),

@@ -624,10 +624,19 @@ impl QuillApp {
     /// first move starts the reorder, later ones swap rows live.
     pub(super) fn pin_drag_move(&mut self, drag: &PinnedChatDrag, y: f32, cx: &mut Context<Self>) {
         let now = std::time::Instant::now();
-        if let Some(reorder) = self.chat_list.pin_reorder.as_mut()
-            && reorder.dragging() == Some(drag.chat_id.0)
+        // The view moved on under the drag (a folder, the archive): its
+        // pinned list is off screen, so the drag goes, unsaved.
+        if !self.pinned_list_shown(drag.archived) {
+            if self.chat_list.pin_reorder.take().is_some() {
+                self.notify_sidebar(cx);
+            }
+            return;
+        }
+        if let Some(pin) = self.chat_list.pin_reorder.as_mut()
+            && pin.archived == drag.archived
+            && pin.reorder.dragging() == Some(drag.chat_id.0)
         {
-            reorder.drag_to(y, now);
+            pin.reorder.drag_to(y, now);
         } else {
             let Some(session) = self.session() else {
                 return;
@@ -652,12 +661,14 @@ impl QuillApp {
                 Some((id, press)) if id == drag.chat_id.0 => press,
                 _ => y,
             };
-            self.chat_list.pin_reorder_archived = drag.archived;
             self.chat_list.pin_reorder =
                 quill::pin_reorder::PinReorder::begin(ids, heights, drag.chat_id.0, press, now)
                     .map(|mut reorder| {
                         reorder.drag_to(y, now);
-                        reorder
+                        crate::ui::chat_list_state::PinDrag {
+                            archived: drag.archived,
+                            reorder,
+                        }
                     });
             // A reorder is not a long press: no peek preview over the drag.
             self.chat_list.preview_press = None;
@@ -670,14 +681,14 @@ impl QuillApp {
     /// `savePinnedOrder`): the dragged row slides into its slot and the
     /// full order goes out as `setPinnedChats`.
     pub(super) fn finish_pin_drag(&mut self, cx: &mut Context<Self>) {
-        let archived = self.chat_list.pin_reorder_archived;
-        let Some(reorder) = self.chat_list.pin_reorder.as_mut() else {
+        let Some(pin) = self.chat_list.pin_reorder.as_mut() else {
             return;
         };
-        if reorder.dragging().is_none() {
+        if pin.reorder.dragging().is_none() {
             return;
         }
-        let ids = reorder.release(std::time::Instant::now());
+        let archived = pin.archived;
+        let ids = pin.reorder.release(std::time::Instant::now());
         if let Some(live) = self.live.as_mut() {
             if let Err(err) = live.driver.set_pinned_chat_order(archived, ids) {
                 self.set_note(StatusNote::error(user_error_for(
@@ -802,6 +813,7 @@ mod drop_on_row_tests;
 mod drop_topic;
 mod forward_drop_tests;
 mod media_drag_tests;
+mod pin_drag_tests;
 pub(in crate::ui) use drop_on_row::DropOnRow;
 pub(in crate::ui) use drop_topic::DropTopic;
 mod header_fit;

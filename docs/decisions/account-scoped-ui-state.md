@@ -3336,6 +3336,130 @@ link-preview test (`forget_failed`, `send_failed`) and `linux_dbus.rs`
 - The OS menu fix (2) is tested at the seam; the real menu bar was not
   clicked.
 
+### Phase 18 (area B: one runtime per widget with one width owner, drags that end with their rows, and resolves that name their window)
+
+Round 18 of the review, area B, on `claude/sm-review18-b`, plus the widget
+items of area C's review (2, 3, 5, 8, 10) and area A's widget query
+tokens. The numbers are area B's ranked findings unless marked.
+
+**A widget drawn in two windows has one width owner (1, 3; dodges).**
+`WidgetEntry` kept the window, view and width of whichever window
+reconciled last, so the same chat in main and in a narrower chat window
+flipped the runtime's width every pass, each relayout reported a height
+that redrew the app, and the loop ran at display rate. Where a widget is
+drawn is now one value, `Presence` (`widgets_state.rs`):
+
+- `Hidden { since }`, or `Shown { owner, at, others }`. The first window
+  to show a widget owns it: only the owner's pass moves the runtime's
+  width and theme, and the widget ticks in the owner's frames. Other
+  windows draw the owner's frame scaled down into their own card
+  (`widget_bubble::frame_scale`, pointer coordinates scaled back), and a
+  new frame notifies every window's view. The owner leaving hands the
+  widget to another window at that window's width; the last one leaving
+  hides it. This also replaces the hand-kept `visible: bool` +
+  `hidden_at: u64` pair, and `wants_frames` is the runtime's own report
+  again (ticks are gated on the owner, not forced off on hide).
+- `input_window` records the window of the widget's last press
+  (`widget_pointer_down`, with the pressing window's state in place). Its
+  links (`as_asked_by`), its link confirm and its copy toast go to that
+  window while it still draws the widget, else to the owner (3).
+- `Lifecycle<R>` (src/message_widget) holds the runtime in its live
+  stages, `Loading(R)` and `Running(R)`, so `runtime: Option<Runtime>`
+  next to the lifecycle is gone; `started()` moves a loading runtime to
+  running.
+- `WidgetsUi.landing: bool` is `lander: Option<Task<()>>`: the screen
+  owns its landing loop, which ends with it.
+
+**Hidden widgets cost nothing (C2, C3).** The runtime thread keeps the
+visibility it is told and does not paint while hidden (a whole frame on
+coming back), and `land_widgets` neither notifies the views of a hidden
+widget (its `Presence` has none) nor redraws the app for its height or
+stop. The `wants_frames` compare is against the stored value, so a hidden
+animating widget no longer marks itself changed on every land.
+
+**Widget query tokens are unique for the run (area A; C5).** The counter
+lived in `WidgetsUi` (per `OnScreen`) and restarted at 0 on every switch,
+so a late answer from the account's last visit matched a new query after
+switching A, B, A. It is a process-wide counter
+(`widgets_state::next_query_token`, listed in scripts/ui-statics.txt). A
+stale answer still in `bots.widget_answers` drains into no matching query
+and is dropped; nothing in the session needs clearing.
+
+**A chat window's widgets go off screen under the lock (C8).** The locked
+render of a chat window draws no history, so it now calls
+`widgets_left_window(Some(chat))`, as the main window does: the widgets
+stop running and polling.
+
+**A logged-out account's widgets stop (C10).** `forget_widget_storage`
+drops every entry (and with them the runtimes) and sets
+`WidgetsUi.storage` to `WidgetStorage::Forgotten`: no widget starts and
+`widget_dir()` is `None` until the screen is replaced, so nothing can
+write the removed folder back.
+
+**A pinned drag ends with its rows (2, 4; older dodge).** The drag ends
+only through the chat rows' listeners. With Contacts, Calls or search in
+their place the release never arrived, the row stayed lifted, the settle
+check asked for 60 fps forever and the next release sent the abandoned
+order. `sidebar_ready` now drops the drag whenever something else takes
+the rows' place, and `set_chat_list_view` drops it on a view change; a
+drag move in a view that does not show its pinned list
+(`pinned_list_shown`, shared with the rows' draggable check) drops it
+instead of starting one. `pin_reorder` + `pin_reorder_archived` are one
+`Option<PinDrag { archived, reorder }>`.
+
+**A forward's answer never ends a forward (5).** Every send ends the
+stage (the share box, the bar's Send, and now the demo bar path too), so
+an answer that finds a stage finds a newer forward, even from the same
+chat and topic. `present_forward_result` shows the result and leaves the
+stage alone.
+
+**The reply chooser is a forward stage (dodge).** `ShareUi::
+reply_elsewhere_open` sat next to `ForwardStage::Picking`; the two boxes
+share the box's selection and search field, and opening the forward box
+never closed the chooser. It is `ForwardStage::ReplyChooser(under)`, over
+the forward that was there: `open_reply_chooser` closes the forward box
+first, `open_picker` closes the chooser first, and `close_reply_chooser`
+returns to what was under it.
+
+**`panel_mode` is private (dodge).** The field is private to
+`media_panel`, so no other module can write it at all; inside the module
+`scripts/single-writers.txt` still holds it to `set_media_panel_mode`.
+
+**The D-Bus connect never runs on the UI thread (6).** Closing a chat's
+toast (`close_linux_notification`, UI thread) reads
+`connected_notifier()`, which never connects: with no connection no toast
+went out over D-Bus. Only the toast worker connects
+(`notifier_on_worker`), so the UI no longer waits on the retry gate or on
+a hanging daemon's D-Bus timeout.
+
+**The link-preview prefetch is armed once per URL (7).** Every frame
+bumped `preview_token` and spawned a new 500 ms timer, so while anything
+animated (a spoiler at 30 fps) the request never went out.
+`ComposerUi.preview_timer: Option<(String, Task)>` holds the URL waited
+on and its timer; a frame with the same URL leaves it running, a new URL
+replaces it.
+
+**A resolve names its window (8).** Five sites (the bot-limit toast's
+"@BotFather", Create Bot, Edit Bot, an inline result's Start, Premium's
+bot purchase) called `driver.resolve_deep_link` directly, so the flow had
+no window and the chat opened in a main window that may be minimized,
+behind the chat window that asked. `resolve_deep_link_here` sets the
+flow's window to the asking window as it sends; `hold_resolved_link` then
+opens the chat there and raises main when needed.
+`scripts/main_frame_queues.py` (run by `check-window-scope.py`) rejects
+`.resolve_deep_link(` anywhere in src/ui but `deep_links.rs`.
+
+Tests: `widgets_state_tests.rs` (the owner's width never moves for a
+second window, the owner leaving hands on, scaling, unique tokens),
+`Lifecycle` holding its runtime (`message_widget/tests.rs`),
+`forward_stage.rs` (the chooser and the box never both open),
+`chat_ui_tests.rs` (a late answer keeps a newer selection of the same
+topic), `chat_list/pin_drag_tests.rs` (Contacts over the rows and another
+folder each end a drag unsaved), the prefetch timer helper, and the
+script's own unit tests. Not tested here: the D-Bus close (Linux, needs a
+daemon) and the resolve seam's window (needs a live driver; the script
+guards the shape).
+
 ### Phase 15 (area C)
 
 Round 15 of the review, area C (the rest of `src/ui`), on
@@ -3769,3 +3893,107 @@ seam.
   - None of them waits on time.
   - No test for 13, 17, 18 and 20. They need a live connection or a
     native window that the offline harness lacks.
+
+### Phase 18 (area A)
+
+Round 18 of the review, area A (core outside `src/ui`). Findings 1 and 2
+were fixed and the `SendGiftState` dodge was converted. Finding 3 (widget
+query tokens restarting on an account switch) moved to the area-B fixer,
+who rewrites `ui/widgets_ui.rs` this round.
+
+**Approve all on one link leaves another link's list alone (1).** The
+`ok` of `processChatJoinRequests` for one invite link emptied whatever
+link list was open for the chat and took every in-flight
+`GetLinkJoinRequests` page. Opening link L2 before L1's Approve all
+answered left L2 empty, total 0 and not loading, with its page dropped.
+`GroupsPurpose` is `Copy`, so the link rides the pending request instead:
+`PendingRequest::invite_link`, stamped by
+`Session::request_for_invite_link`. The ok arm empties the open list only
+when its `invite_link` matches, and takes only that list's page in flight
+(`state.request`). The chat-wide list and badge refetch as before. Test:
+`approve_all_for_one_link_keeps_another_links_list`; the old
+`approve_all_for_a_link_drops_its_page_in_flight` now stamps its link.
+
+**A get answered after a set no longer flips "Hide read time" back
+(2).** `settings.read_date_loading` was one bool for "a get or a set is in
+flight", cleared by whichever answer came first. TDLib sends no update for
+this setting, so a `getReadDatePrivacySettings` answer that landed after
+the click wrote the old value over the optimistic one and stayed. It is
+now `settings.read_date_stage: ReadDateStage` (`Idle`, `Getting(id)`,
+`Setting(id)`, `Failed`), which also replaces `read_date_error`. Only the
+answer or error of the request named in the stage lands. A set supersedes
+a get in flight, and `fetch_read_date_privacy` sends nothing while a set
+is in flight, because the set already holds the value the server will
+have. Test: `read_date_get_answered_after_a_set_is_ignored`; the old
+roundtrip test reads the stage.
+
+**The send-gift lists are one stage each (dodge).** `SendGiftState` kept
+`gifts_loading`, `gifts_loaded` and `gifts_request`, and `premium_loaded`
+with `premium_request`, in step by hand. Each list is now one
+`GiftListFetch` (`NotAsked`, `Asking(id)`, `Answered`, `Failed`).
+`asked_gifts` / `asked_premium` match the id in `Asking`. A Premium
+options request that fails to send now ends as `Failed` instead of
+staying unanswered. "No gifts are available" shows only after an answer,
+not under the load error line. `sending` was the same pair with
+`request`; `SendGiftState::sending()` now reads `request`. The baseline
+lost the four `SendGiftState` lines and `SettingsState::read_date_loading`.
+
+Neither fix has a visible result in the offline demos: both are races
+between two TDLib answers, which the demos do not replay. None of the
+tests waits on time.
+
+### Phase 18 (area C)
+
+Round 18 review of the rest of `src/ui`. Fixed here: findings 1, 4, 6, 7, 9
+and 11 and the listed dodges outside the widget code (findings 2, 3, 5, 8
+and 10 are widget items another fixer owns).
+
+- **Stream boxes belong to their call (1).** `StreamWindow::close_boxes`
+  closes the box over the stream window and hides the revealed key. It runs
+  from `sync_group_call_boxes` when the call tracked changes, beside the
+  other boxes the call owns, and from `StreamWindow::clear`. End, Revoke and
+  the key warning therefore never act on the stream that replaced the one
+  they were opened for.
+- **Stream photo (6).** A chat without a photo now clears the blurred photo
+  instead of returning early and leaving the previous chat's behind it.
+  (The cache is keyed by the photo's file path, which is already unique per
+  photo, so no chat id was added to the key.)
+- **Auto-translate refusal (4).** `ToggleSupergroupAutoTranslate` is a
+  Messages purpose, so `apply_messages_error` now also calls
+  `record_group_info_edit_error`; the Edit box keeps its Settings error
+  instead of closing as saved.
+- **Proxy list box (7).** The box is the sign-in pane's: its dialog is
+  drawn only while `pane_mode() == Connecting` (`proxy_list_box_shown`),
+  and `sync_proxy_list_box` clears the bool each frame once the pane is
+  gone, so it neither covers the chat list nor returns on a later
+  reconnect.
+- **Agent filter (9).** `AgentUi::pick_account` is the one way to change
+  the picked account; a different account resets the activity filter.
+- **Premium preview files (11).** The two polling tasks are gone.
+  `sync_premium_preview_files` runs each main frame while a preview page
+  shows and asks for the clip and the example stickers that are not on
+  disk (`download_file` skips requested and finished files), so a slow
+  answer is picked up whenever it lands.
+- **Dodges converted.**
+  - `stream_joining` + `stream_join_timeout` are one field,
+    `Option<StreamJoining { call, timeout task }>`; dropping it ends the
+    wait.
+  - `hide_armed` + `hide_task` are `StreamWindow::hide_timer`, the task
+    itself.
+  - `StoryViewerUi::cover_sent` / `privacy_sent` are `cover_request` /
+    `privacy_request` (the request id). `StoryManageState` keeps the last
+    settled call, and `outcome(request)` says InFlight, Saved, Failed or
+    Lost, so another call's answer never closes the panel.
+  - `language.packs` + `packs_loading` are `Fetch<Vec<LanguagePackInfoData>>`;
+    a refused list now ends the wait and keeps its reason.
+  - `SendGiftState` was converted by area A.
+- **Baseline.** Lost `LanguageState::packs_loading` (and `+error`),
+  `StoryViewerUi::cover_sent`, `StoryViewerUi::privacy_sent` and
+  `StreamWindow::hide_armed`.
+- **Tests.** `a_switch_to_another_stream_closes_the_boxes`,
+  `the_proxy_list_box_ends_with_the_sign_in_screen`,
+  `picking_another_account_resets_the_activity_filter`,
+  `a_refused_pack_list_stops_loading_and_says_why`, and the Auto-translate
+  refusal assertion in `channel_auto_translate_is_parsed_gated_and_toggled`.
+  None waits on time. No test for 6 and 11 (they need a photo file and a
+  download answer the offline harness cannot produce).

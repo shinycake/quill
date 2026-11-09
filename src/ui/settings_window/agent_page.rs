@@ -474,7 +474,7 @@ impl QuillApp {
         }) {
             return;
         }
-        self.agent_ui.picked = None;
+        self.agent_ui.pick_account(None);
         self.open_settings(Some(Page::AgentAccess), cx);
         self.agent_ui.page.focus_chat = Some(chat_id);
         self.agent_ui.page.scroll_to = Some(Spot::FocusChat);

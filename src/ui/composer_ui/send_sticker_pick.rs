@@ -174,16 +174,20 @@ impl QuillApp {
         if already {
             return;
         }
-        self.composer_ui.preview_token = self.composer_ui.preview_token.wrapping_add(1);
-        let token = self.composer_ui.preview_token;
-        self.spawn_scoped(cx, async move |this, cx| {
+        // This URL's timer is running: frames (an animation redraws the
+        // app 30 times a second) leave it to fire. Another URL replaces it,
+        // and the replaced timer is dropped with its task.
+        if !preview_timer_needed(self.composer_ui.preview_timer.as_ref(), &url) {
+            return;
+        }
+        let waited = url.clone();
+        let timer = self.spawn_scoped(cx, async move |this, cx| {
             cx.background_executor()
                 .timer(Duration::from_millis(500))
                 .await;
             this.update(cx, |this, cx| {
-                if this.composer_ui.preview_token != token {
-                    return;
-                }
+                // Done waiting: the next new URL arms its own timer.
+                this.composer_ui.preview_timer = None;
                 // Re-check the URL survived the quiet window; a newer
                 // keystroke schedules its own timer.
                 let text = this.composer.read(cx).value().to_string();
@@ -203,8 +207,8 @@ impl QuillApp {
                 cx.notify();
             })
             .ok();
-        })
-        .detach();
+        });
+        self.composer_ui.preview_timer = Some((waited, timer));
     }
 
     /// A keystroke brought a URL into the field (typed, pasted, or another
@@ -830,5 +834,30 @@ impl QuillApp {
             )),
             cx,
         )
+    }
+}
+
+/// A link preview prefetch needs a new timer for `url`: none is waiting,
+/// or the one waiting is for another URL.
+fn preview_timer_needed(waiting: Option<&(String, gpui_kit::Task<()>)>, url: &str) -> bool {
+    waiting.is_none_or(|(waited, _)| waited != url)
+}
+
+#[cfg(test)]
+mod preview_timer_tests {
+    /// Round 18 B #7: frames with the same URL keep its timer; only a new
+    /// URL arms another.
+    #[test]
+    fn only_a_new_url_arms_a_new_timer() {
+        let waiting = (String::from("https://a.example"), gpui_kit::Task::ready(()));
+        assert!(super::preview_timer_needed(None, "https://a.example"));
+        assert!(!super::preview_timer_needed(
+            Some(&waiting),
+            "https://a.example"
+        ));
+        assert!(super::preview_timer_needed(
+            Some(&waiting),
+            "https://b.example"
+        ));
     }
 }

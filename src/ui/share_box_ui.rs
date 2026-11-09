@@ -29,7 +29,7 @@ impl QuillApp {
 
     /// The typed query changed: ask the server too (`searchChatsOnServer`).
     pub(super) fn sync_share_search(&mut self, text: &str, cx: &mut Context<Self>) {
-        if !self.share.forward.picker_open() && !self.share.reply_elsewhere_open {
+        if !self.share.forward.picker_open() && !self.share.forward.reply_chooser_open() {
             return;
         }
         if let Some(live) = self.live.as_mut() {
@@ -268,6 +268,7 @@ impl QuillApp {
             }
         } else if self.demo_session.is_some() {
             self.apply_demo_forward(dest, &draft);
+            self.share.forward = ForwardStage::None;
             if let Some(result) = self
                 .demo_session
                 .as_mut()

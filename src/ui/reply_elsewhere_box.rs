@@ -186,7 +186,7 @@ crate::ui::shell::register_dialogs! {
     /// "Reply in Another Chat" over the window (tdesktop `ShowReplyToChatBox`).
     ReplyElsewhere => DialogSpec::new(
         2931,
-        |app| app.share.reply_elsewhere_open && app.chat_ui.has_reply(),
+        |app| app.share.forward.reply_chooser_open() && app.chat_ui.has_reply(),
         QuillApp::build_reply_elsewhere_dialog,
     )
     .per_window()

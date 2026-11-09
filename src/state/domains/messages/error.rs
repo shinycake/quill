@@ -11,6 +11,9 @@ impl Session {
         _extra: Option<RequestId>,
         seq: u64,
     ) {
+        // The Edit box's Auto-translate switch is a Messages request: its
+        // refusal keeps the box open with the reason.
+        self.record_group_info_edit_error(err, pending);
         if let Some(RequestPurpose::GetRepliedMessage {
             chat_id,
             message_id,

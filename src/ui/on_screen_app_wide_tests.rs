@@ -101,7 +101,9 @@ fn call_ids_and_video_chat_boxes_do_not_carry_over(cx: &mut TestAppContext) {
         app.group_call_screen.window_closed_by_user = Some(1);
         app.group_call_screen.settings_open = true;
         app.group_call_screen.stream_join = Some((StreamJoinIntent::Call(1), None));
-        app.group_call_screen.stream_joining = Some(1);
+        app.group_call_screen.stream_joining = Some(
+            crate::ui::group_call_state::StreamJoining::new(1, gpui_kit::Task::ready(())),
+        );
         app.group_call_screen
             .composer
             .update(cx, |input, cx| input.set_value("for A's chat", window, cx));
@@ -115,7 +117,7 @@ fn call_ids_and_video_chat_boxes_do_not_carry_over(cx: &mut TestAppContext) {
         assert_eq!(group.window_closed_by_user, None);
         assert!(!group.settings_open);
         assert!(group.stream_join.is_none(), "no join waits for B's call 1");
-        assert_eq!(group.stream_joining, None, "no Join button waits for it");
+        assert_eq!(group.joining_call(), None, "no Join button waits for it");
         assert_eq!(group.composer.read(cx).value().to_string(), "");
     });
 }

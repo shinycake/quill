@@ -1,7 +1,6 @@
 //! chat-list row rendering: ChatListItem, badges, avatars, skeletons.
 #![deny(clippy::indexing_slicing)]
 
-use super::app::ChatListFilter;
 use super::app::{PaneMode, QuillApp};
 use super::message_text::kit_avatar_element;
 use super::pressable::PressableDiv;

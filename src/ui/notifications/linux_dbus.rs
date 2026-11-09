@@ -91,10 +91,20 @@ fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     quill::locks::lock_or_recover(mutex)
 }
 
+/// The notifier if a worker already connected it; never connects. The UI
+/// thread's way in (closing a toast): a connect blocks for the bus round
+/// trips, up to the D-Bus timeout with a hanging daemon, and waits on
+/// [`CONNECT_RETRY`] while a worker connects. With no connection no toast
+/// went out over D-Bus, so there is nothing to close.
+pub(super) fn connected_notifier() -> Option<&'static Notifier> {
+    NOTIFIER.get()
+}
+
 /// The process-wide notifier, connected on first use. `None` while the
 /// session bus or the daemon cannot be reached; asked again after
-/// [`REPROBE`], as the capability probe does.
-pub(super) fn notifier(clicks: &AccountClicks) -> Option<&'static Notifier> {
+/// [`REPROBE`], as the capability probe does. Blocks while it connects:
+/// worker threads only (the UI thread uses [`connected_notifier`]).
+pub(super) fn notifier_on_worker(clicks: &AccountClicks) -> Option<&'static Notifier> {
     if let Some(notifier) = NOTIFIER.get() {
         return Some(notifier);
     }

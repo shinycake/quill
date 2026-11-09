@@ -10,7 +10,7 @@
 use super::*;
 use crate::ui::status_note::StatusNote;
 use quill::lang::{keys, tr};
-use quill::state::StoryPostOutcome;
+use quill::state::{StoryManageOutcome, StoryPostOutcome};
 
 impl QuillApp {
     pub(super) fn frame_upkeep(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -111,30 +111,29 @@ impl QuillApp {
             }
         }
         // Phase 9.5: the viewer cover editor / privacy editor sent a
-        // management call — once `story_manage.pending` clears, close
-        // the panel on success or leave it open showing the error.
-        if self.stories.viewer_ui().cover_sent
-            && self.session().is_some_and(|s| !s.stories.manage.pending)
-        {
-            let saved = self
-                .session()
-                .is_some_and(|s| s.stories.manage.error.is_none());
+        // management call. Its own answer (matched by request id) closes
+        // the panel on success or leaves it open showing the error; a
+        // call let go without one just ends the wait.
+        let outcome = |this: &Self, request: Option<quill::ids::RequestId>| {
+            request.and_then(|id| {
+                this.session()
+                    .map(|session| session.stories.manage.outcome(id))
+            })
+        };
+        let cover = outcome(self, self.stories.viewer_ui().cover_request);
+        if let Some(done) = cover.filter(|o| *o != StoryManageOutcome::InFlight) {
             self.stories.with_viewer_ui(|open| {
-                open.cover_sent = false;
-                if saved {
+                open.cover_request = None;
+                if done == StoryManageOutcome::Saved {
                     open.cover = None;
                 }
             });
         }
-        if self.stories.viewer_ui().privacy_sent
-            && self.session().is_some_and(|s| !s.stories.manage.pending)
-        {
-            let saved = self
-                .session()
-                .is_some_and(|s| s.stories.manage.error.is_none());
+        let privacy = outcome(self, self.stories.viewer_ui().privacy_request);
+        if let Some(done) = privacy.filter(|o| *o != StoryManageOutcome::InFlight) {
             self.stories.with_viewer_ui(|open| {
-                open.privacy_sent = false;
-                if saved {
+                open.privacy_request = None;
+                if done == StoryManageOutcome::Saved {
                     open.privacy_edit = None;
                 }
             });

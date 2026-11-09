@@ -122,8 +122,10 @@ pub(super) struct ReactionTarget {
 
 pub(super) struct MediaPanel {
     /// Closed, composing, or a selector; written through
-    /// [`QuillApp::set_media_panel_mode`] only.
-    pub panel_mode: PanelMode,
+    /// [`QuillApp::set_media_panel_mode`] only. Private to `media_panel`, so
+    /// no other module can write it (scripts/single-writers.txt checks the
+    /// module itself).
+    panel_mode: PanelMode,
     /// The "Set Status for..." box, once a status asked for a custom time.
     pub until: Option<status_time_box::StatusUntil>,
     pub tab: PanelTab,

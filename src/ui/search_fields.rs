@@ -50,7 +50,8 @@ impl QuillApp {
         }
         if let InputEvent::PressEnter { secondary, shift } = event {
             let marked = state.update(cx, |input, cx| input.marked_text_range(window, cx));
-            if *secondary && !*shift && marked.is_none() && !self.share.reply_elsewhere_open {
+            if *secondary && !*shift && marked.is_none() && !self.share.forward.reply_chooser_open()
+            {
                 self.submit_share_from_search(cx);
             } else if should_send_on_enter(
                 quill::composer::enter_event_from_kit(*shift, *secondary, marked),
@@ -103,14 +104,15 @@ impl QuillApp {
         }
         if let InputEvent::PressEnter { secondary, shift } = event {
             let marked = state.update(cx, |input, cx| input.marked_text_range(window, cx));
-            if *secondary && !*shift && marked.is_none() && !self.share.reply_elsewhere_open {
+            if *secondary && !*shift && marked.is_none() && !self.share.forward.reply_chooser_open()
+            {
                 self.submit_share_from_search(cx);
             } else if should_send_on_enter(
                 quill::composer::enter_event_from_kit(*shift, *secondary, marked),
                 // Not a chat composer: the send-key setting does not apply.
                 SendKeyMode::Enter,
             ) {
-                if self.share.reply_elsewhere_open {
+                if self.share.forward.reply_chooser_open() {
                     self.choose_first_reply_chat(window, cx);
                 } else {
                     self.activate_first_forward_destination(cx);

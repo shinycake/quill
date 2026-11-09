@@ -200,14 +200,12 @@ impl QuillApp {
         match link {
             LimitLink::Premium(kind) => self.open_premium_from(&kind.premium_ref(), cx),
             LimitLink::BotFather => {
-                if let Some(live) = self.live.as_mut() {
-                    let _ = live.driver.resolve_deep_link(DeepLinkAction::OpenUsername {
-                        domain: BOT_MANAGER_USERNAME.to_string(),
-                        start_param: Some(DELETE_BOT_START.to_string()),
-                        post: None,
-                        story_id: None,
-                    });
-                }
+                let _ = self.resolve_deep_link_here(DeepLinkAction::OpenUsername {
+                    domain: BOT_MANAGER_USERNAME.to_string(),
+                    start_param: Some(DELETE_BOT_START.to_string()),
+                    post: None,
+                    story_id: None,
+                });
                 cx.notify();
             }
         }
