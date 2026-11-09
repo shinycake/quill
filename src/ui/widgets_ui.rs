@@ -551,7 +551,11 @@ impl QuillApp {
             RuntimeEvent::Link {
                 telegram: true,
                 url,
-            } => self.open_link(&url, cx),
+            } => {
+                // The widget's window asked: what the link opens shows there.
+                let window = self.widgets.entries.get(&key).and_then(|e| e.window);
+                self.as_asked_by(window, |this| this.open_link(&url, cx));
+            }
             RuntimeEvent::Link {
                 telegram: false,
                 url,
