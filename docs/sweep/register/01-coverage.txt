@@ -1,0 +1,17 @@
+crates/panic-guard/src/lib.rs	53	read
+crates/quill-calls-sys/src/lib.rs	228	read
+crates/quill-calls-sys/src/loader.rs	217	read
+crates/webview-host/src/capture.rs	39	read
+crates/webview-host/src/carrier/browser_exit.rs	57	read
+crates/webview-host/src/carrier/lockdown.rs	541	read
+crates/webview-host/src/carrier/mod.rs	482	read
+crates/webview-host/src/carrier/relay.rs	362	read
+crates/webview-host/src/carrier/script.rs	226	read
+crates/webview-host/src/carrier/watchdog.rs	130	read
+crates/webview-host/src/main.rs	543	read
+crates/webview-host/src/shell.rs	58	read
+crates/webview-protocol/src/carrier.rs	581	read
+crates/webview-protocol/src/lib.rs	283	read
+crates/webview-protocol/src/lines.rs	106	read
+src/about.rs	80	read
+src/account_data.rs	185	read
