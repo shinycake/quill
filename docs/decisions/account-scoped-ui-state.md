@@ -2577,3 +2577,123 @@ deduped and never sent. The seam dedupes before it marks.
 (`state/tests/chat_list_more.rs`), `a_failed_custom_emoji_lookup_asks_again`
 (`emoji/tests.rs`), and the `emoji/custom_lookup.rs` unit tests. None of
 them waits on time.
+
+### Phase 14 (area B: what opens, opens for the window that asked)
+
+Round 14 of the review, area B, on `claude/sm-review14-b`. The finding
+numbers are the review's ranked list. Findings 1, 3, 4, 5, 9 and 10 share
+one root. Round 13's `open_box` named the window whose state was in place.
+In input that is the window of the press. In the poll loop, the main
+window's own frame steps, a toast drain and tasks started for the screen,
+the state in place is the main window's, whichever window the user acted
+in. So answers opened their boxes in the main window, links queued there
+had no origin, and a link resolved for a chat window waited for the main
+window's frame, which never comes while that window is minimized.
+
+**Designs considered.**
+
+- *A. Put the asking window into every request in src/state.* Each
+  `PendingRequest` would carry a window and every answer would read it.
+  That is the strongest form, but it touches the core types for a UI
+  concern, and most answers already know their chat. Rejected.
+- *B. Mark each answer site `box-host:` and keep `open_box` as it was.*
+  Every new site would have to remember. Rejected.
+- *C (chosen). Say who asks, once, where the code starts running.*
+  `ChatWindows::asker` is an `Asker`: `InPlace` (input, a window's own
+  frame, `spawn_scoped` work), `Window(w)` (a flow that carried its window,
+  `as_asked_by`) or `Nobody` (`unasked`). `open_box` opens in the asking
+  window, or in the window of the last press when nobody asked.
+  `queue_deep_link` records the asking window as the link's origin. The
+  poll pass (`poll_pass`), the main frame's upkeep, the toast drain and
+  every `ScopedApp` update of a `spawn_screen`, `spawn_app` or
+  `defer_screen` task run as `Nobody`. A `spawn_scoped` task keeps the
+  asker it started under. Sites that know their window say so with
+  `as_asked_by(window, ..)`: `window_showing(chat)` for an answer about a
+  chat, `window_of_box(kind)` for one that follows a box.
+
+**What was built, by finding.**
+
+1. *A link clicked in a chat window waits for the main window.* The
+   resolved half runs in the frame it belongs to. `resolved_link_frame`
+   gives the chat window for a link whose chat has a window, or for a box
+   (`QrCode`, `ChangePhone`, `PeerColor` and the like). A settings page
+   (`opens_in_main_window`) or a chat with no window gives the main window,
+   which is raised. `run_resolved_deep_link` moved from `frame_upkeep` to
+   `per_window_upkeep`, and runs only when its frame is the window in place.
+2. *A send being prepared is dropped with its window.* `SendPrepState`
+   moved from the per-window `SendBoxUi` to the app-wide `ComposerSends`.
+   A prep whose window closed finishes through `ScopedApp::app()` with no
+   window: the send goes through the account's client (`live_of`, the
+   screen's or a background account's), and only the stored draft is
+   cleared. A closing window no longer clears another window's job.
+3. *Join in a chat window's invite box opens the chat in the main window.*
+   Join keeps the asking window as the link's `flow_window`, so the chat
+   opens, and the result shows, where Join was pressed.
+4. *Boxes from the poll, the main frame and toast drains.* Proxy links run
+   under the window that queued them. The folder limit follows the box that
+   hit it (`window_of_box`). `PromoRequest` carries the ad's chat and
+   `pump_promo_request` runs per window, in the window showing that chat.
+   Grams Needed and Stars run in the window of the suggested post's chat.
+   Area C found two more: the mini-app poll (`startattach` terms, Remove
+   from menu) keeps `MiniApps::from_window`, and QR Share puts the chooser
+   into the window that pressed Share. The swipe poll, the wallpaper file
+   pick and the touch bar name their window too.
+5. *`queue_deep_link` took the window in place.* It takes the asker. A link
+   from the OS, a mini app or a notification is asked by the main window
+   (`as_asked_by(None, ..)`), so the pointer's last window no longer
+   decides.
+6. *An invite box waiting held every later link.* A new link replaces a
+   waiting invite preview: the session's `deep_link` and the box's
+   `deep_link_invite` are cleared and the new link goes on.
+7. *The round-video circle in every window.* The overlay shows only in the
+   window recording (`recording.origin()` or `opening_origin()`), and
+   `RoundPreview::end()` drops the last frame, so the next recording does
+   not start on it.
+8. *The quote picker outlived its reply.* `reply_quote_for` keys the
+   picker to the reply's (chat, message). `reply_quote_open` compares it
+   with the current reply, and a cleared, sent or replaced reply closes it.
+9. *Share pick, custom emoji card and the transcription toast.* The share
+   pick holds its link for the window that picked
+   (`hold_resolved_link`). The card shows in the window of the tap
+   (`custom_emoji_tapped`), and chat windows draw it. The speech trial
+   toast moved to `per_window_upkeep` for the window of the last press.
+10. *A second window's ask moved the old box with its old content.*
+    `press_login_url` no longer asks for `LoginUrlConfirm`. The consent box
+    opens only at its answer, under the window of the button's chat, with
+    that answer's content. An `Open` answer opens no box.
+11. *Low.* The auto-delete picker closes only when its own chat is left
+    (`close_ttl_picker_of_left_chat`). "Group media" is the tray's
+    (`PendingSend.group_media`), so it is per chat. The effects cap is per
+    chat (`chat_is_full`). A window's GIF tab follows its own field
+    (`follow_gif_field`).
+
+**Guard.** `scripts/dialog_hosts.py` rule 5 walks the call graph from
+where nobody asks: `poll_live`, the main frame's steps (not
+`per_window_upkeep`), `drain_suggested_post_notes`, and the bodies of
+`spawn_screen*`, `spawn_app*` and `defer_screen*` calls. It fails on an
+`open_box(` or `queue_deep_link(` reached outside `as_asked_by` or
+`asked_in_place`, unless a `// box-host: <why>` marker says why. Closures
+that run later (listeners, toasts' links, spawned tasks) are skipped. It
+also fails when a root is called outside `unasked(..)`. It runs from
+`check-window-scope.py`, with offline tests in
+`scripts/test_dialog_hosts.py` (CI step "window scope check tests").
+
+**Tests.** `chat_window/asker_tests.rs` covers the asker in place, under
+`as_asked_by` and `unasked`; screen and scoped tasks; queued links' origin;
+an unasked box going to the last press; a link run in a chat window's
+frame with the main window never drawn; which frame a resolved link
+belongs to; the share pick; the folder limit; the No ads preview; the
+camera circle; the custom emoji card; the auto-delete picker; the prep
+guard across windows; group media per chat; the GIF tab; and QR Share.
+Also: `composer/bars_tests.rs` (quote picker), `emoji_effect` (per-chat
+cap), `web_app_ui/mini_app_flow_tests.rs` (mini-app poll window),
+`state/tests/sessions.rs` (the callback answer keeps its chat) and the
+updated `premium_ui/preview_tests.rs`.
+
+**Not done, or not tested.**
+
+- With no live client, nothing tests the proxy link, Join (3), the callback
+  and login URL answers (10), Grams Needed, or a prep finishing after its
+  window closed (2). The guard covers their window choice.
+- The invite preview hand-over (6) has no test of its own.
+- The speech trial toast's move has no test.

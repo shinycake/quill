@@ -159,6 +159,9 @@ fn b1_password_callback_error_surfaces_wrong_password() {
             .map(|answer| answer.text.as_str()),
         Some("bot did not answer")
     );
+    // Round 14: the answer keeps the chat of the press, so the window
+    // showing that chat shows it.
+    assert_eq!(session.bots.last_callback_chat, Some(ChatId(21)));
 }
 
 #[test]

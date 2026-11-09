@@ -377,6 +377,9 @@ impl QuillApp {
             // GIFs download and play only while their tab shows.
             self.sync_gif_downloads();
         }
+        if tab == PanelTab::Gifs {
+            self.follow_gif_field(cx);
+        }
         cx.notify();
     }
 

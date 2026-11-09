@@ -482,10 +482,13 @@ impl QuillApp {
 
     /// Share: pick a chat; the link goes into its composer with the card
     /// image attached, unsent.
-    pub(super) fn qr_share(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    pub(in crate::ui) fn qr_share(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some((shown, picture)) = self.qr_shareable(window, cx) else {
             return;
         };
+        // The chooser is the window's that pressed Share, not the main
+        // window's the export finishes in.
+        let from = self.asking_window().flatten();
         self.qr_export(
             picture,
             window,
@@ -499,7 +502,9 @@ impl QuillApp {
                     return;
                 };
                 open.share_image = image;
-                this.share.link_text = Some(shown.link);
+                this.as_asked_by(from, |this| {
+                    this.in_asking_window(cx, |this, _| this.share.link_text = Some(shown.link));
+                });
                 this.connection
                     .set_note(crate::ui::status_note::StatusNote::silent(tr(
                         keys::Q_MISC_CHOOSE_A_CHAT_TO_SHARE_2,

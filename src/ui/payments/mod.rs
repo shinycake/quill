@@ -57,7 +57,12 @@ impl QuillApp {
         step: &quill::state::PaymentVerification,
         cx: &mut Context<Self>,
     ) {
-        self.open_link(&step.url, cx);
+        // The poll drains the step: the page is the checkout's, so a
+        // Telegram link in it opens as one clicked in the checkout's window.
+        let asker = self
+            .windows
+            .window_of_box(crate::ui::shell::DialogKind::PaymentForm);
+        self.as_asked_by(asker, |this| this.open_link(&step.url, cx));
         if step.closes_checkout {
             self.close_payment_dialog(cx);
         }
@@ -531,12 +536,16 @@ impl QuillApp {
                 request_write_access,
             } => match request {
                 Some(request) => {
-                    // box-host: opened by an answer; press_login_url named the window
+                    // The box opens with this answer's content in the
+                    // window that pressed (the drain names it): a consent
+                    // box still open from an older press is replaced
+                    // there, and an answer that opens no box leaves it be.
                     self.links.login_url_confirm = Some(LoginUrlConfirm {
                         domain,
                         request_write_access,
                         request,
                     });
+                    self.open_box(crate::ui::shell::DialogKind::LoginUrlConfirm);
                     cx.notify();
                 }
                 None => self.set_status_note(

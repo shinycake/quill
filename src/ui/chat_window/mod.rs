@@ -30,6 +30,9 @@
 
 use crate::ui::status_note::StatusNote;
 use crate::ui::user_error::user_error_for;
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+mod asker_tests;
 mod body;
 mod cover;
 #[cfg(test)]
@@ -89,9 +92,9 @@ pub(crate) struct ChatWindows {
     /// session-wide box no open named a window for shows there
     /// (`dialog_hosts`). Pointer moves and scrolls do not count.
     pub(super) last_press: Option<ChatId>,
-    /// The window a flow that runs away from it asked from, while that
-    /// part runs (`QuillApp::as_asked_by`): its boxes name it.
-    pub(super) asking: Option<Option<ChatId>>,
+    /// Who asks for what the code running now opens (`dialog_hosts`):
+    /// the window in place, a window a flow carried, or nobody.
+    pub(super) asker: dialog_hosts::Asker,
     /// Which window shows each kit dialog (`dialog_hosts`).
     dialogs: dialog_hosts::DialogHosts,
     /// A write of the open windows is scheduled (`saved`).
@@ -183,7 +186,7 @@ impl ChatWindows {
             open: Vec::new(),
             scope: None,
             last_press: None,
-            asking: None,
+            asker: dialog_hosts::Asker::InPlace,
             dialogs: dialog_hosts::DialogHosts::default(),
             save_pending: false,
             closed: Vec::new(),
@@ -637,8 +640,8 @@ impl QuillApp {
     /// and message state goes, and the pane shows "Select a chat".
     pub(super) fn leave_open_chat(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.flush_leaving_draft(cx);
+        self.close_ttl_picker_of_left_chat(None);
         self.leave_chat_ui();
-        self.notify.ttl_picker = None;
         self.cancel_recording_here(cx);
         self.leave_gifs_here(self.open_chat_id());
         self.leave_sticker_chat(

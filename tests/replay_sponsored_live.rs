@@ -58,8 +58,16 @@ fn sponsored_tail_hides_after_report_and_hide() {
     assert_eq!(session.begin_sponsored_hide(chat_id, 9002), Some(false));
     assert!(session.messages.last_sponsored_report.is_none());
     assert_eq!(
-        session.payments.hub.promo_request.take(),
-        Some(quill::premium_hub::PremiumFeature::DisabledAds.into())
+        session
+            .payments
+            .hub
+            .promo_request
+            .take()
+            .map(|request| (request.feature, request.chat_id)),
+        Some((
+            quill::premium_hub::PremiumFeature::DisabledAds.into(),
+            chat_id
+        ))
     );
     assert!(!session.messages.sponsored_hidden);
 

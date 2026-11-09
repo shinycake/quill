@@ -296,7 +296,7 @@ fn clicking_the_reply_bar_opens_the_quote_picker(cx: &mut TestAppContext) {
     ));
     vcx.update(|window, cx| window.click(("composer-reply-quote", 1usize), cx));
     frames(vcx);
-    assert!(app.read_with(vcx, |app, _| app.share.reply_quote_open));
+    assert!(app.read_with(vcx, |app, _| app.reply_quote_open()));
 }
 
 #[gpui_kit::test]
@@ -309,7 +309,7 @@ fn right_clicking_the_reply_bar_jumps_to_the_replied_message(cx: &mut TestAppCon
     frames(vcx);
     assert!(jump_ready(&app, vcx, MessageId(10)));
     assert!(
-        !app.read_with(vcx, |app, _| app.share.reply_quote_open),
+        !app.read_with(vcx, |app, _| app.reply_quote_open()),
         "a right click does not open the picker"
     );
 }
@@ -542,4 +542,38 @@ fn a_keyboard_button_while_editing_sends_a_new_message(cx: &mut TestAppContext) 
     );
     assert_eq!(content_after, content, "the edited message kept its text");
     assert!(editing(&app, cx), "the edit stays open");
+}
+
+/// Round 14 (area B, finding 8): the quote picker belongs to the reply it
+/// was opened for. Another reply comes without it, and a sent reply closes
+/// it, so the next reply to the same message opens no picker either.
+#[gpui_kit::test]
+fn the_quote_picker_does_not_outlive_its_reply(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    reply_to_ada(&app, vcx);
+    vcx.update(|window, cx| window.click(("composer-reply-quote", 1usize), cx));
+    frames(vcx);
+    assert!(app.read_with(vcx, |app, _| app.reply_quote_open()));
+    app.update(vcx, |app, cx| {
+        app.chat_ui
+            .set_reply(Some(ComposerReplyTo::new(GROUP, MessageId(11))));
+        cx.notify();
+    });
+    frames(vcx);
+    assert!(
+        !app.read_with(vcx, |app, _| app.reply_quote_open()),
+        "another message's reply has no picker"
+    );
+    reply_to_ada(&app, vcx);
+    vcx.update(|window, cx| window.click(("composer-reply-quote", 1usize), cx));
+    frames(vcx);
+    assert!(app.read_with(vcx, |app, _| app.reply_quote_open()));
+    app.update(vcx, |app, cx| app.consume_sent_reply(GROUP, cx));
+    frames(vcx);
+    reply_to_ada(&app, vcx);
+    assert!(
+        !app.read_with(vcx, |app, _| app.reply_quote_open()),
+        "the next reply to the same message opens no picker"
+    );
 }

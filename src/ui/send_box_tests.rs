@@ -77,7 +77,7 @@ fn paid_media_is_for_channels_that_allow_it_and_the_price_box_sets_it(cx: &mut T
                 ("demo-clip.mp4", AttachmentKind::Video),
             ],
         );
-        app.composer_ui.group_media = Some(true);
+        app.set_composer_group_media(Some(true));
         assert!(app.paid_media_available());
         assert_eq!(app.composer_media_options().paid_stars, 0);
 
@@ -99,9 +99,9 @@ fn paid_media_is_for_channels_that_allow_it_and_the_price_box_sets_it(cx: &mut T
         assert_eq!(app.composer_media_options().paid_stars, 250);
 
         // Files can't be paid media, and neither can ungrouped media.
-        app.composer_ui.group_media = Some(false);
+        app.set_composer_group_media(Some(false));
         assert_eq!(app.composer_media_options().paid_stars, 0);
-        app.composer_ui.group_media = Some(true);
+        app.set_composer_group_media(Some(true));
         tray(app, &[("demo-notes.txt", AttachmentKind::Document)]);
         assert_eq!(app.composer_media_options().paid_stars, 0);
 
@@ -224,7 +224,7 @@ fn a_slot_whose_files_are_being_read_says_so_and_other_chats_are_free(cx: &mut T
         assert!(app.send_box_option_controls(cx).is_empty());
 
         let slot = app.send_slot().expect("an open slot");
-        let job = app.composer_ui.send_box.prep.begin(slot);
+        let job = app.composer_sends.prep.begin(slot);
         assert!(job.is_some());
         assert!(app.tray_preparing());
         assert_eq!(
@@ -245,7 +245,7 @@ fn a_slot_whose_files_are_being_read_says_so_and_other_chats_are_free(cx: &mut T
         assert!(app.tray_preparing(), "back in the chat it is still held");
 
         // The job ends: the label goes with it, nothing else stored.
-        app.composer_ui.send_box.prep.finish(job.unwrap());
+        app.composer_sends.prep.finish(job.unwrap());
         assert!(!app.tray_preparing());
         assert!(app.send_box_option_controls(cx).is_empty());
     });
@@ -355,7 +355,7 @@ fn removing_cards_before_and_past_the_tenth_sends_the_rest_in_order(cx: &mut Tes
     app.update_in(&mut vcx, |app, _, cx| app.check_tray_videos(cx));
     vcx.run_until_parked();
     app.update_in(&mut vcx, |app, window, cx| {
-        app.composer_ui.group_media = Some(true);
+        app.set_composer_group_media(Some(true));
         app.submit_composer(String::new(), window, cx);
         assert!(app.pending_attachments().is_empty(), "the tray went");
         let sent = newest_photos(app, 11);

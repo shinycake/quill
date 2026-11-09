@@ -228,7 +228,7 @@ impl QuillApp {
             input.set_value("two files for you", window, cx);
         });
         if let Some(slot) = self.send_slot() {
-            self.composer_ui.send_box.prep.begin(slot);
+            self.composer_sends.prep.begin(slot);
         }
     }
 

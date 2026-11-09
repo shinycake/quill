@@ -148,6 +148,9 @@ impl QuillApp {
     /// Poll the helper and the session's mini-app answers while something
     /// is going on; stops by itself when nothing is left.
     pub(super) fn ensure_mini_app_poll(&mut self, cx: &mut Context<Self>) {
+        if let Some(window) = self.asking_window() {
+            self.mini_apps.from_window = window;
+        }
         if self.mini_apps.poll.is_some() {
             return;
         }
@@ -161,7 +164,10 @@ impl QuillApp {
                     .await;
                 let keep = this
                     .update(cx, |this, cx| {
-                        this.mini_apps.generation == generation && this.poll_mini_apps(cx)
+                        this.mini_apps.generation == generation
+                            && this.as_asked_by(this.mini_apps.from_window, |this| {
+                                this.poll_mini_apps(cx)
+                            })
                     })
                     .unwrap_or(false);
                 if !keep {
@@ -458,7 +464,8 @@ impl QuillApp {
     /// A URL the page tried to leave the frame for.
     pub(super) fn open_from_mini_app(&mut self, url: &str, cx: &mut Context<Self>) {
         if is_telegram_link(url) {
-            self.queue_deep_link(url.to_string());
+            // Mini apps open over the main window, and so do their links.
+            self.as_asked_by(None, |this| this.queue_deep_link(url.to_string()));
             cx.notify();
             return;
         }
@@ -578,7 +585,7 @@ impl QuillApp {
             }),
             WebAppEvent::OpenLink { url, .. } => self.open_from_mini_app(&url, cx),
             WebAppEvent::OpenTgLink { url } => {
-                self.queue_deep_link(url);
+                self.as_asked_by(None, |this| this.queue_deep_link(url));
                 cx.activate(true);
                 cx.notify();
             }
@@ -811,7 +818,11 @@ impl QuillApp {
                 self.switch_inline_into(chat, query, window, cx);
             }
             RenderAction::OpenBotChat { bot_id } => self.open_user_chat(bot_id, window, cx),
-            RenderAction::OpenInvoice { slug } => self.open_mini_app_invoice(slug, window, cx),
+            // The checkout opens over the main window, as the mini app
+            // does; the main frame runs this, so that window asks.
+            RenderAction::OpenInvoice { slug } => self.as_asked_by(None, |this| {
+                this.open_mini_app_invoice(slug, window, cx);
+            }),
         }
     }
 

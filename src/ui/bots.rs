@@ -184,15 +184,14 @@ impl QuillApp {
             live.driver
                 .send_login_url_info(chat_id, message_id, button_id, url)
         });
-        match sent {
-            // The consent box the answer may open belongs to this window,
-            // whichever window the pointer is over when it lands.
-            Some(Ok(_)) => self.open_box(crate::ui::shell::DialogKind::LoginUrlConfirm),
-            _ => {
-                // Not connected, or TDLib refused the send: plain URL-button
-                // behavior is the honest fallback.
-                self.open_link(url, cx);
-            }
+        // The consent box the answer may open names its window when it
+        // lands (`present_login_url_info`, from the button's chat): an ask
+        // here would move a consent box still open in another window,
+        // with its old domain, before the answer is known.
+        if !matches!(sent, Some(Ok(_))) {
+            // Not connected, or TDLib refused the send: plain URL-button
+            // behavior is the honest fallback.
+            self.open_link(url, cx);
         }
     }
 

@@ -135,6 +135,34 @@ impl QuillApp {
         }
     }
 
+    /// The GIF tab shows in the window in place: the session keeps one
+    /// search for every window, and each window has its own field, so the
+    /// results follow this window's field (an empty field shows the saved
+    /// GIFs, not another window's search).
+    pub(super) fn follow_gif_field(&mut self, cx: &mut Context<Self>) {
+        let field = self
+            .pickers
+            .gif_search_input
+            .read(cx)
+            .value()
+            .trim()
+            .to_string();
+        let Some(panel) = self.session().map(|session| &session.stickers.gifs) else {
+            return;
+        };
+        let searched = panel
+            .search_mode
+            .then(|| panel.search_query.clone())
+            .filter(|query| !query.is_empty());
+        if field.is_empty() {
+            if searched.is_some() {
+                self.choose_gif_section(GifSection::Saved, cx);
+            }
+        } else if searched.as_deref() != Some(field.as_str()) {
+            self.search_gifs_for(&field, cx);
+        }
+    }
+
     fn clear_gif_search_field(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.pickers
             .gif_search_input

@@ -408,6 +408,10 @@ impl QuillApp {
     /// knew was stale or missing): ask for a top-up as the local check
     /// would have.
     fn ask_after_balance_error(&mut self, purpose: SuggestedPostPurpose, cx: &mut Context<Self>) {
+        // The press was on this chat's suggestion: its box and the Stars
+        // screen go to the window showing it, whichever window's toast
+        // drained the error.
+        let asker = self.window_showing(ChatId(purpose.key().0));
         let (price, purpose_for) = match purpose {
             SuggestedPostPurpose::Approve {
                 chat_id,
@@ -436,6 +440,6 @@ impl QuillApp {
             return;
         };
         let short = self.suggest_shortfall(price).unwrap_or(price);
-        self.ask_for_balance(short, purpose_for, cx);
+        self.as_asked_by(asker, |this| this.ask_for_balance(short, purpose_for, cx));
     }
 }

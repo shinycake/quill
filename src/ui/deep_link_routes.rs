@@ -53,6 +53,21 @@ fn settings_action(target: SettingsTarget) -> Option<NavigationAction> {
     }
 }
 
+/// Whether the typed link `ui` opens in the main window whichever window
+/// it was clicked in: a settings page (the settings live there). Its boxes
+/// (the QR code, the phone change, the name color) show where it was
+/// clicked.
+pub(super) fn opens_in_main_window(ui: &DeepLinkUi) -> bool {
+    matches!(
+        ui,
+        DeepLinkUi::Settings(target)
+            if !matches!(
+                target,
+                SettingsTarget::ChangePhone | SettingsTarget::QrCode | SettingsTarget::PeerColor(_)
+            )
+    )
+}
+
 impl QuillApp {
     /// Render-time half of a `DeepLinkState::Ui` route (needs the `Window`).
     pub(super) fn run_deep_link_ui(
@@ -141,12 +156,16 @@ impl QuillApp {
 
     /// Chat picked in the share chooser: open it with the text in the
     /// composer. Never sent; the user confirms (tdesktop `shareUrl`).
+    /// It opens as a link clicked in the window of the chooser: a chat
+    /// with no window comes up in the main window, which comes forward.
     pub(super) fn choose_share_chat(&mut self, chat_id: ChatId, cx: &mut Context<Self>) {
         if let Some(text) = self.share.link_text.take() {
             self.links.pending_deep_link_open = Some(PendingOpen::user(
                 chat_id,
                 DeepLinkAction::ShareDraft { text },
             ));
+            let asker = self.asking_window().flatten();
+            self.hold_resolved_link(asker, cx);
         }
         self.qr_share_chosen(chat_id, cx);
         cx.notify();
@@ -192,7 +211,14 @@ impl QuillApp {
         });
         if loaded {
             self.playback.pending_media_seek = None;
-            self.seek_media_timestamp(chat_id, message_id, seconds, cx);
+            // The poll runs this: the seek is the window's that shows the
+            // chat, with its state in place, and so is a link it opens.
+            let window = self.window_showing(chat_id);
+            self.in_window_scope(window, cx, |this, cx| {
+                this.as_asked_by(window, |this| {
+                    this.seek_media_timestamp(chat_id, message_id, seconds, cx);
+                });
+            });
         } else if now >= give_up_at {
             self.playback.pending_media_seek = None;
         }

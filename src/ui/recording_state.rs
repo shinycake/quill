@@ -241,13 +241,16 @@ impl RecordingUi {
         media
     }
 
-    /// Lock, the discard row and "Play once" belong to one recording:
-    /// whatever ends it (send, story reply, cancel, a closed window) ends
-    /// them too, so none carries over into the next one.
+    /// Lock, the discard row, "Play once" and the camera image belong to
+    /// one recording: whatever ends it (send, story reply, cancel, a closed
+    /// window) ends them too, so none carries over into the next one.
     fn end_capture_flags(&mut self) {
         self.locked = false;
         self.discard_confirm = false;
         self.once = false;
+        if let Ok(mut preview) = self.round_preview.try_borrow_mut() {
+            preview.end();
+        }
     }
 }
 

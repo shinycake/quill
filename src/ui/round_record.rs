@@ -58,13 +58,30 @@ fn starting_camera_circle(cx: &mut Context<QuillApp>) -> AnyElement {
         .into_any_element()
 }
 
+impl RoundPreview {
+    /// The recording ended: the next one starts on its own camera's
+    /// frames, not on this one's last image (which leaves the atlas at
+    /// the next paint).
+    pub(super) fn end(&mut self) {
+        self.seq = 0;
+        if let Some(old) = self.image.take() {
+            self.stale.push(old);
+        }
+    }
+}
+
 impl QuillApp {
-    /// The recording circle, while a video message records.
+    /// The recording circle, while a video message records, in the window
+    /// it belongs to (`chat_window::recording`): another window shows its
+    /// own chat, with no camera over it.
     pub(super) fn round_record_overlay(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let Some(capture) = self.recording.video() else {
-            return self
-                .recording
-                .opening_video()
+        let here = Some(self.windows.scope);
+        let Some(capture) = self
+            .recording
+            .video()
+            .filter(|_| self.recording.origin() == here)
+        else {
+            return (self.recording.opening_video() && self.recording.opening_origin() == here)
                 .then(|| starting_camera_circle(cx));
         };
         self.request_animation_tick(30, cx);

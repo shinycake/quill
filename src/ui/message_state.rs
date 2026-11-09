@@ -70,6 +70,9 @@ pub(crate) struct MessageUi {
     pub(super) rendered_sponsored: std::cell::RefCell<Vec<(ChatId, i64)>>,
     /// The custom emoji card already on screen (it times itself out).
     pub(super) custom_emoji_card_seen: Option<quill::state::CustomEmojiPreview>,
+    /// The custom emoji last tapped in this window: its card shows here,
+    /// over the window of the tap (the session keeps one preview).
+    pub(super) custom_emoji_tapped: Option<i64>,
     /// B4: poll voter-list viewer.
     pub(super) poll_voters_dialog: Option<PollVotersDialog>,
     /// B15: the inline "Add an Option" panel (`addPollOption`).
@@ -106,6 +109,7 @@ impl MessageUi {
             sponsored_about: None,
             rendered_sponsored: std::cell::RefCell::new(Vec::new()),
             custom_emoji_card_seen: None,
+            custom_emoji_tapped: None,
             poll_voters_dialog: None,
             poll_add_option: None,
             fact_check_dialog: None,

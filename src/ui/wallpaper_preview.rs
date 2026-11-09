@@ -100,12 +100,16 @@ impl QuillApp {
             multiple: false,
             prompt: Some(tr(keys::Q_MISC_CHOOSE_WALLPAPER).into()),
         });
-        // The preview opens for the account on screen now.
+        // The preview opens for the account on screen now, in the window
+        // that chose the file.
+        let from = self.asking_window().flatten();
         self.spawn_screen(cx, async move |this, cx| {
             if let Ok(Ok(Some(paths))) = picker.await
                 && let Some(path) = paths.into_iter().next()
             {
-                let _ = this.update(cx, |this, cx| this.preview_wallpaper_file(path, cx));
+                let _ = this.update(cx, |this, cx| {
+                    this.as_asked_by(from, |this| this.preview_wallpaper_file(path, cx));
+                });
             }
         })
         .detach();

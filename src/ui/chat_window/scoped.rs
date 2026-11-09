@@ -24,9 +24,16 @@
 //!
 //! `scripts/check-window-scope.py` flags async work in `src/ui` that touches
 //! window or screen state without one of these.
+//!
+//! A task also keeps who asked for it ([`Asker`]): a `spawn_scoped` task
+//! the asker it was started under, the others nobody, since the main
+//! window's state in place there is not a window that asked. A box such a
+//! task opens without naming its window shows in the window of the last
+//! press (`scripts/dialog_hosts.py` checks their bodies).
 
 use super::super::app::QuillApp;
 pub(in crate::ui) use super::super::on_screen::ScreenEpoch;
+use super::dialog_hosts::Asker;
 use gpui_kit::*;
 use quill::ids::ChatId;
 
@@ -43,6 +50,8 @@ pub(in crate::ui) struct ScopedApp {
     screen: Option<ScreenEpoch>,
     /// The window the task belongs to (`None`: the main window).
     window: Option<ChatId>,
+    /// Who asked for the task: what its updates open goes there.
+    asker: Asker,
 }
 
 impl ScopedApp {
@@ -55,12 +64,15 @@ impl ScopedApp {
     ) -> Result<R, Gone> {
         let screen = self.screen;
         let window = self.window;
+        let asker = self.asker;
         self.app
             .update(cx, |app, cx| {
                 if screen.is_some_and(|screen| app.screen_epoch() != screen) {
                     return None;
                 }
-                app.in_window_scope(window, cx, f)
+                app.in_window_scope(window, cx, |app, cx| {
+                    app.with_asker(asker, |app| f(app, cx))
+                })
             })
             .ok()
             .flatten()
@@ -75,12 +87,15 @@ impl ScopedApp {
     ) -> Result<R, Gone> {
         let screen = self.screen;
         let scope = self.window;
+        let asker = self.asker;
         self.app
             .update_in(cx, |app, window, cx| {
                 if screen.is_some_and(|screen| app.screen_epoch() != screen) {
                     return None;
                 }
-                app.in_window_scope(scope, cx, |app, cx| f(app, window, cx))
+                app.in_window_scope(scope, cx, |app, cx| {
+                    app.with_asker(asker, |app| f(app, window, cx))
+                })
             })
             .ok()
             .flatten()
@@ -95,6 +110,7 @@ impl ScopedApp {
             app: self.app.clone(),
             screen: self.screen,
             window: None,
+            asker: Asker::Nobody,
         }
     }
 
@@ -106,6 +122,7 @@ impl ScopedApp {
             app: self.app.clone(),
             screen: None,
             window: None,
+            asker: Asker::Nobody,
         }
     }
 }
@@ -219,7 +236,7 @@ impl QuillApp {
         let app = cx.weak_entity();
         cx.defer(move |cx| {
             let _ = app.update(cx, |this, cx| {
-                this.in_screen_scope(screen, cx, f);
+                this.in_screen_scope(screen, cx, |this, cx| this.unasked(|this| f(this, cx)));
             });
         });
     }
@@ -233,7 +250,9 @@ impl QuillApp {
     ) {
         let screen = self.screen_epoch();
         cx.defer_in(window, move |this, window, cx| {
-            this.in_screen_scope(screen, cx, |this, cx| f(this, window, cx));
+            this.in_screen_scope(screen, cx, |this, cx| {
+                this.unasked(|this| f(this, window, cx))
+            });
         });
     }
 
@@ -244,6 +263,7 @@ impl QuillApp {
             app: cx.weak_entity(),
             screen: Some(self.screen_epoch()),
             window: self.windows.scope,
+            asker: self.windows.asker,
         }
     }
 
@@ -254,6 +274,7 @@ impl QuillApp {
             app: cx.weak_entity(),
             screen: Some(self.screen_epoch()),
             window: None,
+            asker: Asker::Nobody,
         }
     }
 
@@ -264,6 +285,7 @@ impl QuillApp {
             app: cx.weak_entity(),
             screen: None,
             window: None,
+            asker: Asker::Nobody,
         }
     }
 

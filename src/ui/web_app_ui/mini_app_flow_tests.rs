@@ -294,3 +294,26 @@ fn a_popup_replaced_by_another_is_answered(cx: &mut TestAppContext) {
         prompt(&received);
     });
 }
+
+/// Area C's startattach finding: the poll that answers a mini-app flow runs
+/// as the main window, so it keeps the window the flow started in and its
+/// boxes open there. The poll's own steps (no window asked) keep it.
+#[gpui_kit::test]
+fn the_mini_app_poll_keeps_the_window_its_flow_started_in(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    app.update(&mut vcx, |app, cx| {
+        let window = Some(quill::ids::ChatId(12));
+        app.as_asked_by(window, |app| app.ensure_mini_app_poll(cx));
+        assert_eq!(app.mini_apps.from_window, window);
+        app.unasked(|app| app.ensure_mini_app_poll(cx));
+        assert_eq!(
+            app.mini_apps.from_window, window,
+            "the poll's own steps keep it"
+        );
+        app.ensure_mini_app_poll(cx);
+        assert_eq!(
+            app.mini_apps.from_window, None,
+            "a flow the main window started"
+        );
+    });
+}
