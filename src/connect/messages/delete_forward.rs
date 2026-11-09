@@ -165,6 +165,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             extra,
             dest_chat_id: dest,
             from_chat_id: draft.from_chat_id,
+            from_topic: draft.from_topic,
             requested: draft.message_ids.len(),
         };
         // Several destinations (share box) are in flight at once: the first

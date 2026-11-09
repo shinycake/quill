@@ -150,12 +150,17 @@ impl FfmpegBackend {
         if self.sound.is_some() {
             return;
         }
-        // The first tap, or (once an output is up again) a new one for a
+        // The first tap, or (once a device is up again) a new one for a
         // sound whose tap was let go: a device that was missing at attach
-        // or lost mid-clip gives the clip its soundtrack back.
+        // or lost mid-clip gives the clip its soundtrack back. Only a let-go
+        // sound asks for the device, so a silent clip never opens it, and
+        // only a device that is up (not one still opening, which may fail)
+        // takes the reattach, which restarts the decoder.
         let tap = match self.player.take_audio_tap() {
             Some(tap) => Some(tap),
-            None if crate::ui::audio::video_output_up() => self.player.reattach_audio_tap(),
+            None if self.player.sound_detached() && crate::ui::audio::video_output_ready() => {
+                self.player.reattach_audio_tap()
+            }
             None => None,
         };
         if let Some(tap) = tap {

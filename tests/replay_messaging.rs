@@ -466,6 +466,7 @@ fn replay_forward_messages_result_and_attribution() {
         extra,
         dest_chat_id: quill::ids::ChatId(8),
         from_chat_id: quill::ids::ChatId(7),
+        from_topic: quill::ids::TopicId::None,
         requested: 1,
     });
     apply_all_seq(

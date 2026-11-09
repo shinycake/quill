@@ -61,7 +61,7 @@ impl QuillApp {
     /// Open the video editor on the chosen file for the set, with `emoji`
     /// already picked (a sticker's own). A file not downloaded yet is
     /// fetched and the editor opens when it arrives
-    /// (`sticker_box_frame_upkeep`); the chooser closes either way, as
+    /// (`sticker_box_window_upkeep`); the chooser closes either way, as
     /// tdesktop's panel hides on the pick.
     pub(super) fn pick_video_for_set(
         &mut self,

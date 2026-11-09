@@ -318,6 +318,37 @@ fn the_window_opens_snapped_and_a_move_snaps_to_the_edge(cx: &mut TestAppContext
     assert!(player.is_some_and(|player| player.wants_play()));
 }
 
+/// A secret chat's clip stays in the viewer, which keeps it out of screen
+/// capture: a floating window would not.
+#[gpui_kit::test]
+fn a_secret_chats_clip_never_goes_to_picture_in_picture(cx: &mut TestAppContext) {
+    use quill::ids::UserId;
+    use quill::telegram::envelope::ChatKind;
+    let script = Rc::new(RefCell::new(Script {
+        ready: true,
+        picture: true,
+        ..Script::default()
+    }));
+    let secret = |app: &mut QuillApp| {
+        let chat = app
+            .demo_session
+            .as_mut()
+            .and_then(|session| session.chats.get_mut(&11));
+        if let Some(chat) = chat {
+            chat.kind = ChatKind::Secret {
+                secret_chat_id: 9,
+                user_id: UserId(11),
+            };
+        }
+    };
+    let (app, vcx, _) = open_pip_on(cx, &script, secret, MessageId(204), 0);
+    app.read_with(&vcx, |app, _| {
+        assert!(app.viewer.pip.is_none(), "no floating window");
+        assert!(app.viewer.state.is_open(), "the viewer keeps the clip");
+        assert!(app.viewer.player.is_some());
+    });
+}
+
 fn view_player(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> Option<VideoPlayer> {
     let (_, view) = pip_of(app, vcx);
     pip_player(&view, vcx)

@@ -3215,6 +3215,127 @@ so the Asker filter keeps it).
 - Search hand-off (8) and the link-preview retry (9) were not run live.
 
 
+### Phase 17 (area B: one stage for the forward, one mode for the panel, and flows that ran in the wrong place)
+
+Round 17 of the review, area B, on `claude/sm-review17-b`. The numbers are
+the review's ranked findings. Three round-15 and round-16 "dodges" (state
+kept in step by hand next to other state) are converted too; findings 6
+and 7 came from one of them.
+
+**The forward is one stage (dodge, findings 6 and 7).** `ShareUi` held
+the forward as three fields kept in step by about ten writers: the draft
+(`pending_forward`), the chat the forward bar waits in (`forward_bar_dest`)
+and whether the share box is open (`forward_picker_open`). It is now one
+`ForwardStage` (`src/ui/forward_stage.rs`):
+
+- `None`; `Selecting(draft)`, selection mode in the conversation the
+  messages were picked in; `Picking { draft, bar }`, the share box over a
+  selection (`bar: None`) or over a forward bar ("Change recipient",
+  `bar: Some(chat)`), which leaving the box returns to; and
+  `Bar { draft, dest }`, the forward bar above `dest`'s composer.
+- The transitions are methods (`open_picker`, `close_picker`, `drop_bar`,
+  `selection_mut`, `take_draft`), so a writer cannot leave a bar with no
+  draft or a box over nothing.
+- A forward bar is no selection mode (6). `selecting_in` reads only
+  `Selecting` and `Picking { bar: None }`, and requires the selection's
+  own conversation, so a bar into the selection's own forum no longer
+  shows "3 selected" and a Delete over hidden ids in every topic. Picking
+  again (a toggle, a drag, Shift+click) turns a bar back into a
+  selection (`selection_mut`).
+- `ForwardFlight` and `ForwardResult` carry `from_topic` (7). A forward's
+  answer ends the window's draft only when the draft `is_from` the
+  result's chat and topic, so a newer selection made in another topic of
+  the same chat stays.
+
+**The emoji panel is one mode (dodge).** `MediaPanel { open, reaction,
+status }` is `panel_mode: PanelMode { Closed, Compose, Reaction(target),
+Status(target) }` (`media_panel/mode.rs`). Opening the reaction selector
+over the status selector left the status target set, and the readers
+disagreed on which won (`sync_media_panel_rows` picked the reaction,
+`panel_query` and the custom emoji cell the status). One writer,
+`set_media_panel_mode`, drops a selector's rows and stops resolving the
+status choices when the status mode ends; it is listed in
+`scripts/single-writers.txt`, so `check-screen-state.py` fails any other
+whole write outside tests.
+
+**The link preview's "already asked" mark is the session's (dodge).**
+`ComposerUi::preview_tried` was a per-window copy next to
+`Session::composer_previews`. Any entry there (asked, loaded, none,
+failed) now means "asked". A keystroke that brings a URL into the field
+forgets a `Failed` entry for it (`retry_failed_link_preview`, from the
+composer's Change event, not the frame), and a request that could not be
+sent is stored as `Failed` (`send_failed`), so it is not asked again on
+every frame.
+
+**What else was built, by finding.**
+
+1. *A topic change while editing left the edited text as a plain draft.*
+   `sync_chat_ui`'s topic branch asks for the slot's draft restore
+   (`request_draft_restore`) when the value it replaces was editing or had
+   the rich editor open. The restore runs later in the same upkeep, after
+   the edit is gone, so the stashed draft and its reply come back. A Saved
+   sublist or a thread inside a forum topic keeps the draft slot, so no
+   switch path restored it before.
+2. *Window-menu and Dock commands ran in a chat window's scope.* `on_app`,
+   the one path every menu-bar and Dock handler takes, runs the command
+   through `as_main_window_command`: the main window's state in place
+   (`in_window_scope(None, ..)`) and asked by it (`as_asked_by(None, ..)`).
+   The command raises the main window, so its box shows there.
+3. *A reply typed into a toast of an account not on screen was lost and
+   lingered.* `send_typed_notification_reply` is the one place the typed
+   text is taken. `drain_background_clicks` calls it for the account on
+   screen, and `run_notification_action` calls it for a Reply click that
+   switched accounts first (`open_pending_account_chat`). The chat opens
+   only when nothing was sent.
+4. *A stale Join opened the community-limit box.* `limit_box` is computed
+   only for an answer that is not stale.
+5. *A sticker category listed another window's search.* The session's
+   found list says what it is for: `StickerSearch { Typed(query),
+   Category(source) }` replaced `search_query`. A window lists the found
+   stickers only while they are for its own query or category
+   (`wanted_sticker_search`), and the window of the last press asks for a
+   category the same way it asks for a typed query, so
+   `search_chosen_sticker_category` and the `category_changed` key compare
+   are gone.
+8. *A stale chat-list check revived select mode.* The main window's frame
+   clears the checks once none of them is listed
+   (`end_selection_left_list`, a `// main-only` step: only the main
+   window has a chat list). "Select unread" checks the listed chats only.
+9. *A channel's reaction row stayed after Delete.* The purpose carries the
+   full `MessageSender`, so `drop_reactor_from_audience` matches a chat
+   sender too.
+10. *The D-Bus notifier gave up for the session.* A failed connect is not
+    cached. `RetryGate` lets the next notification try again after
+    `REPROBE` (30 s), the capability probe's interval.
+
+*Guards.* `scripts/single-writers.txt` lists `panel_mode`. The screen
+state check's chat-key list (`scripts/view-state-not-chat.txt`) names the
+two forward-bar chats in the stage. The OS-menu fix sits at the one seam
+all handlers use (`on_app`), so no extra script.
+
+Tests: `chat_ui_tests.rs` (the forum-topic edit test now checks the field
+lost the edited text; `a_forward_bar_into_the_selections_forum_is_no_selection_mode`,
+`a_forward_answer_keeps_a_newer_selection_of_another_topic`),
+`forward_stage.rs` (the stage's transitions),
+`chat_window/asker_tests.rs` (`a_menu_bar_command_runs_as_the_main_window`),
+`notifications/reply_after_switch_tests.rs`,
+`state/tests/premium_limit.rs` (`a_stale_invite_link_join_opens_no_limit_box`),
+`media_panel/panel_tests.rs` (`a_category_does_not_list_another_windows_search`),
+`media_panel/status_tests.rs` (`the_reaction_selector_replaces_the_status_selector`),
+`derived_state_tests.rs` (two chat-list tests), `ownership_types.rs`
+(`a_deleted_channel_reaction_leaves_the_who_reacted_list`), the connect
+link-preview test (`forget_failed`, `send_failed`) and `linux_dbus.rs`
+(`a_failed_connect_is_retried_after_the_reprobe_interval`, Linux only).
+
+**Not done, or not tested.**
+
+- The notification reply (3) is tested through a test-only text seam; a
+  real toast reply after an account switch was not run.
+- The D-Bus retry (10) builds and tests on Linux CI only; it was not run
+  against a daemon that starts late.
+- The OS menu fix (2) is tested at the seam; the real menu bar was not
+  clicked.
+
 ### Phase 15 (area C)
 
 Round 15 of the review, area C (the rest of `src/ui`), on
@@ -3444,3 +3565,207 @@ is, since tdesktop does the same.
   - None of them waits on time.
 - **The flaky `settings::media` test** was already fixed on the merged
   base (`Start the media prefs test from an empty folder`).
+
+### Phase 17 (area A)
+
+Round 17 of the review, area A (core outside `src/ui`). All three findings
+were fixed, and the round-16 `own_info` dodge was converted.
+
+**An agent send gets only its own outcome (1).** TDLib numbers messages
+still being sent per chat (`MessagesManager::get_next_message_id`), and
+scheduled sends share `ScheduledServerMessageId(1)` per date. `agent::events`
+matched `updateMessageSendSucceeded/Failed` by client and temporary id
+only, and kept entries after a waiter read them. So a send could get
+another chat's delivery or error, or an older send's outcome. The log now
+stores each outcome with its chat and a sequence number. `send_inner` takes
+`events::send_mark()` before the request goes out, and `wait_sent(client,
+chat, since, ids, ..)` accepts only outcomes for that chat recorded after
+the mark. The activity page's Undo also offers only the user's own
+messages: `agent_undo_for` drops any logged id whose loaded message is not
+outgoing. An id that isn't loaded is still refused by
+`ConnectDriver::delete_selected`, which needs the message in the history.
+This also covers logs written before the fix. Tests:
+`a_send_gets_only_its_own_chats_outcome_after_it_went_out`, the old
+`send_outcomes_reach_their_waiter` (it no longer sleeps), and
+`undo_never_offers_someone_elses_message`.
+
+**Approve all doesn't bring handled join requests back (2).** This is the
+round-16 #4 shape for the groups lists. On the `ok` of
+`processChatJoinRequests`, `Session::drop_chat_join_request_pages` takes
+every in-flight `GetChatJoinRequests` and `GetMoreChatJoinRequests` for the
+chat out of the registry (the new `RequestRegistry::take_purpose_for_chat`)
+and clears `join_request_latest`. A late page then has no pending request.
+Only clearing `latest` would not be enough, because the answer arm accepts a
+missing `latest`. The link-list arm also takes its `GetLinkJoinRequests`
+pages and clears `request`. `LinkRequestsState::loading` was that same
+stage kept by hand, so it is now `loading()`, derived from `request`, and
+its two baseline lines are gone. Tests:
+`approve_all_drops_the_chat_wide_page_in_flight` and
+`approve_all_for_a_link_drops_its_page_in_flight`.
+
+**A refused approve keeps the list (3).** The `processChatJoinRequest`
+error no longer writes `JoinRequestFetch::Failed`.
+`Session::fail_join_request` keeps both loaded lists, puts the line in
+`invite_link_error` (shown as a toast), and removes the row when the server
+says the request is gone (`HIDE_REQUESTER_MISSING`,
+`USER_ALREADY_PARTICIPANT`). The success path and the "gone" path share
+`forget_join_request`, which removes the row from the chat-wide list and the
+link list. Test: `a_refused_approve_keeps_the_list`. Demo:
+`ready-join-request-refused` (`QUILL_DEMO_JOIN_ERROR=other` for a refusal
+that keeps the row).
+
+**Dodge: the Business wait is derived (round 16).**
+`BusinessSettingsState::own_info: Fetch<()>` was replaced by
+`own_info_error: Option<String>`, which holds only the last failure.
+`Session::business_own_info()` derives the stage: Ready when the own full
+info is cached, Loading while a `getUserFullInfo` for it is in flight,
+otherwise Failed with the stored reason, or Idle. `settle_own_full_info` and
+its two callers are gone. Test:
+`the_business_wait_ends_with_the_own_full_info_error_or_answer`, which now
+also checks that dropping the info stops it reading as ready.
+
+**Checked, not a bug: an Allow that widens grants.** Reviewer C asked
+whether an Allow that widens grants refuses the call that asked for it
+(`still_allowed`, `agent/tools/mod.rs`). It doesn't. A widening ask (`Ask::Chat`, `AllChats`,
+`Contacts`) comes only from `request_access` (`tools/ask.rs`), and that
+call returns on Allowed without calling `still_allowed`. Writes then run
+as new calls with a new `CallScope`. The asks that do run `still_allowed`
+after Allow are `Ask::Write` and `Ask::Raw`. `apply_ask` changes nothing
+for those, and `grants::update` keeps the generation on a no-op (Phase 16
+#1). What remains is a write from another, concurrent call that is waiting
+when the user widens a grant. It is refused with `GRANTS_CHANGED_MESSAGE`
+and works on retry. That is a spurious refusal, never a write that goes
+out without a grant.
+
+**Guards.** None added. Matching an outcome to its send and dropping pages
+after a bulk reset are about what each request means. A script reading
+the source text can't check them.
+
+### Phase 17 (area C)
+
+Round 17 of the review, area C (the rest of `src/ui`), on
+`claude/sm-review17-c`. The numbers are the review's finding numbers. All
+twenty-four were fixed, along with the three dodges the review named and
+the gift-box answers it flagged outside the area. Two of the findings
+(1, 22) were regressions from round 16's let-go soundtrack fix. Several
+shared one shape: a chat window's ask queued for a frame only the main
+window draws. Those are now fixed at the seam, and a guard checks the
+seam.
+
+- **Clip audio asks only when it can help (1, 22).** The FFmpeg backend
+  reattaches a tap only when the player's sound is detached
+  (`Player::sound_detached`: a soundtrack exists and its tap was let go).
+  A silent clip never asks. The output answers through
+  `SharedOutput::ready_or_wake`, which says yes only once a device is up.
+  Before this, every frame opened the device for a silent clip, and with
+  no device a clip with sound reattached (and so seeked) every 5 s.
+- **Admin rights are asked afresh (2).** Opening the rights editor drops
+  a `Loaded` answer and asks again (`refresh_admin_rights`), and the
+  editor seeds from the cache only in demo mode. Save no longer writes
+  back rights changed elsewhere since the first load.
+- **A new native window gets the capture block (3).** Attaching a main
+  window (`attach_main_window`) forgets what the old native window was
+  given (`FrameUi::forget_native_window`). The block is applied again
+  after a Windows GPU-loss reopen.
+- **Main-window queues raise the main window (4, 13).** Mini app actions
+  (t.me links, the link confirm, inline switch, bot chat, invoices) and
+  video chat "Share to" queue work for the main frame. They now go
+  through `raise_main_window_later`, which restores a minimized or hidden
+  main window, instead of `cx.activate`. The video chat's private
+  `raise_main_window` is gone.
+- **The location picker is a box with a host (5).** It opens through
+  `open_box(DialogKind::LocationPicker)`, and its own `opened_in` field
+  is gone. A second window that asks moves the picker there, and sends go
+  to that window's chat.
+- **A call that fails to start reports where Call was pressed (6).**
+  `CallBoxes::card_window` holds the pressing window
+  (`asking_window_or_last_press`), and the call card draws only in that
+  window (chat windows draw `call_overlay` too).
+- **A second call reopens a closed call window (7).** The call window
+  remembers which ringing call it was raised for (`raised_for:
+  Option<i32>`, replacing `window_raised: bool`). A new ringing id raises
+  it once, even after the user closed it.
+- **Gift market boxes keep a purchase in flight (8) and start clean (16).**
+  Popping the Buy or Resale box keeps a buy that is sending. An empty
+  stack resets "Hide My Name".
+- **Group Edit reports non-field failures (9).** Upgrades and the
+  history, auto-translate and sign-messages toggles record their failure
+  as `GroupInfoField::Settings`, shown under the form, so the box no
+  longer closes as saved. Saving the type clears earlier errors first.
+- **The paid-messages save names its target (10).** `PaidSave { Idle,
+  Saving(target), Failed { target, line } }` replaces `saving` and
+  `error`. The error shows only in the chat or channel it was for.
+- **Business sticker pick closes the sticker panel (11),** on a pick, on
+  leaving the page, and when Business closes.
+- **A refused chatbot save is forgotten (12).** The connected bot is
+  cleared on the error, so the next visit asks the server again.
+- **Secret-chat clips stay out of PiP (14).** `viewer_may_pip` refuses a
+  secret chat's item, and the PiP button is hidden for it.
+- **Mini-app answers carry their bot (15).** The `found` and
+  `attachment_menu_bot` answers hold the bot id from the purpose, and the
+  poll takes only the answer for the bot it asked about.
+- **A refused invite link create keeps the box (17).** Only `Ok(Some)`
+  counts as sent. Otherwise the box comes back with an error note.
+- **Opening Hours Back retries the zones (18).** Leaving with no zone
+  list asks for it again. The page shows both the local line and the
+  server's error.
+- **A mini app's data send is reported when it answers (19).**
+  `Session::web_app_answer_due` keeps the mini-app poll alive while a data
+  send or a menu toggle is pending.
+- **The call device menu closes outside an active call (20).**
+- **A sticker-set video pick opens in its own window's frame (21).**
+  `sticker_box_window_upkeep` runs per window and drops picks whose
+  window closed. It replaces the main-only `sticker_box_frame_upkeep`.
+- **New passkey options drop unstarted ones (23).** `begin_register`
+  clears the ceremony before asking, so options that landed after the lock
+  never start a second sheet.
+- **Edit contact saves without the note (24).** A note the box never
+  learned is sent as null, which TDLib reads as keeping the current note.
+  Save works after a failed full-info fetch, and a contact whose names
+  and note are unchanged sends nothing.
+- **Dodges from round 16.**
+  - `GroupSettingsDialog::event_log_filter` is gone. The filter box is the
+    payload of `GroupSettingsView::RecentActionsFilter(Box<…>)`, so it
+    cannot outlive its page (the view is `Clone`, no longer `Copy`).
+  - `EmojiStatusFlow::asking` + `granting` -> `AccessStage { Idle, Asking,
+    Granting }`.
+  - `CommunityWait` is gone. A waiting ban (`ban_wait`) and a new chat for
+    a community (`new_chat_for`) are separate slots, so starting a new chat
+    no longer drops a ban waiting for the member's chats.
+- **Gift box answers belong to their box (outside item).**
+  `SendGiftState::{gifts_request, premium_request}` hold the ids the box
+  asked with. An earlier box's gift list, Premium options or their
+  failure are dropped (`asked_gifts`, `asked_premium`).
+- **Guards.**
+  - `scripts/main_frame_queues.py`, run by `check-window-scope.py`: a
+    write to `mini_apps.render_action` or `links.pending_deep_link_open`
+    needs `raise_main_window_later` (or `hold_resolved_link`) within 12
+    lines, or a `// main-frame:` marker that says why not.
+  - Capture-block tests read what was handed to the native window through
+    a test-only probe (`SHARING_APPLIED`).
+  - The baseline lost `PaidMessages::saving` and
+    `PaidMessages::trust_loaded+error`.
+- **Tests.**
+  - `a_silent_clip_has_no_detached_sound`
+  - `ready_says_no_while_the_device_opens_or_after_it_failed`
+  - `refreshing_admin_rights_drops_a_loaded_answer_and_asks_again`
+  - `a_reset_hands_the_capture_block_to_the_new_window`
+  - `an_invoice_request_brings_the_main_window_forward`
+  - `a_location_picker_opened_again_moves_to_the_window_that_asked`
+  - `a_call_that_fails_to_start_reports_in_the_window_that_pressed_call`
+  - `a_second_call_reopens_a_call_window_you_closed`
+  - `closing_the_buy_box_mid_purchase_keeps_the_purchase`
+  - `hide_my_name_does_not_carry_to_the_next_auction`
+  - `a_refused_upgrade_is_recorded_for_the_box`
+  - the paid-messages tests, moved to `PaidSave`
+  - `leaving_the_sticker_pick_closes_the_sticker_panel`
+  - `a_refused_bot_save_is_forgotten_and_asked_for_again`
+  - `a_secret_chats_clip_never_goes_to_picture_in_picture`
+  - `a_search_answer_names_its_bot_even_when_refused`
+  - `a_data_send_is_due_until_it_answers`
+  - `a_new_options_request_drops_unstarted_options`
+  - the Edit contact note tests (a null note keeps the current one)
+  - `an_earlier_boxs_gift_answers_are_dropped`
+  - None of them waits on time.
+  - No test for 13, 17, 18 and 20. They need a live connection or a
+    native window that the offline harness lacks.

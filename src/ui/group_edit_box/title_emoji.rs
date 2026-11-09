@@ -17,9 +17,9 @@ impl QuillApp {
     pub(in crate::ui) fn group_title_emoji_active(&self) -> bool {
         !self.windows.in_window()
             && self.group_edit_box().is_some_and(|edit| edit.title_emoji)
-            && self.pickers.media_panel.open
-            && self.pickers.media_panel.reaction.is_none()
-            && self.pickers.media_panel.status.is_none()
+            && self.pickers.media_panel.is_open()
+            && self.pickers.media_panel.reaction().is_none()
+            && self.pickers.media_panel.status().is_none()
     }
 
     pub(super) fn toggle_group_title_emoji(&mut self, cx: &mut Context<Self>) {

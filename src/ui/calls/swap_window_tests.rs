@@ -84,3 +84,48 @@ fn the_call_window_answers_a_second_call(cx: &mut TestAppContext) {
     });
     assert!(!prompt, "declined from the call window");
 }
+
+/// Round 17 C finding 7: a call window you closed opens again when a second
+/// call rings, so its Decline and End & Answer are reachable with the main
+/// window minimized; it closes again once the prompt is answered.
+#[gpui_kit::test]
+fn a_second_call_reopens_a_call_window_you_closed(cx: &mut TestAppContext) {
+    let (app, mut call) = open_call_window(cx);
+    let call = &mut call;
+    let active = app.read_with(call, |app, _| {
+        app.session()
+            .and_then(|session| session.calls.active_call.as_ref().map(|call| call.id))
+    });
+    app.update(call, |app, cx| {
+        app.call_screen.window_closed_by_user = active;
+        app.sync_call_window(cx);
+    });
+    call.run_until_parked();
+    assert!(app.read_with(call, |app, _| app.calls.window.is_none()));
+    app.update(call, |app, cx| {
+        if let Some(session) = app.demo_session.as_deref_mut() {
+            session.calls.second_call = SecondCall::Prompt {
+                call_id: 6,
+                user_id: 4502,
+                is_video: false,
+            };
+        }
+        app.sync_call_window(cx);
+    });
+    call.run_until_parked();
+    assert!(
+        app.read_with(call, |app, _| app.calls.window.is_some()),
+        "the window opens for the second call"
+    );
+    app.update(call, |app, cx| {
+        if let Some(session) = app.demo_session.as_deref_mut() {
+            session.calls.second_call = SecondCall::None;
+        }
+        app.sync_call_window(cx);
+    });
+    call.run_until_parked();
+    assert!(
+        app.read_with(call, |app, _| app.calls.window.is_none()),
+        "and closes again once answered"
+    );
+}

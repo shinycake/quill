@@ -77,8 +77,11 @@ fn the_filter_box_applies_on_save_and_drops_on_cancel(cx: &mut TestAppContext) {
     app.update_in(&mut vcx, |app, _, cx| {
         app.open_group_settings_view(CHANNEL, GroupSettingsView::RecentActions, cx);
         app.open_event_log_filter(CHANNEL, cx);
-        let view = app.admin.group_settings_dialog.as_ref().map(|d| d.view);
-        assert_eq!(view, Some(GroupSettingsView::RecentActionsFilter));
+        let view = app.admin.group_settings_dialog.as_ref().map(|d| &d.view);
+        assert!(matches!(
+            view,
+            Some(GroupSettingsView::RecentActionsFilter(_))
+        ));
         let open = app.event_log_filter_box().expect("filter box");
         assert!(open.draft().all_actions() && open.draft().can_save());
 
@@ -95,8 +98,8 @@ fn the_filter_box_applies_on_save_and_drops_on_cancel(cx: &mut TestAppContext) {
         // Cancel: back on the list, the choices dropped.
         app.close_event_log_filter(cx);
         assert!(app.event_log_filter_box().is_none());
-        let view = app.admin.group_settings_dialog.as_ref().map(|d| d.view);
-        assert_eq!(view, Some(GroupSettingsView::RecentActions));
+        let view = app.admin.group_settings_dialog.as_ref().map(|d| &d.view);
+        assert_eq!(view, Some(&GroupSettingsView::RecentActions));
         app.open_event_log_filter(CHANNEL, cx);
         let open = app.event_log_filter_box().expect("filter box");
         assert!(open.draft().all_actions());

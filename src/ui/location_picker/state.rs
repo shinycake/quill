@@ -27,10 +27,6 @@ pub(crate) struct LocationPickerUi {
     pub(super) locate: Option<Task<()>>,
     pub(super) geocode: Option<Task<()>>,
     pub(super) map_focus: Option<FocusHandle>,
-    /// The chat window the picker was opened in (`None`: the main
-    /// window). Its tasks and search field are that window's, so the
-    /// picker closes with it.
-    pub(super) opened_in: Option<quill::ids::ChatId>,
 }
 
 /// Its tasks (settle, resolve, search, locate, geocode) cancel on drop.

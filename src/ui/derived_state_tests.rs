@@ -166,8 +166,8 @@ fn a_toggle_after_a_delete_does_not_revive_the_deleted_id(cx: &mut TestAppContex
     });
     let ids = app.read_with(vcx, |app, _| {
         app.share
-            .pending_forward
-            .as_ref()
+            .forward
+            .draft()
             .map(|draft| draft.message_ids.clone())
             .unwrap_or_default()
     });
@@ -262,6 +262,55 @@ fn a_chat_that_leaves_the_list_drops_out_of_the_bulk_selection(cx: &mut TestAppC
     });
     assert!(!app.read_with(vcx, |app, _| app.selecting_chats()));
     assert!(app.read_with(vcx, |app, _| app.chat_list.selected.is_empty()));
+}
+
+/// Round 17 (area B, finding 8): when the last checked chat leaves the
+/// list (archived or left, from another device too), the checks go with
+/// the mode: the chat coming back later does not bring "1 selected" back.
+#[gpui_kit::test]
+fn a_selection_whose_chats_all_left_the_list_ends(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx, "ready-chats");
+    let vcx = &mut vcx;
+    app.update(vcx, |app, cx| {
+        // The only check is a chat the list no longer shows.
+        app.chat_list.selected.insert(9_999);
+        cx.notify();
+    });
+    frames(vcx);
+    app.read_with(vcx, |app, _| {
+        assert!(!app.selecting_chats());
+        assert!(
+            app.chat_list.selected.is_empty(),
+            "the stale check went at the frame"
+        );
+    });
+}
+
+/// Round 17 (area B, finding 8): "Select unread" checks the unread chats
+/// of the folder shown, not every unread chat of the account.
+#[gpui_kit::test]
+fn select_unread_checks_only_the_listed_chats(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx, "ready-chats");
+    let vcx = &mut vcx;
+    let (_, unread) = read_and_unread_chats(&app, vcx);
+    app.update(vcx, |app, cx| {
+        app.set_chat_list_view(ChatListFilter::All, Some(1));
+        app.select_unread_chats(cx);
+    });
+    app.read_with(vcx, |app, _| {
+        let listed: Vec<ChatId> = app.listed_main_chats().iter().map(|c| c.id).collect();
+        assert!(
+            app.chat_list
+                .selected
+                .iter()
+                .all(|id| listed.contains(&ChatId(*id))),
+            "only rows of the folder are checked"
+        );
+        assert!(
+            listed.contains(&unread) || !app.chat_list.selected.contains(&unread.0),
+            "an unread chat outside the folder is not checked"
+        );
+    });
 }
 
 fn history_len(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> usize {

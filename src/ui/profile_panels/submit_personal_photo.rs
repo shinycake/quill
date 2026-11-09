@@ -132,15 +132,10 @@ impl QuillApp {
             dialog.share_phone,
         );
         // An empty field before the note is known is not "no note": saving
-        // it would erase the contact's note. Ask again and wait.
-        if dialog.note == ContactNote::Waiting && note.is_empty() {
-            if let Some(live) = self.live.as_mut() {
-                let _ = live.driver.fetch_user_full_info(user_id);
-            }
-            self.set_note(StatusNote::silent(tr(keys::Q_PEOPLE_LOADING)));
-            cx.notify();
-            return false;
-        }
+        // it would erase the contact's note. It is sent as "keep the note"
+        // (null), so Save works even when the note never loads (a failed
+        // full-info fetch has no stage to wait out).
+        let note = (dialog.note == ContactNote::Seeded || !note.is_empty()).then_some(note);
         if first.is_empty() && last.is_empty() {
             self.set_note(StatusNote::silent(tr(keys::Q_PEOPLE_ENTER_A_NAME_FOR_THE)));
             cx.notify();
@@ -165,12 +160,14 @@ impl QuillApp {
             return true;
         };
         let names_unchanged = first == old_first && last == old_last;
-        let sent = if names_unchanged && !share {
-            live.driver.set_user_note(user_id, &note).map(|_| ())
-        } else {
-            live.driver
-                .edit_contact(user_id, &phone, &first, &last, &note, share)
-                .map(|_| ())
+        let sent = match (&note, names_unchanged && !share) {
+            (Some(note), true) => live.driver.set_user_note(user_id, note).map(|_| ()),
+            // Nothing to change: the note is kept and the names are the same.
+            (None, true) => Ok(()),
+            (note, false) => live
+                .driver
+                .edit_contact(user_id, &phone, &first, &last, note.as_deref(), share)
+                .map(|_| ()),
         };
         match sent {
             Ok(()) => {

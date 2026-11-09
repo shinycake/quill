@@ -88,6 +88,10 @@ impl<S: JsonSender> ConnectDriver<S> {
             .request(purpose(PasskeysPurpose::Parameters), None);
         let state = &mut self.session.settings.passkeys;
         state.registration = None;
+        // Options left from a request answered after the lock (nothing
+        // ticked to start them) are stale: the fresh ones start the
+        // ceremony, not a second system sheet after an expired one.
+        state.ceremony = None;
         state.error = None;
         self.send_json_request(extra, &get_passkey_parameters(extra))
             .map(Some)

@@ -767,3 +767,53 @@ fn visible_history_saved_with_a_type_change_joins_its_upgrade() {
     assert!(driver.session.groups.admin_followups.is_empty());
     let _ = std::fs::remove_dir_all(dir);
 }
+
+/// The rights editor asks again on every open: TDLib tells only bots when
+/// another admin changes a member's rights, so a cached answer can be
+/// stale and Save would write it back. A lookup in flight is kept.
+#[test]
+fn refreshing_admin_rights_drops_a_loaded_answer_and_asks_again() {
+    let (dir, prepared) = prepared_tmp(&MemorySecretStore::new());
+    let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+    let recorder = Arc::new(RecordingSender::new());
+    let seq = AtomicU64::new(0);
+    let mut driver = ready_driver(&recorder, prepared, &sink, &seq);
+    megagroup(&mut driver, &seq, &sink, 13, CREATOR, "");
+    let first = driver
+        .fetch_admin_rights(ChatId(13), 888)
+        .unwrap()
+        .expect("lookup sent");
+    assert!(
+        driver
+            .refresh_admin_rights(ChatId(13), 888)
+            .unwrap()
+            .is_none(),
+        "the lookup in flight is the fresh one"
+    );
+    ingest(
+        &mut driver,
+        &format!(
+            r#"{{"@type":"chatMember","@extra":"{}","member_id":{{"@type":"messageSenderUser","user_id":888}},"status":{{"@type":"chatMemberStatusAdministrator","can_be_edited":true,"rights":{{"@type":"chatAdministratorRights","can_delete_messages":true}}}}}}"#,
+            first.0
+        ),
+        &seq,
+        &sink,
+    );
+    assert!(matches!(
+        driver.session.groups.admin_rights.get(&(13, 888)),
+        Some(crate::state::AdminRightsFetch::Loaded(_))
+    ));
+    assert!(
+        driver
+            .fetch_admin_rights(ChatId(13), 888)
+            .unwrap()
+            .is_none(),
+        "the plain fetch keeps the answer"
+    );
+    driver
+        .refresh_admin_rights(ChatId(13), 888)
+        .unwrap()
+        .expect("a reopen asks again");
+    assert_eq!(count(&recorder, "getChatMember"), 2);
+    let _ = std::fs::remove_dir_all(dir);
+}

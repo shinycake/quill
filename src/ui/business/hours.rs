@@ -465,6 +465,12 @@ impl QuillApp {
                 .map(|z| z.id)
                 .or_else(|| (!saved_zone.is_empty()).then_some(saved_zone));
             let Some(zone) = zone else {
+                // A list that failed to load is asked for again here: it
+                // was asked only on the way in, and Back would wait for it
+                // for good. TDLib's refusal shows beside this line.
+                if let Some(live) = self.live.as_mut() {
+                    let _ = live.driver.ensure_time_zones();
+                }
                 self.business_error(tr(keys::Q_OPS_THE_TIME_ZONES_ARE_STILL), cx);
                 return Leave::Stay;
             };

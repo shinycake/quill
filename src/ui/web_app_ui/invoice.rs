@@ -85,7 +85,7 @@ impl QuillApp {
     /// window) and bring Quill in front of the mini app.
     pub(super) fn request_mini_app_invoice(&mut self, slug: String, cx: &mut Context<Self>) {
         self.mini_apps.render_action = Some(RenderAction::OpenInvoice { slug });
-        cx.activate(true);
+        self.raise_main_window_later(cx);
         cx.notify();
     }
 

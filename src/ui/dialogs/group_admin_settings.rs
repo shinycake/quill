@@ -1,7 +1,7 @@
 use quill::ids::ChatId;
 
 /// Which page an Edit box row opened.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub(crate) enum GroupSettingsView {
     Reactions,
     Discussion,
@@ -12,8 +12,9 @@ pub(crate) enum GroupSettingsView {
     JoinRequests,
     Administrators,
     RecentActions,
-    /// The Filter box over the recent actions.
-    RecentActionsFilter,
+    /// The Filter box over the recent actions, with its choices so far:
+    /// they live and go with this page, so they are always this chat's.
+    RecentActionsFilter(Box<crate::ui::event_log_filter_box::EventLogFilterBox>),
 }
 
 /// The page dialog over the group / channel Edit box (reactions,
@@ -33,10 +34,6 @@ pub struct GroupSettingsDialog {
     /// stage (the list's own fetch is `groups.revoked_invite_links`, an
     /// `InviteLinkFetch` with its answer and error).
     pub(crate) revoked_open: bool,
-    /// The Recent Actions filter box, on the `RecentActionsFilter` page
-    /// only: it goes with any other page (`set_group_settings_view`) and
-    /// with the box, so it is always this chat's.
-    pub(in crate::ui) event_log_filter: Option<crate::ui::event_log_filter_box::EventLogFilterBox>,
 }
 
 impl GroupSettingsDialog {
@@ -46,7 +43,6 @@ impl GroupSettingsDialog {
             view,
             details_link: None,
             revoked_open: false,
-            event_log_filter: None,
         }
     }
 }

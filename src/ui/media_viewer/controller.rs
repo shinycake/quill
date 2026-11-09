@@ -63,10 +63,7 @@ impl QuillApp {
             toggle_play: handler(|this, _, cx| this.toggle_viewer_video(cx)),
             toggle_mute: handler(|this, _, cx| this.toggle_playback_mute(cx)),
             fullscreen: handler(|this, window, cx| this.viewer_toggle_fullscreen(window, cx)),
-            pip: self
-                .viewer
-                .player
-                .is_some()
+            pip: (self.viewer.player.is_some() && self.viewer_may_pip(item))
                 .then(|| handler(|this, _, cx| this.open_video_pip(cx))),
             hover: Rc::new(move |at, _, cx| {
                 let _ = hover_view.update(cx, |this, cx| {

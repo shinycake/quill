@@ -70,6 +70,9 @@ impl Session {
                     gifts.iter().flat_map(|g| g.files.iter().cloned()).collect();
                 self.remember_files(&files);
                 let send = &mut self.payments.gifts_manage.send;
+                if !send.asked_gifts(pending) {
+                    return;
+                }
                 send.gifts_loading = false;
                 send.gifts_loaded = true;
                 send.gifts = gifts;
@@ -79,6 +82,9 @@ impl Session {
                 PaymentsPurpose::GetPremiumGiftOptions,
             ) => {
                 let send = &mut self.payments.gifts_manage.send;
+                if !send.asked_premium(pending) {
+                    return;
+                }
                 send.premium_loaded = true;
                 send.premium_options = options;
             }
@@ -306,6 +312,8 @@ impl Session {
         match purpose {
             PaymentsPurpose::GetGiftOption(_) => {}
             PaymentsPurpose::GetGiftCollections => manage.collections_loading = false,
+            PaymentsPurpose::GetAvailableGifts if !manage.send.asked_gifts(pending) => {}
+            PaymentsPurpose::GetPremiumGiftOptions if !manage.send.asked_premium(pending) => {}
             PaymentsPurpose::GetAvailableGifts => {
                 manage.send.gifts_loading = false;
                 manage.send.gifts_loaded = true;

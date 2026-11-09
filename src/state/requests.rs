@@ -294,6 +294,8 @@ pub struct ForwardFlight {
     pub extra: RequestId,
     pub dest_chat_id: ChatId,
     pub from_chat_id: ChatId,
+    /// The conversation of `from_chat_id` the messages were picked in.
+    pub from_topic: crate::ids::TopicId,
     pub requested: usize,
 }
 
@@ -304,6 +306,9 @@ pub struct ForwardResult {
     pub dest_chat_id: ChatId,
     pub dest_title: String,
     pub from_chat_id: ChatId,
+    /// The conversation of `from_chat_id` the messages were picked in: a
+    /// window's selection is this forward's only when it is from there.
+    pub from_topic: crate::ids::TopicId,
     pub requested: usize,
     pub forwarded_ids: Vec<MessageId>,
 }
@@ -706,6 +711,21 @@ impl RequestRegistry {
             .pending
             .iter()
             .filter(|(_, req)| req.purpose == purpose && req.community_id == Some(community_id))
+            .map(|(key, _)| *key)
+            .collect();
+        for key in keys {
+            self.remove(key);
+        }
+    }
+
+    /// Drop every in-flight request with `purpose` for `chat_id`, so an
+    /// answer that no longer fits the state it would change is ignored (a
+    /// page of join requests asked before Approve all emptied the list).
+    pub(crate) fn take_purpose_for_chat(&mut self, purpose: RequestPurpose, chat_id: ChatId) {
+        let keys: Vec<u64> = self
+            .pending
+            .iter()
+            .filter(|(_, req)| req.purpose == purpose && req.chat_id == Some(chat_id))
             .map(|(key, _)| *key)
             .collect();
         for key in keys {

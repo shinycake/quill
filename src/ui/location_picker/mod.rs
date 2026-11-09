@@ -13,6 +13,7 @@ mod map;
 pub(super) mod state;
 
 use super::app::QuillApp;
+use crate::ui::shell::DialogKind;
 use crate::ui::status_note::StatusNote;
 use gpui_kit::*;
 use quill::ids::ChatId;
@@ -77,8 +78,12 @@ impl QuillApp {
                     .and_then(|session| session.auth_state.guessed_country_iso.clone())
             })
             .and_then(|iso| country::country_center(&iso));
+        // One picker per account: opened from another window, it moves
+        // there (its host is the window that asked, `open_box`), starts
+        // over for this chat, and its tasks and search field are this
+        // window's. The window it showed in closes it.
         self.location_ui.reset();
-        self.location_ui.opened_in = self.windows.scope;
+        self.open_box(DialogKind::LocationPicker);
         self.location_ui.map_focus = Some(cx.focus_handle().tab_stop(true));
         if let Some(live) = self.live.as_mut() {
             if live.driver.open_location_picker(chat_id, country).is_err() {
@@ -106,15 +111,17 @@ impl QuillApp {
         cx.notify();
     }
 
-    /// `chat`'s window closed: a picker opened there goes with it, instead
-    /// of coming back in the main window for a chat it does not show, with
+    /// `chat`'s window closed: a picker it shows goes with it, instead of
+    /// coming back in the main window for a chat it does not show, with
     /// its locate and search tasks gone.
     pub(in crate::ui) fn close_location_picker_of_window(
         &mut self,
         chat: quill::ids::ChatId,
         cx: &mut Context<Self>,
     ) {
-        if self.location_ui.opened_in == Some(chat) && self.location_picker_open() {
+        if self.location_picker_open()
+            && self.windows.window_of_box(DialogKind::LocationPicker) == Some(chat)
+        {
             self.close_location_picker(cx);
         }
     }

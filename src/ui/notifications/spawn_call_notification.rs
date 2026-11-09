@@ -63,8 +63,10 @@ impl QuillApp {
     /// A notification was clicked or one of its buttons pressed. "Mark as
     /// read" works in the background (the window stays where it is); "Open"
     /// and "Reply" bring the app forward with the chat selected, and Reply
-    /// also focuses the composer (a Reply whose text was typed into the
-    /// notification was already sent by `drain_background_clicks`).
+    /// also focuses the composer. A Reply whose text was typed into the
+    /// notification sends it instead: `drain_background_clicks` did for the
+    /// account on screen, and here does for a click that switched accounts
+    /// first (`open_pending_account_chat`).
     pub(in crate::ui) fn run_notification_action(
         &mut self,
         chat_id: ChatId,
@@ -74,6 +76,12 @@ impl QuillApp {
     ) {
         if action == NotificationAction::MarkRead {
             self.mark_read_from_notification(chat_id, cx);
+            return;
+        }
+        if action == NotificationAction::Reply
+            && let Some(account) = self.current_account()
+            && self.send_typed_notification_reply(&account, chat_id, cx)
+        {
             return;
         }
         // Behind the passcode the window comes forward and nothing opens

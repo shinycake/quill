@@ -203,8 +203,8 @@ fn press_and_move(
 fn forward_bar(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> Vec<MessageId> {
     app.read_with(vcx, |app, _| {
         app.share
-            .pending_forward
-            .as_ref()
+            .forward
+            .draft()
             .map(|draft| draft.message_ids.clone())
             .unwrap_or_default()
     })

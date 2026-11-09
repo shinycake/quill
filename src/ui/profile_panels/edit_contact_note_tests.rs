@@ -71,9 +71,11 @@ fn edit_contact_waits_for_the_note_before_saving(cx: &mut TestAppContext) {
         note_state(&app, vcx),
         Some((ContactNote::Waiting, String::new()))
     );
-    // Save before the note is known keeps the box open and sends nothing.
+    // Round 17 C finding 24: Save before the note is known goes through
+    // (the note is sent as "keep", null), so a full-info fetch that never
+    // answers does not hold the rename up for good.
     let saved = app.update_in(vcx, |app, _, cx| app.submit_edit_contact(cx));
-    assert!(!saved);
+    assert!(saved);
 
     app.update_in(vcx, |app, _, _| {
         let mut info = UserFullInfoData::default();

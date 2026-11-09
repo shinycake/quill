@@ -15,6 +15,7 @@ use gpui_kit::{AppContext, Entity, ImageSource, TestAppContext, VisualTestContex
 use quill::ids::{ChatId, FileId};
 use quill::premium_hub::PremiumFeature;
 use quill::premium_hub::promo::{PreviewOpen, PromoPage};
+use quill::state::StickerSearch;
 use quill::telegram::envelope::{MessageContent, StickerContent, StickerFormat, StickerItem};
 use quill::telegram::{EmojiCategory, EmojiCategorySource};
 use std::sync::Arc;
@@ -81,6 +82,8 @@ fn seed(app: &mut QuillApp, premium: bool) {
         category("Smile", EmojiCategorySource::Search(vec!["😀".into()])),
     ];
     session.stickers.stickers.found_stickers = vec![sticker(1, true), sticker(2, false)];
+    // What the Premium category asked for (a demo has no client to ask).
+    session.stickers.stickers.searched = StickerSearch::Category(EmojiCategorySource::Premium);
 }
 
 fn open_stickers(app: &Entity<QuillApp>, cx: &mut VisualTestContext) {
@@ -170,6 +173,36 @@ fn choosing_a_category_lists_its_stickers_and_back_returns(cx: &mut TestAppConte
         assert_eq!(app.pickers.media_panel.category, None);
         assert_ne!(header(app).as_deref(), Some("Smile"));
     });
+}
+
+/// Round 17 (area B, finding 5): the found stickers are one list per
+/// session. While they are another window's typed search, a category
+/// chosen here does not list them under its name.
+#[gpui_kit::test]
+fn a_category_does_not_list_another_windows_search(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    app.update(vcx, |app, _| {
+        seed(app, true);
+        let session = app.demo_session.as_mut().expect("demo session");
+        session.stickers.stickers.searched = StickerSearch::Typed("cat".into());
+    });
+    open_stickers(&app, vcx);
+    app.update(vcx, |app, cx| app.choose_sticker_category(Some(0), cx));
+    frames(vcx);
+    app.read_with(vcx, |app, _| {
+        assert_eq!(header(app).as_deref(), Some("Premium"));
+        assert_eq!(found_cells(app), 0, "the cat stickers are not Premium's");
+    });
+    // The category's own answer lists.
+    app.update(vcx, |app, cx| {
+        let session = app.demo_session.as_mut().expect("demo session");
+        session.stickers.stickers.searched = StickerSearch::Category(EmojiCategorySource::Premium);
+        session.revision += 1;
+        cx.notify();
+    });
+    frames(vcx);
+    app.read_with(vcx, |app, _| assert_eq!(found_cells(app), 2));
 }
 
 /// TDLib may send an animated sticker with no thumbnail: the tile loads

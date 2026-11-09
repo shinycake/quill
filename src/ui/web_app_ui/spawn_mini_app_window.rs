@@ -216,9 +216,9 @@ impl QuillApp {
             || self.mini_apps.awaiting_attach_bot.is_some()
             || self.mini_apps.awaiting_search.is_some()
             || self.mini_apps.awaiting_toggle.is_some()
-            || self
-                .session()
-                .is_some_and(|session| !session.bots.web_apps.pending.is_empty())
+            || self.session().is_some_and(|session| {
+                !session.bots.web_apps.pending.is_empty() || session.web_app_answer_due()
+            })
     }
 
     /// The session's one-shot answers.
@@ -285,8 +285,14 @@ impl QuillApp {
                 window.emit(reply);
             }
         }
-        if let Some(result) = attach_bot
-            && let Some(then) = self.mini_apps.awaiting_attach_bot.take()
+        // An answer for another bot than the flow waiting (a link clicked
+        // before the first one answered) is dropped: it never drives this
+        // launch, and the flow keeps waiting for its own.
+        if let Some((asked, result)) = attach_bot
+            && let Some(then) = self
+                .mini_apps
+                .awaiting_attach_bot
+                .take_if(|then| then.bot_id() == asked)
         {
             match result {
                 Ok(bot) if bot.is_added => self.start_web_app(then, cx),
@@ -323,11 +329,14 @@ impl QuillApp {
                 }
             }
         }
-        if let Some(result) = found
-            && let Some(then) = self.mini_apps.awaiting_search.take()
+        if let Some((asked, result)) = found
+            && let Some(then) = self
+                .mini_apps
+                .awaiting_search
+                .take_if(|then| then.bot_id() == asked)
         {
             match result {
-                Ok((_, app)) => {
+                Ok(app) => {
                     let bot_id = then.bot_id();
                     let verified = self
                         .session()
@@ -483,8 +492,10 @@ impl QuillApp {
     /// A URL the page tried to leave the frame for.
     pub(super) fn open_from_mini_app(&mut self, url: &str, cx: &mut Context<Self>) {
         if is_telegram_link(url) {
-            // Mini apps open over the main window, and so do their links.
+            // Mini apps open over the main window, and so do their links:
+            // the main window comes forward to run the resolved step.
             self.as_asked_by(None, |this| this.queue_deep_link(url.to_string()));
+            self.raise_main_window_later(cx);
             cx.notify();
             return;
         }
@@ -509,7 +520,8 @@ impl QuillApp {
                         suspicious,
                         from_poll_option: false,
                     });
-                cx.activate(true);
+                // The box is the main window's (the poll runs as it).
+                self.raise_main_window_later(cx);
                 cx.notify();
             }
         }
@@ -580,7 +592,8 @@ impl QuillApp {
                             chat,
                         });
                         self.close_mini_app_window(cx);
-                        cx.activate(true);
+                        self.raise_main_window_later(cx);
+                        cx.notify();
                     }
                 }
             }
@@ -747,7 +760,7 @@ impl QuillApp {
             ShellEvent::Menu { id } => match id.as_str() {
                 "open_bot" => {
                     self.mini_apps.render_action = Some(RenderAction::OpenBotChat { bot_id });
-                    cx.activate(true);
+                    self.raise_main_window_later(cx);
                     cx.notify();
                 }
                 "terms" => self.open_link(MINI_APP_TERMS_URL, cx),

@@ -612,6 +612,25 @@ fn driver_link_preview_prefetch_ingest() {
         .get(url)
         .expect("state kept");
     assert!(matches!(stored.fetch, LinkPreviewFetch::Failed));
+    // Round 17 (area B, dodge): the session's entry is the one "asked
+    // already" mark. Typing the URL again forgets a failure only; a
+    // preview that loaded or has none stays.
+    let previews = &mut driver.session.messages.composer_previews;
+    previews.forget_failed(url);
+    assert!(previews.get(url).is_none(), "asked again");
+    previews.forget_failed("https://example.com/story");
+    assert!(
+        previews.get("https://example.com/story").is_some(),
+        "404 stays"
+    );
+    // A request that could not be sent is kept as failed, not asked
+    // again on every frame.
+    previews.send_failed(url);
+    assert!(
+        previews
+            .get(url)
+            .is_some_and(|stored| matches!(stored.fetch, LinkPreviewFetch::Failed))
+    );
     let _ = std::fs::remove_dir_all(&dir);
 }
 

@@ -197,17 +197,22 @@ fn a_forward_from_a_chat_window_answers_there(cx: &mut TestAppContext) {
     let h = new_app(cx);
     let _chat_window = h.open_in_new_window(OTHER, cx);
     read(&h, None, cx, |app, _| {
-        app.share.pending_forward = quill::composer::ForwardDraft::from_message(
+        app.share.forward = quill::composer::ForwardDraft::from_message(
             OPEN,
             quill::ids::TopicId::None,
             quill::ids::MessageId(101),
             false,
+        )
+        .map_or(
+            crate::ui::forward_stage::ForwardStage::None,
+            crate::ui::forward_stage::ForwardStage::Selecting,
         );
     });
     let result = quill::state::ForwardResult {
         dest_chat_id: OPEN,
         dest_title: "A".into(),
         from_chat_id: OTHER,
+        from_topic: quill::ids::TopicId::None,
         requested: 1,
         forwarded_ids: vec![quill::ids::MessageId(1)],
     };
@@ -215,7 +220,7 @@ fn a_forward_from_a_chat_window_answers_there(cx: &mut TestAppContext) {
         .update(cx, |app, cx| app.present_forward_answer(result, cx));
     let main = read(&h, None, cx, |app, _| {
         (
-            app.share.pending_forward.is_some(),
+            app.share.forward.draft().is_some(),
             app.share.forward_result.is_some(),
         )
     });

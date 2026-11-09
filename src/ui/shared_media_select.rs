@@ -341,7 +341,7 @@ impl QuillApp {
             return;
         };
         // The chat's own selection stays: its draft is not replaced.
-        if self.share.pending_forward.is_some() && !self.share.forward_picker_open {
+        if self.share.forward.is_some() && !self.share.forward.picker_open() {
             self.set_note(StatusNote::error(tr(
                 keys::Q_OPS_FINISH_THE_CHAT_SELECTION_FIRST,
             )));
@@ -356,7 +356,7 @@ impl QuillApp {
             remove_caption: false,
             topic_id: None,
         };
-        self.share.pending_forward = Some(draft);
+        self.share.forward = crate::ui::forward_stage::ForwardStage::Selecting(draft);
         self.clear_shared_media_selection(cx);
         self.open_forward_picker(window, cx);
     }

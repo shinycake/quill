@@ -6,3 +6,4 @@
 
 chat_ui | src/ui/chat_ui_state.rs::replace_chat_ui | a new ChatUi is a new chat visit: the visit that ended drops its parked plays (`drop_play_intent_of_visit`)
 group_settings_dialog | src/ui/group_admin_settings.rs::set_group_settings_dialog | the invite pages belong to the box's chat: closing the box or opening it for another chat clears them (`drop_invite_link_pages`)
+panel_mode | src/ui/media_panel/mode.rs::set_media_panel_mode | leaving the status selector stops resolving its choices (`close_emoji_status_choices`) and leaving a selector drops the rows it listed

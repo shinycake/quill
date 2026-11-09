@@ -486,7 +486,7 @@ impl QuillApp {
             keep.extend(select);
             self.add_to_selection(chat_id, keep);
             let topic = self.open_topic_id(chat_id);
-            if let Some(draft) = self.share.pending_forward.as_mut() {
+            if let Some(draft) = self.share.forward.selection_mut() {
                 let leaving: Vec<_> = deselect
                     .into_iter()
                     .filter(|id| draft.contains(*id))

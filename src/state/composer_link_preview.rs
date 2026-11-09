@@ -64,6 +64,21 @@ impl ComposerLinkPreviews {
         self.0.drain(..over);
     }
 
+    /// The request for `url` could not be sent: kept as failed, so the
+    /// composers do not ask again on every frame.
+    pub fn send_failed(&mut self, url: &str) {
+        self.asked(url);
+        self.answered(url, LinkPreviewFetch::Failed);
+    }
+
+    /// The URL was typed into a field again: a failed request is
+    /// forgotten so it is asked once more. Any other state stays.
+    pub fn forget_failed(&mut self, url: &str) {
+        self.0.retain(|preview| {
+            preview.url != url || !matches!(preview.fetch, LinkPreviewFetch::Failed)
+        });
+    }
+
     /// The answer for `url`. An answer for a URL no longer kept is
     /// dropped, and a failure never replaces a preview already loaded.
     pub fn answered(&mut self, url: &str, fetch: LinkPreviewFetch) {

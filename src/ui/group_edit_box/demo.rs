@@ -165,8 +165,26 @@ impl QuillApp {
         self.demo_edit_box(CHANNEL, "screenshot demo — channel Edit box", window, cx);
     }
 
+    /// `QUILL_DEMO_GROUP_EDIT_FAILED=settings`: the upgrade a save asked
+    /// for was refused, so the box shows why under the form.
     fn demo_basic_group_edit_box(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.demo_edit_box(BASIC, "screenshot demo — basic group Edit box", window, cx);
+        let failed = std::env::var("QUILL_DEMO_GROUP_EDIT_FAILED").unwrap_or_default();
+        if failed == "settings"
+            && let Some(session) = self.demo_session.as_mut()
+        {
+            session.groups.info_edit_errors.insert(
+                BASIC,
+                quill::state::GroupInfoEditError {
+                    field: quill::state::GroupInfoField::Settings,
+                    reason: "CHAT_NOT_MODIFIED".into(),
+                },
+            );
+            // A Save went out and every request answered.
+            if let Some(edit) = self.group_edit_box_mut() {
+                edit.saving = Some(Vec::new());
+            }
+        }
     }
 
     fn demo_group_photo_crop(&mut self, window: &mut Window, cx: &mut Context<Self>) {

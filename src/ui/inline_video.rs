@@ -252,7 +252,7 @@ impl QuillApp {
         // This window's own media panel: the session's GIF flag is one for
         // every window, cleared when another window leaves its GIF tab.
         let panel = &self.pickers.media_panel;
-        if !(panel.open && panel.tab == PanelTab::Gifs) {
+        if !(panel.is_open() && panel.tab == PanelTab::Gifs) {
             videos.leave_panel(window, Panel::Gifs);
         }
     }

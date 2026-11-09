@@ -620,3 +620,40 @@ fn a_send_answer_for_an_earlier_dialog_does_not_land_in_the_open_one() {
     assert!(!send.sending);
     assert_eq!(send.done.as_deref(), Some("Gift sent."));
 }
+
+/// Round 17 outside item: a gift list or Premium options answer belongs to
+/// the box that asked. A box reopened before the first answer drops the
+/// earlier box's failure and options.
+#[test]
+fn an_earlier_boxs_gift_answers_are_dropped() {
+    let mut p = parts();
+    add_chat(
+        &mut p,
+        json!({"@type":"updateNewChat","chat":{"id":21,"title":"Ann","type":{"@type":"chatTypePrivate","user_id":21},"unread_count":0}}),
+    );
+    p.0.open_send_gift(ChatId(21)).unwrap();
+    let first_gifts = sent_request(&p.1, "getAvailableGifts");
+    let first_premium = sent_request(&p.1, "getPremiumGiftPaymentOptions");
+    p.0.open_send_gift(ChatId(21)).unwrap();
+    feed(
+        &mut p,
+        json!({"@type": "error", "@extra": first_gifts["@extra"], "code": 400, "message": "FLOOD"}),
+    );
+    feed(
+        &mut p,
+        json!({"@type": "error", "@extra": first_premium["@extra"], "code": 400, "message": "FLOOD"}),
+    );
+    let send = &p.0.session.payments.gifts_manage.send;
+    assert!(send.gifts_loading && !send.gifts_loaded && send.error.is_none());
+    assert!(!send.premium_loaded);
+    let second = sent_request(&p.1, "getAvailableGifts");
+    feed(
+        &mut p,
+        json!({"@type": "availableGifts", "@extra": second["@extra"], "gifts": [
+            {"@type": "availableGift", "resale_count": 0, "gift": {
+                "@type": "gift", "id": "55", "star_count": 50, "upgrade_star_count": 20}},
+        ]}),
+    );
+    let send = &p.0.session.payments.gifts_manage.send;
+    assert!(send.gifts_loaded && !send.gifts_loading && send.gifts.len() == 1);
+}

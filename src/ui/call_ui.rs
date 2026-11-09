@@ -18,6 +18,9 @@ impl QuillApp {
     /// would need media, the card says so honestly (audio transport is
     /// the C2 libtgvoip spike, not faked here).
     pub(super) fn call_overlay(&mut self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        if self.call_card_window() != self.windows.scope {
+            return None;
+        }
         let session = self.session()?;
         // The call itself lives in the call window; the main window only
         // asks for a rating afterwards, or reports a failure to start.
@@ -32,6 +35,16 @@ impl QuillApp {
             return None;
         }
         Some(self.call_card(cx).into_any_element())
+    }
+
+    /// The window that draws the call card (`None`: the main window): the
+    /// one that pressed Call, while it is open. A chat window's call that
+    /// fails to start says so there, not as a scrim over a main window the
+    /// user may not look at for hours.
+    pub(super) fn call_card_window(&self) -> Option<quill::ids::ChatId> {
+        self.call_boxes
+            .card_window
+            .filter(|chat| self.windows.has(*chat))
     }
 
     /// Phase C1: format a call clock as `m:ss`.

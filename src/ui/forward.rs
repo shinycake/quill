@@ -2,6 +2,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
+use super::forward_stage::ForwardStage;
 use super::*;
 use crate::ui::status_note::StatusNote;
 use gpui_kit::component::button::*;
@@ -27,6 +28,7 @@ pub(super) fn apply_ready_forward(session: &mut Session, sink: &Arc<MemorySink>,
         extra,
         dest_chat_id: ChatId(12),
         from_chat_id: ChatId(11),
+        from_topic: Default::default(),
         requested: 2,
     });
     let json = format!(
@@ -81,18 +83,20 @@ impl QuillApp {
         // A new forward is no viewer share at a time (that one sets it
         // again after this).
         self.viewer.extra.share_at = None;
-        if let Some(existing) = self.screen.share.pending_forward.as_mut()
+        if self.share.forward.picker_open()
+            && let Some(existing) = self.screen.share.forward.draft_mut()
             && existing.is_from(chat_id, topic)
-            && self.screen.share.forward_picker_open
         {
             existing.toggle(chat_id, topic, message_id, pending);
             if existing.is_empty() {
                 self.close_forward_picker(window, cx);
+                self.share.forward.drop_if_empty();
             }
             cx.notify();
             return;
         }
-        self.share.pending_forward = Some(single);
+        // A new forward: no bar it was not picked for comes along.
+        self.share.forward = ForwardStage::Selecting(single);
         self.open_forward_picker(window, cx);
     }
 
@@ -105,18 +109,19 @@ impl QuillApp {
     ) {
         self.drop_deleted_selection();
         let topic = self.open_topic_id(chat_id);
-        match self.share.pending_forward.as_mut() {
+        match self.share.forward.selection_mut() {
             Some(draft) => {
                 draft.toggle(chat_id, topic, message_id, pending);
                 if draft.is_empty() {
-                    self.share.pending_forward = None;
+                    self.share.forward = ForwardStage::None;
                     self.chat_ui.selection_focus = None;
-                    self.share.forward_picker_open = false;
                 }
             }
             None => {
-                self.share.pending_forward =
-                    ForwardDraft::from_message(chat_id, topic, message_id, pending);
+                if let Some(draft) = ForwardDraft::from_message(chat_id, topic, message_id, pending)
+                {
+                    self.share.forward = ForwardStage::Selecting(draft);
+                }
             }
         }
         self.set_note(match self.forward_draft().map(|d| d.count()) {
@@ -137,10 +142,9 @@ impl QuillApp {
         let Some(draft) = self.forward_draft() else {
             return;
         };
-        if !self.selection_forwardable(draft.from_chat_id) {
+        if !self.selection_forwardable(draft.from_chat_id) || !self.share.forward.open_picker() {
             return;
         }
-        self.share.forward_picker_open = true;
         self.share.focus_search = true;
         self.share.selection.clear();
         self.share
@@ -162,7 +166,7 @@ impl QuillApp {
         {
             self.close_schedule_picker(cx);
         }
-        self.share.forward_picker_open = false;
+        self.share.forward.close_picker();
         self.share.selection.clear();
         // "Share at 1:23" lasts as long as the picker it opened.
         self.viewer.extra.share_at = None;
@@ -173,10 +177,8 @@ impl QuillApp {
     }
 
     pub(super) fn clear_forward(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let _ = cancel_forward_draft(self.share.pending_forward.take());
+        let _ = cancel_forward_draft(self.share.forward.take_draft());
         self.chat_ui.selection_focus = None;
-        self.share.forward_picker_open = false;
-        self.share.forward_bar_dest = None;
         self.share.selection.clear();
         self.share
             .search_input
@@ -192,20 +194,20 @@ impl QuillApp {
         let topic = self.open_topic_id(chat_id);
         if self
             .share
-            .forward_bar_dest
+            .forward
+            .bar_dest()
             .is_some_and(|dest| dest != chat_id)
         {
-            self.share.forward_bar_dest = None;
+            self.share.forward.drop_bar();
         }
-        if self.share.forward_bar_dest != Some(chat_id)
+        if self.share.forward.bar_dest() != Some(chat_id)
             && self
                 .share
-                .pending_forward
-                .as_ref()
+                .forward
+                .draft()
                 .is_some_and(|draft| !draft.is_from(chat_id, topic))
         {
-            self.share.pending_forward = None;
-            self.share.forward_picker_open = false;
+            self.share.forward = ForwardStage::None;
             self.chat_ui.selection_focus = None;
         }
     }
@@ -239,17 +241,15 @@ impl QuillApp {
                 StatusNote::info(label)
             },
         );
+        // A newer selection made in another conversation of the same chat
+        // (another forum topic) is not this forward's.
         let this_forward = self
             .share
-            .pending_forward
-            .as_ref()
-            .is_none_or(|draft| draft.from_chat_id == result.from_chat_id);
+            .forward
+            .draft()
+            .is_none_or(|draft| draft.is_from(result.from_chat_id, result.from_topic));
         if this_forward {
-            self.share.pending_forward = None;
-            self.share.forward_picker_open = false;
-            if self.share.forward_bar_dest == Some(result.dest_chat_id) {
-                self.share.forward_bar_dest = None;
-            }
+            self.share.forward = ForwardStage::None;
         }
         self.share.forward_result = Some(result);
         cx.notify();

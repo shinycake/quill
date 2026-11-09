@@ -146,7 +146,7 @@ impl Session {
                     ..
                 })
                 | RequestPurpose::HideContactCloseBirthdays),
-            ) => self.apply_privacy_data_error(purpose, err),
+            ) => self.apply_privacy_data_error(purpose, pending, err),
             Some(RequestPurpose::GetActiveSessions) => {
                 self.settings.sessions_stale = false;
                 self.settings

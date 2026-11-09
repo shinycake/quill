@@ -35,10 +35,6 @@ impl QuillApp {
         // account is ready (`chat_window::saved`).
         // main-only: it opens the chat windows themselves.
         self.restore_chat_windows(window, cx);
-        // A video chosen for an owned set finished downloading: its editor.
-        // main-only: the pick carries its window and the editor opens there
-        // (`hand_to_chat_window`); the main frame only notices the file.
-        self.sticker_box_frame_upkeep(window, cx);
         // Revenue and affiliate pages: the amount field, the setup
         // sliders, program photos and pages, profile balances.
         // main-only: they are pages of the session's info panel, which only
@@ -57,6 +53,9 @@ impl QuillApp {
         self.story_frame_upkeep(cx);
         // main-only: the sign-in screen is the main window's.
         self.sync_signin(window, cx);
+        // main-only: the chat list and its multi-select are the main
+        // window's (chat windows have none).
+        self.end_selection_left_list();
     }
 
     /// The stories' follow-ups: refreshed trays, the composer's check,

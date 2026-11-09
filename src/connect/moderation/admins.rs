@@ -444,16 +444,21 @@ impl<S: JsonSender> ConnectDriver<S> {
     }
 
     /// Phase D3b: explicit refresh of one administrator's rights — clears
-    /// the cached result and re-sends (the plain fetch keeps `Loaded`).
+    /// a cached answer and re-sends (the plain fetch keeps `Loaded`). The
+    /// rights editor asks this on every open. A lookup already in flight is
+    /// kept: its answer is the fresh one.
     pub fn refresh_admin_rights(
         &mut self,
         chat_id: ChatId,
         user_id: i64,
     ) -> Result<Option<RequestId>, ConnectSendError> {
-        self.session
-            .groups
-            .admin_rights
-            .remove(&(chat_id.0, user_id));
+        let key = (chat_id.0, user_id);
+        if !matches!(
+            self.session.groups.admin_rights.get(&key),
+            Some(AdminRightsFetch::Loading)
+        ) {
+            self.session.groups.admin_rights.remove(&key);
+        }
         self.fetch_admin_rights(chat_id, user_id)
     }
 }

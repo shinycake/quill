@@ -465,7 +465,6 @@ impl Session {
                     }
                     state.requests.extend(requests);
                     state.total_count = total_count;
-                    state.loading = false;
                     state.error = None;
                     state.request = None;
                 } else if let Some(pending) = pending

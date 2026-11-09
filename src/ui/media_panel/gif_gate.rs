@@ -8,7 +8,7 @@ use crate::ui::app::QuillApp;
 impl MediaPanel {
     /// The panel is open on its GIFs tab.
     pub(in crate::ui) fn shows_gifs(&self) -> bool {
-        self.open && self.tab == PanelTab::Gifs
+        self.is_open() && self.tab == PanelTab::Gifs
     }
 }
 

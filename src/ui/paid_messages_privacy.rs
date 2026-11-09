@@ -94,7 +94,9 @@ impl QuillApp {
         let session = self.session();
         let can_restrict = self.can_restrict_new_chats();
         let error = session.and_then(|s| s.settings.privacy_data.error.clone());
-        let paid_error = session.and_then(|s| s.payments.paid_messages.error.clone());
+        let paid_error = session
+            .and_then(|s| s.payments.paid_messages.save.user_error())
+            .map(str::to_string);
         let muted = cx.theme().muted_foreground;
         let mut body = div().flex().flex_col().gap_1();
         body = body.child(

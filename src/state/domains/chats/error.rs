@@ -94,10 +94,15 @@ impl Session {
                 );
                 // `joinChatByInviteLink` over the community limit opens the
                 // limit box (tdesktop `ChannelsLimitBox`) instead of a dialog.
-                let limit_box = matches!(
-                    pending.map(|p| p.purpose),
-                    Some(RequestPurpose::Chats(ChatsPurpose::DeepLinkJoin { .. }))
-                ) && self.note_premium_limit(err, pending);
+                // A stale answer (the flow ended, as an account switch
+                // ends it) opens nothing: the box would wait in this
+                // session for the switch back.
+                let limit_box = !stale
+                    && matches!(
+                        pending.map(|p| p.purpose),
+                        Some(RequestPurpose::Chats(ChatsPurpose::DeepLinkJoin { .. }))
+                    )
+                    && self.note_premium_limit(err, pending);
                 // A web link TDLib calls not internal (`t.me/` itself, a
                 // page it can't type) opens in the browser, as tdesktop
                 // leaves a `t.me` link it can't convert.
@@ -113,7 +118,7 @@ impl Session {
                 if !stale {
                     self.payments.hub.auto_start = None;
                 }
-                if !stale && limit_box {
+                if limit_box {
                     self.chats_state.deep_link = None;
                 } else if !stale && web_fallback {
                     let url = std::mem::take(&mut self.chats_state.deep_link_original);

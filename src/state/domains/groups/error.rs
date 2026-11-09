@@ -319,7 +319,6 @@ impl Session {
                     && let Some(state) = self.groups.invite_pages.join_requests_mut(chat_id.0)
                     && state.request == Some(pending.id)
                 {
-                    state.loading = false;
                     state.request = None;
                     state.error =
                         Some(call_request_error_line(err, "Could not load join requests"));
@@ -368,15 +367,9 @@ impl Session {
                     "Could not delete revoked links",
                 ));
             }
-            Some(RequestPurpose::Groups(GroupsPurpose::ProcessChatJoinRequest { .. })) => {
+            Some(RequestPurpose::Groups(GroupsPurpose::ProcessChatJoinRequest { user_id })) => {
                 if let Some(chat_id) = pending.and_then(|p| p.chat_id) {
-                    self.groups.join_requests.insert(
-                        chat_id.0,
-                        JoinRequestFetch::Failed(call_request_error_line(
-                            err,
-                            "Could not process join request",
-                        )),
-                    );
+                    self.fail_join_request(err, chat_id, user_id);
                 }
             }
             // Phase D3b: failed admin-management requests land in

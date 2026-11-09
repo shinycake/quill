@@ -455,4 +455,8 @@ pub enum GroupInfoField {
     Photo,
     /// The Type box's link (`setSupergroupUsername`).
     Username,
+    /// A Save step that is no field: the basic group's upgrade (which the
+    /// title and description wait on), or the history, auto-translate and
+    /// signature switches. The box stays open with the typed edits.
+    Settings,
 }

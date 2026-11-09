@@ -118,20 +118,7 @@ impl QuillApp {
             match click.action {
                 NotificationAction::MarkRead => self.mark_read_from_notification(chat_id, cx),
                 NotificationAction::Reply => {
-                    let tag = quill::notify::notification_tag(&click.account.0, chat_id);
-                    let typed =
-                        super::native_extras::take_reply_text(&tag, &click.account, chat_id);
-                    if let Some(text) = typed.as_deref() {
-                        // Length only: message text never goes to the log.
-                        eprintln!(
-                            "inline reply typed into a notification: {} chars",
-                            text.chars().count()
-                        );
-                    }
-                    let sent = typed.is_some_and(|text| {
-                        self.send_inline_reply(&click.account, chat_id, &text, cx)
-                    });
-                    if !sent {
+                    if !self.send_typed_notification_reply(&click.account, chat_id, cx) {
                         open.push(click);
                     }
                 }
@@ -148,6 +135,30 @@ impl QuillApp {
         // again on its own: bring the app forward so `flush_notifications`
         // runs and opens the chat.
         activate_everything(&self.delivery.windows.window_ids(), cx);
+    }
+
+    /// Send what was typed into `account`'s notification for the chat, if
+    /// anything was: the one place the typed text is taken, so it is sent
+    /// by whichever path runs the Reply click (on screen, or after the
+    /// account switch a click on another account's toast asks for) and
+    /// never waits to be sent by a later click. Returns whether a message
+    /// went out; the caller opens the chat otherwise.
+    pub(in crate::ui) fn send_typed_notification_reply(
+        &mut self,
+        account: &AccountKey,
+        chat_id: ChatId,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let tag = quill::notify::notification_tag(&account.0, chat_id);
+        let Some(text) = super::native_extras::take_reply_text(&tag, account, chat_id) else {
+            return false;
+        };
+        // Length only: message text never goes to the log.
+        eprintln!(
+            "inline reply typed into a notification: {} chars",
+            text.chars().count()
+        );
+        self.send_inline_reply(account, chat_id, &text, cx)
     }
 
     /// "Mark as read" from the notification: `viewMessages` through the

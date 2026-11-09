@@ -463,14 +463,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !allowed {
             return Ok(None);
         }
-        let user_id = match sender {
-            MessageSender::User { user_id } => user_id,
-            MessageSender::Chat { .. } => 0,
-        };
         let extra = self.session.request(
             RequestPurpose::Messages(MessagesPurpose::DeleteMessageReactionsFromSender {
                 message_id: message_id.0,
-                user_id,
+                sender,
             }),
             Some(chat_id),
         );

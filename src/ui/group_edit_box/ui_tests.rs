@@ -221,11 +221,11 @@ fn escape_and_cancel_close_the_emoji_panel(cx: &mut TestAppContext) {
     let vcx = &mut vcx;
     vcx.update(|window, cx| window.click("group-edit-title-emoji", cx));
     frames(vcx);
-    assert!(app.read_with(vcx, |app, _| app.pickers.media_panel.open));
+    assert!(app.read_with(vcx, |app, _| app.pickers.media_panel.is_open()));
     // Escape closes the topmost surface: the panel, then the box.
     vcx.update(|window, cx| window.press("escape", cx));
     frames(vcx);
-    assert!(!app.read_with(vcx, |app, _| app.pickers.media_panel.open));
+    assert!(!app.read_with(vcx, |app, _| app.pickers.media_panel.is_open()));
     assert!(app.read_with(vcx, |app, _| app.group_edit_box().is_some()));
     vcx.update(|window, cx| window.click("group-edit-title-emoji", cx));
     frames(vcx);
@@ -233,7 +233,7 @@ fn escape_and_cancel_close_the_emoji_panel(cx: &mut TestAppContext) {
     // panel closes and the box stays.
     vcx.update(|window, cx| window.click("group-edit-photo", cx));
     frames(vcx);
-    assert!(!app.read_with(vcx, |app, _| app.pickers.media_panel.open));
+    assert!(!app.read_with(vcx, |app, _| app.pickers.media_panel.is_open()));
     assert!(app.read_with(vcx, |app, _| app.group_edit_box().is_some()));
     vcx.update(|window, cx| window.click("group-edit-title-emoji", cx));
     frames(vcx);

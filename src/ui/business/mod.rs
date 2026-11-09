@@ -129,7 +129,10 @@ impl QuillApp {
     }
 
     pub(super) fn close_business(&mut self, cx: &mut Context<Self>) {
-        if self.dialogs.business_dialog.take().is_some() {
+        if let Some(closed) = self.dialogs.business_dialog.take() {
+            if closed.view == View::StickerPick {
+                self.close_start_page_stickers();
+            }
             cx.notify();
         }
     }
@@ -187,6 +190,9 @@ impl QuillApp {
 
     /// Show another screen, building its draft from the saved values.
     pub(super) fn business_go(&mut self, view: View, window: &mut Window, cx: &mut Context<Self>) {
+        if self.business_view() == Some(View::StickerPick) && view != View::StickerPick {
+            self.close_start_page_stickers();
+        }
         let missing = self.business_draft_missing(view);
         match view {
             View::Greeting | View::Away | View::Location | View::StartPage | View::Hours => {
@@ -297,7 +303,7 @@ impl QuillApp {
     /// its request failed: the screen shows it with a Retry.
     pub(super) fn business_info_error(&self) -> Option<String> {
         self.session()
-            .and_then(|s| s.settings.business.own_info.error().map(str::to_string))
+            .and_then(|s| s.business_own_info().error().map(str::to_string))
     }
 
     /// A waiting screen's Retry: the own full info, asked again.

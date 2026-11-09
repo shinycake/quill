@@ -3,6 +3,19 @@ use super::*;
 use crate::telegram::envelope::{BotsPayload, TdError};
 
 impl Session {
+    /// A mini app's data send or a Remove from menu is waiting for TDLib:
+    /// its answer is reported when it lands, so the mini-app poll keeps
+    /// running after the window that sent it has closed.
+    pub fn web_app_answer_due(&self) -> bool {
+        self.requests.pending.values().any(|pending| {
+            matches!(
+                pending.purpose,
+                RequestPurpose::SendWebAppData
+                    | RequestPurpose::Bots(BotsPurpose::ToggleBotInAttachmentMenu { .. })
+            )
+        })
+    }
+
     /// A mini-app payload (`webAppInfo`, `webAppUrl`, `mainWebApp`,
     /// `foundWebApp`, `attachmentMenuBot`, `updateAttachmentMenuBots`,
     /// `customRequestResult`). Answers are matched by `@extra`, so only
@@ -40,15 +53,16 @@ impl Session {
                 if let Some(RequestPurpose::Bots(BotsPurpose::SearchWebApp { bot_user_id })) =
                     purpose
                 {
-                    self.bots.web_apps.found = Some(Ok((bot_user_id, app)));
+                    self.bots.web_apps.found = Some((bot_user_id, Ok(app)));
                 }
             }
             BotsPayload::AttachmentMenuBot(bot) => {
                 self.keep_attach_bot_icons(std::slice::from_ref(&bot));
-                if let Some(RequestPurpose::Bots(BotsPurpose::GetAttachmentMenuBot { .. })) =
-                    purpose
+                if let Some(RequestPurpose::Bots(BotsPurpose::GetAttachmentMenuBot {
+                    bot_user_id,
+                })) = purpose
                 {
-                    self.bots.web_apps.attachment_menu_bot = Some(Ok(bot));
+                    self.bots.web_apps.attachment_menu_bot = Some((bot_user_id, Ok(bot)));
                 }
             }
             BotsPayload::UpdateAttachmentMenuBots(bots) => {
@@ -171,12 +185,13 @@ impl Session {
                     });
                 }
             }
-            RequestPurpose::Bots(BotsPurpose::SearchWebApp { .. }) => {
-                self.bots.web_apps.found = Some(Err(if err.code == 404 {
+            RequestPurpose::Bots(BotsPurpose::SearchWebApp { bot_user_id }) => {
+                let message = if err.code == 404 {
                     "This bot has no app with that name.".into()
                 } else {
                     web_app_error_text(err)
-                }));
+                };
+                self.bots.web_apps.found = Some((bot_user_id, Err(message)));
             }
             RequestPurpose::Bots(BotsPurpose::CanBotSendMessages { bot_user_id }) => {
                 self.bots.web_apps.write_access = Some((
@@ -204,8 +219,9 @@ impl Session {
                 }
                 self.bots.web_apps.emoji_access = Some((bot_user_id, false));
             }
-            RequestPurpose::Bots(BotsPurpose::GetAttachmentMenuBot { .. }) => {
-                self.bots.web_apps.attachment_menu_bot = Some(Err(web_app_error_text(err)));
+            RequestPurpose::Bots(BotsPurpose::GetAttachmentMenuBot { bot_user_id }) => {
+                self.bots.web_apps.attachment_menu_bot =
+                    Some((bot_user_id, Err(web_app_error_text(err))));
             }
             RequestPurpose::Bots(BotsPurpose::ToggleBotInAttachmentMenu { .. }) => {
                 self.bots.web_apps.attachment_menu_toggled = Some(Err(web_app_error_text(err)));

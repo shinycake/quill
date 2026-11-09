@@ -37,8 +37,8 @@ fn forward_bar(
         .update(cx, |app, cx| {
             app.in_window_scope(chat, cx, |app, _| {
                 (
-                    app.share.forward_bar_dest,
-                    app.share.pending_forward.as_ref().map(|d| d.from_chat_id),
+                    app.share.forward.bar_dest(),
+                    app.share.forward.draft().map(|d| d.from_chat_id),
                 )
             })
         })
@@ -69,7 +69,7 @@ fn continue_in_chat_moves_the_forward_and_comment_to_the_destination(cx: &mut Te
     // The Forward box, in the chat window, with the main window's chat
     // ticked and a comment typed.
     in_window(&h, chat_window, Some(OTHER), cx, |app, window, cx| {
-        app.share.pending_forward = Some(draft());
+        app.share.forward = crate::ui::forward_stage::ForwardStage::Selecting(draft());
         app.share.selection.toggle(OPEN);
         app.share
             .comment_input

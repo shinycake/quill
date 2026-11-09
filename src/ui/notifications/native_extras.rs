@@ -58,6 +58,10 @@ pub(in crate::ui) fn take_reply_text(
     account: &AccountKey,
     chat_id: ChatId,
 ) -> Option<String> {
+    #[cfg(test)]
+    if let Some(text) = test_texts::take(account, chat_id) {
+        return Some(text);
+    }
     #[cfg(any(target_os = "macos", target_os = "windows"))]
     {
         let _ = (account, chat_id);
@@ -70,4 +74,30 @@ pub(in crate::ui) fn take_reply_text(
     }
     #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
     None
+}
+
+/// Text "typed" into a notification by a test, as the platform parks it,
+/// taken first by [`take_reply_text`].
+#[cfg(test)]
+pub(in crate::ui) mod test_texts {
+    use quill::ids::{AccountKey, ChatId};
+    use std::cell::RefCell;
+    use std::collections::HashMap;
+
+    thread_local! {
+        static PARKED: RefCell<HashMap<(AccountKey, ChatId), String>> =
+            RefCell::new(HashMap::new());
+    }
+
+    pub(in crate::ui) fn park(account: &AccountKey, chat_id: ChatId, text: &str) {
+        PARKED.with(|parked| {
+            parked
+                .borrow_mut()
+                .insert((account.clone(), chat_id), text.to_string())
+        });
+    }
+
+    pub(super) fn take(account: &AccountKey, chat_id: ChatId) -> Option<String> {
+        PARKED.with(|parked| parked.borrow_mut().remove(&(account.clone(), chat_id)))
+    }
 }

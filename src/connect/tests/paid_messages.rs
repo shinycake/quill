@@ -204,12 +204,12 @@ fn remove_fee_reads_revenue_then_allows_free_messages() {
     let allow = requests(&f, "allowUnpaidMessagesFromUser").remove(0);
     assert_eq!(allow["user_id"], 551);
     assert_eq!(allow["refund_payments"], true);
-    assert!(f.1.session.payments.paid_messages.saving);
+    assert!(f.1.session.payments.paid_messages.save.is_saving());
     ingest(
         &mut f,
         &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra_of(&allow)),
     );
-    assert!(!f.1.session.payments.paid_messages.saving);
+    assert!(!f.1.session.payments.paid_messages.save.is_saving());
     assert_eq!(f.1.session.user_pays_me(ChatId(550)), 0);
     assert!(f.1.session.payments.paid_messages.revenue.is_empty());
     cleanup(f);
@@ -227,8 +227,13 @@ fn a_refused_exception_leaves_a_line_to_show() {
             extra_of(&allow)
         ),
     );
-    assert!(!f.1.session.payments.paid_messages.saving);
-    assert!(f.1.session.payments.paid_messages.error.is_some());
+    use crate::paid_messages::PaidTarget;
+    let save = &f.1.session.payments.paid_messages.save;
+    assert!(!save.is_saving());
+    assert!(save.error_for(PaidTarget::User(600)).is_some());
+    // Round 17 C finding 10: the line is that user's, never another chat's.
+    assert!(save.error_for(PaidTarget::User(601)).is_none());
+    assert!(save.error_for(PaidTarget::Channel(600)).is_none());
     cleanup(f);
 }
 

@@ -168,7 +168,7 @@ impl QuillApp {
             }
             Ok("panel") => {
                 self.message_ui.menu_ui.sticker_set_open = false;
-                self.pickers.media_panel.open = true;
+                self.set_media_panel_mode(crate::ui::media_panel::PanelMode::Compose);
                 self.pickers.media_panel.tab = crate::ui::media_panel::PanelTab::Stickers;
             }
             _ => {}

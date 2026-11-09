@@ -585,7 +585,7 @@ impl QuillApp {
             .ghost()
             .small()
             .on_click(cx.listener(|this, _, _, cx| this.clear_recent_stickers(cx)));
-        let query = panel.search_query.to_lowercase();
+        let query = panel.searched.typed().to_lowercase();
         let mut seen = std::collections::HashSet::new();
         let visible_sets: Vec<_> = match panel.tab {
             StickerTab::Installed => panel.sets.iter().collect(),
@@ -747,7 +747,7 @@ impl QuillApp {
                 StickerTab::Trending if panel.trending.is_empty() => {
                     Some(tr(keys::Q_MEDIA_NO_TRENDING_STICKER_SETS).into())
                 }
-                StickerTab::Search if panel.search_query.is_empty() => {
+                StickerTab::Search if panel.searched.typed().is_empty() => {
                     Some(tr(keys::Q_MEDIA_SEARCH_BY_EMOJI_TITLE_OR).into())
                 }
                 StickerTab::Search

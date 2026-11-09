@@ -12,6 +12,32 @@ pub enum StickerTab {
     Archived,
 }
 
+/// What the session's found stickers were asked for.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StickerSearch {
+    /// A typed query (`searchStickers` by keyword); empty before any.
+    Typed(String),
+    /// A category of the sticker strip (`searchStickers` for its emoji,
+    /// `getPremiumStickers`).
+    Category(crate::telegram::EmojiCategorySource),
+}
+
+impl Default for StickerSearch {
+    fn default() -> Self {
+        Self::Typed(String::new())
+    }
+}
+
+impl StickerSearch {
+    /// The typed query; empty for a category.
+    pub fn typed(&self) -> &str {
+        match self {
+            Self::Typed(query) => query,
+            Self::Category(_) => "",
+        }
+    }
+}
+
 /// Composer sticker panel (Unigram `StickerDrawerViewModel` installed regular sets).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct StickerPanel {
@@ -66,7 +92,10 @@ pub struct StickerPanel {
     pub recent: Vec<StickerItem>,
     /// Slice S8: `searchStickerSets` / `searchStickers` results.
     pub found_sets: Vec<StickerSetInfo>,
-    pub search_query: String,
+    /// What `found_stickers` are (being) found for: a typed query or a
+    /// category. One list per session; a window shows it only while it is
+    /// for what that window asks.
+    pub searched: StickerSearch,
     pub search_offset: usize,
     pub search_has_more: bool,
     pub found_stickers: Vec<StickerItem>,

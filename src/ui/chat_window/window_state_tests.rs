@@ -296,6 +296,51 @@ fn a_location_picker_closes_with_its_window(cx: &mut TestAppContext) {
     assert!(!app.read_with(cx, |app, _| app.location_picker_open()));
 }
 
+/// Round 17 C finding 5: Send Location opened in the main window while a
+/// chat window shows the picker moves it to the main window, for the main
+/// window's chat; closing the chat window then leaves it open.
+#[gpui_kit::test]
+fn a_location_picker_opened_again_moves_to_the_window_that_asked(cx: &mut TestAppContext) {
+    use crate::ui::shell::DialogKind;
+    let (app, _, chat_window) = new_app(cx);
+    app.update(cx, |app, cx| {
+        app.set_window_scope(None);
+        app.in_window_scope(Some(OTHER), cx, |app, cx| app.open_location_picker(cx));
+        assert_eq!(
+            app.windows.window_of_box(DialogKind::LocationPicker),
+            Some(OTHER)
+        );
+        app.open_location_picker(cx);
+        assert_eq!(app.windows.window_of_box(DialogKind::LocationPicker), None);
+    });
+    cx.update_window(chat_window, |_, window, _| window.remove_window())
+        .expect("the chat window");
+    cx.run_until_parked();
+    assert!(
+        app.read_with(cx, |app, _| app.location_picker_open()),
+        "the main window's picker stays"
+    );
+}
+
+/// Round 17 C finding 6: a call pressed in a chat window that fails to
+/// start says so in that window, not as a scrim over the main window.
+#[gpui_kit::test]
+fn a_call_that_fails_to_start_reports_in_the_window_that_pressed_call(cx: &mut TestAppContext) {
+    let (app, _, _) = new_app(cx);
+    app.update(cx, |app, cx| {
+        app.set_window_scope(None);
+        app.in_window_scope(Some(OTHER), cx, |app, cx| app.dial_user(5, false, cx));
+        if let Some(session) = app.demo_session.as_mut() {
+            session.calls.error = Some("Could not start the call".into());
+        }
+        assert_eq!(app.call_card_window(), Some(OTHER));
+        assert!(app.call_overlay(cx).is_none(), "not over the main window");
+        app.in_window_scope(Some(OTHER), cx, |app, cx| {
+            assert!(app.call_overlay(cx).is_some(), "in the chat window");
+        });
+    });
+}
+
 /// Round 15 C finding 10: a clip that failed in a chat window's viewer
 /// says so there only; the main window's viewer keeps its own line.
 #[gpui_kit::test]

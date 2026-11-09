@@ -150,9 +150,9 @@ fn dropping_on_a_row_opens_the_chat_with_the_messages_in_its_forward_bar(cx: &mu
     frames(vcx);
     assert_eq!(open_chat(&app, vcx), Some(ChatId(12)));
     let (dest, from, ids) = app.read_with(vcx, |app, _| {
-        let draft = app.share.pending_forward.as_ref();
+        let draft = app.share.forward.draft();
         (
-            app.share.forward_bar_dest,
+            app.share.forward.bar_dest(),
             draft.map(|d| d.from_chat_id),
             draft.map(|d| d.message_ids.clone()).unwrap_or_default(),
         )
@@ -205,7 +205,7 @@ fn a_drop_on_a_channel_the_user_cannot_post_in_changes_nothing(cx: &mut TestAppC
     frames(vcx);
     assert_eq!(open_chat(&app, vcx), Some(ChatId(11)));
     assert_eq!(
-        app.read_with(vcx, |app, _| app.share.forward_bar_dest),
+        app.read_with(vcx, |app, _| app.share.forward.bar_dest()),
         None
     );
 }
@@ -305,8 +305,8 @@ fn an_unforwardable_member_keeps_the_selection_from_lifting(cx: &mut TestAppCont
     frames(vcx);
     let ids = app.read_with(vcx, |app, _| {
         app.share
-            .pending_forward
-            .as_ref()
+            .forward
+            .draft()
             .map(|d| d.message_ids.clone())
             .unwrap_or_default()
     });
@@ -337,7 +337,7 @@ fn a_drop_on_a_forum_row_asks_for_a_topic_and_opens_nothing(cx: &mut TestAppCont
     frames(vcx);
     assert_eq!(open_chat(&app, vcx), Some(ChatId(11)));
     assert_eq!(
-        app.read_with(vcx, |app, _| app.share.forward_bar_dest),
+        app.read_with(vcx, |app, _| app.share.forward.bar_dest()),
         None
     );
 }
@@ -361,7 +361,7 @@ fn a_drop_on_a_secret_chat_is_refused(cx: &mut TestAppContext) {
     frames(vcx);
     assert_eq!(open_chat(&app, vcx), Some(ChatId(11)));
     assert_eq!(
-        app.read_with(vcx, |app, _| app.share.forward_bar_dest),
+        app.read_with(vcx, |app, _| app.share.forward.bar_dest()),
         None
     );
 }
@@ -376,7 +376,7 @@ fn a_drop_on_the_same_chat_puts_the_forward_bar_in_it(cx: &mut TestAppContext) {
     frames(vcx);
     assert_eq!(open_chat(&app, vcx), Some(ChatId(11)));
     assert_eq!(
-        app.read_with(vcx, |app, _| app.share.forward_bar_dest),
+        app.read_with(vcx, |app, _| app.share.forward.bar_dest()),
         Some(ChatId(11))
     );
 }

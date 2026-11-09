@@ -590,6 +590,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             }
             Err(err) => {
                 self.session.requests.take(extra);
+                self.session.messages.composer_previews.send_failed(url);
                 Err(err)
             }
         }

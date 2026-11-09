@@ -235,7 +235,6 @@ impl Session {
                         voice_notes_restricted,
                     },
                 );
-                self.settle_own_full_info(user_id.0);
             }
             // A5: `checkChatUsername` answer — the driver stashes the
             // verdict in `Session::username_check` before `apply` takes
