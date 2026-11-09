@@ -1,3 +1,5 @@
+// Modified by the Quill project (2026) from gpui-pre-windows 0.3.9 (Apache-2.0):
+// windows stop receiving vsync frames while idle; `capture_image`. See third_party/gpui-pre-windows/QUILL-CHANGES.md.
 #![deny(unsafe_op_in_unsafe_fn)]
 
 use std::{
@@ -21,7 +23,12 @@ use windows::{
         Graphics::Dwm::*,
         Graphics::Gdi::*,
         System::{
-            Com::*, Diagnostics::Debug::MessageBeep, LibraryLoader::*, Ole::*, SystemServices::*,
+            Com::*,
+            Diagnostics::Debug::MessageBeep,
+            LibraryLoader::*,
+            Ole::*,
+            Shutdown::{ShutdownBlockReasonCreate, ShutdownBlockReasonDestroy},
+            SystemServices::*,
         },
         UI::{Controls::*, HiDpi::*, Input::KeyboardAndMouse::*, Shell::*, WindowsAndMessaging::*},
     },
@@ -55,6 +62,8 @@ pub struct WindowsWindowState {
 
     pub callbacks: Callbacks,
     pub frame_signal: Arc<PlatformFrameSignal>,
+    /// Quill: the window list reads this (see `TrackedWindow`).
+    pub destroyed: Arc<AtomicBool>,
     pub input_handler: Cell<Option<PlatformInputHandler>>,
     pub ime_enabled: Cell<bool>,
     pub pending_surrogate: Cell<Option<u16>>,
@@ -91,6 +100,13 @@ pub struct WindowsWindowState {
     hwnd: HWND,
     pub(crate) a11y: RefCell<Option<A11yState>>,
     pub mouse_position: Cell<Point<Pixels>>,
+    /// Quill: something drew or presented since the last `draw_window` (see
+    /// `WindowsWindowInner::frames_after_draw`).
+    frame_drew: Cell<bool>,
+    /// Quill: GPUI asked for another frame since the last `draw_window`.
+    frame_asked: Cell<bool>,
+    /// Quill: whether this window's vsync invalidations are parked.
+    frame_idle: Cell<FrameIdle>,
 }
 
 pub(crate) struct WindowsWindowInner {
@@ -100,12 +116,12 @@ pub(crate) struct WindowsWindowInner {
     pub(crate) state: WindowsWindowState,
     system_settings: WindowsSystemSettings,
     pub(crate) handle: AnyWindowHandle,
-    pub(crate) hide_title_bar: bool,
+    pub(crate) hide_title_bar: Cell<bool>,
     pub(crate) is_movable: bool,
     pub(crate) is_resizable: bool,
     pub(crate) is_minimizable: bool,
     pub(crate) executor: ForegroundExecutor,
-    pub(crate) validation_number: usize,
+    pub(crate) validation_number: ValidationNumber,
     pub(crate) main_receiver: PriorityQueueReceiver<RunnableVariant>,
     pub(crate) platform_window_handle: HWND,
     pub(crate) parent_hwnd: Option<HWND>,
@@ -171,6 +187,7 @@ impl WindowsWindowState {
             min_size,
             callbacks,
             frame_signal: Arc::new(PlatformFrameSignal::new()),
+            destroyed: Arc::new(AtomicBool::new(false)),
             input_handler: Cell::new(input_handler),
             ime_enabled: Cell::new(true),
             pending_surrogate: Cell::new(pending_surrogate),
@@ -193,6 +210,9 @@ impl WindowsWindowState {
             direct_manipulation,
             a11y: RefCell::new(None),
             mouse_position: Cell::new(Point::default()),
+            frame_drew: Cell::new(false),
+            frame_asked: Cell::new(false),
+            frame_idle: Cell::new(FrameIdle::new(Instant::now())),
         })
     }
 
@@ -256,6 +276,95 @@ impl WindowsWindowState {
 }
 
 impl WindowsWindowInner {
+    /// Quill: the frame waker. GPUI has a frame to draw (the window became
+    /// dirty or queued a next-frame callback). While this window is parked,
+    /// unpark it (which wakes the vsync thread) and invalidate it now, so the
+    /// frame is drawn without waiting for the next vblank; otherwise only
+    /// restart the idle grace period. `RDW_INVALIDATE` alone sends nothing
+    /// synchronously, so this is safe to call from inside GPUI updates.
+    pub(crate) fn demand_frames(&self) {
+        // A hidden or minimized window stays parked: it gets no `WM_PAINT`,
+        // so nothing would park it again, and the vsync thread would
+        // invalidate it every vblank. Showing (`WM_SHOWWINDOW`) and
+        // restoring (`WM_SIZE`) resume it.
+        if self.visibility() == WindowVisibility::Hidden {
+            return;
+        }
+        self.resume_frames();
+    }
+
+    /// Quill: `demand_frames` without the visibility check, for a window
+    /// that is being shown (`WM_SHOWWINDOW` arrives before it is visible).
+    /// A parked window gets one `WM_PAINT` and stays parked;
+    /// `frames_after_draw` unparks it if that frame asks for more.
+    pub(crate) fn resume_frames(&self) {
+        let mut idle = self.state.frame_idle.get();
+        let woken = idle.demand(Instant::now());
+        self.state.frame_idle.set(idle);
+        if woken {
+            unsafe {
+                let _ = RedrawWindow(Some(self.hwnd), None, None, RDW_INVALIDATE);
+            }
+        }
+    }
+
+    /// Quill: a draw was deferred and validated away, so only the vsync
+    /// thread's next invalidation retries it: unpark the window's frames.
+    pub(crate) fn keep_frames_running(&self) {
+        // Hidden, it gets no `WM_PAINT`, as in `demand_frames`.
+        if self.visibility() == WindowVisibility::Hidden {
+            return;
+        }
+        let mut idle = self.state.frame_idle.get();
+        let resume = idle.keep_running(Instant::now());
+        self.state.frame_idle.set(idle);
+        if resume {
+            FRAME_GATE.unpark(self.hwnd);
+        }
+    }
+
+    /// Quill: before GPUI handles a frame request in `draw_window`. A woken
+    /// frame counts only what GPUI asks for during it, not the request that
+    /// woke it.
+    pub(crate) fn frames_before_draw(&self) {
+        if self.state.frame_idle.get().awaits_woken_frame() {
+            self.state.frame_asked.set(false);
+        }
+    }
+
+    /// Quill: the window was hidden or minimized, so it gets no `WM_PAINT`
+    /// and the idle decision can't run: park its vsync invalidations. The
+    /// idle state parks too, so the first frame demand once it is back
+    /// unparks it (and invalidates it at once).
+    pub(crate) fn park_frames(&self) {
+        let mut idle = self.state.frame_idle.get();
+        idle.park();
+        self.state.frame_idle.set(idle);
+        FRAME_GATE.park(self.hwnd);
+    }
+
+    /// Quill: after GPUI handled a frame request in `draw_window`. Frames
+    /// that neither drew, presented nor asked for another frame for
+    /// `FRAME_IDLE_AFTER` park the window's vsync invalidations; a frame
+    /// drawn while parked (woken by a demand, or `WM_PAINT` from the system)
+    /// unparks them if it asks for another frame or follows the last one
+    /// closely. `keep_running`: the platform has its own reason to keep
+    /// frames coming.
+    pub(crate) fn frames_after_draw(&self, keep_running: bool) {
+        // The kill switch (`QUILL_IDLE_FRAMES=0`) asks for every frame.
+        let frame = Frame {
+            drew: self.state.frame_drew.take(),
+            asked: self.state.frame_asked.take() || keep_running || !idle_frames_enabled(),
+        };
+        let mut idle = self.state.frame_idle.get();
+        match idle.frame(frame, Instant::now()) {
+            Transition::Park => FRAME_GATE.park(self.hwnd),
+            Transition::Resume => FRAME_GATE.unpark(self.hwnd),
+            Transition::Keep => {}
+        }
+        self.state.frame_idle.set(idle);
+    }
+
     /// Whether the window is being presented: shown and not minimized. Windows
     /// has no notification for a window fully covered by other windows, so
     /// that case reports `Visible`.
@@ -290,7 +399,7 @@ impl WindowsWindowInner {
             drop_target_helper: context.drop_target_helper.clone(),
             state,
             handle: context.handle,
-            hide_title_bar: context.hide_title_bar,
+            hide_title_bar: Cell::new(context.hide_title_bar),
             is_movable: context.is_movable,
             is_resizable: context.is_resizable,
             is_minimizable: context.is_minimizable,
@@ -425,7 +534,7 @@ struct WindowCreateContext {
     current_cursor: Option<HCURSOR>,
     cursor_visible: Arc<AtomicBool>,
     drop_target_helper: IDropTargetHelper,
-    validation_number: usize,
+    validation_number: ValidationNumber,
     main_receiver: PriorityQueueReceiver<RunnableVariant>,
     platform_window_handle: HWND,
     appearance: WindowAppearance,
@@ -915,6 +1024,16 @@ impl PlatformWindow for WindowsWindow {
             .ok();
     }
 
+    fn set_shutdown_block_reason(&self, reason: Option<&str>) {
+        let hwnd = self.0.hwnd;
+        match reason {
+            Some(reason) => unsafe { ShutdownBlockReasonCreate(hwnd, &HSTRING::from(reason)) },
+            None => unsafe { ShutdownBlockReasonDestroy(hwnd) },
+        }
+        .inspect_err(|e| log::error!("Shutdown block reason failed: {e}"))
+        .ok();
+    }
+
     fn set_background_appearance(&self, background_appearance: WindowBackgroundAppearance) {
         self.state.background_appearance.set(background_appearance);
         let hwnd = self.0.hwnd;
@@ -972,6 +1091,23 @@ impl PlatformWindow for WindowsWindow {
 
     fn on_request_frame(&self, callback: Box<dyn FnMut(RequestFrameOptions)>) {
         self.state.callbacks.request_frame.set(Some(callback));
+    }
+
+    // Quill: GPUI asks for another frame (the window is still dirty, or
+    // next-frame callbacks are queued): keep the vsync frames coming.
+    fn schedule_frame(&self) {
+        self.state.frame_asked.set(true);
+    }
+
+    // Quill: see `WindowsWindowInner::demand_frames`. Holds the window
+    // weakly: a waker that outlives the window does nothing.
+    fn frame_waker(&self) -> Option<Rc<dyn Fn()>> {
+        let inner = Rc::downgrade(&self.0);
+        Some(Rc::new(move || {
+            if let Some(inner) = inner.upgrade() {
+                inner.demand_frames();
+            }
+        }))
     }
 
     fn on_input(&self, callback: Box<dyn FnMut(PlatformInput) -> DispatchEventResult>) {
@@ -1036,6 +1172,8 @@ impl PlatformWindow for WindowsWindow {
     }
 
     fn draw(&self, scene: &Scene) {
+        // Quill: a drawn (or presented) frame keeps the vsync frames coming.
+        self.state.frame_drew.set(true);
         self.state
             .renderer
             .borrow_mut()
@@ -1048,6 +1186,15 @@ impl PlatformWindow for WindowsWindow {
         self.state
             .renderer
             .borrow_mut()
+            .render_to_image(scene, self.state.background_appearance.get())
+    }
+
+    // Quill: `Window::capture_frame`, offscreen with this window's renderer.
+    fn capture_image(&self, scene: &Scene) -> anyhow::Result<image::RgbaImage> {
+        self.state
+            .renderer
+            .try_borrow_mut()
+            .map_err(|_| anyhow::anyhow!("the renderer is busy drawing"))?
             .render_to_image(scene, self.state.background_appearance.get())
     }
 

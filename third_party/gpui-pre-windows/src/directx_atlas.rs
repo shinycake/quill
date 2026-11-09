@@ -1,3 +1,6 @@
+// Modified by the Quill project (2026) from gpui-pre-windows 0.3.9 (Apache-2.0):
+// `QUILL_TRACE_VIDEO` upload lines for large images; images in textures of
+// their own. See third_party/gpui-pre-windows/QUILL-CHANGES.md.
 use etagere::BucketedAtlasAllocator;
 use parking_lot::Mutex;
 use windows::Win32::Graphics::{
@@ -30,6 +33,8 @@ struct DirectXAtlasTexture {
     texture: ID3D11Texture2D,
     view: [Option<ID3D11ShaderResourceView>; 1],
     live_atlas_keys: u32,
+    /// QUILL: the class of every tile it holds.
+    class: TileClass,
 }
 
 impl DirectXAtlas {
@@ -86,6 +91,26 @@ impl PlatformAtlas for DirectXAtlas {
     fn remove(&self, key: &AtlasKey) {
         self.0.lock().remove(key);
     }
+
+    fn next_use_mark(&self) -> u64 {
+        self.0.lock().next_use_mark()
+    }
+
+    fn emoji_glyph_count(&self) -> usize {
+        self.0.lock().emoji_glyph_count()
+    }
+
+    fn remove_emoji_glyphs_unused_since(&self, mark: u64) -> usize {
+        self.0.lock().remove_emoji_glyphs_unused_since(mark)
+    }
+
+    fn text_glyph_count(&self) -> usize {
+        self.0.lock().text_glyph_count()
+    }
+
+    fn remove_text_glyphs_unused_since(&self, mark: u64) -> usize {
+        self.0.lock().remove_text_glyphs_unused_since(mark)
+    }
 }
 
 impl AtlasBackend for DirectXAtlasTextures {
@@ -95,14 +120,17 @@ impl AtlasBackend for DirectXAtlasTextures {
         size: Size<DevicePixels>,
         bytes: &[u8],
     ) -> anyhow::Result<AtlasTile> {
-        let tile = self
-            .allocate(size, kind)
-            .ok_or_else(|| anyhow::anyhow!("failed to allocate"))?;
-        let texture = self
-            .texture(tile.texture_id)
-            .ok_or_else(|| anyhow::anyhow!("allocated tile refers to a missing texture"))?;
-        texture.upload(&self.device_context, tile.bounds, bytes);
-        Ok(tile)
+        self.insert_tile(kind, size, bytes, false)
+    }
+
+    // QUILL: images in textures of their own.
+    fn insert_image(
+        &mut self,
+        kind: AtlasTextureKind,
+        size: Size<DevicePixels>,
+        bytes: &[u8],
+    ) -> anyhow::Result<AtlasTile> {
+        self.insert_tile(kind, size, bytes, true)
     }
 
     fn remove(&mut self, tile: AtlasTile) {
@@ -131,10 +159,28 @@ impl AtlasBackend for DirectXAtlasTextures {
 }
 
 impl DirectXAtlasTextures {
+    fn insert_tile(
+        &mut self,
+        kind: AtlasTextureKind,
+        size: Size<DevicePixels>,
+        bytes: &[u8],
+        images: bool,
+    ) -> anyhow::Result<AtlasTile> {
+        let tile = self
+            .allocate(size, kind, TileClass::of(images, size))
+            .ok_or_else(|| anyhow::anyhow!("failed to allocate"))?;
+        let texture = self
+            .texture(tile.texture_id)
+            .ok_or_else(|| anyhow::anyhow!("allocated tile refers to a missing texture"))?;
+        texture.upload(&self.device_context, tile.bounds, bytes);
+        Ok(tile)
+    }
+
     fn allocate(
         &mut self,
         size: Size<DevicePixels>,
         texture_kind: AtlasTextureKind,
+        class: TileClass,
     ) -> Option<AtlasTile> {
         {
             let textures = match texture_kind {
@@ -143,16 +189,18 @@ impl DirectXAtlasTextures {
                 AtlasTextureKind::Subpixel => &mut self.subpixel_textures,
             };
 
+            // QUILL: only textures holding the same class of tile.
             if let Some(tile) = textures
                 .iter_mut()
                 .rev()
+                .filter(|texture| texture.class == class)
                 .find_map(|texture| texture.allocate(size))
             {
                 return Some(tile);
             }
         }
 
-        let texture = self.push_texture(size, texture_kind)?;
+        let texture = self.push_texture(size, texture_kind, class)?;
         texture.allocate(size)
     }
 
@@ -160,6 +208,7 @@ impl DirectXAtlasTextures {
         &mut self,
         min_size: Size<DevicePixels>,
         kind: AtlasTextureKind,
+        class: TileClass,
     ) -> Option<&mut DirectXAtlasTexture> {
         const DEFAULT_ATLAS_SIZE: Size<DevicePixels> = Size {
             width: DevicePixels(1024),
@@ -171,7 +220,17 @@ impl DirectXAtlasTextures {
             width: DevicePixels(16384),
             height: DevicePixels(16384),
         };
-        let size = min_size.min(&MAX_ATLAS_SIZE).max(&DEFAULT_ATLAS_SIZE);
+        // QUILL: small images get 512² textures (`TileClass`).
+        const SMALL_IMAGE_ATLAS_SIZE: Size<DevicePixels> = Size {
+            width: DevicePixels(512),
+            height: DevicePixels(512),
+        };
+        let floor = if class == TileClass::SmallImages {
+            SMALL_IMAGE_ATLAS_SIZE
+        } else {
+            DEFAULT_ATLAS_SIZE
+        };
+        let size = min_size.min(&MAX_ATLAS_SIZE).max(&floor);
         let pixel_format;
         let bind_flag;
         let bytes_per_pixel;
@@ -240,6 +299,7 @@ impl DirectXAtlasTextures {
             texture,
             view,
             live_atlas_keys: 0,
+            class,
         };
         if let Some(ix) = index {
             texture_list.textures[ix] = Some(atlas_texture);
@@ -300,6 +360,10 @@ impl DirectXAtlasTexture {
             );
             return;
         }
+        // Quill: `QUILL_TRACE_VIDEO` times image uploads of 64 KiB and up
+        // (video pictures drawn as images), against the NV12 path.
+        let started = (crate::surface_support::trace_uploads() && expected >= 64 * 1024)
+            .then(std::time::Instant::now);
         unsafe {
             device_context.UpdateSubresource(
                 &self.texture,
@@ -316,6 +380,9 @@ impl DirectXAtlasTexture {
                 bounds.size.width.to_bytes(self.bytes_per_pixel as u8),
                 0,
             );
+        }
+        if let Some(started) = started {
+            crate::surface_support::trace_upload("atlas", expected, started);
         }
     }
 
@@ -336,6 +403,33 @@ fn etagere_point_to_device(value: etagere::Point) -> Point<DevicePixels> {
     Point {
         x: DevicePixels::from(value.x),
         y: DevicePixels::from(value.y),
+    }
+}
+
+/// QUILL: which tiles share a texture. Images never share one with glyphs
+/// and SVGs (a long-lived glyph kept a photo's texture alive). Small images
+/// (avatars, custom emoji: both sides at most 128 px) get 512² (1 MB)
+/// textures of their own, so the few left on screen after browsing keep
+/// 1 MB textures instead of 4 MB ones larger pictures came and went in.
+/// Larger images keep upstream's 1024² textures: animation frames of a few
+/// hundred pixels rotate through one, where a smaller texture would hold
+/// one frame and be made anew for each.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum TileClass {
+    Glyphs,
+    SmallImages,
+    Images,
+}
+
+impl TileClass {
+    fn of(images: bool, size: Size<DevicePixels>) -> Self {
+        if !images {
+            Self::Glyphs
+        } else if size.width.0 <= 128 && size.height.0 <= 128 {
+            Self::SmallImages
+        } else {
+            Self::Images
+        }
     }
 }
 
@@ -395,9 +489,11 @@ mod tests {
             return;
         };
 
+        // QUILL: larger than a small image (`TileClass`), so it shares the
+        // big tiles' texture.
         let small = Size {
-            width: DevicePixels(64),
-            height: DevicePixels(64),
+            width: DevicePixels(200),
+            height: DevicePixels(200),
         };
         let big = Size {
             width: DevicePixels(700),
@@ -416,5 +512,46 @@ mod tests {
 
         let tile_b = insert_tile(&atlas, big_key_b, big);
         assert_eq!(tile_b.texture_id, keeper_tile.texture_id);
+    }
+
+    /// QUILL: a color emoji drawn while a photo was on screen landed in the
+    /// photo's texture and kept it alive after the photo left.
+    #[test]
+    fn test_glyphs_never_keep_an_image_texture_alive() {
+        let Some(atlas) = create_atlas() else {
+            return;
+        };
+        let photo = make_image_key(1);
+        let emoji = AtlasKey::Glyph(gpui::RenderGlyphParams {
+            font_id: gpui::FontId(0),
+            glyph_id: gpui::GlyphId(7),
+            font_size: gpui::px(16.),
+            subpixel_variant: Point::default(),
+            scale_factor: 2.,
+            is_emoji: true,
+            subpixel_rendering: false,
+            dilation: 0,
+        });
+        let photo_tile = insert_tile(
+            &atlas,
+            photo.clone(),
+            Size {
+                width: DevicePixels(720),
+                height: DevicePixels(540),
+            },
+        );
+        let emoji_tile = insert_tile(
+            &atlas,
+            emoji,
+            Size {
+                width: DevicePixels(64),
+                height: DevicePixels(64),
+            },
+        );
+        assert_eq!(emoji_tile.texture_id.kind, photo_tile.texture_id.kind);
+        assert_ne!(emoji_tile.texture_id, photo_tile.texture_id);
+        atlas.remove(&photo);
+        assert!(atlas.get_texture_view(photo_tile.texture_id).is_none());
+        assert!(atlas.get_texture_view(emoji_tile.texture_id).is_some());
     }
 }
