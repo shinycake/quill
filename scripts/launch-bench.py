@@ -38,6 +38,9 @@ every launch). TELEGRAM_API_ID and TELEGRAM_API_HASH are passed to the app;
 QUILL_ENV_FILE (default: quill.local.env next to this repository) fills them
 when unset.
 
+Each bundle's folder is made read-only, so the app cannot update itself
+there, and the script stops if a bundle's executable changes anyway.
+
 Quit any running Quill first: a second Quill hands its launch to the first.
 Bundles and trace files stay on the internal disk: an app that LaunchServices
 starts from a removable volume waits on a consent prompt.
@@ -70,21 +73,34 @@ def credentials():
 
 def make_bundle(label, binary, template):
     app = WORK / label / "Quill.app"
+    if app.parent.is_dir():
+        app.parent.chmod(0o755)
     shutil.rmtree(app.parent, ignore_errors=True)
     app.parent.mkdir(parents=True)
     if pathlib.Path(binary).is_dir():
         # A whole bundle: its signature and notarization are what is measured.
         subprocess.run(["ditto", binary, app], check=True)
-        return app
-    subprocess.run(["ditto", template, app], check=True)
-    exe = app / "Contents/MacOS/quill"
-    shutil.copy2(binary, exe)
-    subprocess.run(["install_name_tool", "-add_rpath", "@executable_path/../Frameworks", exe],
-                   capture_output=True)
-    identity = os.environ.get("QUILL_CODESIGN_IDENTITY", "-")
-    subprocess.run(["codesign", "--force", "--deep", "-s", identity, app],
-                   check=True, capture_output=True)
+    else:
+        subprocess.run(["ditto", template, app], check=True)
+        exe = app / "Contents/MacOS/quill"
+        shutil.copy2(binary, exe)
+        subprocess.run(["install_name_tool", "-add_rpath", "@executable_path/../Frameworks", exe],
+                       capture_output=True)
+        identity = os.environ.get("QUILL_CODESIGN_IDENTITY", "-")
+        subprocess.run(["codesign", "--force", "--deep", "-s", identity, app],
+                       check=True, capture_output=True)
+    # Quill does not update itself in a folder it cannot write to. A local
+    # build reports Cargo's version, older than any release, so one signed
+    # like the release would download the latest release during the runs
+    # and could swap it in for the binary under test.
+    app.parent.chmod(0o555)
     return app
+
+
+def stamp(app):
+    """What tells one executable file from another at the same path."""
+    info = (app / "Contents/MacOS/quill").stat()
+    return info.st_ino, info.st_size, info.st_mtime_ns
 
 
 def running(pattern=None):
@@ -286,11 +302,13 @@ def main():
     sides = []
     envs = {}
     given = {}
+    made = {}
     for side in opts.sides:
         label, _, binary = side.partition("=")
         binary, *extra = binary.split("@")
         envs[label] = extra
         sides.append((label, make_bundle(label, binary, opts.template)))
+        made[label] = stamp(sides[-1][1])
         if pathlib.Path(binary).is_dir():
             # A release bundle carries its own credentials.
             given[label] = {}
@@ -306,6 +324,9 @@ def main():
             marks = launch(app, WORK / f"trace-{label}.txt", given.get(label, creds), opts.cold,
                            data_root=opts.data_root, until=opts.until, extra_env=envs[label],
                            evict_paths=evict_paths, onscreen=opts.onscreen, recycled=opts.recycle)
+            if stamp(app) != made[label]:
+                sys.exit(f"{label}: the executable changed during the runs (an update "
+                         "installed itself?); its numbers are not this build's")
             results[label].append(marks)
             shown = f"{marks[opts.until]:.0f} ms" if opts.until in marks else "NOT REACHED"
             print(f"{label} run {run}: {opts.until} {shown}, load {os.getloadavg()[0]:.1f}",

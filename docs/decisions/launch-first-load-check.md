@@ -96,6 +96,24 @@ from the first release that has it:
 scripts/launch-bench.py --recycle --onscreen old=/path/to/old/Quill.app new=/path/to/new/Quill.app
 ```
 
+When there is nothing to check, `settle` costs the worker 2 ms for TDLib's three files
+and 4 ms for the call library's seven (the probe on a locally signed copy, file cache
+purged). The window does not notice: one build launched with `settle` and with its first
+instruction patched to return, file cache purged, ten launches each in turn, put the
+window on screen in a median 946 ms and 949 ms.
+
+## Measuring a local build against a release
+Two things made a local build look 30 to 50 ms slower than the release before the
+comparison above was done on one build:
+
+- A plain `cargo build` targets macOS 11 and has no chained fixups; the release targets
+  macOS 14. Build with `MACOSX_DEPLOYMENT_TARGET=14.0`, or compare two local builds.
+- A local build reports Cargo's version, which is older than every release. Signed with
+  the release's identity it could update itself, and in two runs the binary under test
+  was replaced by the latest release part of the way through. `launch-bench.py` now keeps
+  each bundle in a read-only folder, where Quill does not update itself, and stops if a
+  bundle's executable changes.
+
 ## What is left
 The executable's own check, 730 to 900 ms before `main`, is still there. Nothing in the
 process can run before it. What would shorten it:
@@ -105,6 +123,11 @@ process can run before it. What would shorten it:
 - An executable that is only a stub, with the app in a library `settle`d next to TDLib.
   The same bytes are scanned, partly in parallel.
 - Apple caching the verdict. Worth a Feedback report.
+
+Apart from the check: loading the call library on the early-connect worker costs the main
+thread about 30 ms of a launch with a purged file cache (`main` to the app object built:
+298 ms with the library in the bundle, 269 ms without, eight launches each in turn). It
+could load after the first frame, at the price of holding the loader's lock then.
 
 ## Rules
 - A new bundled library is loaded through `first_load::settle` first.
