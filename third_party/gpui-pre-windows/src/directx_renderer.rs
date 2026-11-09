@@ -1,9 +1,3 @@
-// Modified by the Quill project (2026) from gpui-pre-windows 0.3.9 (Apache-2.0):
-// drawing returns an error instead of panicking when device-loss recovery
-// failed, and every recovery attempt keeps DirectComposition; HDR stills and the scRGB
-// swap chain (`hdr_surfaces`); NV12 video surfaces (`yuv_surfaces`); shaders shared
-// by every window on a device (`shared_shaders`). See
-// third_party/gpui-pre-windows/QUILL-CHANGES.md.
 use std::{
     slice,
     sync::{Arc, OnceLock},
@@ -26,8 +20,6 @@ use windows::{
 };
 
 use crate::directx_renderer::shader_resources::{RawShaderBytes, ShaderModule, ShaderTarget};
-use hdr_surfaces::{HdrSurfaces, OutputMode};
-use yuv_surfaces::YuvSurfaces;
 use crate::*;
 use gpui::*;
 
@@ -36,11 +28,6 @@ const RENDER_TARGET_FORMAT: DXGI_FORMAT = DXGI_FORMAT_B8G8R8A8_UNORM;
 // This configuration is used for MSAA rendering on paths only, and it's guaranteed to be supported by DirectX 11.
 const PATH_MULTISAMPLE_COUNT: u32 = 4;
 const MAX_INSTANCE_BUFFER_SIZE: usize = 256 * 1024 * 1024;
-
-#[path = "hdr_surfaces.rs"]
-mod hdr_surfaces;
-#[path = "yuv_surfaces.rs"]
-mod yuv_surfaces;
 
 pub(crate) struct FontInfo {
     pub gamma_ratios: [f32; 4],
@@ -57,15 +44,7 @@ pub(crate) struct DirectXRenderer {
     globals: DirectXGlobalElements,
     pipelines: DirectXRenderPipelines,
     direct_composition: Option<DirectComposition>,
-    /// Quill: fixed at creation. Upstream re-derived it from `direct_composition` on each
-    /// device-loss attempt, so every retry after a failed one lost DirectComposition.
-    disable_direct_composition: bool,
     font_info: &'static FontInfo,
-    /// Quill: what the swap chain holds (see `hdr_surfaces`).
-    output: OutputMode,
-    /// Quill: switching to HDR output failed; not retried until the window
-    /// releases it.
-    hdr_failed: bool,
 
     width: u32,
     height: u32,
@@ -113,10 +92,6 @@ struct DirectXRenderPipelines {
     mono_sprites: PipelineState<MonochromeSprite>,
     subpixel_sprites: PipelineState<SubpixelSprite>,
     poly_sprites: PipelineState<PolychromeSprite>,
-    hdr_surfaces: HdrSurfaces,
-    /// Quill: `None` when the NV12 pipeline couldn't be made (this window
-    /// then refuses NV12 frames).
-    yuv_surfaces: Option<YuvSurfaces>,
 }
 
 struct DirectXGlobalElements {
@@ -199,12 +174,8 @@ impl DirectXRenderer {
         let direct_composition = if disable_direct_composition {
             None
         } else {
-            let dxgi_device = devices
-                .dxgi_device
-                .as_ref()
-                .context("missing DXGI device for DirectComposition")?;
-            let composition =
-                DirectComposition::new(dxgi_device, hwnd).context("Creating DirectComposition")?;
+            let composition = DirectComposition::new(devices.dxgi_device.as_ref().unwrap(), hwnd)
+                .context("Creating DirectComposition")?;
             composition
                 .set_swap_chain(&resources.swap_chain)
                 .context("Setting swap chain for DirectComposition")?;
@@ -219,10 +190,7 @@ impl DirectXRenderer {
             globals,
             pipelines,
             direct_composition,
-            disable_direct_composition,
             font_info: Self::get_font_info(),
-            output: OutputMode::SDR,
-            hdr_failed: false,
             width: 1,
             height: 1,
             skip_draws: false,
@@ -234,29 +202,22 @@ impl DirectXRenderer {
     }
 
     fn pre_draw(&self, clear_color: &[f32; 4]) -> Result<()> {
-        // Quill: errors instead of upstream's `expect`/`unwrap`; a renderer whose device-loss
-        // recovery failed has no resources or devices.
-        let resources = self.resources.as_ref().context("resources missing")?;
+        let resources = self.resources.as_ref().expect("resources missing");
         let device_context = &self
             .devices
             .as_ref()
-            .context("devices missing")?
+            .expect("devices missing")
             .device_context;
         update_buffer(
             device_context,
-            self.globals
-                .global_params_buffer
-                .as_ref()
-                .context("missing global params buffer")?,
+            self.globals.global_params_buffer.as_ref().unwrap(),
             &[GlobalParams {
                 gamma_ratios: self.font_info.gamma_ratios,
                 viewport_size: [resources.viewport.Width, resources.viewport.Height],
                 grayscale_enhanced_contrast: self.font_info.grayscale_enhanced_contrast,
                 subpixel_enhanced_contrast: self.font_info.subpixel_enhanced_contrast,
                 is_bgr: self.font_info.is_bgr as u32,
-                hdr_output: self.output.hdr as u32,
-                output_scale: self.output.scale,
-                _pad: 0,
+                _pad: [0; 3],
             }],
         )?;
         unsafe {
@@ -282,10 +243,13 @@ impl DirectXRenderer {
 
     #[inline]
     fn present(&mut self) -> Result<()> {
-        // Quill: an error instead of upstream's `expect` (see `pre_draw`).
-        let resources = self.resources.as_ref().context("resources missing")?;
-        // SAFETY: the swap chain belongs to this renderer's live resources.
-        let result = unsafe { resources.swap_chain.Present(0, DXGI_PRESENT(0)) };
+        let result = unsafe {
+            self.resources
+                .as_ref()
+                .expect("resources missing")
+                .swap_chain
+                .Present(0, DXGI_PRESENT(0))
+        };
         result.ok().context("Presenting swap chain failed")
     }
 
@@ -297,7 +261,7 @@ impl DirectXRenderer {
     }
 
     fn handle_device_lost_impl(&mut self, directx_devices: &DirectXDevices) -> Result<()> {
-        let disable_direct_composition = self.disable_direct_composition;
+        let disable_direct_composition = self.direct_composition.is_none();
 
         unsafe {
             #[cfg(debug_assertions)]
@@ -340,11 +304,8 @@ impl DirectXRenderer {
         let direct_composition = if disable_direct_composition {
             None
         } else {
-            let dxgi_device = devices
-                .dxgi_device
-                .as_ref()
-                .context("missing DXGI device for DirectComposition")?;
-            let composition = DirectComposition::new(dxgi_device, self.hwnd)?;
+            let composition =
+                DirectComposition::new(devices.dxgi_device.as_ref().unwrap(), self.hwnd)?;
             composition.set_swap_chain(&resources.swap_chain)?;
             Some(composition)
         };
@@ -362,8 +323,6 @@ impl DirectXRenderer {
         self.globals = globals;
         self.pipelines = pipelines;
         self.direct_composition = direct_composition;
-        // The new swap chain is 8-bit; the next frame switches again if needed.
-        self.output = OutputMode::SDR;
         self.skip_draws = true;
         Ok(())
     }
@@ -378,7 +337,6 @@ impl DirectXRenderer {
             // and so likely do not have the textures anymore that are required for drawing
             return Ok(());
         }
-        self.sync_output_mode();
         self.render(scene, background_appearance)?;
         self.present()
     }
@@ -394,7 +352,7 @@ impl DirectXRenderer {
         background_appearance: WindowBackgroundAppearance,
     ) -> Result<()> {
         self.pre_draw(&match background_appearance {
-            WindowBackgroundAppearance::Opaque => self.output.opaque_clear(),
+            WindowBackgroundAppearance::Opaque => [1.0f32; 4],
             _ => [0.0f32; 4],
         })?;
         self.upload_scene_buffers(scene)?;
@@ -404,10 +362,6 @@ impl DirectXRenderer {
             .as_ref()
             .and_then(|devices| devices.annotation.clone())
             .filter(|annotation| unsafe { annotation.GetStatus().as_bool() });
-        // Quill: the NV12 frames this frame draws keep their textures.
-        if let Some(yuv) = self.pipelines.yuv_surfaces.as_mut() {
-            yuv.begin_frame(&scene.surfaces);
-        }
         for batch in scene.batches() {
             let _annotation = annotation
                 .as_ref()
@@ -447,18 +401,6 @@ impl DirectXRenderer {
                 )
             })?;
         }
-        // Quill: video textures not drawn lately go, and a frame without
-        // surfaces frees every surface texture (the viewer closed), so they
-        // never outlive what's on screen.
-        if let Some(yuv) = self.pipelines.yuv_surfaces.as_mut() {
-            yuv.end_frame();
-        }
-        if scene.surfaces.is_empty() {
-            self.pipelines.hdr_surfaces.release();
-            if let Some(yuv) = self.pipelines.yuv_surfaces.as_mut() {
-                yuv.release();
-            }
-        }
         Ok(())
     }
 
@@ -467,9 +409,7 @@ impl DirectXRenderer {
     /// goes through MetalRenderer; this is the Windows analogue). Draws into
     /// the existing render target, copies it into a `D3D11_USAGE_STAGING`
     /// texture, maps it, and converts BGRA to RGBA.
-    ///
-    /// Quill: built in every configuration; it backs `Window::capture_frame`
-    /// (the next frame draws the render target again before presenting).
+    #[cfg(feature = "test-support")]
     pub(crate) fn render_to_image(
         &mut self,
         scene: &Scene,
@@ -481,11 +421,6 @@ impl DirectXRenderer {
         anyhow::ensure!(
             !self.skip_draws,
             "render_to_image unavailable while recovering from a lost device"
-        );
-        // Quill: the readback below is 8-bit only.
-        anyhow::ensure!(
-            !self.output.hdr,
-            "render_to_image unavailable while the swap chain is HDR"
         );
         self.render(scene, background_appearance)?;
 
@@ -501,16 +436,6 @@ impl DirectXRenderer {
         // A CPU-readable copy of the render target.
         let mut desc = D3D11_TEXTURE2D_DESC::default();
         unsafe { render_target.GetDesc(&mut desc) };
-        // Quill: `CopyResource` into the single-sample staging texture needs
-        // a single-sample source. The render target is buffer 0 of the
-        // flip-model swap chain, created with one sample (flip model allows
-        // no other); only path rasterization uses MSAA, in its own texture.
-        // Refuse rather than copy if that ever changes.
-        anyhow::ensure!(
-            desc.SampleDesc.Count == 1,
-            "render_to_image needs a single-sample render target, not {} samples",
-            desc.SampleDesc.Count
-        );
         let width = desc.Width;
         let height = desc.Height;
         let staging_desc = D3D11_TEXTURE2D_DESC {
@@ -584,7 +509,7 @@ impl DirectXRenderer {
                     BUFFER_COUNT as u32,
                     width,
                     height,
-                    self.output.format(),
+                    RENDER_TARGET_FORMAT,
                     DXGI_SWAP_CHAIN_FLAG(0),
                 )
                 .context("Failed to resize swap chain")?;
@@ -892,20 +817,6 @@ impl DirectXRenderer {
         if surfaces.is_empty() {
             return Ok(());
         }
-        let devices = self.devices.as_ref().context("devices missing")?;
-        // Quill: in order, each through the pipeline for its format.
-        for surface in surfaces {
-            match surface.frame.format() {
-                SurfaceFormat::Rgba16Float => self
-                    .pipelines
-                    .hdr_surfaces
-                    .draw(devices, slice::from_ref(surface))?,
-                SurfaceFormat::Nv12 => match self.pipelines.yuv_surfaces.as_mut() {
-                    Some(yuv) => yuv.draw(devices, surface)?,
-                    None => surface.frame.mark_refused(),
-                },
-            }
-        }
         Ok(())
     }
 
@@ -1086,16 +997,6 @@ impl DirectXRenderPipelines {
             16,
             create_blend_state(device)?,
         )?;
-        let hdr_surfaces = HdrSurfaces::new(device)?;
-        // Quill: without the NV12 pipeline the window still draws; its NV12
-        // frames are refused and their producers show images instead.
-        let yuv_surfaces = match YuvSurfaces::new(device) {
-            Ok(yuv) => Some(yuv),
-            Err(error) => {
-                log::warn!("NV12 surface pipeline unavailable: {error:#}");
-                None
-            }
-        };
 
         Ok(Self {
             shadow_pipeline,
@@ -1106,8 +1007,6 @@ impl DirectXRenderPipelines {
             mono_sprites,
             subpixel_sprites,
             poly_sprites,
-            hdr_surfaces,
-            yuv_surfaces,
         })
     }
 }
@@ -1115,7 +1014,7 @@ impl DirectXRenderPipelines {
 impl DirectComposition {
     pub fn new(dxgi_device: &IDXGIDevice, hwnd: HWND) -> Result<Self> {
         let comp_device = get_comp_device(dxgi_device)?;
-        let comp_target = unsafe { comp_device.CreateTargetForHwnd(hwnd, true) }?;
+        let comp_target = unsafe { comp_device.CreateTargetForHwnd(hwnd, false) }?;
         let comp_visual = unsafe { comp_device.CreateVisual() }?;
 
         Ok(Self {
@@ -1174,10 +1073,7 @@ struct GlobalParams {
     grayscale_enhanced_contrast: f32,
     subpixel_enhanced_contrast: f32,
     is_bgr: u32,
-    // Quill: see `GlobalParams` in shaders.hlsl.
-    hdr_output: u32,
-    output_scale: f32,
-    _pad: u32,
+    _pad: [u32; 3],
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -1208,7 +1104,14 @@ impl<T> PipelineState<T> {
         buffer_size: usize,
         blend_state: ID3D11BlendState,
     ) -> Result<Self> {
-        let (vertex, fragment) = shared_shaders(device, shader_module)?;
+        let vertex = {
+            let raw_shader = RawShaderBytes::new(shader_module, ShaderTarget::Vertex)?;
+            create_vertex_shader(device, raw_shader.as_bytes())?
+        };
+        let fragment = {
+            let raw_shader = RawShaderBytes::new(shader_module, ShaderTarget::Fragment)?;
+            create_fragment_shader(device, raw_shader.as_bytes())?
+        };
         let buffer = create_buffer(device, std::mem::size_of::<T>(), buffer_size)?;
         let view = create_buffer_view(device, &buffer)?;
 
@@ -1380,8 +1283,6 @@ struct PathSprite {
 
 impl Drop for DirectXRenderer {
     fn drop(&mut self) {
-        // Quill: a later window reusing the handle starts in SDR.
-        crate::hdr_output::forget(self.hwnd);
         #[cfg(debug_assertions)]
         if let Some(devices) = &self.devices {
             report_live_objects(&devices.device).ok();
@@ -1669,54 +1570,6 @@ fn create_blend_state_for_path_sprite(device: &ID3D11Device) -> Result<ID3D11Ble
     }
 }
 
-/// Quill: the shaders made on one D3D device, shared by every window that
-/// draws with it. Upstream made all of them again for each window, so each
-/// notification toast (a window of its own) had the driver build about ten
-/// shader pairs on the UI thread. Blend and sampler states need no cache:
-/// D3D11 hands back the existing object for an identical description. The
-/// cache follows the device: after a device loss the new device gets its
-/// own shaders.
-struct SharedShaders {
-    device: ID3D11Device,
-    pairs: Vec<(ShaderModule, ID3D11VertexShader, ID3D11PixelShader)>,
-}
-
-thread_local! {
-    static SHARED_SHADERS: std::cell::RefCell<Option<SharedShaders>> =
-        const { std::cell::RefCell::new(None) };
-}
-
-fn shared_shaders(
-    device: &ID3D11Device,
-    module: ShaderModule,
-) -> Result<(ID3D11VertexShader, ID3D11PixelShader)> {
-    SHARED_SHADERS.with_borrow_mut(|shared| {
-        if shared.as_ref().is_some_and(|shared| shared.device != *device) {
-            *shared = None;
-        }
-        let shared = shared.get_or_insert_with(|| SharedShaders {
-            device: device.clone(),
-            pairs: Vec::new(),
-        });
-        if let Some((_, vertex, fragment)) = shared.pairs.iter().find(|(made, ..)| *made == module)
-        {
-            return Ok((vertex.clone(), fragment.clone()));
-        }
-        let vertex = {
-            let raw_shader = RawShaderBytes::new(module, ShaderTarget::Vertex)?;
-            create_vertex_shader(device, raw_shader.as_bytes())?
-        };
-        let fragment = {
-            let raw_shader = RawShaderBytes::new(module, ShaderTarget::Fragment)?;
-            create_fragment_shader(device, raw_shader.as_bytes())?
-        };
-        shared
-            .pairs
-            .push((module, vertex.clone(), fragment.clone()));
-        Ok((vertex, fragment))
-    })
-}
-
 #[inline]
 fn create_vertex_shader(device: &ID3D11Device, bytes: &[u8]) -> Result<ID3D11VertexShader> {
     unsafe {
@@ -1863,9 +1716,6 @@ pub(crate) mod shader_resources {
         MonochromeSprite,
         SubpixelSprite,
         PolychromeSprite,
-        EmojiRasterization,
-        HdrSurface,
-        YuvSurface,
     }
 
     #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -1939,18 +1789,6 @@ pub(crate) mod shader_resources {
                     ShaderTarget::Vertex => POLYCHROME_SPRITE_VERTEX_BYTES,
                     ShaderTarget::Fragment => POLYCHROME_SPRITE_FRAGMENT_BYTES,
                 },
-                ShaderModule::EmojiRasterization => match target {
-                    ShaderTarget::Vertex => EMOJI_RASTERIZATION_VERTEX_BYTES,
-                    ShaderTarget::Fragment => EMOJI_RASTERIZATION_FRAGMENT_BYTES,
-                },
-                ShaderModule::HdrSurface => match target {
-                    ShaderTarget::Vertex => HDR_SURFACE_VERTEX_BYTES,
-                    ShaderTarget::Fragment => HDR_SURFACE_FRAGMENT_BYTES,
-                },
-                ShaderModule::YuvSurface => match target {
-                    ShaderTarget::Vertex => YUV_SURFACE_VERTEX_BYTES,
-                    ShaderTarget::Fragment => YUV_SURFACE_FRAGMENT_BYTES,
-                },
             };
             Self { inner: bytes }
         }
@@ -1961,12 +1799,6 @@ pub(crate) mod shader_resources {
         unsafe {
             use windows::Win32::Graphics::{
                 Direct3D::ID3DInclude, Hlsl::D3D_COMPILE_STANDARD_FILE_INCLUDE,
-            };
-
-            let shader_name = if matches!(entry, ShaderModule::EmojiRasterization) {
-                "color_text_raster.hlsl"
-            } else {
-                "shaders.hlsl"
             };
 
             let entry = format!(
@@ -1985,7 +1817,7 @@ pub(crate) mod shader_resources {
             let mut compile_blob = None;
             let mut error_blob = None;
             let shader_path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-                .join(&format!("src/{}", shader_name))
+                .join("src/shaders.hlsl")
                 .canonicalize()?;
 
             let entry_point = PCSTR::from_raw(entry.as_ptr());
@@ -2037,9 +1869,6 @@ pub(crate) mod shader_resources {
                 ShaderModule::MonochromeSprite => "monochrome_sprite",
                 ShaderModule::SubpixelSprite => "subpixel_sprite",
                 ShaderModule::PolychromeSprite => "polychrome_sprite",
-                ShaderModule::EmojiRasterization => "emoji_rasterization",
-                ShaderModule::HdrSurface => "hdr_surface",
-                ShaderModule::YuvSurface => "yuv_surface",
             }
         }
     }
@@ -2225,67 +2054,5 @@ mod dxgi {
             (number >> 16) & 0xFFFF,
             number & 0xFFFF
         ))
-    }
-}
-
-#[cfg(test)]
-mod shared_shader_tests {
-    use super::{SHARED_SHADERS, ShaderModule, shared_shaders};
-    use windows::Win32::{
-        Foundation::HMODULE,
-        Graphics::{
-            Direct3D::D3D_DRIVER_TYPE_WARP,
-            Direct3D11::{
-                D3D11_CREATE_DEVICE_BGRA_SUPPORT, D3D11_SDK_VERSION, D3D11CreateDevice,
-                ID3D11Device, ID3D11VertexShader,
-            },
-        },
-    };
-
-    fn warp_device() -> ID3D11Device {
-        let mut device: Option<ID3D11Device> = None;
-        unsafe {
-            D3D11CreateDevice(
-                None,
-                D3D_DRIVER_TYPE_WARP,
-                HMODULE::default(),
-                D3D11_CREATE_DEVICE_BGRA_SUPPORT,
-                None,
-                D3D11_SDK_VERSION,
-                Some(&mut device),
-                None,
-                None,
-            )
-        }
-        .expect("WARP device");
-        device.expect("WARP device")
-    }
-
-    fn owner(shader: &ID3D11VertexShader) -> ID3D11Device {
-        unsafe { shader.GetDevice() }.expect("shader device")
-    }
-
-    /// A device loss hands every window a new device: the shaders it gets
-    /// must be made on that device, and the lost device's shaders dropped.
-    #[::core::prelude::v1::test]
-    fn a_new_device_gets_its_own_shaders() {
-        let lost = warp_device();
-        let (first, _) = shared_shaders(&lost, ShaderModule::Quad).expect("shaders");
-        let (again, _) = shared_shaders(&lost, ShaderModule::Quad).expect("shaders");
-        assert_eq!(first, again, "a second window on one device shares them");
-
-        let recovered = warp_device();
-        let (made, _) = shared_shaders(&recovered, ShaderModule::Quad).expect("shaders");
-        assert_ne!(made, first);
-        assert_eq!(owner(&made), recovered);
-        let (sprite, _) =
-            shared_shaders(&recovered, ShaderModule::MonochromeSprite).expect("shaders");
-        assert_eq!(owner(&sprite), recovered);
-        let held = SHARED_SHADERS.with_borrow(|shared| {
-            shared
-                .as_ref()
-                .map(|shared| (shared.device == recovered, shared.pairs.len()))
-        });
-        assert_eq!(held, Some((true, 2)), "only the new device's shaders stay");
     }
 }

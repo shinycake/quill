@@ -1,7 +1,3 @@
-// Modified by the Quill project (2026) from gpui-pre-windows 0.3.10 (Apache-2.0):
-// posts through `gpui_message`; `dispatch_after` goes through `TimerThread`
-// (high-resolution timers) and falls back to the thread-pool timer only when
-// that thread can't start. See third_party/gpui-pre-windows/QUILL-CHANGES.md.
 use std::{
     ffi::c_void,
     ptr::NonNull,
@@ -13,7 +9,7 @@ use std::{
 use anyhow::Context;
 use gpui_util::ResultExt;
 use windows::Win32::{
-    Foundation::FILETIME,
+    Foundation::{FILETIME, LPARAM, WPARAM},
     Media::{timeBeginPeriod, timeEndPeriod},
     System::Threading::{
         CloseThreadpoolTimer, CreateThreadpoolTimer, GetCurrentThread, PTP_CALLBACK_INSTANCE,
@@ -21,12 +17,10 @@ use windows::Win32::{
         TP_CALLBACK_ENVIRON_V3, TP_CALLBACK_PRIORITY, TP_CALLBACK_PRIORITY_HIGH,
         TP_CALLBACK_PRIORITY_LOW, TP_CALLBACK_PRIORITY_NORMAL, TrySubmitThreadpoolCallback,
     },
+    UI::WindowsAndMessaging::PostMessageW,
 };
 
-use crate::{
-    HWND, SafeHwnd, ValidationNumber, WM_GPUI_TASK_DISPATCHED_ON_MAIN_THREAD,
-    timer_thread::TimerThread,
-};
+use crate::{HWND, SafeHwnd, WM_GPUI_TASK_DISPATCHED_ON_MAIN_THREAD};
 use gpui::{
     PlatformDispatcher, Priority, PriorityQueueSender, RunnableVariant, TimerResolutionGuard,
 };
@@ -36,15 +30,14 @@ pub(crate) struct WindowsDispatcher {
     main_sender: PriorityQueueSender<RunnableVariant>,
     main_thread_id: ThreadId,
     pub(crate) platform_window_handle: SafeHwnd,
-    validation_number: ValidationNumber,
-    timers: Option<TimerThread>,
+    validation_number: usize,
 }
 
 impl WindowsDispatcher {
     pub(crate) fn new(
         main_sender: PriorityQueueSender<RunnableVariant>,
         platform_window_handle: HWND,
-        validation_number: ValidationNumber,
+        validation_number: usize,
     ) -> Self {
         let main_thread_id = current().id();
         let platform_window_handle = platform_window_handle.into();
@@ -55,7 +48,6 @@ impl WindowsDispatcher {
             platform_window_handle,
             validation_number,
             wake_posted: AtomicBool::new(false),
-            timers: TimerThread::start(),
         }
     }
 
@@ -128,10 +120,13 @@ impl PlatformDispatcher for WindowsDispatcher {
             Ok(_) => {
                 if !self.wake_posted.swap(true, Ordering::AcqRel) {
                     unsafe {
-                        self.validation_number
-                            .message(WM_GPUI_TASK_DISPATCHED_ON_MAIN_THREAD, 0)
-                            .post(self.platform_window_handle.as_raw())
-                            .log_err();
+                        PostMessageW(
+                            Some(self.platform_window_handle.as_raw()),
+                            WM_GPUI_TASK_DISPATCHED_ON_MAIN_THREAD,
+                            WPARAM(self.validation_number),
+                            LPARAM(0),
+                        )
+                        .log_err();
                     }
                 }
             }
@@ -150,10 +145,7 @@ impl PlatformDispatcher for WindowsDispatcher {
     }
 
     fn dispatch_after(&self, duration: Duration, runnable: RunnableVariant) {
-        match &self.timers {
-            Some(timers) => timers.schedule(duration, runnable),
-            None => self.dispatch_on_threadpool_after(runnable, duration),
-        }
+        self.dispatch_on_threadpool_after(runnable, duration);
     }
 
     fn spawn_realtime(&self, f: Box<dyn FnOnce() + Send>) {

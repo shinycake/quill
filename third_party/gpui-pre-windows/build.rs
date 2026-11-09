@@ -1,6 +1,4 @@
 #![allow(clippy::disallowed_methods, reason = "build scripts are exempt")]
-// Modified by the Quill project (2026) from gpui-pre-windows 0.3.9 (Apache-2.0):
-// compiles the `hdr_surface` and `yuv_surface` shaders. See third_party/gpui-pre-windows/QUILL-CHANGES.md.
 
 fn main() {
     #[cfg(not(all(target_os = "windows", not(debug_assertions))))]
@@ -42,9 +40,6 @@ mod shader_compilation {
             "monochrome_sprite",
             "subpixel_sprite",
             "polychrome_sprite",
-            // QUILL: HDR stills and NV12 video pictures.
-            "hdr_surface",
-            "yuv_surface",
         ];
 
         let rust_binding_path = format!("{}/shaders_bytes.rs", out_dir);
@@ -55,18 +50,6 @@ mod shader_compilation {
         for module in modules {
             compile_shader_for_module(
                 module,
-                &out_dir,
-                &fxc_path,
-                shader_path.to_str().unwrap(),
-                &rust_binding_path,
-            );
-        }
-
-        {
-            let shader_path = PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap())
-                .join("src/color_text_raster.hlsl");
-            compile_shader_for_module(
-                "emoji_rasterization",
                 &out_dir,
                 &fxc_path,
                 shader_path.to_str().unwrap(),
