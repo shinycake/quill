@@ -314,6 +314,40 @@ fn set_chat_member_status_ok_invalidates_admin_list() {
     assert_eq!(session.groups.member_list_stale, vec![13]);
 }
 
+/// The add's answer is the only word a user client gets: it marks the
+/// member lists stale so the dialog and the info panel ask again.
+#[test]
+fn adding_members_marks_the_member_list_stale() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    session
+        .groups
+        .basic_group_members
+        .insert(13, crate::state::SupergroupMembersFetch::Loading);
+    let extra = session.request(RequestPurpose::AddChatMember, Some(ChatId(13)));
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"failedToAddMembers","@extra":"{}","failed_to_add_members":[]}}"#,
+            extra.0
+        ),
+    );
+    assert!(!session.groups.basic_group_members.contains_key(&13));
+    assert_eq!(session.groups.member_list_stale, vec![13]);
+}
+
+/// A finished ownership transfer drops the member caches and marks the
+/// chat stale, so the lists on screen refetch instead of loading forever.
+#[test]
+fn an_ownership_transfer_marks_the_member_list_stale() {
+    let (mut session, _sink) = session();
+    session.begin_ownership_transfer(13, 888);
+    session.finish_ownership_transfer(888, Some(13));
+    assert_eq!(session.groups.member_list_stale, vec![13]);
+}
+
 #[test]
 fn update_chat_member_invalidates_admin_list_and_own_rights() {
     // Phase D3b: `updateChatMember` (schema 1.8.67, line 11202)

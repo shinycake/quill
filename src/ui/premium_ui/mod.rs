@@ -293,7 +293,19 @@ impl QuillApp {
         cx.notify();
     }
 
-    fn select_gift(&mut self, id: Option<String>, cx: &mut Context<Self>) {
+    pub(in crate::ui) fn select_gift(&mut self, id: Option<String>, cx: &mut Context<Self>) {
+        // An Upgrade or resale price confirmation left open on another
+        // gift belongs to that gift: it goes, or this gift's buttons would
+        // stay hidden behind it.
+        if let Some(manage) = self.gift_manage_mut() {
+            manage.flow.take_if(|flow| match flow {
+                quill::gift_manage::GiftFlow::Upgrade { id: open, .. }
+                | quill::gift_manage::GiftFlow::Resale { id: open } => {
+                    id.as_deref() != Some(open.as_str())
+                }
+                _ => false,
+            });
+        }
         if let Some(hub) = self.hub_mut() {
             hub.gift_selected = id;
             hub.gift_convert_confirm = None;
@@ -858,6 +870,9 @@ fn gift_details(
 use crate::ui::status_note::StatusNote;
 pub(super) use gift_card::{gift_card_element, gift_card_of};
 mod gift_card;
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+mod gift_flow_tests;
 mod grams;
 mod grams_demo;
 mod grams_withdraw;

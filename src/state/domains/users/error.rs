@@ -129,8 +129,12 @@ impl Session {
                     Some(format!("could not import contacts (error {})", err.code));
             }
             Some(RequestPurpose::AddContactByPhone) => {
-                self.users_state.new_contact_outcome =
-                    pending.map(|p| (p.id, NewContactOutcome::Failed(err.code)));
+                let id = pending.map(|p| p.id);
+                if id.is_some() && self.users_state.new_contact_request == id {
+                    self.users_state.new_contact_request = None;
+                    self.users_state.new_contact_outcome =
+                        pending.map(|p| (p.id, NewContactOutcome::Failed(err.code)));
+                }
             }
             Some(RequestPurpose::ClearImportedContacts) => {
                 self.users_state.contacts_notice = Some(format!(

@@ -78,6 +78,7 @@ impl QuillApp {
         }) {
             return;
         }
+        self.profile_modal_replaced_by(target);
         if let InfoPanelTarget::User(user_id) = target {
             self.reset_common_groups_search(user_id, window, cx);
         }

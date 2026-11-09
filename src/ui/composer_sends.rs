@@ -490,8 +490,10 @@ impl QuillApp {
         }
     }
 
-    /// `account` logged out or was removed: drop its choices.
+    /// `account` logged out or was removed: drop its choices, and the
+    /// mini apps it agreed to open (tdesktop keeps them with the account).
     pub(in crate::ui) fn forget_account_sends(&mut self, account: &AccountKey) {
+        quill::web_app::trust::forget_account(&account.to_string());
         self.composer_ui.send_box.prep.cancel_account(account);
         let dropped = self.composer_sends.forget_account(account);
         self.forget_tray_checks(&dropped);

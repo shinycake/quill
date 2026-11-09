@@ -565,8 +565,8 @@ impl<S: JsonSender> ConnectDriver<S> {
         if paid_prices_change {
             self.sync_paid_guard();
         }
-        if let Some((followup, ok)) = admin_followup {
-            self.run_admin_followup(followup, ok);
+        if let Some((followups, ok)) = admin_followup {
+            self.run_admin_followups(followups, ok);
         }
         if let Some((edit, ok)) = edit_after_upgrade {
             self.run_edit_after_upgrade(edit, ok);
@@ -574,6 +574,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if let Some(extra) = new_chat_created {
             self.run_new_chat_created(extra);
         }
+        self.close_dropped_web_apps();
         self.maybe_preload_topics(topic_chat, forum_supergroup);
         self.maybe_refresh_forum_topic(topic_refresh);
         if self.session.last_seq != previous_seq {

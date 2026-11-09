@@ -1,14 +1,67 @@
 #![deny(clippy::indexing_slicing)]
 use super::app::QuillApp;
 use super::shell::{DialogKind, QuillShell};
+use crate::ui::status_note::StatusNote;
 use gpui_kit::component::button::*;
 use gpui_kit::component::dialog::Dialog;
 use gpui_kit::component::input::Textarea;
 use gpui_kit::component::*;
 use gpui_kit::*;
+use quill::ids::ChatId;
 use quill::lang::{keys, tr, tr_with};
+use quill::telegram::envelope::MessageSender;
 
 impl QuillApp {
+    /// Open "Buy a collectible by name" for `chat`, the chat it buys for
+    /// until it closes (`PaymentUi::marketplace_chat`).
+    pub(super) fn open_marketplace_for(
+        &mut self,
+        chat: Option<ChatId>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(chat) = chat else {
+            self.connection.set_note(StatusNote::silent(tr(
+                keys::Q_NAVIGATION_OPEN_A_PRIVATE_CHAT_OR,
+            )));
+            cx.notify();
+            return;
+        };
+        let busy = self
+            .session()
+            .and_then(|s| s.payments.marketplace_gift.as_ref())
+            .is_some_and(|g| g.loading || g.sending);
+        if !busy {
+            self.payments
+                .marketplace_name_input
+                .update(cx, |input, cx| input.set_value("", window, cx));
+            self.payments
+                .marketplace_comment_input
+                .update(cx, |input, cx| input.set_value("", window, cx));
+            self.payments.marketplace_private = true;
+            self.payments.marketplace_error = None;
+            self.payments.marketplace_chat = Some(chat);
+            if let Some(live) = self.live.as_mut() {
+                live.driver.session.payments.marketplace_gift = None;
+            } else if let Some(session) = self.demo_session.as_mut() {
+                session.payments.marketplace_gift = None;
+            }
+        }
+        self.payments.marketplace_open = true;
+        cx.notify();
+    }
+
+    /// The Send Gift box's recipient, as the chat a purchase for it goes
+    /// to (a user's private chat has the user's id).
+    pub(super) fn send_gift_recipient_chat(&self) -> Option<ChatId> {
+        let send = &self.session()?.payments.gifts_manage.send;
+        let recipient = send.recipient.as_ref().filter(|_| send.open)?;
+        Some(match recipient.sender {
+            MessageSender::User { user_id } => ChatId(user_id),
+            MessageSender::Chat { chat_id } => ChatId(chat_id),
+        })
+    }
+
     fn load_marketplace_gift(&mut self, cx: &mut Context<Self>) {
         let name = self
             .payments
@@ -17,7 +70,7 @@ impl QuillApp {
             .value()
             .trim()
             .to_string();
-        let chat = self.session().and_then(|s| s.open_chat);
+        let chat = self.payments.marketplace_chat;
         let result = chat.and_then(|chat| {
             self.live
                 .as_mut()

@@ -259,6 +259,51 @@ fn withdrawal_asks_without_password_then_with_it() {
     assert_eq!(earn.open_url.as_deref(), Some("https://fragment.com/w"));
 }
 
+/// An answer to a withdrawal the user cancelled opens nothing, and it
+/// leaves the next attempt alone: its URL does not end it, and its error
+/// writes nothing into the new password box.
+#[test]
+fn a_cancelled_withdrawals_answer_opens_nothing() {
+    let mut p = parts();
+    let target = WithdrawTarget::Stars {
+        owner: EarnPeer::User(BOT),
+        count: 1500,
+    };
+    p.0.start_withdrawal(target).unwrap();
+    error(&mut p, "getStarWithdrawalUrl", "PASSWORD_HASH_INVALID");
+    p.0.submit_withdrawal_password("hunter2").unwrap();
+    let cancelled = sent_request(&p.1, "getStarWithdrawalUrl")["@extra"].clone();
+    p.0.cancel_withdrawal();
+    p.0.start_withdrawal(target).unwrap();
+    feed(
+        &mut p,
+        json!({"@type": "httpUrl", "url": "https://fragment.com/w", "@extra": cancelled}),
+    );
+    let earn = &p.0.session.payments.earn;
+    assert_eq!(earn.open_url, None, "Fragment does not open after Cancel");
+    assert_eq!(
+        earn.withdraw.as_ref().map(|w| &w.step),
+        Some(&WithdrawStep::Checking),
+        "the new attempt goes on"
+    );
+    // Cancel the new attempt from its password box; its wrong-password
+    // answer lands on the attempt after it.
+    error(&mut p, "getStarWithdrawalUrl", "PASSWORD_HASH_INVALID");
+    p.0.submit_withdrawal_password("wrong").unwrap();
+    let cancelled = sent_request(&p.1, "getStarWithdrawalUrl")["@extra"].clone();
+    p.0.cancel_withdrawal();
+    p.0.start_withdrawal(target).unwrap();
+    feed(
+        &mut p,
+        json!({"@type": "error", "code": 400, "message": "PASSWORD_HASH_INVALID",
+            "@extra": cancelled}),
+    );
+    assert_eq!(
+        p.0.session.payments.earn.withdraw.as_ref().map(|w| &w.step),
+        Some(&WithdrawStep::Checking)
+    );
+}
+
 #[test]
 fn withdrawal_errors_follow_tdesktop() {
     let mut p = parts();

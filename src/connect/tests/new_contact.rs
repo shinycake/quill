@@ -134,3 +134,45 @@ fn a_failed_import_is_reported_to_the_box() {
     );
     cleanup(f);
 }
+
+/// Esc before the answer, then a new box: its Create goes out, and the
+/// first import's answer opens no chat behind it.
+#[test]
+fn a_closed_boxs_import_opens_nothing_and_the_next_box_sends() {
+    let mut f = fixture();
+    f.1.add_contact_by_phone("+15550100001", "Ada", "").unwrap();
+    let first = last_request(&f);
+    f.1.forget_new_contact();
+    let second =
+        f.1.add_contact_by_phone("+15550100002", "Grace", "")
+            .unwrap();
+    assert!(second.is_some(), "the next box's Create is sent");
+    let sent = f.2.snapshot().len();
+    ingest(
+        &mut f,
+        &format!(
+            r#"{{"@type":"importedContacts","@extra":"{}","user_ids":[777],"importer_count":[0]}}"#,
+            extra_of(&first)
+        ),
+    );
+    assert!(f.1.session.users_state.user_chat_to_open.is_none());
+    assert!(f.1.session.users_state.new_contact_outcome.is_none());
+    assert_eq!(f.2.snapshot().len(), sent, "no createPrivateChat");
+    assert_eq!(f.1.session.users_state.new_contact_request, second);
+    cleanup(f);
+}
+
+/// The Contacts tab's list, invalidated by a contact change, is fetched
+/// again; one that failed waits for Retry.
+#[test]
+fn an_invalidated_contact_list_is_fetched_again() {
+    let mut f = fixture();
+    f.1.session.users_state.contacts = None;
+    f.1.session.users_state.contacts_error = false;
+    f.1.refetch_invalidated_contacts();
+    assert_eq!(last_request(&f)["@type"], "getContacts");
+    let sent = f.2.snapshot().len();
+    f.1.refetch_invalidated_contacts();
+    assert_eq!(f.2.snapshot().len(), sent, "one fetch in flight");
+    cleanup(f);
+}

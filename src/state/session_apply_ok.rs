@@ -674,6 +674,13 @@ impl Session {
         // processed request from the cached list. The count is
         // approximate per the schema; `updateChatPendingJoinRequests`
         // is the authoritative badge source.
+        // An approved request adds a member: the member lists ask again.
+        if let Some(RequestPurpose::Groups(GroupsPurpose::ProcessChatJoinRequest { .. })) =
+            pending.map(|p| p.purpose)
+            && let Some(chat_id) = pending.and_then(|p| p.chat_id)
+        {
+            self.groups.members_added(chat_id.0);
+        }
         if let Some(RequestPurpose::Groups(GroupsPurpose::ProcessChatJoinRequest { user_id })) =
             pending.map(|p| p.purpose)
             && let Some(chat_id) = pending.and_then(|p| p.chat_id)

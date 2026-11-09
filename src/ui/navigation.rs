@@ -1,11 +1,9 @@
 //! Navigation keeps chat rows in the sidebar and preferences in Settings.
 #![deny(clippy::indexing_slicing)]
 use super::app::QuillApp;
-use crate::ui::status_note::StatusNote;
 use gpui_kit::component::*;
 use gpui_kit::*;
 use quill::agent::ui_driver::guard::{self, HardSurface};
-use quill::lang::{keys, tr};
 use quill::new_chat::NewChatKind;
 use quill::settings_catalog::Page;
 use quill::telegram::envelope::ChatKind;
@@ -34,7 +32,6 @@ pub(super) enum NavigationAction {
     Premium,
     MyGifts,
     ChatGifts,
-    Gift,
     /// The send-gift dialog for the open chat's user or channel.
     SendGift,
     ChatMute,
@@ -99,12 +96,9 @@ impl NavigationAction {
     /// box, and the payment ones a chat opens.
     fn hard_surface(self) -> Option<HardSurface> {
         match self {
-            Self::Stars
-            | Self::Premium
-            | Self::Subscriptions
-            | Self::MyGifts
-            | Self::Gift
-            | Self::SendGift => Some(HardSurface::Payments),
+            Self::Stars | Self::Premium | Self::Subscriptions | Self::MyGifts | Self::SendGift => {
+                Some(HardSurface::Payments)
+            }
             Self::Passcode => Some(HardSurface::Passcode),
             Self::TwoFa | Self::Websites => Some(HardSurface::Security),
             Self::Account | Self::Accounts => Some(HardSurface::Account),
@@ -254,35 +248,6 @@ impl QuillApp {
                 }
             }
             NavigationAction::SendGift => self.open_send_gift_dialog(window, cx),
-            NavigationAction::Gift => {
-                if self.session().and_then(|s| s.open_chat).is_some() {
-                    let busy = self
-                        .session()
-                        .and_then(|s| s.payments.marketplace_gift.as_ref())
-                        .is_some_and(|g| g.loading || g.sending);
-                    if !busy {
-                        self.payments
-                            .marketplace_name_input
-                            .update(cx, |input, cx| input.set_value("", window, cx));
-                        self.payments
-                            .marketplace_comment_input
-                            .update(cx, |input, cx| input.set_value("", window, cx));
-                        self.payments.marketplace_private = true;
-                        self.payments.marketplace_error = None;
-                        if let Some(live) = self.live.as_mut() {
-                            live.driver.session.payments.marketplace_gift = None;
-                        } else if let Some(session) = self.demo_session.as_mut() {
-                            session.payments.marketplace_gift = None;
-                        }
-                    }
-                    self.payments.marketplace_open = true;
-                } else {
-                    self.connection.set_note(StatusNote::silent(tr(
-                        keys::Q_NAVIGATION_OPEN_A_PRIVATE_CHAT_OR,
-                    )));
-                }
-                cx.notify();
-            }
             NavigationAction::Appearance => {
                 self.open_settings_on(Page::Appearance);
                 cx.notify();

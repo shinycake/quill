@@ -259,6 +259,14 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // Both steps run where the panel is drawn, in order: from a chat
+        // window the panel's open is handed to the main window, and the
+        // post's page set before it would be reset to the overview.
+        if self.hand_to_main_window(cx, move |app, window, cx| {
+            app.open_message_statistics_panel(chat_id, message_id, window, cx);
+        }) {
+            return;
+        }
         self.open_info_panel_target(
             quill::state::InfoPanelTarget::Statistics(chat_id.0),
             window,

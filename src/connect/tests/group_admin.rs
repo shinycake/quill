@@ -668,3 +668,70 @@ fn unrestrict_boost_count_needs_the_right_to_restrict() {
     assert_eq!(count(&recorder, "setSupergroupUnrestrictBoostCount"), 0);
     let _ = std::fs::remove_dir_all(dir);
 }
+
+/// The Edit box saves a basic group's type change with History: Visible.
+/// The history step joins the type save's upgrade, and both land on the
+/// new supergroup.
+#[test]
+fn visible_history_saved_with_a_type_change_joins_its_upgrade() {
+    let (dir, prepared) = prepared_tmp(&MemorySecretStore::new());
+    let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+    let recorder = Arc::new(RecordingSender::new());
+    let seq = AtomicU64::new(0);
+    let mut driver = ready_driver(&recorder, prepared, &sink, &seq);
+    ingest(
+        &mut driver,
+        r#"{"@type":"updateNewChat","chat":{"id":30,"title":"Basic","type":{"@type":"chatTypeBasicGroup","basic_group_id":7},"unread_count":0}}"#,
+        &seq,
+        &sink,
+    );
+    ingest(
+        &mut driver,
+        &format!(
+            r#"{{"@type":"updateBasicGroup","basic_group":{{"@type":"basicGroup","id":7,"member_count":12,"status":{CREATOR},"is_active":true}}}}"#
+        ),
+        &seq,
+        &sink,
+    );
+    let upgrade = driver
+        .save_group_type(
+            ChatId(30),
+            &[crate::group_type::GroupTypeEdit::Upgrade],
+            &[],
+        )
+        .unwrap();
+    let upgrade = *upgrade.first().expect("upgrade sent");
+    assert!(
+        driver
+            .set_group_history_visible(ChatId(30), true)
+            .unwrap()
+            .is_none(),
+        "no second upgrade"
+    );
+    assert_eq!(count(&recorder, "upgradeBasicGroupChatToSupergroupChat"), 1);
+    ingest(
+        &mut driver,
+        &format!(
+            r#"{{"@type":"updateSupergroup","supergroup":{{"@type":"supergroup","id":777,"member_count":12,"status":{CREATOR}}}}}"#
+        ),
+        &seq,
+        &sink,
+    );
+    ingest(
+        &mut driver,
+        &format!(
+            r#"{{"@type":"chat","@extra":"{}","id":-100777,"title":"Basic","type":{{"@type":"chatTypeSupergroup","supergroup_id":777,"is_channel":false}},"unread_count":0}}"#,
+            upgrade.0
+        ),
+        &seq,
+        &sink,
+    );
+    let history = recorder
+        .snapshot()
+        .into_iter()
+        .find(|j| j.contains("toggleSupergroupIsAllHistoryAvailable"))
+        .expect("history made visible on the new group");
+    assert!(history.contains(r#""supergroup_id":777"#));
+    assert!(driver.session.groups.admin_followups.is_empty());
+    let _ = std::fs::remove_dir_all(dir);
+}

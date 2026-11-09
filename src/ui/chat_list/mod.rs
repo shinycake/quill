@@ -196,8 +196,7 @@ impl QuillApp {
         self.enter_chat_ui(chat_id, cx);
         // Voice notes and music keep playing across chats (the player bar
         // follows, as in Telegram Desktop).
-        self.stop_animation_playback();
-        self.playback.autoplayed_gifs.clear();
+        self.leave_gifs_here(self.open_chat_id());
         self.leave_sticker_chat(
             None,
             self.open_chat_id(),
@@ -572,6 +571,9 @@ impl QuillApp {
                 &err,
             )));
         }
+        // With sync off a list that was never loaded, or was invalidated,
+        // still loads.
+        self.refetch_open_contacts();
         cx.notify();
     }
 

@@ -535,3 +535,47 @@ fn a_phone_share_without_a_number_is_not_sent() {
     contact.phone_number = " ".into();
     assert!(h.driver.share_phone_with_bot(42, &contact).is_err());
 }
+
+/// A launch pressed before an account switch: its answer, landing while
+/// the account is in the background, opens nothing then or later, and
+/// the app TDLib started is closed.
+#[test]
+fn a_launch_dropped_by_a_switch_opens_nothing_and_is_closed() {
+    let mut h = Harness::ready();
+    let theme = ThemeParams::light_default();
+    let extra = h
+        .driver
+        .open_web_app(
+            ChatId(5),
+            42,
+            "https://bot.example/app",
+            LaunchSource::InlineButton,
+            &theme,
+        )
+        .expect("sent");
+    h.driver.forget_web_app_launches();
+    h.ingest(&format!(
+        r#"{{"@type":"webAppInfo","@extra":"{}","launch_id":"777","url":{{"@type":"webAppUrl","url":"https://bot.example/app?x","require_same_origin":false}}}}"#,
+        extra.as_extra()
+    ));
+    assert_eq!(h.driver.session.bots.web_apps.open_result, None);
+    assert_eq!(h.last("closeWebApp")["web_app_launch_id"], 777);
+}
+
+/// An answer that landed before the switch, not yet shown, is closed too.
+#[test]
+fn an_unshown_answer_is_closed_on_a_switch() {
+    let mut h = Harness::ready();
+    let theme = ThemeParams::light_default();
+    let extra = h
+        .driver
+        .open_web_app(ChatId(5), 42, "", LaunchSource::InlineButton, &theme)
+        .expect("sent");
+    h.ingest(&format!(
+        r#"{{"@type":"webAppInfo","@extra":"{}","launch_id":"778","url":{{"@type":"webAppUrl","url":"https://bot.example/app?x","require_same_origin":false}}}}"#,
+        extra.as_extra()
+    ));
+    h.driver.forget_web_app_launches();
+    assert_eq!(h.driver.session.bots.web_apps.open_result, None);
+    assert_eq!(h.last("closeWebApp")["web_app_launch_id"], 778);
+}
