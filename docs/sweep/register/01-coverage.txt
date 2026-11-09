@@ -85,3 +85,13 @@ src/auth.rs	496	read
 src/auto_delete.rs	193	read
 src/autoscroll.rs	99	read
 src/autostart.rs	464	read
+src/battery_saving.rs	254	read
+src/battery_signal.rs	534	read
+src/boost_box.rs	880	read
+src/bot_invite.rs	367	read
+src/bot_profile.rs	81	read
+src/bot_verification.rs	318	read
+src/bubble_layout.rs	977	read
+src/business_bot_bar.rs	201	read
+src/business_bots.rs	381	read
+src/business_chat_links.rs	197	read
