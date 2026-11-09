@@ -140,6 +140,9 @@ impl QuillApp {
                     // honest UI is TDLib's own text saying so.
                     (true, _) => {
                         self.links.deep_link_dialog = Some(text);
+                        self.screen
+                            .windows
+                            .open_box_in(DialogKind::DeepLinkInfo, from_window);
                     }
                     (false, Some(action)) => {
                         live.driver.session.chats_state.deep_link_from_agent = from_agent;
@@ -150,11 +153,22 @@ impl QuillApp {
                     // copy written for exactly this case.
                     (false, None) => {
                         self.links.deep_link_dialog = Some(text);
+                        self.screen
+                            .windows
+                            .open_box_in(DialogKind::DeepLinkInfo, from_window);
                     }
                 }
             }
             // The user decides on the invite; Join starts its own origin.
             Some(preview @ DeepLinkState::InvitePreview { .. }) => {
+                // A preview already up is the same flow's: it stays where
+                // it shows. A new one belongs to the window the link was
+                // clicked in, not to the window the pointer is over now.
+                if self.screen.links.deep_link_invite.is_none() {
+                    self.screen
+                        .windows
+                        .open_box_in(DialogKind::DeepLinkInvite, from_window);
+                }
                 self.screen.links.deep_link_invite = Some(preview.clone());
                 live.driver.session.chats_state.deep_link = Some(preview);
             }
@@ -170,9 +184,13 @@ impl QuillApp {
                     action,
                     from_agent,
                 });
+                self.links.pending_flow_window = from_window;
             }
             Some(DeepLinkState::ShowText(text)) => {
                 self.links.deep_link_dialog = Some(text);
+                self.screen
+                    .windows
+                    .open_box_in(DialogKind::DeepLinkInfo, from_window);
             }
             // Typed links (`deep_link_types`): the UI half runs in render.
             // An agent's step gets none of them (settings, proxies, folders,
@@ -183,6 +201,7 @@ impl QuillApp {
                     guard::refuse_typed_link();
                 } else {
                     self.links.pending_deep_link_ui = Some(ui);
+                    self.links.pending_flow_window = from_window;
                 }
             }
             // TDLib has no type for it: `getDeepLinkInfo` explains it.
@@ -202,13 +221,22 @@ impl QuillApp {
         if self.refused_while_locked() {
             return;
         }
-        if let Some(open) = self.links.pending_deep_link_open.take() {
-            self.open_deep_link_chat(open, window, cx);
-            self.drop_shared_card(cx);
-        }
-        if let Some(ui) = self.links.pending_deep_link_ui.take() {
-            self.run_deep_link_ui(ui, window, cx);
-        }
+        // It runs in the main window's frame; its boxes belong to the
+        // window the link was clicked in.
+        let asked_by = self
+            .links
+            .pending_flow_window
+            .take()
+            .filter(|chat| self.windows.has(*chat));
+        self.as_asked_by(asked_by, |this| {
+            if let Some(open) = this.links.pending_deep_link_open.take() {
+                this.open_deep_link_chat(open, window, cx);
+                this.drop_shared_card(cx);
+            }
+            if let Some(ui) = this.links.pending_deep_link_ui.take() {
+                this.run_deep_link_ui(ui, window, cx);
+            }
+        });
     }
 
     /// Starts the deep-link flow for `link` at the next poll, remembering

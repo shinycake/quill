@@ -91,6 +91,7 @@ impl QuillApp {
                     .small()
                     .on_click(cx.listener(|this, _, _, cx| {
                         this.agent_ui.page.reset_confirm = true;
+                        this.open_box(crate::ui::shell::DialogKind::AgentResetToken);
                         cx.notify();
                     })),
                 cx,

@@ -10,6 +10,14 @@ use quill::composer::ComposerReplyTo;
 use quill::ids::ChatId;
 use quill::telegram::SendReply;
 
+#[cfg(test)]
+thread_local! {
+    /// The reply targets asked for, for tests (the demo session has no
+    /// driver to see the ask).
+    pub(super) static REPLY_FETCHES: std::cell::RefCell<Vec<(ChatId, quill::ids::MessageId)>> =
+        const { std::cell::RefCell::new(Vec::new()) };
+}
+
 impl QuillApp {
     /// An edit comes before a reply: cancelling the edit hands the stashed
     /// reply back, which may be gone too. Returns whether an edit was
@@ -83,6 +91,8 @@ impl QuillApp {
         else {
             return;
         };
+        #[cfg(test)]
+        REPLY_FETCHES.with(|asked| asked.borrow_mut().push((chat_id, message_id)));
         if let Some(live) = self.live.as_mut() {
             let _ = live.driver.fetch_composer_reply_target(chat_id, message_id);
         }

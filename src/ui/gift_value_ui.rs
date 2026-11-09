@@ -170,6 +170,7 @@ impl QuillApp {
                 }
             }
         }
+        self.open_box(crate::ui::shell::DialogKind::GiftValue);
         cx.notify();
     }
 

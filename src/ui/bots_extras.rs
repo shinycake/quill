@@ -219,6 +219,7 @@ impl QuillApp {
             target: None,
             rights: ChatAdminRights::default(),
         });
+        self.open_box(DialogKind::ProfilePanel);
         cx.notify();
     }
 
@@ -444,6 +445,7 @@ impl QuillApp {
                         .label(tr(keys::Q_MEDIA_BACK))
                         .ghost()
                         .on_click(cx.listener(move |this, _, window, cx| {
+                            // box-host: a step of the open box; it stays where it shows
                             this.dialogs.profile_dialog = Some(ProfileDialog::AddBot {
                                 bot_id,
                                 invite: back_invite.clone(),
@@ -509,6 +511,7 @@ impl QuillApp {
                     cx,
                 )
                 .on_click(cx.listener(move |this, _, window, cx| {
+                    // box-host: a step of the open box; it stays where it shows
                     this.dialogs.profile_dialog = Some(ProfileDialog::AddBot {
                         bot_id,
                         invite: row_invite.clone(),
@@ -549,6 +552,7 @@ impl QuillApp {
             game_short_name,
             target: None,
         });
+        self.open_box(DialogKind::ProfilePanel);
         cx.notify();
     }
 
@@ -674,6 +678,7 @@ impl QuillApp {
                         .label(tr(keys::Q_MEDIA_BACK))
                         .ghost()
                         .on_click(cx.listener(move |this, _, window, cx| {
+                            // box-host: a step of the open box; it stays where it shows
                             this.dialogs.profile_dialog = Some(ProfileDialog::ShareGame {
                                 bot_id,
                                 game_short_name: back_name.clone(),
@@ -715,6 +720,7 @@ impl QuillApp {
                     cx,
                 )
                 .on_click(cx.listener(move |this, _, window, cx| {
+                    // box-host: a step of the open box; it stays where it shows
                     this.dialogs.profile_dialog = Some(ProfileDialog::ShareGame {
                         bot_id,
                         game_short_name: name.clone(),

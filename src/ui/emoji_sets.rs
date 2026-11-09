@@ -37,6 +37,7 @@ const TABS: [EmojiSetTab; 2] = [EmojiSetTab::Installed, EmojiSetTab::Trending];
 impl QuillApp {
     pub(super) fn open_emoji_sets(&mut self, cx: &mut Context<Self>) {
         self.pickers.emoji_set_return_tab = EmojiSetTab::Installed;
+        self.open_box(DialogKind::EmojiSets);
         if let Some(live) = self.live.as_mut() {
             if live.driver.open_emoji_sets().is_err() {
                 self.connection.set_note(StatusNote::error(tr(

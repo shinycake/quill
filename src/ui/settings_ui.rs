@@ -89,6 +89,7 @@ impl QuillApp {
         } else if let Some(session) = self.demo_session.as_mut() {
             session.chat_list.archive_settings_open = true;
         }
+        self.open_box(DialogKind::ArchiveSettings);
         cx.notify();
     }
 
@@ -117,6 +118,7 @@ impl QuillApp {
             && let Some(mut settings) = session.chat_list.archive_chat_list_settings
         {
             archive_setting_set(&mut settings, index, on);
+            // box-host: a setting of the open archive box; it does not ask for the suggestion box
             session.chat_list.archive_chat_list_settings = Some(settings);
         }
         cx.notify();
@@ -252,8 +254,10 @@ impl QuillApp {
     /// session.
     pub(super) fn set_archive_settings_open(&mut self, open: bool) {
         if let Some(live) = self.live.as_mut() {
+            // box-host: only closes; every caller passes false
             live.driver.session.chat_list.archive_settings_open = open;
         } else if let Some(session) = self.demo_session.as_mut() {
+            // box-host: only closes; every caller passes false
             session.chat_list.archive_settings_open = open;
         }
     }

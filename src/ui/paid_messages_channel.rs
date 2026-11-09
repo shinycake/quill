@@ -125,6 +125,7 @@ impl QuillApp {
             touched: false,
             seeded,
         });
+        self.open_box(DialogKind::DirectMessages);
         cx.notify();
     }
 

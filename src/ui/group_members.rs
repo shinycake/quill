@@ -47,6 +47,7 @@ impl QuillApp {
                 .is_some_and(|chat| matches!(chat.kind, ChatKind::BasicGroup { .. }))
         });
         self.admin.member_dialog = Some(MemberDialog::new(window, cx, chat_id, is_basic_group));
+        self.open_box(DialogKind::Member);
         // Slice G1: a fresh dialog open clears the last action error —
         // stale failures from a previous open must not linger.
         if let Some(live) = self.live.as_mut() {

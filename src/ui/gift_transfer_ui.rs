@@ -56,6 +56,7 @@ impl QuillApp {
         if let Some(manage) = self.gift_manage_mut() {
             manage.flow = Some(quill::gift_manage::GiftFlow::Transfer(picker));
         }
+        self.open_box(crate::ui::shell::DialogKind::GiftTransfer);
         cx.notify();
     }
 

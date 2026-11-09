@@ -359,6 +359,7 @@ impl QuillApp {
             live.driver.session.payments.subscriptions_open = true;
             live.driver.maybe_fetch_star_subscriptions()
         });
+        self.open_box(DialogKind::Subscriptions);
         if !matches!(sent, Some(Ok(_))) {
             self.connection.set_note(StatusNote::error(tr(
                 keys::Q_MONEY_COULD_NOT_LOAD_SUBSCRIPTIONS,

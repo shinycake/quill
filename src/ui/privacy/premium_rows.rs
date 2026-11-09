@@ -122,6 +122,7 @@ impl QuillApp {
             && last_seen_warning_due(&detail, self.privacy_premium(), last_seen_warning_seen())
         {
             self.privacy.last_seen_warning = Some(detail);
+            self.open_box(DialogKind::LastSeenWarning);
             cx.notify();
             return;
         }

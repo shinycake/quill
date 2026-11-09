@@ -154,6 +154,7 @@ impl QuillApp {
         self.dialogs.edit_profile_dialog = Some(EditProfileDialog::new(
             window, cx, &first, &last, &bio, &username,
         ));
+        self.open_box(DialogKind::EditProfile);
         if let Some(dialog) = &self.dialogs.edit_profile_dialog {
             dialog
                 .first_name_input

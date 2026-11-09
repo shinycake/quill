@@ -210,6 +210,7 @@ impl QuillApp {
             }
         })
         .detach();
+        // box-host: a new Manage box; its history and type sub-boxes start closed
         self.admin.group_edit_box = Some(GroupEditBox {
             chat_id,
             title_input,
@@ -228,6 +229,7 @@ impl QuillApp {
             history_visible: None,
             history_box: None,
         });
+        self.open_box(DialogKind::GroupEditBox);
         cx.notify();
     }
 

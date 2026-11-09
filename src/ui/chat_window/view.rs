@@ -92,8 +92,11 @@ impl ChatWindowView {
         self.chat_id
     }
 
-    /// The window is going away: flush the draft and tell the app.
-    fn closing(&mut self, reopenable: bool, cx: &mut Context<Self>) {
+    /// The window is going away: close its boxes, flush the draft and tell
+    /// the app. `window` is this window while it can still run their
+    /// closes (`None`: the platform already destroyed it, and its
+    /// per-window boxes go with its state).
+    fn closing(&mut self, reopenable: bool, window: Option<&mut Window>, cx: &mut Context<Self>) {
         if self.closed {
             return;
         }
@@ -102,6 +105,10 @@ impl ChatWindowView {
         // Where the window stood, for "Reopen closed window".
         let bounds = self.bounds_seen.filter(|_| reopenable);
         let _ = self.owner.update(cx, |app, cx| {
+            // Its boxes close against its own state, before it goes.
+            if let Some(window) = window {
+                app.close_window_boxes(chat_id, window, cx);
+            }
             app.in_window_scope(Some(chat_id), cx, |app, cx| app.flush_leaving_draft(cx));
             app.chat_window_closed(chat_id, bounds, cx);
         });
@@ -129,7 +136,7 @@ impl ChatWindowView {
 
     /// Close the window from inside it (title bar close, Cmd/Ctrl+W).
     pub(crate) fn close(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.closing(true, cx);
+        self.closing(true, Some(window), cx);
         window.remove_window();
     }
 }
@@ -145,16 +152,16 @@ impl Render for ChatWindowView {
         // (Telegram Desktop `closeChatFromWindows`, and a separate window
         // closes when its peer becomes unavailable). So does a window the
         // session keeps no view for: it could only show another window's.
-        let (alive, title) = app.read_with(cx, |app, _| {
+        let (alive, title) = app.update(cx, |app, cx| {
             let alive = app.pane_mode() == super::super::app::PaneMode::Ready
                 && app.session().is_some_and(|session| {
                     session.chats.contains_key(&chat_id.0)
                         && session.window_chats.contains(&chat_id)
                 });
-            (alive, app.chat_window_title(chat_id))
+            (alive, app.chat_window_title(chat_id, cx))
         });
         if !alive {
-            self.closing(false, cx);
+            self.closing(false, Some(window), cx);
             let handle = window.window_handle();
             cx.defer(move |cx| {
                 let _ = handle.update(cx, |_, window, _| window.remove_window());
@@ -273,7 +280,7 @@ impl Render for ChatWindowView {
                 move |event: &KeyUpEvent, _, cx| {
                     let handled = app
                         .update(cx, |app, cx| {
-                            app.note_window_input(Some(chat_id));
+                            app.note_window_press(Some(chat_id));
                             app.viewer_key_up(&event.keystroke.key, cx)
                         })
                         .unwrap_or(false);
@@ -513,14 +520,14 @@ pub(super) fn open_chat_window(
         let view = cx.new(|cx| ChatWindowView::new(owner, chat_id, window, cx));
         *built_out.borrow_mut() = Some((view.downgrade(), view.read(cx).slot.clone()));
         let weak = view.downgrade();
-        window.on_window_should_close(cx, move |_, cx| {
-            let _ = weak.update(cx, |this, cx| this.closing(true, cx));
+        window.on_window_should_close(cx, move |window, cx| {
+            let _ = weak.update(cx, |this, cx| this.closing(true, Some(window), cx));
             true
         });
         // A platform that destroys the window never asks it to close.
         let gone = view.clone();
         super::super::window_control::when_window_goes(window, cx, move |cx| {
-            gone.update(cx, |this, cx| this.closing(false, cx));
+            gone.update(cx, |this, cx| this.closing(false, None, cx));
         });
         window.activate_window();
         cx.new(|cx| Root::new(view, window, cx))

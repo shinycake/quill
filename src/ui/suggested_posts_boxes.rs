@@ -74,6 +74,7 @@ impl QuillApp {
             send_date: terms.send_date,
             error: None,
         });
+        self.open_box(DialogKind::SuggestPrice);
         cx.notify();
     }
 
@@ -135,6 +136,7 @@ impl QuillApp {
             }
             SuggestedPrice::TonCents(_) => {
                 self.suggested_posts.grams_needed = Some(price);
+                self.open_box(DialogKind::SuggestGramsNeeded);
             }
         }
         cx.notify();
@@ -248,6 +250,7 @@ impl QuillApp {
             picker,
             error: None,
         });
+        self.open_box(DialogKind::SuggestTime);
         cx.notify();
     }
 
@@ -470,6 +473,7 @@ impl QuillApp {
             };
             let title = price_box.mode.price_title();
             let body = this.suggest_price_body(&price_box, cx);
+            // box-host: put back while the dialog builds; it stays where it shows
             this.suggested_posts.price = Some(price_box);
             let body = Rc::new(RefCell::new(Some(body)));
             dialog

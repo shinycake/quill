@@ -274,9 +274,9 @@ impl QuillApp {
         if cx.reduce_motion() || power_saving::on(power_saving::Flag::ChatEffects) {
             return;
         }
-        // The sticker was chosen in the window the last input happened in.
+        // The sticker was chosen by the last press, in its window.
         let key = CellKey {
-            window: self.windows.last_input,
+            window: self.windows.last_press,
             file: file.0,
         };
         let Some(cell) = CELLS.with(|cells| cells.borrow().get(&key).copied()) else {

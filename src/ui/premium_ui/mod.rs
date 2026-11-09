@@ -119,6 +119,7 @@ impl QuillApp {
             let _ = live.driver.ensure_earn_app_config();
             live.driver.maybe_fetch_star_transactions()
         });
+        self.open_box(DialogKind::Stars);
         if let Some(Err(_)) = sent {
             self.connection
                 .set_note(StatusNote::error(tr(keys::Q_MONEY_COULD_NOT_LOAD_STARS)));
@@ -274,6 +275,7 @@ impl QuillApp {
             self.connection
                 .set_note(StatusNote::error(tr(keys::Q_MONEY_COULD_NOT_LOAD_GIFTS)));
         }
+        self.open_box(crate::ui::shell::DialogKind::ReceivedGifts);
         cx.notify();
     }
 

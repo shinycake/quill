@@ -786,6 +786,7 @@ impl QuillApp {
         });
         input.update(cx, |input, cx| input.set_value(current, window, cx));
         self.dialogs.saved_tag_dialog = Some(SavedTagDialog { tag, input });
+        self.open_box(DialogKind::SavedTagName);
         cx.notify();
     }
 

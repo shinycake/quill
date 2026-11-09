@@ -58,6 +58,7 @@ impl QuillApp {
             payments.note = None;
             live.driver.send_payment_form_request(invoice)
         });
+        self.open_box(crate::ui::shell::DialogKind::PaymentForm);
         match sent {
             Some(Ok(_)) => self.open_payment_dialog(window, cx),
             _ => {

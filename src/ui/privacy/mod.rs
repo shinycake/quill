@@ -826,6 +826,7 @@ pub(crate) fn apply_ready_privacy(session: &mut Session, sink: &Arc<MemorySink>,
     session.settings.privacy_data.check_password_suggested = true;
     session.settings.privacy_data.inactive_session_ttl_days = Some(180);
     session.settings.read_date_show = Some(true);
+    // box-host: demo
     session.chat_list.archive_chat_list_settings =
         Some(quill::telegram::requests::ArchiveChatListSettings {
             archive_and_mute_new_chats_from_unknown_users: true,

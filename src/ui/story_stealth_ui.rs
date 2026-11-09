@@ -78,6 +78,7 @@ impl QuillApp {
             self.show_stealth_toast(StealthToast::already(left), cx);
         } else {
             self.stories.stealth_box = Some(StealthBox { open_after });
+            self.open_box(DialogKind::StoryStealth);
             self.ensure_stealth_box_tick(cx);
         }
         cx.notify();

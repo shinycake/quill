@@ -443,6 +443,7 @@ impl QuillApp {
             report: true,
             delete_chat: true,
         });
+        self.open_box(DialogKind::BlockBar);
         cx.notify();
     }
 

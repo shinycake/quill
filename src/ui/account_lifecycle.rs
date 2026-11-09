@@ -108,6 +108,7 @@ impl QuillApp {
             return;
         }
         self.account_boxes.lifecycle.open = true;
+        self.open_box(DialogKind::AccountLifecycle);
         self.account_boxes.lifecycle.confirm_delete = false;
         self.account_boxes.lifecycle.confirm_logout = false;
         self.close_all_notify_windows(cx);

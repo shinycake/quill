@@ -87,6 +87,7 @@ impl QuillApp {
     /// Opens `next` above the current box.
     pub(super) fn market_push(&mut self, next: MarketBox, cx: &mut Context<Self>) {
         self.gift_market.push(next);
+        self.open_box(crate::ui::shell::DialogKind::GiftMarket);
         cx.notify();
     }
 
@@ -94,6 +95,7 @@ impl QuillApp {
     pub(super) fn market_replace(&mut self, next: MarketBox, cx: &mut Context<Self>) {
         self.gift_market.stack.pop();
         self.gift_market.push(next);
+        self.open_box(crate::ui::shell::DialogKind::GiftMarket);
         cx.notify();
     }
 
@@ -209,6 +211,7 @@ impl QuillApp {
             AuctionBoxChoice::About => MarketBox::AuctionAbout { gift_id },
         };
         self.gift_market.push(next);
+        self.open_box(crate::ui::shell::DialogKind::GiftMarket);
         cx.notify();
     }
 

@@ -75,6 +75,7 @@ impl QuillApp {
             .is_some_and(|session| session.calls.prefs.confirm_before_calling)
         {
             self.call_boxes.confirm = Some((user_id, is_video));
+            self.open_box(crate::ui::shell::DialogKind::CallConfirm);
             cx.notify();
             return;
         }

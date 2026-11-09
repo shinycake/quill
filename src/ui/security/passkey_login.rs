@@ -82,6 +82,7 @@ impl QuillApp {
         if live.driver.begin_login().is_err() {
             return;
         }
+        self.open_box(crate::ui::shell::DialogKind::PasskeyCeremony);
         self.run_passkey_ticker(window, cx);
         cx.notify();
     }
@@ -159,6 +160,7 @@ impl QuillApp {
             _ => None,
         };
         if let Some(sheet) = sheet {
+            // box-host: demo
             self.privacy.passkeys.ceremony =
                 Some(CeremonyUi::new(CeremonyMode::Login, sheet, None));
         }
@@ -175,6 +177,7 @@ impl QuillApp {
         sheet: CeremonySheet,
         cx: &mut Context<Self>,
     ) {
+        // box-host: a step of the open ceremony; it stays where it shows
         self.privacy.passkeys.ceremony = Some(CeremonyUi::new(CeremonyMode::Login, sheet, None));
         cx.notify();
     }

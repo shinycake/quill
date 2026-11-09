@@ -64,6 +64,7 @@ impl QuillApp {
             .first_name_input
             .update(cx, |input, cx| input.focus(window, cx));
         self.dialogs.profile_dialog = Some(ProfileDialog::EditContact(dialog));
+        self.open_box(DialogKind::ProfilePanel);
         cx.notify();
     }
 
@@ -172,6 +173,7 @@ impl QuillApp {
             .day_input
             .update(cx, |input, cx| input.focus(window, cx));
         self.dialogs.profile_dialog = Some(ProfileDialog::Birthday(dialog));
+        self.open_box(DialogKind::ProfilePanel);
         cx.notify();
     }
 
@@ -248,6 +250,7 @@ impl QuillApp {
             let _ = live.driver.fetch_suitable_personal_chats();
         }
         self.dialogs.profile_dialog = Some(ProfileDialog::PersonalChannel);
+        self.open_box(DialogKind::ProfilePanel);
         cx.notify();
     }
 
@@ -286,6 +289,7 @@ impl QuillApp {
             user_id,
             target: None,
         });
+        self.open_box(DialogKind::ProfilePanel);
         cx.notify();
     }
 
@@ -692,6 +696,7 @@ impl QuillApp {
                                 .label(tr(keys::CREATE_GROUP_BACK))
                                 .ghost()
                                 .on_click(cx.listener(move |this, _, window, cx| {
+                                    // box-host: a step of the open box; it stays where it shows
                                     this.dialogs.profile_dialog =
                                         Some(ProfileDialog::ShareContact {
                                             user_id,
@@ -739,6 +744,7 @@ impl QuillApp {
                         )
                         .on_click(cx.listener(
                             move |this, _, window, cx| {
+                                // box-host: a step of the open box; it stays where it shows
                                 this.dialogs.profile_dialog = Some(ProfileDialog::ShareContact {
                                     user_id,
                                     target: Some(id),

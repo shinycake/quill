@@ -17,9 +17,6 @@ impl QuillApp {
         // What every window's frame runs, here with the main window's
         // state in place (`window_upkeep`).
         self.per_window_upkeep(window, cx);
-        // main-only: the main window's reply bar; a chat window's reply
-        // target fetch belongs to the session side (`connect`).
-        self.fetch_missing_reply_target();
         // The chat windows open at the last run come back once the
         // account is ready (`chat_window::saved`).
         // main-only: it opens the chat windows themselves.

@@ -17,7 +17,7 @@ pub(crate) struct ConnectionUi {
     /// The toasts on screen and waiting, with the visible one's timer.
     pub(super) toasts: ToastQueue,
     /// The window a note set now toasts in (`None`: the main window): the
-    /// one the last input happened in (`QuillApp::note_window_input`).
+    /// one of the last press or key (`QuillApp::note_window_press`).
     pub(super) note_window: Option<quill::ids::ChatId>,
     /// The deadline a wake-up is already scheduled for.
     pub(super) toast_wake: Option<Instant>,

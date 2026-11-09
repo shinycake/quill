@@ -123,9 +123,6 @@ pub(super) struct Slices {
     /// The slice whose content is being rendered, laid out or painted, in
     /// any window (`None`: the window's own view).
     scope: Rc<Cell<Option<EntityId>>>,
-    /// A screen reader (or another accessibility client) reads the window:
-    /// history rows report the accessibility focus.
-    pub(super) a11y_active: Cell<bool>,
 }
 
 impl Slices {

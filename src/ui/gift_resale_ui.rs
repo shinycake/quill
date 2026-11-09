@@ -97,6 +97,7 @@ impl QuillApp {
                     .and_then(|send| send.recipient.clone());
             }
             self.gift_market.push(MarketBox::Resale);
+            self.open_box(crate::ui::shell::DialogKind::GiftMarket);
         } else {
             self.connection.set_note(StatusNote::error(tr(
                 keys::Q_MONEY_COULDNT_LOAD_THE_GIFTS_ON,
@@ -177,6 +178,7 @@ impl QuillApp {
         if started {
             self.payments.gift_hide_name = false;
             self.gift_market.push(MarketBox::Buy);
+            self.open_box(crate::ui::shell::DialogKind::GiftMarket);
         }
         cx.notify();
     }

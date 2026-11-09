@@ -103,6 +103,7 @@ impl QuillApp {
             filled: false,
             local_error: None,
         });
+        self.open_box(DialogKind::BotEdit);
         // The texts arrive from the session on the poll; fill the fields
         // once. Watched until they arrive or the box closes, however slow
         // the link: Save stays off until then. The fields are filled with

@@ -366,6 +366,7 @@ impl QuillApp {
             folder_id,
             selected: ids.into_iter().collect(),
         });
+        self.open_box(DialogKind::FolderNewChats);
         cx.notify();
     }
 
@@ -548,6 +549,7 @@ impl QuillApp {
     /// value when we do not know it yet.
     pub(super) fn show_folder_limit(&mut self, kind: FolderLimitKind, cx: &mut Context<Self>) {
         self.folders.limit_box = Some(kind);
+        self.open_box(DialogKind::FolderLimit);
         if let Some(live) = self.live.as_mut() {
             let _ = live.driver.fetch_premium_limit(kind);
         }

@@ -812,6 +812,7 @@ impl QuillApp {
             return;
         }
         self.folders.editor = Some(FolderEditorDialog::new(window, cx, None));
+        self.open_box(DialogKind::FolderEditor);
         cx.notify();
     }
 
@@ -839,6 +840,7 @@ impl QuillApp {
             )));
         }
         self.folders.editor = Some(dialog);
+        self.open_box(DialogKind::FolderEditor);
         cx.notify();
     }
 

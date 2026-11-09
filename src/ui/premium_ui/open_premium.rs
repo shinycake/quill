@@ -50,6 +50,7 @@ impl QuillApp {
             hub.premium_open = true;
             hub.premium_ref = start_ref.into();
         }
+        self.open_box(DialogKind::PremiumFeatures);
         let sent = self.live.as_mut().map(|live| {
             // The subscribe button needs `premium_bot_username` / `premium_invoice_slug`.
             let _ = live.driver.ensure_earn_app_config();

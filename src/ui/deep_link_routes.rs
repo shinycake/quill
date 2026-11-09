@@ -62,9 +62,12 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         match ui {
-            DeepLinkUi::StickerSet { set_id } => self.view_message_sticker_set(set_id, cx),
+            // Per-window boxes: into the state of the window that asked.
+            DeepLinkUi::StickerSet { set_id } => {
+                self.in_asking_window(cx, |app, cx| app.view_message_sticker_set(set_id, cx));
+            }
             DeepLinkUi::Share { text } => {
-                self.share.link_text = Some(text);
+                self.in_asking_window(cx, |app, _| app.share.link_text = Some(text));
                 self.connection.set_note(StatusNote::silent(tr(
                     keys::Q_MISC_CHOOSE_A_CHAT_TO_SHARE_2,
                 )));
@@ -73,11 +76,13 @@ impl QuillApp {
                 if !self.handle_proxy_link(&link, cx) {
                     self.links.deep_link_dialog =
                         Some(tr(keys::Q_MISC_THIS_PROXY_LINK_IS_NOT).into());
+                    self.open_box(DialogKind::DeepLinkInfo);
                 }
             }
             DeepLinkUi::FolderInvite { link } => self.open_folder_invite(link, cx),
             DeepLinkUi::ConferenceCall { link } => {
                 self.call_boxes.conference_link = Some(link);
+                self.open_box(DialogKind::ConferenceLink);
                 cx.notify();
             }
             DeepLinkUi::Background { name } => self.open_background_link(name, cx),
@@ -336,6 +341,7 @@ crate::ui::shell::register_dialogs! {
         |app| app.share.link_text.is_some(),
         QuillApp::build_deep_link_share_dialog,
     )
+    .per_window()
     .close(|app, _, cx| app.cancel_share_link(cx)),
 }
 

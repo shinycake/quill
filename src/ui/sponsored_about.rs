@@ -221,6 +221,7 @@ crate::ui::shell::register_dialogs! {
         |app| app.message_ui.sponsored_about.is_some(),
         QuillApp::build_sponsored_about_dialog,
     )
+    .per_window()
     .close(|app, _, cx| app.close_sponsored_about(cx)),
 }
 

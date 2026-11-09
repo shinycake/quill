@@ -24,6 +24,7 @@ impl QuillApp {
             current,
             quill::admin_extras::custom_title_placeholder(false),
         ));
+        self.open_box(DialogKind::Username);
         cx.notify();
     }
 
@@ -45,6 +46,7 @@ impl QuillApp {
                 let too_long = !quill::admin_extras::custom_title_fits(&value);
                 let has_emoji = value.chars().any(looks_like_emoji);
                 if too_long || has_emoji {
+                    // box-host: put back after a failed submit; it stays where it shows
                     self.admin.username_dialog = Some(dialog);
                     self.connection.set_note(if too_long {
                         StatusNote::silent(tr(keys::Q_PEOPLE_CUSTOM_TITLE_MUST_BE_AT))
@@ -64,11 +66,13 @@ impl QuillApp {
                             }
                         }
                         Err(_) => {
+                            // box-host: put back after a failed submit; it stays where it shows
                             self.admin.username_dialog = Some(dialog);
                             tr(keys::Q_PEOPLE_COULD_NOT_SET_CUSTOM_TITLE).into()
                         }
                     },
                     None => {
+                        // box-host: put back after a failed submit; it stays where it shows
                         self.admin.username_dialog = Some(dialog);
                         tr(keys::Q_PEOPLE_CUSTOM_TITLES_NEED_A_LIVE).into()
                     }
@@ -79,6 +83,7 @@ impl QuillApp {
             // optimistic — the new name arrives via `updateCommunity`.
             TextPromptKind::CommunityName { community_id } => {
                 if value.is_empty() {
+                    // box-host: put back after a failed submit; it stays where it shows
                     self.admin.username_dialog = Some(dialog);
                     self.connection.set_note(StatusNote::error(tr(
                         keys::Q_PEOPLE_COMMUNITY_NAME_CANNOT_BE_EMPTY,
@@ -90,11 +95,13 @@ impl QuillApp {
                     Some(live) => match live.driver.set_community_name(community_id, &value) {
                         Ok(_) => tr(keys::Q_PEOPLE_COMMUNITY_NAME_UPDATED).into(),
                         Err(_) => {
+                            // box-host: put back after a failed submit; it stays where it shows
                             self.admin.username_dialog = Some(dialog);
                             tr(keys::Q_PEOPLE_COULD_NOT_UPDATE_COMMUNITY_NAME).into()
                         }
                     },
                     None => {
+                        // box-host: put back after a failed submit; it stays where it shows
                         self.admin.username_dialog = Some(dialog);
                         tr(keys::Q_PEOPLE_RENAMING_COMMUNITIES_NEEDS_A_LIVE).into()
                     }
@@ -112,6 +119,7 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         self.admin.group_confirm_dialog = Some(GroupConfirmDialog { chat_id, action });
+        self.open_box(DialogKind::GroupConfirm);
         cx.notify();
     }
 
@@ -158,6 +166,7 @@ impl QuillApp {
         };
         // The conversion asks twice (tdesktop): the intro leads to the warning.
         if matches!(dialog.action, GroupConfirmAction::BroadcastIntro) {
+            // box-host: the intro leads to the warning in the same box
             self.admin.group_confirm_dialog = Some(GroupConfirmDialog {
                 chat_id: dialog.chat_id,
                 action: GroupConfirmAction::BroadcastUpgrade,
@@ -351,12 +360,14 @@ impl QuillApp {
                         note
                     }
                     Err(_) => {
+                        // box-host: put back after a failed submit; it stays where it shows
                         self.admin.group_confirm_dialog = Some(dialog);
                         tr(keys::Q_PEOPLE_ACTION_FAILED).to_string()
                     }
                 }
             }
             None => {
+                // box-host: put back after a failed submit; it stays where it shows
                 self.admin.group_confirm_dialog = Some(dialog);
                 tr(keys::Q_PEOPLE_CHAT_ACTIONS_NEED_A_LIVE).to_string()
             }

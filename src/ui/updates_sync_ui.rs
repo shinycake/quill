@@ -112,6 +112,7 @@ impl QuillApp {
                 )
                 .on_click(cx.listener(|this, _, _, cx| {
                     this.account_boxes.freeze_info_open = true;
+                    this.open_box(crate::ui::shell::DialogKind::AccountNotice);
                     cx.notify();
                 }))
                 .into_any_element(),
@@ -355,6 +356,7 @@ impl QuillApp {
             self.account_boxes.age_verify_started,
         ) {
             self.account_boxes.age_verify_open = true;
+            self.open_box(crate::ui::shell::DialogKind::AccountNotice);
             cx.notify();
         } else {
             self.set_sensitive_content(on, cx);

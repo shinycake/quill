@@ -875,6 +875,7 @@ crate::ui::shell::register_dialogs! {
         |app| app.chat_ui.scheduled_dialog_open,
         QuillApp::build_scheduled_dialog,
     )
+    .per_window()
     .close(|app, _, cx| {
             app.chat_ui.scheduled_dialog_open = false;
             cx.notify();

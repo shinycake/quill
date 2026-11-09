@@ -444,6 +444,7 @@ impl QuillApp {
         match parsed {
             Ok(draft) => {
                 self.settings.proxy.link = Some(ProxyLinkBox { draft, warn: false });
+                self.open_box(crate::ui::shell::DialogKind::ProxyLink);
                 if let Some(live) = self.live.as_mut() {
                     live.driver
                         .session
@@ -454,7 +455,10 @@ impl QuillApp {
                     let _ = live.driver.maybe_fetch_proxies();
                 }
             }
-            Err(issue) => self.links.deep_link_dialog = Some(issue.message().into()),
+            Err(issue) => {
+                self.links.deep_link_dialog = Some(issue.message().into());
+                self.open_box(crate::ui::shell::DialogKind::DeepLinkInfo);
+            }
         }
         cx.notify();
         true

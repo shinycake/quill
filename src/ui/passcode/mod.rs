@@ -228,6 +228,7 @@ impl QuillApp {
             return;
         }
         self.account.passcode.open = true;
+        self.open_box(DialogKind::Passcode);
         self.account.passcode.view = PasscodeView::Status;
         self.account.passcode.error = None;
         cx.notify();

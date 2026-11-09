@@ -24,8 +24,7 @@
 //! in while its window is drawn or handles input, so the app's own
 //! conversation, composer and overlay code serves every window; work that
 //! finishes later runs in the window it started in (`scoped`); kit
-//! dialogs open in the window whose input asked for them
-//! (`QuillShell::sync_kit_dialogs_in`). On the session side the chat is
+//! dialogs open in the window that asked for them (`dialog_hosts`). On the session side the chat is
 //! one of `Session::window_chats`.
 #![deny(clippy::indexing_slicing)]
 
@@ -35,6 +34,8 @@ mod body;
 mod cover;
 #[cfg(test)]
 mod dialog_host_tests;
+#[cfg(test)]
+mod dialog_host_window_tests;
 mod dialog_hosts;
 #[cfg(test)]
 mod lock_tests;
@@ -84,9 +85,13 @@ pub(crate) struct ChatWindows {
     /// The chat whose window's state is in place (`None`: the main
     /// window's). See `slot`.
     pub(super) scope: Option<ChatId>,
-    /// The window the last input event happened in (`None`: the main
-    /// window): a dialog it asks for opens there.
-    pub(super) last_input: Option<ChatId>,
+    /// The window of the last press or key (`None`: the main window): a
+    /// session-wide box no open named a window for shows there
+    /// (`dialog_hosts`). Pointer moves and scrolls do not count.
+    pub(super) last_press: Option<ChatId>,
+    /// The window a flow that runs away from it asked from, while that
+    /// part runs (`QuillApp::as_asked_by`): its boxes name it.
+    pub(super) asking: Option<Option<ChatId>>,
     /// Which window shows each kit dialog (`dialog_hosts`).
     dialogs: dialog_hosts::DialogHosts,
     /// A write of the open windows is scheduled (`saved`).
@@ -133,7 +138,7 @@ impl MainWindow {
             let id = window.window_handle().window_id();
             let _ = app.update(cx, |app, _| {
                 let chat = app.windows.chat_for_window(id);
-                app.note_window_input(chat);
+                app.note_window_press(chat);
             });
         });
         Self {
@@ -177,7 +182,8 @@ impl ChatWindows {
         Self {
             open: Vec::new(),
             scope: None,
-            last_input: None,
+            last_press: None,
+            asking: None,
             dialogs: dialog_hosts::DialogHosts::default(),
             save_pending: false,
             closed: Vec::new(),
@@ -561,8 +567,8 @@ impl QuillApp {
         self.follow_windows(cx);
         self.drop_play_intent_in_window(chat_id);
         self.stop_gif_of_window(chat_id);
-        if self.windows.last_input == Some(chat_id) {
-            self.windows.last_input = None;
+        if self.windows.last_press == Some(chat_id) {
+            self.windows.last_press = None;
         }
         if self.connection.note_window == Some(chat_id) {
             self.connection.note_window = None;
@@ -658,25 +664,12 @@ impl QuillApp {
         cx.notify();
     }
 
-    /// The native title of `chat_id`'s window: the chat name, with its
-    /// unread count and the total like the main window's (Telegram Desktop
-    /// `MainWindow::updateTitle` runs the same way for every window).
-    pub(super) fn chat_window_title(&self, chat_id: ChatId) -> String {
-        use quill::window_title::{TitleChat, window_title};
-        let Some(session) = self.session() else {
-            return window_title(None, 0, None);
-        };
-        if self.account.passcode.is_locked() {
-            return window_title(None, 0, None);
-        }
-        // Every account counts, like tdesktop's `Core::App().unreadBadge()`.
-        let total = (self.frame.title_badge.borrow_mut())
-            .get(session, &session.settings.badge_prefs)
-            .saturating_add(quill::notify_accounts::other_accounts_unread().count);
-        let chat = session.chats.get(&chat_id.0).map(|chat| TitleChat {
-            name: &chat.title,
-            unread: chat.unread_count.max(0) as u32,
-        });
-        window_title(chat, total, self.title_account_name().as_deref())
+    /// The native title of `chat_id`'s window: the main window's title
+    /// (`window_title_in_place`) with the window's own view in place, so
+    /// Saved Messages and an open topic read as they do there (Telegram
+    /// Desktop `MainWindow::updateTitle` runs the same way for every window).
+    pub(super) fn chat_window_title(&mut self, chat_id: ChatId, cx: &mut Context<Self>) -> String {
+        self.in_window_scope(Some(chat_id), cx, |app, _| app.window_title_in_place())
+            .unwrap_or_else(|| quill::window_title::window_title(None, 0, None))
     }
 }

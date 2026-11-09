@@ -152,6 +152,7 @@ impl QuillApp {
             sent: false,
             needs_boosts: None,
         });
+        self.open_box(DialogKind::ChatAppearance);
         cx.notify();
     }
 

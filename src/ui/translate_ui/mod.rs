@@ -295,6 +295,7 @@ impl QuillApp {
             search,
             _search_subscription: subscription,
         });
+        self.open_box(DialogKind::Translate);
     }
 
     // ---------------------------------------------------------------------

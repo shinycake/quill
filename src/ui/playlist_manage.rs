@@ -125,6 +125,7 @@ impl QuillApp {
     /// "Delete" in the track menu: ask first.
     fn ask_remove_playlist_track(&mut self, file_id: FileId, cx: &mut Context<Self>) {
         self.playback.playlist_remove = Some(file_id);
+        self.open_box(DialogKind::RemovePlaylistTrack);
         cx.notify();
     }
 

@@ -75,6 +75,7 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         self.admin.ownership_dialog = Some(OwnershipDialog::new(window, cx, chat_id, stage));
+        self.open_box(DialogKind::Ownership);
         if let Some(live) = self.live.as_mut() {
             let session = &mut live.driver.session;
             session.groups.ownership.transfer_error = None;

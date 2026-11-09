@@ -106,6 +106,7 @@ fn open_learn(cx: &mut Context<QuillApp>) -> impl Fn(&mut Window, &mut App) + 's
     move |_, cx| {
         let _ = owner.update(cx, |this, cx| {
             this.earn.learn = true;
+            this.open_box(crate::ui::shell::DialogKind::EarnLearn);
             cx.notify();
         });
     }
@@ -508,6 +509,7 @@ impl QuillApp {
                     .tab_index(0)
                     .on_click(cx.listener(move |this, _, _, cx| {
                         this.earn.ton_tx = Some(row_tx.clone());
+                        this.open_box(crate::ui::shell::DialogKind::EarnTonTx);
                         cx.notify();
                     }))
                     .child(
@@ -567,6 +569,7 @@ impl QuillApp {
                 tx,
                 move |this, cx| {
                     this.earn.star_tx = Some(row_tx.clone());
+                    this.open_box(crate::ui::shell::DialogKind::EarnStarTx);
                     cx.notify();
                 },
                 cx,
@@ -769,6 +772,7 @@ impl QuillApp {
                         level: required.unwrap_or(0),
                         reason: crate::ui::earn_state::AskBoostReason::Cpm,
                     });
+                    this.open_box(crate::ui::shell::DialogKind::EarnAskBoost);
                     if let Some(live) = this.live.as_mut() {
                         let _ = live
                             .driver

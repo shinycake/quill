@@ -462,6 +462,7 @@ impl QuillApp {
         self.dialogs.add_contact_dialog = Some(AddContactDialog::new(
             window, cx, user_id, &phone, &first, &last,
         ));
+        self.open_box(DialogKind::AddContact);
         if let Some(dialog) = &self.dialogs.add_contact_dialog {
             dialog
                 .phone_input
@@ -485,6 +486,7 @@ impl QuillApp {
         self.dialogs.add_contact_dialog = Some(AddContactDialog::new(
             window, cx, user_id, phone, first, last,
         ));
+        self.open_box(DialogKind::AddContact);
         if let Some(dialog) = &self.dialogs.add_contact_dialog {
             dialog
                 .phone_input

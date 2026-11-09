@@ -89,6 +89,7 @@ impl QuillApp {
             shared,
             keep: std::collections::HashSet::new(),
         });
+        self.open_box(crate::ui::shell::DialogKind::FolderDelete);
         // Only a shared folder has chats worth leaving with it.
         if shared
             && let Some(live) = self.live.as_mut()
@@ -211,6 +212,7 @@ impl QuillApp {
         self.close_mute_menu(cx);
         self.notify.ttl_picker = None;
         self.folders.menu_chat = Some(chat_id);
+        self.open_box(crate::ui::shell::DialogKind::FolderMenu);
         if let Some(live) = self.live.as_mut()
             && let Err(err) = live.driver.fetch_chat_lists_to_add_chat(chat_id)
         {

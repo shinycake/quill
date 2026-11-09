@@ -25,6 +25,7 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         self.admin.welcome_dialog = Some(WelcomeDialog::new(window, cx, chat_id));
+        self.open_box(DialogKind::Welcome);
         if let Some(live) = self.live.as_mut()
             && live.driver.load_chat_welcome_messages(chat_id).is_err()
         {

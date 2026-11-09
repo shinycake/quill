@@ -299,6 +299,7 @@ mod demo {
     impl QuillApp {
         fn demo_mini_app_invoice(&mut self, window: &mut Window, cx: &mut Context<Self>) {
             if let Some(session) = self.demo_session.as_mut() {
+                // box-host: demo
                 session.payments.form = Some(PaymentFormData {
                     id: 1,
                     form_type: PaymentFormTypeData::Stars { star_count: 50 },

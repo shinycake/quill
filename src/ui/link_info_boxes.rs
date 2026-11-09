@@ -135,6 +135,7 @@ impl QuillApp {
                     .set_note(StatusNote::info(tr(keys::Q_REST_GIFT_CODES_NEED_A_SIGNED)));
             }
         }
+        self.open_box(crate::ui::shell::DialogKind::GiftCodeLink);
         cx.notify();
     }
 
@@ -153,6 +154,7 @@ impl QuillApp {
                 )));
             }
         }
+        self.open_box(crate::ui::shell::DialogKind::LanguageLink);
         cx.notify();
     }
 

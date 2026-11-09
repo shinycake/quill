@@ -66,6 +66,7 @@ impl QuillApp {
             boosts: session.chat_unrestrict_boost_count(chat_id),
             lock_hint: None,
         });
+        self.open_box(DialogKind::Permissions);
         cx.notify();
     }
 
@@ -118,6 +119,7 @@ impl QuillApp {
                     .set_note(StatusNote::silent(tr(keys::Q_PEOPLE_PERMISSIONS_UPDATED))),
                 Ok(false) => {}
                 Err(_) => {
+                    // box-host: put back after a failed submit; it stays where it shows
                     self.admin.permissions_dialog = Some(dialog);
                     self.connection.set_note(StatusNote::error(tr(
                         keys::Q_PEOPLE_COULD_NOT_UPDATE_PERMISSIONS,

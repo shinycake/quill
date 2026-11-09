@@ -291,6 +291,7 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         self.group_call_boxes.rtmp_start = RtmpStartUi::default();
+        self.open_box(DialogKind::RtmpStart);
         match self.live.as_mut() {
             Some(live) => {
                 if live.driver.begin_rtmp_start(chat_id).is_err() {

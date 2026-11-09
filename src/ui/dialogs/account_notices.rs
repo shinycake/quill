@@ -82,6 +82,7 @@ impl QuillApp {
                     keys::Q_OPS_NEW_LOGIN_ALLOWED_YOU_CAN,
                 )));
             }
+            // box-host: opened by an answer; review_new_login named the window
             Some(LoginReview::Prevented { places }) => self.auth_ui.login_prevented = Some(places),
             None => {}
         }
@@ -165,6 +166,10 @@ impl QuillApp {
     }
 
     fn review_new_login(&mut self, confirmed: bool, cx: &mut Context<Self>) {
+        // "No" ends in the prevented-login box, which the answer sets.
+        if !confirmed {
+            self.open_box(DialogKind::AccountNotice);
+        }
         if let Some(live) = self.live.as_mut() {
             let _ = live.driver.review_unconfirmed_sessions(confirmed);
         } else if let Some(demo) = self.demo_session.as_mut() {

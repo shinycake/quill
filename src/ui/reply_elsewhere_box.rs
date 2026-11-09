@@ -189,5 +189,6 @@ crate::ui::shell::register_dialogs! {
         |app| app.share.reply_elsewhere_open && app.chat_ui.has_reply(),
         QuillApp::build_reply_elsewhere_dialog,
     )
+    .per_window()
     .close(|app, window, cx| app.close_reply_panels(window, cx)),
 }

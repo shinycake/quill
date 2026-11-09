@@ -221,6 +221,7 @@ impl QuillApp {
             gifts_scroll: gpui_kit::base::VirtualListScrollHandle::new(),
             clock_running: false,
         }));
+        self.open_box(crate::ui::shell::DialogKind::PeerQr);
         if own && let Some(data) = self.qr_data_mut() {
             data.retry_contact_link();
         }

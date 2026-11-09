@@ -77,6 +77,7 @@ impl QuillApp {
             example_asked_at: None,
             removing: false,
         });
+        self.open_box(DialogKind::AiStylePreview);
         cx.notify();
     }
 

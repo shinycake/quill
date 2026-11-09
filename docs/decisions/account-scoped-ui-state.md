@@ -2276,3 +2276,149 @@ store classification), the lock tests in `agent/access.rs`,
 `shared_media_tabs.rs`, `find_in_history.rs`, `premium_purchase.rs`
 and `settings/app_prefs.rs`. None of them waits on time. The
 round-trip wait test ends on the lock, not a timeout.
+
+### Phase 13 (area B: a box belongs to the window that opened it)
+
+Round 13 of the review, area B, on `claude/sm-review13-b`. Findings 1 to
+3 came from one flaw in round 12's per-window dialog host. A box's window
+was chosen when a window's sync first saw its flag set, from the window
+of the last input, and the host was keyed by kind alone. So:
+
+1. Mute asked again from a chat window, while the main window showed
+   Mute for another chat, stayed in the main window and switched to the
+   chat window's chat.
+2. A per-window kind (Scheduled, a sticker set, a poll) shown in one
+   window held the same kind back in every other window. A closing chat
+   window ran the close of a kind against the main window's state.
+3. "Last input" counted pointer moves and scrolls. An answer opened its
+   box in whichever window the pointer had crossed while the request ran.
+
+**Designs considered.**
+
+- *A. Detect the open at the scope choke point.* Compare every flag on
+  each `set_window_scope` and credit a flag that turned on to the window
+  in place. An ask repeated while its flag is already set leaves no edge
+  (finding 1 again). An answer from the poll loop turns its flag on with
+  the main window in place. There is no cheap generic way to compare 150
+  flags, and it costs every frame. Rejected.
+- *B. A typed `Hosted<T>` wrapper on every session-wide flag.* The flag
+  carries its window, and the type makes an open without one impossible.
+  This is the strongest guarantee, but it touches about 150 fields, most
+  in src/state, which area A was changing in the same round. Rejected for
+  now. It stays the way to go if the static guard proves too loose.
+- *C. Keep round 12's host, and let sites opt in to claiming the box.*
+  This is what the review sketched. An open that forgets to claim falls
+  back to the same wrong window, so the fix depends on every site
+  remembering. Rejected.
+- *D (chosen). Every open names its window, and a guard checks that.*
+
+**What was built (`chat_window/dialog_hosts.rs`).**
+
+- A spec is session-wide unless it is marked `DialogSpec::per_window()`.
+  Per-window kinds keep their flag in the window's swapped state
+  (`chat_ui`, `message_ui`, `composer_ui`, `pickers`, `viewer`, `share`),
+  so the key is effectively (kind, window). Each window shows its own,
+  and the hosts table never holds them. 33 specs are per-window.
+- A session-wide open calls `QuillApp::open_box(kind)` as it sets the
+  flag. That names the window in place: input, `spawn_scoped`
+  continuations and a window's own frame all run with their window in
+  place. An answer whose flow knows its window uses
+  `ChatWindows::open_box_in(kind, window)`, for example the deep link
+  pump with the link's `flow_window`. A resolved link runs in the main
+  window's frame, so `run_resolved_deep_link` wraps its opens in
+  `as_asked_by(flow_window)`. A per-window box such a flow opens
+  (a sticker set, Share) goes through `in_asking_window`. A box that
+  waits for an answer is asked for at the request site (Boost, gift
+  info, payment form, login URL, export), so the answer shows where the
+  request was made.
+- Asked again from another window while shown, a session-wide box moves
+  there. An ask made before its flag is set waits for the flag.
+- An open no path named shows in the window of the last press or key
+  (`windows.last_press`). Pointer moves and scrolls only put a window's
+  state in place (`note_window_pointer`). They no longer change where a
+  box or a toast goes.
+- A chat window that closes from inside (its close button, Cmd/Ctrl+W,
+  the platform's close, or its chat going away) runs
+  `close_window_boxes` with its own state in place and its own `Window`.
+  Every per-window flag set there closes with its own close, and so does
+  every session-wide box it showed or asked for. The main window's box
+  of the same kind, and its flag, stay. A session-wide box left open
+  by a window that went without a close is closed by the main window's
+  next sync, with the main window's state in place. Before, any window's
+  sync could close it against its own state.
+- The lock is unchanged: `sync_host_dialogs` still returns at once while
+  locked. An ask made under the lock is recorded and shows after the
+  unlock, in the window that asked (`lock-is-a-render-state.md`).
+
+**The guard.** `scripts/dialog_hosts.py`, run by
+`check-window-scope.py`:
+
+- A spec's `.per_window()` must match its predicate. A predicate that
+  reads swapped window state (following `self` and `app` methods and
+  free helpers three calls deep) must be per-window, and one that does
+  not read it must not be.
+- The script takes the flag fields from each predicate, or from
+  `scripts/dialog-hosts.txt` when it cannot read them. Every write that
+  sets a session-wide flag in src/ui must have an `open_box` or
+  `open_box_in` that names the kind in the same function, or a
+  `// box-host: <why>` marker. Markers are for a refresh of a box that
+  is already open, a demo, or an answer whose request site asked.
+- A flag set in src/state or src/connect needs a UI `open_box` naming
+  the kind, or an `answer` entry in `dialog-hosts.txt` with its reason.
+- `open_box` on a per-window kind fails, and so does a stale entry.
+
+**The other findings.**
+
+- *4. The reply bar's missing message.* `fetch_missing_reply_target`
+  moved from the main-only upkeep into `per_window_upkeep`, so a chat
+  window's reply bar asks for its own message. The driver still asks
+  once per message.
+- *5. Screen reader focus.* `history_a11y::install` now runs for each
+  window slot's history focus handle. Before, it ran only for the main
+  window's. `a11y_active` moved from `Slices` into `WindowSlices`, and
+  `per_window_upkeep` writes it for the window that draws. So a screen
+  reader on one window does not make another window's rows report focus.
+- *6. The chat window title.* The main window's title function is now
+  `window_title_in_place`. `chat_window_title` runs it with the chat
+  window's view in place, so Saved Messages and an open topic, with the
+  topic's unread count, read the same in both.
+
+**Sweep.** The main-only steps of `frame_upkeep` were checked for reads
+of swapped window state. The only other match is
+`maybe_prefetch_link_preview`, which reads the composer in place, so a
+chat window's link preview chip never prefetches. It was left alone on
+purpose. The session keeps one `composer_preview`, and an answer for a
+URL other than the current one is dropped (`connect/core`). With two
+windows asking for different URLs, each answer would undo the other's,
+so the prefetch would loop. The fix is to key the preview by window or
+URL in the session and in the driver's answer path. That is a
+src/state and src/connect change, so it is left for a round that owns
+those files.
+
+Tests: `chat_window/dialog_host_window_tests.rs`. It covers Mute moving
+to the window that asked, an open naming the window in place rather than
+the last press, two windows showing their own Scheduled box, a closing
+window closing only its own boxes, a session box closing with its
+window, an answer showing in the window that asked, pointer moves not
+counting as a press, and a typed link's box opening in the window it was
+clicked in. `chat_window/upkeep_tests.rs` covers the reply fetch, the
+screen reader focus and flag per window, and the Saved Messages and
+topic titles. The existing `dialog_host_tests.rs` still pass.
+
+Not done, or not tested:
+- An ask that is never answered stays in the hosts table until the
+  same kind is asked for again. It shows nothing, because its flag is
+  clear.
+- A typed link's other effects (opening a chat, a mini app) still run in
+  the main window's `Window`. Only the boxes it opens, and the scope for
+  Share and sticker sets, follow `flow_window`.
+- `app_theme/editor.rs` (`show_theme_editor`, through a plain
+  `spawn_in`) and the mini app's remove-from-menu poll name the window in
+  place when they run.
+- The guard reads writes by field path. A write through a local alias
+  (`let state = &mut self.x; state.open = true`) is not seen.
+- `kit_dialog_open` and `open_dialog_name` still answer for the whole
+  app, not per window. The review did not mark this material.
+- The window close path is tested through `ChatWindowView::close`. The
+  platform's close button and a chat that goes away use the same
+  `closing(.., Some(window), ..)` path but have no test of their own.
