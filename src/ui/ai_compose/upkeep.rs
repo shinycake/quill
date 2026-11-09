@@ -6,9 +6,10 @@
 //! opened in (a chat window's composer, or the main window's). Their
 //! answers are taken in that window's frame (`ai_compose_window_upkeep`,
 //! a step of every window's upkeep), so they land while the main window
-//! is minimized and their toasts show in that window. What is the
-//! session's (the button's blink, the style link's preview, emoji files)
-//! stays in the main window's upkeep.
+//! is minimized and their toasts show in that window. The style preview
+//! a link opens is taken in the frame of the window that shows it. What is
+//! the session's (the button's blink, the style notice, emoji files) stays
+//! in the main window's upkeep.
 
 use super::{MarkedLink, marked_link, session_mut};
 use crate::ui::app::QuillApp;
@@ -28,7 +29,6 @@ impl QuillApp {
     ) {
         self.sync_ai_compose_button(cx);
         self.ai_style_notice_upkeep(window, cx);
-        self.ai_style_preview_upkeep(window, cx);
         self.fetch_ai_compose_emoji();
         self.fetch_ai_style_icons();
     }
@@ -58,7 +58,24 @@ impl QuillApp {
         {
             self.ai_compose_box_upkeep(window, cx);
         }
+        if self.ai_style_preview_is_here() {
+            self.ai_style_preview_upkeep(window, cx);
+        }
         self.ai_apply_in_place_upkeep(window, cx);
+    }
+
+    /// The style preview's answers land in the window that shows its box,
+    /// or in the main window once that window closed.
+    fn ai_style_preview_is_here(&self) -> bool {
+        if self.ai_compose.preview.is_none() {
+            return false;
+        }
+        let here = self.windows.scope;
+        let owner = self
+            .windows
+            .window_of_box(crate::ui::shell::DialogKind::AiStylePreview)
+            .filter(|chat| self.windows.has(*chat));
+        owner == here
     }
 
     /// The box's answers, in its own window's frame (or any, with no box

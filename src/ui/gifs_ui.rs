@@ -44,6 +44,11 @@ fn empty_tile(color: Hsla) -> AnyElement {
         .into_any_element()
 }
 
+/// An answer for the session's GIF list is on its way.
+fn gifs_on_their_way(panel: &GifPanel) -> bool {
+    panel.loading || panel.search_loading
+}
+
 /// What the footer's sections choose.
 #[derive(Clone, PartialEq, Eq)]
 pub(super) enum GifSection {
@@ -79,6 +84,30 @@ pub(in crate::ui) enum GifWanted {
     #[default]
     Saved,
     Search(String),
+}
+
+/// What a window last asked the session's GIF list for: a window not in
+/// use asks for its own section once, so two of them never take the list
+/// from each other every frame.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(in crate::ui) enum GifAsked {
+    #[default]
+    Nothing,
+    For(GifWanted),
+}
+
+/// What one window's GIF tab shows from the session.
+#[derive(Clone, Copy)]
+pub(super) enum GifShown<'a> {
+    /// The session's list holds this window's GIFs: they page, and the
+    /// spinner and errors are this window's.
+    Live,
+    /// Another window's search is in the list: this window's saved GIFs.
+    Saved(&'a [AnimationItem]),
+    /// Or its search, answered earlier.
+    Found(&'a [AnimationItem]),
+    /// Or nothing yet: the window asks (`gif_tab_upkeep`).
+    Missing,
 }
 
 impl GifWanted {
@@ -130,29 +159,29 @@ impl QuillApp {
     }
 
     fn search_gifs_for(&mut self, query: &str, cx: &mut Context<Self>) {
+        self.pickers.gif_scroll.set_offset(point(px(0.), px(0.)));
         self.request_gifs(GifWanted::Search(query.trim().to_string()), cx);
     }
 
-    /// Put `wanted` in the session's GIF list, from the top, as this
-    /// window's. A request that cannot be sent leaves the window on what
-    /// the list holds, so nothing asks again every frame.
+    /// Put `wanted` in the session's GIF list as this window's. A request
+    /// that cannot be sent leaves the window on what the list holds, so
+    /// nothing asks again every frame.
     fn request_gifs(&mut self, wanted: GifWanted, cx: &mut Context<Self>) {
-        self.pickers.gif_scroll.set_offset(point(px(0.), px(0.)));
         self.pickers.gif_wanted = wanted.clone();
+        self.pickers.gif_asked = GifAsked::For(wanted.clone());
         let sent = if let Some(live) = self.live.as_mut() {
             match &wanted {
                 GifWanted::Saved => live.driver.show_saved_gifs().is_ok(),
                 GifWanted::Search(query) => live.driver.search_gifs(query).is_ok(),
             }
         } else if let Some(session) = self.demo_session.as_mut() {
-            let gifs = &mut session.stickers.gifs;
             match &wanted {
-                GifWanted::Saved => gifs.search_mode = false,
+                GifWanted::Saved => session.stickers.gifs.search_mode = false,
                 GifWanted::Search(query) => {
                     // No search bot offline: the demo finds nothing.
-                    gifs.search_mode = true;
-                    gifs.search_query = query.clone();
-                    gifs.search_results.clear();
+                    session.stickers.gifs.search_mode = true;
+                    session.stickers.gifs.search_query = query.clone();
+                    session.accept_gif_search_results(Vec::new(), String::new(), true);
                 }
             }
             true
@@ -175,6 +204,7 @@ impl QuillApp {
     pub(super) fn choose_gif_section(&mut self, section: GifSection, cx: &mut Context<Self>) {
         // Typing that was waiting no longer searches.
         self.pickers.gif_keystroke = self.pickers.gif_keystroke.wrapping_add(1);
+        self.pickers.gif_scroll.set_offset(point(px(0.), px(0.)));
         self.request_gifs(GifWanted::of_section(&section), cx);
     }
 
@@ -197,31 +227,70 @@ impl QuillApp {
         self.follow_gif_wanted(cx);
     }
 
-    /// The session's list holds another window's GIFs: ask for this
-    /// window's again.
+    /// The window in use: the session's list holds another window's
+    /// GIFs, so ask for this window's again (they page from there). A
+    /// section kept from before shows meanwhile, and waits for an answer
+    /// on its way to another window instead of cancelling it.
     fn follow_gif_wanted(&mut self, cx: &mut Context<Self>) {
         let Some(panel) = self.session().map(|session| &session.stickers.gifs) else {
             return;
         };
-        if GifWanted::shown(panel) != self.pickers.gif_wanted {
+        let ask = match self.gif_shown(panel) {
+            GifShown::Live | GifShown::Saved(_) => false,
+            GifShown::Found(_) => !gifs_on_their_way(panel),
+            GifShown::Missing => true,
+        };
+        if ask {
             let wanted = self.pickers.gif_wanted.clone();
             self.request_gifs(wanted, cx);
         }
     }
 
-    /// Frame upkeep: two windows with the GIF tab open share the session's
-    /// one list. The window the user last pressed in has its own GIFs in
-    /// it (another window's tab shows nothing of them meanwhile,
-    /// `gif_picker_panel`).
+    /// Frame upkeep: every window with the GIF tab open shows its own
+    /// section from the session's one list. The window the user last
+    /// pressed in has its GIFs in the list; another shows its saved GIFs
+    /// or its search kept from before, and when it has neither it asks
+    /// once, after any answer on its way, without a press.
     pub(in crate::ui) fn gif_tab_upkeep(&mut self, cx: &mut Context<Self>) {
-        if self.windows.pressed_here() && self.pickers.media_panel.shows_gifs() {
+        if !self.pickers.media_panel.shows_gifs() {
+            return;
+        }
+        if self.windows.pressed_here() {
             self.follow_gif_wanted(cx);
+            return;
+        }
+        let Some(panel) = self.session().map(|session| &session.stickers.gifs) else {
+            return;
+        };
+        let wanted = self.pickers.gif_wanted.clone();
+        if matches!(self.gif_shown(panel), GifShown::Missing)
+            && !gifs_on_their_way(panel)
+            && self.pickers.gif_asked != GifAsked::For(wanted.clone())
+        {
+            self.request_gifs(wanted, cx);
         }
     }
 
-    /// The session's list holds what this window's tab asks for.
-    pub(super) fn gif_list_is_mine(&self, panel: &GifPanel) -> bool {
-        GifWanted::shown(panel) == self.pickers.gif_wanted
+    /// What this window's tab shows from the session's list.
+    pub(super) fn gif_shown<'a>(&self, panel: &'a GifPanel) -> GifShown<'a> {
+        if GifWanted::shown(panel) == self.pickers.gif_wanted {
+            return GifShown::Live;
+        }
+        match &self.pickers.gif_wanted {
+            GifWanted::Saved if panel.loaded || !panel.animations.is_empty() => {
+                GifShown::Saved(&panel.animations)
+            }
+            GifWanted::Saved => GifShown::Missing,
+            GifWanted::Search(query) => panel
+                .searches_kept
+                .get(query)
+                .map_or(GifShown::Missing, GifShown::Found),
+        }
+    }
+
+    /// Shown in the field: only for the list this window asked for.
+    fn gifs_loading(&self, panel: &GifPanel) -> bool {
+        matches!(self.gif_shown(panel), GifShown::Live) && gifs_on_their_way(panel)
     }
 
     fn clear_gif_search_field(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -236,6 +305,9 @@ impl QuillApp {
         let Some(panel) = self.session().map(|session| &session.stickers.gifs) else {
             return;
         };
+        if !matches!(self.gif_shown(panel), GifShown::Live) {
+            return;
+        }
         let content = layout_gifs(panel.visible_animations(), GRID_WIDTH).height;
         let handle = &self.pickers.gif_scroll;
         let viewport = f32::from(handle.bounds().size.height);
@@ -279,7 +351,7 @@ impl QuillApp {
         let panel = self
             .session()
             .map_or(&no_panel, |session| &session.stickers.gifs);
-        let loading = panel.loading || panel.search_loading;
+        let loading = self.gifs_loading(panel);
         let muted = cx.theme().muted_foreground;
         let search = div().px_2().py_2().child(
             Input::new(&self.pickers.gif_search_input)
@@ -293,15 +365,14 @@ impl QuillApp {
                 .when(loading, |input| input.suffix(Spinner::new().small()))
                 .aria_label(tr(keys::GIFS_SEARCH)),
         );
-        let animations: &[AnimationItem] = if self.gif_list_is_mine(panel) {
-            panel.visible_animations()
-        } else {
-            // Another window's GIFs: none here until this window asks
-            // again (a press in it, `gif_tab_upkeep`).
-            &[]
+        let shown = self.gif_shown(panel);
+        let animations: &[AnimationItem] = match shown {
+            GifShown::Live => panel.visible_animations(),
+            GifShown::Saved(animations) | GifShown::Found(animations) => animations,
+            GifShown::Missing => &[],
         };
         let body = if animations.is_empty() {
-            self.gif_panel_status(panel, cx)
+            self.gif_panel_status(panel, shown, cx)
         } else {
             self.gif_grid(panel, animations, cx)
         };
@@ -319,8 +390,17 @@ impl QuillApp {
 
     /// Why the grid is empty. Nothing while the first answer is on its way
     /// (the field's spinner says so).
-    fn gif_panel_status(&self, panel: &GifPanel, cx: &mut Context<Self>) -> AnyElement {
-        let text = if panel.loading || panel.search_loading || !self.gif_list_is_mine(panel) {
+    fn gif_panel_status(
+        &self,
+        panel: &GifPanel,
+        shown: GifShown<'_>,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let text = if let GifShown::Saved(_) = shown {
+            Some(tr(keys::Q_MISC_NO_SAVED_GIFS_YET_RIGHT))
+        } else if let GifShown::Found(_) = shown {
+            Some(tr(keys::Q_MISC_NO_GIFS_FOUND))
+        } else if matches!(shown, GifShown::Missing) || gifs_on_their_way(panel) {
             None
         } else if panel.search_mode && panel.search_failed && panel.search_bot_username.is_empty() {
             Some(tr(keys::Q_MISC_GIF_SEARCH_IS_NOT_AVAILABLE))

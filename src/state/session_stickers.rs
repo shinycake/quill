@@ -275,6 +275,9 @@ impl Session {
             } else {
                 next_offset
             };
+        let gifs = &mut self.stickers.gifs;
+        gifs.searches_kept
+            .keep(&gifs.search_query, &gifs.search_results);
     }
 
     pub fn accept_sticker_set(&mut self, id: i64, stickers: Vec<StickerItem>) {

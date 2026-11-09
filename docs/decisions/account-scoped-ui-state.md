@@ -2906,8 +2906,27 @@ and `connect/tests/message_ops` (previews by URL).
 
 - The prep fallback (4) needs a live client to send; only `window_where`
   is tested. The account round trip was not run live.
-- A window whose GIF tab shows another window's list shows the empty
-  state until a press there; tdesktop keeps a list per window. The
-  session's one search is unchanged.
-- The style link's preview box (`AiStylePreview`) and its notices still
-  run in the main frame.
+- The style notices (`ai_style_notice_upkeep`) still run in the main
+  frame.
+
+**Follow-up (the two leftovers above, fixed).**
+
+- *A second window's GIF tab showed nothing until a press there.* The
+  session still pages one search, but now keeps the searches answered
+  lately by query (`GifPanel::searches_kept`, the last eight). A window
+  shows what it wants (`QuillApp::gif_shown`): the live list when it
+  holds the window's section, the saved GIFs, or its search kept from
+  before. A window that has none of these asks once, on its first frame
+  with the tab open (`PickerUi::gif_asked`, an enum), after any answer on
+  its way, so it never cancels another window's. The window in use
+  takes the list back for paging only when nothing is loading. Only the
+  live list pages or shows the spinner.
+- *The style preview ran in the main frame.* It runs in
+  `ai_compose_window_upkeep` of the window that shows its box
+  (`window_of_box(AiStylePreview)`), or the main window's once that
+  window closed. Its toasts show in that window.
+
+Tests: `asker_tests.rs` (`a_gif_tab_shows_its_section_without_a_press`,
+and `each_window_keeps_its_own_gif_section` now checks that the other
+window shows its kept section without asking), `ai_compose/dialog_tests.rs`
+(`a_chat_windows_style_preview_takes_its_answer_in_its_own_frame`).
