@@ -56,8 +56,11 @@ pub(crate) struct PaidMessagesUi {
     pub(super) charge: Option<PriceSlider>,
     /// The confirmation before a paid send.
     pub(super) confirm: Option<ComposerPaidConfirm>,
-    /// "Don't ask me again" in the confirmation.
-    pub(super) confirm_trust: bool,
+    /// "Don't ask me again", ticked on the confirmation for this chat and
+    /// price (`chat_id`, `per_message`). Another confirmation shows it
+    /// unticked, and Pay or Cancel clears it, so a tick never trusts a
+    /// price the user did not see.
+    pub(super) confirm_trust: Option<(i64, i64)>,
     pub(super) remove_fee: Option<RemoveFeeBox>,
     pub(super) direct: Option<DirectMessagesBox>,
 }
@@ -79,7 +82,7 @@ impl PaidMessagesUi {
         Self {
             charge: None,
             confirm: None,
-            confirm_trust: false,
+            confirm_trust: None,
             remove_fee: None,
             direct: None,
         }

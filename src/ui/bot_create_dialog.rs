@@ -231,7 +231,7 @@ impl QuillApp {
         cx.notify();
     }
 
-    fn submit_bot_create(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    fn submit_bot_create(&mut self, cx: &mut Context<Self>) {
         let Some(dialog) = self.screen.dialogs.bot_create_dialog.as_mut() else {
             return;
         };
@@ -268,15 +268,16 @@ impl QuillApp {
         }
         dialog.submitted = true;
         // Watched until TDLib answers or the box closes: a cap would leave
-        // Create off with nothing in flight, and drop a late success.
-        self.spawn_screen_in(window, cx, async move |this, cx| {
+        // Create off with nothing in flight, and drop a late success. Not
+        // tied to the window it was pressed in: when that window closes the
+        // box goes on in the main window, and its answer still lands.
+        self.spawn_screen(cx, async move |this, cx| {
             loop {
                 cx.background_executor()
                     .timer(Duration::from_millis(150))
                     .await;
-                let Ok(done) = this.update_in(cx, |this, window, cx| {
-                    this.poll_bot_create(&name, &full, window, cx)
-                }) else {
+                let Ok(done) = this.update(cx, |this, cx| this.poll_bot_create(&name, &full, cx))
+                else {
                     break;
                 };
                 if done {
@@ -289,11 +290,10 @@ impl QuillApp {
     }
 
     /// Watch the `createBot` answer; `true` when it is settled.
-    fn poll_bot_create(
+    pub(super) fn poll_bot_create(
         &mut self,
         name: &str,
         full: &str,
-        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
         if self.dialogs.bot_create_dialog.is_none() {
@@ -317,8 +317,9 @@ impl QuillApp {
                 .and_then(|id| self.session().and_then(|s| s.user(id)))
                 .map(|u| u.first_name.clone())
                 .unwrap_or_default();
+            // The shell closes the kit dialog with its flag, in whichever
+            // window hosts it.
             self.close_bot_create(cx);
-            window.close_dialog(cx);
             // tdesktop reports the new bot to the requesting bot.
             if let (Some(share), Some(live)) = (share, self.live.as_mut()) {
                 let _ = live.driver.share_users_with_bot(
@@ -496,8 +497,8 @@ impl QuillApp {
                         .label(tr(keys::CREATE_BOT_BUTTON))
                         .primary()
                         .disabled(!can_create)
-                        .on_click(cx.listener(|this, _, window, cx| {
-                            this.submit_bot_create(window, cx);
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.submit_bot_create(cx);
                         })),
                 );
             let content = div()

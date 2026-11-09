@@ -35,6 +35,20 @@ impl<S: JsonSender> ConnectDriver<S> {
         Ok(Some(extra))
     }
 
+    /// A contact change set the list to `None` (add, delete, import,
+    /// clear): fetch it again for the tab that shows it. A list that
+    /// failed waits for Retry; a send that fails ends the loading with
+    /// Retry instead of leaving "Loading contacts..." up.
+    pub fn refetch_invalidated_contacts(&mut self) {
+        let users = &self.session.users_state;
+        if users.contacts.is_some() || users.contacts_error {
+            return;
+        }
+        if self.fetch_contacts().is_err() {
+            self.session.users_state.contacts_error = true;
+        }
+    }
+
     /// Phase 6: user-scoped `getUserFullInfo` for the user info panel
     /// (opened from the contacts list, where there is no chat to resolve
     /// through). Deduped by the bio cache + in-flight user id; the id-less
@@ -290,7 +304,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(ConnectSendError::InvalidRequest);
         }
         let purpose = RequestPurpose::AddContactByPhone;
-        if self.session.requests.has_purpose(purpose) {
+        if self.session.users_state.new_contact_request.is_some() {
             return Ok(None);
         }
         self.session.users_state.new_contact_outcome = None;
@@ -308,7 +322,15 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session.requests.take(extra);
             return Err(err);
         }
+        self.session.users_state.new_contact_request = Some(extra);
         Ok(Some(extra))
+    }
+
+    /// The New Contact box closed: the import it sent opens no chat when
+    /// it lands, and the next box may send its own.
+    pub fn forget_new_contact(&mut self) {
+        self.session.users_state.new_contact_request = None;
+        self.session.users_state.new_contact_outcome = None;
     }
 
     /// Slice A6: "Delete synced contacts" (TGX

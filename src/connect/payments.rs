@@ -56,6 +56,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.session.payments.request = Some(PaymentRequest {
             invoice: invoice.clone(),
         });
+        self.session.payments.validate_request = Some(extra);
         let json = validate_order_info_request(extra, invoice, order, allow_save);
         self.send_json_request(extra, &json)
     }

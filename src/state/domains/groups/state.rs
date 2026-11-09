@@ -13,6 +13,14 @@ impl GroupsState {
         }
     }
 
+    /// `chat` gained members: its cached member pages go and the lists on
+    /// screen ask again.
+    pub(crate) fn members_added(&mut self, chat: i64) {
+        self.supergroup_members.retain(|(id, _), _| *id != chat);
+        self.basic_group_members.remove(&chat);
+        self.mark_member_list_stale(chat);
+    }
+
     /// The query the member list `key` was asked with ("" for one asked
     /// before queries were kept, or filled elsewhere).
     pub fn member_query(&self, key: (i64, MemberListFilter)) -> &str {

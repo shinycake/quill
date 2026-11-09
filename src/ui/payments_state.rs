@@ -12,6 +12,10 @@ pub(crate) struct PaymentUi {
     /// text fields.
     pub(super) dialog: Option<PaymentDialog>,
     pub(super) marketplace_open: bool,
+    /// The chat "Buy a collectible by name" buys for, fixed when the box
+    /// opens: the Send Gift box's recipient, or the open chat from the
+    /// menu. Never the chat open behind it later.
+    pub(super) marketplace_chat: Option<quill::ids::ChatId>,
     pub(super) marketplace_name_input: Entity<TextareaState>,
     pub(super) marketplace_comment_input: Entity<TextareaState>,
     pub(super) marketplace_private: bool,
@@ -174,6 +178,7 @@ impl PaymentUi {
         Self {
             dialog: None,
             marketplace_open: false,
+            marketplace_chat: None,
             marketplace_name_input: cx.new(|cx| {
                 TextareaState::new(window, cx)
                     .placeholder(tr(keys::Q_MONEY_COLLECTIBLE_GIFT_NAME_E_G))

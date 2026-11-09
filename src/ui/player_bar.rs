@@ -373,6 +373,27 @@ impl QuillApp {
         cx.notify();
     }
 
+    /// After updates land: the track's message was deleted (a tombstone:
+    /// deleted by anyone, a cleared history, a deleted chat), so the track
+    /// stops and the bar goes, as tdesktop stops on `itemRemoved`. A
+    /// message only paged out of the loaded history plays on, and so does
+    /// a profile's saved track, which is no message.
+    pub(in crate::ui) fn check_playing_track(&mut self, cx: &mut Context<Self>) {
+        let Some(key) = self.active_playback_key() else {
+            return;
+        };
+        if self.playing_saved_track() {
+            return;
+        }
+        let deleted = self
+            .session()
+            .and_then(|session| session.histories.get(&key.chat.0))
+            .is_some_and(|history| history.is_tombstone(key.message));
+        if deleted {
+            self.close_player(cx);
+        }
+    }
+
     /// Apply what the OS asked for (media keys, the Now Playing widget).
     pub(super) fn drain_media_commands(&mut self, cx: &mut Context<Self>) {
         for command in media_session::take_commands() {
@@ -424,10 +445,16 @@ impl QuillApp {
 
     /// Open the track's chat if needed and scroll to the message.
     /// A profile's saved track is no message: its title opens the owner's
-    /// Playlist page instead.
-    fn jump_to_playing(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    /// Playlist page instead, in the main window, the one that draws it.
+    /// The track's chat opens at the track in the window that shows it
+    /// (`route_chat_open`), so a chat window's track never scrolls the
+    /// clicking window's history.
+    pub(super) fn jump_to_playing(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.playing_saved_track() {
-            if let Some(owner) = self.saved_track_owner() {
+            if let Some(owner) = self.saved_track_owner()
+                && !self
+                    .hand_to_main_window(cx, move |this, _, cx| this.open_playlist_ui(owner, cx))
+            {
                 self.open_playlist_ui(owner, cx);
             }
             return;
@@ -435,10 +462,12 @@ impl QuillApp {
         let (Some(chat), Some(id)) = (self.playback.player.chat, self.active_playback_id()) else {
             return;
         };
-        if self.open_chat_id() != Some(chat) {
-            self.select_listed_chat(chat, window, cx);
+        if self.open_chat_id() == Some(chat) {
+            self.jump_to_pinned_message(id, cx);
+            return;
         }
-        self.jump_to_pinned_message(id, cx);
+        let open = super::chat_window::ChatOpen::new(chat).at(id);
+        self.select_chat_request(open, window, cx);
     }
 
     /// The bar, when a voice note or music file is active.

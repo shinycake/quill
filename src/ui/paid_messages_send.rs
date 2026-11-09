@@ -71,7 +71,7 @@ impl QuillApp {
             slot,
             once: self.send_once(),
         });
-        self.paid_messages.confirm_trust = false;
+        self.paid_messages.confirm_trust = None;
         if let Some(live) = self.live.as_mut() {
             // The balance for the Pay check.
             let _ = live.driver.maybe_fetch_star_transactions();
@@ -104,8 +104,17 @@ impl QuillApp {
         ))
     }
 
+    /// "Don't ask me again" is ticked on the confirmation on screen.
+    pub(super) fn paid_confirm_trusted(&self) -> bool {
+        self.paid_messages.confirm_trust.is_some_and(|key| {
+            self.paid_confirm_view()
+                .is_some_and(|(confirm, _)| (confirm.chat_id, confirm.per_message) == key)
+        })
+    }
+
     /// Cancel: a composer send keeps its text; a held send is dropped.
     pub(super) fn cancel_paid_confirm(&mut self, cx: &mut Context<Self>) {
+        self.paid_messages.confirm_trust = None;
         if self.paid_messages.confirm.take().is_none()
             && let Some(live) = self.live.as_mut()
         {
@@ -118,7 +127,8 @@ impl QuillApp {
     /// goes out again and is released from the guard; a held send is
     /// released as it is.
     pub(super) fn confirm_paid_send(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let remember = self.paid_messages.confirm_trust;
+        let remember = self.paid_confirm_trusted();
+        self.paid_messages.confirm_trust = None;
         let Some(ComposerPaidConfirm {
             ask: confirm,
             slot,
@@ -335,6 +345,7 @@ impl QuillApp {
                 .and_then(|s| s.payments.hub.balance)
                 .map(|b| b.stars);
             let short = balance.filter(|stars| *stars < confirm.total());
+            let trust_key = (confirm.chat_id, confirm.per_message);
             let mut body = div()
                 .flex()
                 .flex_col()
@@ -350,9 +361,9 @@ impl QuillApp {
                 .child(
                     Checkbox::new("paid-send-trust")
                         .label(tr(keys::LAUNCH_EXE_DONT_ASK))
-                        .checked(this.paid_messages.confirm_trust)
-                        .on_click(cx.listener(|this, &on: &bool, _, cx| {
-                            this.paid_messages.confirm_trust = on;
+                        .checked(this.paid_confirm_trusted())
+                        .on_click(cx.listener(move |this, &on: &bool, _, cx| {
+                            this.paid_messages.confirm_trust = on.then_some(trust_key);
                             cx.notify();
                         })),
                 )

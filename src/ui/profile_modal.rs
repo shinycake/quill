@@ -160,25 +160,38 @@ impl QuillApp {
         if self.windows.scope.is_some() {
             return;
         }
+        self.dismiss_profile_modal();
+        cx.notify();
+    }
+
+    /// A button inside the modal navigated elsewhere (Message, a group in
+    /// common, Mute's Sound..., Share): the modal goes and the info column
+    /// is what it was before the modal, at once, so what the button opens
+    /// next (a chat whose column follows the old one) finds the user's
+    /// column, not the member's profile. Also on a switch: the column is
+    /// the session's and comes back with the account.
+    pub(super) fn dismiss_profile_modal(&mut self) {
         let Some(modal) = self.dialogs.profile_modal.take() else {
             return;
         };
-        match modal.previous {
-            None => self.close_info_panel(cx),
-            Some(previous) => {
-                if let Some(live) = self.live.as_mut() {
-                    live.driver.set_info_panel(Some(previous));
-                } else if let Some(session) = self.demo_session.as_mut() {
-                    session.users_state.open_info_panel = Some(previous);
-                }
-            }
+        if let Some(live) = self.live.as_mut() {
+            live.driver.set_info_panel(modal.previous);
+        } else if let Some(session) = self.demo_session.as_mut() {
+            session.users_state.open_info_panel = modal.previous;
+        }
+        if modal.previous.is_none() {
+            self.common_groups.close();
         }
     }
 
-    /// Drop the modal without touching the info panel (a button inside it
-    /// navigated elsewhere).
-    pub(super) fn dismiss_profile_modal(&mut self) {
-        self.dialogs.profile_modal = None;
+    /// Another info target opens while the modal is up (a member row inside
+    /// a group's modal, Statistics): it takes the column, and the modal,
+    /// which shows only its own target, goes instead of coming back later
+    /// with a stale column to give back.
+    pub(super) fn profile_modal_replaced_by(&mut self, target: InfoPanelTarget) {
+        self.dialogs
+            .profile_modal
+            .take_if(|modal| modal.target != target);
     }
 
     /// The modal layer, above the window content.

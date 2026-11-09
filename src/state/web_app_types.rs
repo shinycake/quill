@@ -63,6 +63,9 @@ pub struct WebApps {
     pub pending: Vec<WebAppPending>,
     /// One-shot: the open call's answer.
     pub open_result: Option<WebAppOpenResult>,
+    /// Launches TDLib started for an open call that was dropped before
+    /// its answer; the driver sends `closeWebApp` for each.
+    pub dropped_launches: Vec<i64>,
     /// `updateAttachmentMenuBots`: the bots in the attachment menu.
     pub attachment_menu_bots: Vec<AttachmentMenuBot>,
     /// One-shot: `getAttachmentMenuBot` answer (for adding a bot), or a

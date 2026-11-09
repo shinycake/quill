@@ -81,7 +81,7 @@ impl QuillApp {
 
     /// Put back what the info panel showed before the layer, or nothing.
     /// Needs no window, so the poll loop can call it.
-    pub(super) fn drop_earn_layer(&mut self, cx: &mut Context<Self>) {
+    pub(in crate::ui) fn drop_earn_layer(&mut self, cx: &mut Context<Self>) {
         self.earn.fade = None;
         self.earn.back.clear();
         let restore = self.earn.restore.take();

@@ -236,17 +236,59 @@ impl QuillApp {
             {
                 self.admin.group_settings_dialog = None;
             }
-            // routed: the window that shows the old group shows its
-            // upgrade in place.
-            if let Some(live) = self.live.as_mut()
-                && live.driver.session.open_chat == Some(old)
-            {
-                let _ = live.driver.select_chat(new);
-                self.enter_chat_ui(new, cx);
-            }
+            // The Edit box of the old group would come back with its rows
+            // and a Save that fails on the deactivated chat.
+            self.close_group_edit_box_for(old, cx);
+            // routed: this runs as the main window, whose own chat moves in
+            // place; a chat window showing the old group is replaced by
+            // one for the new chat (`move_upgraded_chat_window`).
+            self.in_window_scope(None, cx, |app, cx| {
+                if let Some(live) = app.live.as_mut()
+                    && live.driver.session.open_chat == Some(old)
+                {
+                    let _ = live.driver.select_chat(new);
+                    app.enter_chat_ui(new, cx);
+                }
+            });
+            self.move_upgraded_chat_window(old, new, cx);
         }
         cx.notify();
         true
+    }
+
+    /// A chat window shows the group that became `new`: it closes, and one
+    /// for the new chat opens where it was, as the main window's own chat
+    /// moves in place.
+    fn move_upgraded_chat_window(&mut self, old: ChatId, new: ChatId, cx: &mut Context<Self>) {
+        let Some(handle) = self
+            .windows
+            .open_windows()
+            .find_map(|(chat, handle)| (chat == old).then_some(handle))
+        else {
+            return;
+        };
+        let Some(main) = self.main_window.handle else {
+            return;
+        };
+        let screen = self.screen_epoch();
+        let app = cx.weak_entity();
+        // window-scope: `in_screen_scope` puts the main window's state in place.
+        cx.defer(move |cx| {
+            let bounds = handle
+                .update(cx, |_, window, _| {
+                    let bounds = window.bounds();
+                    window.remove_window();
+                    bounds
+                })
+                .ok();
+            let _ = main.update(cx, |_, window, cx| {
+                let _ = app.update(cx, |this, cx| {
+                    this.in_screen_scope(screen, cx, |this, cx| {
+                        this.open_chat_window_at(new, bounds, window, cx);
+                    });
+                });
+            });
+        });
     }
 
     pub(super) fn settings_note(text: impl Into<SharedString>, muted: Hsla) -> Div {

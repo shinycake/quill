@@ -79,9 +79,16 @@ impl Session {
         url: String,
     ) {
         let pending = self.take_web_app_pending(request);
-        let (chat_id, source) = match pending {
-            Some(p) if p.bot_user_id == bot_user_id => (p.chat_id, p.source),
-            _ => (None, crate::web_app::LaunchSource::MenuButton),
+        let Some((chat_id, source)) = pending
+            .filter(|p| p.bot_user_id == bot_user_id)
+            .map(|p| (p.chat_id, p.source))
+        else {
+            // The launch was dropped (an account switch): nothing opens,
+            // and an app TDLib started is closed by the driver.
+            if launch_id != 0 {
+                self.bots.web_apps.dropped_launches.push(launch_id);
+            }
+            return;
         };
         self.bots.web_apps.open_result = Some(if url.is_empty() {
             WebAppOpenResult::Failed {
@@ -156,11 +163,13 @@ impl Session {
             | RequestPurpose::Bots(BotsPurpose::GetWebAppUrl { bot_user_id })
             | RequestPurpose::Bots(BotsPurpose::GetMainWebApp { bot_user_id })
             | RequestPurpose::Bots(BotsPurpose::GetWebAppLinkUrl { bot_user_id }) => {
-                let _ = self.take_web_app_pending(pending);
-                self.bots.web_apps.open_result = Some(WebAppOpenResult::Failed {
-                    bot_user_id,
-                    message: web_app_error_text(err),
-                });
+                // A dropped launch's failure is nobody's to report.
+                if self.take_web_app_pending(pending).is_some() {
+                    self.bots.web_apps.open_result = Some(WebAppOpenResult::Failed {
+                        bot_user_id,
+                        message: web_app_error_text(err),
+                    });
+                }
             }
             RequestPurpose::Bots(BotsPurpose::SearchWebApp { .. }) => {
                 self.bots.web_apps.found = Some(Err(if err.code == 404 {
