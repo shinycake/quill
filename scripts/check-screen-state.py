@@ -44,6 +44,10 @@ closed by the passcode lock or refused under it (scripts/lock_surfaces.py,
 scripts/lock-surfaces.txt; round 11: recordings and mini apps outlived
 the lock).
 
+A value whose replacement must do something (`ChatUi`, the Group Settings
+box) is replaced whole only by its one writer (scripts/single_writers.py,
+scripts/single-writers.txt; round 15: hand drops missed at some writers).
+
 Run from the repository root:
 
     python3 scripts/check-screen-state.py [--root DIR]
@@ -56,6 +60,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import lock_surfaces  # noqa: E402
 import session_dialogs  # noqa: E402
+import single_writers  # noqa: E402
 
 APP = "src/ui/app.rs"
 SCREEN = "src/ui/on_screen.rs"
@@ -447,12 +452,16 @@ def main():
     for problem in lock_problems:
         print(problem)
         failed = True
+    writer_problems, writers = single_writers.problems()
+    for problem in writer_problems:
+        print(problem)
+        failed = True
     if failed:
         sys.exit(1)
     print(
         f"screen state: OK ({len(fields)} QuillApp fields, {len(listed)} listed, "
         f"{len(listed_fields(FIELD_LIST))} app-wide sub-fields justified, "
-        f"{session_backed} session-held dialogs closed, {lock_starts} lock surfaces)"
+        f"{session_backed} session-held dialogs closed, {lock_starts} lock surfaces, {writers} single writers)"
     )
 
 

@@ -204,3 +204,30 @@ fn a_windows_failure_is_a_toast(cx: &mut TestAppContext) {
         assert!(app.connection.status_note().is_empty())
     });
 }
+
+/// The lock closes the ceremony box (tdesktop closes its boxes on lock): a
+/// PIN sheet asked for just before the lock takes no focus from the
+/// passcode field, and the box is gone after the unlock.
+#[gpui_kit::test]
+fn the_lock_closes_the_ceremony_and_its_pin_field(cx: &mut TestAppContext) {
+    let (app, shell, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    assert_eq!(shown_dialog(&shell, vcx), Some(DialogKind::PasskeyCeremony));
+    app.update_in(vcx, |app, _, cx| {
+        app.feed_ceremony_event(CeremonyEvent::NeedPin { invalid: false }, cx);
+        app.account.passcode.enabled = true;
+        app.lock_by_passcode(cx);
+    });
+    assert!(app.read_with(vcx, |app, _| app.account.passcode.is_locked()));
+    assert_eq!(sheet(&app, vcx), None, "the ceremony ends at the lock");
+    app.read_with(vcx, |app, _| {
+        assert!(
+            app.privacy.passkeys.pin_input.is_none(),
+            "the PIN field goes"
+        );
+    });
+    app.update_in(vcx, |app, window, cx| {
+        app.unlock_answered(Ok(()), window, cx);
+    });
+    assert_ne!(shown_dialog(&shell, vcx), Some(DialogKind::PasskeyCeremony));
+}

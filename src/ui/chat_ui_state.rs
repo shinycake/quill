@@ -33,6 +33,22 @@ pub(super) struct EditMode {
     pub(super) confirm_cancel: bool,
 }
 
+/// One value of [`ChatUi`], told apart from every other: each one made
+/// gets a new visit. Something parked for the chat shown (a click to play
+/// a round video before its file landed) records it, and applies only
+/// while the same value is in place: a chat change, closing the chat
+/// (Esc) and coming back, or another topic replaced the value, so the
+/// click was for a visit that is over.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct ChatVisit(u64);
+
+impl Default for ChatVisit {
+    fn default() -> Self {
+        static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+        Self(NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed))
+    }
+}
+
 /// The reply bar: the message the composer replies to, and its quote
 /// picker. One value, so the picker goes with the reply however the reply
 /// goes (sent, cancelled, replaced by a reply to another message).
@@ -52,6 +68,8 @@ enum QuotePicker {
 /// One view's state for the chat it shows.
 #[derive(Default)]
 pub(crate) struct ChatUi {
+    /// Which value this is; new with each one made.
+    visit: ChatVisit,
     /// The chat this value was made for; `None` before any chat showed.
     /// Only [`QuillApp::enter_chat_ui`] sets it.
     chat: Option<ChatId>,
@@ -154,6 +172,11 @@ impl ChatUi {
             topic,
             ..Self::default()
         }
+    }
+
+    /// Which value this is (see [`ChatVisit`]).
+    pub(super) fn visit(&self) -> ChatVisit {
+        self.visit
     }
 
     /// The chat this value was made for.
@@ -293,8 +316,9 @@ impl QuillApp {
     /// What other owners still hold for the chat left is ended here too:
     /// the forward selection (`ShareUi`), the auto-delete picker of the
     /// chat left (`NotifyUi`, not per window: one open for a chat another
-    /// window shows stays), a recording (`RecordingUi`, which owes TDLib
-    /// and disk a cancel), and an inline clip parked to play.
+    /// window shows stays), and a recording (`RecordingUi`, which owes
+    /// TDLib and disk a cancel). An inline clip parked to play was for the
+    /// old value's visit, so it no longer starts (`ChatVisit`).
     pub(super) fn enter_chat_ui(&mut self, chat: ChatId, cx: &mut Context<Self>) {
         // Phase B4: the TTL picker belongs to the chat it was opened for.
         self.close_ttl_picker_of_left_chat(Some(chat));
@@ -304,14 +328,25 @@ impl QuillApp {
             return;
         }
         self.profile_modal_leaves_chat(cx);
-        if let Some(left) = self.chat_ui.chat {
-            self.drop_inline_play_intent_in_chat(self.windows.scope, left);
-        }
         let mut next = ChatUi::for_topic(chat, self.open_draft_topic(chat));
-        let old = std::mem::take(&mut *self.screen.chat_ui);
-        next.pending_reply = old.pending_reply.filter(|bar| bar.reply.belongs_to(chat));
-        next.edit_mode = old.edit_mode.filter(|mode| mode.edit.chat_id == chat);
-        *self.screen.chat_ui = next;
+        let old = &mut self.screen.chat_ui;
+        next.pending_reply = old
+            .pending_reply
+            .take()
+            .filter(|bar| bar.reply.belongs_to(chat));
+        next.edit_mode = old
+            .edit_mode
+            .take()
+            .filter(|mode| mode.edit.chat_id == chat);
+        self.replace_chat_ui(next);
+    }
+
+    /// The one writer of the value in place: the visit it ends takes with
+    /// it a round video or GIF parked to play during it, so it neither
+    /// starts with sound when the chat shows again nor holds the slot.
+    fn replace_chat_ui(&mut self, next: ChatUi) {
+        let ended = std::mem::replace(&mut *self.screen.chat_ui, next).visit;
+        self.drop_play_intent_of_visit(ended);
     }
 
     /// The view in place leaves its chat for `next` (`None`: no chat):
@@ -323,7 +358,6 @@ impl QuillApp {
         }
     }
 
-    /// The view in place shows no chat any more (`leave_open_chat`).
     /// The `ChatUi` in place was made for the chat and topic the view
     /// shows now. A click can land between a chat change and the frame
     /// that replaces the value (`sync_chat_ui`): a box of the old chat
@@ -335,8 +369,9 @@ impl QuillApp {
         self.chat_ui.chat == Some(chat) && self.chat_ui.topic == self.open_draft_topic(chat)
     }
 
+    /// The view in place shows no chat any more (`leave_open_chat`).
     pub(super) fn leave_chat_ui(&mut self) {
-        *self.screen.chat_ui = ChatUi::for_chat(None);
+        self.replace_chat_ui(ChatUi::for_chat(None));
     }
 
     /// Frame upkeep: the value follows the chat and topic the view shows,
@@ -358,13 +393,12 @@ impl QuillApp {
                 self.screen.chat_ui.topic = topic;
             }
             Some(made_for) if made_for != chat => {
-                *self.screen.chat_ui = ChatUi::for_topic(chat, topic);
-                self.drop_inline_play_intent_in_chat(self.windows.scope, made_for);
+                self.replace_chat_ui(ChatUi::for_topic(chat, topic));
             }
             Some(_) if self.chat_ui.topic != topic => {
                 let mut next = ChatUi::for_topic(chat, topic);
                 next.pending_reply = self.screen.chat_ui.pending_reply.take();
-                *self.screen.chat_ui = next;
+                self.replace_chat_ui(next);
             }
             Some(_) => {}
         }

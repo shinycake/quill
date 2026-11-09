@@ -246,7 +246,7 @@ pub(super) trait WindowActions: InteractiveElement + Sized {
         });
         let el = on::<_, OpenShortcuts>(el, o, scope, |app, _, _, cx| {
             app.hand_to_main_window(cx, |app, _, cx| {
-                app.open_settings(Some(quill::settings_catalog::Page::Shortcuts));
+                app.open_settings(Some(quill::settings_catalog::Page::Shortcuts), cx);
                 cx.notify();
             });
             true

@@ -165,7 +165,7 @@ impl QuillApp {
                 self.appearance.theme = ThemeChoice::Dark;
                 self.appearance.accent_rgb = 0x8b5cf6;
                 self.appearance.wallpaper_rgb = Some(0x1b1230);
-                self.open_settings_on(quill::settings_catalog::Page::Appearance);
+                self.open_settings_on(quill::settings_catalog::Page::Appearance, cx);
             }
             "accent" => {
                 self.appearance.accent_rgb = 0x8b5cf6;
@@ -229,14 +229,14 @@ impl QuillApp {
         ));
     }
 
-    fn demo_privacy(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {
+    fn demo_privacy(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
         // Slice S3: Privacy overlay with injected rules, the read-date
         // setting, and the blocked list (no live Telegram).
         if let Some(session) = self.demo_session.as_mut() {
             self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
             apply_ready_privacy(session, &self.demo_ui.sink, &self.demo_ui.seq);
         }
-        self.open_settings(Some(quill::settings_catalog::Page::Privacy));
+        self.open_settings(Some(quill::settings_catalog::Page::Privacy), cx);
         self.set_note(StatusNote::silent(
             "screenshot demo — privacy settings (injected, no live Telegram)",
         ));

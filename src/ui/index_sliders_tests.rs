@@ -202,7 +202,7 @@ fn storage_limit_sliders_restart_from_the_account_shown(cx: &mut TestAppContext)
             session.settings.storage_limits = Default::default();
         }
         app.settings.page = None;
-        app.open_settings(Some(quill::settings_catalog::Page::DataStorage));
+        app.open_settings(Some(quill::settings_catalog::Page::DataStorage), cx);
         cx.notify();
     });
     frames(vcx);

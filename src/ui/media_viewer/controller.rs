@@ -23,7 +23,7 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
         self.viewer_clip_path(item)?;
-        if self.playback.error.is_some() && self.viewer.player.is_none() {
+        if self.viewer.clip_error.is_some() && self.viewer.player.is_none() {
             return None;
         }
         let transport = self
@@ -111,7 +111,7 @@ impl QuillApp {
             .as_ref()
             .is_some_and(|player| player.state() == PlayState::Failed);
         let view = cx.entity().downgrade();
-        let state = if let Some(error) = self.playback.error.clone().filter(|_| local) {
+        let state = if let Some(error) = self.viewer.clip_error.clone().filter(|_| local) {
             let open_view = view.clone();
             PictureState::Failed {
                 detail: error.into(),

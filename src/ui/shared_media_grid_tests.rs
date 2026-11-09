@@ -94,8 +94,20 @@ fn another_page_starts_at_the_top_and_the_same_page_keeps_its_place(cx: &mut Tes
     app.update_in(vcx, |_, _, cx| cx.notify());
     vcx.run_until_parked();
     assert!(offset(&app, vcx).is_some_and(|y| y < px(0.)), "kept");
+    // The same chat's list with other items (its newest deleted, a new one
+    // in) is the same list: it keeps its place.
+    show_photos(&app, vcx, 1001, 399);
+    assert!(offset(&app, vcx).is_some_and(|y| y < px(0.)), "same list");
     // Another chat's first page starts at the top.
     show_photos(&app, vcx, 5000, 400);
+    app.update(vcx, |app, cx| {
+        if let Some(session) = app.demo_session.as_mut() {
+            let chat = session.media.shared_media.chat_id.map_or(1, |chat| chat.0);
+            session.media.shared_media.chat_id = Some(quill::ids::ChatId(chat + 1));
+        }
+        cx.notify();
+    });
+    vcx.run_until_parked();
     assert_eq!(offset(&app, vcx), Some(px(0.)));
     assert!(vcx.debug_bounds("shared-media-tile-5400").is_some());
 }

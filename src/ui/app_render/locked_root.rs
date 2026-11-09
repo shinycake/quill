@@ -7,6 +7,7 @@
 use super::super::actions::{CloseWindow, MinimizeWindow, QuitApp, ToggleFullscreen, ZoomWindow};
 use super::super::app::QuillApp;
 use super::super::chat_window::WindowScope;
+use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::agent::ui_driver::guard::{self, HardSurface};
 
@@ -54,8 +55,28 @@ impl QuillApp {
             }))
             .on_action(|_: &ZoomWindow, window, _| window.zoom_window())
             .on_action(|_: &ToggleFullscreen, window, _| window.toggle_fullscreen())
-            .child(self.lock_overlay(cx))
-            .children(self.background_ring_lock_card(cx));
+            .child(self.lock_overlay(cx));
+        // Calls stay answerable under the lock: a call ringing on another
+        // account, and a second call ringing in during this one.
+        let cards: Vec<AnyElement> = self
+            .background_ring_lock_card(cx)
+            .into_iter()
+            .chain(self.swap_call_lock_card(cx))
+            .collect();
+        let root = root.when(!cards.is_empty(), |root| {
+            root.child(
+                div()
+                    .absolute()
+                    .top(px(48.))
+                    .left_0()
+                    .right_0()
+                    .flex()
+                    .flex_col()
+                    .items_center()
+                    .gap_2()
+                    .children(cards),
+            )
+        });
         self.set_window_scope(outer_scope);
         WindowScope::new(cx.weak_entity(), None, root.into_any_element())
     }

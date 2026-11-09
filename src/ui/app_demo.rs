@@ -231,7 +231,7 @@ impl QuillApp {
         })
         .detach();
         QuillApp::register_notification_responses(cx);
-        if demo.is_none() && !app.account.passcode.deferred_connect {
+        if demo.is_none() && app.account.passcode.connect_at_unlock.is_none() {
             // With a local passcode the database key is wrapped: the
             // connection starts after the first unlock (tdesktop starts locked).
             app.start_connection(cx);

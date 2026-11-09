@@ -709,7 +709,7 @@ impl QuillApp {
             .as_str()
         {
             "privacy" => {
-                self.open_settings(Some(quill::settings_catalog::Page::Privacy));
+                self.open_settings(Some(quill::settings_catalog::Page::Privacy), cx);
             }
             "about" => {
                 self.open_passkeys(cx);

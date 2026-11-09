@@ -537,11 +537,10 @@ impl QuillApp {
         self.deliver_notifications(None, cx);
         self.redraw_polled(need, deliver, cx);
         self.discard_stopped_media_playback(cx);
-        // A parked voice note or song starts when its file lands, not under
-        // the lock.
-        if !self.lock_waits() {
-            self.resume_play_intent(cx);
-        }
+        // A parked voice note or song starts when its file lands, under the
+        // lock too, as tdesktop's player plays on while locked; the lock
+        // dropped the parked clips.
+        self.resume_play_intent(cx);
         if logged_out {
             self.restart_live_connection(cx);
         }

@@ -244,7 +244,7 @@ fn space_freed_during_a_held_call_keeps_the_call_client(cx: &mut TestAppContext)
     read(&app, &mut vcx, Some(FLOORS.warn_clear));
     app.read_with(&vcx, |app, _| {
         assert!(
-            !app.account.passcode.deferred_connect,
+            !app.account.passcode.connect_at_unlock.is_some(),
             "nothing waits for the unlock"
         );
     });
@@ -275,7 +275,9 @@ fn recovering_while_locked_connects_at_the_unlock(cx: &mut TestAppContext) {
     });
     read(&app, &mut vcx, Some(FLOORS.warn_clear));
     assert_eq!(shown(&app, &mut vcx), (false, false, start));
-    assert!(app.update_in(&mut vcx, |app, _, _| app.account.passcode.deferred_connect));
+    assert!(app.update_in(&mut vcx, |app, _, _| {
+        app.account.passcode.connect_at_unlock.is_some()
+    }));
 }
 
 #[gpui_kit::test]

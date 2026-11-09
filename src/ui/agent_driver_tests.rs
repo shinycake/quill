@@ -261,7 +261,7 @@ fn a_blocked_surface_answers_with_a_note_and_takes_no_input(cx: &mut TestAppCont
     // Settings open: a note instead of a tree, and no click, even by point
     // on what was the search box.
     vcx.update(|_, cx| {
-        app.update(cx, |app, _| app.open_settings(None));
+        app.update(cx, |app, cx| app.open_settings(None, cx));
     });
     settle(vcx);
     let reply = drive(&app, vcx, UiCommand::ReadTree);
@@ -650,7 +650,7 @@ fn the_forced_tree_builds_on_every_screen(cx: &mut TestAppContext) {
     }
     tree_on(vcx, "the chat list");
 
-    vcx.update(|_, cx| app.update(cx, |app, _| app.open_settings(None)));
+    vcx.update(|_, cx| app.update(cx, |app, cx| app.open_settings(None, cx)));
     tree_on(vcx, "Settings");
     vcx.update(|_, cx| {
         app.update(cx, |app, _| {

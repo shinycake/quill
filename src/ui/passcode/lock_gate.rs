@@ -45,7 +45,7 @@ impl QuillApp {
     /// (`lock_layer`), the agent socket pauses or resumes, and the links
     /// held for the unlock are taken again.
     pub(in crate::ui) fn set_locked(&mut self, locked: bool, cx: &mut Context<Self>) {
-        self.account.passcode.locked = locked;
+        self.account.passcode.set_lock_flag(locked);
         quill::wake::PASSCODE.poke();
         quill::wake::CHROME.poke();
         if !locked {
@@ -65,7 +65,7 @@ impl QuillApp {
     pub(in crate::ui) fn connect_waits_for_unlock(&mut self) -> bool {
         let waits = self.refused_while_locked() && !self.account.passcode.demo;
         if waits {
-            self.account.passcode.deferred_connect = true;
+            self.account.passcode.connect_at_unlock = self.current_account();
         }
         waits
     }
@@ -86,7 +86,8 @@ impl QuillApp {
         // A switch under the lock (a ringing call's Answer) may have put a
         // background client on screen since: that client stays, and the
         // call answered on it with it.
-        if std::mem::take(&mut self.account.passcode.deferred_connect) && self.live.is_none() {
+        let held = self.account.passcode.connect_at_unlock.take();
+        if held.is_some() && held == self.current_account() && self.live.is_none() {
             self.start_connection(cx);
         }
         self.ensure_background_accounts(cx);
@@ -116,6 +117,9 @@ impl QuillApp {
             // upkeep, so a round video playing there kept its sound.
             app.players.inline_videos.leave_window(app.windows.scope);
         });
+        // A clip parked to play goes with the clips; a voice note or song
+        // parked for its download plays on, as tdesktop's player does.
+        self.drop_play_intents_for_lock();
         self.release_story_viewer(cx);
         // The mini app is a helper window the lock screen does not cover;
         // tdesktop closes such windows on lock (`closeAdditionalWindows`).
@@ -130,6 +134,9 @@ impl QuillApp {
         self.close_every_video_pip(cx);
         // The device-linking scanner is a helper window with the camera on.
         self.clear_device_qr();
+        // A passkey ceremony box closes and its key is told to stop; its
+        // PIN sheet would take focus from the passcode field.
+        self.close_passkey_ceremony_for_lock();
         // A profile or group photo's camera panel: the camera and its light
         // go off, and a start still on its way is dropped when it lands.
         self.close_cameras_for_lock(cx);

@@ -256,7 +256,7 @@ fn nothing_connects_on_the_cleared_key_and_the_unlock_connects(cx: &mut TestAppC
         // A remote log out under the lock restarts the connection.
         app.start_connection(cx);
         assert_eq!(app.connect.generation, generation, "nothing prepared");
-        assert!(app.account.passcode.deferred_connect, "it waits");
+        assert!(app.account.passcode.connect_at_unlock.is_some(), "it waits");
         // One prepared before the lock lands refused by the cleared key.
         app.open_client(Err(quill::connect::ConnectBlocker::LockedStore), cx);
         assert!(
@@ -274,6 +274,26 @@ fn nothing_connects_on_the_cleared_key_and_the_unlock_connects(cx: &mut TestAppC
             app.connect.generation > generation,
             "connects at the unlock"
         );
-        assert!(!app.account.passcode.deferred_connect);
+        assert!(!app.account.passcode.connect_at_unlock.is_some());
+    });
+}
+
+/// A connect held for an account that is no longer on screen (a switch
+/// under the lock, from the lock card's Answer) does not start at the
+/// unlock: the held value names its account.
+#[gpui_kit::test]
+fn the_unlock_connects_only_the_account_that_waited(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx, "ready-chats");
+    let vcx = &mut vcx;
+    lock(&app, vcx);
+    let generation = app.update(vcx, |app, _| {
+        app.account.passcode.connect_at_unlock =
+            Some(quill::ids::AccountKey("another-account".into()));
+        app.connect.generation
+    });
+    unlock(&app, vcx);
+    app.read_with(vcx, |app, _| {
+        assert_eq!(app.connect.generation, generation, "nothing connects");
+        assert!(app.account.passcode.connect_at_unlock.is_none());
     });
 }

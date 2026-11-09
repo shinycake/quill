@@ -75,7 +75,7 @@ impl QuillApp {
     /// Settings → Privacy, with nothing open over it, freshly fetched.
     pub(crate) fn open_privacy(&mut self, cx: &mut Context<Self>) {
         self.close_privacy_layers();
-        self.open_settings(Some(quill::settings_catalog::Page::Privacy));
+        self.open_settings(Some(quill::settings_catalog::Page::Privacy), cx);
         self.fetch_privacy();
         cx.notify();
     }

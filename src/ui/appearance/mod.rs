@@ -66,8 +66,12 @@ impl QuillApp {
     pub(crate) fn minimize_to_tray(&self) -> bool {
         self.appearance.minimize_to_tray
     }
-    pub(super) fn open_settings_on(&mut self, page: quill::settings_catalog::Page) {
-        self.open_settings(Some(page));
+    pub(super) fn open_settings_on(
+        &mut self,
+        page: quill::settings_catalog::Page,
+        cx: &mut Context<Self>,
+    ) {
+        self.open_settings(Some(page), cx);
     }
 
     /// Shortcuts take keystrokes for rebinding only while their page is up.

@@ -9,11 +9,6 @@ use quill::ids::ChatId;
 pub(crate) struct AdminUi {
     /// The New Link / Edit Link box (`invite_link_box/`).
     pub(super) invite_link_box: Option<super::invite_link_box::InviteLinkBox>,
-    /// B8: the invite link whose "who joined" details are expanded.
-    pub(super) invite_link_details: Option<(ChatId, String)>,
-    /// B8: the chat whose revoked-links list is expanded (and was
-    /// fetched); another chat's links page starts collapsed.
-    pub(super) revoked_links_open: Option<ChatId>,
     /// Phase D3b: admin-management dialog state (promote picker /
     /// rights editor / demote confirm).
     pub(super) admin_dialog: Option<AdminDialog>,
@@ -80,7 +75,7 @@ impl crate::ui::on_screen::Farewell for AdminUi {
         {
             app.close_boost_box_state(cx);
         }
-        app.drop_invite_link_pages(None);
+        app.drop_invite_link_pages();
     }
 }
 
@@ -88,8 +83,6 @@ impl AdminUi {
     pub(super) fn new() -> Self {
         Self {
             invite_link_box: None,
-            invite_link_details: None,
-            revoked_links_open: None,
             admin_dialog: None,
             create_chat_dialog: None,
             community: CommunityUi::default(),

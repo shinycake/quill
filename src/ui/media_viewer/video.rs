@@ -113,7 +113,7 @@ impl QuillApp {
             .unwrap_or(0.0);
         self.viewer.video = Some(item.message_id);
         self.viewer.video_path = Some(path.to_path_buf());
-        self.playback.error = None;
+        self.viewer.clip_error = None;
         if looping
             && Self::viewer_is_gif_file(item, path)
             && !crate::ui::video_player::plays_gif_files()
@@ -132,7 +132,7 @@ impl QuillApp {
             Ok(player) => player,
             Err(err) => {
                 self.stop_viewer_video();
-                self.playback.error = Some(viewer_error_message(item, &err));
+                self.viewer.clip_error = Some(viewer_error_message(item, &err));
                 cx.notify();
                 return;
             }

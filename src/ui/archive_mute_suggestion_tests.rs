@@ -133,7 +133,7 @@ fn the_privacy_switch_shows_when_allowed_or_premium(cx: &mut TestAppContext) {
                     &OptionValue::Boolean(allowed),
                 );
             }
-            app.open_settings(Some(Page::Privacy));
+            app.open_settings(Some(Page::Privacy), cx);
             cx.notify();
         });
     };

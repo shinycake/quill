@@ -425,3 +425,73 @@ fn a_gif_played_again_while_it_decodes_starts_at_once(cx: &mut TestAppContext) {
         );
     });
 }
+
+/// tdesktop plays a voice note from the click (it streams) and plays on
+/// while locked; a clip stops at the lock. So at the lock a round video
+/// parked for its download goes, and a parked voice note starts when its
+/// file lands, under the lock too, not later at the unlock.
+#[gpui_kit::test]
+fn the_lock_drops_a_parked_clip_and_keeps_a_parked_voice_note(cx: &mut TestAppContext) {
+    const VOICE: i64 = 91;
+    const VOICE_FILE: i32 = 82;
+    let _scripts = queue_scripts(16);
+    let (app, mut vcx) = autoplay_off(cx);
+    let vcx = &mut vcx;
+    set_local(&app, vcx, ROUND_FILE, false);
+    let MessageContent::VideoNote(note) = round_note(&app, vcx) else {
+        panic!("message 611 is a round video");
+    };
+    app.update_in(vcx, |app, _, cx| {
+        app.play_video_note(ChatId(ROUND.0), MessageId(ROUND.1), &note, cx);
+    });
+    settle(&app, vcx);
+    assert!(app.read_with(vcx, |app, _| app.playback.intent.is_some()));
+    app.update_in(vcx, |app, _, cx| {
+        app.account.passcode.enabled = true;
+        app.lock_by_passcode(cx);
+    });
+    assert!(
+        app.read_with(vcx, |app, _| app.playback.intent.is_none()),
+        "the lock dropped the parked round video"
+    );
+    app.update_in(vcx, |app, window, cx| {
+        app.unlock_answered(Ok(()), window, cx)
+    });
+    set_local(&app, vcx, ROUND_FILE, true);
+    land(&app, vcx);
+    assert!(
+        app.read_with(vcx, |app, _| app.players.inline_videos.player(ROUND))
+            .is_none(),
+        "nothing starts at the unlock"
+    );
+
+    app.update_in(vcx, |app, _, _| {
+        let session = app.demo_session.as_mut().expect("the demo session");
+        crate::ui::audio_playback::apply_ready_voice(session, &app.demo_ui.sink, &app.demo_ui.seq);
+    });
+    set_local(&app, vcx, VOICE_FILE, false);
+    app.update_in(vcx, |app, _, cx| {
+        app.press_media(FileId(VOICE_FILE), cx, |app, cx| {
+            app.toggle_voice_playback(
+                ChatId(11),
+                MessageId(VOICE),
+                FileId(VOICE_FILE),
+                true,
+                3.,
+                cx,
+            );
+        });
+        app.lock_by_passcode(cx);
+    });
+    settle(&app, vcx);
+    assert!(
+        app.read_with(vcx, |app, _| app.playback.intent.is_some()),
+        "the voice note waits for its file through the lock"
+    );
+    set_local(&app, vcx, VOICE_FILE, true);
+    land(&app, vcx);
+    app.read_with(vcx, |app, _| {
+        assert!(app.account.passcode.is_locked());
+        assert_eq!(app.playback.playing_voice, Some(MessageId(VOICE)));
+    });
+}

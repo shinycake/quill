@@ -542,7 +542,8 @@ impl QuillApp {
                         if let Some(error) = failed
                             && let Some(item) = this.viewer.state.current()
                         {
-                            this.playback.error = Some(video::viewer_error_message(item, &error));
+                            this.viewer.clip_error =
+                                Some(video::viewer_error_message(item, &error));
                             cx.notify();
                         }
                         this.viewer.player.is_some()

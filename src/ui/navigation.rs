@@ -249,12 +249,12 @@ impl QuillApp {
             }
             NavigationAction::SendGift => self.open_send_gift_dialog(window, cx),
             NavigationAction::Appearance => {
-                self.open_settings_on(Page::Appearance);
+                self.open_settings_on(Page::Appearance, cx);
                 cx.notify();
             }
             NavigationAction::Privacy => {
-                self.open_settings(None);
-                self.show_settings_page(Page::Privacy, cx);
+                self.open_settings(Some(Page::Privacy), cx);
+                cx.notify();
             }
             NavigationAction::TwoFa => {
                 self.open_twofa(cx);
@@ -272,11 +272,11 @@ impl QuillApp {
             NavigationAction::Accounts => {
                 self.open_accounts(cx);
             }
-            NavigationAction::Settings => self.open_settings(None),
+            NavigationAction::Settings => self.open_settings(None, cx),
             NavigationAction::Notifications => self.open_notification_settings(cx),
             NavigationAction::Profile => self.open_edit_profile_dialog(window, cx),
-            NavigationAction::ContactsSettings => self.open_settings(Some(Page::Account)),
-            NavigationAction::CallSettings => self.open_settings(Some(Page::Calls)),
+            NavigationAction::ContactsSettings => self.open_settings(Some(Page::Account), cx),
+            NavigationAction::CallSettings => self.open_settings(Some(Page::Calls), cx),
             NavigationAction::Language => self.open_language_box(window, cx),
             NavigationAction::MarkRead => self.mark_all_chats_as_read(false, cx),
             NavigationAction::Archive => self.open_archive_folder(cx),

@@ -358,67 +358,137 @@ fn leaving_a_screen_saves_it(cx: &mut TestAppContext) {
     assert_eq!(note(&app, vcx), None);
 }
 
-/// A screen built before the full info arrived (or before the phone
-/// changed it) and left untouched writes nothing: leaving compares the
-/// draft with what it was built from, not with the server's value now.
+fn saved_info() -> quill::business_info::BusinessInfo {
+    quill::business_info::BusinessInfo {
+        greeting: Some(quill::business_settings::GreetingSettings {
+            shortcut_id: 2,
+            recipients: quill::business_settings::BusinessRecipients::everyone(),
+            inactivity_days: 7,
+        }),
+        away: Some(quill::business_settings::AwaySettings {
+            shortcut_id: 3,
+            recipients: quill::business_settings::BusinessRecipients::everyone(),
+            schedule: quill::business_settings::AwaySchedule::Always,
+            offline_only: true,
+        }),
+        opening_hours: Some(quill::business_info::OpeningHours::new(
+            "Europe/London".into(),
+            vec![(600, 1020)],
+        )),
+        location: Some(quill::business_info::BusinessLocation {
+            address: "1 Main St".into(),
+            point_e6: None,
+        }),
+        start_page: Some(quill::business_start_page::StartPage {
+            title: "Welcome".into(),
+            message: "Hi".into(),
+            sticker: None,
+        }),
+        ..Default::default()
+    }
+}
+
+fn land_full_info(app: &Entity<QuillApp>, cx: &mut VisualTestContext) {
+    app.update(cx, |app, cx| {
+        cx.notify();
+        let session = app.demo_session.as_mut().expect("demo session");
+        session.users_state.user_full_infos.insert(
+            777,
+            quill::state::UserFullInfoData {
+                extras: quill::telegram::envelope::UserProfileExtras {
+                    business: Some(saved_info()),
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
+        );
+    });
+}
+
+fn waits(app: &Entity<QuillApp>, cx: &mut VisualTestContext, screen: View) -> bool {
+    app.read_with(cx, |app, _| app.business_waits_for_info(screen))
+}
+
+/// A screen opened before the full info arrives shows "Loading…" with
+/// nothing to change, and leaving it writes nothing. When the info lands
+/// the screen is built from it, so it shows the saved settings, and left
+/// untouched it still writes nothing.
 #[gpui_kit::test]
-fn an_untouched_screen_never_overwrites_a_newer_saved_value(cx: &mut TestAppContext) {
+fn a_screen_waits_for_the_full_info_before_it_can_be_changed(cx: &mut TestAppContext) {
     let (app, mut vcx) = new_app(cx);
     let vcx = &mut vcx;
     seed(&app, vcx, true);
     app.update(vcx, |app, _| {
         if let Some(session) = app.demo_session.as_mut() {
             session.my_user_id = Some(777);
+            session.apply_quick_replies(QuickRepliesUpdate::Shortcut(QuickReplyShortcut {
+                id: 3,
+                name: "away".into(),
+                message_count: 1,
+            }));
         }
     });
     open(&app, vcx);
-    for screen in [View::Greeting, View::Hours, View::Location, View::StartPage] {
+    for screen in [
+        View::Greeting,
+        View::Away,
+        View::Hours,
+        View::Location,
+        View::StartPage,
+    ] {
         go(&app, vcx, screen);
-        app.update(vcx, |app, _| {
-            let session = app.demo_session.as_mut().expect("demo session");
-            let me = 777;
-            let business = quill::business_info::BusinessInfo {
-                greeting: Some(quill::business_settings::GreetingSettings {
-                    shortcut_id: 2,
-                    recipients: quill::business_settings::BusinessRecipients::everyone(),
-                    inactivity_days: 7,
-                }),
-                opening_hours: Some(quill::business_info::OpeningHours::new(
-                    "Europe/London".into(),
-                    vec![(600, 1020)],
-                )),
-                location: Some(quill::business_info::BusinessLocation {
-                    address: "1 Main St".into(),
-                    point_e6: None,
-                }),
-                start_page: Some(quill::business_start_page::StartPage {
-                    title: "Welcome".into(),
-                    message: "Hi".into(),
-                    sticker: None,
-                }),
-                ..Default::default()
-            };
-            session.users_state.user_full_infos.insert(
-                me,
-                quill::state::UserFullInfoData {
-                    extras: quill::telegram::envelope::UserProfileExtras {
-                        business: Some(business),
-                        ..Default::default()
-                    },
-                    ..Default::default()
-                },
-            );
-        });
+        assert!(waits(&app, vcx, screen), "{screen:?} waits for the info");
         back(&app, vcx);
         assert_eq!(view(&app, vcx), View::Hub);
         assert_eq!(note(&app, vcx), None, "{screen:?} sent nothing");
+
+        go(&app, vcx, screen);
+        land_full_info(&app, vcx);
+        // The next frame builds the screen from it: no wait, no poll.
+        frames(vcx);
+        assert!(
+            !waits(&app, vcx, screen),
+            "{screen:?} was built when the info landed"
+        );
+        let shows_saved = app.read_with(vcx, |app, cx| {
+            let d = app.dialogs.business_dialog.as_ref().expect("dialog");
+            match screen {
+                View::Greeting => d
+                    .greeting
+                    .as_ref()
+                    .is_some_and(|g| g.enabled && g.days == 7),
+                View::Away => d.away.as_ref().is_some_and(|a| a.enabled && a.offline_only),
+                View::Hours => d.hours.as_ref().is_some_and(|h| h.enabled),
+                View::Location => d
+                    .location
+                    .as_ref()
+                    .is_some_and(|l| l.address.read(cx).value() == "1 Main St"),
+                View::StartPage => d
+                    .start_page
+                    .as_ref()
+                    .is_some_and(|p| p.title.read(cx).value() == "Welcome"),
+                _ => false,
+            }
+        });
+        assert!(shows_saved, "{screen:?} shows the saved settings");
+        back(&app, vcx);
+        assert_eq!(view(&app, vcx), View::Hub);
+        assert_eq!(note(&app, vcx), None, "untouched {screen:?} sent nothing");
         app.update(vcx, |app, _| {
-            let session = app.demo_session.as_mut().expect("demo session");
-            if let Some(me) = session.my_user_id {
-                session.users_state.user_full_infos.remove(&me);
+            if let Some(session) = app.demo_session.as_mut() {
+                session.users_state.user_full_infos.remove(&777);
             }
         });
     }
+    // A change made once the info is in saves (demo mode says it cannot).
+    go(&app, vcx, View::Greeting);
+    land_full_info(&app, vcx);
+    frames(vcx);
+    act(&app, vcx, |app, _, cx| {
+        app.set_business_enabled(MessageKind::Greeting, false, cx)
+    });
+    back(&app, vcx);
+    assert_eq!(note(&app, vcx).as_deref(), Some(QuillApp::DEMO_LINE));
 }
 
 #[gpui_kit::test]

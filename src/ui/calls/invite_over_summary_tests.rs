@@ -85,3 +85,86 @@ fn an_invitation_after_an_ended_call_rings_in_the_call_window(cx: &mut TestAppCo
         assert!(app.calls.window.is_some(), "the call window is open");
     });
 }
+
+/// Round 15 C finding 3: an invitation with no call and no end screen
+/// keeps the call tick, the one thing that loops its ringtone.
+#[gpui_kit::test]
+fn an_invitation_alone_keeps_the_call_tick(cx: &mut TestAppContext) {
+    let (app, mut vcx) = open_app(cx);
+    app.update(&mut vcx, |app, cx| {
+        let Some(session) = app.demo_session.as_deref_mut() else {
+            panic!("the demo has a session");
+        };
+        session.calls.active_call = None;
+        session.calls.summary = None;
+        session.calls.conference_invite = Some(ConferenceInvite {
+            chat_id: ChatId(41),
+            message_id: MessageId(90 << 20),
+            unique_id: 7002,
+            user_id: 41,
+            is_video: false,
+            others: Vec::new(),
+        });
+        app.ensure_call_tick(cx);
+        assert!(app.calls.tick_active, "the tick starts");
+    });
+    vcx.executor()
+        .advance_clock(std::time::Duration::from_secs(3));
+    vcx.run_until_parked();
+    app.read_with(&vcx, |app, _| {
+        assert!(app.calls.tick_active, "and keeps beating");
+        assert_eq!(app.calls.sounds.looping(), Some(CallSound::Incoming));
+    });
+}
+
+/// Round 15 C finding 2: a second call ringing in during a call under the
+/// lock rings, and the lock screen shows it with Decline and End & Answer
+/// (its swap box is a layer of the locked window, not drawn).
+#[gpui_kit::test]
+fn a_second_call_under_the_lock_rings_and_can_be_declined(cx: &mut TestAppContext) {
+    use gpui_kit::test::TestWindowExt;
+    use quill::state::{ActiveCall, SecondCall};
+    use quill::telegram::envelope::CallState;
+    let (app, mut vcx) = open_app(cx);
+    app.update(&mut vcx, |app, cx| {
+        app.account.passcode.enabled = true;
+        app.lock_by_passcode(cx);
+        let Some(session) = app.demo_session.as_deref_mut() else {
+            panic!("the demo has a session");
+        };
+        session.calls.summary = None;
+        session.calls.active_call = Some(ActiveCall::fresh(
+            5,
+            12,
+            true,
+            false,
+            CallState::Ready,
+            None,
+        ));
+        session.calls.second_call = SecondCall::Prompt {
+            call_id: 6,
+            user_id: 41,
+            is_video: false,
+        };
+        app.sync_call_sounds();
+        assert_eq!(app.calls.sounds.looping(), Some(CallSound::Incoming));
+        cx.notify();
+    });
+    vcx.update(|window, cx| window.render_frame(cx));
+    vcx.run_until_parked();
+    let drawn = |vcx: &mut VisualTestContext, id: &'static str| {
+        vcx.update(|window, _| window.try_find(id).is_some())
+    };
+    assert!(drawn(&mut vcx, "lock-swap-call-answer"));
+    vcx.update(|window, cx| window.click("lock-swap-call-decline", cx));
+    vcx.run_until_parked();
+    app.update(&mut vcx, |app, _| {
+        let prompt = app
+            .session()
+            .and_then(|session| session.calls.second_call.prompt());
+        assert!(prompt.is_none(), "declined");
+        assert!(app.account.passcode.is_locked(), "still locked");
+        app.sync_call_sounds();
+        assert_ne!(app.calls.sounds.looping(), Some(CallSound::Incoming));
+    });
+}

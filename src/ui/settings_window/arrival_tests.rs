@@ -35,7 +35,7 @@ fn new_app(cx: &mut TestAppContext) -> (Entity<QuillApp>, VisualTestContext) {
 fn land(app: &Entity<QuillApp>, vcx: &mut VisualTestContext, id: &str) {
     let target = settings_catalog::target(id).expect("catalog id");
     app.update(vcx, |app, cx| {
-        app.open_settings(None);
+        app.open_settings(None, cx);
         app.open_search_target(target, cx);
     });
     for _ in 0..3 {

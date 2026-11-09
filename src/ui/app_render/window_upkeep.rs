@@ -74,6 +74,15 @@ impl QuillApp {
         self.pump_promo_request(cx);
         self.gift_boxes_upkeep(window, cx);
         self.checkout_prefill_upkeep(window, cx);
+        // A Business screen opened before the account's full info arrived
+        // is built from it at the first frame after it lands, in the
+        // window that hosts the box (its inputs need that window).
+        if self
+            .windows
+            .dialog_may_show_in(crate::ui::shell::DialogKind::Business, self.windows.scope)
+        {
+            self.business_info_upkeep(window, cx);
+        }
     }
 
     /// Slice P1 fix-up: the checkout opens on Buy before the form arrives;

@@ -1,0 +1,8 @@
+# Values replaced whole through one writer, because the replacement must do
+# something. Checked by scripts/single_writers.py (run by
+# scripts/check-screen-state.py).
+#
+# <field> | <path::fn> | <reason>
+
+chat_ui | src/ui/chat_ui_state.rs::replace_chat_ui | a new ChatUi is a new chat visit: the visit that ended drops its parked plays (`drop_play_intent_of_visit`)
+group_settings_dialog | src/ui/group_admin_settings.rs::set_group_settings_dialog | the invite pages belong to the box's chat: closing the box or opening it for another chat clears them (`drop_invite_link_pages`)

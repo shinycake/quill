@@ -65,8 +65,16 @@ pub(crate) struct PasscodeUi {
     /// Quill is locked: every window draws only the lock screen, or
     /// nothing (`lock_layer`). Written only by `QuillApp::set_locked`.
     locked: bool,
-    /// Startup was locked: the connection starts after the first unlock.
-    pub(crate) deferred_connect: bool,
+    /// How many times Quill has locked (a locked start counts). Something
+    /// parked for later records it, and a lock in between drops it
+    /// (`locked_since`), whether or not Quill is still locked when it
+    /// lands. Moves only with `locked` (`set_lock_flag`).
+    locks: u64,
+    /// The account whose connection waits for the unlock: a locked start,
+    /// or a reconnect asked under the lock. The unlock connects it only if
+    /// it is still the account on screen, so a switch under the lock (the
+    /// lock card's Answer) needs no hand clear.
+    pub(crate) connect_at_unlock: Option<quill::ids::AccountKey>,
     /// Offer the system prompt as soon as the lock screen shows.
     suggest_system_unlock: bool,
     pub(crate) open: bool,
@@ -151,7 +159,12 @@ impl PasscodeUi {
             enabled,
             // The app starts locked when a passcode is set (tdesktop).
             locked: enabled,
-            deferred_connect: enabled,
+            locks: u64::from(enabled),
+            connect_at_unlock: if enabled {
+                root.as_deref().map(quill::settings::active_account)
+            } else {
+                None
+            },
             suggest_system_unlock: false,
             open: false,
             view: PasscodeView::Status,
@@ -182,11 +195,30 @@ impl PasscodeUi {
         self.locked
     }
 
+    /// The lock count now, for something parked until later.
+    pub(crate) fn lock_count(&self) -> u64 {
+        self.locks
+    }
+
+    /// Quill is locked now, or locked at some point since `count` was
+    /// read: what was parked then no longer applies.
+    pub(crate) fn locked_since(&self, count: u64) -> bool {
+        self.locked || self.locks != count
+    }
+
+    /// The flag and its count, together.
+    fn set_lock_flag(&mut self, locked: bool) {
+        if locked && !self.locked {
+            self.locks += 1;
+        }
+        self.locked = locked;
+    }
+
     /// Set the flag alone, for tests that need a locked state without the
     /// lock's closes or the root layer.
     #[cfg(test)]
     pub(crate) fn force_locked(&mut self, locked: bool) {
-        self.locked = locked;
+        self.set_lock_flag(locked);
     }
 
     fn shake_offset(&self) -> f32 {

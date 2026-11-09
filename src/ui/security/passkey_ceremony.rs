@@ -452,6 +452,19 @@ impl QuillApp {
         cx.notify();
     }
 
+    /// The lock closes the ceremony box, as tdesktop's lock closes its
+    /// boxes: the key gets CTAPHID_CANCEL and a PIN sheet on its way never
+    /// takes focus from the passcode field. The PIN field goes with any
+    /// digits in it; the next ceremony makes a new one.
+    pub(in crate::ui) fn close_passkey_ceremony_for_lock(&mut self) {
+        if let Some(ui) = self.privacy.passkeys.ceremony.take()
+            && let Some(ceremony) = ui.ceremony
+        {
+            ceremony.cancel();
+        }
+        self.privacy.passkeys.pin_input = None;
+    }
+
     fn build_passkey_ceremony_dialog(
         app: &Entity<QuillApp>,
         shell: &Entity<QuillShell>,

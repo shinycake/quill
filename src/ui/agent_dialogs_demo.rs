@@ -58,10 +58,10 @@ fn demo_write_request(_: &mut QuillApp, _: &mut Window, _: &mut Context<QuillApp
 }
 
 /// The consent for "All other chats" over the Agent access page.
-fn demo_consent(app: &mut QuillApp, _: &mut Window, _: &mut Context<QuillApp>) {
+fn demo_consent(app: &mut QuillApp, _: &mut Window, cx: &mut Context<QuillApp>) {
     quill::fast_buttons::set_persistence(false);
     quill::agent::access::set_enabled(true);
-    app.open_settings(Some(quill::settings_catalog::Page::AgentAccess));
+    app.open_settings(Some(quill::settings_catalog::Page::AgentAccess), cx);
     app.agent_ui.consent = Some(AllChatsConsent {
         account: super::agent_state::active_account(),
         scope: Scope::Read,

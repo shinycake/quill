@@ -63,39 +63,14 @@ impl QuillApp {
     }
 
     /// The pages the Invite Links section opened in the session (another
-    /// admin's links, a link's join requests and members) close with the
-    /// Group Settings box for `chat` (`None`: every chat, when the account
-    /// leaves the screen). They live in the `Session`, so nothing else
-    /// would close them: the box would reopen on that admin's lists, and
-    /// "Delete all revoked" would act on them. A late answer finds no page
-    /// and is dropped.
-    pub(super) fn drop_invite_link_pages(&mut self, chat: Option<ChatId>) {
-        if self
-            .admin
-            .invite_link_details
-            .as_ref()
-            .is_some_and(|(open, _)| chat.is_none_or(|chat| *open == chat))
-        {
-            self.admin.invite_link_details = None;
-        }
-        if chat.is_none() || self.admin.revoked_links_open == chat {
-            self.admin.revoked_links_open = None;
-        }
-        let Some(session) = self.session_mut() else {
-            return;
-        };
-        let groups = &mut session.groups;
-        match chat {
-            Some(chat) => {
-                groups.admin_invite_links.remove(&chat.0);
-                groups.link_join_requests.remove(&chat.0);
-                groups.invite_link_members.remove(&chat.0);
-            }
-            None => {
-                groups.admin_invite_links.clear();
-                groups.link_join_requests.clear();
-                groups.invite_link_members.clear();
-            }
+    /// admin's links, a link's join requests and members) go: the Group
+    /// Settings box that opened them closed or moved to another chat
+    /// (`set_group_settings_dialog`), or the account leaves the screen.
+    /// They are one value (`InvitePages`), so nothing is left to clear by
+    /// hand. A late answer finds no page and is dropped.
+    pub(super) fn drop_invite_link_pages(&mut self) {
+        if let Some(session) = self.session_mut() {
+            session.groups.invite_pages.clear();
         }
     }
 
@@ -103,7 +78,7 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut() {
             live.driver.close_admin_invite_links(chat_id);
         } else if let Some(session) = self.demo_session.as_mut() {
-            session.groups.admin_invite_links.remove(&chat_id.0);
+            session.groups.invite_pages.close_admin_links(chat_id.0);
         }
         cx.notify();
     }
@@ -216,8 +191,8 @@ impl QuillApp {
         let state = self
             .session()?
             .groups
-            .admin_invite_links
-            .get(&chat_id.0)?
+            .invite_pages
+            .admin_links(chat_id.0)?
             .clone();
         let admin = state.creator_user_id;
         let name = self.contact_display_name(admin);
@@ -309,7 +284,7 @@ impl QuillApp {
     ) {
         let open = self
             .session()
-            .and_then(|s| s.groups.link_join_requests.get(&chat_id.0))
+            .and_then(|s| s.groups.invite_pages.join_requests(chat_id.0))
             .is_some_and(|state| state.invite_link == invite_link);
         if let Some(live) = self.live.as_mut() {
             if open {
@@ -318,7 +293,7 @@ impl QuillApp {
                 let _ = live.driver.open_link_join_requests(chat_id, invite_link);
             }
         } else if open && let Some(session) = self.demo_session.as_mut() {
-            session.groups.link_join_requests.remove(&chat_id.0);
+            session.groups.invite_pages.close_join_requests(chat_id.0);
         }
         cx.notify();
     }
@@ -354,8 +329,8 @@ impl QuillApp {
         let state = self
             .session()?
             .groups
-            .link_join_requests
-            .get(&chat_id.0)
+            .invite_pages
+            .join_requests(chat_id.0)
             .filter(|state| state.invite_link == invite_link)?
             .clone();
         let muted = cx.theme().muted_foreground;

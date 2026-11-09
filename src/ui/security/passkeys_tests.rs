@@ -157,7 +157,7 @@ fn the_privacy_row_shows_the_count_and_opens_the_list(cx: &mut TestAppContext) {
     app.update_in(vcx, |app, window, cx| {
         app.close_passkeys(cx);
         app.close_kit_dialog_if_done(DialogKind::Passkeys, window, cx);
-        app.open_settings(Some(quill::settings_catalog::Page::Privacy));
+        app.open_settings(Some(quill::settings_catalog::Page::Privacy), cx);
         cx.notify();
     });
     assert_eq!(shown_dialog(&shell, vcx), None);
@@ -181,7 +181,7 @@ fn the_privacy_row_without_passkeys_follows_webauthn(cx: &mut TestAppContext) {
         }
         app.close_passkeys(cx);
         app.close_kit_dialog_if_done(DialogKind::Passkeys, window, cx);
-        app.open_settings(Some(quill::settings_catalog::Page::Privacy));
+        app.open_settings(Some(quill::settings_catalog::Page::Privacy), cx);
         cx.notify();
     });
     assert_eq!(shown_dialog(&shell, vcx), None);

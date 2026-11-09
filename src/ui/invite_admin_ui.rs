@@ -78,6 +78,15 @@ impl QuillApp {
             .child(text.to_owned())
     }
 
+    /// The Group Settings box while it shows `chat_id`: the Invite Links
+    /// section's state is its own.
+    fn invite_settings_of(&self, chat_id: ChatId) -> Option<&super::dialogs::GroupSettingsDialog> {
+        self.admin
+            .group_settings_dialog
+            .as_ref()
+            .filter(|d| d.chat_id == chat_id)
+    }
+
     /// Toggle the "who joined" details of one link.
     pub(super) fn toggle_invite_link_details(
         &mut self,
@@ -85,18 +94,22 @@ impl QuillApp {
         invite_link: &str,
         cx: &mut Context<Self>,
     ) {
-        let open = self
+        let Some(dialog) = self
             .admin
-            .invite_link_details
-            .as_ref()
-            .is_some_and(|(chat, link)| *chat == chat_id && link == invite_link);
+            .group_settings_dialog
+            .as_mut()
+            .filter(|d| d.chat_id == chat_id)
+        else {
+            return;
+        };
+        let open = dialog.details_link.as_deref() == Some(invite_link);
         if open {
-            self.admin.invite_link_details = None;
+            dialog.details_link = None;
             if let Some(live) = self.live.as_mut() {
                 live.driver.close_chat_invite_link_members(chat_id);
             }
         } else {
-            self.admin.invite_link_details = Some((chat_id, invite_link.to_owned()));
+            dialog.details_link = Some(invite_link.to_owned());
             if let Some(live) = self.live.as_mut() {
                 let _ = live
                     .driver
@@ -108,8 +121,16 @@ impl QuillApp {
 
     /// Show or hide the revoked-links list (fetched on first open).
     pub(super) fn toggle_revoked_links(&mut self, chat_id: ChatId, cx: &mut Context<Self>) {
-        let open = self.admin.revoked_links_open != Some(chat_id);
-        self.admin.revoked_links_open = open.then_some(chat_id);
+        let Some(dialog) = self
+            .admin
+            .group_settings_dialog
+            .as_mut()
+            .filter(|d| d.chat_id == chat_id)
+        else {
+            return;
+        };
+        dialog.revoked_open = !dialog.revoked_open;
+        let open = dialog.revoked_open;
         if open && let Some(live) = self.live.as_mut() {
             let _ = live.driver.fetch_revoked_chat_invite_links(chat_id);
         }
@@ -190,16 +211,14 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
         let open = self
-            .admin
-            .invite_link_details
-            .as_ref()
-            .is_some_and(|(chat, link)| *chat == chat_id && link == invite_link);
+            .invite_settings_of(chat_id)
+            .is_some_and(|d| d.details_link.as_deref() == Some(invite_link));
         if !open {
             return None;
         }
         let state = self
             .session()
-            .and_then(|s| s.groups.invite_link_members.get(&chat_id.0))
+            .and_then(|s| s.groups.invite_pages.members(chat_id.0))
             .filter(|state| state.invite_link == invite_link)
             .cloned();
         let muted = cx.theme().muted_foreground;
@@ -348,7 +367,9 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let muted = cx.theme().muted_foreground;
-        let open = self.admin.revoked_links_open == Some(chat_id);
+        let open = self
+            .invite_settings_of(chat_id)
+            .is_some_and(|d| d.revoked_open);
         let mut block = div().flex().flex_col().w_full().gap_1().pt_1().child(
             div().flex().items_center().w_full().gap_1().child(
                 // A disclosure row: the section title with a chevron
