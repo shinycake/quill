@@ -90,6 +90,7 @@ mod ton_wallet;
 mod translate;
 mod users;
 mod web_apps;
+mod widgets;
 
 pub use auth::*;
 pub use backgrounds::*;
@@ -145,3 +146,4 @@ pub use ton_wallet::*;
 pub use translate::*;
 pub use users::*;
 pub use web_apps::*;
+pub use widgets::*;

@@ -141,6 +141,17 @@ pub(crate) fn parse_bots_payload(
         "customRequestResult" => Ok(EnvelopePayload::Bots(BotsPayload::CustomRequestResult {
             result: json_field_str(value, "result"),
         })),
+        "widgetQueryAnswer" => Ok(EnvelopePayload::Bots(BotsPayload::WidgetQueryAnswer {
+            data: json_field_str(value, "data"),
+        })),
+        "widgetPublicData" => Ok(EnvelopePayload::Bots(BotsPayload::WidgetPublicData {
+            data: json_field_str(value, "data"),
+            poll_period: value
+                .get("poll_period")
+                .and_then(Value::as_i64)
+                .and_then(|period| i32::try_from(period).ok())
+                .unwrap_or(0),
+        })),
         _ => return Ok(None),
     };
     payload.map(Some)

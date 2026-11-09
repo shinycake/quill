@@ -5,6 +5,7 @@ mod error;
 mod owned;
 mod purpose;
 mod state;
+mod widgets;
 
 pub use purpose::*;
 

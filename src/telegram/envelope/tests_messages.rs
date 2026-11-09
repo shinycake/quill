@@ -28,8 +28,8 @@ fn b1_message_game_parsed() {
 
 #[test]
 fn a_widget_message_keeps_its_caption_and_size() {
-    // `messageWidget` (TDLib 1.8.70): the HTML and the widget data are not
-    // kept, only what the placeholder card and the caption need.
+    // `messageWidget` (TDLib 1.8.70): the document, the bot's data and the
+    // flags the runtime needs.
     let env = parse_envelope(
         r#"{"@type":"updateNewMessage","message":{"id":9,"chat_id":21,"is_outgoing":false,"content":{"@type":"messageWidget","width":320,"height":180,"html":"<p>hi</p>","public_data":"{}","chat_data":"","widget_id":"7","caption":{"@type":"formattedText","text":"Scores","entities":[{"@type":"textEntity","offset":0,"length":6,"type":{"@type":"textEntityTypeBold"}}]},"show_caption_above_media":true,"is_copy":false,"can_send_queries":true,"can_send_background_queries":false}}}"#,
     )
@@ -44,14 +44,12 @@ fn a_widget_message_keeps_its_caption_and_size() {
     assert_eq!(widget.caption, "Scores");
     assert_eq!(widget.caption_entities.len(), 1);
     assert!(widget.show_caption_above_media);
+    assert_eq!(widget.html, "<p>hi</p>");
+    assert_eq!(widget.public_data, "{}");
+    assert_eq!(widget.widget_id, 7);
+    assert!(!widget.is_copy && widget.can_send_queries && !widget.can_send_background_queries);
     assert_eq!(message.content.preview(), "Scores");
-    let bare = MessageContent::Widget(WidgetContent {
-        width: 0,
-        height: 0,
-        caption: String::new(),
-        caption_entities: Vec::new(),
-        show_caption_above_media: false,
-    });
+    let bare = MessageContent::Widget(WidgetContent::default());
     assert_eq!(bare.preview(), "Widget");
 }
 

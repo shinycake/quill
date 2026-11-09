@@ -147,6 +147,7 @@ pub mod message_effects;
 pub mod message_effects_picker;
 pub mod message_menu;
 pub mod message_menu_origin;
+pub mod message_widget;
 pub mod moderation;
 pub mod moderation_exceptions;
 pub mod mute_menu;
