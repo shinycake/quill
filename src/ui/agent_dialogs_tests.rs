@@ -1,6 +1,7 @@
 //! The request dialog and the all-chats consent in a real window: Allow
-//! applies the grant and answers, Don't allow, Escape and a new request
-//! behind the old one.
+//! applies the grant and answers (and a confirmed write or raw call keeps
+//! the grants' generation, so `still_allowed` lets it go), Don't allow,
+//! Escape and a new request behind the old one.
 use crate::ui::agent_state::{TEST_LOCK, reset_for_test};
 use crate::ui::app::QuillApp;
 use crate::ui::keybindings::bind_keys;
@@ -93,9 +94,11 @@ fn allow_applies_the_grant_then_answers(cx: &mut TestAppContext) {
         "nothing is granted before the user answers"
     );
 
+    let generation = grants::generation();
     vcx.update(|window, cx| window.click("agent-request-allow", cx));
     settle(vcx);
     assert_eq!(answer_of(id, &rx), Some(Decision::Allowed));
+    assert_ne!(grants::generation(), generation, "a new grant moves it");
     let granted = grants::for_account(&AccountKey::primary());
     assert_eq!(
         granted.chats.get(&7).map(|g| (g.scope, g.title.as_str())),
@@ -199,9 +202,15 @@ fn a_write_request_shows_the_text_and_answers_allow_or_deny(cx: &mut TestAppCont
     settle(vcx);
     assert_eq!(open_kind(&shell, vcx), Some(DialogKind::AgentRequest));
     assert!(vcx.debug_bounds("agent-request-preview").is_some());
+    let generation = grants::generation();
     vcx.update(|window, cx| window.click("agent-request-allow", cx));
     settle(vcx);
     assert_eq!(answer_of(id, &rx), Some(Decision::Allowed));
+    assert_eq!(
+        grants::generation(),
+        generation,
+        "Allow on a write keeps the grants' generation, so the write it confirmed still goes"
+    );
     assert!(
         grants::for_account(&AccountKey::primary()).chats.is_empty(),
         "one confirmed write grants nothing"
@@ -238,9 +247,15 @@ fn a_raw_call_shows_the_risk_and_the_request(cx: &mut TestAppContext) {
     settle(vcx);
     assert_eq!(open_kind(&shell, vcx), Some(DialogKind::AgentRequest));
     assert!(vcx.debug_bounds("agent-request-raw").is_some());
+    let generation = grants::generation();
     vcx.update(|window, cx| window.click("agent-request-allow", cx));
     settle(vcx);
     assert_eq!(answer_of(id, &rx), Some(Decision::Allowed));
+    assert_eq!(
+        grants::generation(),
+        generation,
+        "Allow on a raw call keeps the grants' generation, so the call still goes"
+    );
     assert!(
         grants::for_account(&AccountKey::primary()).chats.is_empty(),
         "an allowed raw call grants nothing"

@@ -3015,3 +3015,76 @@ Tests: `asker_tests.rs` (`a_gif_tab_shows_its_section_without_a_press`,
 and `each_window_keeps_its_own_gif_section` now checks that the other
 window shows its kept section without asking), `ai_compose/dialog_tests.rs`
 (`a_chat_windows_style_preview_takes_its_answer_in_its_own_frame`).
+
+### Phase 16 (area A)
+
+Round 16 of the review, area A (core outside `src/ui`). All five findings
+were fixed.
+
+**Allowing a confirmed write lets it go again (1).** Round 15 made
+`common::confirm` and `td_call::ask_user` ask `still_allowed()` after the
+user's Allow. The Allow itself runs `grants::update` with `apply_ask`,
+which changes nothing for `Ask::Write` and `Ask::Raw`, but `update` moved
+`grants::generation()` on every call. With "Confirm each send" on, every
+write the user allowed was refused with `GRANTS_CHANGED_MESSAGE`. `update`
+now compares the account's grants before and after the change and saves
+nothing, keeping the generation, when they are equal. This is the shared
+seam: every grant edit goes through it, so a no-op row click doesn't stop
+waiting writes either. Tests: `a_write_request_shows_the_text_and_answers_allow_or_deny`
+and `a_raw_call_shows_the_risk_and_the_request` (`ui/agent_dialogs_tests.rs`)
+press the real Allow button (`answer_agent_request`) and check that the
+generation did not move. `allow_applies_the_grant_then_answers` checks
+that a real grant still moves it. `an_update_that_changes_nothing_lets_a_waiting_write_go`
+(`agent/tools`) checks `still_allowed` on both sides.
+
+**A community's mute holds without opening it (2).** The community's
+notification settings live only in `communityFullInfo`, which was fetched
+for collapsed communities, for the info panel and for a ban.
+`ConnectDriver::sync_community_full_infos` (formerly
+`sync_collapsed_communities`) now asks for the full info of every community
+with `have_access`, once each, and it runs in `poll_ticks` for every
+account, including background ones. The UI drain no longer calls it.
+Test: `every_community_gets_its_full_info_once_in_the_poll`
+(`connect/tests/communities.rs`).
+
+**A flood wait belongs to its account (3).** `pacing::State::flood_until`
+is a map keyed by `AccountKey`. `take_turn` and `flood` take the account,
+`common::write_error(ctx)` passes `ctx.account`, and
+`account_data::forget_after_helper` calls `pacing::forget_account` next to
+`grants::forget_account`, so a log-out clears it. The per-day cap on new
+people stays process-wide (it protects the api_id). Test:
+`a_flood_wait_refuses_that_accounts_sends_until_it_passes`.
+
+**Add All doesn't bring handled requests back (4).** On the `ok` of
+`processCommunityAddChatRequests`, `reset_add_chat_requests` takes every
+in-flight `GetAddChatRequests` request for the community out of the
+registry (`RequestRegistry::take_purpose_for_community`) and sets the list
+to an answered empty one. A page that answers afterwards has no pending
+request and is ignored. The old `drop_add_chat_requests(Option)` is now
+two functions, one for a single request and one for the reset. Test:
+`a_page_asked_before_add_all_does_not_bring_handled_requests_back`.
+
+**The manage screen sees a Remove or Add at once (5).** Checked in the
+TDLib 1.8.70 source: `ToggleCommunityPeerLinkQuery` calls
+`CommunityManager::on_change_community_dialogs`, which reloads only the
+community's full info before the `ok`.
+`ChatManager::on_update_channel_linked_community_id` changes the
+`Channel`, not the `ChannelFull`, so `supergroupFullInfo.community_id`
+changes only on the next full fetch. The `ok` of `addCommunityChat` and
+`removeCommunityChat` now updates the chat's cached supergroup or user full
+info (`Session::note_chat_community`). A remove clears only a link that
+still names that community. An `updateCommunity` with `have_access: false`
+drops that community's cached full info, and `chat_community_id` ignores a
+link to a community without access, so a deleted community's chats no
+longer map to it or follow its mute. Tests:
+`remove_and_add_ok_update_the_chats_cached_community` and
+`a_community_without_access_has_no_chats` (`state/tests/communities.rs`).
+
+**Build.** `origin/main` (af2a519b2) did not build the UI binary
+(`src/ui/communities` called the removed `ConnectionUi::set_note`). This
+branch merges `fix-community-notes` (PR #1415) for that and does not fix
+it separately.
+
+**Guards.** None added. Finding 1 was fixed in `grants::update`, the one
+place every caller goes through. The account-keying in finding 3 can't be
+checked from the source text.

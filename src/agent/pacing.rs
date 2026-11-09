@@ -3,10 +3,12 @@
 //!
 //! Each send takes a turn: at least [`SAME_CHAT_GAP`] after the last send to
 //! the same chat and [`ANY_GAP`] after any send. When Telegram answers a
-//! send with a flood wait, every agent send is refused until it passes;
-//! nothing is retried for the agent. First messages to people who never
+//! send with a flood wait, every agent send on that account is refused
+//! until it passes (a flood wait belongs to the account Telegram gave it
+//! to, and goes with it on log-out); nothing is retried for the agent. First messages to people who never
 //! wrote to the user are capped at [`NEW_PEERS_PER_DAY`].
 
+use crate::ids::AccountKey;
 use std::collections::{HashMap, VecDeque};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
@@ -23,7 +25,8 @@ struct State {
     /// The next free slot per (client, chat), and for any chat.
     next_in_chat: HashMap<(i32, i64), Instant>,
     next_any: Option<Instant>,
-    flood_until: Option<Instant>,
+    /// Until when Telegram asked each account to slow down.
+    flood_until: HashMap<AccountKey, Instant>,
     /// When each first message to a new person went out.
     new_peers: VecDeque<Instant>,
 }
@@ -41,18 +44,25 @@ pub enum Refusal {
     Busy,
 }
 
-/// Wait for a turn to send `count` messages to `chat_id`, or refuse.
-/// `new_peer` marks a first message to someone who never wrote to the user.
-pub fn take_turn(client: i32, chat_id: i64, count: u32, new_peer: bool) -> Result<(), Refusal> {
+/// Wait for a turn to send `count` messages to `chat_id` from `account`
+/// (on TDLib client `client`), or refuse. `new_peer` marks a first message
+/// to someone who never wrote to the user.
+pub fn take_turn(
+    account: &AccountKey,
+    client: i32,
+    chat_id: i64,
+    count: u32,
+    new_peer: bool,
+) -> Result<(), Refusal> {
     let wait = {
         let mut guard = crate::locks::lock_or_recover(&STATE);
         let state = guard.get_or_insert_with(State::default);
         let now = Instant::now();
-        if let Some(until) = state.flood_until {
+        if let Some(until) = state.flood_until.get(account).copied() {
             if until > now {
                 return Err(Refusal::Flood(until.duration_since(now).as_secs().max(1)));
             }
-            state.flood_until = None;
+            state.flood_until.remove(account);
         }
         while state
             .new_peers
@@ -90,12 +100,24 @@ pub fn take_turn(client: i32, chat_id: i64, count: u32, new_peer: bool) -> Resul
     Ok(())
 }
 
-/// Telegram answered a send with a flood wait of `seconds`.
-pub fn flood(seconds: u64) {
+/// Telegram answered a send from `account` with a flood wait of `seconds`.
+pub fn flood(account: &AccountKey, seconds: u64) {
     let until = Instant::now() + Duration::from_secs(seconds.min(24 * 60 * 60));
     let mut guard = crate::locks::lock_or_recover(&STATE);
     let state = guard.get_or_insert_with(State::default);
-    state.flood_until = Some(state.flood_until.map_or(until, |old| old.max(until)));
+    state
+        .flood_until
+        .entry(account.clone())
+        .and_modify(|old| *old = (*old).max(until))
+        .or_insert(until);
+}
+
+/// `account` logged out or was removed: its flood wait goes with it, so
+/// whoever signs in next under the same key is not held to it.
+pub fn forget_account(account: &AccountKey) {
+    if let Some(state) = crate::locks::lock_or_recover(&STATE).as_mut() {
+        state.flood_until.remove(account);
+    }
 }
 
 /// The seconds in a TDLib flood error ("Too Many Requests: retry after 12"
@@ -118,11 +140,12 @@ pub fn flood_seconds(message: &str) -> Option<u64> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Refusal, flood, flood_seconds, take_turn};
+    use super::{Refusal, flood, flood_seconds, forget_account, take_turn};
+    use crate::ids::AccountKey;
     use std::time::Instant;
 
-    /// The flood wait is one process-wide value: the test that sets it and
-    /// the one that needs it clear must not run at once.
+    /// The queue's gaps are process-wide: the tests that time turns must
+    /// not run at once.
     static FLOOD_TEST: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
     #[test]
@@ -136,18 +159,34 @@ mod tests {
     fn sends_to_one_chat_are_spaced() {
         let _flood = crate::locks::lock_or_recover(&FLOOD_TEST);
         let started = Instant::now();
-        assert_eq!(take_turn(9001, 1, 1, false), Ok(()));
-        assert_eq!(take_turn(9001, 1, 1, false), Ok(()));
+        assert_eq!(
+            take_turn(&AccountKey("pace".into()), 9001, 1, 1, false),
+            Ok(())
+        );
+        assert_eq!(
+            take_turn(&AccountKey("pace".into()), 9001, 1, 1, false),
+            Ok(())
+        );
         assert!(started.elapsed() >= super::SAME_CHAT_GAP);
     }
 
     #[test]
-    fn a_flood_wait_refuses_sends_until_it_passes() {
+    fn a_flood_wait_refuses_that_accounts_sends_until_it_passes() {
         let _flood = crate::locks::lock_or_recover(&FLOOD_TEST);
-        flood(30);
-        assert!(matches!(take_turn(9002, 2, 1, false), Err(Refusal::Flood(s)) if s > 0));
-        crate::locks::lock_or_recover(&super::STATE)
-            .get_or_insert_with(Default::default)
-            .flood_until = None;
+        let a = AccountKey("flood-a".into());
+        let b = AccountKey("flood-b".into());
+        flood(&a, 30);
+        assert!(matches!(take_turn(&a, 9002, 2, 1, false), Err(Refusal::Flood(s)) if s > 0));
+        assert_eq!(
+            take_turn(&b, 9003, 3, 1, false),
+            Ok(()),
+            "another account's sends are not held to it"
+        );
+        forget_account(&a);
+        assert_eq!(
+            take_turn(&a, 9004, 4, 1, false),
+            Ok(()),
+            "a log-out clears the account's flood wait"
+        );
     }
 }

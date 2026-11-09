@@ -257,3 +257,88 @@ fn show_as_one_chat_is_busy_while_its_toggle_is_in_flight() {
     );
     assert!(!session.community_collapse_in_flight(42));
 }
+
+fn ok_for(
+    session: &mut Session,
+    sink: &Arc<MemorySink>,
+    seq: &AtomicU64,
+    purpose: CommunitiesPurpose,
+) {
+    let extra = session.request_for_community(RequestPurpose::Communities(purpose), 42);
+    apply_json(
+        session,
+        seq,
+        sink,
+        &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra.0),
+    );
+}
+
+/// TDLib reloads only the community's full info before the `ok` of a
+/// Remove or an Add; the chat's cached `supergroupFullInfo.community_id`
+/// would keep the old link, and Manage would offer Remove again.
+#[test]
+fn remove_and_add_ok_update_the_chats_cached_community() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    seed_collapsed(&mut session, &sink, &seq);
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        r#"{"@type":"updateSupergroupFullInfo","supergroup_id":7,"supergroup_full_info":{"@type":"supergroupFullInfo","description":"","community_id":42}}"#,
+    );
+    assert_eq!(session.chat_community_id(7), Some(42));
+
+    ok_for(
+        &mut session,
+        &sink,
+        &seq,
+        CommunitiesPurpose::RemoveChat { chat_id: 7 },
+    );
+    assert_eq!(session.chat_community_id(7), None, "removed");
+
+    ok_for(
+        &mut session,
+        &sink,
+        &seq,
+        CommunitiesPurpose::AddChat {
+            chat_id: 7,
+            is_hidden: false,
+        },
+    );
+    assert_eq!(session.chat_community_id(7), Some(42), "added back");
+}
+
+/// Someone else deleted the community: its chats no longer map to it, and
+/// its mute no longer applies to them.
+#[test]
+fn a_community_without_access_has_no_chats() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    seed_collapsed(&mut session, &sink, &seq);
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        r#"{"@type":"updateSupergroupFullInfo","supergroup_id":8,"supergroup_full_info":{"@type":"supergroupFullInfo","description":"","community_id":42}}"#,
+    );
+    assert_eq!(session.chat_community_id(7), Some(42));
+    assert!(session.chat_community_notification_settings(7).is_some());
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        r#"{"@type":"updateCommunity","community":{"@type":"community","id":42,"have_access":false,"name":"Rustaceans","date":1,"status":{"@type":"communityMemberStatusLeft"},"permissions":{"@type":"communityPermissions","can_edit_chat_list":false},"are_chats_collapsed":false}}"#,
+    );
+    assert_eq!(
+        session.chat_community_id(7),
+        None,
+        "listed by its full info"
+    );
+    assert_eq!(
+        session.chat_community_id(8),
+        None,
+        "linked by its own full info"
+    );
+    assert!(session.chat_community_notification_settings(7).is_none());
+}

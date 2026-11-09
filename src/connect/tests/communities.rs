@@ -314,6 +314,51 @@ fn add_chat_requests_page_and_process() {
     );
 }
 
+/// Add All answers while page 2 is still loading: the page's answer does
+/// not bring the handled requests back.
+#[test]
+fn a_page_asked_before_add_all_does_not_bring_handled_requests_back() {
+    let mut rig = Rig::new();
+    let first = rig
+        .driver
+        .fetch_community_add_chat_requests(OWNED, true)
+        .unwrap()
+        .unwrap();
+    rig.ingest(&format!(
+        r#"{{"@type":"communityAddChatRequests","@extra":"{}","total_count":2,"requests":[{{"@type":"communityAddChatRequest","chat_id":7,"is_hidden":false,"sender_user_id":5,"date":10}}],"next_offset":"p2"}}"#,
+        first.0
+    ));
+    let second = rig
+        .driver
+        .fetch_community_add_chat_requests(OWNED, false)
+        .unwrap()
+        .unwrap();
+    let all = rig
+        .driver
+        .process_community_add_chat_requests(OWNED, true, 2)
+        .unwrap()
+        .unwrap();
+    rig.ok(all);
+    rig.ingest(&format!(
+        r#"{{"@type":"communityAddChatRequests","@extra":"{}","total_count":2,"requests":[{{"@type":"communityAddChatRequest","chat_id":9,"is_hidden":false,"sender_user_id":5,"date":12}}],"next_offset":""}}"#,
+        second.0
+    ));
+    let fetch = rig.driver.session.communities.add_chat_requests(OWNED);
+    assert!(!fetch.is_loading(), "the page in flight was dropped");
+    assert_eq!(
+        fetch.data().map(|list| list.requests.len()),
+        Some(0),
+        "no handled request comes back"
+    );
+    assert!(
+        rig.driver
+            .fetch_community_add_chat_requests(OWNED, true)
+            .unwrap()
+            .is_some(),
+        "a fresh first page can be asked"
+    );
+}
+
 #[test]
 fn collapse_toggle_shows_the_asked_value_until_the_update() {
     let mut rig = Rig::new();
@@ -480,19 +525,44 @@ fn joined_communities_keep_the_last_list_while_reloading() {
     );
 }
 
+/// The `getCommunityFullInfo` requests sent for `community_id`.
+fn full_info_asks(rig: &Rig, community_id: i64) -> Vec<Value> {
+    rig.recorder
+        .snapshot()
+        .iter()
+        .filter_map(|json| serde_json::from_str::<Value>(json).ok())
+        .filter(|v| v["@type"] == "getCommunityFullInfo" && v["community_id"] == community_id)
+        .collect()
+}
+
+/// Every community the user can see gets its full info once, collapsed or
+/// not: its notification settings decide the mute of chats that keep the
+/// default. The background poll asks too.
 #[test]
-fn collapsed_communities_get_their_full_info_once() {
+fn every_community_gets_its_full_info_once_in_the_poll() {
     let mut rig = Rig::new();
     rig.ingest(
-        r#"{"@type":"updateCommunity","community":{"@type":"community","id":43,"have_access":true,"name":"Theirs","date":1,"status":{"@type":"communityMemberStatusMember"},"permissions":{"@type":"communityPermissions","can_edit_chat_list":false},"are_chats_collapsed":true}}"#,
+        r#"{"@type":"updateCommunity","community":{"@type":"community","id":44,"have_access":false,"name":"Gone","date":1,"status":{"@type":"communityMemberStatusLeft"},"permissions":{"@type":"communityPermissions","can_edit_chat_list":false},"are_chats_collapsed":false}}"#,
     );
-    rig.driver.sync_collapsed_communities().unwrap();
-    let v = rig.last();
-    assert_eq!(v["@type"], "getCommunityFullInfo");
-    assert_eq!(v["community_id"], MEMBER);
+    let outcome = rig.driver.poll_ticks(
+        crate::connect::TickScope::Background,
+        std::time::Instant::now(),
+        super::ONLINE,
+    );
+    assert!(outcome.progressed);
+    assert_eq!(
+        full_info_asks(&rig, OWNED).len(),
+        1,
+        "not collapsed, still asked"
+    );
+    assert_eq!(full_info_asks(&rig, MEMBER).len(), 1);
+    assert!(
+        full_info_asks(&rig, 44).is_empty(),
+        "no access, nothing to ask"
+    );
     let before = rig.sent_count();
-    rig.driver.sync_collapsed_communities().unwrap();
-    assert_eq!(rig.sent_count(), before);
+    rig.driver.sync_community_full_infos().unwrap();
+    assert_eq!(rig.sent_count(), before, "asked once while in flight");
 }
 
 #[test]
@@ -500,28 +570,33 @@ fn a_failed_full_info_is_asked_again_only_once_the_community_changes() {
     let mut rig = Rig::new();
     let collapsed = r#"{"@type":"updateCommunity","community":{"@type":"community","id":43,"have_access":true,"name":"Theirs","date":1,"status":{"@type":"communityMemberStatusMember"},"permissions":{"@type":"communityPermissions","can_edit_chat_list":false},"are_chats_collapsed":true}}"#;
     rig.ingest(collapsed);
-    rig.driver.sync_collapsed_communities().unwrap();
-    assert_eq!(rig.last()["@type"], "getCommunityFullInfo");
-    let extra = crate::ids::RequestId(rig.last()["@extra"].as_str().unwrap().parse().unwrap());
+    rig.driver.sync_community_full_infos().unwrap();
+    let asks = full_info_asks(&rig, MEMBER);
+    assert_eq!(asks.len(), 1);
+    let extra = crate::ids::RequestId(
+        asks.first()
+            .and_then(|v| v["@extra"].as_str())
+            .unwrap()
+            .parse()
+            .unwrap(),
+    );
     rig.error(extra, "CHANNEL_PRIVATE");
-    let before = rig.sent_count();
     for _ in 0..3 {
-        rig.driver.sync_collapsed_communities().unwrap();
+        rig.driver.sync_community_full_infos().unwrap();
         assert_eq!(rig.driver.want_community_full_info(MEMBER).unwrap(), None);
     }
     assert_eq!(
-        rig.sent_count(),
-        before,
+        full_info_asks(&rig, MEMBER).len(),
+        1,
         "a failure is not asked on every poll"
     );
     rig.ingest(collapsed);
-    rig.driver.sync_collapsed_communities().unwrap();
+    rig.driver.sync_community_full_infos().unwrap();
     assert_eq!(
-        rig.sent_count(),
-        before + 1,
+        full_info_asks(&rig, MEMBER).len(),
+        2,
         "a new updateCommunity asks again"
     );
-    assert_eq!(rig.last()["@type"], "getCommunityFullInfo");
 }
 
 #[test]

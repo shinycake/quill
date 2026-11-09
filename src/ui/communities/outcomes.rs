@@ -121,8 +121,9 @@ impl QuillApp {
         cx.notify();
     }
 
-    /// Poll drain: report finished community requests, move a waiting
-    /// ban on, and fetch what collapsed rows need.
+    /// Poll drain: report finished community requests and move a waiting
+    /// ban on. Full infos are fetched by the driver's ticks
+    /// (`sync_community_full_infos`).
     pub(in crate::ui) fn drain_communities(&mut self, cx: &mut Context<Self>) -> bool {
         let mut progressed = false;
         while let Some(outcome) = self
@@ -135,12 +136,6 @@ impl QuillApp {
         }
         progressed |= self.drain_pending_ban(cx);
         progressed |= self.drain_new_community_chat(cx);
-        if let Some(live) = self.live.as_mut()
-            && let Err(err) = live.driver.sync_collapsed_communities()
-        {
-            self.connection
-                .set_note(StatusNote::error(user_error(&err)));
-        }
         progressed
     }
 }
