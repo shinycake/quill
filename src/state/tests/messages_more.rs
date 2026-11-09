@@ -541,6 +541,7 @@ fn validated_order_info_selects_first_shipping() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
     let extra = session.request(RequestPurpose::ValidateOrderInfo, Some(ChatId(51)));
+    session.payments.validate_request = Some(extra);
     apply_json(
         &mut session,
         &seq,
@@ -554,6 +555,40 @@ fn validated_order_info_selects_first_shipping() {
     assert_eq!(validated.order_info_id, "oid1");
     assert_eq!(validated.shipping_options.len(), 2);
     assert_eq!(session.payments.shipping_id.as_deref(), Some("ship1"));
+}
+
+/// A `validateOrderInfo` answer for a checkout that was closed (Esc, then
+/// Buy on another invoice) is not the open checkout's: no shipping
+/// options, no order id for Pay, and no error note.
+#[test]
+fn a_closed_checkouts_order_check_lands_nowhere() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    let extra = session.request(RequestPurpose::ValidateOrderInfo, Some(ChatId(51)));
+    session.payments.validate_request = Some(extra);
+    session.close_checkout();
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"validatedOrderInfo","@extra":"{}","order_info_id":"oid1","shipping_options":[]}}"#,
+            extra.0
+        ),
+    );
+    assert!(session.payments.validated.is_none());
+    let failed = session.request(RequestPurpose::ValidateOrderInfo, Some(ChatId(51)));
+    session.payments.validate_request = Some(extra);
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"error","@extra":"{}","code":400,"message":"SHIPPING_NOT_AVAILABLE"}}"#,
+            failed.0
+        ),
+    );
+    assert!(session.payments.note.is_none(), "another check's error");
 }
 
 #[test]

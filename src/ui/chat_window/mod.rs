@@ -35,6 +35,8 @@ mod body;
 mod cover;
 #[cfg(test)]
 mod lock_tests;
+#[cfg(test)]
+mod player_box_tests;
 mod recording;
 mod routing;
 mod saved;
@@ -642,8 +644,7 @@ impl QuillApp {
         self.leave_chat_ui();
         self.notify.ttl_picker = None;
         self.cancel_recording_here(cx);
-        self.stop_animation_playback();
-        self.playback.autoplayed_gifs.clear();
+        self.leave_gifs_here(self.open_chat_id());
         self.leave_sticker_chat(
             None,
             self.open_chat_id(),

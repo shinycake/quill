@@ -231,6 +231,20 @@ impl QuillApp {
         cx.notify();
     }
 
+    /// `chat` went away (deleted, left, upgraded to a supergroup): its
+    /// Edit box closes instead of staying up empty, or with the dead
+    /// group's rows, where Save can only fail.
+    pub(in crate::ui) fn close_group_edit_box_for(&mut self, chat: ChatId, cx: &mut Context<Self>) {
+        if self
+            .admin
+            .group_edit_box
+            .as_ref()
+            .is_some_and(|edit| edit.chat_id == chat)
+        {
+            self.close_group_edit_box(cx);
+        }
+    }
+
     pub(in crate::ui) fn close_group_edit_box(&mut self, cx: &mut Context<Self>) {
         self.close_group_title_emoji(cx);
         self.admin.group_edit_box = None;

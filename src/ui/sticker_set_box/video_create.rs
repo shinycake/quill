@@ -71,8 +71,8 @@ impl QuillApp {
 
     /// Each main-window frame: the chosen video's download finished, so
     /// the editor opens on it (the poll has no window to do this), in the
-    /// window the pick was made in. A pick whose chat window closed is
-    /// dropped with it.
+    /// window the pick was made in. A pick whose chat window closed, or
+    /// whose box closed there, is dropped with it.
     pub(in crate::ui) fn sticker_box_frame_upkeep(
         &mut self,
         window: &mut Window,
@@ -81,9 +81,12 @@ impl QuillApp {
         let Some(pending) = self.sticker_box.pending_video.clone() else {
             return;
         };
-        if let Some(chat) = pending.window
-            && !self.windows.open_windows().any(|(open, _)| open == chat)
-        {
+        let box_open = self
+            .in_window_scope(pending.window, cx, |app, _| {
+                app.message_ui.menu_ui.sticker_set_open
+            })
+            .unwrap_or(false);
+        if !box_open {
             self.sticker_box.pending_video = None;
             return;
         }

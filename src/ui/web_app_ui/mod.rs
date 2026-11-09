@@ -238,8 +238,10 @@ impl MiniAppWindow {
 
 /// Everything mini-app related on [`QuillApp`].
 /// The open app's `closeWebApp` goes to its own client, and its helper
-/// window closes; the launches still waiting for an answer are dropped
-/// with the value, and so is the 30 ms poll.
+/// window closes. The open calls still waiting in the session (which goes
+/// to the background with the client) are dropped there, and an answer
+/// not yet shown is closed; the boxes' waits and the 30 ms poll go with
+/// the value.
 impl crate::ui::on_screen::Farewell for MiniApps {
     fn farewell(
         app: &mut QuillApp,
@@ -247,6 +249,9 @@ impl crate::ui::on_screen::Farewell for MiniApps {
         cx: &mut gpui_kit::Context<QuillApp>,
     ) {
         app.close_mini_app_window(cx);
+        if let Some(live) = app.live.as_mut() {
+            live.driver.forget_web_app_launches();
+        }
     }
 }
 
@@ -268,6 +273,16 @@ pub(super) struct MiniApps {
     /// The poll task, alive while a window is.
     poll: Option<Task<()>>,
     generation: u64,
+}
+
+impl QuillApp {
+    /// The account a mini app opens for: its web view storage and its
+    /// first-open consent are this account's.
+    pub(super) fn web_app_account(&self) -> String {
+        self.session()
+            .map(|session| session.account.to_string())
+            .unwrap_or_else(|| "default".into())
+    }
 }
 
 /// Where the helper executable is: next to Quill's own (the app bundle's
@@ -609,7 +624,7 @@ impl QuillApp {
             .session()
             .and_then(|session| session.users.get(&bot_id))
             .is_some_and(|user| user.verification.is_verified);
-        if trust::needs_confirmation(bot_id, verified, false) {
+        if trust::needs_confirmation(&self.web_app_account(), bot_id, verified, false) {
             self.mini_apps.confirm = Some(WebAppConfirm::OpenTerms {
                 then: open,
                 request_write: false,
@@ -704,7 +719,7 @@ impl QuillApp {
                 request_write,
                 allow_write,
             } => {
-                trust::mark_trusted(then.bot_id());
+                trust::mark_trusted(&self.web_app_account(), then.bot_id());
                 self.request_web_app(then, request_write && allow_write, cx);
             }
             WebAppConfirm::RemoveFromMenu { bot_id, .. } => {
@@ -728,7 +743,7 @@ impl QuillApp {
             } => {
                 // The terms shown with the box count as agreed (tdesktop
                 // `_disclaimerAccepted`).
-                trust::mark_trusted(bot.bot_user_id);
+                trust::mark_trusted(&self.web_app_account(), bot.bot_user_id);
                 let sent = self.live.as_mut().map(|live| {
                     live.driver.toggle_bot_in_attachment_menu(
                         bot.bot_user_id,
@@ -813,7 +828,7 @@ impl QuillApp {
                             bot.name.clone()
                         };
                         let mut lines = Vec::new();
-                        if !trust::is_trusted(bot.bot_user_id) {
+                        if !trust::is_trusted(&this.web_app_account(), bot.bot_user_id) {
                             lines.push(
                                 tr(keys::Q_MEDIA_YOU_ARE_ABOUT_TO_USE).to_string(),
                             );

@@ -1818,3 +1818,85 @@ PTT slider; nothing here overlaps it.
   - The `group_call.ptt_delay_slider` entry in
     `scripts/app-wide-fields.txt` belongs to part 1, which moved the
     slider to `SettingsUi`.
+
+### Phase 12 (area C, part 2)
+
+Round 12 of the review, area C, findings 31 to 61, on
+`claude/sm-review12-c2`. Part 1 (`claude/sm-review12-c1`) took findings
+1 to 30, the lock, and the per-window dialog host; the findings here that
+need that structure are listed at the end.
+
+- **An answer acts for the request it answers.**
+  - An Earn withdrawal keeps the id of the `getChatRevenueWithdrawalUrl`
+    it waits for (`Withdraw::request`). An answer or error after Cancel
+    opens nothing and leaves the next attempt alone.
+  - A checkout keeps the id of its `validateOrderInfo`
+    (`PaymentsState::validate_request`). Closing the checkout or opening
+    another form drops it, so a late answer lands nowhere.
+  - New Contact keeps the id of its import (`new_contact_request`).
+    Closing the box forgets it (`forget_new_contact`), so a closed box
+    opens no chat, and the next box's Create is sent.
+  - A failed Premium bot link drops `hub.auto_start`, so a later link
+    does not send `/start` by itself.
+  - A mini app launch dropped by an account switch opens nothing. The
+    farewell clears the session's pending launches
+    (`forget_web_app_launches`). An answer that arrives later, or one
+    that landed but was not shown yet, gets `closeWebApp`
+    (`WebApps::dropped_launches`, closed after each ingest).
+  - A setting saved with a basic group's type change (History: Visible)
+    joins the upgrade already in flight (`upgrade_with` queues its step
+    on that request), and every step queued on one request runs.
+- **What is drawn per window acts in its window.**
+  - The player bar's title jumps in the track's own window
+    (`select_chat_request` with the message), and a saved track's
+    Playlist opens in the main window (`hand_to_main_window`).
+  - A main-window chat change stops only that window's GIF, and the
+    autoplay marks are kept per chat (`HashSet<ChatMessage>`).
+  - The gift market, craft and transfer follow-ups run in the frame of
+    the window that hosts the box (`gift_boxes_upkeep`), not only in the
+    main window's.
+  - A post's Statistics from a chat window hands the whole open to the
+    main window, so the post page is set after the panel opens.
+  - The sticker set box is open in one window at a time: viewing a set
+    closes the box in the other windows, and Add, Remove and Archive
+    close it everywhere (`close_sticker_set_dialog`).
+- **A box belongs to what it was opened for.**
+  - "Don't ask me again" for a paid send is tied to the chat and price
+    it was ticked for (`confirm_trust`); Cancel drops it.
+  - Picking another gift drops the first gift's Upgrade or resale
+    confirmation.
+  - "Buy a collectible by name" from Send Gift buys for that box's
+    recipient (`marketplace_chat`), not the chat open behind it.
+  - The profile modal gives the info column back as soon as it closes,
+    including when a button inside it navigates. A target opened over
+    it replaces it, and a switch closes it.
+  - Deleting or leaving a group from its Edit box closes the box. An
+    upgrade closes the old group's Edit box and moves its chat window to
+    the new supergroup (`move_upgraded_chat_window`).
+  - The rights editor's Save with untouched checkboxes saves the rights
+    its lookup brought in after it opened.
+  - Mini app consent is kept per account (`web_app_trust.json` keyed by
+    account). Logging out or removing an account drops it. The old
+    app-wide list is not read, so each account asks once more.
+  - The Earn layer closes on a switch and gives its column back.
+- **Error arms end loading, and a poll gives up only when its box
+  closes.**
+  - A deleted voice note or song stops the player bar.
+  - The Contacts tab fetches its list again after a contact change
+    invalidates it (`refetch_invalidated_contacts`).
+  - An ownership transfer, added members and an approved join request
+    mark the member list stale.
+  - The bot-create poll is screen-scoped and leaves the dialog to the
+    shell. The Edit Bot fill poll has no cap, and Save waits for the
+    fill, so it cannot clear the about text.
+  - A sticker set's video pick is dropped when its box is closed in the
+    pick's window, so no editor opens with no box.
+- **Skipped for part 1.**
+  - Finding 53 (New Topic from a chat window retargets the main window's
+    manage box) needs the dialog host per window.
+  - Finding 47's other half: a Create Bot box in a chat window that
+    closes moves to the main window. That is the box-moves-on-close
+    structure. Only the poll was fixed here.
+- **Not tested.** The bot-create and Edit Bot polls, the Edit box
+  closing on delete or upgrade, and the upgraded chat window's move all
+  need a live driver. They have no tests.

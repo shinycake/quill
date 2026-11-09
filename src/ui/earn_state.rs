@@ -73,7 +73,10 @@ pub(crate) struct EarnUi {
 
 /// The earn boxes (setup confirm, programs, join, link, revoke, the
 /// withdrawal) keep their state in the session's `payments.earn`, which
-/// goes to the background with the account: each closes here.
+/// goes to the background with the account: each closes here. The layer's
+/// open flag is the session's info column too, while its back stack and
+/// the column it covered are this screen's: it closes, giving that column
+/// back, or it would come back on switch-back with neither.
 impl crate::ui::on_screen::Farewell for EarnUi {
     fn farewell(
         app: &mut QuillApp,
@@ -81,6 +84,9 @@ impl crate::ui::on_screen::Farewell for EarnUi {
         cx: &mut gpui_kit::Context<QuillApp>,
     ) {
         app.close_earn_boxes(window, cx);
+        if app.earn_layer_open() {
+            app.drop_earn_layer(cx);
+        }
     }
 }
 

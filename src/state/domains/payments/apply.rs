@@ -43,6 +43,7 @@ impl Session {
                     self.payments.form_loading = false;
                     self.payments.form_paid = false;
                     self.payments.validated = None;
+                    self.payments.validate_request = None;
                     self.payments.shipping_id = None;
                     self.payments.note = None;
                 }
@@ -50,8 +51,13 @@ impl Session {
             PaymentsPayload::ValidatedOrderInfo(validated) => {
                 // Slice P1: `validateOrderInfo` answer (matched by `@extra`).
                 // The first shipping option is pre-selected, like the
-                // official clients.
-                if pending.map(|p| p.purpose) == Some(RequestPurpose::ValidateOrderInfo) {
+                // official clients. An answer for a checkout since closed
+                // is not this one's.
+                if pending.map(|p| p.purpose) == Some(RequestPurpose::ValidateOrderInfo)
+                    && extra.is_some()
+                    && self.payments.validate_request == extra
+                {
+                    self.payments.validate_request = None;
                     self.payments.shipping_id =
                         validated.shipping_options.first().map(|o| o.id.clone());
                     self.payments.validated = Some(validated);

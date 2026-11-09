@@ -408,7 +408,18 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Ok(None);
         }
         let purpose = RequestPurpose::UpgradeBasicGroup;
-        if self.session.requests.has_purpose_for_chat(purpose, chat_id) {
+        // An upgrade already in flight (the Edit box's type save) takes
+        // this step too, so a setting saved with it is not dropped.
+        if let Some(in_flight) = self
+            .session
+            .requests
+            .ids_for_chat(&[purpose], chat_id)
+            .first()
+            .copied()
+        {
+            if let Some(followup) = followup {
+                self.session.queue_admin_followup(in_flight, followup);
+            }
             return Ok(None);
         }
         let extra = self.session.request(purpose, Some(chat_id));
@@ -422,22 +433,33 @@ impl<S: JsonSender> ConnectDriver<S> {
         Ok(Some(extra))
     }
 
-    /// Before `apply` takes the pending request: the step waiting for this
+    /// Before `apply` takes the pending request: the steps waiting for this
     /// answer, and whether the answer was a success. Always removes the
     /// step, so a failed request never leaves one behind.
     pub(crate) fn capture_admin_followup(
         &mut self,
         owned: &crate::telegram::client::OwnedEnvelope,
-    ) -> Option<(AdminFollowup, bool)> {
+    ) -> Option<(Vec<AdminFollowup>, bool)> {
         let extra = owned.envelope.extra?;
-        let followup = self.session.take_admin_followup(extra)?;
+        let followups: Vec<AdminFollowup> =
+            std::iter::from_fn(|| self.session.take_admin_followup(extra)).collect();
+        if followups.is_empty() {
+            return None;
+        }
         let ok = !matches!(owned.envelope.payload, EnvelopePayload::Error(_));
-        Some((followup, ok))
+        Some((followups, ok))
+    }
+
+    /// After `apply`: run every step that was waiting, in order.
+    pub(crate) fn run_admin_followups(&mut self, followups: Vec<AdminFollowup>, ok: bool) {
+        for followup in followups {
+            self.run_admin_followup(followup, ok);
+        }
     }
 
     /// After `apply`: run the step that was waiting. Steps whose chat is
     /// gone or no longer allowed leave a note instead of failing silently.
-    pub(crate) fn run_admin_followup(&mut self, followup: AdminFollowup, ok: bool) {
+    fn run_admin_followup(&mut self, followup: AdminFollowup, ok: bool) {
         let linking = matches!(followup, AdminFollowup::LinkAfterHistory { .. });
         let result = match followup {
             // The history toggle may be a no-op or lack the right; the

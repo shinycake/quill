@@ -26,8 +26,11 @@ impl Session {
                 }
             }
             Some(RequestPurpose::ValidateOrderInfo) => {
-                self.payments.form_loading = false;
-                self.payments.note = Some(format!("Payment failed: {}", error_reason(err)));
+                if extra.is_some() && self.payments.validate_request == extra {
+                    self.payments.validate_request = None;
+                    self.payments.form_loading = false;
+                    self.payments.note = Some(format!("Payment failed: {}", error_reason(err)));
+                }
             }
             // The payment that failed leaves the in-flight list; the note
             // is the checkout's only while it shows that invoice.
@@ -187,7 +190,7 @@ impl Session {
                 self.apply_ton_wallet_error(err, purpose, pending.and_then(|p| p.user_id))
             }
             Some(RequestPurpose::Payments(PaymentsPurpose::Earn(purpose))) => {
-                self.apply_earn_error(err, purpose)
+                self.apply_earn_error(err, purpose, pending.map(|p| p.id))
             }
             Some(RequestPurpose::Payments(PaymentsPurpose::SuggestedPost(purpose))) => {
                 self.apply_suggested_post_error(err, purpose)

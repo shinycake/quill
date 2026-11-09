@@ -12,6 +12,7 @@ impl Session {
         let payments = &mut self.payments;
         payments.form_loading = false;
         payments.form_request = None;
+        payments.validate_request = None;
         payments.note = None;
         payments.validated = None;
         payments.shipping_id = None;

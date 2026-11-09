@@ -74,6 +74,35 @@ fn a_paid_chat_asks_once_then_sends_with_the_price(cx: &mut TestAppContext) {
     });
 }
 
+/// "Don't ask me again" belongs to the confirmation it was ticked on:
+/// Cancel clears it, and a confirmation for another price shows it off,
+/// so Pay there trusts nothing.
+#[gpui_kit::test]
+fn dont_ask_again_stays_with_its_confirmation(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx, "ready-chats");
+    let vcx = &mut vcx;
+    app.update_in(vcx, |app, _, cx| {
+        charge_in_chat(app, 25);
+        assert!(app.paid_send_waits(ChatId(11), "hello", cx));
+        app.paid_messages.confirm_trust = Some((11, 25));
+        assert!(app.paid_confirm_trusted());
+        app.cancel_paid_confirm(cx);
+        assert!(app.paid_messages.confirm_trust.is_none());
+        assert!(app.paid_send_waits(ChatId(11), "hello", cx));
+        assert!(!app.paid_confirm_trusted(), "the next box opens unticked");
+        // Ticked for 25, then the price on screen becomes 30.
+        app.paid_messages.confirm_trust = Some((11, 25));
+        app.paid_messages.confirm = None;
+        charge_in_chat(app, 30);
+        assert!(app.paid_send_waits(ChatId(11), "hello", cx));
+        app.paid_messages.confirm_trust = Some((11, 25));
+        assert!(
+            !app.paid_confirm_trusted(),
+            "a tick for 25 is not one for 30"
+        );
+    });
+}
+
 #[gpui_kit::test]
 fn free_chats_never_wait(cx: &mut TestAppContext) {
     let (app, mut vcx) = new_app(cx, "ready-chats");

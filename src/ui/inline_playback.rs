@@ -64,7 +64,10 @@ impl QuillApp {
         if !session.settings.media_prefs.autoplay_gifs
             || session.settings.media_prefs.data_saver
             || session.open_chat != Some(row.message.chat_id)
-            || self.playback.autoplayed_gifs.contains(&row.message.id)
+            || self
+                .playback
+                .autoplayed_gifs
+                .contains(&ChatMessage::new(row.message.chat_id, row.message.id))
         {
             return;
         }
@@ -83,10 +86,10 @@ impl QuillApp {
         }) else {
             return;
         };
-        let (id, mime) = (row.message.id, "image/gif".to_string());
+        let key = ChatMessage::new(row.message.chat_id, row.message.id);
         // One GIF plays at a time; the others wait for it to stop.
-        self.playback.autoplayed_gifs.insert(id);
-        self.toggle_animation_playback(id, file_id, mime, cx);
+        self.playback.autoplayed_gifs.insert(key);
+        self.toggle_animation_playback(key.message, file_id, "image/gif".into(), cx);
     }
 
     /// The GIF file of `chat`'s row `message_id` loops in the window whose
@@ -97,6 +100,26 @@ impl QuillApp {
                 window: self.windows.scope,
                 message: ChatMessage::new(chat, message_id),
             })
+    }
+
+    /// The window in place leaves `chat`: the GIF file its row loops stops,
+    /// a GIF it waits to play goes, and `chat`'s GIFs may autoplay again
+    /// when it comes back. A GIF another window plays goes on.
+    pub(super) fn leave_gifs_here(&mut self, chat: Option<ChatId>) {
+        let here = self.windows.scope;
+        if self
+            .playback
+            .playing_animation
+            .is_some_and(|playing| playing.window == here)
+        {
+            self.stop_animation_playback();
+        }
+        self.playback.intent.take_if(|intent| {
+            intent.target.kind() == PlayKind::Gif && intent.target.window() == here
+        });
+        if let Some(chat) = chat {
+            self.playback.autoplayed_gifs.retain(|gif| gif.chat != chat);
+        }
     }
 
     /// The window `chat` closed: a GIF its row played stops, and its clip
@@ -132,8 +155,12 @@ impl QuillApp {
         mime: String,
         cx: &mut Context<Self>,
     ) {
-        self.playback.autoplayed_gifs.insert(message_id);
         let open_chat = self.session().and_then(|session| session.open_chat);
+        if let Some(chat) = open_chat {
+            self.playback
+                .autoplayed_gifs
+                .insert(ChatMessage::new(chat, message_id));
+        }
         if open_chat.is_some_and(|chat| self.gif_playing(chat, message_id)) {
             self.stop_animation_playback();
             self.connection

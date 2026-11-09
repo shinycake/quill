@@ -261,6 +261,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.session.payments.earn.withdraw = Some(Withdraw {
             target,
             step: WithdrawStep::Checking,
+            request: None,
         });
         let result = self.send_withdrawal(target, "");
         if result.is_err() {
@@ -298,11 +299,25 @@ impl<S: JsonSender> ConnectDriver<S> {
         result
     }
 
+    /// Send the URL request and record it on the withdrawal, so only its
+    /// own answer acts on it.
     fn send_withdrawal(
         &mut self,
         target: WithdrawTarget,
         password: &str,
     ) -> Result<(), ConnectSendError> {
+        let request = self.send_withdrawal_request(target, password)?;
+        if let Some(withdraw) = self.session.payments.earn.withdraw.as_mut() {
+            withdraw.request = Some(request);
+        }
+        Ok(())
+    }
+
+    fn send_withdrawal_request(
+        &mut self,
+        target: WithdrawTarget,
+        password: &str,
+    ) -> Result<RequestId, ConnectSendError> {
         let earn = EarnPurpose::WithdrawalUrl {
             with_password: !password.is_empty(),
         };
@@ -314,7 +329,6 @@ impl<S: JsonSender> ConnectDriver<S> {
                 get_star_withdrawal_url(extra, owner, count, password)
             }),
         }
-        .map(|_| ())
     }
 
     pub fn cancel_withdrawal(&mut self) {

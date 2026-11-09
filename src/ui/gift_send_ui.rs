@@ -9,7 +9,6 @@
 use super::app::QuillApp;
 use super::chat_theme::fill_muted;
 use super::gift_manage_ui::{hint, panel, stars};
-use super::navigation::NavigationAction;
 use super::premium_ui::sticker_tile;
 use super::shell::{DialogKind, QuillShell};
 use crate::ui::status_note::StatusNote;
@@ -243,8 +242,11 @@ impl QuillApp {
                         .label(tr(keys::Q_MONEY_BUY_A_COLLECTIBLE_BY_NAME))
                         .ghost()
                         .on_click(cx.listener(|this, _, window, cx| {
+                            // It buys for this box's recipient, not the
+                            // chat open behind it.
+                            let chat = this.send_gift_recipient_chat();
                             this.close_send_gift_dialog(cx);
-                            this.navigate(NavigationAction::Gift, window, cx);
+                            this.open_marketplace_for(chat, window, cx);
                         })),
                 );
             }

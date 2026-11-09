@@ -338,7 +338,18 @@ impl QuillApp {
                         .map(|id| sent_note(id, tr(keys::Q_PEOPLE_REMOVING_MEMBER))),
                 };
                 match result {
-                    Ok(note) => note,
+                    Ok(note) => {
+                        // The chat goes: its Edit box goes with it.
+                        if matches!(
+                            dialog.action,
+                            GroupConfirmAction::DeleteChat
+                                | GroupConfirmAction::LeaveChat
+                                | GroupConfirmAction::RemoveFromList
+                        ) {
+                            self.close_group_edit_box_for(dialog.chat_id, cx);
+                        }
+                        note
+                    }
                     Err(_) => {
                         self.admin.group_confirm_dialog = Some(dialog);
                         tr(keys::Q_PEOPLE_ACTION_FAILED).to_string()
