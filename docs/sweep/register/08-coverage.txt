@@ -143,3 +143,15 @@ src/ui/composer_boxes.rs 136 read
 src/ui/composer_date.rs 282 read
 src/ui/composer_events.rs 144 read
 src/ui/composer_field.rs 586 read
+src/ui/chat_window/recording.rs 103 read
+src/ui/chat_window/routing.rs 271 read
+src/ui/chat_window/saved.rs 274 read
+src/ui/chat_window/scoped.rs 401 read
+src/ui/chat_window/slot.rs 489 read
+src/ui/chat_window/view.rs 547 read
+src/ui/chatlist_global.rs 330 read
+src/ui/chatlist_style.rs 304 read
+src/ui/checklist_box.rs 112 read
+src/ui/checklists.rs 641 read
+src/ui/clipboard_files.rs 201 read
+src/ui/code_highlight.rs 631 read
