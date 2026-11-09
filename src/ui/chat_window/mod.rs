@@ -569,6 +569,7 @@ impl QuillApp {
         self.follow_windows(cx);
         self.drop_play_intent_in_window(chat_id);
         self.stop_gif_of_window(chat_id);
+        self.widgets_window_closed(chat_id);
         if self.windows.last_press == Some(chat_id) {
             self.windows.last_press = None;
         }

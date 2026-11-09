@@ -81,6 +81,57 @@ impl QuillApp {
             .insert(key, width);
     }
 
+    /// The widgets `keys` went off screen: they stop drawing and drop
+    /// what they can rebuild.
+    fn hide_widgets(&mut self, keys: Vec<WidgetKey>) {
+        for key in keys {
+            self.widgets.clock = self.widgets.clock.saturating_add(1);
+            let clock = self.widgets.clock;
+            if let Some(entry) = self.widgets.entries.get_mut(&key) {
+                entry.visible = false;
+                entry.hidden_at = clock;
+                entry.wants_frames = false;
+                if let Some(runtime) = &entry.runtime {
+                    runtime.set_visible(false);
+                    runtime.trim();
+                }
+            }
+        }
+    }
+
+    /// The chat window of `chat_id` closed: its widgets are off screen now,
+    /// not at the next pass of some other window.
+    pub(super) fn widgets_window_closed(&mut self, chat_id: ChatId) {
+        let window = Some(chat_id);
+        // Others' last passes: a widget one of them showed stays on, theirs.
+        let shown_elsewhere = {
+            let mut passes = self.widgets.passes.borrow_mut();
+            passes.seen.remove(&window);
+            passes.views.remove(&window);
+            passes.queued.remove(&window);
+            passes
+                .seen
+                .iter()
+                .flat_map(|(other, keys)| keys.keys().map(move |key| (*key, *other)))
+                .map(|(key, other)| (key, (other, passes.views.get(&other).copied().flatten())))
+                .collect::<std::collections::HashMap<_, _>>()
+        };
+        let mut hidden = Vec::new();
+        for (key, entry) in &mut self.widgets.entries {
+            if entry.window != window || !entry.visible {
+                continue;
+            }
+            match shown_elsewhere.get(key) {
+                Some((other, view)) => {
+                    entry.window = *other;
+                    entry.view = view.or(entry.view);
+                }
+                None => hidden.push(*key),
+            }
+        }
+        self.hide_widgets(hidden);
+    }
+
     /// The pass of `window` was drawn: what it showed is on screen, what it
     /// did not show of that window's widgets is not.
     fn reconcile_widgets(&mut self, window: Option<ChatId>, cx: &mut Context<Self>) {
@@ -99,19 +150,7 @@ impl QuillApp {
                 hidden.push(*key);
             }
         }
-        for key in hidden {
-            self.widgets.clock = self.widgets.clock.saturating_add(1);
-            let clock = self.widgets.clock;
-            if let Some(entry) = self.widgets.entries.get_mut(&key) {
-                entry.visible = false;
-                entry.hidden_at = clock;
-                entry.wants_frames = false;
-                if let Some(runtime) = &entry.runtime {
-                    runtime.set_visible(false);
-                    runtime.trim();
-                }
-            }
-        }
+        self.hide_widgets(hidden);
         for (key, width) in seen {
             let Some((content, outgoing)) = self.widget_message(key) else {
                 continue;
@@ -490,7 +529,7 @@ impl QuillApp {
             return;
         }
         cx.write_to_clipboard(ClipboardItem::new_string(text.clone()));
-        self.connection.set_note(StatusNote::info(tr_with(
+        self.set_note(StatusNote::info(tr_with(
             keys::TGW_COPIED,
             &[("text", &text)],
         )));

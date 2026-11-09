@@ -139,16 +139,19 @@ Measured on an M-series Mac, 2026-11-09:
 
 ## Limits and what is left
 
-- Not built: WebGL and three.js widgets (twidget's 3D backend is
-  Apple-only), keyboard input into widget text fields (`qw_key` exists, but
-  focus routing to the bubble does not), the wheel inside scrollable widgets
-  (the wheel always scrolls the history), the Chart.js and D3 copies that
-  Telegram serves in place of CDN URLs (not vendored), and drag-to-select
-  across the bubble edge.
-- A chat window that closes leaves its widgets marked on screen until a
-  main-window pass sees them. They are trimmed when another pass runs.
-- `dpr` is the scale of the last window drawn. A widget dragged between a
-  1x and a 2x screen keeps its first scale until it restarts.
+- No wheel or keyboard inside a widget, by design: widget profile 1 gives a
+  widget neither (twidget's `Renderer::wheel` and `Renderer::key` do
+  nothing, see widget-sandbox `docs/profile-v1.md`), and Telegram Desktop
+  sends neither. The wheel scrolls the history, as there.
+- Not built, as in Telegram Desktop: WebGL and three.js widgets (twidget's
+  3D backend is Apple-only) and copies of Chart.js or D3 served in place of
+  CDN URLs.
+- `dpr` is one scale for the app, the last window's, as Telegram Desktop's
+  `style::DevicePixelRatio()`. A widget dragged between a 1x and a 2x
+  screen keeps its first scale until it restarts.
+- A chat window that closes takes its widgets off screen at once
+  (`widgets_window_closed`), unless another window's last pass showed them;
+  they move to that window.
 
 ## Verification
 

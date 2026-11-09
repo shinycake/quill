@@ -67,7 +67,6 @@ impl QuillApp {
             }
         }
         session.open_chat(ChatId(11));
-        self.connection
-            .set_note(StatusNote::silent("screenshot demo — message widgets"));
+        self.set_note(StatusNote::silent("screenshot demo — message widgets"));
     }
 }
