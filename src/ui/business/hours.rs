@@ -15,7 +15,7 @@ use quill::business_hours_edit::{
     self as edit, DAY, Interval, WEEKDAYS, day_from_clock, day_summary, extract_day,
     next_added_interval, replace_day,
 };
-use quill::business_info::OpeningHours;
+use quill::business_info::{BusinessInfo, OpeningHours};
 use quill::business_settings::{TimeZone, closest_time_zone};
 use quill::lang::{keys, tr};
 use quill::local_time::{now_unix, utc_offset_at};
@@ -55,8 +55,8 @@ fn field_minute(state: &Entity<TimeFieldState>, cx: &App) -> i32 {
 }
 
 impl QuillApp {
-    pub(super) fn new_hours_draft(&self) -> HoursDraft {
-        let saved = self.my_business().opening_hours;
+    pub(super) fn new_hours_draft(saved: &BusinessInfo) -> HoursDraft {
+        let saved = saved.opening_hours.clone();
         HoursDraft {
             base: saved.clone(),
             enabled: saved.is_some(),
@@ -442,17 +442,29 @@ impl QuillApp {
     /// open day, removes the hours (tdesktop sends an empty
     /// `WorkingHours` then).
     pub(super) fn save_business_hours(&mut self, cx: &mut Context<Self>) -> Leave {
-        let Some((enabled, week, base)) = self
+        let Some((enabled, week, base, saved_zone)) = self
             .dialogs
             .business_dialog
             .as_ref()
             .and_then(|d| d.hours.as_ref())
-            .map(|h| (h.enabled, h.week.clone(), h.base.clone()))
+            .map(|h| {
+                (
+                    h.enabled,
+                    h.week.clone(),
+                    h.base.clone(),
+                    h.time_zone_id.clone(),
+                )
+            })
         else {
             return Leave::Go(None);
         };
         let wanted = if enabled && !week.is_empty() {
-            let Some(zone) = self.business_zone() else {
+            // The saved zone needs no list: only a fresh one waits for it.
+            let zone = self
+                .business_zone()
+                .map(|z| z.id)
+                .or_else(|| (!saved_zone.is_empty()).then_some(saved_zone));
+            let Some(zone) = zone else {
                 self.business_error(tr(keys::Q_OPS_THE_TIME_ZONES_ARE_STILL), cx);
                 return Leave::Stay;
             };
@@ -460,7 +472,7 @@ impl QuillApp {
                 .into_iter()
                 .filter_map(|(s, e)| Some((u32::try_from(s).ok()?, u32::try_from(e).ok()?)))
                 .collect();
-            Some(OpeningHours::new(zone.id, raw))
+            Some(OpeningHours::new(zone, raw))
         } else {
             None
         };

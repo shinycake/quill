@@ -705,7 +705,7 @@ impl Session {
         if let Some(RequestPurpose::Groups(GroupsPurpose::ProcessChatJoinRequest { user_id })) =
             pending.map(|p| p.purpose)
             && let Some(chat_id) = pending.and_then(|p| p.chat_id)
-            && let Some(state) = self.groups.link_join_requests.get_mut(&chat_id.0)
+            && let Some(state) = self.groups.invite_pages.join_requests_mut(chat_id.0)
         {
             let before = state.requests.len();
             state.requests.retain(|r| r.user_id != user_id);
@@ -720,7 +720,7 @@ impl Session {
                 _,
                 Some(chat_id),
             )) => {
-                if let Some(state) = self.groups.link_join_requests.get_mut(&chat_id.0) {
+                if let Some(state) = self.groups.invite_pages.join_requests_mut(chat_id.0) {
                     state.requests.clear();
                     state.total_count = 0;
                 }
@@ -759,7 +759,7 @@ impl Session {
                 if pending.and_then(|p| p.user_id).is_some() =>
             {
                 // Another admin's revoked links were deleted.
-                if let Some(state) = self.groups.admin_invite_links.get_mut(&chat_id.0) {
+                if let Some(state) = self.groups.invite_pages.admin_links_mut(chat_id.0) {
                     state.revoked = InviteLinkFetch::Loaded(InviteLinkList {
                         total_count: 0,
                         links: Vec::new(),

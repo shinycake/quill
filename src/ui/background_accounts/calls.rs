@@ -9,7 +9,6 @@
 use super::*;
 use crate::ui::shell::{DialogKind, QuillShell};
 use crate::ui::status_note::StatusNote;
-use gpui_kit::component::ActiveTheme as _;
 use gpui_kit::component::button::*;
 use gpui_kit::component::dialog::Dialog;
 use quill::lang::{keys, tr, tr_with};
@@ -303,59 +302,26 @@ impl QuillApp {
             return None;
         }
         let (title, body) = self.background_ring_text()?;
-        let theme = cx.theme();
-        Some(
-            div()
-                .id("lock-background-call")
-                .absolute()
-                .top(px(48.))
-                .left_0()
-                .right_0()
-                .flex()
-                .justify_center()
-                .child(
-                    div()
-                        .w(px(360.))
-                        .p_3()
-                        .gap_2()
-                        .flex()
-                        .flex_col()
-                        .rounded_md()
-                        .border_1()
-                        .border_color(theme.border)
-                        .bg(theme.popover)
-                        .child(
-                            div()
-                                .text_sm()
-                                .font_weight(FontWeight::SEMIBOLD)
-                                .child(title),
-                        )
-                        .child(div().text_sm().child(body))
-                        .child(
-                            div()
-                                .flex()
-                                .justify_end()
-                                .gap_2()
-                                .child(
-                                    Button::new("lock-background-call-decline")
-                                        .label(tr(keys::CALL_DECLINE))
-                                        .danger()
-                                        .on_click(cx.listener(|this, _, _, cx| {
-                                            this.decline_background_call(cx);
-                                        })),
-                                )
-                                .child(
-                                    Button::new("lock-background-call-answer")
-                                        .label(tr(keys::Q_OPS_ANSWER))
-                                        .primary()
-                                        .on_click(cx.listener(|this, _, window, cx| {
-                                            this.answer_background_call(window, cx);
-                                        })),
-                                ),
-                        ),
-                )
-                .into_any_element(),
-        )
+        let decline = Button::new("lock-background-call-decline")
+            .label(tr(keys::CALL_DECLINE))
+            .danger()
+            .on_click(cx.listener(|this, _, _, cx| {
+                this.decline_background_call(cx);
+            }));
+        let answer = Button::new("lock-background-call-answer")
+            .label(tr(keys::Q_OPS_ANSWER))
+            .primary()
+            .on_click(cx.listener(|this, _, window, cx| {
+                this.answer_background_call(window, cx);
+            }));
+        Some(crate::ui::calls::lock_call_card(
+            "lock-background-call",
+            title,
+            body,
+            decline,
+            answer,
+            cx,
+        ))
     }
 
     /// The incoming-call prompt for a background account.

@@ -7,7 +7,9 @@ use super::*;
 use crate::ui::status_note::StatusNote;
 use quill::lang::{keys, tr, tr_with};
 use quill::media_viewer::{MediaViewer, MediaViewerItem, ViewerSource, profile_photo_items};
-use quill::state::{ChatPhotosFetch, PhotoGallery, PhotoOwner, ProfilePhotosFetch};
+use quill::state::{
+    ChatPhotosFetch, InfoPanelTarget, PhotoGallery, PhotoOwner, ProfilePhotosFetch,
+};
 
 /// The viewer items of a gallery, newest first.
 fn gallery_items(gallery: &PhotoGallery) -> Vec<MediaViewerItem> {
@@ -19,17 +21,21 @@ fn gallery_items(gallery: &PhotoGallery) -> Vec<MediaViewerItem> {
 }
 
 /// A gallery click waiting for its photos, with what it was asked over:
-/// the window (`None`: the main window), the chat that window showed, and
-/// that window's viewer opens so far. The answer opens it only while all
-/// three still hold: a click on another photo, a chat change, a window
-/// close or the lock in between (each viewer open counts) drops it, so
-/// it never opens late over what the user moved on to.
+/// the window (`None`: the main window), the chat and the info panel that
+/// window showed, that window's viewer opens so far, and the lock count.
+/// The answer opens it only while all of them still hold: a click on
+/// another photo, a chat change, the panel closing or moving to another
+/// peer, a window close, or a lock in between (even one unlocked again
+/// before the photos land) drops it, so it never opens late over what the
+/// user moved on to.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(in crate::ui) struct PendingGallery {
     owner: PhotoOwner,
     window: Option<ChatId>,
     chat: Option<ChatId>,
+    panel: Option<InfoPanelTarget>,
     viewer_opens: u64,
+    locks: u64,
 }
 
 impl QuillApp {
@@ -39,17 +45,20 @@ impl QuillApp {
             owner,
             window: self.asking_window_or_last_press(),
             chat: self.viewed_chat(),
+            panel: self.open_info_target(),
             viewer_opens: self.viewer.open_gen,
+            locks: self.account.passcode.lock_count(),
         });
     }
 
     /// The pending gallery still belongs on screen, with its window's
     /// state in place.
     fn pending_gallery_still_wanted(&self, pending: &PendingGallery) -> bool {
-        !self.account.passcode.is_locked()
+        !self.account.passcode.locked_since(pending.locks)
             && !self.viewer.state.is_open()
             && self.viewer.open_gen == pending.viewer_opens
             && self.viewed_chat() == pending.chat
+            && self.open_info_target() == pending.panel
     }
 
     /// Open the photos of `owner` in the media viewer, on the current one

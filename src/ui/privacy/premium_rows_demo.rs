@@ -47,7 +47,7 @@ impl QuillApp {
                 ..Default::default()
             });
         }
-        self.open_settings(Some(quill::settings_catalog::Page::Privacy));
+        self.open_settings(Some(quill::settings_catalog::Page::Privacy), cx);
         self.privacy.editor = Some(PrivacyEditorTarget::Rule(key));
         cx.notify();
     }

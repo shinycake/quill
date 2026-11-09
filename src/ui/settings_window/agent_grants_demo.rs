@@ -8,7 +8,7 @@ use quill::agent::grants::{self, Scope};
 /// The page with access on, a second account, a wider default, a blocked
 /// chat and a secret chat added. `QUILL_DEMO_AGENT=empty` leaves the added
 /// chats empty and the account single.
-fn demo_grants(app: &mut QuillApp, _: &mut Window, _: &mut Context<QuillApp>) {
+fn demo_grants(app: &mut QuillApp, _: &mut Window, cx: &mut Context<QuillApp>) {
     use quill::agent::grants::ChatGrant;
     quill::fast_buttons::set_persistence(false);
     quill::agent::access::set_enabled(true);
@@ -36,7 +36,7 @@ fn demo_grants(app: &mut QuillApp, _: &mut Window, _: &mut Context<QuillApp>) {
         add(-1_001_234_567_890, "Family", None);
         add(-1_999_000_000_000, "Ben Ortiz", Some(Scope::Read));
     });
-    app.open_settings(Some(quill::settings_catalog::Page::AgentAccess));
+    app.open_settings(Some(quill::settings_catalog::Page::AgentAccess), cx);
     super::agent_page::demo_scroll_from_env(app);
 }
 

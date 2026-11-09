@@ -168,13 +168,19 @@ impl QuillApp {
         self.dialogs.business_dialog.as_ref().map(|d| d.view)
     }
 
-    /// The own account's business info (empty when none is set or the
-    /// full info has not arrived).
-    pub(super) fn my_business(&self) -> BusinessInfo {
-        self.session()
-            .and_then(|s| s.my_user_id.and_then(|me| s.user_full_info(me)))
-            .and_then(|info| info.extras.business.clone())
-            .unwrap_or_default()
+    /// The own account's saved business info, or `None` while its full
+    /// info has not arrived. A screen's draft is built only from the saved
+    /// info: one built from the empty value would show Off and the default
+    /// hours, and a change on it would save those defaults over the real
+    /// settings. Without an own user (the demo) nothing is waited for.
+    pub(super) fn saved_business(&self) -> Option<BusinessInfo> {
+        let session = self.session()?;
+        let Some(me) = session.my_user_id else {
+            return Some(BusinessInfo::default());
+        };
+        session
+            .user_full_info(me)
+            .map(|info| info.extras.business.clone().unwrap_or_default())
     }
 
     pub(super) fn business_premium(&self) -> bool {
@@ -185,26 +191,13 @@ impl QuillApp {
     pub(super) fn business_go(&mut self, view: View, window: &mut Window, cx: &mut Context<Self>) {
         let missing = self.business_draft_missing(view);
         match view {
-            View::Greeting if missing => {
-                let draft = self.new_greeting_draft();
-                if let Some(d) = self.business_mut() {
-                    d.greeting = Some(draft);
+            View::Greeting | View::Away | View::Location | View::StartPage | View::Hours => {
+                if missing && !self.business_fill_draft(view, window, cx) {
+                    self.business_info_watch(window, cx);
                 }
-            }
-            View::Away if missing => {
-                let draft = self.new_away_draft(window, cx);
-                if let Some(d) = self.business_mut() {
-                    d.away = Some(draft);
-                }
-            }
-            View::Hours => {
-                if missing {
-                    let draft = self.new_hours_draft();
-                    if let Some(d) = self.business_mut() {
-                        d.hours = Some(draft);
-                    }
-                }
-                if let Some(live) = self.live.as_mut() {
+                if view == View::Hours
+                    && let Some(live) = self.live.as_mut()
+                {
                     let _ = live.driver.ensure_time_zones();
                 }
             }
@@ -213,18 +206,6 @@ impl QuillApp {
                 if let Some(d) = self.business_mut() {
                     let search = d.zone_search.clone();
                     search.update(cx, |input, cx| input.set_value("", window, cx));
-                }
-            }
-            View::Location if missing => {
-                let draft = self.new_location_draft(window, cx);
-                if let Some(d) = self.business_mut() {
-                    d.location = Some(draft);
-                }
-            }
-            View::StartPage if missing => {
-                let draft = self.new_start_page_draft(window, cx);
-                if let Some(d) = self.business_mut() {
-                    d.start_page = Some(draft);
                 }
             }
             View::StickerPick => self.open_start_page_stickers(cx),
@@ -262,6 +243,86 @@ impl QuillApp {
             d.note = None;
         }
         cx.notify();
+    }
+
+    /// Build the draft of a screen that saves from the full info, once it
+    /// has arrived. `false` while it is still on its way: the screen shows
+    /// "Loading…" with nothing to change, so nothing can save.
+    fn business_fill_draft(
+        &mut self,
+        view: View,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let Some(saved) = self.saved_business() else {
+            return false;
+        };
+        let away = (view == View::Away).then(|| Self::new_away_draft(&saved, window, cx));
+        let location =
+            (view == View::Location).then(|| Self::new_location_draft(&saved, window, cx));
+        let start_page =
+            (view == View::StartPage).then(|| self.new_start_page_draft(&saved, window, cx));
+        let Some(d) = self.business_mut() else {
+            return true;
+        };
+        match view {
+            View::Greeting => d.greeting = Some(Self::new_greeting_draft(&saved)),
+            View::Away => d.away = away,
+            View::Hours => d.hours = Some(Self::new_hours_draft(&saved)),
+            View::Location => d.location = location,
+            View::StartPage => d.start_page = start_page,
+            _ => {}
+        }
+        true
+    }
+
+    /// Wait for the full info while a screen shows "Loading…"; the screen
+    /// fills in when it lands. Stops when the screen is left.
+    fn business_info_watch(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.spawn_screen_in(window, cx, async move |this, cx| {
+            loop {
+                cx.background_executor()
+                    .timer(std::time::Duration::from_millis(200))
+                    .await;
+                let Ok(done) =
+                    this.update_in(cx, |this, window, cx| this.business_info_pump(window, cx))
+                else {
+                    break;
+                };
+                if done {
+                    break;
+                }
+            }
+        })
+        .detach();
+    }
+
+    /// Fill the open screen's draft if the full info arrived. `true` when
+    /// nothing is left to wait for.
+    pub(super) fn business_info_pump(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let Some(view) = self.business_view() else {
+            return true;
+        };
+        if !self.business_waits_for_info(view) {
+            return true;
+        }
+        let filled = self.business_fill_draft(view, window, cx);
+        if filled {
+            cx.notify();
+        }
+        filled
+    }
+
+    /// Whether this screen shows "Loading…" until the full info arrives.
+    pub(super) fn business_waits_for_info(&self, view: View) -> bool {
+        matches!(
+            view,
+            View::Greeting | View::Away | View::Hours | View::Location | View::StartPage
+        ) && self.business_draft_missing(view)
     }
 
     fn business_draft_missing(&self, view: View) -> bool {

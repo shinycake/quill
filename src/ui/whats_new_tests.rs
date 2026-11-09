@@ -40,7 +40,7 @@ fn whats_new_opens_once_from_settings_and_esc_closes_it(cx: &mut TestAppContext)
     let vcx = &mut vcx;
     app.update(vcx, |app, cx| {
         app.demo_release_notes();
-        app.open_settings(None);
+        app.open_settings(None, cx);
         cx.notify();
     });
     frames(vcx);

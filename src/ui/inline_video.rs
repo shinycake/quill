@@ -450,11 +450,15 @@ impl QuillApp {
             return;
         }
         if !self.file_is_local(file_id) {
+            let Some(visit) = self.in_window_scope(window, cx, |app, _| app.chat_ui.visit()) else {
+                return;
+            };
             let target = PlayTarget::Inline {
                 chat: chat_id,
                 message: message_id,
                 demand,
                 window,
+                visit,
             };
             self.play_when_ready(file_id, target, cx);
             self.notify_conversation(cx);

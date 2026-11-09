@@ -118,7 +118,7 @@ impl QuillApp {
     /// view state, clear the last "Cache cleared" note, and fire the
     /// storage + presets fetches (both guarded: once per session).
     pub(crate) fn open_data_storage(&mut self, cx: &mut Context<Self>) {
-        self.open_settings(Some(quill::settings_catalog::Page::DataStorage));
+        self.open_settings(Some(quill::settings_catalog::Page::DataStorage), cx);
         self.settings.data_storage_editor = None;
         self.forget_storage_sliders();
         self.settings.storage_confirm = None;

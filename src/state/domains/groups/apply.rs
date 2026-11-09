@@ -337,7 +337,7 @@ impl Session {
                             self.apply_revoke_answer(chat_id.0, links);
                         }
                         RequestPurpose::GetAdminChatInviteLinks { revoked } => {
-                            if let Some(state) = self.groups.admin_invite_links.get_mut(&chat_id.0)
+                            if let Some(state) = self.groups.invite_pages.admin_links_mut(chat_id.0)
                             {
                                 let loaded =
                                     InviteLinkFetch::Loaded(InviteLinkList { total_count, links });
@@ -414,7 +414,7 @@ impl Session {
                         append,
                     }) = pending.purpose
                     && let Some(chat_id) = pending.chat_id
-                    && let Some(state) = self.groups.invite_link_members.get_mut(&chat_id.0)
+                    && let Some(state) = self.groups.invite_pages.members_mut(chat_id.0)
                     && state.request == Some(pending.id)
                 {
                     if !append {
@@ -435,7 +435,7 @@ impl Session {
                 if let Some(pending) = pending
                     && let RequestPurpose::GetLinkJoinRequests { append } = pending.purpose
                     && let Some(chat_id) = pending.chat_id
-                    && let Some(state) = self.groups.link_join_requests.get_mut(&chat_id.0)
+                    && let Some(state) = self.groups.invite_pages.join_requests_mut(chat_id.0)
                     && state.request == Some(pending.id)
                 {
                     if !append {

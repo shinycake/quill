@@ -520,13 +520,23 @@ impl QuillApp {
             .is_some_and(|s| s.calls.active_call.is_some())
     }
 
-    /// Phase C1: 1s tick while a call is tracked, keeping the overlay's
-    /// ringing / connected clock fresh, and while another account's call
-    /// rings, whose ringtone no update comes along to loop. Mirrors the
-    /// Phase A1 slow-mode tick (at most one task; exits when neither runs).
+    /// Whether the call tick runs: a call is tracked (its clock), or
+    /// something rings with no call to bring updates (another account's
+    /// call, a conference invitation), whose ringtone only the tick loops.
+    /// One test for starting the tick and for keeping it.
+    fn call_tick_wanted(&self) -> bool {
+        self.call_on_screen()
+            || self.background_ring_audible()
+            || self
+                .session()
+                .is_some_and(|s| s.calls.conference_invite.is_some())
+    }
+
+    /// Phase C1: 1s tick while `call_tick_wanted`, keeping the overlay's
+    /// ringing / connected clock fresh and the ringtones looping. Mirrors
+    /// the Phase A1 slow-mode tick (at most one task; exits when unwanted).
     pub(super) fn ensure_call_tick(&mut self, cx: &mut Context<Self>) {
-        let wanted = self.call_on_screen() || self.background_ring_audible();
-        if !wanted || self.calls.tick_active {
+        if !self.call_tick_wanted() || self.calls.tick_active {
             return;
         }
         self.calls.tick_active = true;
@@ -538,11 +548,10 @@ impl QuillApp {
                 cx.background_executor().timer(Duration::from_secs(1)).await;
                 let cont = this
                     .update(cx, |this, cx| {
-                        let on_screen = this.call_on_screen();
-                        if on_screen {
+                        if this.call_on_screen() {
                             this.notify_call_clock(cx);
                         }
-                        if on_screen || this.background_ring_audible() {
+                        if this.call_tick_wanted() {
                             this.sync_call_sounds();
                             true
                         } else {
@@ -723,6 +732,26 @@ impl QuillApp {
         cx.notify();
     }
 
+    /// "Name is calling": the title of the second call's prompt, while
+    /// it shows.
+    pub(super) fn swap_call_title(&self) -> Option<String> {
+        let (_call_id, user_id, is_video) = self.session()?.calls.second_call.prompt()?;
+        let name = self
+            .session()
+            .and_then(|session| session.user(user_id))
+            .map(|user| user.display_name())
+            .unwrap_or_else(|| tr_with(keys::Q_OPS_USER, &[("user_id", &user_id.to_string())]));
+        let kind = if is_video {
+            tr(keys::Q_OPS_VIDEO_CALL_2)
+        } else {
+            "call"
+        };
+        Some(tr_with(
+            keys::Q_OPS_IS_CALLING,
+            &[("name", &name.to_string()), ("kind", kind)],
+        ))
+    }
+
     /// Swap prompt hosted in a kit `Dialog` via `window.open_dialog`
     /// (the kit Phase 2 redo pattern). Esc / backdrop / ✕ declines the
     /// incoming call as busy — the same honest outcome the old
@@ -738,23 +767,11 @@ impl QuillApp {
                 this.decline_swap_call(cx);
             });
         app.update(cx, |this, cx| {
-            let Some((_call_id, user_id, is_video)) =
-                this.session().and_then(|s| s.calls.second_call.prompt())
-            else {
+            let Some(title) = this.swap_call_title() else {
                 return dialog
                     .overlay(true)
                     .title(crate::ui::shell::dialog_title(tr(keys::CALL_INCOMING)))
                     .on_close(on_close.clone());
-            };
-            let name = this
-                .session()
-                .and_then(|session| session.user(user_id))
-                .map(|user| user.display_name())
-                .unwrap_or_else(|| tr_with(keys::Q_OPS_USER, &[("user_id", &user_id.to_string())]));
-            let kind = if is_video {
-                tr(keys::Q_OPS_VIDEO_CALL_2)
-            } else {
-                "call"
             };
             let body = div()
                 .flex()
@@ -790,10 +807,7 @@ impl QuillApp {
                 );
             dialog
                 .overlay(true)
-                .title(crate::ui::shell::dialog_title(tr_with(
-                    keys::Q_OPS_IS_CALLING,
-                    &[("name", &name.to_string()), ("kind", kind)],
-                )))
+                .title(crate::ui::shell::dialog_title(title))
                 .content(crate::ui::shell::scrollable_dialog_content({
                     let body = Rc::new(RefCell::new(Some(body.into_any_element())));
                     move |content, _, _| {
@@ -914,6 +928,7 @@ pub(super) mod live_pip;
 mod live_pip_demo;
 mod live_pip_follow;
 mod lock_layers;
+pub(in crate::ui) use lock_layers::lock_call_card;
 #[cfg(test)]
 #[cfg(feature = "demo-capture")]
 mod rating_owner_tests;

@@ -116,22 +116,35 @@ fn another_chat_drops_a_round_video_waiting_to_play(cx: &mut TestAppContext) {
     use crate::ui::play_intent::{PlayIntent, PlayTarget};
     let (app, mut vcx) = new_app(cx);
     let other = other_chat(&app, &mut vcx);
-    open(&app, &mut vcx, CHAT);
-    app.update(&mut vcx, |app, _| {
-        app.playback.intent = Some(PlayIntent {
-            file: quill::ids::FileId(9001),
-            target: PlayTarget::Inline {
-                chat: CHAT,
-                message: MessageId(5),
-                demand: crate::ui::inline_players::Demand::Sound,
-                window: None,
-            },
+    let park = |app: &gpui_kit::Entity<QuillApp>, vcx: &mut VisualTestContext| {
+        app.update(vcx, |app, _| {
+            app.playback.intent = Some(PlayIntent {
+                file: quill::ids::FileId(9001),
+                target: PlayTarget::Inline {
+                    chat: CHAT,
+                    message: MessageId(5),
+                    demand: crate::ui::inline_players::Demand::Sound,
+                    window: None,
+                    visit: app.chat_ui.visit(),
+                },
+            });
         });
-    });
+    };
+    open(&app, &mut vcx, CHAT);
+    park(&app, &mut vcx);
     open(&app, &mut vcx, other);
     assert!(
         app.read_with(&vcx, |app, _| app.playback.intent.is_none()),
         "the click was for the chat left"
+    );
+    // Esc and the same chat again: the click was for the visit that ended.
+    open(&app, &mut vcx, CHAT);
+    park(&app, &mut vcx);
+    app.update_in(&mut vcx, |app, window, cx| app.leave_open_chat(window, cx));
+    open(&app, &mut vcx, CHAT);
+    assert!(
+        app.read_with(&vcx, |app, _| app.playback.intent.is_none()),
+        "closing the chat ended the visit"
     );
 }
 

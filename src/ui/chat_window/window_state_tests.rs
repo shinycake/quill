@@ -295,3 +295,22 @@ fn a_location_picker_closes_with_its_window(cx: &mut TestAppContext) {
     cx.run_until_parked();
     assert!(!app.read_with(cx, |app, _| app.location_picker_open()));
 }
+
+/// Round 15 C finding 10: a clip that failed in a chat window's viewer
+/// says so there only; the main window's viewer keeps its own line.
+#[gpui_kit::test]
+fn a_clip_error_stays_in_its_windows_viewer(cx: &mut TestAppContext) {
+    let (app, _, _) = new_app(cx);
+    app.update(cx, |app, cx| {
+        app.set_window_scope(None);
+        app.in_window_scope(Some(OTHER), cx, |app, _| {
+            app.viewer.clip_error = Some("This video can't be played".into());
+        });
+        assert!(app.viewer.clip_error.is_none(), "the main viewer has none");
+        let theirs = app.in_window_scope(Some(OTHER), cx, |app, _| app.viewer.clip_error.clone());
+        assert_eq!(
+            theirs.flatten().as_deref(),
+            Some("This video can't be played")
+        );
+    });
+}

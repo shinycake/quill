@@ -54,16 +54,38 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut() {
             let _ = live.driver.refresh_group_admin(chat_id);
         }
-        self.admin.group_settings_dialog = Some(GroupSettingsDialog { chat_id, view });
+        let same_chat = self
+            .admin
+            .group_settings_dialog
+            .as_ref()
+            .is_some_and(|d| d.chat_id == chat_id);
+        if !same_chat {
+            self.set_group_settings_dialog(Some(GroupSettingsDialog::new(chat_id, view)));
+        }
         self.open_box(DialogKind::GroupSettings);
         self.set_group_settings_view(view, cx);
     }
 
     pub(super) fn close_group_settings_dialog(&mut self, cx: &mut Context<Self>) {
-        if let Some(dialog) = self.admin.group_settings_dialog.take() {
-            self.drop_invite_link_pages(Some(dialog.chat_id));
-        }
+        self.set_group_settings_dialog(None);
         cx.notify();
+    }
+
+    /// The one writer of the Group Settings box. The Invite Links pages it
+    /// opened in the session (another admin's links, a link's requests and
+    /// members) are its own: they go when it closes or is replaced by one
+    /// for another chat, so the next box never shows them, and "Delete all
+    /// revoked" never acts on them.
+    pub(super) fn set_group_settings_dialog(&mut self, next: Option<GroupSettingsDialog>) {
+        let old = std::mem::replace(&mut self.admin.group_settings_dialog, next);
+        let kept = match (&old, &self.admin.group_settings_dialog) {
+            (Some(old), Some(next)) => old.chat_id == next.chat_id,
+            (None, _) => true,
+            (Some(_), None) => false,
+        };
+        if !kept {
+            self.drop_invite_link_pages();
+        }
     }
 
     pub(super) fn set_group_settings_view(
@@ -237,7 +259,7 @@ impl QuillApp {
                 .as_ref()
                 .is_some_and(|d| d.chat_id == old)
             {
-                self.admin.group_settings_dialog = None;
+                self.set_group_settings_dialog(None);
             }
             // The Edit box of the old group would come back with its rows
             // and a Save that fails on the deactivated chat.

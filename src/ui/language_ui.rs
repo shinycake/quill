@@ -134,7 +134,7 @@ fn kit_locale(pack_id: &str, language: &str) -> &'static str {
 impl QuillApp {
     /// Settings → Language.
     pub(super) fn open_language_box(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.open_settings(Some(quill::settings_catalog::Page::Language));
+        self.open_settings(Some(quill::settings_catalog::Page::Language), cx);
         self.ensure_language_box(window, cx);
     }
 

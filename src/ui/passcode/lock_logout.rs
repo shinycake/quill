@@ -52,7 +52,7 @@ impl QuillApp {
         self.account.passcode.system_unlock = false;
         self.account.passcode.system_unlock_key = None;
         self.account.passcode.logout_confirm = false;
-        self.account.passcode.deferred_connect = false;
+        self.account.passcode.connect_at_unlock = None;
         // What waited for the unlock was the wiped accounts'.
         self.account.passcode.unlock_intents.drop_all();
         self.set_locked(false, cx);

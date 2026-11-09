@@ -65,6 +65,8 @@ import re
 
 LIST = "scripts/lock-surfaces.txt"
 GATE_FILE = "src/ui/passcode/lock_gate.rs"
+FLAG_FILE = "src/ui/passcode/mod.rs"
+FLAG_SETTER = "set_lock_flag"
 LAYER_FILE = "src/ui/passcode/lock_layer.rs"
 PASSCODE_FILE = "src/ui/passcode/mod.rs"
 STARTS = re.compile(
@@ -357,15 +359,22 @@ def problems():
                 out.append(f"{LIST}:{n}: `{via}` must test a lock gate in a condition")
         elif closer != "-" and not re.search(rf"\bself\.{re.escape(closer)}\(", gate_body):
             out.append(f"{LIST}:{n}: `{key}` names `{closer}`, which `close_for_lock` does not call")
-    # One writer of the flag.
+    # One writer of the flag. `set_locked` reaches it through
+    # `PasscodeUi::set_lock_flag`, which moves the lock count with it
+    # (round 15), and nothing else calls that.
     for path, text in files.items():
         if not path.startswith("src/ui/"):
             continue
         for name, start, end, body in functions(text):
             if LOCKED_WRITE.search(body) and "passcode" in path and not (
-                path == GATE_FILE and name == "set_locked"
+                (path == GATE_FILE and name == "set_locked")
+                or (path == FLAG_FILE and name == FLAG_SETTER)
             ):
                 out.append(f"{path}::{name}: writes the lock flag; only `set_locked` may")
+            elif re.search(rf"\.{FLAG_SETTER}\(", body) and not (
+                path == GATE_FILE and name == "set_locked"
+            ):
+                out.append(f"{path}::{name}: calls `{FLAG_SETTER}`; only `set_locked` may")
             elif re.search(r"passcode\.locked\s*=[^=]", body) and path != GATE_FILE:
                 out.append(f"{path}::{name}: writes `passcode.locked`; only `set_locked` may")
     # What runs while locked.

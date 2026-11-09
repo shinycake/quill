@@ -38,6 +38,10 @@ jobs:
       # docs/decisions/account-scoped-ui-state.md: the account's UI is OnScreen.
       - name: screen state
         run: python3 scripts/check-screen-state.py
+      - name: screen state check tests
+        run: |
+          python3 -m unittest discover -s scripts -p 'test_lock_surfaces.py'
+          python3 -m unittest discover -s scripts -p 'test_single_writers.py'
       # docs/contributing/state-machines.md: stages are one enum, not flags.
       - name: implicit state
         run: python3 scripts/check-implicit-state.py

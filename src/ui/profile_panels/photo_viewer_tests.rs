@@ -96,4 +96,30 @@ fn the_group_avatar_opens_its_photos_newest_first(cx: &mut TestAppContext) {
         )
     });
     assert_eq!(late, (false, false), "dropped, not opened late");
+
+    // A lock in between drops it, even unlocked again before the photos
+    // land: the pump first runs after the unlock.
+    let after_lock = app.update(&mut vcx, |app, cx| {
+        app.wait_for_profile_gallery(owner);
+        app.account.passcode.force_locked(true);
+        app.account.passcode.force_locked(false);
+        app.pump_profile_gallery(cx);
+        (
+            app.viewer.state.is_open(),
+            app.dialogs.pending_profile_gallery.is_some(),
+        )
+    });
+    assert_eq!(after_lock, (false, false), "the lock dropped it");
+
+    // So does closing the info panel that asked, in the same chat.
+    let after_close = app.update(&mut vcx, |app, cx| {
+        app.wait_for_profile_gallery(owner);
+        app.close_info_panel(cx);
+        app.pump_profile_gallery(cx);
+        (
+            app.viewer.state.is_open(),
+            app.dialogs.pending_profile_gallery.is_some(),
+        )
+    });
+    assert_eq!(after_close, (false, false), "the closed panel dropped it");
 }

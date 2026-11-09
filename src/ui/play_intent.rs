@@ -6,6 +6,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
+use super::chat_ui_state::ChatVisit;
 use super::inline_players::Demand;
 use gpui_kit::Context;
 use quill::ids::{ChatId, FileId, MessageId};
@@ -31,12 +32,14 @@ pub(super) enum PlayTarget {
         window: Option<ChatId>,
     },
     /// A round video or MP4 GIF on the inline player, asked for in
-    /// `window` (`None`: the main window).
+    /// `window` (`None`: the main window) during `visit` of its chat: it
+    /// starts only while that window still shows the same visit.
     Inline {
         chat: ChatId,
         message: MessageId,
         demand: Demand,
         window: Option<ChatId>,
+        visit: ChatVisit,
     },
     /// The media viewer's current clip, in `window`'s viewer (`None`: the
     /// main window's).
@@ -202,21 +205,23 @@ impl QuillApp {
             .take_if(|intent| intent.target.window() == Some(chat));
     }
 
-    /// The window `window` (`None`: the main window) left `chat`: a round
-    /// video or GIF parked there would start with sound when the user
-    /// comes back, long after the click. tdesktop drops the play request
-    /// with the chat's history widget.
-    pub(super) fn drop_inline_play_intent_in_chat(&mut self, window: Option<ChatId>, chat: ChatId) {
-        self.playback.intent.take_if(|intent| {
-            matches!(intent.target, PlayTarget::Inline { chat: parked, window: asked, .. }
-                if parked == chat && asked == window)
-        });
+    /// A view's chat value was replaced: drop the round video or GIF
+    /// parked during that visit (`ChatUi::replace_chat_ui`).
+    pub(super) fn drop_play_intent_of_visit(&mut self, ended: ChatVisit) {
+        self.playback.intent.take_if(
+            |intent| matches!(intent.target, PlayTarget::Inline { visit, .. } if visit == ended),
+        );
     }
 
-    /// The chat `window` shows (`None`: the main window): a chat window
-    /// shows its own chat.
-    fn chat_shown_in(&self, window: Option<ChatId>) -> Option<ChatId> {
-        window.or_else(|| self.open_chat_id())
+    /// At the lock: a clip parked to play (a round video, a GIF, the
+    /// viewer's clip) goes, as the lock stops every window's clips and
+    /// closes the viewers. A voice note or song stays: tdesktop plays one
+    /// from the click (it streams) and plays on while locked, and here it
+    /// starts when its file lands, locked or not (`resume_play_intent`).
+    pub(super) fn drop_play_intents_for_lock(&mut self) {
+        self.playback
+            .intent
+            .take_if(|intent| intent.target.player_chat().is_none());
     }
 
     /// Drop the target waiting on `file` (its download failed or stopped).
@@ -230,6 +235,11 @@ impl QuillApp {
             return;
         };
         if !self.file_is_local(intent.file) {
+            return;
+        }
+        // Only a voice note or song plays under the lock; the lock dropped
+        // the clips (`drop_play_intents_for_lock`).
+        if self.lock_waits() && intent.target.player_chat().is_none() {
             return;
         }
         self.playback.intent = None;
@@ -257,9 +267,15 @@ impl QuillApp {
                 message,
                 demand,
                 window,
+                visit,
             } => {
-                // Its window moved on to another chat meanwhile.
-                if self.chat_shown_in(window) == Some(chat) {
+                // Its window left the chat meanwhile (another chat, or Esc
+                // and back), or closed. tdesktop drops the play request
+                // with the chat's history widget.
+                let same_visit = self
+                    .in_window_scope(window, cx, |app, _| app.chat_ui.visit() == visit)
+                    .unwrap_or(false);
+                if same_visit {
                     self.play_inline_on_demand(window, chat, message, file, demand, cx);
                 }
             }

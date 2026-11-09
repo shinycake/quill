@@ -63,10 +63,19 @@ impl SubPage {
 
 impl QuillApp {
     /// Open the settings window, on `page` when given (else where it was).
-    pub(super) fn open_settings(&mut self, page: Option<Page>) {
+    /// The one way Settings opens. Only the main window draws it, so from
+    /// a chat window (its menu, a box it draws, a link in it) the page
+    /// opens there, brought forward, not unseen behind the chat window.
+    pub(super) fn open_settings(&mut self, page: Option<Page>, cx: &mut Context<Self>) {
         if quill::agent::ui_driver::guard::refuse_hard_if_injecting(
             quill::agent::ui_driver::guard::HardSurface::Settings,
         ) {
+            return;
+        }
+        if self.hand_to_main_window(cx, move |app, _, cx| {
+            app.open_settings(page, cx);
+            cx.notify();
+        }) {
             return;
         }
         self.settings.open = true;
@@ -349,61 +358,64 @@ impl QuillApp {
 
 crate::ui::screenshot_demo::register_demos![
     crate::ui::screenshot_demo::DemoSpec::chat_list("ready-settings")
-        .setup(|app, _, _| app.demo_settings(Page::Account)),
+        .setup(|app, _, cx| app.demo_settings(Page::Account, cx)),
     crate::ui::screenshot_demo::DemoSpec::chat_list("ready-settings-privacy")
-        .setup(|app, _, _| app.demo_settings(Page::Privacy)),
+        .setup(|app, _, cx| app.demo_settings(Page::Privacy, cx)),
     crate::ui::screenshot_demo::DemoSpec::chat_list("ready-settings-privacy-blocked").setup(
-        |app, _, _| {
+        |app, _, cx| {
             app.demo_blocked_users();
-            app.demo_settings(Page::Privacy)
+            app.demo_settings(Page::Privacy, cx)
         }
     ),
     crate::ui::screenshot_demo::DemoSpec::chat_list("ready-settings-chats")
-        .setup(|app, _, _| app.demo_settings(Page::Chats)),
+        .setup(|app, _, cx| app.demo_settings(Page::Chats, cx)),
     crate::ui::screenshot_demo::DemoSpec::chat_list("ready-settings-telegram")
-        .setup(|app, _, _| app.demo_settings(Page::Telegram)),
+        .setup(|app, _, cx| app.demo_settings(Page::Telegram, cx)),
     crate::ui::screenshot_demo::DemoSpec::chat_list("ready-settings-notifications")
-        .setup(|app, _, _| app.demo_settings(Page::Notifications)),
-    crate::ui::screenshot_demo::DemoSpec::chat_list("ready-settings-folders").setup(|app, _, _| {
-        if let Some(session) = app.demo_session.as_mut() {
-            for (id, name, icon) in [
-                (1, "Work", "Work"),
-                (2, "Family", "Love"),
-                (3, "News", "Channels"),
-            ] {
-                session
-                    .chat_list
-                    .chat_folders
-                    .push(quill::telegram::envelope::ChatFolderInfo {
-                        id,
-                        name: name.into(),
-                        icon_name: icon.into(),
-                        color_id: -1,
-                        is_shareable: false,
-                        has_my_invite_links: false,
-                    });
+        .setup(|app, _, cx| app.demo_settings(Page::Notifications, cx)),
+    crate::ui::screenshot_demo::DemoSpec::chat_list("ready-settings-folders").setup(
+        |app, _, cx| {
+            if let Some(session) = app.demo_session.as_mut() {
+                for (id, name, icon) in [
+                    (1, "Work", "Work"),
+                    (2, "Family", "Love"),
+                    (3, "News", "Channels"),
+                ] {
+                    session.chat_list.chat_folders.push(
+                        quill::telegram::envelope::ChatFolderInfo {
+                            id,
+                            name: name.into(),
+                            icon_name: icon.into(),
+                            color_id: -1,
+                            is_shareable: false,
+                            has_my_invite_links: false,
+                        },
+                    );
+                }
             }
+            app.demo_settings(Page::Folders, cx)
         }
-        app.demo_settings(Page::Folders)
-    }),
+    ),
     crate::ui::screenshot_demo::DemoSpec::chat_list("ready-settings-appearance")
-        .setup(|app, _, _| app.demo_settings(Page::Appearance)),
+        .setup(|app, _, cx| app.demo_settings(Page::Appearance, cx)),
     crate::ui::screenshot_demo::DemoSpec::chat_list("ready-settings-system")
-        .setup(|app, _, _| app.demo_settings(Page::System)),
+        .setup(|app, _, cx| app.demo_settings(Page::System, cx)),
     crate::ui::screenshot_demo::DemoSpec::chat_list("ready-settings-power")
-        .setup(|app, _, _| app.demo_settings(Page::Power)),
+        .setup(|app, _, cx| app.demo_settings(Page::Power, cx)),
     crate::ui::screenshot_demo::DemoSpec::chat_list("ready-settings-shortcuts")
-        .setup(|app, _, _| app.demo_settings(Page::Shortcuts)),
+        .setup(|app, _, cx| app.demo_settings(Page::Shortcuts, cx)),
     crate::ui::screenshot_demo::DemoSpec::chat_list("ready-settings-about")
-        .setup(|app, _, _| app.demo_settings(Page::About)),
-    crate::ui::screenshot_demo::DemoSpec::chat_list("ready-settings-log-out").setup(|app, _, _| {
-        app.demo_settings(Page::Account);
-        // box-host: demo
-        app.settings.log_out_confirm = true;
-    }),
+        .setup(|app, _, cx| app.demo_settings(Page::About, cx)),
+    crate::ui::screenshot_demo::DemoSpec::chat_list("ready-settings-log-out").setup(
+        |app, _, cx| {
+            app.demo_settings(Page::Account, cx);
+            // box-host: demo
+            app.settings.log_out_confirm = true;
+        }
+    ),
     crate::ui::screenshot_demo::DemoSpec::chat_list("ready-settings-search").setup(
         |app, window, cx| {
-            app.demo_settings(Page::Account);
+            app.demo_settings(Page::Account, cx);
             app.focus_settings_search(Some("notif"), window, cx);
         }
     ),
@@ -442,7 +454,7 @@ impl QuillApp {
     }
 
     /// Screenshot demos: Settings on `page`, signed in as the demo profile.
-    fn demo_settings(&mut self, page: Page) {
+    fn demo_settings(&mut self, page: Page, cx: &mut Context<Self>) {
         if let Some(session) = self.demo_session.as_mut() {
             self.demo_ui
                 .seq
@@ -453,7 +465,7 @@ impl QuillApp {
                 &self.demo_ui.seq,
             );
         }
-        self.open_settings(Some(page));
+        self.open_settings(Some(page), cx);
     }
 }
 

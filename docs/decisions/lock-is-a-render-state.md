@@ -123,7 +123,15 @@ focused window as "the user is here". The rule that replaced those patches:
      upkeep returns on it right after notification delivery (`app_render/frame_upkeep.rs`), which also
      skips the main window's `per_window_upkeep`, as a chat window's locked frame always did. The poll's
      drains moved into `notifications/poll_drains.rs`, which `poll_live` runs only while unlocked. A parked
-     voice note or song (`resume_play_intent`) waits too.
+     voice note or song does not wait (round 15, as tdesktop's player plays on under the lock): `poll_live`
+     resumes it locked (`runs-locked`). The lock drops parked clips, the viewer's and the inline ones
+     (`drop_play_intents_for_lock`), as tdesktop's lock closes the media viewer.
+   - Something parked for a late answer records the lock count (`PasscodeUi::locks`, round 15) and is
+     dropped when `locked_since(count)`: a lock happened in between, even if Quill is unlocked again when
+     the answer lands. The pending profile gallery uses it.
+   - The lock closes the passkey ceremony box, as tdesktop's lock closes its boxes
+     (`close_passkey_ceremony_for_lock`, round 15): the key is told to stop, and a PIN sheet on its way
+     cannot take focus from the passcode field.
    - A starter reached outside those pumps queues itself (`passcode::UnlockIntents`, `wait_for_unlock`) and
      runs again after the unlock, asking every gate a second time. Every open in `os_open.rs` does this,
      so a 3-D Secure page, an Earn or Grams withdrawal, a gift's Fragment page or a bot's URL opens after
@@ -147,6 +155,10 @@ focused window as "the user is here". The rule that replaced those patches:
    The background ring sounds over an older call's end screen, and an answer from the lock card dismisses
    its OS notification (`end_background_ring`). The lock also stops every window's inline clips
    (`leave_window`): a locked chat window runs no frame upkeep, so its round video kept its sound.
+   Round 15: a second call ringing in during a call rings, and the lock screen shows it with Decline and
+   End & Answer (`swap_call_lock_card`), since its swap box is a box of the locked main window. Both lock
+   cards come from one builder (`lock_call_card`), stacked by `locked_root`. A conference invitation with
+   no call keeps the call tick, so its ringtone keeps looping (`call_tick_wanted`).
 4. **A locked Quill is not looked at.** `session.app_active` is false while locked, whichever window has
    the focus, and the lock clears `active_window_chats`. A chat window's locked frame does not mark its
    chat active again. So the open chat's messages notify and sound, as in tdesktop, whose `markingAsRead`
@@ -157,10 +169,10 @@ focused window as "the user is here". The rule that replaced those patches:
    media controls on lock (`system_media_controls_manager.cpp`) and keeps the audio playing.
 6. **Nothing connects on the cleared key.** The lock clears the master key, so a preparation fails with
    `LockedStore`. A connection asked while locked (`start_connection`, for example after a remote log
-   out) waits for the unlock (`connect_waits_for_unlock`, `deferred_connect`), and one prepared before
-   the lock that lands refused by it waits too. A switch under the lock that puts a background client on
-   screen (`adopt_live`) clears the mark, and the unlock connects only when the screen has no client, so
-   it never closes the account (and the call) just answered from the lock card. Background accounts start at the unlock, not as failed
+   out) waits for the unlock (`connect_waits_for_unlock`, `connect_at_unlock`), and one prepared before
+   the lock that lands refused by it waits too. The held connect names its account (round 15): the unlock
+   connects it only while that account is on screen with no client, so a switch under the lock
+   (`adopt_live`, from the lock card's Answer) never has its account, or the call just answered, closed. Background accounts start at the unlock, not as failed
    entries that nothing retries.
 7. **Quit from the lock screen quits safely.** The "Stop and quit?" box would be a box of a locked window,
    never drawn, holding every later Quit and the OS shutdown. Under the lock, Quit stops the exports, as
@@ -241,6 +253,10 @@ even in a comment.
   `a_lock_screen_log_out_that_cannot_start_the_wipe_stays_locked`, `background_accounts::tests`
   `a_call_on_another_account_can_be_answered_from_the_lock_screen`, `export_quit`
   `a_quit_from_the_lock_screen_stops_the_export_and_quits`, and `scripts/test_lock_surfaces.py`.
+- Round 15: `a_second_call_under_the_lock_rings_and_can_be_declined`, `an_invitation_alone_keeps_the_call_tick`,
+  `the_lock_drops_a_parked_clip_and_keeps_a_parked_voice_note`, `the_lock_closes_the_ceremony_and_its_pin_field`,
+  `the_unlock_connects_only_the_account_that_waited`, and `the_group_avatar_opens_its_photos_newest_first`
+  (a lock and an unlock between the ask and the photos).
 - The existing `chat_window::lock_tests` still pass, `locking_with_a_chat_window_open_lets_both_windows_go_idle`
   among them.
 

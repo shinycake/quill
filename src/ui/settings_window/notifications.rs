@@ -15,7 +15,7 @@ use quill::telegram::envelope::{NotificationSettingsScope, NotificationSound};
 impl QuillApp {
     /// Opens Settings on this page and asks for what it shows.
     pub(crate) fn open_notification_settings(&mut self, cx: &mut Context<Self>) {
-        self.open_settings(Some(quill::settings_catalog::Page::Notifications));
+        self.open_settings(Some(quill::settings_catalog::Page::Notifications), cx);
         self.fetch_notification_settings();
         cx.notify();
     }

@@ -341,7 +341,7 @@ impl QuillApp {
     fn reconnect_after_disk(&mut self, cx: &mut Context<Self>) {
         self.disk.screen_refused = false;
         if self.account.passcode.is_locked() {
-            self.account.passcode.deferred_connect = true;
+            self.account.passcode.connect_at_unlock = self.current_account();
         } else {
             self.start_connection(cx);
         }

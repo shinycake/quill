@@ -802,7 +802,7 @@ impl QuillApp {
         }
         self.folders.editor = None;
         self.folders.delete_confirm = None;
-        self.open_settings(Some(quill::settings_catalog::Page::Folders));
+        self.open_settings(Some(quill::settings_catalog::Page::Folders), cx);
         cx.notify();
     }
 

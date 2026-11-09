@@ -191,6 +191,9 @@ impl super::app::QuillApp {
             super::call_conference_ui::shown_call_summary(session).cloned(),
         );
         let invite_rings = session.calls.conference_invite.is_some();
+        // A second call ringing in during this one rings too, the swap
+        // prompt or the lock screen's card showing it.
+        let second_rings = session.calls.second_call.prompt().is_some();
         let enabled = session.settings.inapp_sounds_enabled;
         let background_ring = self.background_ring_audible();
         let marks = &mut self.screen.call_screen.sound_marks;
@@ -211,7 +214,8 @@ impl super::app::QuillApp {
                         is_received: true, ..
                     } => Some(CallSound::Ringback),
                     _ => None,
-                };
+                }
+                .or(second_rings.then_some(CallSound::Incoming));
                 sounds.keep_looping(ringing);
                 let connected =
                     matches!(call.state, CallState::Ready) && call.transport.is_connected();

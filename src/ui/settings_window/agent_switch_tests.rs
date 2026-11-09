@@ -74,7 +74,7 @@ fn off_leaves_one_switch_on_advanced_and_on_reveals_the_page(cx: &mut TestAppCon
     crate::ui::agent_state::reset_for_test(&AccountKey::primary());
     access::set_enabled(false);
     app.update(vcx, |app, cx| {
-        app.open_settings(Some(Page::Advanced));
+        app.open_settings(Some(Page::Advanced), cx);
         cx.notify();
     });
     settle(vcx);
@@ -129,7 +129,7 @@ fn an_agent_driving_the_window_cannot_flip_the_switch(cx: &mut TestAppContext) {
     crate::ui::agent_state::reset_for_test(&AccountKey::primary());
     access::set_enabled(false);
     app.update(vcx, |app, cx| {
-        app.open_settings(Some(Page::Advanced));
+        app.open_settings(Some(Page::Advanced), cx);
         cx.notify();
     });
     settle(vcx);
@@ -157,7 +157,7 @@ fn off_hides_the_chat_menu_entry_and_search(cx: &mut TestAppContext) {
     access::set_enabled(false);
 
     app.update(vcx, |app, cx| {
-        app.open_settings(Some(Page::Advanced));
+        app.open_settings(Some(Page::Advanced), cx);
         cx.notify();
     });
     settle(vcx);

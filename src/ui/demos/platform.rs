@@ -20,19 +20,19 @@ register_demos![
         seed_ready_unread_read_session,
         "screenshot demo — after mark-read (injected updates, no live Telegram)"
     ),
-    DemoSpec::chat_list("ready-about-share").setup(|app, _, _| {
-        app.open_settings_on(quill::settings_catalog::Page::About);
+    DemoSpec::chat_list("ready-about-share").setup(|app, _, cx| {
+        app.open_settings_on(quill::settings_catalog::Page::About, cx);
     }),
     DemoSpec::chat_list("ready-update-changelog")
-        .setup(|app, _, _| app.demo_update(UpdateDemo::Changelog)),
+        .setup(|app, _, cx| app.demo_update(UpdateDemo::Changelog, cx)),
     DemoSpec::chat_list("ready-update-failure")
-        .setup(|app, _, _| app.demo_update(UpdateDemo::Failure)),
+        .setup(|app, _, cx| app.demo_update(UpdateDemo::Failure, cx)),
     DemoSpec::chat_list("ready-update-install")
-        .setup(|app, _, _| app.demo_update(UpdateDemo::Install)),
+        .setup(|app, _, cx| app.demo_update(UpdateDemo::Install, cx)),
     DemoSpec::chat_list("ready-update-staged")
-        .setup(|app, _, _| app.demo_update(UpdateDemo::Staged)),
+        .setup(|app, _, cx| app.demo_update(UpdateDemo::Staged, cx)),
     DemoSpec::chat_list("ready-update-downloading")
-        .setup(|app, _, _| app.demo_update(UpdateDemo::Downloading)),
+        .setup(|app, _, cx| app.demo_update(UpdateDemo::Downloading, cx)),
 ];
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -46,7 +46,7 @@ enum UpdateDemo {
 
 impl QuillApp {
     /// Settings → Updates with a fake 0.2.0 release (no network).
-    fn demo_update(&mut self, demo: UpdateDemo) {
+    fn demo_update(&mut self, demo: UpdateDemo, cx: &mut gpui_kit::Context<Self>) {
         // The demo window is not an installed copy: show the update section
         // as on an install that can replace itself, or with
         // `QUILL_DEMO_SELF_UPDATE=<reason>` (`0`, `translocated`,
@@ -101,6 +101,6 @@ impl QuillApp {
         if std::env::var("QUILL_DEMO_UPDATE_IN").is_ok_and(|v| v == "chats") {
             return;
         }
-        self.open_settings_on(quill::settings_catalog::Page::System);
+        self.open_settings_on(quill::settings_catalog::Page::System, cx);
     }
 }

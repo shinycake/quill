@@ -186,7 +186,7 @@ fn the_settings_row_and_the_deep_link_open_your_own_box(cx: &mut TestAppContext)
     frames(vcx);
     close_box(&app, vcx);
     app.update(vcx, |app, cx| {
-        app.open_settings(Some(Page::Account));
+        app.open_settings(Some(Page::Account), cx);
         cx.notify();
     });
     frames(vcx);

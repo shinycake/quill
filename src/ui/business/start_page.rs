@@ -9,6 +9,7 @@ use gpui_kit::component::input::Input;
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
+use quill::business_info::BusinessInfo;
 use quill::business_start_page::StartPage;
 use quill::ids::FileId;
 use quill::lang::{keys, tr};
@@ -23,10 +24,11 @@ fn about() -> &'static str {
 impl QuillApp {
     pub(super) fn new_start_page_draft(
         &self,
+        saved: &BusinessInfo,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> StartPageDraft {
-        let saved = self.my_business().start_page.unwrap_or_default();
+        let saved = saved.start_page.clone().unwrap_or_default();
         let (title_max, message_max) = self.business_start_page_limits();
         StartPageDraft {
             base: saved.clone(),

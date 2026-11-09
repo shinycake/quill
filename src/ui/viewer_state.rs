@@ -47,6 +47,10 @@ pub(crate) struct ViewerUi {
     pub(super) pip: Option<super::media_viewer::PipLink>,
     /// Sandbox-checked local path of the viewer's clip.
     pub(super) video_path: Option<PathBuf>,
+    /// This viewer's clip failed to play: the line its controls show. Each
+    /// window's viewer has its own, so one clip's error is never drawn
+    /// over another window's working clip.
+    pub(super) clip_error: Option<String>,
     /// The viewer clip's player (`video_player`): picture, sound and
     /// transport. The controls read its transport at render time.
     pub(super) player: Option<super::video_player::VideoPlayer>,
@@ -138,6 +142,7 @@ impl ViewerUi {
             video: None,
             pip: None,
             video_path: None,
+            clip_error: None,
             player: None,
             gif: None,
             video_layer: None,

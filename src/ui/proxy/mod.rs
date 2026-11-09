@@ -96,7 +96,7 @@ fn input(
 impl QuillApp {
     /// Settings → Connection, with the proxy list freshly fetched.
     pub(crate) fn open_proxy_list(&mut self, cx: &mut Context<Self>) {
-        self.open_settings(Some(quill::settings_catalog::Page::Connection));
+        self.open_settings(Some(quill::settings_catalog::Page::Connection), cx);
         self.fetch_proxy_list();
         cx.notify();
     }

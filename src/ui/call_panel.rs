@@ -746,8 +746,7 @@ impl Render for CallPanel {
                         ButtonLook::Answer,
                         move |cx| {
                             let _ = redial_app.update(cx, |app, cx| {
-                                app.dismiss_call_summary(cx);
-                                app.call_again(user_id, is_video, cx);
+                                app.redial(user_id, is_video, cx);
                             });
                         },
                     )

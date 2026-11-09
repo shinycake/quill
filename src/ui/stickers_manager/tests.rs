@@ -310,7 +310,7 @@ fn settings_chats_page_opens_the_box_and_holds_the_suggestion_choice(cx: &mut Te
     let (app, shell, mut vcx) = open_named(cx, "ready-chats");
     let vcx = &mut vcx;
     app.update(vcx, |app, cx| {
-        app.open_settings(Some(Page::Chats));
+        app.open_settings(Some(Page::Chats), cx);
         cx.notify();
     });
     frames(vcx);

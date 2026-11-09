@@ -464,8 +464,8 @@ impl QuillApp {
             );
         }
         let error = self
-            .playback
-            .error
+            .viewer
+            .clip_error
             .clone()
             .filter(|_| !is_video)
             .map(|err| {

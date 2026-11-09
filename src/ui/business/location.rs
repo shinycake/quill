@@ -10,7 +10,7 @@ use gpui_kit::component::switch::Switch;
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
-use quill::business_info::BusinessLocation;
+use quill::business_info::{BusinessInfo, BusinessLocation};
 use quill::business_settings::{ADDRESS_MAX, location_to_save};
 use quill::lang::{keys, tr};
 
@@ -23,11 +23,11 @@ fn map_fallback() -> &'static str {
 
 impl QuillApp {
     pub(super) fn new_location_draft(
-        &self,
+        saved: &BusinessInfo,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> LocationDraft {
-        let base = self.my_business().location;
+        let base = saved.location.clone();
         let saved = base.clone().unwrap_or_default();
         let address = super::live_input(window, cx, tr(keys::LOCATION_ADDRESS));
         address.update(cx, |input, cx| {

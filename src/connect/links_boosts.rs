@@ -50,7 +50,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             RequestPurpose::GetAdminChatInviteLinks { revoked: true },
             Some(chat_id),
         );
-        self.session.groups.admin_invite_links.insert(
+        self.session.groups.invite_pages.set_admin_links(
             chat_id.0,
             AdminLinksState {
                 creator_user_id,
@@ -81,11 +81,17 @@ impl<S: JsonSender> ConnectDriver<S> {
         let sent = self.links_boosts_send(active, &first);
         if sent.is_err() {
             self.session.requests.take(revoked);
-            self.session.groups.admin_invite_links.remove(&chat_id.0);
+            self.session
+                .groups
+                .invite_pages
+                .close_admin_links(chat_id.0);
             return sent;
         }
         if let Err(err) = self.links_boosts_send(revoked, &second) {
-            self.session.groups.admin_invite_links.remove(&chat_id.0);
+            self.session
+                .groups
+                .invite_pages
+                .close_admin_links(chat_id.0);
             return Err(err);
         }
         Ok(Some(active))
@@ -93,7 +99,10 @@ impl<S: JsonSender> ConnectDriver<S> {
 
     /// Back from another admin's links.
     pub fn close_admin_invite_links(&mut self, chat_id: ChatId) {
-        self.session.groups.admin_invite_links.remove(&chat_id.0);
+        self.session
+            .groups
+            .invite_pages
+            .close_admin_links(chat_id.0);
     }
 
     /// `deleteAllRevokedChatInviteLinks` for the admin that is open.
@@ -107,8 +116,8 @@ impl<S: JsonSender> ConnectDriver<S> {
         let Some(creator) = self
             .session
             .groups
-            .admin_invite_links
-            .get(&chat_id.0)
+            .invite_pages
+            .admin_links(chat_id.0)
             .map(|state| state.creator_user_id)
         else {
             return Ok(None);
@@ -143,7 +152,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         &mut self,
         chat_id: ChatId,
     ) -> Result<Option<RequestId>, ConnectSendError> {
-        let Some(state) = self.session.groups.link_join_requests.get(&chat_id.0) else {
+        let Some(state) = self.session.groups.invite_pages.join_requests(chat_id.0) else {
             return Ok(None);
         };
         if state.loading || state.requests.len() as i32 >= state.total_count {
@@ -174,14 +183,19 @@ impl<S: JsonSender> ConnectDriver<S> {
             RequestPurpose::GetLinkJoinRequests { append },
             Some(chat_id),
         );
-        match self.session.groups.link_join_requests.get_mut(&chat_id.0) {
+        match self
+            .session
+            .groups
+            .invite_pages
+            .join_requests_mut(chat_id.0)
+        {
             Some(state) if append => {
                 state.loading = true;
                 state.error = None;
                 state.request = Some(extra);
             }
             _ => {
-                self.session.groups.link_join_requests.insert(
+                self.session.groups.invite_pages.set_join_requests(
                     chat_id.0,
                     LinkRequestsState {
                         invite_link: invite_link.to_owned(),
@@ -204,14 +218,20 @@ impl<S: JsonSender> ConnectDriver<S> {
         );
         let sent = self.links_boosts_send(extra, &payload);
         if sent.is_err() {
-            self.session.groups.link_join_requests.remove(&chat_id.0);
+            self.session
+                .groups
+                .invite_pages
+                .close_join_requests(chat_id.0);
         }
         sent
     }
 
     /// Drop the open link's request list.
     pub fn close_link_join_requests(&mut self, chat_id: ChatId) {
-        self.session.groups.link_join_requests.remove(&chat_id.0);
+        self.session
+            .groups
+            .invite_pages
+            .close_join_requests(chat_id.0);
     }
 
     /// `processChatJoinRequests` for the open link only.
@@ -229,8 +249,8 @@ impl<S: JsonSender> ConnectDriver<S> {
         let Some(link) = self
             .session
             .groups
-            .link_join_requests
-            .get(&chat_id.0)
+            .invite_pages
+            .join_requests(chat_id.0)
             .map(|state| state.invite_link.clone())
         else {
             return Ok(None);

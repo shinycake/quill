@@ -13,36 +13,60 @@ use gpui_kit::{Point, ScrollHandle, px};
 use quill::state::{SharedMediaTab, SharedMediaTabState};
 use std::cell::Cell;
 
-/// What identifies the first page of a tab: its chat, the date it was
-/// reloaded from and its newest message.
+/// What identifies the list a tab shows: its chat, the date it was
+/// reloaded from and the search it answers. Not its items: a deleted or a
+/// new newest item is the same list, and keeps its place.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct PageKey {
     pub chat: i64,
     pub anchor_day: Option<i64>,
-    pub newest: i64,
+    /// The search query, hashed (empty for the plain list).
+    pub query: u64,
 }
 
 impl PageKey {
     pub(crate) fn of(chat: Option<quill::ids::ChatId>, state: &SharedMediaTabState) -> Self {
+        use std::hash::{Hash, Hasher};
+        let mut query = std::collections::hash_map::DefaultHasher::new();
+        state.query.hash(&mut query);
         Self {
             chat: chat.map_or(0, |chat| chat.0),
             anchor_day: state.anchor_day,
-            newest: state.items.first().map_or(0, |item| item.message_id.0),
+            query: query.finish(),
         }
     }
 }
 
+/// A grid tab's place: its scroll and the page it belongs to, one value.
+struct GridTab {
+    scroll: VirtualListScrollHandle,
+    page: Cell<Option<PageKey>>,
+}
+
+/// A month-sectioned list tab's place (files, links, voice, music): its
+/// scroll, its paging mark (`scroll_load`) and the page both belong to,
+/// one value, so another chat's list starts at the top and asks for its
+/// next page afresh.
+struct ListTab {
+    scroll: ScrollHandle,
+    asked: Asked,
+    page: Cell<Option<PageKey>>,
+}
+
+impl ListTab {
+    fn for_page(&self, key: PageKey) -> (&ScrollHandle, &Asked) {
+        if self.page.get() != Some(key) {
+            self.scroll.set_offset(Point::new(px(0.), px(0.)));
+            self.asked.reset();
+            self.page.set(Some(key));
+        }
+        (&self.scroll, &self.asked)
+    }
+}
+
 pub(crate) struct SharedMediaGridUi {
-    scroll: [VirtualListScrollHandle; SharedMediaTab::COUNT],
-    page: [Cell<Option<PageKey>>; SharedMediaTab::COUNT],
-    /// The month-sectioned list tabs (files, links, voice, music), which
-    /// page near their end (`scroll_load`).
-    list_scroll: [ScrollHandle; SharedMediaTab::COUNT],
-    list_asked: [Asked; SharedMediaTab::COUNT],
-    /// The page each list tab's scroll and "asked" belong to, as `page`
-    /// for the grid: another chat's list starts at the top and asks for
-    /// its next page afresh.
-    list_page: [Cell<Option<PageKey>>; SharedMediaTab::COUNT],
+    grid: [GridTab; SharedMediaTab::COUNT],
+    list: [ListTab; SharedMediaTab::COUNT],
 }
 
 impl crate::ui::on_screen::Farewell for SharedMediaGridUi {}
@@ -50,11 +74,15 @@ impl crate::ui::on_screen::Farewell for SharedMediaGridUi {}
 impl SharedMediaGridUi {
     pub(crate) fn new() -> Self {
         Self {
-            scroll: std::array::from_fn(|_| VirtualListScrollHandle::new()),
-            page: std::array::from_fn(|_| Cell::new(None)),
-            list_scroll: std::array::from_fn(|_| ScrollHandle::new()),
-            list_asked: std::array::from_fn(|_| Asked::default()),
-            list_page: std::array::from_fn(|_| Cell::new(None)),
+            grid: std::array::from_fn(|_| GridTab {
+                scroll: VirtualListScrollHandle::new(),
+                page: Cell::new(None),
+            }),
+            list: std::array::from_fn(|_| ListTab {
+                scroll: ScrollHandle::new(),
+                asked: Asked::default(),
+                page: Cell::new(None),
+            }),
         }
     }
 
@@ -65,15 +93,7 @@ impl SharedMediaGridUi {
         tab: SharedMediaTab,
         key: PageKey,
     ) -> Option<(&ScrollHandle, &Asked)> {
-        let scroll = self.list_scroll.get(tab.index())?;
-        let asked = self.list_asked.get(tab.index())?;
-        let page = self.list_page.get(tab.index())?;
-        if page.get() != Some(key) {
-            scroll.set_offset(Point::new(px(0.), px(0.)));
-            asked.reset();
-            page.set(Some(key));
-        }
-        Some((scroll, asked))
+        Some(self.list.get(tab.index())?.for_page(key))
     }
 
     /// The handle of `tab` for the page `key`, back at the top when the tab
@@ -83,27 +103,26 @@ impl SharedMediaGridUi {
         tab: SharedMediaTab,
         key: PageKey,
     ) -> Option<&VirtualListScrollHandle> {
-        let handle = self.scroll.get(tab.index())?;
-        let page = self.page.get(tab.index())?;
-        if page.get() != Some(key) {
-            handle.set_offset(Point::new(px(0.), px(0.)));
-            page.set(Some(key));
+        let tab = self.grid.get(tab.index())?;
+        if tab.page.get() != Some(key) {
+            tab.scroll.set_offset(Point::new(px(0.), px(0.)));
+            tab.page.set(Some(key));
         }
-        Some(handle)
+        Some(&tab.scroll)
     }
 
     #[cfg(test)]
     #[cfg(feature = "demo-capture")]
     pub(super) fn scroll_down(&self, tab: SharedMediaTab, by: f32) {
-        if let Some(handle) = self.scroll.get(tab.index()) {
-            handle.set_offset(Point::new(px(0.), px(-by)));
+        if let Some(tab) = self.grid.get(tab.index()) {
+            tab.scroll.set_offset(Point::new(px(0.), px(-by)));
         }
     }
 
     #[cfg(test)]
     #[cfg(feature = "demo-capture")]
     pub(super) fn offset_y(&self, tab: SharedMediaTab) -> Option<gpui_kit::Pixels> {
-        self.scroll.get(tab.index()).map(|handle| handle.offset().y)
+        self.grid.get(tab.index()).map(|tab| tab.scroll.offset().y)
     }
 }
 
@@ -117,7 +136,7 @@ mod tests {
         PageKey {
             chat,
             anchor_day: None,
-            newest: 100,
+            query: 0,
         }
     }
 
@@ -151,5 +170,31 @@ mod tests {
             "another chat's list is at the top"
         );
         assert!(asked.allow(20, false), "and asks again");
+    }
+
+    /// Deleting the newest file is the same list: it keeps its place. A
+    /// search is another list.
+    #[test]
+    fn the_same_list_keeps_its_place_when_its_newest_item_goes() {
+        use quill::state::SharedMediaTabState;
+        let ui = SharedMediaGridUi::new();
+        let tab = SharedMediaTab::Files;
+        let mut state = SharedMediaTabState::default();
+        let chat = Some(quill::ids::ChatId(1));
+        let Some((scroll, _)) = ui.list_scroll(tab, PageKey::of(chat, &state)) else {
+            panic!("the Files tab has a list");
+        };
+        scroll.set_offset(Point::new(px(0.), px(-300.)));
+        state.items.clear();
+        state.total_count -= 1;
+        let Some((scroll, _)) = ui.list_scroll(tab, PageKey::of(chat, &state)) else {
+            panic!("the Files tab has a list");
+        };
+        assert_eq!(scroll.offset().y, px(-300.), "the place stays");
+        state.query = "report".into();
+        let Some((scroll, _)) = ui.list_scroll(tab, PageKey::of(chat, &state)) else {
+            panic!("the Files tab has a list");
+        };
+        assert_eq!(scroll.offset().y, px(0.), "a search starts at the top");
     }
 }

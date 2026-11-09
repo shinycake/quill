@@ -94,6 +94,11 @@ impl QuillApp {
         }
     }
 
+    /// The info panel that is open (not one sliding out after it closed).
+    pub(in crate::ui) fn open_info_target(&self) -> Option<quill::state::InfoPanelTarget> {
+        self.open_panels().info
+    }
+
     /// The panels the side column draws this frame: the open ones, or the
     /// ones sliding out after they closed.
     pub(in crate::ui) fn drawn_panels(&self) -> PanelSet {

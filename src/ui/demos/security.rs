@@ -94,7 +94,7 @@ impl QuillApp {
     pub(crate) fn demo_ready_storage_usage(
         &mut self,
         _window: &mut Window,
-        _cx: &mut Context<Self>,
+        cx: &mut Context<Self>,
     ) {
         // Slice S4: Data & Storage fixture — fixture stats (including the
         // secret category and per-chat rows) plus seeded per-network
@@ -107,12 +107,12 @@ impl QuillApp {
             session.settings.data_storage = demo_data_storage_prefs();
             session.settings.storage_freed = Some(54_525_952);
         }
-        self.open_settings(Some(quill::settings_catalog::Page::DataStorage));
+        self.open_settings(Some(quill::settings_catalog::Page::DataStorage), cx);
         self.connection
             .set_note(StatusNote::silent("screenshot demo — data & storage"));
     }
 
-    fn demo_link_handler_row(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {
+    fn demo_link_handler_row(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
         self.appearance.theme = if std::env::var("QUILL_DEMO_THEME").as_deref() == Ok("dark") {
             ThemeChoice::Dark
         } else {
@@ -122,12 +122,12 @@ impl QuillApp {
         quill::link_handler::demo_pin(
             checking.then_some(quill::link_handler::LinkHandlerState::Checking),
         );
-        self.open_settings_on(quill::settings_catalog::Page::System);
+        self.open_settings_on(quill::settings_catalog::Page::System, cx);
         self.connection
             .set_note(StatusNote::silent("screenshot demo — default app row"));
     }
 
-    fn demo_appearance(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {
+    fn demo_appearance(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
         // Settings → Appearance: the Appearance page over the
         // ReadyChats fixture (injected, no live Telegram). Non-default
         // values so the screenshot shows the slice live: dark theme,
@@ -145,7 +145,7 @@ impl QuillApp {
         self.appearance.accent_rgb = 0x2f81f7;
         self.appearance.wallpaper_rgb = Some(0x0e1621);
         self.appearance.font_size_px = 16;
-        self.open_settings_on(quill::settings_catalog::Page::Appearance);
+        self.open_settings_on(quill::settings_catalog::Page::Appearance, cx);
         self.connection
             .set_note(StatusNote::silent("screenshot demo — appearance settings"));
     }

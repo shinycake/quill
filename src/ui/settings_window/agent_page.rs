@@ -475,7 +475,7 @@ impl QuillApp {
             return;
         }
         self.agent_ui.picked = None;
-        self.open_settings(Some(Page::AgentAccess));
+        self.open_settings(Some(Page::AgentAccess), cx);
         self.agent_ui.page.focus_chat = Some(chat_id);
         self.agent_ui.page.scroll_to = Some(Spot::FocusChat);
         cx.notify();
@@ -536,9 +536,9 @@ impl QuillApp {
 
 crate::ui::screenshot_demo::register_demos![
     crate::ui::screenshot_demo::DemoSpec::chat_list("ready-settings-agent-access").setup(
-        |app, _, _| {
+        |app, _, cx| {
             demo_access_from_env();
-            app.open_settings(Some(Page::AgentAccess));
+            app.open_settings(Some(Page::AgentAccess), cx);
             demo_scroll_from_env(app);
         }
     ),

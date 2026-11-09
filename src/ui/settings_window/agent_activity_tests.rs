@@ -40,7 +40,7 @@ fn open_page_app(cx: &mut TestAppContext) -> (Entity<QuillApp>, VisualTestContex
         .clone()
         .unwrap_or_else(|| panic!("window opened"));
     app.update(&mut vcx, |app, cx| {
-        app.open_settings(Some(Page::AgentAccess));
+        app.open_settings(Some(Page::AgentAccess), cx);
         cx.notify();
     });
     settle(&mut vcx);
