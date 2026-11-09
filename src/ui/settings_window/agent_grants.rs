@@ -412,7 +412,7 @@ impl QuillApp {
                             .checked(key == &selected)
                             .on_click(move |_, _, cx| {
                                 let _ = owner.update(cx, |this, cx| {
-                                    this.agent_ui.picked = Some(picked.clone());
+                                    this.agent_ui.pick_account(Some(picked.clone()));
                                     cx.notify();
                                 });
                             }),

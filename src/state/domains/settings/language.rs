@@ -2,6 +2,7 @@
 //! strings it produced (docs/decisions/language-packs.md). The UI installs
 //! the strings (`lang::install`); the state only collects them.
 use crate::lang::PackValue;
+use crate::state::fetch::Fetch;
 use crate::state::*;
 use crate::telegram::envelope::{LanguagePackInfoData, LanguagePayload};
 
@@ -50,8 +51,7 @@ pub struct LanguageReady {
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct LanguageState {
     /// `localizationTargetInfo`: official packs and installed custom ones.
-    pub packs: Vec<LanguagePackInfoData>,
-    pub packs_loading: bool,
+    pub packs: Fetch<Vec<LanguagePackInfoData>>,
     /// The pack the interface uses (the one TDLib's `language_pack_id`
     /// names); empty for the built-in English.
     pub current: Option<LanguagePackInfoData>,
@@ -77,8 +77,7 @@ impl Session {
         let state = &mut self.settings.language;
         match payload {
             LanguagePayload::TargetInfo(packs) => {
-                state.packs = packs;
-                state.packs_loading = false;
+                state.packs.succeed(packs);
             }
             LanguagePayload::Strings(strings) => {
                 if let Some(RequestPurpose::Settings(SettingsPurpose::Language(
@@ -150,7 +149,7 @@ impl Session {
     pub(crate) fn apply_language_error(&mut self, err: &TdError, purpose: LanguagePurpose) {
         let state = &mut self.settings.language;
         match purpose {
-            LanguagePurpose::TargetInfo => state.packs_loading = false,
+            LanguagePurpose::TargetInfo => state.packs.fail(error_reason(err)),
             LanguagePurpose::Strings { generation, .. } => {
                 if state.switching.as_ref().map(|s| s.generation) == Some(generation) {
                     state.switching = None;

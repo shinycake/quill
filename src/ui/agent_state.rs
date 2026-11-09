@@ -42,6 +42,16 @@ pub(crate) struct AgentUi {
 }
 
 impl AgentUi {
+    /// Settings now edits `account` (`None` follows the active one). The
+    /// activity filter names the old account's agents, chats and tools, so
+    /// another account starts unfiltered.
+    pub(super) fn pick_account(&mut self, account: Option<AccountKey>) {
+        if self.picked != account {
+            self.picked = account;
+            self.page.filter = Default::default();
+        }
+    }
+
     pub(super) fn new() -> Self {
         Self {
             picked: None,

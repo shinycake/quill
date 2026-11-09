@@ -171,7 +171,11 @@ fn in_other_call(app: &Entity<QuillApp>, vcx: &mut VisualTestContext, joined: bo
         }
         if !joined {
             // The join went out and waits for its answer.
-            app.group_call_screen.stream_joining = Some(OTHER_CALL);
+            app.group_call_screen.stream_joining =
+                Some(crate::ui::group_call_state::StreamJoining::new(
+                    OTHER_CALL,
+                    gpui_kit::Task::ready(()),
+                ));
         }
         app.group_call_screen.window_closed_by_user = Some(OTHER_CALL);
     });
@@ -468,7 +472,7 @@ fn a_join_still_in_flight_counts_as_being_in_that_call(cx: &mut TestAppContext) 
     assert!(
         app.read_with(&main, |app, _| app
             .group_call_screen
-            .stream_joining
+            .joining_call()
             .is_none()),
         "no join of the old call is awaited any more"
     );

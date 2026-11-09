@@ -131,8 +131,6 @@ JoinBox::joining
 JoinedLines::started
 LanguageLinkLookup::loading
 LanguageLinkLookup::loading+error
-LanguageState::packs_loading
-LanguageState::packs_loading+error
 Latest::wake_pending
 LayerFade::closing
 LinuxState::failed
@@ -279,12 +277,9 @@ StoryManageState::pending+error
 StorySearchState::loading
 StorySearchState::loading+error
 StoryViewerUi::close_friends_saving
-StoryViewerUi::cover_sent
-StoryViewerUi::privacy_sent
 StoryViewersState::loading
 StoryViewersState::loading+error
 StreamFacts::transport_failed
-StreamWindow::hide_armed
 StyleExamples::loading
 Tempo::done
 Tempo::inner_done

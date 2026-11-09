@@ -63,7 +63,7 @@ impl QuillApp {
             return;
         }
         if let Some(open) = self.stories.viewer_ui_mut() {
-            open.cover_sent = false;
+            open.cover_request = None;
         }
         let source = self.story_video_path();
         let fallback_ms = self
@@ -471,7 +471,7 @@ impl QuillApp {
                     )
                     .child(
                         Button::new("story-cover-set")
-                            .label(if self.stories.viewer_ui().cover_sent {
+                            .label(if self.stories.viewer_ui().cover_request.is_some() {
                                 tr(keys::Q_MEDIA_SAVING)
                             } else {
                                 tr(keys::Q_MEDIA_SET_2)
@@ -489,7 +489,7 @@ impl QuillApp {
     /// frame. The driver gates on `can_be_edited`; the tick closes the
     /// picker on success.
     pub(super) fn story_cover_save(&mut self, cx: &mut Context<Self>) {
-        if self.stories.viewer_ui().cover_sent {
+        if self.stories.viewer_ui().cover_request.is_some() {
             return;
         }
         let Some((chat_id, story_id, at_ms)) = self
@@ -519,9 +519,9 @@ impl QuillApp {
                 .driver
                 .edit_story_cover(ChatId(chat_id), story_id, timestamp_secs(at_ms))
             {
-                Ok(_) => {
+                Ok(request) => {
                     if let Some(open) = self.stories.viewer_ui_mut() {
-                        open.cover_sent = true;
+                        open.cover_request = Some(request);
                     }
                 }
                 Err(_) => {
