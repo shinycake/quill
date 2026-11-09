@@ -89,9 +89,6 @@ pub(crate) struct PlaybackUi {
     /// A linked `?t=` media timestamp waiting for its message to load
     /// (chat, message, seconds, when to give up).
     pub(super) pending_media_seek: Option<(ChatId, quill::ids::MessageId, i32, std::time::Instant)>,
-    /// The media viewer's playback error. The audio rows read
-    /// `audio.error()` instead.
-    pub(super) error: Option<String>,
 }
 
 /// The `image/gif` file looping in a history row: the row of one window,
@@ -142,7 +139,6 @@ impl PlaybackUi {
             gif_started_at: None,
             gif_decodes: HashMap::new(),
             pending_media_seek: None,
-            error: None,
         }
     }
 }

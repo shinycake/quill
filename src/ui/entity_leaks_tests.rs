@@ -625,7 +625,7 @@ fn leaving_a_settings_page_lets_go_of_what_it_made(cx: &mut TestAppContext) {
                 name: concat!("settings: ", stringify!($page)),
                 open: |h| {
                     h.act(|app, _, cx| {
-                        app.open_settings(Some(Page::$page));
+                        app.open_settings(Some(Page::$page), cx);
                         cx.notify();
                     });
                     let page = h.app.read_with(&h.vcx, |app, _| app.settings.page);

@@ -81,9 +81,6 @@ impl QuillApp {
     /// its client exists, minus the restart. The chat list, folders and
     /// counters are there at once.
     pub(in crate::ui) fn adopt_live(&mut self, mut live: LiveConnect, cx: &mut Context<Self>) {
-        // A connect deferred under the lock was for the account that left;
-        // this one has its client (a switch from the lock card's Answer).
-        self.account.passcode.deferred_connect = false;
         self.connect.generation += 1;
         self.connection.status = ConnectUiStatus::Live;
         self.connection.presence.reset();

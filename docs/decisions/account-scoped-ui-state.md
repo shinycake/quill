@@ -3214,3 +3214,118 @@ so the Asker filter keeps it).
 - The prep fallback (5) needs a live client to send. It has no test.
 - Search hand-off (8) and the link-preview retry (9) were not run live.
 
+
+### Phase 15 (area C)
+
+Round 15 of the review, area C (the rest of `src/ui`), on
+`claude/sm-review15-c`. The numbers are the review's finding numbers. All
+twelve were fixed, and so were the three sets of fields kept in step by
+hand. Four of the findings (1, 4, 5, 6) were round-14 fixes that did not
+go far enough. This round fixes them at their source.
+
+- **A Business screen waits for the saved value (1).** `saved_business`
+  is `None` until the own user's full info has arrived. A draft is built
+  only from a saved value (`new_*_draft(saved, ..)`). A screen opened
+  before the info arrives shows "Loading…" (`business_waits_for_info`),
+  and the frame upkeep of the window hosting the box builds the draft at
+  the first frame after the info is stored (`business_info_upkeep` in
+  `per_window_upkeep`). The screen is derived from the state, with no
+  waiting task and no poll. Nothing is ever built from empty values, so the `base` comparison from round 14
+  now compares against the real saved value. Hours fall back to the
+  saved zone when the zone list has not loaded.
+- **A second call under the lock (2).** The swap prompt is a kit box of
+  the locked main window, so it is not drawn. The lock screen now draws a
+  card for it (`swap_call_lock_card`, Decline and End & Answer) next to
+  the background ring's card. Both use one card builder,
+  `lock_call_card`, and `locked_root` stacks them. The wording follows
+  tdesktop's call panel: "Incoming call" or "Incoming video call", then
+  "Name is calling you…" (`swap_call_text`, also used by the swap box). The second call also
+  rings: `sync_call_sounds` loops Incoming while the swap prompt shows.
+- **An invitation alone keeps the call tick (3).** `call_tick_wanted`
+  (call on screen, background ring, or conference invitation) is the one
+  test for both starting and keeping the tick. Before this, an
+  invitation with no call started the tick and then stopped it at the
+  first beat.
+- **"A lock in between" is a counter (4).** `PasscodeUi::locks` counts
+  locks, and it moves only with the flag (`set_lock_flag`, called by
+  `set_locked` and `force_locked`). A pending profile gallery records the
+  count and the info panel it was asked from. `locked_since(count)` drops
+  it after any lock, even when Quill is unlocked again by the time the
+  photos land. A panel that closed or changed drops it too
+  (`open_info_target`).
+- **A parked clip belongs to a chat visit (5).** `ChatUi` carries a
+  `ChatVisit` token, and `replace_chat_ui` is now its only writer
+  (`enter_chat_ui`, `leave_chat_ui`, `sync_chat_ui`). Replacing the value
+  drops the play intents of the visit that ended
+  (`drop_play_intent_of_visit`). The resume also checks that the window
+  still shows that visit. Esc followed by reopening the same chat is a
+  new visit, so the clip does not start by itself. The hand drops in the
+  chat change paths are gone.
+- **Invite pages are one value (6).** `Session::invite_pages` is an
+  `InvitePages` value that belongs to one chat. It holds that chat's admin
+  links, a link's join requests and its members. A page for another chat
+  replaces it whole. The Group Settings box holds the details link and
+  the revoked toggle (`GroupSettingsDialog::details_link`,
+  `revoked_open`). `set_group_settings_dialog` is the box's only writer,
+  and it clears the pages when the box closes or changes chat. The two
+  `AdminUi` fields and the three maps are gone.
+- **Play intents at the lock follow tdesktop (7).** tdesktop keeps a
+  voice note or song playing under the lock and disables only the OS
+  controls. Its lock closes the media viewer and the call layers. So the
+  lock drops parked clips, both the viewer's and the inline ones
+  (`drop_play_intents_for_lock` in `close_for_lock`). A parked voice note
+  or song stays, and `poll_live` resumes it under the lock (a
+  `runs-locked` line in lock-surfaces.txt). Clip targets that are not
+  dropped are also refused while locked.
+- **Every Settings link goes through one seam (8).** `open_settings(page,
+  cx)` hands off to the main window first (`hand_to_main_window`), so a
+  link opened from a chat window's box or menu shows Settings in the main
+  window. The Privacy entry no longer opens and then switches the page
+  in two steps.
+- **Redial places the call (9).** The call window's Redial and the end
+  card's Call again call `redial`, which dials at once, as tdesktop's
+  panel does (`Call::redial`). The confirm box opened in the main window,
+  hidden behind the call window that had just closed.
+- **A clip error belongs to its window's viewer (10).** `PlaybackUi::error`
+  moved to `ViewerUi::clip_error`, which is swapped per window with the
+  rest of the viewer.
+- **A list keeps its place while its items change (11).** The
+  shared-media page key is the chat, the anchor day and the query's hash.
+  It no longer includes the newest item, so deleting the newest file no
+  longer scrolls the list to the top. Each tab's scroll, paging mark and
+  page are one value (`GridTab`, `ListTab`) instead of three arrays kept
+  in step.
+- **The lock closes the passkey ceremony (12).** As tdesktop's lock does
+  with its boxes, `close_passkey_ceremony_for_lock` cancels the key and
+  removes the PIN field. A PIN sheet on its way can no longer take focus
+  from the passcode field.
+- **The held connect names its account.** `deferred_connect: bool` became
+  `connect_at_unlock: Option<AccountKey>`. The unlock connects only the
+  account that waited, and only while it is still on screen, so
+  `adopt_live` no longer has to clear it by hand.
+- **Guards.**
+  - `scripts/single_writers.py` (run by `check-screen-state.py`, with the
+    list in `scripts/single-writers.txt`) fails a whole write of
+    `chat_ui` or `group_settings_dialog` made anywhere but its one writer.
+  - `lock_surfaces.py` now accepts `set_lock_flag` as the flag's setter,
+    and only `set_locked` may call it.
+  - CI runs the unit tests of both checks.
+- **Tests.**
+  - `a_screen_waits_for_the_full_info_before_it_can_be_changed`
+  - `a_second_call_under_the_lock_rings_and_can_be_declined`
+  - `an_invitation_alone_keeps_the_call_tick`
+  - `the_group_avatar_opens_its_photos_newest_first` (extended with a
+    lock and an unlock in between, and a closed panel)
+  - `another_chat_drops_a_round_video_waiting_to_play` (extended with Esc
+    and reopen)
+  - `a_page_for_another_chat_replaces_every_page` (state)
+  - `the_box_for_another_chat_replaces_the_invite_pages`
+  - `the_lock_drops_a_parked_clip_and_keeps_a_parked_voice_note`
+  - `a_settings_link_in_a_chat_windows_box_opens_in_the_main_window`
+  - `a_clip_error_stays_in_its_windows_viewer`
+  - `the_same_list_keeps_its_place_when_its_newest_item_goes`
+  - `the_lock_closes_the_ceremony_and_its_pin_field`
+  - `the_unlock_connects_only_the_account_that_waited`
+  - None of them waits on time.
+- **Not tested.** Redial (it needs a live driver to dial). The rewiring of
+  the two buttons is covered only by the build.

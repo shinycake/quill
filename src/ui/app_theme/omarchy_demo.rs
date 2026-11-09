@@ -35,7 +35,7 @@ crate::ui::screenshot_demo::register_demos![
             app.appearance.follow_omarchy = true;
             app.preferences.appearance_applied = None;
             app.apply_appearance(cx);
-            app.open_settings_on(quill::settings_catalog::Page::Appearance);
+            app.open_settings_on(quill::settings_catalog::Page::Appearance, cx);
         }
     ),
 ];

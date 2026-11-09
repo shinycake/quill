@@ -54,7 +54,7 @@ fn open_page(cx: &mut TestAppContext) -> (Entity<QuillApp>, Entity<QuillShell>, 
     let (app, shell, mut vcx) = new_app(cx);
     reset_for_test(&AccountKey::primary());
     app.update(&mut vcx, |app, cx| {
-        app.open_settings(Some(Page::AgentAccess));
+        app.open_settings(Some(Page::AgentAccess), cx);
         cx.notify();
     });
     settle(&mut vcx);

@@ -287,7 +287,7 @@ impl Session {
             Some(RequestPurpose::Groups(GroupsPurpose::GetChatInviteLinkMembers { .. })) => {
                 if let Some(pending) = pending
                     && let Some(chat_id) = pending.chat_id
-                    && let Some(state) = self.groups.invite_link_members.get_mut(&chat_id.0)
+                    && let Some(state) = self.groups.invite_pages.members_mut(chat_id.0)
                     && state.request == Some(pending.id)
                 {
                     state.loading = false;
@@ -298,7 +298,7 @@ impl Session {
             Some(RequestPurpose::GetAdminChatInviteLinks { revoked }) => {
                 if let Some(pending) = pending
                     && let Some(chat_id) = pending.chat_id
-                    && let Some(state) = self.groups.admin_invite_links.get_mut(&chat_id.0)
+                    && let Some(state) = self.groups.invite_pages.admin_links_mut(chat_id.0)
                 {
                     let failed = InviteLinkFetch::Failed(call_request_error_line(
                         err,
@@ -316,7 +316,7 @@ impl Session {
             Some(RequestPurpose::GetLinkJoinRequests { .. }) => {
                 if let Some(pending) = pending
                     && let Some(chat_id) = pending.chat_id
-                    && let Some(state) = self.groups.link_join_requests.get_mut(&chat_id.0)
+                    && let Some(state) = self.groups.invite_pages.join_requests_mut(chat_id.0)
                     && state.request == Some(pending.id)
                 {
                     state.loading = false;

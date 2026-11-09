@@ -88,7 +88,7 @@ fn closing_settings_drops_log_out(cx: &mut TestAppContext) {
     let mut vcx = VisualTestContext::from_window(main, cx);
     let vcx = &mut vcx;
     app.update(vcx, |app, cx| {
-        app.demo_settings(Page::Account);
+        app.demo_settings(Page::Account, cx);
         cx.notify();
     });
     frames(vcx);
@@ -101,7 +101,7 @@ fn closing_settings_drops_log_out(cx: &mut TestAppContext) {
     });
     frames(vcx);
     app.update(vcx, |app, cx| {
-        app.open_settings(None);
+        app.open_settings(None, cx);
         cx.notify();
     });
     frames(vcx);
@@ -120,7 +120,7 @@ fn closing_settings_closes_the_privacy_editor(cx: &mut TestAppContext) {
     let mut vcx = VisualTestContext::from_window(main, cx);
     let vcx = &mut vcx;
     app.update(vcx, |app, cx| {
-        app.demo_settings(Page::Account);
+        app.demo_settings(Page::Account, cx);
         app.show_settings_page(Page::Privacy, cx);
     });
     frames(vcx);
@@ -154,7 +154,7 @@ fn a_chat_window_menu_action_leaves_the_main_windows_settings_open(cx: &mut Test
     let (app, main) = new_app(cx);
     let chat_window = open_chat_window(&app, main, cx);
     app.update(cx, |app, cx| {
-        app.open_settings(Some(Page::Language));
+        app.open_settings(Some(Page::Language), cx);
         cx.notify();
     });
     cx.run_until_parked();
@@ -201,6 +201,34 @@ fn agent_access_from_a_chat_window_opens_in_the_main_window(cx: &mut TestAppCont
     assert!(main_active, "the main window came forward");
 }
 
+/// Every Settings link goes through `open_settings`, which hands a chat
+/// window's to the main window: the mute box's "Defaults for all chats"
+/// opens Settings > Notifications there, brought forward.
+#[gpui_kit::test]
+fn a_settings_link_in_a_chat_windows_box_opens_in_the_main_window(cx: &mut TestAppContext) {
+    let (app, main) = new_app(cx);
+    let chat_window = open_chat_window(&app, main, cx);
+    cx.update_window(chat_window, |_, window, _| window.activate_window())
+        .expect("the chat window");
+    cx.run_until_parked();
+    let ran_in = app.update(cx, |app, cx| {
+        app.in_window_scope(Some(OTHER), cx, |app, cx| {
+            app.open_notification_settings(cx);
+            app.settings.open
+        })
+    });
+    assert_eq!(ran_in, Some(false), "nothing opens in the chat window");
+    cx.run_until_parked();
+    app.read_with(cx, |app, _| {
+        assert!(app.settings.open);
+        assert_eq!(app.settings.page, Some(Page::Notifications));
+    });
+    let main_active = cx
+        .update_window(main, |_, window, _| window.is_window_active())
+        .expect("the main window");
+    assert!(main_active, "the main window came forward");
+}
+
 /// The Privacy page and the 2FA box over it each draw the password check
 /// card with a field of their own: what is typed in the box's card does
 /// not show on the page, and the window then goes idle. One field painted
@@ -212,7 +240,7 @@ fn the_password_check_on_the_page_and_in_the_2fa_box_has_a_field_each(cx: &mut T
     let mut vcx = VisualTestContext::from_window(main, cx);
     let vcx = &mut vcx;
     app.update(vcx, |app, cx| {
-        app.demo_settings(Page::Account);
+        app.demo_settings(Page::Account, cx);
         app.show_settings_page(Page::Privacy, cx);
         app.open_twofa(cx);
         if let Some(session) = app.demo_session.as_mut() {
@@ -261,7 +289,7 @@ fn aborting_the_recovery_email_asks_inside_the_2fa_box(cx: &mut TestAppContext) 
     let mut vcx = VisualTestContext::from_window(main, cx);
     let vcx = &mut vcx;
     app.update(vcx, |app, cx| {
-        app.demo_settings(Page::Account);
+        app.demo_settings(Page::Account, cx);
         app.show_settings_page(Page::Privacy, cx);
         app.open_twofa(cx);
         if let Some(session) = app.demo_session.as_mut() {

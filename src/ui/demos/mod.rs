@@ -22,6 +22,7 @@ mod groups_admin;
 mod info_actions;
 mod info_panels;
 mod item_menus;
+mod lock_and_loading;
 mod media;
 mod menu_origin;
 mod messages;

@@ -535,7 +535,7 @@ impl QuillApp {
         ) {
             return;
         }
-        self.open_settings(Some(quill::settings_catalog::Page::Devices));
+        self.open_settings(Some(quill::settings_catalog::Page::Devices), cx);
         self.fetch_sessions();
         cx.notify();
     }

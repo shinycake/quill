@@ -249,7 +249,7 @@ impl QuillApp {
         self.viewer.gif = None;
         self.viewer.video = Some(item.message_id);
         self.viewer.video_path = Some(path.to_path_buf());
-        self.playback.error = None;
+        self.viewer.clip_error = None;
         let total = player.transport().total();
         let duration = if total > 0.0 {
             total

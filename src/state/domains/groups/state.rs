@@ -108,10 +108,10 @@ pub struct GroupsState {
     pub join_request_latest: HashMap<i64, RequestId>,
     /// B8: `getChatInviteLinks` with `is_revoked = true`, keyed by chat id.
     pub revoked_invite_links: HashMap<i64, InviteLinkFetch>,
-    /// Another admin's invite links (owner only), by chat id.
-    pub admin_invite_links: HashMap<i64, AdminLinksState>,
-    /// Pending join requests of the invite link whose details are open.
-    pub link_join_requests: HashMap<i64, LinkRequestsState>,
+    /// The Invite Links section's pages for one chat: another admin's
+    /// links (owner only), and the pending join requests and the members
+    /// of the link whose details are open. One value, replaced whole.
+    pub invite_pages: InvitePages,
     /// `getChatBoosts` list of the open tab, by chat id.
     pub chat_boost_lists: HashMap<i64, BoostsListState>,
     /// `getChatBoostLink` answer `(link, is_public)`, by chat id.
@@ -124,8 +124,6 @@ pub struct GroupsState {
     pub supergroup_username_lists: HashMap<i64, crate::telegram::envelope::SupergroupUsernames>,
     /// B8: `getChatInviteLinkCounts` (owner only), keyed by chat id.
     pub invite_link_counts: HashMap<i64, InviteLinkCountsFetch>,
-    /// B8: members of the invite link whose details are open, by chat id.
-    pub invite_link_members: HashMap<i64, InviteLinkMembersState>,
     /// B8: in-flight `deleteRevokedChatInviteLink` requests, request id to
     /// `(chat id, link)`; a purpose is `Copy` so the link rides here.
     pub revoked_link_deletions: HashMap<RequestId, (i64, String)>,
@@ -366,14 +364,12 @@ impl GroupsState {
             join_request_queries: HashMap::new(),
             join_request_latest: HashMap::new(),
             revoked_invite_links: HashMap::new(),
-            admin_invite_links: HashMap::new(),
-            link_join_requests: HashMap::new(),
+            invite_pages: InvitePages::default(),
             chat_boost_lists: HashMap::new(),
             chat_boost_links: HashMap::new(),
             similar_strips: HashMap::new(),
             supergroup_username_lists: HashMap::new(),
             invite_link_counts: HashMap::new(),
-            invite_link_members: HashMap::new(),
             revoked_link_deletions: HashMap::new(),
             pending_join_request_counts: HashMap::new(),
             pending_join_request_users: HashMap::new(),

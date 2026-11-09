@@ -113,7 +113,7 @@ fn another_admins_links_close_with_the_group_settings_box(cx: &mut TestAppContex
         let Some(session) = app.session_mut() else {
             panic!("the demo session");
         };
-        session.groups.admin_invite_links.insert(
+        session.groups.invite_pages.set_admin_links(
             CHANNEL.0,
             quill::state::AdminLinksState {
                 creator_user_id: 77,
@@ -126,7 +126,49 @@ fn another_admins_links_close_with_the_group_settings_box(cx: &mut TestAppContex
         app.close_group_settings_dialog(cx);
         let open = app
             .session()
-            .is_some_and(|s| s.groups.admin_invite_links.contains_key(&CHANNEL.0));
+            .is_some_and(|s| s.groups.invite_pages.admin_links(CHANNEL.0).is_some());
         assert!(!open, "the admin's page went with the box");
+    });
+}
+
+/// The box moved to another chat (a chat window's Edit, then Manage) takes
+/// the first chat's pages with it, so reopening the first chat's Invite
+/// Links shows its own links, and "Delete all revoked" has no admin.
+#[gpui_kit::test]
+fn the_box_for_another_chat_replaces_the_invite_pages(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let other = ChatId(CHANNEL.0 + 1);
+    app.update_in(&mut vcx, |app, _, cx| {
+        app.open_group_settings_view(CHANNEL, GroupSettingsView::InviteLinks, cx);
+        if let Some(dialog) = app.admin.group_settings_dialog.as_mut() {
+            dialog.revoked_open = true;
+            dialog.details_link = Some("https://t.me/+a".into());
+        }
+        let Some(session) = app.session_mut() else {
+            panic!("the demo session");
+        };
+        session.groups.invite_pages.set_admin_links(
+            CHANNEL.0,
+            quill::state::AdminLinksState {
+                creator_user_id: 77,
+                active: quill::state::InviteLinkFetch::Loading,
+                revoked: quill::state::InviteLinkFetch::Loading,
+                active_request: None,
+                revoked_request: None,
+            },
+        );
+        // The same chat again keeps its pages.
+        app.open_group_settings_view(CHANNEL, GroupSettingsView::InviteLinks, cx);
+        assert!(
+            app.session()
+                .is_some_and(|s| s.groups.invite_pages.admin_links(CHANNEL.0).is_some())
+        );
+        app.open_group_settings_view(other, GroupSettingsView::Boosts, cx);
+        app.close_group_settings_dialog(cx);
+        app.open_group_settings_view(CHANNEL, GroupSettingsView::InviteLinks, cx);
+        let pages = app.session().map(|s| s.groups.invite_pages.chat());
+        assert_eq!(pages, Some(None), "no page of either chat is left");
+        let dialog = app.admin.group_settings_dialog.as_ref().expect("the box");
+        assert!(!dialog.revoked_open && dialog.details_link.is_none());
     });
 }

@@ -87,3 +87,4 @@ src/ui/agent_driver_shot.rs CAPTURED | test hook
 src/ui/composer_rtl.rs SHAPED | test hook
 src/ui/video_player/controls/pip/place.rs FRAMES | test hook
 src/ui/frame_trace.rs COUNTS,LAST | a debug trace, off by default
+src/ui/chat_ui_state.rs NEXT | the ChatVisit counter: it only hands out unique ids, and every window may share it

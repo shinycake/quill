@@ -160,7 +160,7 @@ fn settings_offers_premium_gifting_where_premium_is_sold(cx: &mut TestAppContext
     let (app, shell, mut vcx) = new_app(cx, "ready-birthday-gift");
     let vcx = &mut vcx;
     app.update(vcx, |app, cx| {
-        app.open_settings(Some(Page::Telegram));
+        app.open_settings(Some(Page::Telegram), cx);
         cx.notify();
     });
     assert_eq!(shown_dialog(&shell, vcx), None);

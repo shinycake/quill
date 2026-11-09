@@ -711,8 +711,8 @@ impl QuillApp {
                     })),
             );
         }
-        // Phase C2i: call again from the call-end card (honours the
-        // confirm-before-calling pref).
+        // Phase C2i: call again from the call-end card, at once, as the
+        // call window's Redial (`redial`).
         {
             let user_id = summary.user_id;
             let was_video = summary.is_video;
@@ -720,8 +720,7 @@ impl QuillApp {
                 Button::new("call-summary-again")
                     .label(tr(keys::Q_OPS_CALL_AGAIN))
                     .on_click(cx.listener(move |this, _, _, cx| {
-                        this.dismiss_call_summary(cx);
-                        this.call_again(user_id, was_video, cx);
+                        this.redial(user_id, was_video, cx);
                     })),
             );
         }

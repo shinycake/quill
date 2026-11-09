@@ -11,6 +11,36 @@ use gpui_kit::assets::IconName;
 use quill::lang::{keys, tr};
 
 impl QuillApp {
+    /// Redial from an ended call's own screen (the call window's Redial,
+    /// the end card's Call again): the end screen goes and the call is
+    /// placed at once. tdesktop's panel redials with no box
+    /// (`Panel::_answerHangupRedial` calls `Call::redial`): the press on
+    /// the call's own screen is the confirmation. The confirm box would
+    /// open in the main window, hidden behind the call window that just
+    /// closed, or not drawn under the lock.
+    pub(in crate::ui) fn redial(&mut self, user_id: i64, is_video: bool, cx: &mut Context<Self>) {
+        self.dismiss_call_summary(cx);
+        if self.refuse_offline_call(cx) {
+            return;
+        }
+        self.dial_user(user_id, is_video, cx);
+    }
+
+    /// Offline: a call cannot start, and the status line says so.
+    fn refuse_offline_call(&mut self, cx: &mut Context<Self>) -> bool {
+        let offline = self
+            .live
+            .as_ref()
+            .is_some_and(|live| live.driver.session.is_offline());
+        if offline {
+            self.set_note(StatusNote::error(tr(
+                keys::Q_OPS_YOURE_OFFLINE_CANT_START_A,
+            )));
+            cx.notify();
+        }
+        offline
+    }
+
     /// Phase C2i: "Call again" from a history row — honours the
     /// confirm-before-calling preference before dialling.
     pub(in crate::ui) fn call_again(
@@ -19,15 +49,7 @@ impl QuillApp {
         is_video: bool,
         cx: &mut Context<Self>,
     ) {
-        if self
-            .live
-            .as_ref()
-            .is_some_and(|live| live.driver.session.is_offline())
-        {
-            self.set_note(StatusNote::error(tr(
-                keys::Q_OPS_YOURE_OFFLINE_CANT_START_A,
-            )));
-            cx.notify();
+        if self.refuse_offline_call(cx) {
             return;
         }
         let confirm = self

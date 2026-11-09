@@ -118,7 +118,7 @@ fn menu_routes_to_hard_surfaces_refuse_while_injecting(cx: &mut TestAppContext) 
         ] {
             app.navigate(action, window, cx);
         }
-        app.open_settings(Some(quill::settings_catalog::Page::Shortcuts));
+        app.open_settings(Some(quill::settings_catalog::Page::Shortcuts), cx);
         app.open_account_lifecycle(cx);
         app.open_accounts(cx);
         app.open_passcode(cx);

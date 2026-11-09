@@ -235,7 +235,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.invite_admin_ready(chat_id)? {
             return Ok(None);
         }
-        let Some(state) = self.session.groups.invite_link_members.get(&chat_id.0) else {
+        let Some(state) = self.session.groups.invite_pages.members(chat_id.0) else {
             return Ok(None);
         };
         if state.loading || state.members.len() as i32 >= state.total_count {
@@ -268,7 +268,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             error: None,
             request: Some(extra),
         };
-        match self.session.groups.invite_link_members.get_mut(&chat_id.0) {
+        match self.session.groups.invite_pages.members_mut(chat_id.0) {
             Some(state) if append => {
                 state.loading = true;
                 state.error = None;
@@ -277,8 +277,8 @@ impl<S: JsonSender> ConnectDriver<S> {
             _ => {
                 self.session
                     .groups
-                    .invite_link_members
-                    .insert(chat_id.0, fresh);
+                    .invite_pages
+                    .set_members(chat_id.0, fresh);
             }
         }
         let payload = get_chat_invite_link_members(
@@ -291,14 +291,14 @@ impl<S: JsonSender> ConnectDriver<S> {
         );
         let sent = self.send_invite_admin(extra, &payload);
         if sent.is_err() {
-            self.session.groups.invite_link_members.remove(&chat_id.0);
+            self.session.groups.invite_pages.close_members(chat_id.0);
         }
         sent
     }
 
     /// Drop the open link's member list (details closed).
     pub fn close_chat_invite_link_members(&mut self, chat_id: ChatId) {
-        self.session.groups.invite_link_members.remove(&chat_id.0);
+        self.session.groups.invite_pages.close_members(chat_id.0);
     }
 
     /// `deleteRevokedChatInviteLink`; the link leaves the revoked list on

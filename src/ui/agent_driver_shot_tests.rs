@@ -224,7 +224,7 @@ fn a_blocked_surface_gets_no_screenshot(cx: &mut TestAppContext) {
     let _presence = activity::connect("Test agent");
     settle(vcx);
     vcx.update(|_, cx| {
-        app.update(cx, |app, _| app.open_settings(None));
+        app.update(cx, |app, cx| app.open_settings(None, cx));
     });
     settle(vcx);
     let reply = drive_shot(&app, vcx, UiCommand::ReadTree, FULL);

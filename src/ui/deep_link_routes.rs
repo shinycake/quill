@@ -125,7 +125,7 @@ impl QuillApp {
             DeepLinkUi::Settings(target) => {
                 match settings_action(target) {
                     Some(action) => self.navigate(action, window, cx),
-                    None => self.open_settings(None),
+                    None => self.open_settings(None, cx),
                 }
                 if target == SettingsTarget::Unsupported {
                     self.set_note(StatusNote::silent(tr(

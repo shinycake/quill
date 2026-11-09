@@ -212,7 +212,7 @@ impl Render for QuillApp {
                 this.open_link("https://github.com/shinycake/quill", cx);
             }))
             .on_action(cx.listener(|this, _: &OpenShortcuts, _, cx| {
-                this.open_settings(Some(quill::settings_catalog::Page::Shortcuts));
+                this.open_settings(Some(quill::settings_catalog::Page::Shortcuts), cx);
                 cx.notify();
             }))
             .on_action(cx.listener(|this, _: &NextChat, window, cx| {

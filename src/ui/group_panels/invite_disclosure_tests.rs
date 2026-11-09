@@ -43,15 +43,22 @@ fn the_revoked_links_row_is_a_disclosure_that_toggles(cx: &mut TestAppContext) {
         })
     });
     vcx.run_until_parked();
-    let open = |vcx: &VisualTestContext| app.read_with(vcx, |app, _| app.admin.revoked_links_open);
-    assert_eq!(open(&vcx), None);
+    let open = |vcx: &VisualTestContext| {
+        app.read_with(vcx, |app, _| {
+            app.admin
+                .group_settings_dialog
+                .as_ref()
+                .is_some_and(|d| d.chat_id == ChatId(61) && d.revoked_open)
+        })
+    };
+    assert!(!open(&vcx));
     vcx.update(|window, cx| {
         window.render_frame(cx);
         assert!(window.try_find("revoked-links-toggle").is_some());
         window.click("revoked-links-toggle", cx);
     });
-    // Open for this chat only: another chat's links page starts collapsed.
-    assert_eq!(open(&vcx), Some(ChatId(61)));
+    // The box's own: a box for another chat starts collapsed.
+    assert!(open(&vcx));
     vcx.update(|window, cx| window.click("revoked-links-toggle", cx));
-    assert_eq!(open(&vcx), None);
+    assert!(!open(&vcx));
 }

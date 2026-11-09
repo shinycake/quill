@@ -108,8 +108,8 @@ fn other_admin_links_load_active_and_revoked_for_the_creator() {
         .driver
         .session
         .groups
-        .admin_invite_links
-        .get(&13)
+        .invite_pages
+        .admin_links(13)
         .unwrap();
     let InviteLinkFetch::Loaded(active) = &state.active else {
         panic!("active loaded");
@@ -160,8 +160,8 @@ fn a_stale_admin_reply_is_dropped_after_switching_admin() {
         .driver
         .session
         .groups
-        .admin_invite_links
-        .get(&13)
+        .invite_pages
+        .admin_links(13)
         .unwrap();
     assert_eq!(state.creator_user_id, 10);
     assert!(matches!(state.active, InviteLinkFetch::Loading));
@@ -170,8 +170,8 @@ fn a_stale_admin_reply_is_dropped_after_switching_admin() {
         .driver
         .session
         .groups
-        .admin_invite_links
-        .get(&13)
+        .invite_pages
+        .admin_links(13)
         .unwrap();
     assert!(matches!(state.active, InviteLinkFetch::Loaded(_)));
 }
@@ -194,8 +194,8 @@ fn deleting_an_admins_revoked_links_sends_their_id_and_clears_only_their_list() 
         .driver
         .session
         .groups
-        .admin_invite_links
-        .get(&13)
+        .invite_pages
+        .admin_links(13)
         .unwrap();
     assert!(matches!(
         &state.revoked,
@@ -252,8 +252,8 @@ fn link_join_requests_filter_by_link_page_and_process_in_place() {
         rig.driver
             .session
             .groups
-            .link_join_requests
-            .get(&13)
+            .invite_pages
+            .join_requests(13)
             .unwrap()
             .requests
             .len(),
@@ -270,8 +270,8 @@ fn link_join_requests_filter_by_link_page_and_process_in_place() {
         .driver
         .session
         .groups
-        .link_join_requests
-        .get(&13)
+        .invite_pages
+        .join_requests(13)
         .unwrap();
     assert_eq!(state.requests.len(), 2);
     assert_eq!(state.total_count, 2);
@@ -289,8 +289,8 @@ fn link_join_requests_filter_by_link_page_and_process_in_place() {
         .driver
         .session
         .groups
-        .link_join_requests
-        .get(&13)
+        .invite_pages
+        .join_requests(13)
         .unwrap();
     assert!(state.requests.is_empty());
     assert_eq!(state.total_count, 0);
@@ -312,8 +312,8 @@ fn a_late_link_requests_page_for_another_link_is_ignored() {
         .driver
         .session
         .groups
-        .link_join_requests
-        .get(&13)
+        .invite_pages
+        .join_requests(13)
         .unwrap();
     assert_eq!(state.invite_link, "https://t.me/+b");
     assert!(state.requests.is_empty());

@@ -15,7 +15,7 @@ src/ui/video_player/controls/pip/open.rs::open_pip_window | close_every_video_pi
 src/ui/notify_windows/mod.rs::open_popup | close_all_notify_windows | Quill's notification windows show senders and text; one shown while locked hides the sender (`hide_sender`)
 src/ui/device_qr.rs::start | clear_device_qr | the device-linking camera scanner is a helper window with the camera on, opened from Settings > Devices
 src/profile_photo_camera.rs::start | close_cameras_for_lock | the profile or group photo camera; `start_camera` refuses a new start while locked
-src/media_tools.rs::spawn_capture | via:start_video_capture | the round video recorder; the lock cancels a running one (`cancel_recording`)
+src/media_tools.rs::spawn_capture | via:start_video_capture |the round video recorder; the lock cancels a running one (`cancel_recording`)
 
 # Refused while locked (they test a gate in a condition).
 src/ui/deep_links.rs::pump_deep_link | refuses | a launch or OS link waits for the unlock, as tdesktop's start links (`checkStartUrls`)
@@ -121,5 +121,6 @@ src/ui/notifications/mod.rs::poll_live -> progress_inline_mode | runs-locked | s
 src/ui/notifications/mod.rs::poll_live -> deliver_notifications | runs-locked | notifications and sounds go on under the lock, with the sender hidden; a locked Quill counts as not looked at (`app_active`)
 src/ui/notifications/mod.rs::poll_live -> redraw_polled | runs-locked | asks for a redraw, which draws only the lock screen
 src/ui/notifications/mod.rs::poll_live -> discard_stopped_media_playback | runs-locked | drops a parked play whose download failed
+src/ui/notifications/mod.rs::poll_live -> resume_play_intent | runs-locked | starts a voice note or song parked for its download, as tdesktop's player streams it from the click and plays on while locked; the lock dropped every parked clip (`drop_play_intents_for_lock`), and nothing is drawn
 src/ui/notifications/mod.rs::poll_live -> restart_live_connection | runs-locked | a remote log out under the lock: the old client closes, and the new connection waits for the unlock (`connect_waits_for_unlock`)
 src/ui/notifications/mod.rs::poll_live -> set_note | runs-locked | the status note of an answer (a failed send, a lost connection), as `connection.set_note` did before round 15; it opens and starts nothing, and the lock screen draws no toast over the chats

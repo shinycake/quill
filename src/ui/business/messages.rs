@@ -13,6 +13,7 @@ use gpui_kit::component::time_field::{HourCycle, TimePrecision};
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
+use quill::business_info::BusinessInfo;
 use quill::business_settings::{
     self as bs, AwaySchedule, AwaySettings, BusinessRecipients, GreetingSettings,
 };
@@ -65,8 +66,8 @@ impl QuillApp {
         bs::can_enable(used, state.shortcut_limit(), own)
     }
 
-    pub(super) fn new_greeting_draft(&self) -> GreetingDraft {
-        let base = self.my_business().greeting;
+    pub(super) fn new_greeting_draft(saved: &BusinessInfo) -> GreetingDraft {
+        let base = saved.greeting.clone();
         match base.clone() {
             Some(saved) => GreetingDraft {
                 base,
@@ -83,8 +84,12 @@ impl QuillApp {
         }
     }
 
-    pub(super) fn new_away_draft(&self, window: &mut Window, cx: &mut Context<Self>) -> AwayDraft {
-        let saved = self.my_business().away;
+    pub(super) fn new_away_draft(
+        saved: &BusinessInfo,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AwayDraft {
+        let saved = saved.away.clone();
         let (start, end) = bs::initial_custom_interval(
             saved.as_ref().map(|s| s.schedule),
             WallClock::of(cx).now(),

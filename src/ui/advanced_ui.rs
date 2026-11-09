@@ -295,11 +295,12 @@ impl QuillApp {
 }
 
 crate::ui::screenshot_demo::register_demos![
-    crate::ui::screenshot_demo::DemoSpec::chat_list("ready-settings-advanced")
-        .setup(|app, _, _| app.open_settings(Some(quill::settings_catalog::Page::Advanced))),
+    crate::ui::screenshot_demo::DemoSpec::chat_list("ready-settings-advanced").setup(
+        |app, _, cx| { app.open_settings(Some(quill::settings_catalog::Page::Advanced), cx) }
+    ),
     crate::ui::screenshot_demo::DemoSpec::chat_list("ready-settings-experimental").setup(
-        |app, _, _| {
-            app.open_settings(None);
+        |app, _, cx| {
+            app.open_settings(None, cx);
             app.settings.page = Some(quill::settings_catalog::Page::Advanced);
             app.settings.sub = Some(super::settings_window::SubPage::Experimental);
         }

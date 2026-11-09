@@ -7,7 +7,7 @@ use super::QuillApp;
 use gpui_kit::*;
 use quill::agent::activity::{self, Action};
 
-fn demo_activity(app: &mut QuillApp, _: &mut Window, _: &mut Context<QuillApp>) {
+fn demo_activity(app: &mut QuillApp, _: &mut Window, cx: &mut Context<QuillApp>) {
     quill::fast_buttons::set_persistence(false);
     quill::agent::access::set_enabled(true);
     quill::agent::access::set_confirm_sends(true);
@@ -101,7 +101,7 @@ fn demo_activity(app: &mut QuillApp, _: &mut Window, _: &mut Context<QuillApp>) 
             });
         }
     }
-    app.open_settings(Some(quill::settings_catalog::Page::AgentAccess));
+    app.open_settings(Some(quill::settings_catalog::Page::AgentAccess), cx);
     super::agent_page::demo_scroll_from_env(app);
 }
 

@@ -61,7 +61,7 @@ fn the_agent_access_page_turns_access_on_and_offers_the_setup_command(cx: &mut T
     app.update(vcx, |_, cx| cx.notify());
     settle(vcx);
     app.update(vcx, |app, cx| {
-        app.open_settings(Some(Page::Advanced));
+        app.open_settings(Some(Page::Advanced), cx);
         cx.notify();
     });
     settle(vcx);

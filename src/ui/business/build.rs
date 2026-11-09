@@ -274,6 +274,12 @@ impl QuillApp {
                 return dialog.on_close(on_close);
             };
             let mut body = match view {
+                // Built from the saved settings only: until the full info
+                // arrives there is nothing to show or change.
+                _ if this.business_waits_for_info(view) => div()
+                    .text_sm()
+                    .text_color(cx.theme().muted_foreground)
+                    .child(tr(keys::Q_MEDIA_LOADING)),
                 View::Hub => this.business_hub_body(cx),
                 View::Greeting => this.business_greeting_body(cx),
                 View::Away => this.business_away_body(cx),

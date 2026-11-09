@@ -81,6 +81,15 @@ impl QuillApp {
         self.call_boxes_upkeep(window, cx);
         self.box_answers_upkeep(window, cx);
         self.checkout_prefill_upkeep(window, cx);
+        // A Business screen opened before the account's full info arrived
+        // is built from it at the first frame after it lands, in the
+        // window that hosts the box (its inputs need that window).
+        if self
+            .windows
+            .dialog_may_show_in(crate::ui::shell::DialogKind::Business, self.windows.scope)
+        {
+            self.business_info_upkeep(window, cx);
+        }
         // Phase 4.6: push the playback clock into the seek sliders so the
         // thumb follows elapsed time (the tick has no `&mut Window`).
         self.sync_seek_slider(window, cx);

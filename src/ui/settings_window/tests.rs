@@ -71,7 +71,7 @@ fn settings_cover_the_chats_and_esc_brings_them_back(cx: &mut TestAppContext) {
     frames(vcx);
     assert!(!shown(vcx, "settings-window"));
     app.update(vcx, |app, cx| {
-        app.open_settings(None);
+        app.open_settings(None, cx);
         cx.notify();
     });
     frames(vcx);
@@ -89,7 +89,7 @@ fn pages_switch_and_esc_leaves_a_subpage_first(cx: &mut TestAppContext) {
     let (app, _, mut vcx) = new_app(cx, 1100.);
     let vcx = &mut vcx;
     app.update(vcx, |app, cx| {
-        app.open_settings(None);
+        app.open_settings(None, cx);
         cx.notify();
     });
     frames(vcx);
@@ -115,7 +115,7 @@ fn a_box_opens_over_settings_and_closing_it_comes_back(cx: &mut TestAppContext) 
     let (app, shell, mut vcx) = new_app(cx, 1100.);
     let vcx = &mut vcx;
     app.update(vcx, |app, cx| {
-        app.open_settings(Some(Page::Account));
+        app.open_settings(Some(Page::Account), cx);
         cx.notify();
     });
     frames(vcx);
@@ -135,7 +135,7 @@ fn log_out_asks_before_signing_out(cx: &mut TestAppContext) {
     let (app, shell, mut vcx) = new_app_sized(cx, 1100., 1600.);
     let vcx = &mut vcx;
     app.update(vcx, |app, cx| {
-        app.demo_settings(Page::Account);
+        app.demo_settings(Page::Account, cx);
         cx.notify();
     });
     frames(vcx);
@@ -154,7 +154,7 @@ fn opening_a_chat_closes_settings(cx: &mut TestAppContext) {
     let (app, _, mut vcx) = new_app(cx, 1100.);
     let vcx = &mut vcx;
     app.update(vcx, |app, cx| {
-        app.open_settings(Some(Page::Calls));
+        app.open_settings(Some(Page::Calls), cx);
         cx.notify();
     });
     frames(vcx);
@@ -177,7 +177,7 @@ fn a_narrow_window_shows_the_list_then_a_page_with_a_way_back(cx: &mut TestAppCo
     let (app, _, mut vcx) = new_app(cx, 600.);
     let vcx = &mut vcx;
     app.update(vcx, |app, cx| {
-        app.open_settings(None);
+        app.open_settings(None, cx);
         cx.notify();
     });
     frames(vcx);
@@ -205,7 +205,7 @@ fn typing_searches_and_enter_opens_the_best_match(cx: &mut TestAppContext) {
     let (app, _, mut vcx) = new_app(cx, 1100.);
     let vcx = &mut vcx;
     app.update(vcx, |app, cx| {
-        app.open_settings(None);
+        app.open_settings(None, cx);
         cx.notify();
     });
     frames(vcx);
@@ -239,7 +239,7 @@ fn esc_clears_the_search_before_leaving_settings(cx: &mut TestAppContext) {
     let (app, _, mut vcx) = new_app(cx, 1100.);
     let vcx = &mut vcx;
     app.update(vcx, |app, cx| {
-        app.open_settings(Some(Page::Calls));
+        app.open_settings(Some(Page::Calls), cx);
         cx.notify();
     });
     frames(vcx);
@@ -268,7 +268,7 @@ fn a_narrow_window_shows_results_in_place_of_the_list(cx: &mut TestAppContext) {
     let (app, _, mut vcx) = new_app(cx, 600.);
     let vcx = &mut vcx;
     app.update(vcx, |app, cx| {
-        app.open_settings(None);
+        app.open_settings(None, cx);
         cx.notify();
     });
     frames(vcx);
@@ -291,7 +291,7 @@ fn account_rows_open_their_editors(cx: &mut TestAppContext) {
     let (app, shell, mut vcx) = new_app_sized(cx, 1100., 1600.);
     let vcx = &mut vcx;
     app.update(vcx, |app, cx| {
-        app.demo_settings(Page::Account);
+        app.demo_settings(Page::Account, cx);
         cx.notify();
     });
     frames(vcx);
@@ -309,7 +309,7 @@ fn notifications_live_on_their_page_and_reset_asks_first(cx: &mut TestAppContext
     let (app, shell, mut vcx) = new_app_sized(cx, 1100., 3000.);
     let vcx = &mut vcx;
     app.update(vcx, |app, cx| {
-        app.demo_settings(Page::Account);
+        app.demo_settings(Page::Account, cx);
         cx.notify();
     });
     frames(vcx);
@@ -335,7 +335,7 @@ fn privacy_rules_open_over_the_page_and_esc_closes_them_first(cx: &mut TestAppCo
     let (app, _, mut vcx) = new_app_sized(cx, 1100., 2400.);
     let vcx = &mut vcx;
     app.update(vcx, |app, cx| {
-        app.demo_settings(Page::Account);
+        app.demo_settings(Page::Account, cx);
         app.show_settings_page(Page::Privacy, cx);
     });
     frames(vcx);
@@ -423,8 +423,8 @@ fn leaving_the_calls_page_disarms_the_push_to_talk_capture(cx: &mut TestAppConte
     let armed = |app: &Entity<QuillApp>, vcx: &mut VisualTestContext| {
         app.read_with(vcx, |app, _| app.group_call.ptt_capture)
     };
-    app.update(vcx, |app, _| {
-        app.open_settings(Some(Page::Calls));
+    app.update(vcx, |app, cx| {
+        app.open_settings(Some(Page::Calls), cx);
         app.group_call.ptt_capture = true;
         app.switch_settings_page(Page::Privacy);
     });

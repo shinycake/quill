@@ -208,7 +208,7 @@ impl QuillApp {
     fn open_ai_apply_hotkey_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.close_ai_compose(cx);
         self.close_kit_dialog_if_done(DialogKind::AiCompose, window, cx);
-        self.open_settings(Some(Page::Shortcuts));
+        self.open_settings(Some(Page::Shortcuts), cx);
         cx.notify();
     }
 }

@@ -335,11 +335,11 @@ fn link_members_page_and_ignore_replies_for_a_previous_link() {
         .unwrap()
         .unwrap();
     rig.ingest(&members_json(first, 5, &[1, 2]));
-    let state = &rig.driver.session.groups.invite_link_members[&13];
+    let state = &rig.driver.session.groups.invite_pages.members(13).unwrap();
     assert!(state.members.is_empty());
     assert!(state.loading);
     rig.ingest(&members_json(second, 3, &[7, 8]));
-    let state = &rig.driver.session.groups.invite_link_members[&13];
+    let state = &rig.driver.session.groups.invite_pages.members(13).unwrap();
     assert_eq!(state.invite_link, "https://t.me/+b");
     assert_eq!(state.members.len(), 2);
     assert_eq!(state.total_count, 3);
@@ -354,7 +354,7 @@ fn link_members_page_and_ignore_replies_for_a_previous_link() {
     assert_eq!(sent["offset_member"]["joined_chat_date"], 2008);
     assert_eq!(sent["invite_link"], "https://t.me/+b");
     rig.ingest(&members_json(more, 3, &[9]));
-    let state = &rig.driver.session.groups.invite_link_members[&13];
+    let state = &rig.driver.session.groups.invite_pages.members(13).unwrap();
     assert_eq!(
         state.members.iter().map(|m| m.user_id).collect::<Vec<_>>(),
         vec![7, 8, 9]
@@ -366,13 +366,7 @@ fn link_members_page_and_ignore_replies_for_a_previous_link() {
             .is_none()
     );
     rig.driver.close_chat_invite_link_members(ChatId(13));
-    assert!(
-        !rig.driver
-            .session
-            .groups
-            .invite_link_members
-            .contains_key(&13)
-    );
+    assert!(!rig.driver.session.groups.invite_pages.members(13).is_some());
 }
 
 fn link_json(link: &str, revoked: bool, primary: bool) -> String {

@@ -60,10 +60,10 @@ crate::ui::screenshot_demo::register_demos![
     // Advanced with Agent access off: its switch, and no Agent access page
     // in the sidebar.
     crate::ui::screenshot_demo::DemoSpec::chat_list("ready-settings-agent-off").setup(
-        |app, _, _| {
+        |app, _, cx| {
             quill::fast_buttons::set_persistence(false);
             quill::agent::access::set_enabled(false);
-            app.demo_settings(Page::Advanced);
+            app.demo_settings(Page::Advanced, cx);
         }
     ),
 ];
