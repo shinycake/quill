@@ -33,7 +33,7 @@ zed-rev = "d2a4fb6ded7c470be25d1541281da3882495b65b"
 
 [features]
 bench-support = ["gpui/bench-support"]
-default = []
+default = ["runtime_shaders"]
 font-kit = [
     "dep:font-kit",
     "dep:core-text",

@@ -1,3 +1,5 @@
+// Modified by the Quill project (2026) from gpui-pre-apple 0.3.9 (Apache-2.0):
+// images in textures of their own. See QUILL-CHANGES.md.
 use anyhow::{Context as _, Result, ensure};
 use etagere::BucketedAtlasAllocator;
 use gpui::{
@@ -58,6 +60,26 @@ impl PlatformAtlas for MetalAtlas {
     fn remove(&self, key: &AtlasKey) {
         self.0.lock().remove(key);
     }
+
+    fn next_use_mark(&self) -> u64 {
+        self.0.lock().next_use_mark()
+    }
+
+    fn emoji_glyph_count(&self) -> usize {
+        self.0.lock().emoji_glyph_count()
+    }
+
+    fn remove_emoji_glyphs_unused_since(&self, mark: u64) -> usize {
+        self.0.lock().remove_emoji_glyphs_unused_since(mark)
+    }
+
+    fn text_glyph_count(&self) -> usize {
+        self.0.lock().text_glyph_count()
+    }
+
+    fn remove_text_glyphs_unused_since(&self, mark: u64) -> usize {
+        self.0.lock().remove_text_glyphs_unused_since(mark)
+    }
 }
 
 impl AtlasBackend for MetalAtlasTextures {
@@ -67,13 +89,17 @@ impl AtlasBackend for MetalAtlasTextures {
         size: Size<DevicePixels>,
         bytes: &[u8],
     ) -> Result<AtlasTile> {
-        let upload = AtlasUpload::new(kind, size, bytes)?;
-        let tile = self.allocate(size, kind)?;
-        let texture = self
-            .texture(tile.texture_id)
-            .context("looking up allocated atlas texture")?;
-        texture.upload(tile.bounds.origin, &upload)?;
-        Ok(tile)
+        self.insert_tile(kind, size, bytes, false)
+    }
+
+    // QUILL: images in textures of their own.
+    fn insert_image(
+        &mut self,
+        kind: AtlasTextureKind,
+        size: Size<DevicePixels>,
+        bytes: &[u8],
+    ) -> Result<AtlasTile> {
+        self.insert_tile(kind, size, bytes, true)
     }
 
     fn remove(&mut self, tile: AtlasTile) {
@@ -106,10 +132,27 @@ impl AtlasBackend for MetalAtlasTextures {
 }
 
 impl MetalAtlasTextures {
+    fn insert_tile(
+        &mut self,
+        kind: AtlasTextureKind,
+        size: Size<DevicePixels>,
+        bytes: &[u8],
+        images: bool,
+    ) -> Result<AtlasTile> {
+        let upload = AtlasUpload::new(kind, size, bytes)?;
+        let tile = self.allocate(size, kind, TileClass::of(images, size))?;
+        let texture = self
+            .texture(tile.texture_id)
+            .context("looking up allocated atlas texture")?;
+        texture.upload(tile.bounds.origin, &upload)?;
+        Ok(tile)
+    }
+
     fn allocate(
         &mut self,
         size: Size<DevicePixels>,
         texture_kind: AtlasTextureKind,
+        class: TileClass,
     ) -> Result<AtlasTile> {
         {
             let textures = match texture_kind {
@@ -118,16 +161,18 @@ impl MetalAtlasTextures {
                 AtlasTextureKind::Subpixel => unreachable!(),
             };
 
+            // QUILL: only textures holding the same class of tile.
             if let Some(tile) = textures
                 .iter_mut()
                 .rev()
+                .filter(|texture| texture.class == class)
                 .find_map(|texture| texture.allocate(size))
             {
                 return Ok(tile);
             }
         }
 
-        let texture = self.push_texture(size, texture_kind)?;
+        let texture = self.push_texture(size, texture_kind, class)?;
         texture.allocate(size).context("allocating atlas tile")
     }
 
@@ -135,6 +180,7 @@ impl MetalAtlasTextures {
         &mut self,
         min_size: Size<DevicePixels>,
         kind: AtlasTextureKind,
+        class: TileClass,
     ) -> Result<&mut MetalAtlasTexture> {
         const DEFAULT_ATLAS_SIZE: Size<DevicePixels> = Size {
             width: DevicePixels(1024),
@@ -145,9 +191,19 @@ impl MetalAtlasTextures {
             width: DevicePixels(16384),
             height: DevicePixels(16384),
         };
-        let size = min_size.min(&MAX_ATLAS_SIZE).max(&DEFAULT_ATLAS_SIZE);
+        // QUILL: small images get 512² textures (`TileClass`).
+        const SMALL_IMAGE_ATLAS_SIZE: Size<DevicePixels> = Size {
+            width: DevicePixels(512),
+            height: DevicePixels(512),
+        };
+        let floor = if class == TileClass::SmallImages {
+            SMALL_IMAGE_ATLAS_SIZE
+        } else {
+            DEFAULT_ATLAS_SIZE
+        };
+        let size = min_size.min(&MAX_ATLAS_SIZE).max(&floor);
         let texture_descriptor = MTLTextureDescriptor::new();
-        // SAFETY: Both dimensions are clamped to the existing 1024..=16384 atlas size limits.
+        // SAFETY: Both dimensions are clamped to the 512..=16384 atlas size limits.
         unsafe {
             texture_descriptor.setWidth(size.width.0 as usize);
             texture_descriptor.setHeight(size.height.0 as usize);
@@ -199,6 +255,7 @@ impl MetalAtlasTextures {
             allocator: etagere::BucketedAtlasAllocator::new(size_to_etagere(size)),
             metal_texture,
             live_atlas_keys: 0,
+            class,
         };
 
         Ok(texture_list.textures[index].insert(atlas_texture))
@@ -219,6 +276,8 @@ struct MetalAtlasTexture {
     allocator: BucketedAtlasAllocator,
     metal_texture: Retained<ProtocolObject<dyn MTLTexture>>,
     live_atlas_keys: u32,
+    /// QUILL: the class of every tile it holds.
+    class: TileClass,
 }
 
 impl MetalAtlasTexture {
@@ -337,6 +396,33 @@ fn point_from_etagere(value: etagere::Point) -> Point<DevicePixels> {
     }
 }
 
+/// QUILL: which tiles share a texture. Images never share one with glyphs
+/// and SVGs (a long-lived glyph kept a photo's texture alive). Small images
+/// (avatars, custom emoji: both sides at most 128 px) get 512² (1 MB)
+/// textures of their own, so the few left on screen after browsing keep
+/// 1 MB textures instead of 4 MB ones larger pictures came and went in.
+/// Larger images keep upstream's 1024² textures: animation frames of a few
+/// hundred pixels rotate through one, where a smaller texture would hold
+/// one frame and be made anew for each.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum TileClass {
+    Glyphs,
+    SmallImages,
+    Images,
+}
+
+impl TileClass {
+    fn of(images: bool, size: Size<DevicePixels>) -> Self {
+        if !images {
+            Self::Glyphs
+        } else if size.width.0 <= 128 && size.height.0 <= 128 {
+            Self::SmallImages
+        } else {
+            Self::Images
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -414,9 +500,11 @@ mod tests {
             return;
         };
 
+        // QUILL: larger than a small image (`TileClass`), so it shares the
+        // big tiles' texture.
         let small = Size {
-            width: DevicePixels(64),
-            height: DevicePixels(64),
+            width: DevicePixels(200),
+            height: DevicePixels(200),
         };
         let big = Size {
             width: DevicePixels(700),
@@ -434,6 +522,75 @@ mod tests {
         atlas.remove(&big_key_a);
         let tile_b = insert_tile(&atlas, big_key_b, big);
         assert_eq!(tile_b.texture_id, keeper_tile.texture_id);
+    }
+
+    fn make_emoji_key(glyph: u32) -> AtlasKey {
+        AtlasKey::Glyph(gpui::RenderGlyphParams {
+            font_id: gpui::FontId(0),
+            glyph_id: gpui::GlyphId(glyph),
+            font_size: gpui::px(16.),
+            subpixel_variant: Point::default(),
+            scale_factor: 2.,
+            is_emoji: true,
+            subpixel_rendering: false,
+            dilation: 0,
+        })
+    }
+
+    /// QUILL: a color emoji drawn while a photo was on screen landed in the
+    /// photo's texture and kept it alive after the photo left.
+    #[test]
+    fn test_glyphs_never_keep_an_image_texture_alive() {
+        let Some(atlas) = create_atlas() else {
+            return;
+        };
+        let photo = make_image_key(1, 0);
+        let emoji = make_emoji_key(7);
+        let photo_tile = insert_tile(
+            &atlas,
+            photo.clone(),
+            Size {
+                width: DevicePixels(720),
+                height: DevicePixels(540),
+            },
+        );
+        let emoji_tile = insert_tile(
+            &atlas,
+            emoji,
+            Size {
+                width: DevicePixels(64),
+                height: DevicePixels(64),
+            },
+        );
+        assert_eq!(emoji_tile.texture_id.kind, photo_tile.texture_id.kind);
+        assert_ne!(emoji_tile.texture_id, photo_tile.texture_id);
+        atlas.remove(&photo);
+        assert!(atlas.metal_texture(photo_tile.texture_id).is_none());
+        assert!(atlas.metal_texture(emoji_tile.texture_id).is_some());
+    }
+
+    /// QUILL: an avatar left on screen kept the 4 MB texture larger
+    /// pictures had come and gone in.
+    #[test]
+    fn test_small_pictures_get_small_textures() {
+        let Some(atlas) = create_atlas() else {
+            return;
+        };
+        let side = |tile: &AtlasTile| {
+            let texture = atlas.metal_texture(tile.texture_id).unwrap();
+            (texture.width(), texture.height())
+        };
+        let size = |width, height| Size {
+            width: DevicePixels(width),
+            height: DevicePixels(height),
+        };
+        let avatar = insert_tile(&atlas, make_image_key(1, 0), size(92, 92));
+        assert_eq!(side(&avatar), (512, 512));
+        let photo = insert_tile(&atlas, make_image_key(2, 0), size(720, 540));
+        assert_ne!(photo.texture_id, avatar.texture_id);
+        assert_eq!(side(&photo), (1024, 1024));
+        let emoji = insert_tile(&atlas, make_emoji_key(7), size(64, 64));
+        assert_eq!(side(&emoji), (1024, 1024));
     }
 
     #[test]
@@ -500,7 +657,7 @@ mod tests {
         ] {
             let texture = state
                 .backend
-                .push_texture(size(DevicePixels(8), DevicePixels(8)), kind)?;
+                .push_texture(size(DevicePixels(8), DevicePixels(8)), kind, TileClass::Glyphs)?;
             texture.upload(
                 Point::default(),
                 &AtlasUpload::new(
