@@ -53,6 +53,7 @@ pub mod clock_style;
 pub mod code_language;
 pub mod collectible_info;
 pub mod community_mode;
+pub mod community_row;
 pub mod composer;
 pub mod composer_doc;
 pub mod connect;
