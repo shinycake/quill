@@ -264,7 +264,7 @@ impl QuillApp {
                 return;
             }
         }
-        if self.account.passcode.locked || !self.live_pip_source_alive(source) {
+        if self.account.passcode.is_locked() || !self.live_pip_source_alive(source) {
             self.close_live_pip(cx);
             return;
         }

@@ -202,7 +202,7 @@ fn the_chooser_stops_the_shared_source_and_cancel_keeps_it(cx: &mut TestAppConte
 }
 
 #[gpui_kit::test]
-fn without_access_the_privacy_box_shows_and_escape_closes_it(cx: &mut TestAppContext) {
+fn without_access_the_privacy_box_shows_and_its_windows_escape_closes_it(cx: &mut TestAppContext) {
     let (app, mut vcx) = new_app(cx, ScreenAccess::Denied);
     let vcx = &mut vcx;
     app.update_in(vcx, |app, _, cx| {
@@ -221,8 +221,16 @@ fn without_access_the_privacy_box_shows_and_escape_closes_it(cx: &mut TestAppCon
             "no chooser without access"
         );
         assert!(
-            app.dismiss_topmost_layer(window, cx),
-            "Escape closes the box"
+            !app.dismiss_topmost_layer(window, cx),
+            "the main window's Escape leaves the call window's box"
+        );
+        assert!(
+            !app.escape_screen_privacy(false, cx),
+            "nor does the 1:1 call window's"
+        );
+        assert!(
+            app.escape_screen_privacy(true, cx),
+            "Escape in the voice chat window closes the box"
         );
         assert!(app.screen_share.privacy_for.is_none());
     });

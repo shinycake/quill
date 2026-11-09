@@ -210,7 +210,7 @@ impl WindowSlot {
             viewer: ViewerUi::new(),
             chat_search_input: QuillApp::new_chat_search_field(window, cx),
             share: ShareUi::new(window, cx, forward_search_input),
-            lock_field: LockField::new(window, cx, app.account.passcode.locked),
+            lock_field: LockField::new(window, cx, app.account.passcode.is_locked()),
             surfaces: Surfaces::new(std::time::Instant::now()),
             motion: MotionState::default(),
             menu: MenuFocus::new(cx),

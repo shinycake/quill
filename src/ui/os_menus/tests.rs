@@ -170,7 +170,7 @@ fn window_menu_new_group_opens_the_create_group_box(cx: &mut TestAppContext) {
 fn window_menu_items_do_nothing_while_locked(cx: &mut TestAppContext) {
     let (app, mut vcx) = new_app(cx);
     app.update_in(&mut vcx, |app, _, _| {
-        app.account.passcode.locked = true;
+        app.account.passcode.force_locked(true);
         assert!(!app.os_menu_session_usable());
     });
     vcx.dispatch_action(WindowMenuAddContact);

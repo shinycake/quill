@@ -661,3 +661,31 @@ fn a_found_bot_is_added_and_asked_about_on_leave(cx: &mut TestAppContext) {
     assert_eq!(view(&app, vcx), View::Hub);
     assert_eq!(note(&app, vcx).as_deref(), Some(QuillApp::DEMO_LINE));
 }
+
+/// With the main window choosing the start page sticker, a sticker clicked
+/// in a chat window's panel is that window's, not the start page's.
+#[gpui_kit::test]
+fn a_chat_windows_sticker_click_is_not_the_start_pages(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    seed(&app, vcx, true);
+    let file_id = quill::ids::FileId(902);
+    open(&app, vcx);
+    go(&app, vcx, View::StartPage);
+    go(&app, vcx, View::StickerPick);
+    let other = quill::ids::ChatId(12);
+    act(&app, vcx, |app, window, cx| {
+        app.open_chat_in_new_window(other, window, cx)
+    });
+    let taken = app.update(vcx, |app, cx| {
+        app.in_window_scope(Some(other), cx, |app, cx| {
+            app.route_business_start_page_sticker(file_id, cx)
+        })
+    });
+    assert_eq!(taken, Some(false), "the chat window's click is its own");
+    assert_eq!(view(&app, vcx), View::StickerPick, "still choosing");
+    let taken = app.update(vcx, |app, cx| {
+        app.route_business_start_page_sticker(file_id, cx)
+    });
+    assert!(taken, "the main window's click is the start page's");
+}

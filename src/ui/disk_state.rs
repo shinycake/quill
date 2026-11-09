@@ -340,7 +340,7 @@ impl QuillApp {
 
     fn reconnect_after_disk(&mut self, cx: &mut Context<Self>) {
         self.disk.screen_refused = false;
-        if self.account.passcode.locked {
+        if self.account.passcode.is_locked() {
             self.account.passcode.deferred_connect = true;
         } else {
             self.start_connection(cx);
@@ -382,7 +382,7 @@ impl QuillApp {
         self.bring_main_window_forward(cx);
         self.disk.full_notices += 1;
         let notice = full_disk_notice(self.disk.unwritable);
-        let locked = self.account.passcode.locked;
+        let locked = self.account.passcode.is_locked();
         self.show_os_notification(notice, None, None, locked, cx);
     }
 

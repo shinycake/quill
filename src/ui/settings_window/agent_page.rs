@@ -467,6 +467,13 @@ impl QuillApp {
         if guard::refuse_hard_if_injecting(guard::HardSurface::Settings) {
             return;
         }
+        // Only the main window draws Settings: from a chat window's menu the
+        // page opens there, brought forward.
+        if self.hand_to_main_window(cx, move |app, _, cx| {
+            app.open_agent_access_for_chat(chat_id, cx);
+        }) {
+            return;
+        }
         self.agent_ui.picked = None;
         self.open_settings(Some(Page::AgentAccess));
         self.agent_ui.page.focus_chat = Some(chat_id);

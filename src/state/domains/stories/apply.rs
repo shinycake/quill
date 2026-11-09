@@ -48,7 +48,7 @@ impl Session {
                     && let Some(chat_id) = pending.and_then(|p| p.chat_id)
                 {
                     self.stories.albums.insert(chat_id.0, albums);
-                    self.clear_story_page_op(RequestPurpose::GetChatStoryAlbums);
+                    self.clear_story_page_op(pending);
                 }
             }
             StoriesPayload::StoryAlbum { album } => {

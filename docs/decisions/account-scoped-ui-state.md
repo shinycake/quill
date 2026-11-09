@@ -95,10 +95,10 @@ views), `appearance`, `chat_prefs`, `language`, `start_files`, `first_run`,
 | `NotifyUi` (19) | `mute_menu_open`, `mute_chat`, `mute_custom_open`, `mute_time`, `ttl_picker_open`, sound pickers, `tone_upload_target`, `defaults_*`, `notifications_confirm`, sliders | `notify_clicks`, `notify_inflight`, `reply_targets`, `preview_waits` (keyed), `notification_sounds`, `polled_redraw`, `windows` |
 | `CallUi` (22) | players, `window*`, `ended_at`, `confirm`, `dialing`, `history_*`, `mic_test*`, `add_people`, `conference_link` | `notify_clicks`, `notified` (keyed), `tick_active`, `panel_view`, `sounds`, `sound_marks` |
 | `PlaybackUi` (30) | `player`, `playing_*`, `intent`, `playlist_*`, `track_length`, seek fields, `tick*`, `positions`, `playing_animation`, `autoplayed_gifs`, `gif*`, `gif_decodes`, `pending_media_seek`, `error` | `audio` (engine), `stickers` (shared player), `emoji_plays`, `inline_videos`, `userpic_videos`, `speed`, `volume`, `unmuted_volume` |
-| `GroupCallUi` (31) | dialogs, `composer`, `window*`, `chat_shown`, `pin`, levels, scrolls, `stream`, `rtmp_start`, `live_pip` | `ptt`, `ptt_clock`, `ptt_capture`, `ptt_delay_slider`, `global_ptt*` |
+| `GroupCallUi` (31) | dialogs, `composer`, `window*`, `chat_shown`, `pin`, levels, scrolls, `stream`, `rtmp_start`, `live_pip` | `ptt`, `ptt_clock`, `ptt_capture`, `global_ptt*` |
 | `AgentUi` (5) | `picked`, `consent`, `page` | `activity_shown`, `ui_send` |
 | `ConnectionUi` (9) | `status`, `generation`, `closed_noted_generation`, `note`, `note_window`, `status_traced`, `presence` | `toasts`, `toast_wake` |
-| `ChatWindows` (12) | `open`, `scope`, `last_input`, `dialog_host`, `closed`, `restore`, `save_pending` | `main`, `main_place`, `cascade`, `main_dialogs_closed`, `_key_scope` |
+| `ChatWindows` (12) | `open`, `scope`, `last_input`, `dialogs` (the owner of each kit dialog), `closed`, `restore`, `save_pending` | `main`, `main_place`, `cascade`, `main_dialogs_closed`, `_key_scope` |
 | `AuthUi` (18) | everything else | `demo_inputs` (synthetic mode) |
 
 Dialog registry (`register_dialogs!`): 189 entries; 163 `.closes(..)`, 24
@@ -1815,9 +1815,98 @@ PTT slider; nothing here overlaps it.
     (only the checkout stays); tdesktop opens it too.
   - Mini apps still have one `open_result` slot; a second answer before
     the first is drawn replaces it.
-  - The `group_call.ptt_delay_slider` entry in
-    `scripts/app-wide-fields.txt` belongs to part 1, which moved the
-    slider to `SettingsUi`.
+
+### Phase 12 (area C, part 1)
+
+Round 12 of the review, area C, findings 1 to 30, the lock findings, and
+the two part-2 findings that need a dialog host per window (47's other
+half, 53), on `claude/sm-review12-c1`.
+
+- **The lock is a render state** (docs/decisions/lock-is-a-render-state.md).
+  - A kit root plugin, `passcode::lock_layer::LockLayer`, runs last in
+    every window. While locked it drops the built surface, the kit's
+    dialog, sheet, popover and tooltip layers included, and draws the lock
+    screen alone, or nothing for a window type it does not name. Call
+    windows and notification windows stay as they are.
+  - While locked, the main window and each chat window build only their
+    lock screen (`locked_root`, `render_locked`), so no deferred overlay
+    exists to paint over it.
+  - The shell does not sync dialogs while locked, so a box neither opens,
+    closes nor moves under the lock. It is back after the unlock, in its
+    own window.
+  - `set_locked` is the one writer of the flag. `refused_while_locked` is
+    the one gate for what is not drawn: app key interceptors
+    (`intercept_keys_unlocked`), account switches, OS opens, the Dock and
+    the window menu.
+  - `close_for_lock` now also turns off the profile photo camera and
+    disarms both key captures.
+- **The agent socket pauses while locked.** Every tool and the unread
+  resource return `LOCKED_MESSAGE` (`agent::access::paused_by_lock`, a
+  process flag that only a real lock sets).
+- **Nothing switches account behind the lock.** `switch_account` refuses.
+  A notification click from another account only shows the window, and
+  a stale Dock account item only raises it. A ringing call's Answer
+  still switches (`switch_account_even_locked`).
+- **`lock_surfaces.py` covers all of `src/`.** It checks windows, helper
+  processes, captures, app-wide key hooks and action handlers. A gate
+  must be tested in a condition. Entries are keyed by `path::fn`, and a
+  `via:` entry names a function that gates. The guard also checks that
+  `set_locked` is the only writer and that `LockLayer` is registered.
+- **Each window shows its own kit dialog** (`chat_window/dialog_hosts.rs`).
+  - A kind is owned by the window that showed it. One with no owner opens
+    in the window of the last input.
+  - A chat window's boxes close with it, each with its spec's close,
+    instead of moving to the main window. Every spec now has a close,
+    except the call swap and agent request prompts, which must be
+    answered.
+  - New Topic or Edit Topic from a chat window claims the manage box for
+    that window (`claim_dialog`), so the main window's box does not turn
+    into another forum's editor.
+- **What Settings opens belongs to its page.** Closing Settings leaves the
+  page on screen, Account when none was chosen (`shown_settings_page`).
+  Account drops Log out?, and Privacy drops its rule editor, exceptions
+  list, pickers and Unblock confirmation (`close_privacy_layers`).
+  Settings is the main window's: a chat window's ⋮ actions leave it open,
+  and Agent access from a chat window hands off to the main window.
+- **The 2FA status card has its own password field**
+  (`TwoStepUi::status_check_password`), so one field is not drawn twice in
+  a frame.
+- **A box keeps the chat it was opened for.** Add to folder carries
+  `FolderUi::menu_chat`. Profile › Auto-Delete opens the picker for the
+  profile's chat. The Business start page takes a sticker only from the
+  window that shows its box.
+- **Polls wait for an answer or their screen.** The Chatbots poll and the
+  quick reply poll no longer stop after a count. The error lines that
+  outlived their box are cleared where the box opens.
+- **App prefs live outside the accounts.** The appearance, chat,
+  spellcheck, translation and settings-search prefs, the recent hashtags
+  and the custom themes moved from `accounts/primary/`, which removing
+  the first account deleted, to `<app root>/app`
+  (`settings::app_prefs_paths`). The move runs once, on first use. Each
+  item moves on its own, the app folder wins a conflict, and a marker is
+  written last.
+- **Calls and stories.**
+  - A call window's target is decided by what happens now: an active
+    call, then a ringing conference invite, then an ended call's summary.
+  - Boxes drawn in a call window take Esc there (`CALL_WINDOW_LAYERS`).
+  - The story viewer plays only while the main window is active.
+  - Story edit, cover, privacy and page ops match answers by request id.
+  - Shares that are not the composer's message use
+    `send_options_to(chat)`.
+- **The viewer acts on its item's chat.**
+  - Show in Chat and View all follow the item's chat.
+  - A viewer emptied by deletes closes through `close_media_viewer`.
+  - An account switch clears the OS media session.
+  - A chat window's viewer hold and parked intents are that window's.
+- **Not done, or not tested.**
+  - Finding 10 (recent hashtags per account) needs `composer_suggest.rs`,
+    which belongs to another area.
+  - Finding 6 was not confirmed: the link inbox retries while a link is
+    pending. The unlock pokes `wake::LINKS` anyway.
+  - The camera's close on lock, the notification-click and Dock
+    refusals, the Settings polls, the error lines and the media session
+    clear have no tests: they need ffmpeg, a second signed-in account or
+    a live driver.
 
 ### Phase 12 (area A)
 

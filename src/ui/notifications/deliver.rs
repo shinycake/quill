@@ -177,7 +177,7 @@ impl QuillApp {
                     .as_ref()
                     .filter(|(notified_on, _)| *notified_on == account)
                     .map(|(_, call_id)| *call_id),
-                locked: self.account.passcode.locked,
+                locked: self.account.passcode.is_locked(),
             })
         else {
             return;

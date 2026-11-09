@@ -20,7 +20,6 @@ use gpui_kit::component::theme::{ActiveTheme, Theme, ThemeMode};
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
-use quill::ids::AccountKey;
 use quill::lang::{Key, keys, tr};
 use quill::settings::{
     AccountPaths, AppearancePrefs, AutoNight, ChatPrefs, ThemeChoice, clamp_font_size,
@@ -82,15 +81,15 @@ impl QuillApp {
         )
     }
 
-    /// Account-rooted prefs path. Appearance is a device setting (like
-    /// Telegram's locally stored theme choice), so it lives under the
-    /// primary account's root rather than per-account data.
+    /// The app's own prefs folder (`<app root>/app`). Appearance is a
+    /// device setting (like tdesktop's locally stored theme choice), so it
+    /// lives outside every account's folder and survives removing one.
     pub(crate) fn appearance_paths() -> AccountPaths {
         // `safe_app_root` has no `./quill-data` fallback (security: never
         // scatter account state under the launch directory); without a
         // platform data dir the prefs fall back to the temp dir.
         let root = safe_app_root().unwrap_or_else(|| std::env::temp_dir().join("quill-appearance"));
-        AccountPaths::for_root(&root, &AccountKey::primary())
+        quill::settings::app_prefs_paths(&root)
     }
 
     /// Load persisted prefs (defaults when the file is missing/corrupt).

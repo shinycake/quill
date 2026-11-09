@@ -201,3 +201,31 @@ fn only_a_channel_keeps_a_leave_row(cx: &mut TestAppContext) {
     let (_app, mut vcx) = open_demo(cx, "ready-profile-channel");
     assert!(shown(&mut vcx, "g1-leave-chat"));
 }
+
+/// More › Auto-Delete opens the timer box for the profile's chat over the
+/// profile, whatever chat the window shows: it does not open the chat
+/// first (which a chat window of its own would have taken).
+#[gpui_kit::test]
+fn auto_delete_opens_for_the_profiles_chat_without_opening_it(cx: &mut TestAppContext) {
+    let (app, mut vcx) = open_demo(cx, "ready-profile-user");
+    let vcx = &mut vcx;
+    let shown_chat = app.read_with(vcx, |app, _| app.session().and_then(|s| s.open_chat));
+    let target = super::action_row::ProfileTarget {
+        kind: quill::profile_actions::ProfilePeerKind::User { is_bot: false },
+        chat: Some(ChatId(PROFILE_GROUP)),
+        user: None,
+    };
+    app.update_in(vcx, |app, window, cx| {
+        app.run_profile_menu_entry(
+            quill::profile_actions::ProfileMenuEntry::AutoDelete,
+            target,
+            window,
+            cx,
+        );
+    });
+    frames(vcx);
+    app.read_with(vcx, |app, _| {
+        assert_eq!(app.notify.ttl_picker, Some(ChatId(PROFILE_GROUP)));
+        assert_eq!(app.session().and_then(|s| s.open_chat), shown_chat);
+    });
+}

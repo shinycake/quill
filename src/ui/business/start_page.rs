@@ -71,15 +71,19 @@ impl QuillApp {
     }
 
     /// A sticker clicked in the panel while it chooses the start page
-    /// sticker. `true` when it was taken here (it is not sent). Only the
-    /// main window shows the Business page, so a chat window's pick is
-    /// never its: it goes to that window's chat.
+    /// sticker. `true` when it was taken here (it is not sent). Only a
+    /// click in the window that shows the box counts: another window's
+    /// sticker panel sends to its own chat.
     pub(in crate::ui) fn route_business_start_page_sticker(
         &mut self,
         file_id: FileId,
         cx: &mut Context<Self>,
     ) -> bool {
-        if self.windows.in_window() || self.business_view() != Some(View::StickerPick) {
+        if self.business_view() != Some(View::StickerPick)
+            || !self
+                .windows
+                .dialog_may_show_in(crate::ui::shell::DialogKind::Business, self.windows.scope)
+        {
             return false;
         }
         let found = self.session().and_then(|s| {

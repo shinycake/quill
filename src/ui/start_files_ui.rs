@@ -41,7 +41,7 @@ impl QuillApp {
             .live
             .as_ref()
             .is_some_and(|live| matches!(live.driver.session.auth, AuthorizationState::Ready));
-        if !ready || self.account.passcode.locked {
+        if !ready || self.account.passcode.is_locked() {
             return;
         }
         let files = quill::start_files::take_files();

@@ -376,7 +376,7 @@ impl QuillApp {
             return;
         }
         let reply_to = self.send_reply_for(chat_id, cx);
-        let options = self.composer_send_options();
+        let options = self.send_options_to(chat_id);
         let Some(live) = self.live.as_mut() else {
             self.close_location_picker(cx);
             self.connection.set_note(StatusNote::info(tr(
@@ -410,5 +410,6 @@ crate::ui::shell::register_dialogs! {
         3795,
         |app| app.location_picker_open(),
         QuillApp::build_location_picker_dialog,
-    ),
+    )
+    .close(|app, _, cx| app.close_location_picker(cx)),
 }

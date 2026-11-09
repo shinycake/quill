@@ -536,7 +536,8 @@ crate::ui::shell::register_dialogs! {
         6590,
         |app| app.preferences.app_theme.editor.is_some(),
         QuillApp::build_theme_editor_dialog,
-    ),
+    )
+    .close(|app, _, cx| app.close_theme_editor(cx)),
 }
 
 #[cfg(test)]

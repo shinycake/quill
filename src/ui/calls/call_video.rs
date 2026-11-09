@@ -162,7 +162,10 @@ impl QuillApp {
     /// `PanelBackground`), for the call or the ended call's summary.
     pub(crate) fn call_peer_backdrop(&self) -> Option<Arc<RenderImage>> {
         let session = self.session()?;
-        let user_id = match (&session.calls.active_call, &session.calls.summary) {
+        let user_id = match (
+            &session.calls.active_call,
+            crate::ui::call_conference_ui::shown_call_summary(session),
+        ) {
             (Some(call), _) => call.user_id,
             (None, Some(summary)) => summary.user_id,
             (None, None) => return None,
@@ -242,6 +245,8 @@ pub(crate) struct CallWindowRoot {
     /// Which pictures had a frame at the last draw: the panel lays out
     /// around them, so it is redrawn when that changes.
     drawn: (bool, bool),
+    /// Takes keyboard focus so Esc reaches the window's boxes.
+    focus: FocusHandle,
 }
 
 impl CallWindowRoot {
@@ -260,6 +265,7 @@ impl CallWindowRoot {
             remote: cx.new(|cx| CallPictureView::new(owner, CallPicture::Remote, cx)),
             local: cx.new(|cx| CallPictureView::new(owner, CallPicture::Local, cx)),
             drawn: (false, false),
+            focus: cx.focus_handle(),
         }
     }
 }
@@ -289,10 +295,27 @@ impl Render for CallWindowRoot {
             let panel = self.panel.entity_id();
             cx.defer(move |cx| cx.notify(panel));
         }
+        if window.focused(cx).is_none() {
+            self.focus.focus(window, cx);
+        }
         let cached = || StyleRefinement::default().size_full();
         let (w, h) = PREVIEW_SIZE;
         div()
             .size_full()
+            .track_focus(&self.focus)
+            // Esc closes the screen privacy box drawn over this window
+            // (`esc_stack::CALL_WINDOW_LAYERS`); the call never closes on it.
+            .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
+                if !quill::calls::tile_pin::exits_fullscreen(&event.keystroke.key) {
+                    return;
+                }
+                let Some(owner) = this.owner.upgrade() else {
+                    return;
+                };
+                if owner.update(cx, |app, cx| app.escape_screen_privacy(false, cx)) {
+                    cx.stop_propagation();
+                }
+            }))
             .relative()
             .overflow_hidden()
             .bg(call_chrome::surface())

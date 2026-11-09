@@ -19,6 +19,9 @@ pub(crate) struct TwoStepUi {
     /// drawn in the same frame, and one field painted in two places
     /// notifies at every paint (`lock-field-per-window.md`).
     pub(super) check_password: Entity<InputState>,
+    /// The same check card on the 2FA box's Status view. Its own field for
+    /// the same reason: the box is drawn over the Privacy page.
+    pub(super) status_check_password: Entity<InputState>,
     pub(super) new_password: Entity<InputState>,
     pub(super) hint: Entity<TextareaState>,
     pub(super) email: Entity<TextareaState>,
@@ -45,12 +48,16 @@ impl TwoStepUi {
                 .placeholder(tr(keys::Q_PREFS_CURRENT_PASSWORD))
                 .submit_on_enter(false)
         });
-        let check_password = cx.new(|cx| {
-            InputState::new(window, cx)
-                .masked(true)
-                .placeholder(tr(keys::Q_PREFS_CURRENT_PASSWORD))
-                .submit_on_enter(false)
-        });
+        let check_field = |window: &mut Window, cx: &mut Context<QuillApp>| {
+            cx.new(|cx| {
+                InputState::new(window, cx)
+                    .masked(true)
+                    .placeholder(tr(keys::Q_PREFS_CURRENT_PASSWORD))
+                    .submit_on_enter(false)
+            })
+        };
+        let check_password = check_field(window, cx);
+        let status_check_password = check_field(window, cx);
         let twofa_new_password = cx.new(|cx| {
             InputState::new(window, cx)
                 .masked(true)
@@ -79,6 +86,7 @@ impl TwoStepUi {
             view: TwofaView::Status,
             current_password: twofa_current_password,
             check_password,
+            status_check_password,
             new_password: twofa_new_password,
             hint: twofa_hint,
             email: twofa_email,

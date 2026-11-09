@@ -34,6 +34,9 @@ use crate::ui::user_error::user_error_for;
 mod body;
 mod cover;
 #[cfg(test)]
+mod dialog_host_tests;
+mod dialog_hosts;
+#[cfg(test)]
 mod lock_tests;
 #[cfg(test)]
 mod player_box_tests;
@@ -70,7 +73,7 @@ use quill::state::ChatSummary;
 pub(in crate::ui) use routing::ChatOpen;
 pub(in crate::ui) use scoped::ScopedApp;
 pub(in crate::ui) use slot::scope_probe;
-use view::ChatWindowView;
+pub(in crate::ui) use view::ChatWindowView;
 pub(in crate::ui) use view::WindowScope;
 
 /// The open chat windows and the scope bookkeeping of the account on
@@ -84,8 +87,8 @@ pub(crate) struct ChatWindows {
     /// The window the last input event happened in (`None`: the main
     /// window): a dialog it asks for opens there.
     pub(super) last_input: Option<ChatId>,
-    /// The window showing the kit dialog (`Some(None)`: the main window).
-    dialog_host: Option<Option<ChatId>>,
+    /// Which window shows each kit dialog (`dialog_hosts`).
+    dialogs: dialog_hosts::DialogHosts,
     /// A write of the open windows is scheduled (`saved`).
     save_pending: bool,
     /// Windows the user closed, newest last, for "Reopen closed window"
@@ -175,7 +178,7 @@ impl ChatWindows {
             open: Vec::new(),
             scope: None,
             last_input: None,
-            dialog_host: None,
+            dialogs: dialog_hosts::DialogHosts::default(),
             save_pending: false,
             closed: Vec::new(),
             restore: saved::Restore::default(),
@@ -314,26 +317,6 @@ impl ChatWindows {
         !self.open.is_empty()
     }
 
-    /// Whether the window `host` (`None`: the main window) may open the
-    /// kit dialog the app flags ask for: the one already showing a dialog
-    /// keeps it; otherwise the window the last input happened in.
-    pub(super) fn dialog_may_open_in(&self, host: Option<ChatId>) -> bool {
-        match self.dialog_host {
-            Some(current) => current == host,
-            None => self.last_input == host,
-        }
-    }
-
-    pub(super) fn dialog_opened_in(&mut self, host: Option<ChatId>) {
-        self.dialog_host = Some(host);
-    }
-
-    pub(super) fn dialog_closed_in(&mut self, host: Option<ChatId>) {
-        if self.dialog_host == Some(host) {
-            self.dialog_host = None;
-        }
-    }
-
     /// Bring the window showing `chat_id` to the front, with its compose
     /// field focused (Telegram Desktop `Window::Controller::activate`).
     /// Returns whether there was one.
@@ -386,7 +369,7 @@ impl QuillApp {
     /// offers it for every supported chat while unlocked
     /// (`SeparateWindowLocked`).
     pub(super) fn can_open_chat_window(&self, chat: &ChatSummary) -> bool {
-        chat.supported() && !self.account.passcode.locked
+        chat.supported() && !self.account.passcode.is_locked()
     }
 
     /// "Open in new window" (Telegram Desktop `showInNewWindow`): activate
@@ -587,7 +570,8 @@ impl QuillApp {
         self.connection
             .toasts
             .window_closed(chat_id, std::time::Instant::now());
-        self.windows.dialog_closed_in(Some(chat_id));
+        // Its boxes close with it, not move (`dialog_hosts`).
+        self.windows.dialogs_window_closed(chat_id);
         self.set_window_chat_active(chat_id, false);
         self.players.userpic_videos.forget_window(chat_id);
         self.players.inline_videos.forget_window(chat_id, cx);
@@ -682,7 +666,7 @@ impl QuillApp {
         let Some(session) = self.session() else {
             return window_title(None, 0, None);
         };
-        if self.account.passcode.locked {
+        if self.account.passcode.is_locked() {
             return window_title(None, 0, None);
         }
         // Every account counts, like tdesktop's `Core::App().unreadBadge()`.

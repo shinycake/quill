@@ -122,7 +122,9 @@ impl QuillApp {
         {
             return;
         }
-        if !action.stays_in_settings() {
+        // Only the main window draws Settings: an action from a chat
+        // window's menu acts there and leaves the main window's page open.
+        if !action.stays_in_settings() && !self.windows.in_window() {
             self.close_settings();
         }
         match action {

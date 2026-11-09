@@ -22,7 +22,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         let purpose = RequestPurpose::GetChatStoryAlbums;
         let extra = self.session.request(purpose, Some(chat_id));
         self.session
-            .begin_story_page_check(story_page_op_label(purpose));
+            .begin_story_page_check(story_page_op_label(purpose), extra);
         let json = get_chat_story_albums(extra, chat_id);
         self.send_story_page(purpose, extra, &json).map(Some)
     }
@@ -52,7 +52,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session
                 .request_for_story_album(purpose, chat_id, None, Some(story_album_id));
         self.session
-            .begin_story_page_check(story_page_op_label(purpose));
+            .begin_story_page_check(story_page_op_label(purpose), extra);
         let json = get_story_album_stories(extra, chat_id, story_album_id, offset, limit);
         self.send_story_page(purpose, extra, &json).map(Some)
     }
@@ -76,7 +76,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         let purpose = RequestPurpose::CreateStoryAlbum;
         let extra = self.session.request(purpose, Some(story_poster_chat_id));
         self.session
-            .begin_story_page_op(story_page_op_label(purpose));
+            .begin_story_page_op(story_page_op_label(purpose), extra);
         let json = create_story_album(extra, story_poster_chat_id, name, story_ids);
         self.send_story_page(purpose, extra, &json)
     }
@@ -100,7 +100,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             None,
         );
         self.session
-            .begin_story_page_op(story_page_op_label(purpose));
+            .begin_story_page_op(story_page_op_label(purpose), extra);
         let json = reorder_story_albums(extra, chat_id, story_album_ids);
         self.send_story_page(purpose, extra, &json)
     }
@@ -121,7 +121,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session
                 .request_for_story_album(purpose, chat_id, None, Some(story_album_id));
         self.session
-            .begin_story_page_op(story_page_op_label(purpose));
+            .begin_story_page_op(story_page_op_label(purpose), extra);
         let json = delete_story_album(extra, chat_id, story_album_id);
         self.send_story_page(purpose, extra, &json)
     }
@@ -145,7 +145,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         let purpose = RequestPurpose::SetStoryAlbumName;
         let extra = self.session.request(purpose, Some(chat_id));
         self.session
-            .begin_story_page_op(story_page_op_label(purpose));
+            .begin_story_page_op(story_page_op_label(purpose), extra);
         let json = set_story_album_name(extra, chat_id, story_album_id, name);
         self.send_story_page(purpose, extra, &json)
     }
@@ -166,7 +166,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         let purpose = RequestPurpose::AddStoryAlbumStories;
         let extra = self.session.request(purpose, Some(chat_id));
         self.session
-            .begin_story_page_op(story_page_op_label(purpose));
+            .begin_story_page_op(story_page_op_label(purpose), extra);
         let json = add_story_album_stories(extra, chat_id, story_album_id, story_ids);
         self.send_story_page(purpose, extra, &json)
     }
@@ -185,7 +185,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         let purpose = RequestPurpose::RemoveStoryAlbumStories;
         let extra = self.session.request(purpose, Some(chat_id));
         self.session
-            .begin_story_page_op(story_page_op_label(purpose));
+            .begin_story_page_op(story_page_op_label(purpose), extra);
         let json = remove_story_album_stories(extra, chat_id, story_album_id, story_ids);
         self.send_story_page(purpose, extra, &json)
     }
@@ -205,7 +205,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         let purpose = RequestPurpose::ReorderStoryAlbumStories;
         let extra = self.session.request(purpose, Some(chat_id));
         self.session
-            .begin_story_page_op(story_page_op_label(purpose));
+            .begin_story_page_op(story_page_op_label(purpose), extra);
         let json = reorder_story_album_stories(extra, chat_id, story_album_id, story_ids);
         self.send_story_page(purpose, extra, &json)
     }
@@ -232,7 +232,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         let purpose = RequestPurpose::GetChatArchivedStories;
         let extra = self.session.request(purpose, Some(chat_id));
         self.session
-            .begin_story_page_check(story_page_op_label(purpose));
+            .begin_story_page_check(story_page_op_label(purpose), extra);
         let json = get_chat_archived_stories(extra, chat_id, from_story_id, limit);
         self.send_story_page(purpose, extra, &json).map(Some)
     }
@@ -259,7 +259,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         let purpose = RequestPurpose::GetChatPostedToChatPageStories;
         let extra = self.session.request(purpose, Some(chat_id));
         self.session
-            .begin_story_page_check(story_page_op_label(purpose));
+            .begin_story_page_check(story_page_op_label(purpose), extra);
         let json = get_chat_posted_to_chat_page_stories(extra, chat_id, from_story_id, limit);
         let sent = self.send_story_page(purpose, extra, &json).map(Some);
         // Phase 9.7: a fresh first page restarts the list — the server only
@@ -289,7 +289,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session
                 .request_for_story_album(purpose, chat_id, Some(story_ids.to_vec()), None);
         self.session
-            .begin_story_page_op(story_page_op_label(purpose));
+            .begin_story_page_op(story_page_op_label(purpose), extra);
         let json = set_chat_pinned_stories(extra, chat_id, story_ids);
         self.send_story_page(purpose, extra, &json)
     }

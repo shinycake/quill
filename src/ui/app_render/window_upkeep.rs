@@ -47,21 +47,35 @@ impl QuillApp {
         self.gift_boxes_upkeep(window, cx);
     }
 
-    /// The gift and Grams boxes' follow-ups, in the window that hosts the
-    /// kit dialog (`dialog_may_open_in`): a box opened in a chat window
+    /// The gift and Grams boxes' follow-ups, each in the window that hosts
+    /// its kit dialog (`dialog_may_show_in`): a box opened in a chat window
     /// goes on while the main window is minimized or closed, and its
     /// toasts and password field are that window's.
     fn gift_boxes_upkeep(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if !self.windows.dialog_may_open_in(self.windows.scope) {
-            return;
-        }
+        use crate::ui::shell::DialogKind;
+        let here = self.windows.scope;
         // Gift market: an auction whose state arrived, the followed
         // auction, the forge, toasts and sticker downloads.
-        self.gift_market_frame_upkeep(window, cx);
+        if self
+            .windows
+            .dialog_may_show_in(DialogKind::GiftMarket, here)
+        {
+            self.gift_market_frame_upkeep(window, cx);
+        }
         // Gift transfer: Fragment's export page, the transferred toast.
-        self.gift_transfer_frame_upkeep(window, cx);
+        if self
+            .windows
+            .dialog_may_show_in(DialogKind::GiftTransfer, here)
+        {
+            self.gift_transfer_frame_upkeep(window, cx);
+        }
         // Grams: Fragment's withdrawal page, the password field.
-        self.grams_withdraw_frame_upkeep(window, cx);
+        if self
+            .windows
+            .dialog_may_show_in(DialogKind::GramsWithdraw, here)
+        {
+            self.grams_withdraw_frame_upkeep(window, cx);
+        }
     }
 
     /// The per-window half of the poll loop, run once for every window

@@ -116,7 +116,7 @@ crate::ui::shell::register_dialogs! {
     /// The chat's folders.
     FolderMenu => DialogSpec::new(
         2934,
-        |app| app.folders.menu_open,
+        |app| app.folders.menu_chat.is_some(),
         QuillApp::build_folder_menu_dialog,
     )
     .close(|app, _, cx| app.close_folder_menu(cx)),

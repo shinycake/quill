@@ -49,6 +49,8 @@ pub enum StoryPageOpState {
 pub struct StoryPageOp {
     pub label: String,
     pub state: StoryPageOpState,
+    /// The call the op tracks: only its answer moves `state`.
+    pub request: Option<crate::ids::RequestId>,
 }
 
 /// Phase 9.7: the status-line label for a story-page request purpose —
@@ -145,8 +147,10 @@ mod tests {
                 None,
                 Some(7),
             );
-            session
-                .begin_story_page_check(story_page_op_label(RequestPurpose::GetStoryAlbumStories));
+            session.begin_story_page_check(
+                story_page_op_label(RequestPurpose::GetStoryAlbumStories),
+                extra,
+            );
             (extra, ids.to_vec())
         };
         let (extra, _) = fetch(&mut session, &[301, 302]);
@@ -224,7 +228,10 @@ mod tests {
         let (mut session, sink) = session();
         let seq = AtomicU64::new(1);
         let extra = session.request(RequestPurpose::GetChatArchivedStories, Some(ChatId(11)));
-        session.begin_story_page_check(story_page_op_label(RequestPurpose::GetChatArchivedStories));
+        session.begin_story_page_check(
+            story_page_op_label(RequestPurpose::GetChatArchivedStories),
+            extra,
+        );
         assert!(matches!(
             session.stories.page_op.as_ref().map(|op| &op.state),
             Some(StoryPageOpState::Checking)
@@ -251,7 +258,7 @@ mod tests {
         let (mut session, sink) = session();
         let seq = AtomicU64::new(1);
         let extra = session.request(RequestPurpose::CreateStoryAlbum, Some(ChatId(11)));
-        session.begin_story_page_op(story_page_op_label(RequestPurpose::CreateStoryAlbum));
+        session.begin_story_page_op(story_page_op_label(RequestPurpose::CreateStoryAlbum), extra);
         assert!(matches!(
             session.stories.page_op.as_ref().map(|op| &op.state),
             Some(StoryPageOpState::Sending)
@@ -271,7 +278,7 @@ mod tests {
         ));
         assert_eq!(session.stories.albums[&11][0].name, "New");
         let extra = session.request(RequestPurpose::DeleteStoryAlbum, Some(ChatId(11)));
-        session.begin_story_page_op(story_page_op_label(RequestPurpose::DeleteStoryAlbum));
+        session.begin_story_page_op(story_page_op_label(RequestPurpose::DeleteStoryAlbum), extra);
         apply_json(
             &mut session,
             &seq,

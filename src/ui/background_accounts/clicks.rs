@@ -172,6 +172,9 @@ impl QuillApp {
                     continue;
                 }
                 ClickPlan::Ignore => continue,
+                // tdesktop's `openNotificationMessage` only shows the
+                // window while locked; the click has done that already.
+                ClickPlan::SwitchThenOpen(_) if self.refused_while_locked() => continue,
                 ClickPlan::SwitchThenOpen(_) => {}
             }
             self.switch_account(&click.account, "", window, cx);

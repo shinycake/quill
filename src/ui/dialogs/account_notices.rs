@@ -178,6 +178,25 @@ impl QuillApp {
         cx.notify();
     }
 
+    /// Esc / backdrop: dismisses the front notice when it can be
+    /// dismissed (the others wait for their own button).
+    pub(crate) fn dismiss_account_notice(&mut self, cx: &mut Context<Self>) {
+        match self.account_notice() {
+            Some(AccountNotice::Service) => {
+                if let Some(live) = self.live.as_mut() {
+                    live.driver.session.dismiss_service_notice();
+                } else if let Some(demo) = self.demo_session.as_mut() {
+                    demo.dismiss_service_notice();
+                }
+            }
+            Some(AccountNotice::LoginPrevented) => self.auth_ui.login_prevented = None,
+            Some(AccountNotice::Frozen) => self.account_boxes.freeze_info_open = false,
+            Some(AccountNotice::AgeVerify) => self.account_boxes.age_verify_open = false,
+            _ => {}
+        }
+        cx.notify();
+    }
+
     /// One dialog for the three notices; the front one is shown.
     pub(crate) fn build_account_notice_dialog(
         app: &Entity<QuillApp>,
@@ -187,21 +206,7 @@ impl QuillApp {
     ) -> Dialog {
         let on_close =
             QuillShell::on_close_kind(app, shell, DialogKind::AccountNotice, |this, _, cx| {
-                // Esc / backdrop: the dismissible notices only.
-                match this.account_notice() {
-                    Some(AccountNotice::Service) => {
-                        if let Some(live) = this.live.as_mut() {
-                            live.driver.session.dismiss_service_notice();
-                        } else if let Some(demo) = this.demo_session.as_mut() {
-                            demo.dismiss_service_notice();
-                        }
-                    }
-                    Some(AccountNotice::LoginPrevented) => this.auth_ui.login_prevented = None,
-                    Some(AccountNotice::Frozen) => this.account_boxes.freeze_info_open = false,
-                    Some(AccountNotice::AgeVerify) => this.account_boxes.age_verify_open = false,
-                    _ => {}
-                }
-                cx.notify();
+                this.dismiss_account_notice(cx)
             });
         app.update(cx, |this, cx| {
             let notice = this.account_notice();
@@ -535,5 +540,6 @@ crate::ui::shell::register_dialogs! {
         100,
         |app| app.account_notice().is_some(),
         QuillApp::build_account_notice_dialog,
-    ),
+    )
+    .close(|app, _, cx| app.dismiss_account_notice(cx)),
 }

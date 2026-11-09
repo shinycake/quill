@@ -24,7 +24,10 @@ impl AdvancedUi {
     /// handler decides whether a screen that takes them is showing.
     pub(super) fn new(cx: &mut Context<QuillApp>, load_disk_state: bool) -> Self {
         cx.observe_keystrokes(|this, event, window, cx| {
-            this.feed_secret_code(&event.keystroke, window, cx)
+            // A passcode typed on the lock screen is not a secret code.
+            if !this.refused_while_locked() {
+                this.feed_secret_code(&event.keystroke, window, cx)
+            }
         })
         .detach();
         Self {

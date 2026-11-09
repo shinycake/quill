@@ -194,7 +194,9 @@ impl QuillApp {
     /// `chat_id`'s window was activated or deactivated, moved, resized or
     /// went to another display: a main window it now hides holds still at
     /// once, and one it no longer hides draws again, its content asking for
-    /// ticks again.
+    /// ticks again. A window in the background ends its viewer's Space
+    /// hold: the key-up goes to another window (`viewer_window_activation`
+    /// for the main window).
     pub(super) fn chat_window_placed(
         &mut self,
         chat_id: ChatId,
@@ -203,6 +205,9 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         self.windows.note_place(chat_id, active, place);
+        if !active {
+            self.in_window_scope(Some(chat_id), cx, Self::cancel_viewer_boost);
+        }
         // Asked of the platform: the main window's own activation callback
         // may run after this one.
         let main_active = assume_active()

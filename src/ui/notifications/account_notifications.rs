@@ -14,7 +14,7 @@ impl QuillApp {
         queued: QueuedNotification,
         cx: &mut Context<Self>,
     ) {
-        let locked = self.account.passcode.locked
+        let locked = self.account.passcode.is_locked()
             || self
                 .background
                 .client(account)

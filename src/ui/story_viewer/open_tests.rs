@@ -42,6 +42,8 @@ pub(super) fn open_app(
     });
     let app: Entity<QuillApp> = slot.borrow().clone().expect("the app");
     let mut vcx = VisualTestContext::from_window(handle.into(), cx);
+    // The story viewer plays only in an active window.
+    vcx.update(|window, _| window.activate_window());
     frames(&mut vcx);
     (app, vcx)
 }

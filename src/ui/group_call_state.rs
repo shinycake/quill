@@ -194,12 +194,14 @@ impl QuillApp {
             self.group_call_boxes.share_open = false;
             self.group_call_boxes.share_copied = false;
         }
-        // The rename and Settings boxes are drawn in the call window: with
-        // that window closed they would show nowhere, yet their Esc layers
-        // would still sit in the main window.
+        // The rename, Settings and screen privacy boxes are drawn in the
+        // call window: with that window closed they would show nowhere.
         if id.is_some() && self.group_call_screen.window_closed_by_user == id {
             self.group_call_screen.title_dialog = None;
             self.group_call_screen.settings_open = false;
+            if self.screen_share.privacy_for == Some(super::screen_share_state::ScreenFor::Group) {
+                self.screen_share.privacy_for = None;
+            }
         }
         if self.group_call_boxes.share_open
             && call.is_some_and(|(_, generating, ready)| !generating && !ready)

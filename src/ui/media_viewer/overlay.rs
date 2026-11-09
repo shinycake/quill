@@ -468,9 +468,10 @@ impl QuillApp {
                                 }));
                         }
                         if !menu_profile {
-                            menu = menu.item(item(tr(keys::Q_AV_SHOW_IN_CHAT), |this, _, cx| {
-                                this.show_viewer_in_chat(cx)
-                            }));
+                            menu = menu
+                                .item(item(tr(keys::Q_AV_SHOW_IN_CHAT), |this, window, cx| {
+                                    this.show_viewer_in_chat(window, cx)
+                                }));
                         }
                         if menu_chat_source {
                             menu = menu.item(item(

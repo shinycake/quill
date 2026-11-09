@@ -178,7 +178,7 @@ impl QuillApp {
         text: &str,
         cx: &mut Context<Self>,
     ) -> bool {
-        let locked = self.account.passcode.locked;
+        let locked = self.account.passcode.is_locked();
         let Some(session) = self.session().filter(|s| &s.account == account) else {
             return false;
         };

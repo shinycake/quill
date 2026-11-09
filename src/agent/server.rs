@@ -522,6 +522,9 @@ fn answer(request: &Value, id: &Value, agent: &str, conn: u64) -> String {
                 .and_then(Value::as_str)
                 .unwrap_or_default();
             if uri == super::guide::UNREAD_URI {
+                if super::access::paused_by_lock() {
+                    return error_line(id, code::ACCESS_OFF, super::access::LOCKED_MESSAGE);
+                }
                 return match super::tools::unread_resource() {
                     Ok(result) => result_line(id, result),
                     Err(super::tools::ToolError(message)) => {

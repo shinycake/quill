@@ -88,7 +88,8 @@ impl QuillApp {
     /// An account is signed in on screen and the passcode lock is off:
     /// tdesktop's "there is a session controller" check.
     pub(crate) fn os_menu_session_usable(&self) -> bool {
-        matches!(self.current_auth(), AuthorizationState::Ready) && !self.account.passcode.locked
+        matches!(self.current_auth(), AuthorizationState::Ready)
+            && !self.account.passcode.is_locked()
     }
 
     /// What the Dock menu shows now, given the registry.
@@ -142,7 +143,7 @@ impl QuillApp {
         DockModel {
             registered: registry.accounts.len(),
             accounts,
-            locked: self.account.passcode.locked,
+            locked: self.account.passcode.is_locked(),
             notifications: self.desktop_notifications_enabled(),
             player,
         }
@@ -183,6 +184,10 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         raise(window, cx);
+        // The item is not listed while locked; a stale menu only raises.
+        if self.refused_while_locked() {
+            return;
+        }
         if self.session().map(|session| &session.account) != Some(key) {
             self.switch_account(key, "", window, cx);
         }

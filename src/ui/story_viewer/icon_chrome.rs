@@ -168,7 +168,9 @@ impl QuillApp {
             return Vec::new();
         };
         let own = story.can_be_deleted;
-        let busy = self.session().is_some_and(|s| s.stories.manage.pending);
+        let busy = self
+            .session()
+            .is_some_and(|s| s.stories.manage.pending_for(item.chat_id.0, item.story_id));
         let is_video = matches!(item.kind, StoryViewerKind::Video);
         let hidden = self.story_chat_hidden(item.chat_id.0);
         let mut out = Vec::new();

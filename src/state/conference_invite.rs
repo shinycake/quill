@@ -68,6 +68,9 @@ impl Session {
                 .push((message.chat_id, message.id));
             return;
         }
+        // A new call: an earlier call's end screen goes, as it does for a
+        // new 1:1 call (`accept_call_update`).
+        self.calls.summary = None;
         self.calls.conference_invite = Some(ConferenceInvite {
             chat_id: message.chat_id,
             message_id: message.id,

@@ -132,5 +132,6 @@ crate::ui::shell::register_dialogs! {
         2960,
         |app| app.session().is_some_and(|s| s.calls.call_link_confirm.is_some()),
         QuillApp::build_call_link_leave_dialog,
-    ),
+    )
+    .close(|app, _, cx| app.cancel_call_link_leave(cx)),
 }

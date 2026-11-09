@@ -196,7 +196,7 @@ impl QuillApp {
                 .upgrade()
                 .is_none_or(|view| view.read(cx).player().is_none())
         });
-        let locked = self.account.passcode.locked;
+        let locked = self.account.passcode.is_locked();
         let ended =
             self.take_video_pips(cx, |app, link, _| locked || app.pip_message_deleted(link));
         for link in ended {

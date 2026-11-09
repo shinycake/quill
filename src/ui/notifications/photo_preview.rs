@@ -86,7 +86,7 @@ impl QuillApp {
                         };
                         // The passcode lock came up while waiting: show
                         // what a locked app shows.
-                        let now_locked = locked || app.account.passcode.locked;
+                        let now_locked = locked || app.account.passcode.is_locked();
                         let path = if now_locked { None } else { path };
                         if now_locked && !locked {
                             notification.title = quill::notify::APP_TITLE.to_string();

@@ -518,9 +518,18 @@ impl QuillApp {
         let Some(slot) = self.send_slot() else {
             return false;
         };
-        let chat_id = ChatId(slot.draft.chat_id);
+        self.chat_sends_silent(ChatId(slot.draft.chat_id))
+    }
+
+    /// Whether a send to `chat_id` of the account on screen goes without
+    /// sound: the user's "send silently" choice for that chat, else its
+    /// `default_disable_notification`.
+    pub(in crate::ui) fn chat_sends_silent(&self, chat_id: ChatId) -> bool {
+        let Some(account) = self.session().map(|session| &session.account) else {
+            return false;
+        };
         self.composer_sends
-            .silent_override(&slot.account, chat_id)
+            .silent_override(account, chat_id)
             .unwrap_or_else(|| self.chat_default_silent(chat_id))
     }
 
