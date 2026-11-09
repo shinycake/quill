@@ -210,7 +210,7 @@ fn a_field_no_list_named_goes_too(cx: &mut TestAppContext) {
     let (app, mut vcx) = new_app(cx, "ready-chats");
     frames(&mut vcx);
     app.update(&mut vcx, |app, _| {
-        app.pickers.media_panel.panel_mode = crate::ui::media_panel::PanelMode::Compose;
+        app.set_media_panel_mode(crate::ui::media_panel::PanelMode::Compose);
         app.folders.tab_menu = Some(crate::ui::folder_extras::FolderTabMenu {
             folder_id: Some(2),
             position: point(px(10.), px(10.)),

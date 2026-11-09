@@ -12,6 +12,14 @@ use std::collections::HashSet;
 use std::rc::Rc;
 use std::time::Instant;
 
+/// A pinned-chat drag (or its release slide) and the pinned list it
+/// reorders: the main list's, or the archive's. One value, so the list
+/// can never be kept apart from the drag by hand.
+pub(crate) struct PinDrag {
+    pub(super) archived: bool,
+    pub(super) reorder: quill::pin_reorder::PinReorder,
+}
+
 pub(crate) struct ChatListUi {
     /// kit Phase 3: chat-list virtualization — scroll handle owned by the
     /// app so scroll position survives re-renders (scroll restoration).
@@ -30,10 +38,9 @@ pub(crate) struct ChatListUi {
     pub(super) archive_menu: Option<Point<Pixels>>,
     /// Contacts tab, stories menu, suggestions and search tabs.
     pub(super) global: super::chatlist_global::ChatlistGlobal,
-    /// Pinned-chat drag in progress (or its release slide), see
-    /// `quill::pin_reorder`; `pin_reorder_archived` says which pinned list.
-    pub(super) pin_reorder: Option<quill::pin_reorder::PinReorder>,
-    pub(super) pin_reorder_archived: bool,
+    /// Pinned-chat drag in progress (or its release slide), with the
+    /// pinned list it reorders.
+    pub(super) pin_reorder: Option<PinDrag>,
     /// Where the last press on a pinned row went down, so the dragged row
     /// starts under the pointer instead of where the drag threshold fired.
     pub(super) pin_press: Option<(i64, f32)>,
@@ -91,7 +98,6 @@ impl ChatListUi {
             archive_menu: None,
             global,
             pin_reorder: None,
-            pin_reorder_archived: false,
             pin_press: None,
             preview: None,
             preview_press: None,

@@ -3336,6 +3336,130 @@ link-preview test (`forget_failed`, `send_failed`) and `linux_dbus.rs`
 - The OS menu fix (2) is tested at the seam; the real menu bar was not
   clicked.
 
+### Phase 18 (area B: one runtime per widget with one width owner, drags that end with their rows, and resolves that name their window)
+
+Round 18 of the review, area B, on `claude/sm-review18-b`, plus the widget
+items of area C's review (2, 3, 5, 8, 10) and area A's widget query
+tokens. The numbers are area B's ranked findings unless marked.
+
+**A widget drawn in two windows has one width owner (1, 3; dodges).**
+`WidgetEntry` kept the window, view and width of whichever window
+reconciled last, so the same chat in main and in a narrower chat window
+flipped the runtime's width every pass, each relayout reported a height
+that redrew the app, and the loop ran at display rate. Where a widget is
+drawn is now one value, `Presence` (`widgets_state.rs`):
+
+- `Hidden { since }`, or `Shown { owner, at, others }`. The first window
+  to show a widget owns it: only the owner's pass moves the runtime's
+  width and theme, and the widget ticks in the owner's frames. Other
+  windows draw the owner's frame scaled down into their own card
+  (`widget_bubble::frame_scale`, pointer coordinates scaled back), and a
+  new frame notifies every window's view. The owner leaving hands the
+  widget to another window at that window's width; the last one leaving
+  hides it. This also replaces the hand-kept `visible: bool` +
+  `hidden_at: u64` pair, and `wants_frames` is the runtime's own report
+  again (ticks are gated on the owner, not forced off on hide).
+- `input_window` records the window of the widget's last press
+  (`widget_pointer_down`, with the pressing window's state in place). Its
+  links (`as_asked_by`), its link confirm and its copy toast go to that
+  window while it still draws the widget, else to the owner (3).
+- `Lifecycle<R>` (src/message_widget) holds the runtime in its live
+  stages, `Loading(R)` and `Running(R)`, so `runtime: Option<Runtime>`
+  next to the lifecycle is gone; `started()` moves a loading runtime to
+  running.
+- `WidgetsUi.landing: bool` is `lander: Option<Task<()>>`: the screen
+  owns its landing loop, which ends with it.
+
+**Hidden widgets cost nothing (C2, C3).** The runtime thread keeps the
+visibility it is told and does not paint while hidden (a whole frame on
+coming back), and `land_widgets` neither notifies the views of a hidden
+widget (its `Presence` has none) nor redraws the app for its height or
+stop. The `wants_frames` compare is against the stored value, so a hidden
+animating widget no longer marks itself changed on every land.
+
+**Widget query tokens are unique for the run (area A; C5).** The counter
+lived in `WidgetsUi` (per `OnScreen`) and restarted at 0 on every switch,
+so a late answer from the account's last visit matched a new query after
+switching A, B, A. It is a process-wide counter
+(`widgets_state::next_query_token`, listed in scripts/ui-statics.txt). A
+stale answer still in `bots.widget_answers` drains into no matching query
+and is dropped; nothing in the session needs clearing.
+
+**A chat window's widgets go off screen under the lock (C8).** The locked
+render of a chat window draws no history, so it now calls
+`widgets_left_window(Some(chat))`, as the main window does: the widgets
+stop running and polling.
+
+**A logged-out account's widgets stop (C10).** `forget_widget_storage`
+drops every entry (and with them the runtimes) and sets
+`WidgetsUi.storage` to `WidgetStorage::Forgotten`: no widget starts and
+`widget_dir()` is `None` until the screen is replaced, so nothing can
+write the removed folder back.
+
+**A pinned drag ends with its rows (2, 4; older dodge).** The drag ends
+only through the chat rows' listeners. With Contacts, Calls or search in
+their place the release never arrived, the row stayed lifted, the settle
+check asked for 60 fps forever and the next release sent the abandoned
+order. `sidebar_ready` now drops the drag whenever something else takes
+the rows' place, and `set_chat_list_view` drops it on a view change; a
+drag move in a view that does not show its pinned list
+(`pinned_list_shown`, shared with the rows' draggable check) drops it
+instead of starting one. `pin_reorder` + `pin_reorder_archived` are one
+`Option<PinDrag { archived, reorder }>`.
+
+**A forward's answer never ends a forward (5).** Every send ends the
+stage (the share box, the bar's Send, and now the demo bar path too), so
+an answer that finds a stage finds a newer forward, even from the same
+chat and topic. `present_forward_result` shows the result and leaves the
+stage alone.
+
+**The reply chooser is a forward stage (dodge).** `ShareUi::
+reply_elsewhere_open` sat next to `ForwardStage::Picking`; the two boxes
+share the box's selection and search field, and opening the forward box
+never closed the chooser. It is `ForwardStage::ReplyChooser(under)`, over
+the forward that was there: `open_reply_chooser` closes the forward box
+first, `open_picker` closes the chooser first, and `close_reply_chooser`
+returns to what was under it.
+
+**`panel_mode` is private (dodge).** The field is private to
+`media_panel`, so no other module can write it at all; inside the module
+`scripts/single-writers.txt` still holds it to `set_media_panel_mode`.
+
+**The D-Bus connect never runs on the UI thread (6).** Closing a chat's
+toast (`close_linux_notification`, UI thread) reads
+`connected_notifier()`, which never connects: with no connection no toast
+went out over D-Bus. Only the toast worker connects
+(`notifier_on_worker`), so the UI no longer waits on the retry gate or on
+a hanging daemon's D-Bus timeout.
+
+**The link-preview prefetch is armed once per URL (7).** Every frame
+bumped `preview_token` and spawned a new 500 ms timer, so while anything
+animated (a spoiler at 30 fps) the request never went out.
+`ComposerUi.preview_timer: Option<(String, Task)>` holds the URL waited
+on and its timer; a frame with the same URL leaves it running, a new URL
+replaces it.
+
+**A resolve names its window (8).** Five sites (the bot-limit toast's
+"@BotFather", Create Bot, Edit Bot, an inline result's Start, Premium's
+bot purchase) called `driver.resolve_deep_link` directly, so the flow had
+no window and the chat opened in a main window that may be minimized,
+behind the chat window that asked. `resolve_deep_link_here` sets the
+flow's window to the asking window as it sends; `hold_resolved_link` then
+opens the chat there and raises main when needed.
+`scripts/main_frame_queues.py` (run by `check-window-scope.py`) rejects
+`.resolve_deep_link(` anywhere in src/ui but `deep_links.rs`.
+
+Tests: `widgets_state_tests.rs` (the owner's width never moves for a
+second window, the owner leaving hands on, scaling, unique tokens),
+`Lifecycle` holding its runtime (`message_widget/tests.rs`),
+`forward_stage.rs` (the chooser and the box never both open),
+`chat_ui_tests.rs` (a late answer keeps a newer selection of the same
+topic), `chat_list/pin_drag_tests.rs` (Contacts over the rows and another
+folder each end a drag unsaved), the prefetch timer helper, and the
+script's own unit tests. Not tested here: the D-Bus close (Linux, needs a
+daemon) and the resolve seam's window (needs a live driver; the script
+guards the shape).
+
 ### Phase 15 (area C)
 
 Round 15 of the review, area C (the rest of `src/ui`), on

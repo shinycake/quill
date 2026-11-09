@@ -156,11 +156,13 @@ impl QuillApp {
     }
 
     /// Linux: `CloseNotification` for the chat's toast on a worker thread,
-    /// when the D-Bus notifier is up. Nothing elsewhere.
-    #[cfg_attr(not(target_os = "linux"), allow(unused_variables, clippy::unused_self))]
+    /// when a worker already connected the D-Bus notifier: this runs on the
+    /// UI thread, which never connects (round 18 B #6). Nothing elsewhere.
+    #[allow(clippy::unused_self)]
+    #[cfg_attr(not(target_os = "linux"), allow(unused_variables))]
     fn close_linux_notification(&self, account: AccountKey, chat_id: ChatId) {
         #[cfg(target_os = "linux")]
-        if let Some(notifier) = super::linux_dbus::notifier(&self.background.clicks) {
+        if let Some(notifier) = super::linux_dbus::connected_notifier() {
             let _ = quill::thread_guard::spawn_guarded("quill-notify-close", move || {
                 if let Err(error) = notifier.close(&(account, chat_id)) {
                     eprintln!("failed to close the desktop notification: {error}");
@@ -341,7 +343,7 @@ impl QuillApp {
             // thread reports the click. Without a session bus,
             // `notify-send --wait` holds the thread until the click.
             #[cfg(target_os = "linux")]
-            if let Some(notifier) = super::linux_dbus::notifier(&clicks) {
+            if let Some(notifier) = super::linux_dbus::notifier_on_worker(&clicks) {
                 if let Err(error) = notifier.show(
                     (account, chat_id),
                     &notification.title,

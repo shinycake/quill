@@ -436,11 +436,11 @@ fn each_window_keeps_its_own_gif_section(cx: &mut TestAppContext) {
             Some(EMOJI),
             "the emoji section stays"
         );
-        app.pickers.media_panel.panel_mode = crate::ui::media_panel::PanelMode::Compose;
+        app.set_media_panel_mode(crate::ui::media_panel::PanelMode::Compose);
         app.pickers.media_panel.tab = PanelTab::Gifs;
         // The chat window opens its GIF tab; the main window's stays open.
         app.note_window_press(Some(OTHER));
-        app.pickers.media_panel.panel_mode = crate::ui::media_panel::PanelMode::Compose;
+        app.set_media_panel_mode(crate::ui::media_panel::PanelMode::Compose);
         app.pickers.media_panel.tab = PanelTab::Gifs;
         app.gif_tab_upkeep(cx);
         assert_eq!(
@@ -488,14 +488,14 @@ fn a_gif_tab_shows_its_section_without_a_press(cx: &mut TestAppContext) {
         };
         // The main window searched "dogs" and is in use.
         app.note_window_press(None);
-        app.pickers.media_panel.panel_mode = crate::ui::media_panel::PanelMode::Compose;
+        app.set_media_panel_mode(crate::ui::media_panel::PanelMode::Compose);
         app.pickers.media_panel.tab = PanelTab::Gifs;
         app.pickers.gif_wanted = GifWanted::Search("dogs".into());
         app.gif_tab_upkeep(cx);
         assert_eq!(searching(app).as_deref(), Some("dogs"));
         // The chat window's tab wants "cats", never answered.
         app.set_window_scope(Some(OTHER));
-        app.pickers.media_panel.panel_mode = crate::ui::media_panel::PanelMode::Compose;
+        app.set_media_panel_mode(crate::ui::media_panel::PanelMode::Compose);
         app.pickers.media_panel.tab = PanelTab::Gifs;
         app.pickers.gif_wanted = GifWanted::Search("cats".into());
         app.gif_tab_upkeep(cx);

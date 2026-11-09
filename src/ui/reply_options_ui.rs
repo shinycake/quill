@@ -118,7 +118,7 @@ impl QuillApp {
         };
         match option {
             ReplyOption::UpdateQuote => {
-                self.share.reply_elsewhere_open = false;
+                self.share.forward.close_reply_chooser();
                 self.chat_ui.open_quote_picker();
                 self.set_note(StatusNote::silent(tr(keys::Q_OPS_PICK_THE_PART_TO_QUOTE)));
             }
@@ -154,8 +154,8 @@ impl QuillApp {
             return;
         }
         self.chat_ui.close_quote_picker();
-        self.share.reply_elsewhere_open = true;
-        self.share.forward.close_picker();
+        // One stage with the forward box: that box closes as this opens.
+        self.share.forward.open_reply_chooser();
         self.share.focus_search = true;
         self.share
             .search_input
@@ -164,8 +164,7 @@ impl QuillApp {
     }
 
     pub(super) fn close_reply_panels(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let was_open = self.share.reply_elsewhere_open;
-        self.share.reply_elsewhere_open = false;
+        let was_open = self.share.forward.close_reply_chooser();
         self.chat_ui.close_quote_picker();
         if was_open {
             self.share
@@ -200,7 +199,7 @@ impl QuillApp {
             cx.notify();
             return;
         }
-        self.share.reply_elsewhere_open = false;
+        self.share.forward.close_reply_chooser();
         self.share
             .search_input
             .update(cx, |input, cx| input.set_value("", window, cx));
