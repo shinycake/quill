@@ -152,3 +152,14 @@ src/calls/tile_pin.rs	178	read
 src/capture_choice.rs	255	read
 src/chat_appearance.rs	584	read
 src/chat_bottom_bar.rs	269	read
+src/calls/engine/external.rs	142	read
+src/calls/engine/mock/external.rs	83	read
+src/calls/engine/mock/mod.rs	982	read
+src/calls/engine/mod.rs	24	read
+src/calls/engine/stream.rs	367	read
+src/calls/engine/stream_feeder.rs	531	read
+src/calls/engine/tgcalls/call_engine.rs	425	read
+src/calls/engine/tgcalls/callbacks.rs	419	read
+src/calls/engine/tgcalls/config.rs	194	read
+src/calls/engine/tgcalls/devices.rs	96	read
+src/calls/engine/tgcalls/group.rs	766	read
