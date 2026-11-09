@@ -66,8 +66,9 @@ pub struct CallNotification {
     pub call_id: i32,
     pub title: String,
     pub body: String,
-    /// Accept and Decline buttons. Off while the app is locked: answering
-    /// must not bypass the passcode.
+    /// Accept and Decline buttons. On while the app is locked too: a call
+    /// stays answerable under the lock, as tdesktop's call panel does, and
+    /// answering shows the call window, never the chats.
     pub buttons: bool,
 }
 
@@ -105,7 +106,7 @@ pub fn decide_call_notify(input: &CallNotifyInput) -> Option<CallNotification> {
         call_id: input.call_id,
         title,
         body,
-        buttons: !input.locked,
+        buttons: true,
     })
 }
 
@@ -297,13 +298,13 @@ mod tests {
     }
 
     #[test]
-    fn a_locked_app_hides_the_caller_and_the_buttons() {
+    fn a_locked_app_hides_the_caller_and_keeps_the_call_answerable() {
         let n = decide_call_notify(&input(false, None, true)).expect("notify");
         assert_eq!(n.title, "Quill");
         assert!(!n.title.contains("Ada"));
-        assert!(call_buttons(&n).is_empty());
+        assert_eq!(call_buttons(&n).len(), 2);
         let command = linux_call_command(&n);
-        assert!(!command.args.iter().any(|a| a.contains("accept")));
+        assert!(command.args.iter().any(|a| a.contains("accept")));
     }
 
     #[test]

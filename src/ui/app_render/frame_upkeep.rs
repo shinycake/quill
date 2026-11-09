@@ -1,6 +1,7 @@
 //! Per-frame upkeep that `render` runs before building the window: things
 //! that need `&mut Window` (inputs, notifications, deep links, story and
-//! payment follow-ups) or keep timers ticking.
+//! payment follow-ups) or keep timers ticking. Only notification delivery
+//! runs while Quill is locked.
 
 use super::*;
 use crate::ui::status_note::StatusNote;
@@ -14,6 +15,15 @@ impl QuillApp {
         // main-only: notification clicks, other accounts and delivery are the
         // app's; a chat they open goes through the router (`route_chat_open`).
         self.flush_notifications(window, cx);
+        // Locked: the steps below turn stored requests and answers into
+        // something shown or started (a box, a viewer, a sign-in, a page).
+        // Their state waits for the first frame after the unlock, as a
+        // chat window's locked frame runs none of them either
+        // (docs/decisions/lock-is-a-render-state.md, "What runs while
+        // locked"; `scripts/lock_surfaces.py` checks this order).
+        if self.lock_waits() {
+            return;
+        }
         // What every window's frame runs, here with the main window's
         // state in place (`window_upkeep`).
         self.per_window_upkeep(window, cx);

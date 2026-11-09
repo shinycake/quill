@@ -396,65 +396,70 @@ impl QuillApp {
         // Rename (`setVideoChatTitle`).
         let rename = self.group_call_rename_overlay(tr(keys::Q_AV_EDIT_TITLE).into(), cx);
         // Streaming with an external app: the server URL and key.
-        let stream = call.rtmp_url.clone().map(|url| {
-            let key = call.rtmp_stream_key.clone().unwrap_or_default();
-            let copy = |id: &'static str, label: &'static str, value: String| {
-                Button::new(id)
-                    .label(label)
-                    .ghost()
-                    .xsmall()
-                    .text_color(rgb(ACTIVE_FG))
-                    .on_click(
-                        cx.listener(move |this, _, _, cx| this.copy_rtmp_value(label, &value, cx)),
+        // The stream key is a secret: not drawn under the lock.
+        let stream = call
+            .rtmp_url
+            .clone()
+            .filter(|_| !self.refused_while_locked())
+            .map(|url| {
+                let key = call.rtmp_stream_key.clone().unwrap_or_default();
+                let copy = |id: &'static str, label: &'static str, value: String| {
+                    Button::new(id)
+                        .label(label)
+                        .ghost()
+                        .xsmall()
+                        .text_color(rgb(ACTIVE_FG))
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.copy_rtmp_value(label, &value, cx)
+                        }))
+                };
+                div()
+                    .mx(px(16.))
+                    .mb(px(8.))
+                    .p(px(10.))
+                    .rounded(px(10.))
+                    .bg(call_chrome::group_raised())
+                    .text_size(px(12.))
+                    .flex()
+                    .flex_col()
+                    .gap(px(4.))
+                    .child(
+                        div()
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .child(tr(keys::Q_AV_STREAM_WITH_ANOTHER_APP)),
                     )
-            };
-            div()
-                .mx(px(16.))
-                .mb(px(8.))
-                .p(px(10.))
-                .rounded(px(10.))
-                .bg(call_chrome::group_raised())
-                .text_size(px(12.))
-                .flex()
-                .flex_col()
-                .gap(px(4.))
-                .child(
-                    div()
-                        .font_weight(FontWeight::SEMIBOLD)
-                        .child(tr(keys::Q_AV_STREAM_WITH_ANOTHER_APP)),
-                )
-                .child(
-                    div()
-                        .text_color(call_chrome::group_muted())
-                        .truncate()
-                        .child(url.clone()),
-                )
-                .child(
-                    div()
-                        .flex()
-                        .gap(px(4.))
-                        .child(copy(
-                            "group-call-rtmp-url",
-                            tr(keys::GROUP_CALL_RTMP_URL_COPY),
-                            url,
-                        ))
-                        .child(copy(
-                            "group-call-rtmp-key",
-                            tr(keys::GROUP_CALL_RTMP_KEY_COPY),
-                            key,
-                        ))
-                        .child(
-                            Button::new("group-call-rtmp-revoke")
-                                .label(tr(keys::Q_AV_REVOKE_KEY))
-                                .ghost()
-                                .xsmall()
-                                .text_color(rgb(MEMBER_MUTED_ICON))
-                                .on_click(cx.listener(|this, _, _, cx| {
-                                    this.replace_video_chat_rtmp_url(cx)
-                                })),
-                        ),
-                )
-        });
+                    .child(
+                        div()
+                            .text_color(call_chrome::group_muted())
+                            .truncate()
+                            .child(url.clone()),
+                    )
+                    .child(
+                        div()
+                            .flex()
+                            .gap(px(4.))
+                            .child(copy(
+                                "group-call-rtmp-url",
+                                tr(keys::GROUP_CALL_RTMP_URL_COPY),
+                                url,
+                            ))
+                            .child(copy(
+                                "group-call-rtmp-key",
+                                tr(keys::GROUP_CALL_RTMP_KEY_COPY),
+                                key,
+                            ))
+                            .child(
+                                Button::new("group-call-rtmp-revoke")
+                                    .label(tr(keys::Q_AV_REVOKE_KEY))
+                                    .ghost()
+                                    .xsmall()
+                                    .text_color(rgb(MEMBER_MUTED_ICON))
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        this.replace_video_chat_rtmp_url(cx)
+                                    })),
+                            ),
+                    )
+            });
         div()
             .id("group-call-panel")
             .size_full()

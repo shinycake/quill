@@ -110,8 +110,11 @@ impl QuillApp {
         if !current {
             self.video_avatar.clip = self.open_cover_clip(owner, animation, scale, cx);
         }
-        let covered =
-            self.viewer.state.is_open() || self.stories.viewer.is_open() || self.kit_dialog_open();
+        // The lock screen covers it too (the kit's dialogs read closed then).
+        let covered = self.viewer.state.is_open()
+            || self.stories.viewer.is_open()
+            || self.kit_dialog_open()
+            || self.refused_while_locked();
         if let Some(clip) = &self.video_avatar.clip {
             let play = active && !covered;
             if play != clip.player.wants_play() {

@@ -119,6 +119,12 @@ impl super::app::QuillApp {
         if self.background.wiping {
             return;
         }
+        // Under the lock the master key is cleared, so the preparation
+        // would fail on it (`KeyLocked`): the connection waits for the
+        // unlock (`resume_after_unlock`), as at a locked start.
+        if self.connect_waits_for_unlock() {
+            return;
+        }
         quill::startup_trace::mark("connect_start");
         self.connect.generation += 1;
         let generation = self.connect.generation;
@@ -263,6 +269,9 @@ impl super::app::QuillApp {
                 self.refuse_screen_open(cx);
                 self.connection.set_note(StatusNote::silent(""));
             }
+            // Prepared before the lock, refused by the key it cleared: open
+            // again after the unlock instead of a "key locked" card.
+            Err(ConnectBlocker::LockedStore) if self.connect_waits_for_unlock() => {}
             Err(blocker) => match blocker.startup_failure() {
                 Some(failure) => {
                     eprintln!("quill: no client: {}", blocker.user_message());

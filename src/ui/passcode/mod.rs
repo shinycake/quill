@@ -76,6 +76,11 @@ pub(crate) struct PasscodeUi {
     system_unlock_key: Option<MasterKey>,
     /// Demo fixtures must not touch the Keychain or the real data folder.
     pub(crate) demo: bool,
+    /// What was asked while locked and runs at the unlock (`unlock_intents`).
+    pub(in crate::ui) unlock_intents: UnlockIntents,
+    /// A lock asked while a passcode job ran: it lands with the job's
+    /// answer (`run_passcode_job`), so a Turn off cannot finish under it.
+    pub(in crate::ui) lock_after_job: bool,
 }
 
 impl PasscodeUi {
@@ -97,6 +102,8 @@ impl PasscodeUi {
                 .submit_on_enter(true)
         });
         for input in [&old, &new, &confirm] {
+            // window-scope: the passcode box is the main window's; a lock it
+            // held back reaches every window itself (`in_every_window`).
             cx.subscribe_in(input, window, |this, _, event: &InputEvent, window, cx| {
                 if matches!(event, InputEvent::PressEnter { .. }) {
                     this.submit_passcode_form(window, cx);
@@ -151,6 +158,8 @@ impl PasscodeUi {
             idle: IdleTracker::default(),
             system_unlock_key: None,
             demo: false,
+            unlock_intents: UnlockIntents::default(),
+            lock_after_job: false,
         }
     }
 
@@ -302,16 +311,20 @@ impl QuillApp {
         self.account.passcode.error = None;
         let task = cx.background_executor().spawn(async move { job() });
         // screen-scope: the passcode is one lock over every account; only its window matters.
+        // window-scope: `done` runs in its window (`in_window_of`); a held
+        // lock reaches every window itself (`in_every_window`).
         cx.spawn_in(window, async move |this, cx| {
             let out = task.await;
             let ran = this.update_in(cx, |this, window, cx| {
                 this.account.passcode.busy = false;
                 this.in_window_of(window, cx, |this, window, cx| done(this, out, window, cx));
+                this.lock_held_for_job(cx);
                 cx.notify();
             });
             if ran.is_err() {
                 let _ = this.update(cx, |this, cx| {
                     this.account.passcode.busy = false;
+                    this.lock_held_for_job(cx);
                     cx.notify();
                 });
             }
@@ -516,6 +529,13 @@ impl QuillApp {
         if !self.account.passcode.enabled || self.account.passcode.is_locked() {
             return;
         }
+        // A Turn off or Change in flight would land under the lock: Turn
+        // off would leave Quill locked with no passcode to unlock it. The
+        // lock waits for the job's answer.
+        if self.account.passcode.busy {
+            self.account.passcode.lock_after_job = true;
+            return;
+        }
         let state = global_unlock();
         if self.account.passcode.system_unlock {
             self.account.passcode.system_unlock_key = state.key();
@@ -549,9 +569,7 @@ impl QuillApp {
             self.account.passcode.system_unlock_key = global_unlock().key();
         }
         super::presence::note_input();
-        if std::mem::take(&mut self.account.passcode.deferred_connect) {
-            self.start_connection(cx);
-        }
+        self.resume_after_unlock(cx);
         cx.notify();
     }
 
@@ -700,38 +718,6 @@ impl QuillApp {
             }
         })
         .detach();
-    }
-
-    /// "Log out" on the lock screen: wipe the local data after confirming.
-    pub(crate) fn confirm_lock_logout(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let mut wiping = false;
-        if !self.account.passcode.demo
-            && let Some(root) = self.passcode_root()
-        {
-            // Every client closes first so TDLib is not writing while the
-            // database folders are removed; the wipe and the fresh
-            // connection wait for the close without freezing the window,
-            // and a quit before then finishes the wipe on the next start.
-            self.begin_local_wipe(root, cx);
-            wiping = true;
-        }
-        self.account.passcode.enabled = false;
-        quill::wake::PASSCODE.poke();
-        self.account.passcode.system_unlock = false;
-        self.account.passcode.system_unlock_key = None;
-        self.account.passcode.logout_confirm = false;
-        self.account.passcode.deferred_connect = false;
-        self.set_locked(false, cx);
-        self.account
-            .passcode
-            .lock
-            .input
-            .update(cx, |input, cx| input.set_value("", window, cx));
-        // With local data, the connection starts once it is wiped (above).
-        if !self.account.passcode.demo && !wiping {
-            self.start_connection(cx);
-        }
-        cx.notify();
     }
 
     /// Tray "Lock Quill": lock, or show the passcode settings when none
@@ -936,6 +922,12 @@ crate::ui::shell::register_dialogs! {
 mod build_passcode_dialog;
 mod lock_field;
 mod lock_gate;
+mod lock_logout;
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+mod lock_waits_tests;
+mod unlock_intents;
+pub(in crate::ui) use unlock_intents::UnlockIntents;
 #[cfg(test)]
 #[cfg(feature = "demo-capture")]
 mod lock_gate_tests;

@@ -404,3 +404,33 @@ fn the_on_screen_call_pass_keeps_a_background_accounts_pick(cx: &mut TestAppCont
         assert!(app.calls.notify_clicks.lock().unwrap().is_empty());
     });
 }
+
+/// Round 13 C finding 4: a call on another account rings under the lock,
+/// and the lock screen shows it with Answer and Decline, as tdesktop's call
+/// panel stays usable for any account under the lock.
+#[gpui_kit::test]
+fn a_call_on_another_account_can_be_answered_from_the_lock_screen(cx: &mut TestAppContext) {
+    use gpui_kit::test::TestWindowExt;
+    let (app, mut vcx) = new_app(cx);
+    app.update(&mut vcx, |app, cx| {
+        app.account.passcode.enabled = true;
+        app.lock_by_passcode(cx);
+        app.background.ringing = Some(ring());
+        cx.notify();
+    });
+    vcx.update(|window, cx| window.render_frame(cx));
+    vcx.run_until_parked();
+    let drawn = |vcx: &mut VisualTestContext, id: &'static str| {
+        vcx.update(|window, _| window.try_find(id).is_some())
+    };
+    assert!(drawn(&mut vcx, "lock-background-call-answer"));
+    assert!(drawn(&mut vcx, "lock-background-call-decline"));
+    vcx.update(|window, cx| window.click("lock-background-call-decline", cx));
+    vcx.run_until_parked();
+    app.read_with(&vcx, |app, _| {
+        assert!(app.background_ring_account().is_none(), "declined");
+        assert!(app.account.passcode.is_locked(), "still locked");
+    });
+    vcx.update(|window, cx| window.render_frame(cx));
+    assert!(!drawn(&mut vcx, "lock-background-call-answer"));
+}

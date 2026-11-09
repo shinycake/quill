@@ -399,8 +399,14 @@ impl QuillApp {
     }
 
     /// Apply what the OS asked for (media keys, the Now Playing widget).
+    /// While locked the OS controls are off, as tdesktop turns its system
+    /// media controls off under the lock: a key pressed then does nothing.
     pub(super) fn drain_media_commands(&mut self, cx: &mut Context<Self>) {
-        for command in media_session::take_commands() {
+        let commands = media_session::take_commands();
+        if self.refused_while_locked() {
+            return;
+        }
+        for command in commands {
             let playing = self.is_playing();
             match command {
                 Command::Play if !playing => self.toggle_active_playback(cx),
@@ -416,7 +422,13 @@ impl QuillApp {
     }
 
     /// Tell the OS what is playing (cheap: deduplicated downstream).
+    /// Nothing while locked: Now Playing would name the sender or the song
+    /// over the lock. The unlock publishes again (`resume_after_unlock`).
     pub(super) fn publish_now_playing(&mut self) {
+        if self.refused_while_locked() {
+            media_session::publish(None);
+            return;
+        }
         let (Some(id), Some(duration), Some(position)) = (
             self.active_playback_id(),
             self.playback.track_duration(),

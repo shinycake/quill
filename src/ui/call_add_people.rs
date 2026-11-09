@@ -67,6 +67,11 @@ impl AddPeopleBox {
 impl QuillApp {
     /// "Add People" (tdesktop `Panel::addPeople`): only once connected.
     pub(super) fn open_call_add_people(&mut self, cx: &mut Context<Self>) {
+        // A box over the call window waits for no one under the lock
+        // (`calls::lock_layers`).
+        if self.refused_while_locked() {
+            return;
+        }
         let established = self
             .session()
             .and_then(|session| session.calls.active_call.as_ref())
