@@ -634,6 +634,7 @@ crate::ui::shell::register_dialogs! {
         |app| app.message_ui.menu_ui.report_open,
         QuillApp::build_message_report_dialog,
     )
+    .per_window()
     .close(|app, _, cx| app.close_message_report(cx)),
 }
 

@@ -98,6 +98,7 @@ impl QuillApp {
         };
         self.close_media_viewer(cx);
         self.dialogs.photo_delete = Some((delete, facts.revoke));
+        self.open_box(crate::ui::shell::DialogKind::PhotoDelete);
         cx.notify();
     }
 

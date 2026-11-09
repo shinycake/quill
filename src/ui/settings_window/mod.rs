@@ -398,6 +398,7 @@ crate::ui::screenshot_demo::register_demos![
         .setup(|app, _, _| app.demo_settings(Page::About)),
     crate::ui::screenshot_demo::DemoSpec::chat_list("ready-settings-log-out").setup(|app, _, _| {
         app.demo_settings(Page::Account);
+        // box-host: demo
         app.settings.log_out_confirm = true;
     }),
     crate::ui::screenshot_demo::DemoSpec::chat_list("ready-settings-search").setup(

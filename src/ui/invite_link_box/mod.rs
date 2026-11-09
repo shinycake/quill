@@ -136,6 +136,7 @@ impl QuillApp {
             custom: None,
             focus_custom: false,
         });
+        self.open_box(DialogKind::InviteLinkBox);
         cx.notify();
     }
 

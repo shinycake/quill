@@ -185,7 +185,9 @@ impl QuillApp {
                 .send_login_url_info(chat_id, message_id, button_id, url)
         });
         match sent {
-            Some(Ok(_)) => {}
+            // The consent box the answer may open belongs to this window,
+            // whichever window the pointer is over when it lands.
+            Some(Ok(_)) => self.open_box(crate::ui::shell::DialogKind::LoginUrlConfirm),
             _ => {
                 // Not connected, or TDLib refused the send: plain URL-button
                 // behavior is the honest fallback.
@@ -208,6 +210,7 @@ impl QuillApp {
         self.links.callback_password_dialog = Some(CallbackPasswordDialog::new(
             window, cx, chat_id, message_id, data,
         ));
+        self.open_box(crate::ui::shell::DialogKind::CallbackPassword);
         if let Some(dialog) = &self.links.callback_password_dialog {
             dialog
                 .password_input

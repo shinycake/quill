@@ -525,6 +525,7 @@ crate::ui::shell::register_dialogs! {
         |app| app.share.forward_picker_open && app.forward_draft().is_some(),
         QuillApp::build_forward_box_dialog,
     )
+    .per_window()
     .close(|app, window, cx| app.close_forward_picker(window, cx)),
 }
 

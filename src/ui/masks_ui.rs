@@ -46,6 +46,7 @@ impl QuillApp {
             session.stickers.masks.open = true;
             session.stickers.manager.open = true;
         }
+        self.open_box(crate::ui::shell::DialogKind::MaskSets);
         cx.notify();
     }
 

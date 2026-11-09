@@ -272,6 +272,7 @@ impl QuillApp {
     /// Slice G10: open the communities hub dialog (side-menu entry).
     pub(super) fn open_community_hub(&mut self, cx: &mut Context<Self>) {
         self.admin.community.hub_open = true;
+        self.open_box(crate::ui::shell::DialogKind::CommunityHub);
         cx.notify();
     }
 

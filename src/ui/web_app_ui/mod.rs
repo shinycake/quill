@@ -546,6 +546,7 @@ impl QuillApp {
                         short_name: short_name.clone(),
                         start_parameter: start_parameter.clone(),
                     });
+                    self.open_box(DialogKind::WebAppConfirm);
                     self.ensure_mini_app_poll(cx);
                 } else {
                     self.set_status_note(
@@ -581,6 +582,7 @@ impl QuillApp {
                         chat_id: target,
                         bot_id,
                     });
+                    self.open_box(DialogKind::WebAppConfirm);
                     self.ensure_mini_app_poll(cx);
                 } else {
                     self.set_status_note(StatusNote::error(tr(keys::BOT_MENU_NOT_SUPPORTED)), cx);
@@ -630,6 +632,7 @@ impl QuillApp {
                 request_write: false,
                 allow_write: false,
             });
+            self.open_box(DialogKind::WebAppConfirm);
             cx.notify();
             return;
         }

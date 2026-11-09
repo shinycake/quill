@@ -137,6 +137,7 @@ impl QuillApp {
             editor: None,
             select_saved: None,
         });
+        self.open_box(crate::ui::shell::DialogKind::AiCompose);
         self.ai_compose_dispatch(send, window, cx);
     }
 

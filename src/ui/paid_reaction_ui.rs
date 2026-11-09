@@ -176,6 +176,7 @@ impl QuillApp {
             sender,
             slider,
         });
+        self.open_box(crate::ui::shell::DialogKind::PaidReaction);
         if let Some(live) = self.live.as_mut() {
             // The balance for the "Send" check.
             let _ = live.driver.maybe_fetch_star_transactions();

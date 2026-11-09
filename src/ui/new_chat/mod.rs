@@ -211,6 +211,7 @@ impl QuillApp {
             title_error: false,
             type_box,
         });
+        self.open_box(DialogKind::CreateChat);
         cx.notify();
     }
 

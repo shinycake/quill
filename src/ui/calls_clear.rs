@@ -27,6 +27,7 @@ impl QuillApp {
             return;
         }
         self.chat_list.global.clear_calls_open = true;
+        self.open_box(DialogKind::ClearCalls);
         self.chat_list.global.clear_calls_revoke = false;
         cx.notify();
     }

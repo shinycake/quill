@@ -440,6 +440,7 @@ impl QuillApp {
             return;
         }
         self.privacy.websites_open = true;
+        self.open_box(DialogKind::Websites);
         self.privacy.websites_confirm = None;
         // The last open's failure line goes: a cached list skips the fetch.
         if let Some(session) = self.session_mut() {

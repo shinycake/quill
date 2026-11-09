@@ -67,6 +67,7 @@ impl QuillApp {
             return;
         }
         self.account.accounts.open = true;
+        self.open_box(DialogKind::Accounts);
         self.account.accounts.remove_confirm = None;
         self.account.accounts.error = None;
         cx.notify();

@@ -206,6 +206,7 @@ impl QuillApp {
             both: false,
             awaiting: None,
         });
+        self.open_box(DialogKind::ChatLook);
         self.ensure_wallpapers_loaded(cx);
         let boosted = self.is_boosted_look(chat_id);
         if let Some(live) = self.live.as_mut() {

@@ -132,6 +132,7 @@ impl QuillApp {
             )
             .on_click(cx.listener(move |this, _, _, cx| {
                 this.privacy.extra.session_details = Some(session_id);
+                this.open_box(DialogKind::SessionDetails);
                 this.privacy.extra.renaming_device = false;
                 cx.notify();
             }));

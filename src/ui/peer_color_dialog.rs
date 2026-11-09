@@ -84,6 +84,7 @@ impl QuillApp {
             draft,
             sent: false,
         });
+        self.open_box(DialogKind::PeerColor);
         cx.notify();
     }
 

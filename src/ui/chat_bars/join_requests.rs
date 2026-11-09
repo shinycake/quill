@@ -95,6 +95,7 @@ impl QuillApp {
             search,
             _search_subscription: subscription,
         });
+        self.open_box(DialogKind::JoinRequests);
         if let Some(live) = self.live.as_mut() {
             live.driver
                 .session

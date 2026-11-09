@@ -27,6 +27,10 @@ pub(in crate::ui) struct WindowSlices {
     pub(super) conversation_rendered: Cell<bool>,
     /// The conversation slot was part of the window's last render.
     pub(super) conversation_shown: Cell<bool>,
+    /// A screen reader (or another accessibility client) reads this window:
+    /// its history rows report the accessibility focus. Each window's
+    /// frame writes its own (`per_window_upkeep`).
+    pub(in crate::ui) a11y_active: Cell<bool>,
 }
 
 impl WindowSlices {

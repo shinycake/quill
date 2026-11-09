@@ -34,6 +34,7 @@ impl QuillApp {
             dialog.prefill_from_form(&form, window, cx);
         }
         self.payments.dialog = Some(dialog);
+        self.open_box(crate::ui::shell::DialogKind::PaymentForm);
     }
 
     /// Slice P1: close the checkout dialog, discarding the form answers
@@ -391,6 +392,7 @@ impl QuillApp {
                 keys::Q_MONEY_COULD_NOT_LOAD_THE_RECEIPT,
             )));
         }
+        self.open_box(crate::ui::shell::DialogKind::PaymentReceipt);
         cx.notify();
     }
 
@@ -529,6 +531,7 @@ impl QuillApp {
                 request_write_access,
             } => match request {
                 Some(request) => {
+                    // box-host: opened by an answer; press_login_url named the window
                     self.links.login_url_confirm = Some(LoginUrlConfirm {
                         domain,
                         request_write_access,

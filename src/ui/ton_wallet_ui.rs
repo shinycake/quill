@@ -205,6 +205,7 @@ impl QuillApp {
                 session.show_wallet_transaction(tx);
             }
         }
+        self.open_box(crate::ui::shell::DialogKind::Money);
         cx.notify();
     }
 }

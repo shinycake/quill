@@ -31,6 +31,7 @@ impl QuillApp {
         self.close_mute_menu(cx);
         self.folders.menu_chat = None;
         self.notify.ttl_picker = Some(chat_id);
+        self.open_box(crate::ui::shell::DialogKind::TtlPicker);
         cx.notify();
     }
 

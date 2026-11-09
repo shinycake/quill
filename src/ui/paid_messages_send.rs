@@ -71,6 +71,7 @@ impl QuillApp {
             slot,
             once: self.send_once(),
         });
+        self.open_box(DialogKind::PaidSendConfirm);
         self.paid_messages.confirm_trust = None;
         if let Some(live) = self.live.as_mut() {
             // The balance for the Pay check.
@@ -271,6 +272,7 @@ impl QuillApp {
             refund: false,
             direct,
         });
+        self.open_box(DialogKind::RemoveFee);
         cx.notify();
     }
 

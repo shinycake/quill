@@ -269,6 +269,7 @@ impl QuillApp {
         self.admin.restrict_dialog = Some(RestrictDialog::new(
             window, cx, chat_id, user_id, ban, current, until,
         ));
+        self.open_box(DialogKind::Restrict);
         cx.notify();
     }
 
@@ -312,6 +313,7 @@ impl QuillApp {
                 Ok(unix) => RestrictUntil::Custom(unix).until_date(now),
                 Err(err) => {
                     dialog.error = Some(err.message());
+                    // box-host: put back after a failed submit; it stays where it shows
                     self.admin.restrict_dialog = Some(dialog);
                     cx.notify();
                     return;
@@ -346,12 +348,14 @@ impl QuillApp {
                         }
                     }
                     Ok(None) | Err(_) => {
+                        // box-host: put back after a failed submit; it stays where it shows
                         self.admin.restrict_dialog = Some(dialog);
                         StatusNote::error(tr(keys::Q_PEOPLE_COULD_NOT_UPDATE_MEMBER_STATUS))
                     }
                 }
             }
             None => {
+                // box-host: put back after a failed submit; it stays where it shows
                 self.admin.restrict_dialog = Some(dialog);
                 StatusNote::info(tr(keys::Q_PEOPLE_MEMBER_ACTIONS_NEED_A_LIVE))
             }

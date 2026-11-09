@@ -54,6 +54,7 @@ impl QuillApp {
 
     pub(super) fn open_my_chats(&mut self, channels: bool, cx: &mut Context<Self>) {
         self.chat_list.my_chats_open = Some(channels);
+        self.open_box(DialogKind::MyChats);
         cx.notify();
     }
 

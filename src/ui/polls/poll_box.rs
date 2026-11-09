@@ -148,6 +148,7 @@ crate::ui::shell::register_dialogs! {
         |app| app.chat_ui.poll_dialog.as_ref().is_some_and(|d| d.confirming_discard),
         QuillApp::build_poll_discard_dialog,
     )
+    .per_window()
     .close(|app, _, cx| {
             app.chat_ui.poll_dialog = None;
             cx.notify();
@@ -157,6 +158,7 @@ crate::ui::shell::register_dialogs! {
         |app| app.chat_ui.poll_dialog.is_some(),
         QuillApp::build_poll_create_dialog,
     )
+    .per_window()
     .close(|app, _, cx| {
             app.chat_ui.poll_dialog = None;
             cx.notify();

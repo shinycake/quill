@@ -156,6 +156,7 @@ impl QuillApp {
             self.gift_market.craft_primary = Some(gift);
             self.gift_market.push(MarketBox::CraftInfo);
         }
+        self.open_box(crate::ui::shell::DialogKind::GiftMarket);
         cx.notify();
     }
 

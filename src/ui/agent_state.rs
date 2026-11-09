@@ -258,6 +258,7 @@ impl QuillApp {
                 account,
                 scope: next,
             });
+            self.open_box(crate::ui::shell::DialogKind::AgentConsent);
         } else {
             grants::update(&account, |g| apply_scope(g, target, scope));
         }

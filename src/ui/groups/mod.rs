@@ -569,6 +569,7 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         self.admin.community.create_dialog = Some(CreateCommunityDialog::new(window, cx));
+        self.open_box(DialogKind::CommunityCreate);
         cx.notify();
     }
 
@@ -599,6 +600,7 @@ impl QuillApp {
         let name = dialog.name_input.read(cx).value().trim().to_string();
         let hide_chat = dialog.hide_chat;
         if name.is_empty() {
+            // box-host: put back after a failed submit; it stays where it shows
             self.admin.community.create_dialog = Some(dialog);
             self.connection
                 .set_note(StatusNote::error(tr(keys::Q_PEOPLE_NAME_CANNOT_BE_EMPTY)));
@@ -606,6 +608,7 @@ impl QuillApp {
             return;
         }
         let Some(chat_id) = dialog.chat_id else {
+            // box-host: put back after a failed submit; it stays where it shows
             self.admin.community.create_dialog = Some(dialog);
             self.connection
                 .set_note(StatusNote::silent(tr(keys::Q_PEOPLE_PICK_A_CHAT_FOR_THE)));
@@ -620,12 +623,14 @@ impl QuillApp {
                 {
                     Ok(Some(_)) => StatusNote::silent(tr(keys::Q_PEOPLE_COMMUNITY_CREATED)),
                     _ => {
+                        // box-host: put back after a failed submit; it stays where it shows
                         self.admin.community.create_dialog = Some(dialog);
                         StatusNote::error(tr(keys::Q_PEOPLE_COULD_NOT_CREATE_COMMUNITY))
                     }
                 }
             }
             None => {
+                // box-host: put back after a failed submit; it stays where it shows
                 self.admin.community.create_dialog = Some(dialog);
                 StatusNote::info(tr(keys::Q_PEOPLE_CREATING_COMMUNITIES_NEEDS_A_LIVE))
             }
@@ -657,6 +662,7 @@ impl QuillApp {
             &current,
             tr(keys::COMMUNITY_MANAGE_NAME),
         ));
+        self.open_box(DialogKind::Username);
         cx.notify();
     }
 

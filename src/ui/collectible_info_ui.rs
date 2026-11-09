@@ -44,6 +44,7 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut() {
             let _ = live.driver.request_collectible_info(lookup);
         }
+        self.open_box(crate::ui::shell::DialogKind::CollectibleInfo);
         cx.notify();
     }
 

@@ -19,6 +19,7 @@ use quill::lang::{keys, tr};
 impl QuillApp {
     pub(super) fn open_archive_hint(&mut self, cx: &mut Context<Self>) {
         self.chat_list.archive_hint_open = true;
+        self.open_box(DialogKind::ArchiveHint);
         // The wording depends on the account's archive settings.
         if let Some(live) = self.live.as_mut()
             && live

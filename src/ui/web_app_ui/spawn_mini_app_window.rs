@@ -266,6 +266,7 @@ impl QuillApp {
             match result {
                 Ok(bot) if bot.is_added => self.start_web_app(then, cx),
                 Ok(bot) => {
+                    // box-host: opened by an answer; the attach-bot deep link request named the window
                     self.mini_apps.confirm = Some(WebAppConfirm::AddToMenu {
                         bot,
                         allow_write: true,
@@ -318,6 +319,7 @@ impl QuillApp {
                     {
                         self.request_web_app(then, false, cx);
                     } else {
+                        // box-host: opened by an answer; the web app search request named the window
                         self.mini_apps.confirm = Some(WebAppConfirm::OpenTerms {
                             then,
                             request_write: app.request_write_access,
@@ -736,6 +738,7 @@ impl QuillApp {
                         .map(|window| window.launch.bot_name.clone())
                         .unwrap_or_default();
                     self.mini_apps.confirm = Some(WebAppConfirm::RemoveFromMenu { bot_id, name });
+                    self.open_box(crate::ui::shell::DialogKind::WebAppConfirm);
                     cx.notify();
                 }
                 _ => {}

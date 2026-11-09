@@ -55,6 +55,7 @@ impl QuillApp {
             .first_name_input
             .update(cx, |input, cx| input.focus(window, cx));
         self.dialogs.add_contact_dialog = Some(dialog);
+        self.open_box(DialogKind::AddContact);
         cx.notify();
     }
 

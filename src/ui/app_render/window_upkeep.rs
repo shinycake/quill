@@ -12,6 +12,11 @@ use quill::lang::{keys, tr};
 impl QuillApp {
     /// One window's frame upkeep, with that window's state in place.
     pub(in crate::ui) fn per_window_upkeep(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        // Whether a screen reader reads this window, for its history rows.
+        self.slices
+            .window
+            .a11y_active
+            .set(self.a11y_tree_wanted(window));
         // The window's menus and layers take and give back its focus, and
         // the menu's items claim their handles afresh for this frame.
         self.menu_focus_upkeep(window, cx);
@@ -19,6 +24,9 @@ impl QuillApp {
         self.advance_thread(window, cx);
         // A deleted message's reply or edit bar goes.
         self.cancel_gone_composer_targets(window, cx);
+        // The reply bar's message, when it is not in memory: each window's
+        // own bar (the driver asks once per message).
+        self.fetch_missing_reply_target();
         // What was open for a chat the view no longer shows goes.
         self.sync_chat_ui();
         // The histories every window still reads stay whole.

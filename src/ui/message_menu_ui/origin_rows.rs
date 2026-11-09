@@ -131,6 +131,7 @@ impl QuillApp {
                 this.message_ui.menu = None;
                 if let Some(session) = this.origin_session_mut() {
                     session.users_state.replies_block = Some(block.clone());
+                    this.open_box(DialogKind::BlockFromReplies);
                 }
                 cx.notify();
             },

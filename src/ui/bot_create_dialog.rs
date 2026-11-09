@@ -173,6 +173,7 @@ impl QuillApp {
             submitted: false,
             _subscription: subscription,
         });
+        self.open_box(DialogKind::BotCreate);
         let typed = suggested_username.trim_start_matches('@').to_string();
         username.update(cx, |input, cx| input.set_value(typed, window, cx));
         cx.notify();

@@ -119,6 +119,7 @@ crate::ui::shell::register_dialogs! {
         |app| app.chat_ui.cancel_edit_confirm_open(),
         QuillApp::build_cancel_edit_dialog,
     )
+    .per_window()
     .close(|app, _, cx| app.close_cancel_edit_confirm(cx)),
 }
 

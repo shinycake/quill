@@ -151,8 +151,10 @@ impl QuillApp {
                     .set_note(StatusNote::error(tr(keys::Q_GRAMS_COULD_NOT_LOAD)));
             }
         } else if let Some(grams) = self.grams_mut() {
+            // box-host: GramsWithdraw shows only once a withdrawal is set, which start_grams_withdraw names
             grams.open = true;
         }
+        self.open_box(DialogKind::Grams);
         cx.notify();
     }
 

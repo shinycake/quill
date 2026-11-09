@@ -151,7 +151,6 @@ slices.main_views | the main window's child view ids
 slices.image_cache | the bounded image cache, keyed by image source
 slices.idle_trim | the idle cache trim task
 slices.scope | the view being drawn
-slices.a11y_active | the screen reader is on
 group_call.window | the video chat window, opened and closed by the sync with the session on screen; the call ends with the client (`retire_live_to_background`)
 group_call.window_opening | that window is opening
 group_call.chat_shown | the window's chat column is open, a layout preference

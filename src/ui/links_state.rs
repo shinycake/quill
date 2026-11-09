@@ -46,6 +46,10 @@ pub(crate) struct LinkUi {
     /// The chat window the link flow in progress was asked from. Taken
     /// with the flow's state at each step, as the agent origin is.
     pub(super) flow_window: Option<ChatId>,
+    /// The chat window the resolved link waiting for render
+    /// (`pending_deep_link_ui`, `pending_deep_link_open`) was clicked in:
+    /// the boxes it opens belong to it.
+    pub(super) pending_flow_window: Option<ChatId>,
     /// B1: password prompt for `inlineKeyboardButtonTypeCallbackWithPassword`.
     pub(super) callback_password_dialog: Option<CallbackPasswordDialog>,
     /// B1: `loginUrlInfoRequestConfirmation` domain/url awaiting user consent.
@@ -80,6 +84,7 @@ impl LinkUi {
             agent_pending_link: None,
             window_pending_link: None,
             flow_window: None,
+            pending_flow_window: None,
             callback_password_dialog: None,
             login_url_confirm: None,
         }

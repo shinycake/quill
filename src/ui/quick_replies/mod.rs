@@ -65,6 +65,7 @@ impl QuillApp {
             confirm_delete: false,
             local_error: None,
         });
+        self.open_box(crate::ui::shell::DialogKind::QuickReplies);
         if let Some(live) = self.live.as_mut() {
             let _ = live.driver.ensure_quick_reply_shortcuts();
         }

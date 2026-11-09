@@ -74,6 +74,7 @@ impl QuillApp {
             blur: None,
             note: None,
         });
+        self.open_box(DialogKind::WallpaperPreview);
         cx.notify();
     }
 

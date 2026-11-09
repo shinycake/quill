@@ -196,6 +196,7 @@ impl QuillApp {
             name,
             kind: DirectConfirmKind::Ban { channel, user_id },
         });
+        self.open_box(DialogKind::DirectConfirm);
     }
 
     /// "Remove Fee" opens the box with the refund choice; "Charge Fee"

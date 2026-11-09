@@ -49,6 +49,7 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         self.chat_list.pending_close_secret_chat = Some(chat_id);
+        self.open_box(crate::ui::shell::DialogKind::CloseSecretChat);
         cx.notify();
     }
 

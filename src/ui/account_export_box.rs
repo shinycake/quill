@@ -58,6 +58,7 @@ impl QuillApp {
             .session()
             .is_some_and(|s| s.settings.account_export.is_some())
         {
+            self.open_box(DialogKind::AccountExport);
             self.dialogs.account_export_progress_hidden = false;
             cx.notify();
             return;
@@ -83,6 +84,7 @@ impl QuillApp {
             size_slider: slider,
             error: None,
         });
+        self.open_box(DialogKind::AccountExport);
         cx.notify();
     }
 

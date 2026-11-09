@@ -32,6 +32,7 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         self.admin.add_special = Some(AddSpecialDialog::new(window, cx, chat_id, role));
+        self.open_box(DialogKind::AddSpecial);
         if let Some(live) = self.live.as_mut()
             && live
                 .driver
