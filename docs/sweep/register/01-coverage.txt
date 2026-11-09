@@ -28,3 +28,15 @@ src/agent/pacing.rs	192	read
 src/agent/prompts.rs	236	read
 src/agent/server.rs	554	read
 src/agent/summary.rs	760	read
+src/agent/td.rs	192	read
+src/agent/tools/ask.rs	132	read
+src/agent/tools/chats.rs	526	read
+src/agent/tools/history.rs	446	read
+src/agent/tools/messages.rs	552	read
+src/agent/tools/mod.rs	729	read
+src/agent/tools/people.rs	320	read
+src/agent/tools/status.rs	133	read
+src/agent/tools/target.rs	373	read
+src/agent/tools/td_call.rs	470	read
+src/agent/tools/td_offset.rs	101	read
+src/agent/tools/td_policy.rs	504	read
