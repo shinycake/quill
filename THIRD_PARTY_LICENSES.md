@@ -13,7 +13,7 @@ under `licenses/`.
 
 ## Overview
 
-- MIT License: 683
+- MIT License: 684
 - Apache License 2.0: 43
 - Unicode License v3: 26
 - ISC License: 22

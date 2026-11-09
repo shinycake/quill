@@ -111,11 +111,9 @@ and pthread. build.rs compiles it optimized in every profile.
   `licenses/message-widgets.txt`, and `THIRD_PARTY.md` has the row.
 - widget-sandbox publishes no license. At v0.6.1 and on `main` the
   repository has no LICENSE file, its `package.json` is private with no
-  license field, and GitHub reports none (checked 2026-11-09). Without a
-  license, redistributing its code (the sandbox C++ and the WidgetJS
-  bundles) inside an MIT app is not cleared. The brief called it BSD-3,
-  which twidget is. This must be settled with Telegram (or a license added
-  upstream) before this ships.
+  license field, and GitHub reports none (checked 2026-11-09). The owner
+  cleared shipping it as is on 2026-11-09. If upstream adds a license
+  later, its text goes into `licenses/message-widgets.txt`.
 - Telegram Desktop's `tgw/` (GPLv3) was read for behavior only. No code was
   copied, translated or paraphrased. The glue and the painter are Quill's own
   (MIT).
@@ -151,7 +149,6 @@ Measured on an M-series Mac, 2026-11-09:
   main-window pass sees them. They are trimmed when another pass runs.
 - `dpr` is the scale of the last window drawn. A widget dragged between a
   1x and a 2x screen keeps its first scale until it restarts.
-- widget-sandbox's license (above).
 
 ## Verification
 
