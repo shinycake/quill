@@ -1,0 +1,12 @@
+--- a/twidget/core/src/renderer.cpp
++++ b/twidget/core/src/renderer.cpp
+@@ -3089,7 +3089,8 @@
+             std::string body;
+             serialize_node(c, body);
+             size_t close = body.rfind("</body>");
+-            if (close != std::string::npos) {
++            // QUILL: no badge for an empty reason; the host draws its own over the frozen frame.
++            if (close != std::string::npos && !frozen_reason_.empty()) {
+                 std::string badge = "<div data-tw-badge=\"" + std::string(frozen_fatal_ ? "fatal" : "paused") + "\">";
+                 escape_text(frozen_reason_, badge);
+                 badge += "</div>";
