@@ -5,9 +5,11 @@ use crate::state::*;
 use crate::telegram::envelope::ChatNotificationSettings;
 
 impl Session {
-    /// One row per collapsed community the person is in at least one
-    /// chat of. A community whose full info has not arrived yet has no
-    /// row, and its chats stay where they are.
+    /// One row per collapsed community with at least one chat in the
+    /// main list. A community whose full info has not arrived yet has no
+    /// row, and its chats stay where they are. Chats outside the main
+    /// list (archived or not joined) are the row's "and N more"
+    /// (`notInCount`).
     pub fn collapsed_community_rows(&self) -> Vec<CommunityRowSummary> {
         let mut rows: Vec<CommunityRowSummary> = self
             .groups
@@ -24,7 +26,7 @@ impl Session {
                     match self
                         .chats
                         .get(&chat.chat_id)
-                        .filter(|summary| summary.in_main_list || summary.in_archive)
+                        .filter(|summary| summary.in_main_list)
                     {
                         Some(summary) => joined.push(CommunityMemberChat {
                             chat_id: summary.id.0,

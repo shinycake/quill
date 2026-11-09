@@ -140,7 +140,6 @@ impl Session {
                     member,
                 }
             }
-            // The new flag arrives with `updateCommunity`.
             CommunitiesPurpose::ToggleCollapsed { .. }
             | CommunitiesPurpose::GetJoined
             | CommunitiesPurpose::GetAddChatRequests { .. }

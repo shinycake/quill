@@ -33,8 +33,6 @@ impl Session {
         if !settings.use_default_mute_for {
             return false;
         }
-        // TDLib 1.8.70: a community chat falls back to its community's
-        // settings before the scope's.
         if let Some(community) = self.chat_community_notification_settings(chat.id.0)
             && !community.use_default_mute_for
         {

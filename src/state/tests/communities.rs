@@ -19,8 +19,8 @@ fn limits_come_from_the_options() {
         &sink,
         r#"{"@type":"updateOption","name":"community_bot_count_max","value":{"@type":"optionValueInteger","value":"5"}}"#,
     );
-    assert_eq!(session.communities.chat_count_max, Some(20));
-    assert_eq!(session.communities.bot_count_max, Some(5));
+    assert_eq!(session.communities.chat_count_max, 20);
+    assert_eq!(session.communities.bot_count_max, 5);
 }
 
 #[test]
@@ -117,10 +117,9 @@ fn a_collapsed_community_gets_one_row_for_its_joined_chats() {
     assert_eq!(row.name, "Rustaceans");
     let mut members = row.member_chat_ids.clone();
     members.sort_unstable();
-    assert_eq!(members, vec![7, 8]);
-    assert_eq!(row.not_joined, 1);
+    assert_eq!(members, vec![7]);
+    assert_eq!(row.not_joined, 2);
     assert_eq!(row.unread_chats, 1);
-    // Chat 7 keeps the default mute, and its community is muted.
     assert!(row.badge_muted);
     let chat = session.chats.get(&7).cloned().expect("chat 7");
     assert!(session.effective_muted(&chat));

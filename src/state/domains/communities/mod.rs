@@ -2,10 +2,12 @@
 //! list, adding and removing chats, add-chat requests, collapsing,
 //! notification settings, bans).
 mod apply;
+mod chat_link;
 mod chat_list;
 mod purpose;
 mod query;
 mod state;
 
+pub use chat_link::CommunityChatKind;
 pub use purpose::*;
 pub use state::*;

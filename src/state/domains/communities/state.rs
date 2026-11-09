@@ -102,9 +102,13 @@ pub struct CommunitiesState {
     pub outcomes: VecDeque<CommunityOutcome>,
     /// TDLib options `community_chat_count_max` and
     /// `community_bot_count_max`, for the limit toast.
-    pub chat_count_max: Option<i64>,
-    pub bot_count_max: Option<i64>,
+    pub chat_count_max: i64,
+    pub bot_count_max: i64,
 }
+
+/// TDLib's default for both community limits, until `updateOption` sends
+/// one.
+pub const DEFAULT_COMMUNITY_PEERS_MAX: i64 = 100;
 
 impl CommunitiesState {
     pub(crate) fn new() -> Self {
@@ -114,15 +118,14 @@ impl CommunitiesState {
             member_chats: HashMap::new(),
             notification_sends: HashMap::new(),
             outcomes: VecDeque::new(),
-            chat_count_max: None,
-            bot_count_max: None,
+            chat_count_max: DEFAULT_COMMUNITY_PEERS_MAX,
+            bot_count_max: DEFAULT_COMMUNITY_PEERS_MAX,
         }
     }
 
     pub(crate) fn apply_option(&mut self, name: &str, value: &OptionValue) {
-        let number = match value {
-            OptionValue::Integer(number) => Some(*number),
-            _ => None,
+        let OptionValue::Integer(number) = *value else {
+            return;
         };
         match name {
             "community_chat_count_max" => self.chat_count_max = number,

@@ -322,6 +322,9 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// The full info of every collapsed community, which its chat-list
     /// entry is built from; asked once per community.
     pub fn sync_collapsed_communities(&mut self) -> Result<(), ConnectSendError> {
+        if !self.chats_path_active() {
+            return Ok(());
+        }
         let missing: Vec<i64> = self
             .session
             .groups

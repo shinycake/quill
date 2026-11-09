@@ -64,7 +64,6 @@ impl CommunityRowSummary {
             return None;
         }
         let mut newest: Vec<&CommunityMemberChat> = joined.iter().collect();
-        // Stable: ties keep the community's order.
         newest.sort_by_key(|chat| std::cmp::Reverse(chat.date));
         let date = newest.first().map_or(0, |chat| chat.date);
         newest.truncate(SHOWN_NAMES);
@@ -241,8 +240,6 @@ mod tests {
         assert_eq!(
             group_main_list(&chats, &rows),
             vec![
-                // Chat 1 was pinned, but its community comes first by date,
-                // after the pinned section.
                 GroupedEntry::Community(1),
                 GroupedEntry::Chat(1),
                 GroupedEntry::Community(0),
