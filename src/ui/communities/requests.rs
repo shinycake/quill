@@ -49,8 +49,7 @@ impl QuillApp {
                 .driver
                 .fetch_community_add_chat_requests(community_id, true)
         {
-            self.connection
-                .set_note(StatusNote::error(user_error(&err)));
+            self.set_note(StatusNote::error(user_error(&err)));
         }
         self.admin.community.flow.requests_scroll = ScrollHandle::new();
         self.admin.community.flow.requests_asked = Default::default();
@@ -138,8 +137,7 @@ impl QuillApp {
                 action.approve,
             )
         {
-            self.connection
-                .set_note(StatusNote::error(user_error(&err)));
+            self.set_note(StatusNote::error(user_error(&err)));
         }
         cx.notify();
     }
@@ -180,8 +178,7 @@ impl QuillApp {
                 live.driver
                     .process_community_add_chat_requests(community_id, approve, count)
         {
-            self.connection
-                .set_note(StatusNote::error(user_error(&err)));
+            self.set_note(StatusNote::error(user_error(&err)));
         }
         cx.notify();
     }
@@ -392,8 +389,7 @@ impl QuillApp {
                 .driver
                 .fetch_community_add_chat_requests(community_id, false)
         {
-            self.connection
-                .set_note(StatusNote::error(user_error(&err)));
+            self.set_note(StatusNote::error(user_error(&err)));
         }
         cx.notify();
     }

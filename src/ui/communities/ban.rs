@@ -121,8 +121,7 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut()
             && let Err(err) = live.driver.ban_community_member(community_id, member)
         {
-            self.connection
-                .set_note(StatusNote::error(user_error(&err)));
+            self.set_note(StatusNote::error(user_error(&err)));
         }
         cx.notify();
     }

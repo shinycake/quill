@@ -61,8 +61,7 @@ impl QuillApp {
                 .driver
                 .set_community_notification_settings(community_id, settings)
         {
-            self.connection
-                .set_note(StatusNote::error(user_error(&err)));
+            self.set_note(StatusNote::error(user_error(&err)));
         }
         cx.notify();
     }
@@ -96,8 +95,7 @@ impl QuillApp {
                 })
                 .last();
             if let Some(err) = failed {
-                self.connection
-                    .set_note(StatusNote::error(user_error(&err)));
+                self.set_note(StatusNote::error(user_error(&err)));
             }
         }
         cx.notify();

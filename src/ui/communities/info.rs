@@ -67,7 +67,7 @@ impl QuillApp {
             .session()
             .is_some_and(|s| s.chat_is_owner(quill::ids::ChatId(chat.chat_id)));
         if kind == CommunityChatKind::Bot || (chat.is_hidden && !owner) {
-            self.connection.set_note(StatusNote::info(by_kind(
+            self.set_note(StatusNote::info(by_kind(
                 kind,
                 keys::COMMUNITY_HIDDEN_NOT_ACCESSIBLE,
                 keys::COMMUNITY_HIDDEN_NOT_ACCESSIBLE_CHANNEL,
@@ -92,8 +92,7 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut()
             && let Err(err) = live.driver.join_channel(quill::ids::ChatId(chat_id))
         {
-            self.connection
-                .set_note(StatusNote::error(user_error(&err)));
+            self.set_note(StatusNote::error(user_error(&err)));
         }
         cx.notify();
     }
