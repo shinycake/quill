@@ -3215,6 +3215,127 @@ so the Asker filter keeps it).
 - Search hand-off (8) and the link-preview retry (9) were not run live.
 
 
+### Phase 17 (area B: one stage for the forward, one mode for the panel, and flows that ran in the wrong place)
+
+Round 17 of the review, area B, on `claude/sm-review17-b`. The numbers are
+the review's ranked findings. Three round-15 and round-16 "dodges" (state
+kept in step by hand next to other state) are converted too; findings 6
+and 7 came from one of them.
+
+**The forward is one stage (dodge, findings 6 and 7).** `ShareUi` held
+the forward as three fields kept in step by about ten writers: the draft
+(`pending_forward`), the chat the forward bar waits in (`forward_bar_dest`)
+and whether the share box is open (`forward_picker_open`). It is now one
+`ForwardStage` (`src/ui/forward_stage.rs`):
+
+- `None`; `Selecting(draft)`, selection mode in the conversation the
+  messages were picked in; `Picking { draft, bar }`, the share box over a
+  selection (`bar: None`) or over a forward bar ("Change recipient",
+  `bar: Some(chat)`), which leaving the box returns to; and
+  `Bar { draft, dest }`, the forward bar above `dest`'s composer.
+- The transitions are methods (`open_picker`, `close_picker`, `drop_bar`,
+  `selection_mut`, `take_draft`), so a writer cannot leave a bar with no
+  draft or a box over nothing.
+- A forward bar is no selection mode (6). `selecting_in` reads only
+  `Selecting` and `Picking { bar: None }`, and requires the selection's
+  own conversation, so a bar into the selection's own forum no longer
+  shows "3 selected" and a Delete over hidden ids in every topic. Picking
+  again (a toggle, a drag, Shift+click) turns a bar back into a
+  selection (`selection_mut`).
+- `ForwardFlight` and `ForwardResult` carry `from_topic` (7). A forward's
+  answer ends the window's draft only when the draft `is_from` the
+  result's chat and topic, so a newer selection made in another topic of
+  the same chat stays.
+
+**The emoji panel is one mode (dodge).** `MediaPanel { open, reaction,
+status }` is `panel_mode: PanelMode { Closed, Compose, Reaction(target),
+Status(target) }` (`media_panel/mode.rs`). Opening the reaction selector
+over the status selector left the status target set, and the readers
+disagreed on which won (`sync_media_panel_rows` picked the reaction,
+`panel_query` and the custom emoji cell the status). One writer,
+`set_media_panel_mode`, drops a selector's rows and stops resolving the
+status choices when the status mode ends; it is listed in
+`scripts/single-writers.txt`, so `check-screen-state.py` fails any other
+whole write outside tests.
+
+**The link preview's "already asked" mark is the session's (dodge).**
+`ComposerUi::preview_tried` was a per-window copy next to
+`Session::composer_previews`. Any entry there (asked, loaded, none,
+failed) now means "asked". A keystroke that brings a URL into the field
+forgets a `Failed` entry for it (`retry_failed_link_preview`, from the
+composer's Change event, not the frame), and a request that could not be
+sent is stored as `Failed` (`send_failed`), so it is not asked again on
+every frame.
+
+**What else was built, by finding.**
+
+1. *A topic change while editing left the edited text as a plain draft.*
+   `sync_chat_ui`'s topic branch asks for the slot's draft restore
+   (`request_draft_restore`) when the value it replaces was editing or had
+   the rich editor open. The restore runs later in the same upkeep, after
+   the edit is gone, so the stashed draft and its reply come back. A Saved
+   sublist or a thread inside a forum topic keeps the draft slot, so no
+   switch path restored it before.
+2. *Window-menu and Dock commands ran in a chat window's scope.* `on_app`,
+   the one path every menu-bar and Dock handler takes, runs the command
+   through `as_main_window_command`: the main window's state in place
+   (`in_window_scope(None, ..)`) and asked by it (`as_asked_by(None, ..)`).
+   The command raises the main window, so its box shows there.
+3. *A reply typed into a toast of an account not on screen was lost and
+   lingered.* `send_typed_notification_reply` is the one place the typed
+   text is taken. `drain_background_clicks` calls it for the account on
+   screen, and `run_notification_action` calls it for a Reply click that
+   switched accounts first (`open_pending_account_chat`). The chat opens
+   only when nothing was sent.
+4. *A stale Join opened the community-limit box.* `limit_box` is computed
+   only for an answer that is not stale.
+5. *A sticker category listed another window's search.* The session's
+   found list says what it is for: `StickerSearch { Typed(query),
+   Category(source) }` replaced `search_query`. A window lists the found
+   stickers only while they are for its own query or category
+   (`wanted_sticker_search`), and the window of the last press asks for a
+   category the same way it asks for a typed query, so
+   `search_chosen_sticker_category` and the `category_changed` key compare
+   are gone.
+8. *A stale chat-list check revived select mode.* The main window's frame
+   clears the checks once none of them is listed
+   (`end_selection_left_list`, a `// main-only` step: only the main
+   window has a chat list). "Select unread" checks the listed chats only.
+9. *A channel's reaction row stayed after Delete.* The purpose carries the
+   full `MessageSender`, so `drop_reactor_from_audience` matches a chat
+   sender too.
+10. *The D-Bus notifier gave up for the session.* A failed connect is not
+    cached. `RetryGate` lets the next notification try again after
+    `REPROBE` (30 s), the capability probe's interval.
+
+*Guards.* `scripts/single-writers.txt` lists `panel_mode`. The screen
+state check's chat-key list (`scripts/view-state-not-chat.txt`) names the
+two forward-bar chats in the stage. The OS-menu fix sits at the one seam
+all handlers use (`on_app`), so no extra script.
+
+Tests: `chat_ui_tests.rs` (the forum-topic edit test now checks the field
+lost the edited text; `a_forward_bar_into_the_selections_forum_is_no_selection_mode`,
+`a_forward_answer_keeps_a_newer_selection_of_another_topic`),
+`forward_stage.rs` (the stage's transitions),
+`chat_window/asker_tests.rs` (`a_menu_bar_command_runs_as_the_main_window`),
+`notifications/reply_after_switch_tests.rs`,
+`state/tests/premium_limit.rs` (`a_stale_invite_link_join_opens_no_limit_box`),
+`media_panel/panel_tests.rs` (`a_category_does_not_list_another_windows_search`),
+`media_panel/status_tests.rs` (`the_reaction_selector_replaces_the_status_selector`),
+`derived_state_tests.rs` (two chat-list tests), `ownership_types.rs`
+(`a_deleted_channel_reaction_leaves_the_who_reacted_list`), the connect
+link-preview test (`forget_failed`, `send_failed`) and `linux_dbus.rs`
+(`a_failed_connect_is_retried_after_the_reprobe_interval`, Linux only).
+
+**Not done, or not tested.**
+
+- The notification reply (3) is tested through a test-only text seam; a
+  real toast reply after an account switch was not run.
+- The D-Bus retry (10) builds and tests on Linux CI only; it was not run
+  against a daemon that starts late.
+- The OS menu fix (2) is tested at the seam; the real menu bar was not
+  clicked.
+
 ### Phase 15 (area C)
 
 Round 15 of the review, area C (the rest of `src/ui`), on

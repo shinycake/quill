@@ -187,7 +187,7 @@ fn restore_on_a_locked_pack_opens_the_premium_preview(cx: &mut TestAppContext) {
     frames(vcx);
     assert_eq!(premium_page(&app, vcx), Some(REACTIONS_PREVIEW));
     assert!(
-        app.read_with(vcx, |app, _| !app.pickers.media_panel.open),
+        app.read_with(vcx, |app, _| !app.pickers.media_panel.is_open()),
         "the selector closes"
     );
 }

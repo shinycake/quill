@@ -20,8 +20,8 @@ impl QuillApp {
     pub(super) fn sync_history_holds(&mut self) {
         let holds: Vec<ChatId> = self
             .share
-            .pending_forward
-            .as_ref()
+            .forward
+            .draft()
             .map(|draft| draft.from_chat_id)
             .into_iter()
             .chain(self.chat_ui.reply().map(|reply| reply.chat_id))

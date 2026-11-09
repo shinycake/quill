@@ -316,25 +316,18 @@ fn a_forward_drop_on_a_forum_row_asks_for_a_topic_then_waits_in_its_bar(cx: &mut
     assert!(chooser_open(&app, vcx));
     assert_eq!(open_chat(&app, vcx), Some(ChatId(11)));
     assert_eq!(
-        app.read_with(vcx, |app, _| app.share.forward_bar_dest),
+        app.read_with(vcx, |app, _| app.share.forward.bar_dest()),
         None
     );
     pick(vcx, 2);
     assert_eq!(open_chat(&app, vcx), Some(ChatId(13)));
     assert_eq!(open_topic(&app, vcx), Some(2));
     app.read_with(vcx, |app, _| {
-        assert_eq!(app.share.forward_bar_dest, Some(ChatId(13)));
-        let ids = app
-            .share
-            .pending_forward
-            .as_ref()
-            .map(|d| d.message_ids.clone());
+        assert_eq!(app.share.forward.bar_dest(), Some(ChatId(13)));
+        let ids = app.share.forward.draft().map(|d| d.message_ids.clone());
         assert_eq!(ids, Some(vec![MessageId(101), MessageId(102)]));
         // The topic is bound when it is picked, not when Send runs.
-        assert_eq!(
-            app.share.pending_forward.as_ref().and_then(|d| d.topic_id),
-            Some(2)
-        );
+        assert_eq!(app.share.forward.draft().and_then(|d| d.topic_id), Some(2));
     });
 }
 
@@ -349,7 +342,7 @@ fn cancelling_a_forward_drop_leaves_the_forward_bar_alone(cx: &mut TestAppContex
     assert!(!chooser_open(&app, vcx));
     assert_eq!(open_chat(&app, vcx), Some(ChatId(11)));
     assert_eq!(
-        app.read_with(vcx, |app, _| app.share.forward_bar_dest),
+        app.read_with(vcx, |app, _| app.share.forward.bar_dest()),
         None
     );
 }
@@ -382,7 +375,7 @@ fn an_administrators_direct_messages_keep_the_note_instead_of_a_chooser(cx: &mut
     drop_selection_on_13(&app, vcx);
     assert!(!chooser_open(&app, vcx));
     assert_eq!(
-        app.read_with(vcx, |app, _| app.share.forward_bar_dest),
+        app.read_with(vcx, |app, _| app.share.forward.bar_dest()),
         None
     );
 }
@@ -395,7 +388,7 @@ fn a_members_direct_messages_take_the_drop_like_any_chat(cx: &mut TestAppContext
     drop_selection_on_13(&app, vcx);
     assert!(!chooser_open(&app, vcx));
     assert_eq!(
-        app.read_with(vcx, |app, _| app.share.forward_bar_dest),
+        app.read_with(vcx, |app, _| app.share.forward.bar_dest()),
         Some(ChatId(13))
     );
 }

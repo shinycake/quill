@@ -57,6 +57,9 @@ impl QuillApp {
         self.story_frame_upkeep(cx);
         // main-only: the sign-in screen is the main window's.
         self.sync_signin(window, cx);
+        // main-only: the chat list and its multi-select are the main
+        // window's (chat windows have none).
+        self.end_selection_left_list();
     }
 
     /// The stories' follow-ups: refreshed trays, the composer's check,

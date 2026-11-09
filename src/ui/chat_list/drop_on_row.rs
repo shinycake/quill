@@ -542,7 +542,7 @@ impl QuillApp {
                 quill::ids::MessageId(102),
                 false,
             );
-            self.share.pending_forward = Some(draft);
+            self.share.forward = crate::ui::forward_stage::ForwardStage::Selecting(draft);
         }
         let state = &mut self.chat_list.drop_on_row;
         state.hover = Some(ChatId(12));

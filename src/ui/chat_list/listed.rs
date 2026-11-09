@@ -11,7 +11,7 @@ impl QuillApp {
     /// The main list's chats for the open folder and category (the Unread
     /// filter and a community narrow what the session lists). Empty on the
     /// Archived category, which shows the archive alone.
-    pub(super) fn listed_main_chats(&self) -> Vec<&ChatSummary> {
+    pub(in crate::ui) fn listed_main_chats(&self) -> Vec<&ChatSummary> {
         let folder = self.folders.tab;
         let filter = self.chat_list.filter;
         // Borrowed, never cloned: the list can hold thousands of chats and
@@ -125,6 +125,16 @@ impl QuillApp {
             _ => None,
         });
         self.checked_among(rows).next().is_some()
+    }
+
+    /// Frame upkeep: once no checked chat is in the list any more (the
+    /// last one archived or left, from another device too), the checks go
+    /// and with them multi-select mode. Otherwise a check that only left
+    /// the list came back with it ("1 selected", row clicks ticking).
+    pub(in crate::ui) fn end_selection_left_list(&mut self) {
+        if !self.chat_list.selected.is_empty() && self.selected_chat_ids().is_empty() {
+            self.chat_list.selected.clear();
+        }
     }
 
     /// Before a change builds on the checks, forget the ones that left the

@@ -311,8 +311,8 @@ fn the_emoji_panel_opens_in_the_window_that_asked(cx: &mut TestAppContext) {
     h.settle(cx);
     let (window_panel, main_panel) = h.app.read_with(cx, |app, _| {
         let slot = app.windows.slot_for(OTHER).expect("slot");
-        let open = slot.borrow().pickers.media_panel.open;
-        (open, app.pickers.media_panel.open)
+        let open = slot.borrow().pickers.media_panel.is_open();
+        (open, app.pickers.media_panel.is_open())
     });
     assert!(window_panel, "the window's picker opened");
     assert!(!main_panel, "the main window's picker stayed closed");

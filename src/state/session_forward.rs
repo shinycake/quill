@@ -190,6 +190,7 @@ impl Session {
             dest_chat_id,
             dest_title,
             from_chat_id: flight.as_ref().map(|f| f.from_chat_id).unwrap_or(ChatId(0)),
+            from_topic: flight.as_ref().map(|f| f.from_topic).unwrap_or_default(),
             requested: flight
                 .as_ref()
                 .map(|f| f.requested)

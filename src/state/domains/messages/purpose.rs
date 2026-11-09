@@ -175,8 +175,9 @@ pub enum MessagesPurpose {
     /// list's "Delete reaction" and the delete box's reactions checkbox).
     DeleteMessageReactionsFromSender {
         message_id: i64,
-        /// The member whose reactions go; 0 for a channel sender.
-        user_id: i64,
+        /// The member or chat (a channel, an anonymous admin) whose
+        /// reactions go, so its who-reacted row goes on success.
+        sender: crate::telegram::envelope::MessageSender,
     },
     /// MED4: `getWebPageInstantView` (TDLib 1.8.67, `schema/td_api.tl:14794`).
     /// The URL rides `Session::instant_view_urls` keyed by `RequestId`

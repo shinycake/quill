@@ -294,6 +294,8 @@ pub struct ForwardFlight {
     pub extra: RequestId,
     pub dest_chat_id: ChatId,
     pub from_chat_id: ChatId,
+    /// The conversation of `from_chat_id` the messages were picked in.
+    pub from_topic: crate::ids::TopicId,
     pub requested: usize,
 }
 
@@ -304,6 +306,9 @@ pub struct ForwardResult {
     pub dest_chat_id: ChatId,
     pub dest_title: String,
     pub from_chat_id: ChatId,
+    /// The conversation of `from_chat_id` the messages were picked in: a
+    /// window's selection is this forward's only when it is from there.
+    pub from_topic: crate::ids::TopicId,
     pub requested: usize,
     pub forwarded_ids: Vec<MessageId>,
 }

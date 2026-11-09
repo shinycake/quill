@@ -160,7 +160,7 @@ impl Harness {
                 .map(|layer| layer.name);
             let search = app.session().map(|session| &session.search);
             let others = [
-                ("media-panel", app.pickers.media_panel.open),
+                ("media-panel", app.pickers.media_panel.is_open()),
                 ("send-menu", app.composer_ui.send_menu.open.is_some()),
                 ("search", search.is_some_and(|s| s.search.open)),
                 (
@@ -427,11 +427,15 @@ const MAIN_WINDOW: &[Surface] = &[
         name: "forward box",
         open: |h| {
             h.act(|app, window, cx| {
-                app.share.pending_forward = quill::composer::ForwardDraft::from_message(
+                app.share.forward = quill::composer::ForwardDraft::from_message(
                     ChatId(11),
                     quill::ids::TopicId::None,
                     MessageId(101),
                     false,
+                )
+                .map_or(
+                    crate::ui::forward_stage::ForwardStage::None,
+                    crate::ui::forward_stage::ForwardStage::Selecting,
                 );
                 app.open_forward_picker(window, cx);
             })

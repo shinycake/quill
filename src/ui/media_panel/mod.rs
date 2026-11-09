@@ -102,8 +102,7 @@ pub(super) struct PanelSection {
 #[derive(Clone, Debug, PartialEq)]
 pub(super) struct PanelKey {
     tab: PanelTab,
-    reaction: bool,
-    status: bool,
+    usage: PanelUse,
     query: String,
     session_revision: u64,
     recent_emoji: usize,
@@ -122,11 +121,9 @@ pub(super) struct ReactionTarget {
 }
 
 pub(super) struct MediaPanel {
-    pub open: bool,
-    /// Set while the panel picks a reaction instead of composing.
-    pub reaction: Option<ReactionTarget>,
-    /// Set while the panel is the emoji status selector.
-    pub status: Option<status::StatusTarget>,
+    /// Closed, composing, or a selector; written through
+    /// [`QuillApp::set_media_panel_mode`] only.
+    pub panel_mode: PanelMode,
     /// The "Set Status for..." box, once a status asked for a custom time.
     pub until: Option<status_time_box::StatusUntil>,
     pub tab: PanelTab,
@@ -147,9 +144,7 @@ pub(super) struct MediaPanel {
 impl Default for MediaPanel {
     fn default() -> Self {
         Self {
-            open: false,
-            reaction: None,
-            status: None,
+            panel_mode: PanelMode::Closed,
             until: None,
             tab: PanelTab::default(),
             list: ListState::new(0, ListAlignment::Top, px(400.)),
@@ -261,15 +256,13 @@ fn push_custom_packs(
 
 impl QuillApp {
     pub(super) fn media_panel_open(&self) -> bool {
-        self.pickers.media_panel.open
+        self.pickers.media_panel.is_open()
     }
 
     /// Whether the panel floats over the composer: open, and neither a
     /// selector nor hosted by the story viewer or a title box.
     pub(super) fn media_panel_over_composer(&self) -> bool {
-        self.media_panel_open()
-            && self.pickers.media_panel.reaction.is_none()
-            && self.pickers.media_panel.status.is_none()
+        self.pickers.media_panel.panel_mode == PanelMode::Compose
             && !self.story_reply_panel_active()
             && !self.group_title_emoji_active()
     }
@@ -283,7 +276,9 @@ impl QuillApp {
     }
 
     pub(super) fn toggle_media_panel(&mut self, tab: PanelTab, cx: &mut Context<Self>) {
-        if self.pickers.media_panel.open && self.pickers.media_panel.tab == tab {
+        if self.pickers.media_panel.panel_mode == PanelMode::Compose
+            && self.pickers.media_panel.tab == tab
+        {
             self.close_media_panel(cx);
         } else {
             self.open_media_panel(tab, cx);
@@ -292,7 +287,7 @@ impl QuillApp {
 
     pub(super) fn open_media_panel(&mut self, tab: PanelTab, cx: &mut Context<Self>) {
         self.cancel_recording_here(cx);
-        self.pickers.media_panel.open = true;
+        self.set_media_panel_mode(PanelMode::Compose);
         self.pickers.media_panel.category = None;
         self.set_media_panel_tab(tab, cx);
         if let Some(live) = self.live.as_mut() {
@@ -317,14 +312,13 @@ impl QuillApp {
             input.set_value("", window, cx);
             input.focus(window, cx);
         });
-        self.pickers.media_panel.reaction = Some(ReactionTarget {
+        self.set_media_panel_mode(PanelMode::Reaction(ReactionTarget {
             chat_id,
             message_id,
             position,
-        });
+        }));
         self.pickers.media_panel.key = None;
         self.pickers.media_panel.active_section = 0;
-        self.pickers.media_panel.open = true;
         self.pickers.media_panel.tab = PanelTab::Emoji;
         if let Some(live) = self.live.as_mut() {
             // Loads the installed custom emoji packs.
@@ -339,7 +333,7 @@ impl QuillApp {
         choice: quill::state::ReactionChoice,
         cx: &mut Context<Self>,
     ) -> bool {
-        let Some(target) = self.pickers.media_panel.reaction else {
+        let Some(target) = self.pickers.media_panel.reaction() else {
             return false;
         };
         self.close_media_panel(cx);
@@ -348,15 +342,11 @@ impl QuillApp {
     }
 
     pub(super) fn close_media_panel(&mut self, cx: &mut Context<Self>) -> bool {
-        if !self.pickers.media_panel.open {
+        if !self.pickers.media_panel.is_open() {
             return false;
         }
-        self.pickers.media_panel.open = false;
+        self.set_media_panel_mode(PanelMode::Closed);
         self.pickers.media_panel.hovered = None;
-        if self.pickers.media_panel.reaction.take().is_some() {
-            self.pickers.media_panel.key = None;
-        }
-        self.close_status_selector();
         self.sync_gif_downloads();
         cx.notify();
         true
@@ -390,15 +380,16 @@ impl QuillApp {
     }
 
     pub(super) fn panel_query(&self, cx: &App) -> String {
+        let usage = self.pickers.media_panel.usage();
         match self.pickers.media_panel.tab {
-            PanelTab::Emoji if self.pickers.media_panel.status.is_some() => self
+            PanelTab::Emoji if usage == PanelUse::Status => self
                 .pickers
                 .status_search_input
                 .read(cx)
                 .value()
                 .trim()
                 .to_string(),
-            PanelTab::Emoji if self.pickers.media_panel.reaction.is_some() => self
+            PanelTab::Emoji if usage == PanelUse::Reaction => self
                 .pickers
                 .reaction_search_input
                 .read(cx)
@@ -434,8 +425,7 @@ impl QuillApp {
         }
         let key = PanelKey {
             tab: self.pickers.media_panel.tab,
-            reaction: self.pickers.media_panel.reaction.is_some(),
-            status: self.pickers.media_panel.status.is_some(),
+            usage: self.pickers.media_panel.usage(),
             query: query.clone(),
             session_revision: self.session().map_or(0, |s| s.revision),
             recent_emoji: self
@@ -452,19 +442,13 @@ impl QuillApp {
         let same_view = self.pickers.media_panel.key.as_ref().is_some_and(|old| {
             old.tab == key.tab
                 && old.query == key.query
-                && old.reaction == key.reaction
+                && old.usage == key.usage
                 && old.category == key.category
                 && old.unicode_only == key.unicode_only
         });
-        let category_changed = self
-            .pickers
-            .media_panel
-            .key
-            .as_ref()
-            .is_none_or(|old| old.category != key.category);
         let (rows, sections) = match key.tab {
-            PanelTab::Emoji if key.reaction => self.build_reaction_rows(&query),
-            PanelTab::Emoji if key.status => self.build_status_rows(&query),
+            PanelTab::Emoji if key.usage == PanelUse::Reaction => self.build_reaction_rows(&query),
+            PanelTab::Emoji if key.usage == PanelUse::Status => self.build_status_rows(&query),
             PanelTab::Emoji => self.build_emoji_rows(&query),
             PanelTab::Stickers => self.build_sticker_rows(&query),
             PanelTab::Gifs => (Vec::new(), Vec::new()),
@@ -477,18 +461,15 @@ impl QuillApp {
         self.pickers.media_panel.rows = rows;
         self.pickers.media_panel.sections = sections;
         self.pickers.media_panel.key = Some(key);
-        if category_changed && self.pickers.media_panel.tab == PanelTab::Stickers {
-            self.search_chosen_sticker_category();
-        }
     }
 
     /// The panel's searches go to TDLib for the query this window's field
-    /// holds. The answers are one list per session (sticker search, keyword
-    /// emoji), each with the query it is for, so "already asked" is read
-    /// from there, not from a mark of this window's: a second window's
-    /// search replaces the list, and this window asks again once it is the
-    /// window of the last press or key (only that one asks, so two windows
-    /// with two queries do not take turns asking).
+    /// holds, or the sticker category it chose. The answers are one list
+    /// per session (sticker search, keyword emoji), each with what it is
+    /// for, so "already asked" is read from there, not from a mark of this
+    /// window's: a second window's search replaces the list, and this
+    /// window asks again once it is the window of the last press or key
+    /// (only that one asks, so two windows do not take turns asking).
     fn sync_media_panel_search(&mut self, query: &str) {
         if !self.windows.pressed_here() {
             return;
@@ -500,18 +481,26 @@ impl QuillApp {
         // Emoji search adds TDLib's keyword matches (all typed languages).
         let keywords =
             tab == PanelTab::Emoji && session.stickers.emoji.keyword_emojis.query != query;
-        // Sticker search goes to TDLib (by emoji or keyword).
-        let stickers = tab == PanelTab::Stickers
-            && !query.is_empty()
-            && session.stickers.stickers.search_query != query;
+        // Sticker search goes to TDLib (by emoji or keyword, or for a
+        // category).
+        let stickers = (tab == PanelTab::Stickers)
+            .then(|| self.wanted_sticker_search(query))
+            .flatten()
+            .filter(|wanted| session.stickers.stickers.searched != *wanted);
         let Some(live) = self.live.as_mut() else {
             return;
         };
         if keywords {
             let _ = live.driver.search_keyword_emojis(query);
         }
-        if stickers {
-            let _ = live.driver.search_sticker_picker(query);
+        match stickers {
+            Some(quill::state::StickerSearch::Typed(query)) => {
+                let _ = live.driver.search_sticker_picker(&query);
+            }
+            Some(quill::state::StickerSearch::Category(source)) => {
+                let _ = live.driver.search_sticker_category(&source);
+            }
+            None => {}
         }
     }
 
@@ -625,9 +614,11 @@ impl QuillApp {
                 label: category.unwrap_or_else(|| tr(keys::Q_MISC_SEARCH_RESULTS).into()),
                 set_id: None,
             });
-            // Typed: the session's results only while they are this
-            // query's (another window may have searched since).
-            let found = if query.is_empty() || session.stickers.stickers.search_query == query {
+            // The session's results only while they are for this query or
+            // category (another window may have searched since).
+            let found = if self.wanted_sticker_search(query).as_ref()
+                == Some(&session.stickers.stickers.searched)
+            {
                 session.stickers.stickers.found_stickers.len()
             } else {
                 0
@@ -831,7 +822,7 @@ impl QuillApp {
     fn emoji_cell(&self, id: u64, emoji: SharedString, cx: &mut Context<Self>) -> AnyElement {
         // A recently used emoji offers "Reset recent emoji" (the list is
         // local; tdesktop clears it from the same section).
-        let in_recent = self.pickers.media_panel.reaction.is_none()
+        let in_recent = self.pickers.media_panel.reaction().is_none()
             && self.session().is_some_and(|s| {
                 s.settings
                     .media_prefs
@@ -959,6 +950,9 @@ fn placeholder_cell(size: f32, cx: &App) -> AnyElement {
 mod categories;
 mod custom_emoji_cell;
 mod gif_gate;
+mod mode;
+pub(in crate::ui) use mode::PanelMode;
+use mode::PanelUse;
 mod reaction_packs_demo;
 mod reaction_rows;
 mod reveal;

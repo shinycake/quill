@@ -29,9 +29,14 @@ pub(super) struct SelectionRow {
 impl QuillApp {
     /// Whether selection mode is on in `chat_id`, in the conversation the
     /// view shows there (`forward_draft` hides one made in another topic).
+    /// A forward bar is no selection mode, in the chat it waits in or the
+    /// one its messages came from: a bar into the selection's own forum
+    /// kept "3 selected" and a Delete over hidden ids in every topic.
     pub(super) fn selecting_in(&self, chat_id: ChatId) -> bool {
-        self.forward_draft()
-            .is_some_and(|draft| draft.from_chat_id == chat_id)
+        self.share.forward.selection().is_some()
+            && self
+                .forward_draft()
+                .is_some_and(|draft| draft.is_from(chat_id, self.open_topic_id(chat_id)))
     }
 
     /// Follow selection mode for the motion state; returns the check fade
@@ -210,7 +215,7 @@ impl QuillApp {
     pub(super) fn add_to_selection(&mut self, chat_id: ChatId, ids: Vec<MessageId>) {
         self.drop_deleted_selection();
         let topic = self.open_topic_id(chat_id);
-        let Some(draft) = self.share.pending_forward.as_mut() else {
+        let Some(draft) = self.share.forward.selection_mut() else {
             return;
         };
         let room = quill::selection_pin::room_for(draft.count());
@@ -653,8 +658,7 @@ impl QuillApp {
                 }
             }
         }
-        self.share.pending_forward = None;
-        self.share.forward_picker_open = false;
+        self.share.forward = super::forward_stage::ForwardStage::None;
         cx.notify();
     }
 

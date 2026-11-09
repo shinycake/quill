@@ -131,7 +131,7 @@ impl QuillApp {
                 this.child(self.message_menu_overlay(menu, cx))
             })
             // The expanded reaction selector, where the menu was.
-            .when_some(self.pickers.media_panel.reaction, |this, target| {
+            .when_some(self.pickers.media_panel.reaction(), |this, target| {
                 let panel = self.media_panel(cx);
                 let panel = self.selector_panel(panel);
                 this.child(

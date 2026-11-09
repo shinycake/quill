@@ -65,24 +65,59 @@ pub(super) struct Notifier {
     reply_texts: Mutex<HashMap<NotifyKey, String>>,
 }
 
-static NOTIFIER: OnceLock<Option<Notifier>> = OnceLock::new();
+/// The connection once made. A failed attempt is not cached here: the
+/// daemon may start after Quill (mako or dunst launched by the session
+/// after an autostarted Quill), so [`CONNECT_RETRY`] gates the next try.
+static NOTIFIER: OnceLock<Notifier> = OnceLock::new();
+
+/// When the last connect failed, so a missing daemon is asked for again
+/// every [`REPROBE`] rather than on every notification or never.
+static CONNECT_RETRY: Mutex<RetryGate> = Mutex::new(RetryGate { failed_at: None });
+
+/// The last failed connect, and whether the next may run.
+#[derive(Debug)]
+struct RetryGate {
+    failed_at: Option<std::time::Instant>,
+}
+
+impl RetryGate {
+    fn due(&self, now: std::time::Instant) -> bool {
+        self.failed_at
+            .is_none_or(|at| now.saturating_duration_since(at) >= REPROBE)
+    }
+}
 
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     quill::locks::lock_or_recover(mutex)
 }
 
-/// The process-wide notifier, connected on first use. `None`, for good,
-/// when the session bus or the daemon cannot be reached.
+/// The process-wide notifier, connected on first use. `None` while the
+/// session bus or the daemon cannot be reached; asked again after
+/// [`REPROBE`], as the capability probe does.
 pub(super) fn notifier(clicks: &AccountClicks) -> Option<&'static Notifier> {
-    NOTIFIER
-        .get_or_init(|| match Notifier::connect(clicks.clone()) {
-            Ok(notifier) => Some(notifier),
-            Err(error) => {
-                eprintln!("desktop notifications over D-Bus unavailable: {error}");
-                None
-            }
-        })
-        .as_ref()
+    if let Some(notifier) = NOTIFIER.get() {
+        return Some(notifier);
+    }
+    let mut gate = lock(&CONNECT_RETRY);
+    // Another worker may have connected while this one waited.
+    if let Some(notifier) = NOTIFIER.get() {
+        return Some(notifier);
+    }
+    let now = std::time::Instant::now();
+    if !gate.due(now) {
+        return None;
+    }
+    match Notifier::connect(clicks.clone()) {
+        Ok(notifier) => {
+            gate.failed_at = None;
+            Some(NOTIFIER.get_or_init(|| notifier))
+        }
+        Err(error) => {
+            eprintln!("desktop notifications over D-Bus unavailable: {error}");
+            gate.failed_at = Some(now);
+            None
+        }
+    }
 }
 
 /// How often a missing notification daemon is looked for again.
@@ -128,7 +163,7 @@ pub(in crate::ui) fn linux_service_capabilities() -> quill::notify::custom::Nati
 /// answered inline. Taking it clears it. Only the account on screen offers
 /// the field.
 pub(super) fn take_reply_text(account: &AccountKey, chat_id: ChatId) -> Option<String> {
-    let notifier = NOTIFIER.get()?.as_ref()?;
+    let notifier = NOTIFIER.get()?;
     lock(&notifier.reply_texts).remove(&(account.clone(), chat_id))
 }
 
@@ -265,7 +300,7 @@ fn listen(signals: MessageIterator) {
         let Some(signal) = interpret_signal(member.as_str(), id, text.as_deref()) else {
             continue;
         };
-        if let Some(notifier) = NOTIFIER.get().and_then(Option::as_ref) {
+        if let Some(notifier) = NOTIFIER.get() {
             notifier.handle(signal);
         }
     }
@@ -288,6 +323,18 @@ mod tests {
         assert_eq!(shown.id_by_chat.get(&key), Some(&2));
         assert_eq!(shown.close(2), Some(key));
         assert!(shown.id_by_chat.is_empty());
+    }
+
+    /// Round 17 (area B, finding 10): a daemon missing at the first
+    /// notification is asked for again after the re-probe interval.
+    #[test]
+    fn a_failed_connect_is_retried_after_the_reprobe_interval() {
+        let start = std::time::Instant::now();
+        let mut gate = RetryGate { failed_at: None };
+        assert!(gate.due(start), "the first connect runs");
+        gate.failed_at = Some(start);
+        assert!(!gate.due(start + REPROBE / 2));
+        assert!(gate.due(start + REPROBE));
     }
 
     #[test]

@@ -96,14 +96,45 @@ fn headers(app: &QuillApp) -> Vec<String> {
         .collect()
 }
 
+/// Round 17 (area B, dodge): the panel is one mode. The reaction selector
+/// opened over the status selector is the reaction selector only: its
+/// rows, its search field and its clicks, with no status target left.
+#[gpui_kit::test]
+fn the_reaction_selector_replaces_the_status_selector(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx, true);
+    let vcx = &mut vcx;
+    open_selector(&app, vcx);
+    app.update_in(vcx, |app, window, cx| {
+        let chat = app.open_chat_id().unwrap_or(quill::ids::ChatId(11));
+        app.open_reaction_selector(
+            chat,
+            quill::ids::MessageId(1),
+            point(px(10.), px(10.)),
+            window,
+            cx,
+        );
+    });
+    frames(vcx);
+    app.read_with(vcx, |app, _| {
+        let panel = &app.pickers.media_panel;
+        assert!(panel.is_open());
+        assert!(panel.reaction().is_some());
+        assert!(panel.status().is_none(), "one mode, not two targets");
+        assert!(
+            !headers(app).iter().any(|h| h == "Collectibles"),
+            "the status rows went with the status mode"
+        );
+    });
+}
+
 #[gpui_kit::test]
 fn the_menu_entry_opens_the_selector_with_the_remove_cell_first(cx: &mut TestAppContext) {
     let (app, mut vcx) = new_app(cx, true);
     let vcx = &mut vcx;
     open_selector(&app, vcx);
     app.read_with(vcx, |app, _| {
-        assert!(app.pickers.media_panel.open);
-        assert!(app.pickers.media_panel.status.is_some());
+        assert!(app.pickers.media_panel.is_open());
+        assert!(app.pickers.media_panel.status().is_some());
         assert!(
             app.session().is_some_and(|s| !s.stickers.emoji.open),
             "the pack settings dialog stays closed"
@@ -145,8 +176,8 @@ fn a_click_sets_the_status_forever_and_closes_the_selector(cx: &mut TestAppConte
     frames(vcx);
     assert_eq!(my_status(&app, vcx), 5001, "the first themed status");
     app.read_with(vcx, |app, _| {
-        assert!(!app.pickers.media_panel.open);
-        assert!(app.pickers.media_panel.status.is_none());
+        assert!(!app.pickers.media_panel.is_open());
+        assert!(app.pickers.media_panel.status().is_none());
     });
 }
 
@@ -165,7 +196,7 @@ fn the_star_removes_the_status(cx: &mut TestAppContext) {
     });
     app.update(vcx, |app, cx| app.choose_panel_status(None, 0, cx));
     assert_eq!(my_status(&app, vcx), 0);
-    app.read_with(vcx, |app, _| assert!(!app.pickers.media_panel.open));
+    app.read_with(vcx, |app, _| assert!(!app.pickers.media_panel.is_open()));
 }
 
 #[gpui_kit::test]
@@ -175,7 +206,7 @@ fn without_premium_a_status_opens_premium_and_removing_still_works(cx: &mut Test
     // The menu entry itself shows the Premium preview.
     open_selector(&app, vcx);
     app.read_with(vcx, |app, _| {
-        assert!(app.pickers.media_panel.status.is_none())
+        assert!(app.pickers.media_panel.status().is_none())
     });
 
     // Past the menu, a chosen status is not set; the star still removes one.
@@ -185,7 +216,7 @@ fn without_premium_a_status_opens_premium_and_removing_still_works(cx: &mut Test
     frames(vcx);
     app.update(vcx, |app, cx| app.choose_panel_status(Some(5003), 0, cx));
     assert_eq!(my_status(&app, vcx), 0, "no Premium, no status");
-    app.read_with(vcx, |app, _| assert!(!app.pickers.media_panel.open));
+    app.read_with(vcx, |app, _| assert!(!app.pickers.media_panel.is_open()));
 
     app.update(vcx, |app, cx| {
         let session = app.demo_session.as_mut().expect("demo session");
@@ -247,7 +278,10 @@ fn the_menu_sets_a_status_for_a_while_and_custom_opens_the_box(cx: &mut TestAppC
     });
     frames(vcx);
     app.read_with(vcx, |app, _| {
-        assert!(!app.pickers.media_panel.open, "the selector hides first");
+        assert!(
+            !app.pickers.media_panel.is_open(),
+            "the selector hides first"
+        );
         assert!(app.pickers.media_panel.until.is_some());
     });
 }

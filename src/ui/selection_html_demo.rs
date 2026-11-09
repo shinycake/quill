@@ -127,8 +127,11 @@ impl QuillApp {
             }
         }
         session.open_chat(CHAT);
-        self.share.pending_forward =
-            ForwardDraft::from_message(CHAT, quill::ids::TopicId::None, RICH, false);
+        self.share.forward =
+            ForwardDraft::from_message(CHAT, quill::ids::TopicId::None, RICH, false).map_or(
+                crate::ui::forward_stage::ForwardStage::None,
+                crate::ui::forward_stage::ForwardStage::Selecting,
+            );
     }
 }
 
@@ -193,7 +196,10 @@ mod tests {
 
     fn select(app: &Entity<QuillApp>, cx: &mut VisualTestContext, draft: Option<ForwardDraft>) {
         app.update(cx, |app, cx| {
-            app.share.pending_forward = draft;
+            app.share.forward = draft.map_or(
+                crate::ui::forward_stage::ForwardStage::None,
+                crate::ui::forward_stage::ForwardStage::Selecting,
+            );
             cx.notify();
         });
         frames(cx);
@@ -230,7 +236,7 @@ mod tests {
         assert!(has(&mut cx, BUTTON));
         cx.update(|window, cx| window.click(BUTTON, cx));
         frames(&mut cx);
-        assert!(app.read_with(&cx, |app, _| app.share.pending_forward.is_none()));
+        assert!(app.read_with(&cx, |app, _| !app.share.forward.is_some()));
         assert!(!has(&mut cx, BUTTON));
     }
 

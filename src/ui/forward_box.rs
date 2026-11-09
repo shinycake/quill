@@ -367,16 +367,8 @@ impl QuillApp {
     fn forward_box_menu(&self, owner: WeakEntity<Self>) -> impl IntoElement {
         let draft = self.forward_draft();
         let multiple = draft.as_ref().is_some_and(|d| d.count() > 1);
-        let send_copy = self
-            .share
-            .pending_forward
-            .as_ref()
-            .is_some_and(|d| d.send_copy);
-        let remove_caption = self
-            .share
-            .pending_forward
-            .as_ref()
-            .is_some_and(|d| d.remove_caption);
+        let send_copy = self.share.forward.draft().is_some_and(|d| d.send_copy);
+        let remove_caption = self.share.forward.draft().is_some_and(|d| d.remove_caption);
         let selected = self.share.selection.len();
         let single_saved = self
             .share
@@ -418,11 +410,7 @@ impl QuillApp {
                             .checked(send_copy)
                             .on_click(act(&owner, |this, _, cx| {
                                 this.set_forward_send_copy(
-                                    !this
-                                        .share
-                                        .pending_forward
-                                        .as_ref()
-                                        .is_some_and(|d| d.send_copy),
+                                    !this.share.forward.draft().is_some_and(|d| d.send_copy),
                                     cx,
                                 );
                             })),
@@ -522,7 +510,7 @@ crate::ui::shell::register_dialogs! {
     /// The forward box over the window (tdesktop `ShowForwardMessagesBox`).
     ForwardBox => DialogSpec::new(
         2930,
-        |app| app.share.forward_picker_open && app.forward_draft().is_some(),
+        |app| app.share.forward.picker_open() && app.forward_draft().is_some(),
         QuillApp::build_forward_box_dialog,
     )
     .per_window()

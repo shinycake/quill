@@ -227,9 +227,27 @@ fn on_app(
 ) {
     cx.defer(move |cx| {
         let _ = handle.update(cx, |_, window, cx| {
-            let _ = app.update(cx, |this, cx| f(this, window, cx));
+            let _ = app.update(cx, |this, cx| this.as_main_window_command(window, cx, f));
         });
     });
+}
+
+impl QuillApp {
+    /// Run `f`, a menu-bar or Dock command, as the main window's: the
+    /// window it raises and hands. The state in place is whichever window
+    /// the user last pressed in, so a box it opens (`open_box`, which
+    /// reads the asking window) or a navigation it runs went to a chat
+    /// window, now behind main.
+    pub(in crate::ui) fn as_main_window_command(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+        f: impl FnOnce(&mut Self, &mut Window, &mut Context<Self>),
+    ) {
+        self.in_window_scope(None, cx, |this, cx| {
+            this.as_asked_by(None, |this| f(this, window, cx))
+        });
+    }
 }
 
 /// The `MenuItem`s for the Dock menu's rows.

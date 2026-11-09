@@ -22,15 +22,6 @@ pub(in crate::ui) struct StatusTarget {
     pub position: Point<Pixels>,
 }
 
-impl MediaPanel {
-    /// Where the panel shows when it is a selector (reaction or status).
-    pub(in crate::ui) fn selector_anchor(&self) -> Option<Point<Pixels>> {
-        self.reaction
-            .map(|target| target.position)
-            .or(self.status.map(|target| target.position))
-    }
-}
-
 impl QuillApp {
     /// Open the selector at `position`. The caller has checked Premium.
     pub(in crate::ui) fn open_status_selector(
@@ -43,14 +34,12 @@ impl QuillApp {
             input.set_value("", window, cx);
             input.focus(window, cx);
         });
+        self.set_media_panel_mode(PanelMode::Status(StatusTarget { position }));
         let panel = &mut self.pickers.media_panel;
-        panel.reaction = None;
-        panel.status = Some(StatusTarget { position });
         panel.key = None;
         panel.active_section = 0;
         panel.category = None;
         panel.tab = PanelTab::Emoji;
-        panel.open = true;
         if let Some(live) = self.live.as_mut() {
             // The installed emoji packs, and the statuses to list.
             let _ = live.driver.open_media_panel();
@@ -61,16 +50,6 @@ impl QuillApp {
             }
         }
         cx.notify();
-    }
-
-    /// The panel closed: leave status mode and stop resolving its choices.
-    pub(super) fn close_status_selector(&mut self) {
-        if self.pickers.media_panel.status.take().is_some() {
-            self.pickers.media_panel.key = None;
-            if let Some(live) = self.live.as_mut() {
-                live.driver.close_emoji_status_choices();
-            }
-        }
     }
 
     /// The status the account has now (`0`: none).

@@ -634,6 +634,9 @@ mod photo_preview;
 mod poll_drains;
 #[cfg(test)]
 #[cfg(feature = "demo-capture")]
+mod reply_after_switch_tests;
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
 mod ringtone_tests;
 mod spawn_call_notification;
 #[cfg(test)]

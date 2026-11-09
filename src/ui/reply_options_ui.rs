@@ -155,7 +155,7 @@ impl QuillApp {
         }
         self.chat_ui.close_quote_picker();
         self.share.reply_elsewhere_open = true;
-        self.share.forward_picker_open = false;
+        self.share.forward.close_picker();
         self.share.focus_search = true;
         self.share
             .search_input

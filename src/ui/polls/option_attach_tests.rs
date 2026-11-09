@@ -78,7 +78,7 @@ fn a_sticker_chosen_in_the_panel_goes_to_the_option_not_the_chat(cx: &mut TestAp
         assert!(!app.route_poll_option_sticker(FileId(9), "x", (512, 512), cx));
 
         app.choose_poll_option_sticker(AttachTarget::Row(0), cx);
-        assert!(app.pickers.media_panel.open);
+        assert!(app.pickers.media_panel.is_open());
         assert!(app.route_poll_option_sticker(FileId(9), "\u{1F600}", (512, 512), cx));
         assert_eq!(
             slot(app, 0),
@@ -194,7 +194,7 @@ fn emoji_picked_in_the_panel_go_to_the_option_field_with_a_token(cx: &mut TestAp
         assert!(!app.route_poll_option_custom_emoji("x", 1, window, cx));
 
         app.choose_poll_option_emoji(AttachTarget::Row(1), cx);
-        assert!(app.pickers.media_panel.open);
+        assert!(app.pickers.media_panel.is_open());
         assert!(app.route_poll_option_emoji("\u{1F600}", window, cx));
         assert!(app.route_poll_option_custom_emoji("\u{2B50}", 5368324170671202286, window, cx));
         let dialog = app.chat_ui.poll_dialog.as_ref().unwrap();

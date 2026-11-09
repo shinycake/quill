@@ -26,7 +26,8 @@ HistoryUi.ends | compared with the history synced next; a new chat's ends differ
 HistoryUi.last_highlight | compared with the session's highlight, which is the open chat's
 HistoryUi.self_destruct_tick_chat | marks a running tick task, as slow_mode_tick_chat
 HistoryUi.live_location_tick_chat | marks a running tick task, as slow_mode_tick_chat
-ShareUi.forward_bar_dest | the chat a forward waits in; kept across chats on purpose (dismiss_forward_for_chat)
+ShareUi.forward.Bar.dest | the chat the forward bar waits in; kept across chats on purpose (dismiss_forward_for_view)
+ShareUi.forward.Picking.bar | the forward bar the share box was opened over, which leaving the box returns to; it goes with the bar (dismiss_forward_for_view)
 ViewerUi.video | the media viewer's clip, which outlives a chat change (the viewer is the screen's)
 ViewerUi.pending_seek | a media-timestamp link's seek for the viewer's clip, as ViewerUi.video
 ComposerUi.send_effect_once | an effect id, not a chat's: set and cleared around one synchronous send

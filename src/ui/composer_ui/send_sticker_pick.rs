@@ -153,26 +153,23 @@ impl QuillApp {
         // No URL: nothing to fetch. The chip reads the preview of its own
         // composer's URL, so another window's stays.
         let Some(url) = self.chosen_preview_url(&text) else {
-            self.composer_ui.preview_tried = None;
             return;
         };
         // TGX never prefetches a disabled preview.
         if self.preview_choice().disabled {
             return;
         }
-        // A preview asked for already (loading, loaded or none) is the
-        // session's; one whose request failed is asked again by a composer
-        // that did not ask for it last (the URL typed again).
-        let tried_here = self.composer_ui.preview_tried.as_deref() == Some(url.as_str());
+        // A URL asked for already (loading, loaded, none or failed) is the
+        // session's, whichever window asked. A failed one is forgotten
+        // when the URL is typed into a field again
+        // (`retry_failed_link_preview`), so it is asked once more then.
         let already = self.live.as_ref().is_some_and(|live| {
             live.driver
                 .session
                 .messages
                 .composer_previews
                 .get(&url)
-                .is_some_and(|stored| {
-                    !matches!(stored.fetch, quill::state::LinkPreviewFetch::Failed) || tried_here
-                })
+                .is_some()
         });
         if already {
             return;
@@ -196,9 +193,6 @@ impl QuillApp {
                 if this.preview_choice().disabled {
                     return;
                 }
-                if this.live.is_some() {
-                    this.composer_ui.preview_tried = Some(url.clone());
-                }
                 if let Some(live) = this.live.as_mut()
                     && live.driver.request_composer_link_preview(&url).is_err()
                 {
@@ -211,6 +205,26 @@ impl QuillApp {
             .ok();
         })
         .detach();
+    }
+
+    /// A keystroke brought a URL into the field (typed, pasted, or another
+    /// link chosen): a preview whose request failed (`Failed`, which says
+    /// nothing about the URL) is forgotten, so the prefetch asks again. A
+    /// URL that stays in the field is not asked again on every keystroke.
+    pub(in crate::ui) fn retry_failed_link_preview(&mut self, prev: &str, text: &str) {
+        let Some(url) = self.chosen_preview_url(text) else {
+            return;
+        };
+        if self.chosen_preview_url(prev).as_deref() == Some(url.as_str()) {
+            return;
+        }
+        if let Some(live) = self.live.as_mut() {
+            live.driver
+                .session
+                .messages
+                .composer_previews
+                .forget_failed(&url);
+        }
     }
 
     /// MED4b: TGX `LinkPreview.hasMedia` — the chip's size toggle needs

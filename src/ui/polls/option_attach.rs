@@ -468,7 +468,7 @@ impl QuillApp {
 
     /// The field an emoji pick goes to, while the panel is open for one.
     fn poll_emoji_field(&self) -> Option<Entity<TextareaState>> {
-        if !self.pickers.media_panel.open {
+        if !self.pickers.media_panel.is_open() {
             return None;
         }
         let rows = self
@@ -546,7 +546,7 @@ impl QuillApp {
         size: (i32, i32),
         cx: &mut Context<Self>,
     ) -> bool {
-        if !self.pickers.media_panel.open {
+        if !self.pickers.media_panel.is_open() {
             return false;
         }
         let rows = self

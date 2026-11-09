@@ -49,8 +49,11 @@ fn enter_toggles_the_first_match_and_does_not_send(cx: &mut TestAppContext) {
             let id = history.messages.keys().next().copied().expect("a message");
             (ChatId(*chat), MessageId(id))
         };
-        app.share.pending_forward =
-            ForwardDraft::from_message(first, quill::ids::TopicId::None, message, false);
+        app.share.forward =
+            ForwardDraft::from_message(first, quill::ids::TopicId::None, message, false).map_or(
+                crate::ui::forward_stage::ForwardStage::None,
+                crate::ui::forward_stage::ForwardStage::Selecting,
+            );
         app.open_forward_picker(window, cx);
         assert!(app.share.selection.is_empty());
         app.activate_first_forward_destination(cx);
@@ -58,9 +61,9 @@ fn enter_toggles_the_first_match_and_does_not_send(cx: &mut TestAppContext) {
         // A second Enter unticks it again (selectActive toggles); it never sends.
         app.activate_first_forward_destination(cx);
         assert!(app.share.selection.is_empty());
-        assert!(app.share.forward_picker_open);
+        assert!(app.share.forward.picker_open());
         // Ctrl+Enter with nothing ticked does nothing.
         app.submit_share_from_search(cx);
-        assert!(app.share.forward_picker_open);
+        assert!(app.share.forward.picker_open());
     });
 }

@@ -252,7 +252,7 @@ pub(super) static ESC_LAYERS: &[EscLayer] = &[
     ),
     layer!(
         "forward-picker",
-        |app| app.share.forward_picker_open,
+        |app| app.share.forward.picker_open(),
         |app, window, cx| app.close_forward_picker(window, cx)
     ),
     // The chat list peeking over the conversation (`sidebar_reveal`).
@@ -308,7 +308,7 @@ pub(super) static ESC_LAYERS: &[EscLayer] = &[
     ),
     layer!(
         "pending-forward",
-        |app| app.share.pending_forward.is_some(),
+        |app| app.share.forward.is_some(),
         |app, window, cx| app.clear_forward(window, cx)
     ),
     layer!(
@@ -373,7 +373,7 @@ impl QuillApp {
     /// window counts only the layers it draws (`WINDOW_LAYERS`).
     fn focus_return_layer_open(&self) -> bool {
         let in_window = self.windows.in_window();
-        self.pickers.media_panel.open
+        self.pickers.media_panel.is_open()
             || ESC_LAYERS.iter().any(|layer| {
                 FOCUS_RETURN_LAYERS.contains(&layer.name)
                     && (!in_window || WINDOW_LAYERS.contains(&layer.name))

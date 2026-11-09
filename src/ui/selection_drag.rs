@@ -88,8 +88,8 @@ impl QuillApp {
             && self.selection_forwardable(chat)
             && self
                 .share
-                .pending_forward
-                .as_ref()
+                .forward
+                .draft()
                 .is_some_and(|draft| draft.from_chat_id == chat && draft.contains(message_id));
         self.message_ui.selection_drag = Some(DragSelect {
             chat,
@@ -253,23 +253,23 @@ impl QuillApp {
         if ids.is_empty() {
             if self
                 .share
-                .pending_forward
-                .as_ref()
+                .forward
+                .draft()
                 .is_some_and(|draft| draft.is_from(chat, topic))
             {
-                self.share.pending_forward = None;
-                self.share.forward_picker_open = false;
+                self.share.forward = crate::ui::forward_stage::ForwardStage::None;
                 self.chat_ui.selection_focus = None;
             }
         } else {
-            match self.share.pending_forward.as_mut() {
+            match self.share.forward.selection_mut() {
                 Some(draft) if draft.is_from(chat, topic) => draft.message_ids = ids,
                 _ => {
                     if let Some(mut draft) = ids.first().and_then(|&first| {
                         quill::composer::ForwardDraft::from_message(chat, topic, first, false)
                     }) {
                         draft.message_ids = ids;
-                        self.share.pending_forward = Some(draft);
+                        self.share.forward =
+                            crate::ui::forward_stage::ForwardStage::Selecting(draft);
                     }
                 }
             }
@@ -506,8 +506,8 @@ mod tests {
     fn selected(app: &Entity<QuillApp>, cx: &mut VisualTestContext) -> Vec<MessageId> {
         app.read_with(cx, |app, _| {
             app.share
-                .pending_forward
-                .as_ref()
+                .forward
+                .draft()
                 .map(|draft| draft.message_ids.clone())
                 .unwrap_or_default()
         })

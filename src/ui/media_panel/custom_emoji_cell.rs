@@ -20,7 +20,7 @@ impl QuillApp {
         let file_id = item.file_id;
         // The reaction selector is this panel in reaction mode, with its own
         // switch (tdesktop `EmojiListWidget::powerSavingFlag`).
-        let flag = if self.pickers.media_panel.reaction.is_some() {
+        let flag = if self.pickers.media_panel.reaction().is_some() {
             quill::power_saving::Flag::EmojiReactions
         } else {
             quill::power_saving::Flag::EmojiPanel
@@ -59,7 +59,7 @@ impl QuillApp {
         let still = self.panel_still(&item);
         let premium = self.session().is_some_and(|s| s.my_is_premium());
         let fallback: SharedString = item.emoji.clone().into();
-        let status_id = self.pickers.media_panel.status.and(item.custom_emoji_id);
+        let status_id = self.pickers.media_panel.status().and(item.custom_emoji_id);
         let cell = div()
             .id(("panel-custom-emoji", id))
             .size(px(EMOJI_CELL))
@@ -298,7 +298,7 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.pickers.media_panel.status.is_some() {
+        if self.pickers.media_panel.status().is_some() {
             if let Some(id) = item.custom_emoji_id {
                 self.choose_panel_status(Some(id), 0, cx);
             }
@@ -395,14 +395,14 @@ impl QuillApp {
             .justify_between()
             .px_2()
             .pt_2()
-            .child(if self.pickers.media_panel.status.is_some() {
+            .child(if self.pickers.media_panel.status().is_some() {
                 div()
                     .px_1()
                     .text_sm()
                     .font_semibold()
                     .child(tr(keys::Q_EMOJI_STATUS_SELECTOR))
                     .into_any_element()
-            } else if self.pickers.media_panel.reaction.is_some() {
+            } else if self.pickers.media_panel.reaction().is_some() {
                 div()
                     .px_1()
                     .text_sm()
@@ -430,16 +430,16 @@ impl QuillApp {
             let sections = self.pickers.media_panel.sections.clone();
             let active = self.pickers.media_panel.active_section;
             let search = div().px_2().pt_2().child(
-                Textarea::new(if self.pickers.media_panel.status.is_some() {
+                Textarea::new(if self.pickers.media_panel.status().is_some() {
                     &self.pickers.status_search_input
-                } else if self.pickers.media_panel.reaction.is_some() {
+                } else if self.pickers.media_panel.reaction().is_some() {
                     &self.pickers.reaction_search_input
                 } else if tab == PanelTab::Emoji {
                     &self.pickers.emoji_search_input
                 } else {
                     &self.pickers.sticker_search_input
                 })
-                .aria_label(if self.pickers.media_panel.status.is_some() {
+                .aria_label(if self.pickers.media_panel.status().is_some() {
                     tr(keys::Q_EMOJI_STATUS_SEARCH)
                 } else if tab == PanelTab::Emoji {
                     tr(keys::Q_MEDIA_SEARCH_EMOJI)
@@ -472,7 +472,7 @@ impl QuillApp {
                 });
             }
             let strip = (tab == PanelTab::Stickers
-                && self.pickers.media_panel.reaction.is_none()
+                && self.pickers.media_panel.reaction().is_none()
                 && self.panel_query(cx).is_empty())
             .then(|| self.sticker_category_strip(cx))
             .flatten();

@@ -18,7 +18,7 @@ impl QuillApp {
             ForwardDraft::from_message(ChatId(11), quill::ids::TopicId::None, MessageId(101), false)
         {
             draft.toggle(ChatId(11), quill::ids::TopicId::None, MessageId(102), false);
-            self.share.pending_forward = Some(draft);
+            self.share.forward = crate::ui::forward_stage::ForwardStage::Selecting(draft);
         }
         self.open_forward_picker(window, cx);
         if std::env::var("QUILL_DEMO_FORWARD_BOX").as_deref() != Ok("empty") {
