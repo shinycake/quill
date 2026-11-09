@@ -521,7 +521,8 @@ crate::ui::shell::register_dialogs! {
         2950,
         |app| app.session().is_some_and(|s| s.groups.boost_box.is_some()),
         QuillApp::build_boost_box_dialog,
-    ),
+    )
+    .close(|app, _, cx| app.close_boost_box_state(cx)),
 }
 
 #[cfg(test)]

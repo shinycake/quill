@@ -273,5 +273,6 @@ crate::ui::shell::register_dialogs! {
             })
         },
         QuillApp::build_collectible_info_dialog,
-    ),
+    )
+    .close(|app, _, cx| app.close_collectible_info(cx)),
 }

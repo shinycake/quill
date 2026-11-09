@@ -571,5 +571,6 @@ crate::ui::shell::register_dialogs! {
         5110,
         |app| app.session().is_some_and(|s| s.stickers.masks.open),
         QuillApp::build_mask_sets_dialog,
-    ),
+    )
+    .close(|app, _, cx| app.close_mask_sets(cx)),
 }

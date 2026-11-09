@@ -613,7 +613,8 @@ crate::ui::shell::register_dialogs! {
                 .is_some_and(|start| start.box_open())
         },
         QuillApp::build_rtmp_start_dialog,
-    ),
+    )
+    .close(|app, _, cx| app.close_rtmp_start(cx)),
 }
 
 #[cfg(feature = "demo-capture")]

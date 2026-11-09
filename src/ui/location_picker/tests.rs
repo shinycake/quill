@@ -288,3 +288,18 @@ fn a_denied_location_says_so_and_waits_for_a_place(cx: &mut TestAppContext) {
     assert!(find(vcx, "location-here-state"));
     assert!(find(vcx, "location-venues-waiting"));
 }
+
+/// The window-close path runs the spec's close: the open flag clears and
+/// the picker goes, like Esc.
+#[gpui_kit::test]
+fn the_dialog_close_clears_the_open_picker(cx: &mut TestAppContext) {
+    let (app, shell, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    frames(vcx);
+    open_picker(&app, vcx);
+    assert_eq!(dialog(&shell, vcx), Some(DialogKind::LocationPicker));
+    app.update_in(vcx, |app, _, cx| app.close_location_picker(cx));
+    frames(vcx);
+    assert!(!app.read_with(vcx, |app, _| app.location_picker_open()));
+    assert_eq!(dialog(&shell, vcx), None);
+}
