@@ -155,3 +155,15 @@ src/ui/checklist_box.rs 112 read
 src/ui/checklists.rs 641 read
 src/ui/clipboard_files.rs 201 read
 src/ui/code_highlight.rs 631 read
+src/ui/composer_rtl.rs 1259 read
+src/ui/composer_sends.rs 570 read
+src/ui/composer_shortcuts.rs 611 read
+src/ui/composer_state.rs 179 read
+src/ui/composer_suggest.rs 751 read
+src/ui/composer_system_replace.rs 90 read
+src/ui/composer_targets.rs 113 read
+src/ui/composer_thumb.rs 134 read
+src/ui/composer_ui/bar_slide.rs 112 read
+src/ui/composer_ui/command_menu_view.rs 179 read
+src/ui/composer_ui/mod.rs 849 read
+src/ui/composer_ui/send_sticker_pick.rs 834 read
