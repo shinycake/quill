@@ -1,3 +1,17 @@
+src/ui/composer_ui/text_limit.rs 157 read
+src/ui/composer_unicode.rs 103 read
+src/ui/confirm_boxes.rs 161 read
+src/ui/connect_ui.rs 315 read
+src/ui/connection_state.rs 226 read
+src/ui/contacts.rs 567 read
+src/ui/contacts_import.rs 323 read
+src/ui/context_menu_keys.rs 557 read
+src/ui/conversation/conversation_part1.rs 797 read
+src/ui/conversation/header_view.rs 261 read
+src/ui/conversation/history_message_list.rs 893 read
+src/ui/conversation/history_reads.rs 53 read
+src/ui/conversation/history_scroll_memory.rs 166 read
+src/ui/conversation/landing.rs 255 read
 src/ui/conversation/mod.rs 555 read
 src/ui/conversation/render_history_row_body.rs 563 read
 src/ui/conversation/row_build.rs 249 read
