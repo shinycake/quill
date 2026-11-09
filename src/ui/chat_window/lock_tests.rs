@@ -284,7 +284,9 @@ fn an_unlock_intent_runs_as_its_window_and_only_for_its_account(cx: &mut TestApp
     let (first, second) = (ran.clone(), ran.clone());
     app.update(cx, |app, cx| {
         app.in_window_scope(Some(OTHER), cx, |app, _| {
-            app.wait_for_unlock(move |app, _| first.borrow_mut().push(app.asking_window_or_last_press()));
+            app.wait_for_unlock(move |app, _| {
+                first.borrow_mut().push(app.asking_window_or_last_press())
+            });
         });
     });
     cx.update_window(main, |_, window, cx| {
@@ -304,7 +306,9 @@ fn an_unlock_intent_runs_as_its_window_and_only_for_its_account(cx: &mut TestApp
     lock(&app, cx);
     cx.run_until_parked();
     app.update(cx, |app, _| {
-        app.wait_for_unlock(move |app, _| second.borrow_mut().push(app.asking_window_or_last_press()));
+        app.wait_for_unlock(move |app, _| {
+            second.borrow_mut().push(app.asking_window_or_last_press())
+        });
         if let Some(session) = app.demo_session.as_deref_mut() {
             session.account = quill::ids::AccountKey::new("account-2").expect("a key");
         }
