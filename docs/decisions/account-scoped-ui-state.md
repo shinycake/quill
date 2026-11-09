@@ -2819,7 +2819,18 @@ with a different `photo_id` drop `user_profile_photos[user]`
 (`Session::forget_user_photos`, next to `forget_chat_photos`). The viewer
 fetches the gallery again the next time it opens. That covers a contact's
 change and your own change from another device; the own Set/Delete OK
-uses the same helper.
+uses the same helper. A fetch that was out when the photo changed could
+still land the old list, so each stage of `ProfilePhotosFetch` and
+`ChatPhotosFetch` now names its request: `Loading(RequestId)` for the
+first page, and `next_page: PhotoPage` (`Idle` or `Asking(RequestId)`)
+in place of the `loading_more` bool. An answer or error lands only when
+it is the request the list waits for, so a dropped fetch's first page or
+later page never shows, and a late later page can no longer be taken as
+the first page of a new list (the round-15 "own profile photo pages"
+note). Tests: `a_user_photo_change_while_a_page_is_out_drops_its_answer`
+(`state/tests/profile_panels.rs`) and
+`a_chat_photo_change_while_a_page_is_out_drops_its_answer`
+(`state/tests/photo_gallery.rs`).
 
 **A grant change stops waiting writes (3).** The per-call thread locals
 (the switch's generation, the connection, the lock count) are one

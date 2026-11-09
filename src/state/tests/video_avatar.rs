@@ -84,7 +84,7 @@ fn earlier_chat_photos_keep_their_clips_in_the_gallery() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
     seed_group(&mut session, &seq, &sink);
-    let extra = session.request(RequestPurpose::GetChatPhotoHistory, Some(ChatId(GROUP)));
+    let extra = session.ask_chat_photos_page(ChatId(GROUP));
     let change = format!(
         r#"{{"@type":"message","id":20,"chat_id":{GROUP},"is_outgoing":false,"date":1700000000,"content":{{"@type":"messageChatChangePhoto","photo":{}}}}}"#,
         photo_json(600, 63, Some(68))

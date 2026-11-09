@@ -121,6 +121,10 @@ mod tests {
     use super::{Refusal, flood, flood_seconds, take_turn};
     use std::time::Instant;
 
+    /// The flood wait is one process-wide value: the test that sets it and
+    /// the one that needs it clear must not run at once.
+    static FLOOD_TEST: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
     #[test]
     fn flood_errors_name_their_seconds() {
         assert_eq!(flood_seconds("Too Many Requests: retry after 12"), Some(12));
@@ -130,6 +134,7 @@ mod tests {
 
     #[test]
     fn sends_to_one_chat_are_spaced() {
+        let _flood = crate::locks::lock_or_recover(&FLOOD_TEST);
         let started = Instant::now();
         assert_eq!(take_turn(9001, 1, 1, false), Ok(()));
         assert_eq!(take_turn(9001, 1, 1, false), Ok(()));
@@ -138,6 +143,7 @@ mod tests {
 
     #[test]
     fn a_flood_wait_refuses_sends_until_it_passes() {
+        let _flood = crate::locks::lock_or_recover(&FLOOD_TEST);
         flood(30);
         assert!(matches!(take_turn(9002, 2, 1, false), Err(Refusal::Flood(s)) if s > 0));
         crate::locks::lock_or_recover(&super::STATE)

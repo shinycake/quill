@@ -166,33 +166,43 @@ impl Session {
         } else if pending.purpose == RequestPurpose::GetUserProfilePhotos
             && let Some(user_id) = pending.user_id
         {
-            // A failed later page keeps the photos already listed.
-            if let Some(ProfilePhotosFetch::Loaded { loading_more, .. }) =
-                self.users_state.user_profile_photos.get_mut(&user_id)
-                && std::mem::take(loading_more)
-            {
-                return;
+            // A failed later page keeps the photos already listed; a fetch
+            // the list no longer waits for changes nothing.
+            match self.users_state.user_profile_photos.get_mut(&user_id) {
+                Some(ProfilePhotosFetch::Loaded { next_page, .. })
+                    if next_page.answers(pending.id) =>
+                {
+                    *next_page = PhotoPage::Idle;
+                }
+                Some(ProfilePhotosFetch::Loading(id)) if *id == pending.id => {
+                    self.users_state
+                        .user_profile_photos
+                        .insert(user_id, ProfilePhotosFetch::Failed(reason));
+                }
+                _ => {}
             }
-            self.users_state
-                .user_profile_photos
-                .insert(user_id, ProfilePhotosFetch::Failed(reason));
         } else if pending.purpose == RequestPurpose::GetChatPhotoHistory
             && let Some(chat_id) = pending.chat_id
         {
-            if let Some(ChatPhotosFetch::Loaded { loading_more, .. }) =
-                self.users_state.chat_photo_history.get_mut(&chat_id.0)
-                && std::mem::take(loading_more)
-            {
-                return;
+            match self.users_state.chat_photo_history.get_mut(&chat_id.0) {
+                Some(ChatPhotosFetch::Loaded { next_page, .. })
+                    if next_page.answers(pending.id) =>
+                {
+                    *next_page = PhotoPage::Idle;
+                }
+                Some(ChatPhotosFetch::Loading(id)) if *id == pending.id => {
+                    self.users_state
+                        .chat_photo_history
+                        .insert(chat_id.0, ChatPhotosFetch::Failed(reason));
+                }
+                _ => {}
             }
-            self.users_state
-                .chat_photo_history
-                .insert(chat_id.0, ChatPhotosFetch::Failed(reason));
         }
     }
 
-    /// A `chatPhotos` answer: cache every size file and the gallery. A
-    /// later page (`loading_more`) extends the list.
+    /// A `chatPhotos` answer: cache every size file and the gallery. The
+    /// first page starts the list and a later page extends it, each only
+    /// when it is the request the list waits for.
     pub(crate) fn apply_profile_photos(
         &mut self,
         total_count: i32,
@@ -209,13 +219,15 @@ impl Session {
                 self.upsert_file(file, false);
             }
         }
-        let mut gallery = match self.users_state.user_profile_photos.remove(&user_id) {
-            Some(ProfilePhotosFetch::Loaded {
-                photos,
-                loading_more: true,
-                ..
-            }) => photos,
-            _ => Vec::new(),
+        let mut gallery = match self.users_state.user_profile_photos.get(&user_id) {
+            Some(ProfilePhotosFetch::Loading(id)) if *id == pending.id => Vec::new(),
+            Some(ProfilePhotosFetch::Loaded { next_page, .. }) if next_page.answers(pending.id) => {
+                match self.users_state.user_profile_photos.remove(&user_id) {
+                    Some(ProfilePhotosFetch::Loaded { photos, .. }) => photos,
+                    _ => Vec::new(),
+                }
+            }
+            _ => return,
         };
         page.retain(|photo| gallery.iter().all(|shown| shown.id != photo.id));
         // An empty later page means the count was stale: stop there.
@@ -230,7 +242,7 @@ impl Session {
             ProfilePhotosFetch::Loaded {
                 total_count,
                 photos: gallery,
-                loading_more: false,
+                next_page: PhotoPage::Idle,
             },
         );
     }
