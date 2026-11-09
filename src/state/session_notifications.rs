@@ -33,6 +33,11 @@ impl Session {
         if !settings.use_default_mute_for {
             return false;
         }
+        if let Some(community) = self.chat_community_notification_settings(chat.id.0)
+            && !community.use_default_mute_for
+        {
+            return community.mute_for > 0;
+        }
         let scope = scope_for_chat_kind(&chat.kind);
         self.scope_settings_for(scope).mute_for > 0
     }
@@ -57,6 +62,11 @@ impl Session {
         let settings = &chat.notification_settings;
         if !settings.use_default_mute_stories {
             return settings.mute_stories;
+        }
+        if let Some(community) = self.chat_community_notification_settings(chat.id.0)
+            && !community.use_default_mute_stories
+        {
+            return community.mute_stories;
         }
         let scope = scope_for_chat_kind(&chat.kind);
         self.scope_settings_for(scope).mute_stories

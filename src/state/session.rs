@@ -147,6 +147,8 @@ pub struct Session {
     /// Bots: info, commands, games, inline queries, callback answers, login URLs, mini apps, reply keyboards.
     /// Declared in `src/state/domains/bots/state.rs`.
     pub bots: Box<BotsState>,
+    /// TDLib 1.8.70 community requests; `src/state/domains/communities/state.rs`.
+    pub communities: Box<CommunitiesState>,
     /// Payments, receipts, Stars subscriptions, Premium and gifts.
     /// Declared in `src/state/domains/payments/state.rs`.
     pub payments: Box<PaymentsState>,

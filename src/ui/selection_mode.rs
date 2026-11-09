@@ -708,6 +708,11 @@ impl QuillApp {
         let choice = std::rc::Rc::new(std::cell::Cell::new(
             quill::connect::ModerationChoice::default(),
         ));
+        let community_ban = moderation.as_ref().and_then(|offer| {
+            self.want_community_for_moderation(offer.chat_id.0);
+            self.moderation_ban_community(offer.chat_id.0)
+        });
+        let ban_from_community = std::rc::Rc::new(std::cell::Cell::new(false));
         let app = cx.entity().downgrade();
         window.open_alert_dialog(cx, move |alert, _, _| {
             let (app, revoke, confirm) = (app.clone(), revoke.clone(), confirm.clone());
@@ -715,6 +720,8 @@ impl QuillApp {
             let (moderation_state, moderation_offer) = (choice.clone(), moderation.clone());
             let on_ok_choice = choice.clone();
             let on_ok_offer = moderation.clone();
+            let community_state = ban_from_community.clone();
+            let on_ok_community = ban_from_community.clone();
             alert
                 .when_some(warning, |alert, (title, text)| {
                     alert.title(title).description(
@@ -728,7 +735,8 @@ impl QuillApp {
                 })
                 .when(label.is_some() || moderation_offer.is_some(), |alert| {
                     let label = label.clone();
-                    alert.content(move |content, _, _| {
+                    let community_state = community_state.clone();
+                    alert.content(move |content, _, cx| {
                         let state = checkbox_state.clone();
                         let mut content = content;
                         if let Some(label) = label.clone() {
@@ -815,6 +823,30 @@ impl QuillApp {
                                 );
                             }
                         }
+                        if let Some((_, chats)) = community_ban {
+                            let state = community_state.clone();
+                            content = content.child(
+                                gpui_kit::component::checkbox::Checkbox::new(
+                                    "delete-moderate-community-ban",
+                                )
+                                .label(tr(keys::COMMUNITY_BAN_TOGGLE))
+                                .checked(state.get())
+                                .on_click(
+                                    move |checked, window, _| {
+                                        state.set(*checked);
+                                        window.refresh();
+                                    },
+                                ),
+                            );
+                            if community_state.get() && chats > 0 {
+                                content = content.child(
+                                    div()
+                                        .text_xs()
+                                        .text_color(cx.theme().muted_foreground)
+                                        .child(quill::lang::trn(keys::COMMUNITY_BAN_ABOUT, chats)),
+                                );
+                            }
+                        }
                         content
                     })
                 })
@@ -833,7 +865,18 @@ impl QuillApp {
                         Some(offer) => on_ok_choice.get().clamp(offer.options),
                         None => quill::connect::ModerationChoice::default(),
                     };
+                    let community = community_ban
+                        .filter(|_| on_ok_community.get())
+                        .zip(offer.clone());
                     let _ = app.update(cx, |this, cx| {
+                        if let Some(((community_id, _), offer)) = community {
+                            this.start_community_ban(
+                                community_id,
+                                quill::state::CommunityMember::User(offer.user_id),
+                                offer.user_name,
+                                cx,
+                            );
+                        }
                         // Reports and "delete all" name the user's
                         // messages, so they go out before the delete.
                         if let (true, Some(offer), Some(live)) =

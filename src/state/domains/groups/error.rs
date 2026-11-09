@@ -35,6 +35,7 @@ impl Session {
             self.note_premium_limit(err, pending);
         }
         self.record_group_info_edit_error(err, pending);
+        self.note_community_full_info_failed(pending);
         self.apply_group_type_error(err, pending);
         match pending.map(|p| p.purpose) {
             Some(RequestPurpose::CanTransferOwnership) => {
@@ -57,6 +58,16 @@ impl Session {
                 if let Some(chat_id) = pending.and_then(|p| p.chat_id) {
                     self.fail_owner_lookup(chat_id.0, err);
                 }
+            }
+            // tdesktop toasts a refused create; the box stays, and the
+            // photo waiting for the community goes.
+            Some(RequestPurpose::CreateCommunity) => {
+                self.communities.new_community_photo = None;
+                self.communities
+                    .outcomes
+                    .push_back(crate::state::CommunityOutcome::CreateFailed {
+                        reason: error_reason(err),
+                    });
             }
             // TDLib 1.8.68 community management: surface refusals
             // ("Have not enough rights", a missing community) in the

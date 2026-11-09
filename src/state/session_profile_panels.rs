@@ -99,9 +99,9 @@ impl Session {
         let id = match kind {
             ProfileChatsKind::GroupsInCommon => pending.user_id?,
             ProfileChatsKind::SimilarChats => pending.chat_id?.0,
-            ProfileChatsKind::SuitablePersonalChats | ProfileChatsKind::SuitableDiscussionChats => {
-                0
-            }
+            ProfileChatsKind::SuitablePersonalChats
+            | ProfileChatsKind::SuitableDiscussionChats
+            | ProfileChatsKind::SuitableCommunityChats => 0,
         };
         Some((kind, id))
     }

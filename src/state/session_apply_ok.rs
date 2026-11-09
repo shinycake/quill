@@ -43,6 +43,7 @@ impl Session {
         self.apply_group_type_ok(pending);
         self.apply_ai_compose_ok(pending);
         self.apply_hang_up_ok(pending);
+        self.apply_communities_ok(pending);
         match pending.map(|p| p.purpose) {
             Some(
                 RequestPurpose::SetChatTheme

@@ -272,6 +272,7 @@ mod checklist_box;
 mod checklists;
 mod collectible_info_ui;
 mod command_shortcuts;
+mod communities;
 mod composer;
 mod composer_boxes;
 #[cfg(test)]

@@ -90,6 +90,24 @@ impl Session {
         }
     }
 
+    /// Record `supergroup.has_forum_sidebar` (`updateSupergroup` / `getSupergroup`).
+    pub fn set_supergroup_forum_sidebar(&mut self, supergroup_id: i64, has_forum_sidebar: bool) {
+        if has_forum_sidebar {
+            self.threads.forum_sidebar_supergroups.insert(supergroup_id);
+        } else {
+            self.threads
+                .forum_sidebar_supergroups
+                .remove(&supergroup_id);
+        }
+    }
+
+    /// `supergroup.has_forum_sidebar`, kept so a topics toggle sends it back.
+    pub fn supergroup_has_forum_sidebar(&self, supergroup_id: i64) -> bool {
+        self.threads
+            .forum_sidebar_supergroups
+            .contains(&supergroup_id)
+    }
+
     /// `Some` for a private chat with a bot that has topics
     /// (`userTypeBot.has_topics`; Telegram Desktop `UserData::isForum`).
     pub fn bot_topics(&self, chat_id: ChatId) -> Option<BotTopics> {

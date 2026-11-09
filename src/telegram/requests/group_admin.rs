@@ -7,14 +7,15 @@ use crate::telegram::envelope::ChatAvailableReactions;
 use serde_json::json;
 
 /// `toggleSupergroupIsForum supergroup_id:int53 is_forum:Bool
-/// has_forum_tabs:Bool = Ok;` (line 15218). Requires owner privileges;
-/// discussion supergroups can't become forums. `has_forum_tabs` is
-/// ignored when `is_forum` is false.
+/// has_forum_tabs:Bool has_forum_sidebar:Bool = Ok;` (schema 1.8.70).
+/// Requires owner privileges; discussion supergroups can't become forums.
+/// Both layout flags are ignored when `is_forum` is false.
 pub fn toggle_supergroup_is_forum(
     extra: RequestId,
     supergroup_id: i64,
     is_forum: bool,
     has_forum_tabs: bool,
+    has_forum_sidebar: bool,
 ) -> String {
     json!({
         "@type": "toggleSupergroupIsForum",
@@ -22,6 +23,7 @@ pub fn toggle_supergroup_is_forum(
         "supergroup_id": supergroup_id,
         "is_forum": is_forum,
         "has_forum_tabs": is_forum && has_forum_tabs,
+        "has_forum_sidebar": is_forum && has_forum_sidebar,
     })
     .to_string()
 }

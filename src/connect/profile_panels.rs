@@ -43,9 +43,9 @@ impl<S: JsonSender> ConnectDriver<S> {
         let extra = match kind {
             ProfileChatsKind::GroupsInCommon => self.session.request_for_user(purpose, id),
             ProfileChatsKind::SimilarChats => self.session.request(purpose, Some(ChatId(id))),
-            ProfileChatsKind::SuitablePersonalChats | ProfileChatsKind::SuitableDiscussionChats => {
-                self.session.request(purpose, None)
-            }
+            ProfileChatsKind::SuitablePersonalChats
+            | ProfileChatsKind::SuitableDiscussionChats
+            | ProfileChatsKind::SuitableCommunityChats => self.session.request(purpose, None),
         };
         let json = match kind {
             ProfileChatsKind::GroupsInCommon => {
@@ -54,6 +54,9 @@ impl<S: JsonSender> ConnectDriver<S> {
             ProfileChatsKind::SimilarChats => get_chat_similar_chats(extra, ChatId(id)),
             ProfileChatsKind::SuitablePersonalChats => get_suitable_personal_chats(extra),
             ProfileChatsKind::SuitableDiscussionChats => get_suitable_discussion_chats(extra),
+            ProfileChatsKind::SuitableCommunityChats => {
+                crate::telegram::requests::get_suitable_community_chats(extra)
+            }
         };
         self.session
             .users_state

@@ -710,6 +710,7 @@ fn driver_community_management_rights_and_delete() {
             administrator_count: 1,
             banned_count: 0,
             add_chat_request_count: 0,
+            notification_settings: Default::default(),
         },
     );
     ingest(

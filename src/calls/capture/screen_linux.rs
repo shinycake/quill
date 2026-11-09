@@ -196,17 +196,17 @@ async fn cast(
     let offered = proxy
         .available_source_types()
         .await
-        .unwrap_or(SourceType::Monitor | SourceType::Window);
-    let mut types = offered & (SourceType::Monitor | SourceType::Window);
+        .unwrap_or(SourceType::MONITOR | SourceType::WINDOW);
+    let mut types = offered & (SourceType::MONITOR | SourceType::WINDOW);
     if types.is_empty() {
-        types = SourceType::Monitor.into();
+        types = SourceType::MONITOR;
     }
     let cursor = proxy
         .available_cursor_modes()
         .await
         .ok()
-        .filter(|modes| modes.contains(CursorMode::Embedded))
-        .map(|_| CursorMode::Embedded);
+        .filter(|modes| modes.contains(CursorMode::EMBEDDED))
+        .map(|_| CursorMode::EMBEDDED);
     proxy
         .select_sources(
             session,

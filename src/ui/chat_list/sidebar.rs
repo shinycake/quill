@@ -11,6 +11,7 @@
 use super::*;
 use crate::ui::empty_state::EmptyState;
 use gpui_kit::assets::IconName;
+use quill::community_row::{GroupedEntry, ListedChat, group_main_list};
 use quill::lang::{keys, tr};
 
 impl QuillApp {
@@ -254,12 +255,41 @@ impl QuillApp {
             {
                 chats.sort_by_key(|chat| reorder.position(chat.id.0).unwrap_or(usize::MAX));
             }
-            for chat in chats {
-                items.push(ChatListItem::Chat {
-                    id: chat.id,
-                    archived: false,
-                    height: row_height(chat),
-                });
+            let communities = if filter == ChatListFilter::All && folder.is_none() {
+                self.session()
+                    .map(|s| s.collapsed_community_rows())
+                    .unwrap_or_default()
+            } else {
+                Vec::new()
+            };
+            let listed: Vec<ListedChat> = chats
+                .iter()
+                .map(|chat| ListedChat {
+                    chat_id: chat.id.0,
+                    pinned: chat.is_pinned,
+                    date: chat.last_message.as_ref().map_or(0, |m| m.date),
+                })
+                .collect();
+            for entry in group_main_list(&listed, &communities) {
+                match entry {
+                    GroupedEntry::Chat(index) => {
+                        if let Some(chat) = chats.get(index) {
+                            items.push(ChatListItem::Chat {
+                                id: chat.id,
+                                archived: false,
+                                height: row_height(chat),
+                            });
+                        }
+                    }
+                    GroupedEntry::Community(index) => {
+                        if let Some(row) = communities.get(index) {
+                            items.push(ChatListItem::Community {
+                                community_id: row.community_id,
+                                height: chat_row_height(&[], self.appearance.preview_lines),
+                            });
+                        }
+                    }
+                }
             }
         }
         // Parity slice: folder chats page eagerly — the driver re-requests
@@ -311,7 +341,8 @@ impl QuillApp {
                 .map(|item| {
                     let height = match item {
                         ChatListItem::Chat { height, .. } => *height,
-                        ChatListItem::ArchiveRow { height } => *height,
+                        ChatListItem::ArchiveRow { height }
+                        | ChatListItem::Community { height, .. } => *height,
                         ChatListItem::ArchiveBar => {
                             px(quill::chatlist_archive::COLLAPSED_BAR_HEIGHT)
                         }

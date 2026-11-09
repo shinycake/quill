@@ -37,6 +37,9 @@ pub enum ProfileChatsKind {
     /// B7: the groups that can become a channel's discussion group
     /// (`getSuitableDiscussionChats`); key id 0.
     SuitableDiscussionChats,
+    /// The owned supergroups and channels that can join a community
+    /// (`getSuitableCommunityChats`, TDLib 1.8.70); key id 0.
+    SuitableCommunityChats,
 }
 
 /// Groups in common load a page at a time (`getGroupsInCommon` takes the

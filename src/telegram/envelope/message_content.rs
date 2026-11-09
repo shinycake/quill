@@ -110,9 +110,25 @@ pub enum MessageContent {
     /// `schema/td_api.tl:5449`) — the seller-side notice. Quill is a
     /// buyer client; kept minimal for a compact "payment received" row.
     PaymentReceived(PaymentReceivedContent),
+    /// `messageWidget` (TDLib 1.8.70): a bot's HTML widget. Quill doesn't
+    /// run widgets (Telegram Desktop runs them in its own QuickJS sandbox,
+    /// `tgw/`), so only what the placeholder card and the caption need is
+    /// kept; the HTML and the widget data are dropped.
+    Widget(WidgetContent),
     Unsupported {
         type_name: String,
     },
+}
+
+/// Parsed `messageWidget` (TDLib 1.8.70).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WidgetContent {
+    /// The widget's size as the bot set it, in points.
+    pub width: i32,
+    pub height: i32,
+    pub caption: String,
+    pub caption_entities: Vec<TextEntity>,
+    pub show_caption_above_media: bool,
 }
 
 /// Slice bots-games: parsed `messageGame` (TDLib 1.8.67,
@@ -401,6 +417,11 @@ impl MessageContent {
             }
             MessageContent::Action(action) => crate::service_text::action_preview(action),
             MessageContent::Unsupported { .. } => "Unsupported message".into(),
+            // tdesktop `lng_in_dlg_widget`; a caption wins, like media.
+            MessageContent::Widget(widget) if !widget.caption.is_empty() => {
+                widget.caption.chars().take(80).collect()
+            }
+            MessageContent::Widget(_) => "Widget".into(),
             // Slice bots-games: chat-list preview for a game card.
             MessageContent::Game(game) => {
                 let title = game.title.trim();
@@ -533,6 +554,7 @@ pub(crate) fn parse_content(value: Option<&Value>) -> (MessageContent, Vec<Parse
         Some("messageRichMessage") => parse_message_rich_message(value),
         // Slice bots-games: `messageGame` (schema 1.8.67, line 5234).
         Some("messageGame") => parse_message_game(value),
+        Some("messageWidget") => parse_message_widget(value),
         // Slice P1: `messageInvoice` (schema 1.8.67, line 5270).
         Some("messageInvoice") => parse_message_invoice(value),
         // Slice P1: `messagePaymentSuccessful` (schema 1.8.67, line 5436).
@@ -688,6 +710,34 @@ pub(crate) fn parse_message_game(value: &Value) -> (MessageContent, Vec<ParsedFi
             },
         }),
         files,
+    )
+}
+
+/// `messageWidget width:int32 height:int32 html:string public_data:string
+/// chat_data:string widget_id:int64 caption:formattedText
+/// show_caption_above_media:Bool …` (schema 1.8.70).
+pub(crate) fn parse_message_widget(value: &Value) -> (MessageContent, Vec<ParsedFile>) {
+    let size = |name: &str| {
+        value
+            .get(name)
+            .and_then(Value::as_i64)
+            .unwrap_or(0)
+            .sat_i32()
+            .max(0)
+    };
+    let (caption, caption_entities) = parse_caption(value.get("caption"));
+    (
+        MessageContent::Widget(WidgetContent {
+            width: size("width"),
+            height: size("height"),
+            caption,
+            caption_entities,
+            show_caption_above_media: value
+                .get("show_caption_above_media")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+        }),
+        Vec::new(),
     )
 }
 

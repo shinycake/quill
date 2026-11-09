@@ -22,6 +22,8 @@ pub enum RequestPurpose {
     ChatList(ChatListPurpose),
     /// Requests for chat-level look and actions: backgrounds, themes, deep links, action bar.
     Chats(ChatsPurpose),
+    /// Requests for the TDLib 1.8.70 community methods.
+    Communities(CommunitiesPurpose),
     /// Requests for groups and channels: members, admin rights, invite links, join requests, boosts, communities.
     Groups(GroupsPurpose),
     /// Requests for files, downloads, uploads and the shared-media gallery.
@@ -118,6 +120,7 @@ impl std::fmt::Debug for RequestPurpose {
             Self::Calls(inner) => inner.fmt(f),
             Self::ChatList(inner) => inner.fmt(f),
             Self::Chats(inner) => inner.fmt(f),
+            Self::Communities(inner) => inner.fmt(f),
             Self::Groups(inner) => inner.fmt(f),
             Self::Media(inner) => inner.fmt(f),
             Self::Messages(inner) => inner.fmt(f),

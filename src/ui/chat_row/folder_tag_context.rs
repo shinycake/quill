@@ -39,6 +39,9 @@ impl QuillApp {
             Some(ChatListItem::ArchiveRow { .. }) => self.archive_row_element(cx),
             Some(ChatListItem::ArchiveBar) => self.archive_bar_element(cx),
             Some(ChatListItem::StoryStrip) => self.story_strip_element(cx),
+            Some(ChatListItem::Community { community_id, .. }) => {
+                self.community_row_element(community_id, cx)
+            }
             Some(ChatListItem::Chat {
                 id,
                 archived,

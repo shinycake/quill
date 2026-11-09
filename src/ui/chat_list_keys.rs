@@ -106,6 +106,7 @@ pub(super) enum ListRow {
     /// The "Archived chats" row or its collapsed bar.
     Archive,
     Chat(ChatId),
+    Community(i64),
 }
 
 /// A selectable search result, by identity.
@@ -307,6 +308,9 @@ fn list_rows(items: &[ChatListItem]) -> Vec<(usize, ListRow)> {
             ChatListItem::ArchiveRow { .. } | ChatListItem::ArchiveBar => {
                 Some((index, ListRow::Archive))
             }
+            ChatListItem::Community { community_id, .. } => {
+                Some((index, ListRow::Community(*community_id)))
+            }
             ChatListItem::StoryStrip => None,
         })
         .collect()
@@ -450,6 +454,9 @@ impl QuillApp {
         // Escape from the chat comes back to it.
         match row {
             ListRow::Archive => self.open_archive_folder(cx),
+            ListRow::Community(community_id) => {
+                self.enter_community_chat_list_mode(community_id, cx)
+            }
             ListRow::Chat(id) if self.selecting_chats() => {
                 self.toggle_chat_selected(id, cx);
             }

@@ -11,6 +11,9 @@ pub struct SupergroupProfileFacts {
     pub location: Option<BusinessLocation>,
     /// `can_send_gift`.
     pub can_send_gift: bool,
+    /// TDLib 1.8.70 `community_id`: the community the chat was added to,
+    /// 0 for none.
+    pub community_id: i64,
 }
 
 impl SupergroupProfileFacts {
@@ -21,6 +24,7 @@ impl SupergroupProfileFacts {
                 .and_then(|info| info.get("can_send_gift"))
                 .and_then(Value::as_bool)
                 .unwrap_or(false),
+            community_id: super::int53_or_zero(info.and_then(|info| info.get("community_id"))),
         }
     }
 }

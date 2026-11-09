@@ -50,6 +50,8 @@ impl Session {
                 // objects themselves arrive via `updateUser`.
                 if self.apply_earn_recipient_bots(&user_ids, pending) {
                     // Affiliate recipients: `getOwnedBots`.
+                } else if self.apply_community_owned_bots(&user_ids, pending) {
+                    // "Add a Chat to Community": `getOwnedBots`.
                 } else if self.apply_web_app_users(&user_ids, pending) {
                     // Apps tab: `getGrossingWebAppBots`.
                 } else if pending.map(|p| p.purpose) == Some(RequestPurpose::GetContacts) {

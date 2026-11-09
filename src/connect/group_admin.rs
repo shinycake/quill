@@ -202,10 +202,11 @@ impl<S: JsonSender> ConnectDriver<S> {
         if self.session.requests.has_purpose_for_chat(purpose, chat_id) {
             return Ok(None);
         }
+        let sidebar = self.session.supergroup_has_forum_sidebar(supergroup_id);
         let extra = self.session.request(purpose, Some(chat_id));
         self.send_json_request(
             extra,
-            &toggle_supergroup_is_forum(extra, supergroup_id, enabled, tabs),
+            &toggle_supergroup_is_forum(extra, supergroup_id, enabled, tabs, sidebar),
         )
         .map(Some)
     }

@@ -133,6 +133,9 @@ impl QuillApp {
                 cx,
             ));
         }
+        if let Some(community) = self.community_manage_section(chat_id.0, cx) {
+            section = section.child(community);
+        }
         if supergroup && session.is_some_and(|s| s.chat_can_set_sticker_set(chat_id)) {
             section = section.child(self.group_sticker_choices(chat_id, cx));
         }

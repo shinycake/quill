@@ -195,7 +195,7 @@ request as JSON (the `@type` is the method; fields as in the
 
     td_call {"request": {"@type": "getChatPinnedMessage", "chat_id": -1001234567890}}
 
-- Quill checks the request against TDLib 1.8.69: an unknown method is
+- Quill checks the request against TDLib 1.8.70: an unknown method is
   refused and fields the method doesn't have are dropped. Chat ids may be
   numbers or numeric strings.
 - Grants apply to every chat id in the request (`chat_id`, `from_chat_id`,

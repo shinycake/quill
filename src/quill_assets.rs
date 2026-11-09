@@ -170,6 +170,7 @@ gpui_kit::assets::icon_assets!(
         SearchX,
         Music,
         CircleDashed,
+        CircleMinus,
         ArrowDownLeft,
         ArrowUpRight,
         // Session device pictures and the session box (`ui::security::session_list`).

@@ -76,6 +76,24 @@ impl<S: JsonSender> ConnectDriver<S> {
         Ok(Some(extra))
     }
 
+    /// `getCommunityFullInfo` asked in the background (a collapsed row,
+    /// the moderation ban): nothing after a failure until TDLib sends
+    /// something new about the community.
+    pub fn want_community_full_info(
+        &mut self,
+        community_id: i64,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        if self
+            .session
+            .communities
+            .full_info_failed
+            .contains(&community_id)
+        {
+            return Ok(None);
+        }
+        self.get_community_full_info(community_id)
+    }
+
     /// Slice (communities backend core): `setCommunityName` (schema 1.8.67,
     /// line 11811). Empty names are refused client-side
     /// (`Err(InvalidRequest)`). Not optimistic — the new name arrives via

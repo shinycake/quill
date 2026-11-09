@@ -533,7 +533,13 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Communities: browse and manage owned communities (backend — builders + drivers + state sync for create/loadFullInfo/setName — plus Communities hub dialog listing owned communities with per-row info buttons) <!-- parity:communities-hub -->
 - [ ] Communities: toggle community chat visibility (blocked: TDLib 1.8.68 reads `communityChat.is_hidden` but has no method to change it; community methods are create, name, photo, permissions and delete only) <!-- parity:communities-chat-visibility -->
 - [x] Communities: community chat-list mode (view a community's chats as a filtered chat list) <!-- parity:communities-chatlist-mode -->
-- [ ] Communities: add a chat to a community (blocked: no TDLib 1.8.68 method; `createCommunity` takes only the first chat) <!-- parity:communities-add-chat -->
+- [x] Communities: add a chat to a community, with visibility and a request when you can't edit the list (addCommunityChat, TDLib 1.8.70) <!-- parity:communities-add-chat -->
+- [x] Communities: remove a chat from a community (removeCommunityChat, TDLib 1.8.70) <!-- parity:communities-remove-chat -->
+- [x] Communities: pending add-chat requests for admins, one by one with undo or all at once (TDLib 1.8.70) <!-- parity:communities-add-requests -->
+- [x] Communities: Show as One Chat, the collapsed chat-list row and its menu (toggleCommunityAreChatsCollapsed, TDLib 1.8.70) <!-- parity:communities-show-as-one -->
+- [x] Communities: community notification settings and mute submenu (setCommunityNotificationSettings, TDLib 1.8.70) <!-- parity:communities-notifications -->
+- [x] Communities: ban a member from the community, with the owned-chats warning (TDLib 1.8.70) <!-- parity:communities-ban -->
+- [x] Communities: joined communities in the Add to Community picker (getJoinedCommunities, TDLib 1.8.70) <!-- parity:communities-joined-list -->
 - [ ] Communities: admin-rights management (blocked: TDLib 1.8.68 has the `communityAdministratorRights` type but no method to set them) <!-- parity:communities-admin-rights -->
 - [x] Communities: members can edit the chat list switch (setCommunityPermissions, TDLib 1.8.68) <!-- parity:communities-permissions -->
 - [x] Communities: delete a community, owner only, with confirmation (deleteCommunity, TDLib 1.8.68) <!-- parity:communities-delete -->
@@ -910,6 +916,8 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] "Apps" tab in search with popular mini apps <!-- parity:bots-apps-tab -->
 - [x] Mini apps can open invoices (openInvoice): run the checkout and report paid, failed, pending or cancelled back to the app <!-- parity:bots-webapp-invoice -->
 - [x] Mini apps can ask to share your phone number, with a confirmation box <!-- parity:bots-webapp-share-phone -->
+- [x] Message widgets show as a card with their caption (messageWidget, TDLib 1.8.70) <!-- parity:bots-widget-card -->
+- [ ] Message widgets run in the chat: sandboxed HTML/JS with bot queries and public-data polling (built on branch claude/message-widgets-runtime; held until TelegramMessenger/widget-sandbox has a license) <!-- parity:bots-widget-runtime -->
 - [x] Add an option to an open poll and "Allow adding options" when creating <!-- parity:polls-add-option -->
 - [x] Poll creation extras: hide results until close, restrict to subscribers, absolute deadline <!-- parity:polls-create-extras -->
 - [x] Links and media in poll options <!-- parity:polls-option-media -->

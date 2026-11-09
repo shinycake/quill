@@ -178,6 +178,26 @@ impl Session {
     /// send stays quiet, or a list with a stuck download pokes every frame.
     pub(crate) fn user_photo_path_waking(&self, user_id: i64, wake: &Signal) -> Option<&str> {
         let file_id = self.users.get(&user_id)?.photo_small_file_id;
+        self.claimed_avatar_path(file_id, wake)
+    }
+
+    /// The downloaded community userpic (`community.photo.small`),
+    /// claimed for download when missing, as a user's avatar is.
+    pub fn community_photo_path(&self, community_id: i64) -> Option<&str> {
+        let file_id = self
+            .groups
+            .communities
+            .get(&community_id)?
+            .photo
+            .as_ref()?
+            .id
+            .0;
+        self.claimed_avatar_path(file_id, &crate::wake::UPDATES)
+    }
+
+    /// The local path of the avatar `file_id`, or a download claim for it
+    /// that pokes `wake` when the next pass will send it.
+    fn claimed_avatar_path(&self, file_id: i32, wake: &Signal) -> Option<&str> {
         let path = self
             .media
             .files
