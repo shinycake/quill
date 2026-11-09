@@ -292,7 +292,7 @@ impl QuillApp {
         };
         let photo = dialog.photo.as_ref().map(|photo| photo.input.clone());
         let Some(live) = self.live.as_mut() else {
-            self.connection.set_note(StatusNote::info(tr(
+            self.set_note(StatusNote::info(tr(
                 keys::Q_PEOPLE_CREATING_CHATS_NEEDS_A_LIVE,
             )));
             cx.notify();
@@ -304,7 +304,7 @@ impl QuillApp {
             }
             Ok(None) => {}
             Err(err) => {
-                self.connection.set_note(StatusNote::error(user_error_for(
+                self.set_note(StatusNote::error(user_error_for(
                     keys::Q_NEW_CHAT_FAILED,
                     &err,
                 )));
@@ -329,8 +329,7 @@ impl QuillApp {
             return;
         }
         let Some(live) = self.live.as_mut() else {
-            self.connection
-                .set_note(StatusNote::info(tr(keys::Q_PEOPLE_DEMO_MODE_THIS_NEEDS_A)));
+            self.set_note(StatusNote::info(tr(keys::Q_PEOPLE_DEMO_MODE_THIS_NEEDS_A)));
             cx.notify();
             return;
         };
@@ -346,7 +345,7 @@ impl QuillApp {
                 cx,
             ),
             Err(err) => {
-                self.connection.set_note(StatusNote::error(user_error_for(
+                self.set_note(StatusNote::error(user_error_for(
                     keys::Q_NOTES_FAILED_SAVE_GROUP_INFO,
                     &err,
                 )));
@@ -400,8 +399,7 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut()
             && live.driver.add_chat_members(chat, &users).is_err()
         {
-            self.connection
-                .set_note(StatusNote::error(tr(keys::Q_PEOPLE_COULD_NOT_ADD_MEMBERS)));
+            self.set_note(StatusNote::error(tr(keys::Q_PEOPLE_COULD_NOT_ADD_MEMBERS)));
         }
         self.finish_new_chat(chat, window, cx);
     }

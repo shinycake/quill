@@ -143,7 +143,7 @@ impl QuillApp {
     /// A held Send can go only from its own chat: when that chat is no
     /// longer open as the render lands, the user is told nothing went.
     fn note_held_send_dropped(&mut self) {
-        self.connection.set_note(StatusNote::error(tr(
+        self.set_note(StatusNote::error(tr(
             keys::Q_MISC_NOT_SENT_THE_CHAT_CLOSED_BEFORE_THE_PHOTO,
         )));
     }
@@ -207,7 +207,7 @@ impl QuillApp {
             }
             (found, None) => {
                 if found.is_some() {
-                    self.connection.set_note(StatusNote::error(tr(
+                    self.set_note(StatusNote::error(tr(
                         keys::Q_MISC_COULDNT_SAVE_THE_EDITED_PHOTO,
                     )));
                 }

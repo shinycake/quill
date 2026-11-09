@@ -252,7 +252,7 @@ impl QuillApp {
         self.share.forward_bar_dest = Some(chat_id);
         self.share.forward_picker_open = false;
         self.share.selection.clear();
-        self.connection.set_note(StatusNote::silent(tr(
+        self.set_note(StatusNote::silent(tr(
             keys::Q_OPS_FORWARD_BAR_READY_PRESS_SEND,
         )));
         cx.notify();

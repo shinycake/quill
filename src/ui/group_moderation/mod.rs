@@ -45,8 +45,7 @@ impl QuillApp {
                 .fetch_supergroup_members(chat_id, MemberListFilter::Recent, "")
                 .is_err()
         {
-            self.connection
-                .set_note(StatusNote::error(tr(keys::Q_PEOPLE_COULD_NOT_LOAD_MEMBERS)));
+            self.set_note(StatusNote::error(tr(keys::Q_PEOPLE_COULD_NOT_LOAD_MEMBERS)));
         }
         cx.notify();
     }
@@ -74,7 +73,7 @@ impl QuillApp {
                 .refresh_supergroup_members(chat_id, filter, query.trim())
                 .is_err()
             {
-                self.connection.set_note(StatusNote::error(tr(
+                self.set_note(StatusNote::error(tr(
                     keys::Q_PEOPLE_COULD_NOT_SEARCH_MEMBERS,
                 )));
             } else if let Some(AdminDialogKind::Promote { searched, .. }) = self
@@ -86,7 +85,7 @@ impl QuillApp {
                 query.trim().clone_into(searched);
             }
         } else {
-            self.connection.set_note(StatusNote::info(tr(
+            self.set_note(StatusNote::info(tr(
                 keys::Q_PEOPLE_MEMBER_SEARCH_NEEDS_A_LIVE,
             )));
         }
@@ -113,7 +112,7 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut()
             && live.driver.fetch_admin_rights(chat_id, user_id).is_err()
         {
-            self.connection.set_note(StatusNote::error(tr(
+            self.set_note(StatusNote::error(tr(
                 keys::Q_PEOPLE_COULD_NOT_LOAD_ADMIN_RIGHTS,
             )));
         }
@@ -191,7 +190,7 @@ impl QuillApp {
                 let Some(rights) = (*rights).or(fetched) else {
                     let failed = matches!(fetch, Some(AdminRightsFetch::Failed(_)));
                     self.admin.admin_dialog = Some(dialog);
-                    self.connection.set_note(StatusNote::silent(tr(if failed {
+                    self.set_note(StatusNote::silent(tr(if failed {
                         keys::Q_PEOPLE_COULD_NOT_LOAD_ADMIN_RIGHTS
                     } else {
                         keys::Q_PEOPLE_RIGHTS_ARE_STILL_LOADING
@@ -232,7 +231,7 @@ impl QuillApp {
         if keep_dialog {
             self.admin.admin_dialog = Some(dialog);
         }
-        self.connection.set_note(StatusNote::info(note));
+        self.set_note(StatusNote::info(note));
         cx.notify();
     }
 
@@ -360,7 +359,7 @@ impl QuillApp {
                 StatusNote::info(tr(keys::Q_PEOPLE_MEMBER_ACTIONS_NEED_A_LIVE))
             }
         };
-        self.connection.set_note(note);
+        self.set_note(note);
         cx.notify();
     }
 
@@ -377,7 +376,7 @@ impl QuillApp {
             },
             None => StatusNote::info(tr(keys::Q_PEOPLE_MEMBER_ACTIONS_NEED_A_LIVE)),
         };
-        self.connection.set_note(note);
+        self.set_note(note);
         self.refresh_member_dialog(cx);
     }
 

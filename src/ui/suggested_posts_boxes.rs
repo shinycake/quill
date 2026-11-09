@@ -128,7 +128,7 @@ impl QuillApp {
                     BalanceFor::Offer => tr(keys::Q_MONEY_OFFER_THIS_PRICE),
                     BalanceFor::Accept => tr(keys::Q_MONEY_ACCEPT_THIS_POST),
                 };
-                self.connection.set_note(StatusNote::info(tr_with(
+                self.set_note(StatusNote::info(tr_with(
                     keys::Q_MONEY_YOU_NEED_TO,
                     &[("label", &(price.label()).to_string()), ("what", what)],
                 )));
@@ -215,13 +215,16 @@ impl QuillApp {
                 chat_id,
                 message_id,
             } => {
-                self.screen.connection.set_note(match self.live.as_mut() {
-                    Some(live) => match live.driver.add_offer(chat_id, message_id, terms) {
-                        Ok(_) => StatusNote::silent(tr(keys::Q_MONEY_SENDING_THE_OFFER)),
-                        Err(_) => StatusNote::error(tr(keys::Q_MONEY_COULDNT_SEND_THE_OFFER)),
+                self.screen.connection.set_note_for(
+                    &self.screen.windows,
+                    match self.live.as_mut() {
+                        Some(live) => match live.driver.add_offer(chat_id, message_id, terms) {
+                            Ok(_) => StatusNote::silent(tr(keys::Q_MONEY_SENDING_THE_OFFER)),
+                            Err(_) => StatusNote::error(tr(keys::Q_MONEY_COULDNT_SEND_THE_OFFER)),
+                        },
+                        None => StatusNote::silent(tr(keys::Q_MONEY_OFFER_SENT_DEMO)),
                     },
-                    None => StatusNote::silent(tr(keys::Q_MONEY_OFFER_SENT_DEMO)),
-                });
+                );
                 cx.notify();
             }
         }

@@ -281,7 +281,7 @@ impl QuillApp {
             .session()
             .is_some_and(|s| s.payments.premium_option == Some(true));
         if !premium {
-            self.connection.set_note(StatusNote::info(tr(
+            self.set_note(StatusNote::info(tr(
                 keys::Q_PREFS_CHANGING_GIFT_SETTINGS_NEEDS_TELEGRAM,
             )));
             cx.notify();
@@ -294,7 +294,7 @@ impl QuillApp {
         edit(&mut next);
         if let Some(live) = self.live.as_mut() {
             if let Err(err) = live.driver.set_gift_settings(next) {
-                self.connection.set_note(StatusNote::error(user_error_for(
+                self.set_note(StatusNote::error(user_error_for(
                     keys::Q_NOTES_FAILED_GIFT_SETTINGS,
                     &err,
                 )));
@@ -411,7 +411,7 @@ impl QuillApp {
     pub(super) fn set_sensitive_content(&mut self, on: bool, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
             if let Err(err) = live.driver.set_ignore_sensitive_content(on) {
-                self.connection.set_note(StatusNote::error(user_error_for(
+                self.set_note(StatusNote::error(user_error_for(
                     keys::Q_NOTES_FAILED_SENSITIVE_SETTING,
                     &err,
                 )));
@@ -539,7 +539,7 @@ impl QuillApp {
             prefs.ip_reveal_warning = ip;
         });
         self.privacy.editor = None;
-        self.connection.set_note(StatusNote::silent(tr(
+        self.set_note(StatusNote::silent(tr(
             keys::Q_PREFS_FILE_OPEN_SETTINGS_SAVED,
         )));
         cx.notify();
@@ -749,7 +749,7 @@ impl QuillApp {
                 .spawn(async move { std::fs::copy(&src, &dest).map(|_| dest) })
                 .await;
             let _ = this.update(cx, |this, cx| {
-                this.connection.set_note(match copied {
+                this.set_note(match copied {
                     Ok(dest) => StatusNote::info(format!(
                         "saved to {}",
                         dest.file_name().and_then(|n| n.to_str()).unwrap_or("file")

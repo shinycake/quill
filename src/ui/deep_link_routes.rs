@@ -83,7 +83,7 @@ impl QuillApp {
             }
             DeepLinkUi::Share { text } => {
                 self.in_asking_window(cx, |app, _| app.share.link_text = Some(text));
-                self.connection.set_note(StatusNote::silent(tr(
+                self.set_note(StatusNote::silent(tr(
                     keys::Q_MISC_CHOOSE_A_CHAT_TO_SHARE_2,
                 )));
             }
@@ -128,7 +128,7 @@ impl QuillApp {
                     None => self.open_settings(None),
                 }
                 if target == SettingsTarget::Unsupported {
-                    self.connection.set_note(StatusNote::silent(tr(
+                    self.set_note(StatusNote::silent(tr(
                         keys::Q_MISC_THAT_SETTINGS_PAGE_ISNT_SUPPORTED,
                     )));
                 }
@@ -147,8 +147,7 @@ impl QuillApp {
             )
         });
         if requested {
-            self.connection
-                .set_note(StatusNote::silent(tr(keys::Q_CHAT_LOADING_INSTANT_VIEW)));
+            self.set_note(StatusNote::silent(tr(keys::Q_CHAT_LOADING_INSTANT_VIEW)));
         } else if !fallback.is_empty() {
             self.open_web_link(fallback, tr(keys::Q_CHAT_COULD_NOT_OPEN_LINK), cx);
         }

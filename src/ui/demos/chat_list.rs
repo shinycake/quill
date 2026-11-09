@@ -54,7 +54,7 @@ impl QuillApp {
             .demo_chat_menu_variant()
             .unwrap_or_else(|| ChatMenuState::at(ChatId(11), Point::new(px(120.), px(770.))));
         self.chat_list.menu = Some(menu);
-        self.connection.set_note(StatusNote::silent(
+        self.set_note(StatusNote::silent(
             "screenshot demo — mentions · reactions · multi-select · report · block",
         ));
     }
@@ -129,8 +129,7 @@ impl QuillApp {
             search.accept_messages(Vec::new(), false);
             search.accept_public_chats(Vec::new(), false);
         }
-        self.connection
-            .set_note(StatusNote::silent("screenshot demo — search empty state"));
+        self.set_note(StatusNote::silent("screenshot demo — search empty state"));
     }
 
     fn demo_ready_typing(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {
@@ -138,7 +137,6 @@ impl QuillApp {
             self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
             apply_ready_typing(session, &self.demo_ui.sink, &self.demo_ui.seq);
         }
-        self.connection
-            .set_note(StatusNote::silent("screenshot demo — typing…"));
+        self.set_note(StatusNote::silent("screenshot demo — typing…"));
     }
 }

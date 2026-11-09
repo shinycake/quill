@@ -107,7 +107,7 @@ impl QuillApp {
         };
         if let Some(live) = self.live.as_mut() {
             if let Err(err) = live.driver.mark_folder_as_read(folder_id) {
-                self.connection.set_note(StatusNote::error(user_error_for(
+                self.set_note(StatusNote::error(user_error_for(
                     keys::Q_NOTES_FAILED_FOLDER_READ,
                     &err,
                 )));
@@ -342,7 +342,7 @@ impl QuillApp {
         match self.live.as_mut() {
             Some(live) => {
                 if let Err(err) = live.driver.process_folder_new_chats(folder_id, &[]) {
-                    self.connection.set_note(StatusNote::error(user_error_for(
+                    self.set_note(StatusNote::error(user_error_for(
                         keys::Q_NOTES_FAILED_HIDE_NEW_CHATS,
                         &err,
                     )));
@@ -383,12 +383,12 @@ impl QuillApp {
         ids.sort_unstable();
         match self.live.as_mut() {
             Some(live) => match live.driver.process_folder_new_chats(dialog.folder_id, &ids) {
-                Ok(_) => self.connection.set_note(match ids.len() {
+                Ok(_) => self.set_note(match ids.len() {
                     0 => StatusNote::silent(tr(keys::Q_CHATLIST_NEW_CHATS_HIDDEN)),
                     1 => StatusNote::silent(tr(keys::Q_CHATLIST_JOINING_1_CHAT)),
                     n => StatusNote::silent(trn(keys::Q_CHATLIST_JOINING_CHATS, n)),
                 }),
-                Err(err) => self.connection.set_note(StatusNote::error(user_error_for(
+                Err(err) => self.set_note(StatusNote::error(user_error_for(
                     keys::Q_NOTES_FAILED_PROCESS_NEW_CHATS,
                     &err,
                 ))),

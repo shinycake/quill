@@ -460,8 +460,7 @@ impl QuillApp {
                 .ghost()
                 .on_click(cx.listener(move |this, _, _, cx| {
                     cx.write_to_clipboard(ClipboardItem::new_string(link.clone()));
-                    this.connection
-                        .set_note(StatusNote::info(tr(keys::CREATE_CHANNEL_LINK_COPIED)));
+                    this.set_note(StatusNote::info(tr(keys::CREATE_CHANNEL_LINK_COPIED)));
                     cx.notify();
                 })),
             None => Button::new("new-chat-invite-link")

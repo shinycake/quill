@@ -16,21 +16,20 @@ impl QuillApp {
 
     fn choose_main_profile_tab(&mut self, tab: ProfileTab, cx: &mut Context<Self>) -> bool {
         let Some(live) = self.live.as_mut() else {
-            self.connection
-                .set_note(StatusNote::info(tr(keys::Q_PEOPLE_DEMO_MODE_THIS_NEEDS_A)));
+            self.set_note(StatusNote::info(tr(keys::Q_PEOPLE_DEMO_MODE_THIS_NEEDS_A)));
             cx.notify();
             return true;
         };
         match live.driver.set_main_profile_tab(tab) {
             Ok(_) => {
-                self.connection.set_note(StatusNote::silent(tr_with(
+                self.set_note(StatusNote::silent(tr_with(
                     keys::Q_PEOPLE_MAIN_TAB_2,
                     &[("label", (tab.label()))],
                 )));
                 true
             }
             Err(_) => {
-                self.connection.set_note(StatusNote::error(tr(
+                self.set_note(StatusNote::error(tr(
                     keys::Q_PEOPLE_COULDNT_REACH_TELEGRAM_TRY_AGAIN,
                 )));
                 cx.notify();

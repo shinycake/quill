@@ -170,7 +170,7 @@ impl QuillApp {
             return;
         };
         if name.is_empty() {
-            self.connection.set_note(StatusNote::error(tr(
+            self.set_note(StatusNote::error(tr(
                 keys::Q_PEOPLE_TOPIC_NAME_CANNOT_BE_EMPTY,
             )));
             cx.notify();
@@ -203,14 +203,14 @@ impl QuillApp {
                         .edit_forum_topic_with_icon(chat_id, id, &name, editor.icon_emoji)
                 }
             };
-            self.connection.set_note(match (result, editor.target) {
+            self.set_note(match (result, editor.target) {
                 (Ok(_), None) => StatusNote::silent(tr(keys::Q_PEOPLE_TOPIC_CREATED)),
                 (Ok(_), Some(_)) => StatusNote::silent(tr(keys::Q_PEOPLE_TOPIC_SAVED)),
                 (Err(_), None) => StatusNote::error(tr(keys::Q_PEOPLE_COULD_NOT_CREATE_TOPIC)),
                 (Err(_), Some(_)) => StatusNote::error(tr(keys::Q_PEOPLE_COULD_NOT_SAVE_TOPIC)),
             });
         } else {
-            self.connection.set_note(StatusNote::info(tr(
+            self.set_note(StatusNote::info(tr(
                 keys::Q_PEOPLE_TOPICS_NEED_A_LIVE_CONNECTION,
             )));
         }
@@ -255,15 +255,14 @@ impl QuillApp {
                 // The topic list refetches after the server confirms
                 // (the render path reloads when the cache is dropped).
                 Ok(_) => {
-                    self.connection
-                        .set_note(StatusNote::silent(tr(keys::Q_PEOPLE_TOPIC_UPDATED)));
+                    self.set_note(StatusNote::silent(tr(keys::Q_PEOPLE_TOPIC_UPDATED)));
                 }
-                Err(_) => self
-                    .connection
-                    .set_note(StatusNote::error(tr(keys::Q_PEOPLE_COULD_NOT_UPDATE_TOPIC))),
+                Err(_) => {
+                    self.set_note(StatusNote::error(tr(keys::Q_PEOPLE_COULD_NOT_UPDATE_TOPIC)))
+                }
             }
         } else {
-            self.connection.set_note(StatusNote::info(tr(
+            self.set_note(StatusNote::info(tr(
                 keys::Q_PEOPLE_TOPICS_NEED_A_LIVE_CONNECTION,
             )));
         }

@@ -43,7 +43,7 @@ impl QuillApp {
                 .set_unrestrict_boost_count(chat_id, unrestrict_clamped(count))
                 .is_err()
         {
-            self.connection.set_note(StatusNote::error(tr(
+            self.set_note(StatusNote::error(tr(
                 keys::Q_MONEY_COULD_NOT_SAVE_THE_SETTING,
             )));
         }

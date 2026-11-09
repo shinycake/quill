@@ -117,7 +117,6 @@ impl QuillApp {
         self.demo_ui
             .seq
             .store(seq.load(Ordering::SeqCst), Ordering::SeqCst);
-        self.connection
-            .set_note(StatusNote::silent("screenshot demo — forum topic titles"));
+        self.set_note(StatusNote::silent("screenshot demo — forum topic titles"));
     }
 }

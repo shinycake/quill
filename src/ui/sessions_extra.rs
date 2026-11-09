@@ -14,7 +14,7 @@ impl QuillApp {
     pub(super) fn set_session_ttl(&mut self, days: i32, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
             if let Err(err) = live.driver.set_inactive_session_ttl(days) {
-                self.connection.set_note(StatusNote::error(user_error_for(
+                self.set_note(StatusNote::error(user_error_for(
                     keys::Q_NOTES_FAILED_SESSION_TIMEOUT,
                     &err,
                 )));
@@ -77,7 +77,7 @@ impl QuillApp {
             live.driver.save_device_prefs();
         } else if let Some(demo) = self.demo_session.as_mut() {
             demo.settings.device_prefs = prefs;
-            self.connection.set_note(StatusNote::silent(tr(
+            self.set_note(StatusNote::silent(tr(
                 keys::Q_PREFS_DEMO_DEVICE_NAME_IS_NOT,
             )));
         }

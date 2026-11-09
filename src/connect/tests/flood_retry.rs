@@ -333,3 +333,58 @@ fn only_idempotent_reads_are_retained_for_retry() {
     assert!(stash.take(RequestId(3)).is_some());
     assert!(stash.is_empty());
 }
+
+/// A custom emoji lookup's rate limit that is too long to retry frees its
+/// ids without counting a failure and holds every lookup until the wait is
+/// over, so repeated limits never give the ids up for the session.
+#[test]
+fn a_long_custom_emoji_rate_limit_holds_lookups_instead_of_giving_up() {
+    let mut h = Harness::new();
+    for _ in 0..=crate::emoji::custom_lookup::MAX_FAILURES {
+        let extra = h
+            .driver
+            .lookup_custom_emoji(&[41])
+            .unwrap()
+            .expect("lookup goes out");
+        h.flood(extra, "Too Many Requests: retry after 600");
+        assert!(h.driver.session.requests.get(extra).is_none());
+        assert!(h.driver.session.custom_emoji_needs_resolving(41));
+        assert!(
+            h.driver.lookup_custom_emoji(&[41]).unwrap().is_none(),
+            "held while the limit lasts"
+        );
+        // The hold is taken at ingest time (the real clock).
+        let now = Instant::now();
+        h.driver.request_tick(now + Duration::from_secs(300));
+        assert!(h.driver.lookup_custom_emoji(&[41]).unwrap().is_none());
+        assert!(h.driver.next_deadline(now, quill_now_ms()).is_some());
+        h.driver.request_tick(now + Duration::from_secs(700));
+    }
+    assert!(h.driver.session.custom_emoji_needs_resolving(41));
+    assert!(h.driver.lookup_custom_emoji(&[41]).unwrap().is_some());
+}
+
+/// Retries that run out on a short limit are not a failure either.
+#[test]
+fn custom_emoji_rate_limit_retries_that_run_out_hold_lookups() {
+    let mut h = Harness::new();
+    let mut now = Instant::now();
+    let extra = h
+        .driver
+        .lookup_custom_emoji(&[41])
+        .unwrap()
+        .expect("lookup goes out");
+    for _ in 0..FLOOD_RETRY_MAX_ATTEMPTS {
+        h.flood(extra, "Too Many Requests: retry after 1");
+        now += Duration::from_secs(5);
+        h.driver.request_tick(now);
+    }
+    h.flood(extra, "Too Many Requests: retry after 1");
+    assert!(h.driver.session.requests.get(extra).is_none());
+    assert!(h.driver.session.custom_emoji_needs_resolving(41));
+    // The hold was taken at ingest time (the real clock); a tick far past
+    // it releases the lookups.
+    h.driver
+        .request_tick(Instant::now() + Duration::from_secs(10));
+    assert!(h.driver.lookup_custom_emoji(&[41]).unwrap().is_some());
+}

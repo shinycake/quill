@@ -39,8 +39,7 @@ impl QuillApp {
                 .fetch_supergroup_members(chat_id, MemberListFilter::Recent, "")
                 .is_err()
         {
-            self.connection
-                .set_note(StatusNote::error(tr(keys::Q_PEOPLE_COULD_NOT_LOAD_MEMBERS)));
+            self.set_note(StatusNote::error(tr(keys::Q_PEOPLE_COULD_NOT_LOAD_MEMBERS)));
         }
         cx.notify();
     }
@@ -63,7 +62,7 @@ impl QuillApp {
                 .refresh_supergroup_members(chat_id, MemberListFilter::Search, &query)
                 .is_err()
         {
-            self.connection.set_note(StatusNote::error(tr(
+            self.set_note(StatusNote::error(tr(
                 keys::Q_PEOPLE_COULD_NOT_SEARCH_MEMBERS,
             )));
         }
@@ -151,7 +150,7 @@ impl QuillApp {
             },
             None => StatusNote::info(tr(keys::Q_PEOPLE_MEMBER_ACTIONS_NEED_A_LIVE)),
         };
-        self.connection.set_note(note);
+        self.set_note(note);
         self.refresh_member_dialog(cx);
     }
 

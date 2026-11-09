@@ -65,7 +65,7 @@ impl QuillApp {
                 if let Some(live) = self.live.as_mut() {
                     live.driver.session.payments.form_loading = false;
                 }
-                self.connection.set_note(StatusNote::error(tr(
+                self.set_note(StatusNote::error(tr(
                     keys::Q_MONEY_COULD_NOT_LOAD_THE_PAYMENT,
                 )));
             }
@@ -216,7 +216,7 @@ impl QuillApp {
             )
         });
         if !matches!(sent, Some(Ok(_))) {
-            self.connection.set_note(StatusNote::error(tr(
+            self.set_note(StatusNote::error(tr(
                 keys::Q_MONEY_COULD_NOT_SUBMIT_THE_PAYMENT,
             )));
         }

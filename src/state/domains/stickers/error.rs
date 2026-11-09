@@ -32,11 +32,16 @@ impl Session {
                 }
             }
             // The lookup's ids are asked for again; the note shows only
-            // where it is read, in the status picker.
+            // where it is read, in the status picker. A rate limit is no
+            // failure: the connect layer holds lookups until it is over.
             Some(RequestPurpose::GetCustomEmojiStickers) => {
                 let emoji = &mut self.stickers.emoji;
                 if let Some(pending) = pending {
-                    emoji.custom_emoji_lookup_failed(pending.id);
+                    if err.is_flood() {
+                        emoji.custom_emoji_lookup_rate_limited(pending.id);
+                    } else {
+                        emoji.custom_emoji_lookup_failed(pending.id);
+                    }
                 }
                 if emoji.status_open || emoji.chat_status_open {
                     emoji.status_note = Some(call_request_error_line(

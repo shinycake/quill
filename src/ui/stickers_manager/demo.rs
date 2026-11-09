@@ -129,7 +129,6 @@ impl QuillApp {
         stickers.tab = StickerTab::Installed;
         session.stickers.manager.open = true;
         self.settings.sticker_settings_open = true;
-        self.connection
-            .set_note(StatusNote::silent("screenshot demo — stickers manager"));
+        self.set_note(StatusNote::silent("screenshot demo — stickers manager"));
     }
 }

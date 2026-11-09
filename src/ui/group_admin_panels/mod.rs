@@ -126,7 +126,7 @@ impl QuillApp {
                 .chat_boost_status
                 .remove(&chat_id.0);
             if live.driver.fetch_chat_boost_status(chat_id).is_err() {
-                self.connection.set_note(StatusNote::error(tr(
+                self.set_note(StatusNote::error(tr(
                     keys::Q_PEOPLE_COULD_NOT_LOAD_BOOST_STATUS,
                 )));
             }

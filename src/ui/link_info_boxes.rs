@@ -126,13 +126,11 @@ impl QuillApp {
         match self.live.as_mut() {
             Some(live) => {
                 if live.driver.request_gift_code_info(&code).is_err() {
-                    self.connection
-                        .set_note(StatusNote::error(tr(keys::Q_REST_COULD_NOT_CHECK_THE_GIFT)));
+                    self.set_note(StatusNote::error(tr(keys::Q_REST_COULD_NOT_CHECK_THE_GIFT)));
                 }
             }
             None => {
-                self.connection
-                    .set_note(StatusNote::info(tr(keys::Q_REST_GIFT_CODES_NEED_A_SIGNED)));
+                self.set_note(StatusNote::info(tr(keys::Q_REST_GIFT_CODES_NEED_A_SIGNED)));
             }
         }
         self.open_box(crate::ui::shell::DialogKind::GiftCodeLink);
@@ -144,12 +142,11 @@ impl QuillApp {
         match self.live.as_mut() {
             Some(live) => {
                 if live.driver.request_language_pack_info(&id).is_err() {
-                    self.connection
-                        .set_note(StatusNote::error(tr(keys::Q_REST_COULD_NOT_LOOK_UP_THE)));
+                    self.set_note(StatusNote::error(tr(keys::Q_REST_COULD_NOT_LOOK_UP_THE)));
                 }
             }
             None => {
-                self.connection.set_note(StatusNote::info(tr(
+                self.set_note(StatusNote::info(tr(
                     keys::Q_REST_LANGUAGE_LINKS_NEED_A_SIGNED,
                 )));
             }
@@ -177,8 +174,7 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut()
             && live.driver.apply_gift_code().is_err()
         {
-            self.connection
-                .set_note(StatusNote::error(tr(keys::Q_REST_COULD_NOT_USE_THE_GIFT)));
+            self.set_note(StatusNote::error(tr(keys::Q_REST_COULD_NOT_USE_THE_GIFT)));
         }
         cx.notify();
     }

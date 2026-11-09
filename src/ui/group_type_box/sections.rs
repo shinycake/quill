@@ -368,8 +368,7 @@ impl QuillApp {
     /// Copy one of the usernames' t.me links.
     pub(super) fn copy_group_type_username(&mut self, name: &str, cx: &mut Context<Self>) {
         cx.write_to_clipboard(ClipboardItem::new_string(format!("https://t.me/{name}")));
-        self.connection
-            .set_note(StatusNote::info(tr(keys::CREATE_CHANNEL_LINK_COPIED)));
+        self.set_note(StatusNote::info(tr(keys::CREATE_CHANNEL_LINK_COPIED)));
         cx.notify();
     }
 }

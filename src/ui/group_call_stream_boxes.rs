@@ -415,7 +415,7 @@ impl QuillApp {
             (None, Some(live)) => {
                 let microphone = live.driver.selected_call_devices().0.map(str::to_owned);
                 if let Err(err) = live.driver.select_call_devices(microphone, None) {
-                    self.connection.set_note(StatusNote::error(tr_with(
+                    self.set_note(StatusNote::error(tr_with(
                         keys::Q_OPS_COULD_NOT_SELECT_AUDIO_DEVICE,
                         &[("err", &err.to_string())],
                     )));
@@ -437,7 +437,7 @@ impl QuillApp {
                 .map(|c| c.id)
             && let Err(err) = live.driver.set_group_call_playback_muted(call_id, muted)
         {
-            self.connection.set_note(StatusNote::error(tr_with(
+            self.set_note(StatusNote::error(tr_with(
                 keys::Q_OPS_COULD_NOT_SELECT_AUDIO_DEVICE,
                 &[("err", &err.to_string())],
             )));

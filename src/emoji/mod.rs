@@ -40,9 +40,8 @@ pub struct EmojiPanel {
     pub outdated_packs: std::collections::HashSet<i64>,
     pub status_open: bool,
     pub status_note: Option<String>,
-    pub status_resolution_attempted: std::collections::HashSet<i64>,
-    /// The ids each `getCustomEmojiStickers` asked for, so a failed one
-    /// asks again ([`custom_lookup`]).
+    /// Where each custom emoji id's `getCustomEmojiStickers` stands: asked,
+    /// answered, failed or given up ([`custom_lookup`]).
     pub custom_lookups: CustomEmojiLookups,
     pub open: bool,
     pub failed: bool,
@@ -453,7 +452,7 @@ impl Session {
             });
         });
         for id in dropped_ids {
-            emoji.status_resolution_attempted.remove(&id);
+            emoji.custom_lookups.forget(id);
         }
     }
 
@@ -590,8 +589,7 @@ impl Session {
     /// Neither resolved nor already asked for.
     pub fn custom_emoji_needs_resolving(&self, id: i64) -> bool {
         let emoji = &self.stickers.emoji;
-        !emoji.status_resolution_attempted.contains(&id)
-            && emoji.custom_emoji_stickers.lookup(id).is_none()
+        !emoji.custom_lookups.attempted(id) && emoji.custom_emoji_stickers.lookup(id).is_none()
     }
 
     /// Image files of the open chat's resolved custom emoji that still need

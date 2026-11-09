@@ -89,7 +89,7 @@ impl QuillApp {
                 session.stories.story_retry.remove(&(chat_id.0, story_id));
             }
             if !fetch.is_empty() {
-                self.connection.set_note(StatusNote::silent(tr(
+                self.set_note(StatusNote::silent(tr(
                     keys::Q_MEDIA_DEMO_GETSTORY_RUNS_WITH_LIVE,
                 )));
             }

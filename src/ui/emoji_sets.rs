@@ -40,7 +40,7 @@ impl QuillApp {
         self.open_box(DialogKind::EmojiSets);
         if let Some(live) = self.live.as_mut() {
             if live.driver.open_emoji_sets().is_err() {
-                self.connection.set_note(StatusNote::error(tr(
+                self.set_note(StatusNote::error(tr(
                     keys::Q_MEDIA_COULD_NOT_LOAD_EMOJI_PACKS,
                 )));
             }
@@ -76,7 +76,7 @@ impl QuillApp {
             .set_offset(point(px(0.), px(0.)));
         if let Some(live) = self.live.as_mut() {
             if live.driver.select_emoji_set_tab(tab).is_err() {
-                self.connection.set_note(StatusNote::error(tr(
+                self.set_note(StatusNote::error(tr(
                     keys::Q_MEDIA_COULD_NOT_LOAD_EMOJI_PACKS,
                 )));
             }
@@ -124,7 +124,7 @@ impl QuillApp {
             .set_offset(point(px(0.), px(0.)));
         if let Some(live) = self.live.as_mut() {
             if live.driver.search_emoji_packs(query).is_err() {
-                self.connection.set_note(StatusNote::error(tr(
+                self.set_note(StatusNote::error(tr(
                     keys::Q_MEDIA_COULD_NOT_SEARCH_EMOJI_PACKS,
                 )));
             }
@@ -155,7 +155,7 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut()
             && live.driver.more_trending_emoji_packs().is_err()
         {
-            self.connection.set_note(StatusNote::error(tr(
+            self.set_note(StatusNote::error(tr(
                 keys::Q_MEDIA_COULD_NOT_LOAD_MORE_EMOJI,
             )));
         }
@@ -168,13 +168,14 @@ impl QuillApp {
     }
     fn install_emoji_set(&mut self, id: i64, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
-            self.screen
-                .connection
-                .set_note(match live.driver.set_emoji_pack_installed(id, true) {
+            self.screen.connection.set_note_for(
+                &self.screen.windows,
+                match live.driver.set_emoji_pack_installed(id, true) {
                     Ok(Some(_)) => StatusNote::silent(tr(keys::Q_MEDIA_INSTALLING_EMOJI_PACK)),
                     Ok(None) => StatusNote::silent(tr(keys::Q_MEDIA_AN_EMOJI_PACK_IS_ALREADY)),
                     Err(_) => StatusNote::error(tr(keys::Q_MEDIA_COULD_NOT_INSTALL_EMOJI_PACK)),
-                });
+                },
+            );
         }
         cx.notify();
     }

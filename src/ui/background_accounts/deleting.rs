@@ -225,7 +225,7 @@ impl QuillApp {
             // Without the record, a quit before the clients close would
             // keep the data but lose the passcode: keep both.
             let message = tr_with(keys::Q_REST_COULD_NOT_LOG_OUT_E, &[("e", &e.to_string())]);
-            self.connection.set_note(StatusNote::error(message.clone()));
+            self.set_note(StatusNote::error(message.clone()));
             cx.notify();
             return Err(message);
         }
@@ -247,7 +247,7 @@ impl QuillApp {
                 // Nothing opens in this run; the next start deletes the
                 // folders before connecting.
                 Deletion::Deferred => {
-                    this.connection.set_note(StatusNote::silent(tr(
+                    this.set_note(StatusNote::silent(tr(
                         keys::Q_REST_RESTART_QUILL_TO_FINISH_LOGGING_OUT,
                     )));
                 }

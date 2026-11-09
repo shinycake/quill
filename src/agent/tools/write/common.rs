@@ -265,7 +265,9 @@ pub fn confirm(ctx: &Ctx, target: &Target, kind: &str, preview: &str) -> Result<
             ToolError::new("Several requests are already waiting for the user in Quill. Wait for those answers, then retry.")
         })?;
     match prompts::wait(id, &rx, ANSWER_WAIT) {
-        Some(Decision::Allowed) => Ok(()),
+        // Up to two minutes went by: the lock, the switch and the grants
+        // are asked again (the queue turn after asks once more).
+        Some(Decision::Allowed) => still_allowed(),
         Some(Decision::Denied) => {
             record(
                 ctx,
@@ -387,6 +389,30 @@ pub fn change(
     request: Value,
 ) -> Result<Value, ToolError> {
     change_on(ctx, target, tool, summary, request, Vec::new())
+}
+
+/// [`change`] for a write made of several requests: they go out in one
+/// queue turn, so the turn's check (lock, switch, grants) is the only point
+/// where the write can be refused with nothing done. Separate turns would
+/// let a later one say "nothing was sent or changed" after an earlier one
+/// went out. Stops at the first request that fails.
+pub fn change_steps(
+    ctx: &Ctx,
+    target: &Target,
+    tool: &str,
+    summary: &str,
+    requests: Vec<Value>,
+) -> Result<(), ToolError> {
+    if requests.is_empty() {
+        return Ok(());
+    }
+    take_write_turn(ctx, target.chat_id)?;
+    let result = requests
+        .into_iter()
+        .try_for_each(|request| td::call(&ctx.client, request).map(drop))
+        .map_err(write_error);
+    log_on(ctx, target, tool, summary, result.is_ok(), Vec::new());
+    result
 }
 
 /// [`change`] on messages `ids`, which the log names.

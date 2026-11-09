@@ -20,6 +20,9 @@ impl Session {
                     self.remember_files(std::slice::from_ref(&file));
                 }
                 let is_bot = user.is_bot;
+                if self.users.get(&user_id.0).map(|known| known.photo_id) != Some(user.photo_id) {
+                    self.forget_user_photos(user_id.0);
+                }
                 self.users.insert(user_id.0, user);
                 if is_bot {
                     self.bots.bot_user_ids.insert(user_id.0);
@@ -212,6 +215,14 @@ impl Session {
                     self.upsert_file(file, false);
                     id
                 });
+                if self
+                    .users_state
+                    .user_full_infos
+                    .get(&user_id.0)
+                    .is_some_and(|known| known.photo_id != photo_id)
+                {
+                    self.forget_user_photos(user_id.0);
+                }
                 self.users_state.user_full_infos.insert(
                     user_id.0,
                     UserFullInfoData {

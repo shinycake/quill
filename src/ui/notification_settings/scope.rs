@@ -29,8 +29,7 @@ impl QuillApp {
                 .get(&scope)
                 .cloned()
             else {
-                self.connection
-                    .set_note(StatusNote::silent(tr(keys::Q_PREFS_DEFAULTS_STILL_LOADING)));
+                self.set_note(StatusNote::silent(tr(keys::Q_PREFS_DEFAULTS_STILL_LOADING)));
                 cx.notify();
                 return;
             };
@@ -38,7 +37,7 @@ impl QuillApp {
             let result = live
                 .driver
                 .send_scope_notification_settings(scope, &settings);
-            self.connection.set_note(match result {
+            self.set_note(match result {
                 Ok(_) => StatusNote::silent(tr(keys::Q_PREFS_DEFAULT_SOUND_UPDATED)),
                 Err(_) => StatusNote::error(tr(keys::Q_PREFS_COULD_NOT_CHANGE_DEFAULT_SOUND)),
             });
@@ -55,7 +54,7 @@ impl QuillApp {
                 .settings
                 .scope_notification_settings
                 .insert(scope, settings);
-            self.connection.set_note(StatusNote::silent(tr(
+            self.set_note(StatusNote::silent(tr(
                 keys::Q_PREFS_DEFAULT_SOUND_UPDATED_2,
             )));
         }
@@ -81,8 +80,7 @@ impl QuillApp {
                 .get(&scope)
                 .cloned()
             else {
-                self.connection
-                    .set_note(StatusNote::silent(tr(keys::Q_PREFS_DEFAULTS_STILL_LOADING)));
+                self.set_note(StatusNote::silent(tr(keys::Q_PREFS_DEFAULTS_STILL_LOADING)));
                 cx.notify();
                 return;
             };
@@ -90,7 +88,7 @@ impl QuillApp {
             let result = live
                 .driver
                 .send_scope_notification_settings(scope, &settings);
-            self.connection.set_note(match result {
+            self.set_note(match result {
                 Ok(_) if mute_for == 0 => StatusNote::silent(tr(keys::Q_PREFS_DEFAULT_UNMUTED)),
                 Ok(_) => StatusNote::silent(tr(keys::Q_PREFS_DEFAULT_MUTE_UPDATED)),
                 Err(_) => StatusNote::error(tr(keys::Q_PREFS_COULD_NOT_CHANGE_DEFAULT_MUTE)),
@@ -107,8 +105,7 @@ impl QuillApp {
                 .settings
                 .scope_notification_settings
                 .insert(scope, settings);
-            self.connection
-                .set_note(StatusNote::silent(tr(keys::Q_PREFS_DEFAULT_MUTE_UPDATED_2)));
+            self.set_note(StatusNote::silent(tr(keys::Q_PREFS_DEFAULT_MUTE_UPDATED_2)));
         }
         cx.notify();
     }
@@ -132,8 +129,7 @@ impl QuillApp {
                 .get(&scope)
                 .cloned()
             else {
-                self.connection
-                    .set_note(StatusNote::silent(tr(keys::Q_PREFS_DEFAULTS_STILL_LOADING)));
+                self.set_note(StatusNote::silent(tr(keys::Q_PREFS_DEFAULTS_STILL_LOADING)));
                 cx.notify();
                 return;
             };
@@ -141,7 +137,7 @@ impl QuillApp {
             let result = live
                 .driver
                 .send_scope_notification_settings(scope, &settings);
-            self.connection.set_note(match result {
+            self.set_note(match result {
                 Ok(_) => StatusNote::silent(tr(keys::Q_PREFS_DEFAULT_PREVIEW_UPDATED)),
                 Err(_) => StatusNote::error(tr(keys::Q_PREFS_COULD_NOT_CHANGE_DEFAULT_PREVIEW)),
             });
@@ -157,7 +153,7 @@ impl QuillApp {
                 .settings
                 .scope_notification_settings
                 .insert(scope, settings);
-            self.connection.set_note(StatusNote::silent(tr(
+            self.set_note(StatusNote::silent(tr(
                 keys::Q_PREFS_DEFAULT_PREVIEW_UPDATED_2,
             )));
         }
@@ -184,8 +180,7 @@ impl QuillApp {
                 .get(&scope)
                 .cloned()
             else {
-                self.connection
-                    .set_note(StatusNote::silent(tr(keys::Q_PREFS_DEFAULTS_STILL_LOADING)));
+                self.set_note(StatusNote::silent(tr(keys::Q_PREFS_DEFAULTS_STILL_LOADING)));
                 cx.notify();
                 return;
             };
@@ -193,7 +188,7 @@ impl QuillApp {
             let result = live
                 .driver
                 .send_scope_notification_settings(scope, &settings);
-            self.connection.set_note(match result {
+            self.set_note(match result {
                 Ok(_) => StatusNote::silent(tr(keys::Q_PREFS_STORY_NOTIFICATION_DEFAULT_UPDATED)),
                 Err(_) => StatusNote::error(tr(keys::Q_PREFS_COULD_NOT_CHANGE_STORY_NOTIFICATION)),
             });
@@ -209,7 +204,7 @@ impl QuillApp {
                 .settings
                 .scope_notification_settings
                 .insert(scope, settings);
-            self.connection.set_note(StatusNote::silent(tr(
+            self.set_note(StatusNote::silent(tr(
                 keys::Q_PREFS_STORY_NOTIFICATION_DEFAULT_UPDATED_2,
             )));
         }
@@ -236,8 +231,7 @@ impl QuillApp {
                 .get(&scope)
                 .cloned()
             else {
-                self.connection
-                    .set_note(StatusNote::silent(tr(keys::Q_PREFS_DEFAULTS_STILL_LOADING)));
+                self.set_note(StatusNote::silent(tr(keys::Q_PREFS_DEFAULTS_STILL_LOADING)));
                 cx.notify();
                 return;
             };
@@ -245,7 +239,7 @@ impl QuillApp {
             let result = live
                 .driver
                 .send_scope_notification_settings(scope, &settings);
-            self.connection.set_note(match result {
+            self.set_note(match result {
                 Ok(_) => {
                     StatusNote::silent(tr(keys::Q_PREFS_DEFAULT_MENTION_NOTIFICATIONS_UPDATED))
                 }
@@ -263,7 +257,7 @@ impl QuillApp {
                 .settings
                 .scope_notification_settings
                 .insert(scope, settings);
-            self.connection.set_note(StatusNote::silent(tr(
+            self.set_note(StatusNote::silent(tr(
                 keys::Q_PREFS_DEFAULT_MENTION_NOTIFICATIONS_UPDATED_2,
             )));
         }
@@ -290,8 +284,7 @@ impl QuillApp {
                 .get(&scope)
                 .cloned()
             else {
-                self.connection
-                    .set_note(StatusNote::silent(tr(keys::Q_PREFS_DEFAULTS_STILL_LOADING)));
+                self.set_note(StatusNote::silent(tr(keys::Q_PREFS_DEFAULTS_STILL_LOADING)));
                 cx.notify();
                 return;
             };
@@ -299,7 +292,7 @@ impl QuillApp {
             let result = live
                 .driver
                 .send_scope_notification_settings(scope, &settings);
-            self.connection.set_note(match result {
+            self.set_note(match result {
                 Ok(_) => StatusNote::silent(tr(keys::Q_PREFS_STORY_POSTER_DEFAULT_UPDATED)),
                 Err(_) => StatusNote::error(tr(keys::Q_PREFS_COULD_NOT_CHANGE_STORY_POSTER)),
             });
@@ -315,7 +308,7 @@ impl QuillApp {
                 .settings
                 .scope_notification_settings
                 .insert(scope, settings);
-            self.connection.set_note(StatusNote::silent(tr(
+            self.set_note(StatusNote::silent(tr(
                 keys::Q_PREFS_STORY_POSTER_DEFAULT_UPDATED_2,
             )));
         }
@@ -342,8 +335,7 @@ impl QuillApp {
                 .get(&scope)
                 .cloned()
             else {
-                self.connection
-                    .set_note(StatusNote::silent(tr(keys::Q_PREFS_DEFAULTS_STILL_LOADING)));
+                self.set_note(StatusNote::silent(tr(keys::Q_PREFS_DEFAULTS_STILL_LOADING)));
                 cx.notify();
                 return;
             };
@@ -351,7 +343,7 @@ impl QuillApp {
             let result = live
                 .driver
                 .send_scope_notification_settings(scope, &settings);
-            self.connection.set_note(match result {
+            self.set_note(match result {
                 Ok(_) => StatusNote::silent(tr(
                     keys::Q_PREFS_DEFAULT_PINNED_MESSAGE_NOTIFICATIONS_UPDATED,
                 )),
@@ -369,7 +361,7 @@ impl QuillApp {
                 .settings
                 .scope_notification_settings
                 .insert(scope, settings);
-            self.connection.set_note(StatusNote::silent(tr(
+            self.set_note(StatusNote::silent(tr(
                 keys::Q_PREFS_DEFAULT_PINNED_MESSAGE_NOTIFICATIONS_UPDATED_2,
             )));
         }
@@ -708,7 +700,7 @@ impl QuillApp {
     ) {
         if let Some(live) = self.live.as_mut() {
             let result = live.driver.reset_chat_notification_settings(chat_id);
-            self.connection.set_note(match result {
+            self.set_note(match result {
                 Ok(_) => StatusNote::silent(tr(keys::Q_PREFS_EXCEPTION_RESET)),
                 Err(_) => StatusNote::error(tr(keys::Q_PREFS_COULD_NOT_RESET_EXCEPTION)),
             });
@@ -720,8 +712,7 @@ impl QuillApp {
             for list in session.settings.notification_exceptions.values_mut() {
                 list.retain(|id| *id != chat_id.0);
             }
-            self.connection
-                .set_note(StatusNote::silent(tr(keys::Q_PREFS_EXCEPTION_RESET_2)));
+            self.set_note(StatusNote::silent(tr(keys::Q_PREFS_EXCEPTION_RESET_2)));
         }
         cx.notify();
     }

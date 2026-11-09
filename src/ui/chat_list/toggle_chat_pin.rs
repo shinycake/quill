@@ -63,7 +63,7 @@ impl QuillApp {
         }
         if let Some(live) = self.live.as_mut() {
             let result = live.driver.toggle_chat_pin(chat_id, !pinned);
-            self.connection.set_note(match result {
+            self.set_note(match result {
                 Ok(Some(_)) if pinned => StatusNote::silent(tr(keys::Q_CHATLIST_UNPINNING)),
                 Ok(Some(_)) => StatusNote::silent(tr(keys::Q_CHATLIST_PINNING)),
                 Ok(None) => StatusNote::silent(tr(keys::Q_CHATLIST_PIN_REQUEST_ALREADY_IN_FLIGHT)),
@@ -74,7 +74,7 @@ impl QuillApp {
         }
         if self.demo_session.is_some() {
             self.apply_demo_pin(chat_id, !pinned, archived);
-            self.connection.set_note(if pinned {
+            self.set_note(if pinned {
                 StatusNote::silent(tr(keys::Q_LEFTOVERS_UNPINNED))
             } else {
                 StatusNote::silent(tr(keys::Q_LEFTOVERS_PINNED))
@@ -110,7 +110,7 @@ impl QuillApp {
                 && session.unread_forum_topics(chat_id).is_empty()
         });
         if marked && nothing_to_view && self.live.is_some() {
-            self.connection.set_note(StatusNote::silent(tr(
+            self.set_note(StatusNote::silent(tr(
                 keys::Q_CHATLIST_OPEN_THE_CHAT_TO_MARK,
             )));
             cx.notify();
@@ -122,7 +122,7 @@ impl QuillApp {
             } else {
                 live.driver.toggle_chat_marked_as_unread(chat_id, true)
             };
-            self.connection.set_note(match result {
+            self.set_note(match result {
                 Ok(Some(_)) if marked => StatusNote::silent(tr(keys::Q_CHATLIST_MARKING_AS_READ)),
                 Ok(Some(_)) => StatusNote::silent(tr(keys::Q_CHATLIST_MARKING_AS_UNREAD)),
                 Ok(None) => StatusNote::silent(tr(keys::Q_CHATLIST_REQUEST_ALREADY_IN_FLIGHT)),
@@ -133,7 +133,7 @@ impl QuillApp {
         }
         if self.demo_session.is_some() {
             self.apply_demo_marked_as_unread(chat_id, !marked);
-            self.connection.set_note(if marked {
+            self.set_note(if marked {
                 StatusNote::silent(tr(keys::Q_CHATLIST_MARKED_AS_READ))
             } else {
                 StatusNote::silent(tr(keys::Q_CHATLIST_MARKED_AS_UNREAD))

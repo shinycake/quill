@@ -147,8 +147,7 @@ impl QuillApp {
             if live.driver.open_grams(is_dark).is_err()
                 && !live.driver.session.payments.hub.grams.open
             {
-                self.connection
-                    .set_note(StatusNote::error(tr(keys::Q_GRAMS_COULD_NOT_LOAD)));
+                self.set_note(StatusNote::error(tr(keys::Q_GRAMS_COULD_NOT_LOAD)));
             }
         } else if let Some(grams) = self.grams_mut() {
             // box-host: GramsWithdraw shows only once a withdrawal is set, which start_grams_withdraw names
@@ -659,7 +658,7 @@ fn receipt(
             .small()
             .on_click(cx.listener(move |this, _, _, cx| {
                 cx.write_to_clipboard(ClipboardItem::new_string(id.clone()));
-                this.connection.set_note(StatusNote::info(tr(
+                this.set_note(StatusNote::info(tr(
                     keys::CREDITS_BOX_HISTORY_ENTRY_ID_COPIED,
                 )));
                 cx.notify();

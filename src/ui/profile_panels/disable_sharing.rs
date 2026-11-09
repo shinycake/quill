@@ -57,13 +57,12 @@ impl QuillApp {
 
     fn disable_private_sharing(&mut self, chat_id: ChatId, cx: &mut Context<Self>) {
         let Some(live) = self.live.as_mut() else {
-            self.connection
-                .set_note(StatusNote::info(tr(keys::Q_PEOPLE_DEMO_MODE_THIS_NEEDS_A)));
+            self.set_note(StatusNote::info(tr(keys::Q_PEOPLE_DEMO_MODE_THIS_NEEDS_A)));
             cx.notify();
             return;
         };
         if let Err(err) = live.driver.set_chat_protected_content(chat_id, true) {
-            self.connection.set_note(StatusNote::error(user_error_for(
+            self.set_note(StatusNote::error(user_error_for(
                 keys::Q_PEOPLE_COULDNT_REACH_TELEGRAM_TRY_AGAIN,
                 &err,
             )));

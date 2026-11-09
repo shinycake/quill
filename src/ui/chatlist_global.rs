@@ -170,7 +170,7 @@ impl QuillApp {
 
     fn copy_invitation(&mut self, cx: &mut Context<Self>) {
         cx.write_to_clipboard(ClipboardItem::new_string(index::INVITE_TEXT.to_string()));
-        self.connection.set_note(StatusNote::info(tr(
+        self.set_note(StatusNote::info(tr(
             keys::Q_CHATLIST_INVITATION_COPIED_TO_THE_CLIPBOARD,
         )));
         cx.notify();

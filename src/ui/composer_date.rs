@@ -128,8 +128,7 @@ impl QuillApp {
             .filter(|time| (1..=MAX_DATE).contains(time))
             .and_then(|time| i32::try_from(time).ok())
         else {
-            self.connection
-                .set_note(StatusNote::silent(tr(keys::Q_CHAT_PICK_A_DATE_AND_TIME)));
+            self.set_note(StatusNote::silent(tr(keys::Q_CHAT_PICK_A_DATE_AND_TIME)));
             cx.notify();
             return;
         };
@@ -138,7 +137,7 @@ impl QuillApp {
         self.close_composer_date_dialog(window, cx);
         let text = self.composer.read(cx).value().to_string();
         if text.get(range.clone()) != Some(selected.as_str()) {
-            self.connection.set_note(StatusNote::silent(tr(
+            self.set_note(StatusNote::silent(tr(
                 keys::Q_CHAT_THE_TEXT_CHANGED_SELECT_IT,
             )));
             cx.notify();

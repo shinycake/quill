@@ -263,8 +263,7 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) -> bool {
         let Some(live) = self.live.as_mut() else {
-            self.connection
-                .set_note(StatusNote::info(tr(keys::Q_MEDIA_DEMO_MODE_ADDING_A_BOT)));
+            self.set_note(StatusNote::info(tr(keys::Q_MEDIA_DEMO_MODE_ADDING_A_BOT)));
             cx.notify();
             return true;
         };
@@ -297,7 +296,7 @@ impl QuillApp {
             .get(&chat_id)
             .map(|chat| chat.title.clone())
             .unwrap_or_default();
-        self.connection.set_note(match sent {
+        self.set_note(match sent {
             Ok(Some(_)) => StatusNote::silent(tr_with(
                 keys::Q_MEDIA_ADDING_THE_BOT_TO,
                 &[("title", &title.to_string())],
@@ -597,7 +596,7 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) -> bool {
         let Some(live) = self.live.as_mut() else {
-            self.connection.set_note(StatusNote::info(tr(
+            self.set_note(StatusNote::info(tr(
                 keys::Q_MEDIA_DEMO_MODE_SHARING_NEEDS_A,
             )));
             cx.notify();
@@ -608,12 +607,11 @@ impl QuillApp {
             .send_game_message(ChatId(chat_id), bot_id, game_short_name)
         {
             Ok(_) => {
-                self.connection
-                    .set_note(StatusNote::silent(tr(keys::Q_MEDIA_GAME_SENT)));
+                self.set_note(StatusNote::silent(tr(keys::Q_MEDIA_GAME_SENT)));
                 true
             }
             Err(_) => {
-                self.connection.set_note(StatusNote::error(tr(
+                self.set_note(StatusNote::error(tr(
                     keys::Q_MEDIA_COULDNT_SEND_THE_GAME_HERE,
                 )));
                 cx.notify();

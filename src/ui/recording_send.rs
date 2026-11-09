@@ -220,7 +220,7 @@ impl QuillApp {
         } else {
             keys::Q_NOTES_RECORDING_NOT_SENT_ACCOUNT_CHANGED
         };
-        self.connection.set_note(StatusNote::silent(tr(key)));
+        self.set_note(StatusNote::silent(tr(key)));
         cx.notify();
     }
 
@@ -236,7 +236,7 @@ impl QuillApp {
             Ok(draft) => draft,
             Err(err) => {
                 self.restore_composer_after_failed_send(target, window, cx);
-                self.connection.set_note(StatusNote::error(err));
+                self.set_note(StatusNote::error(err));
                 cx.notify();
                 return;
             }
@@ -251,32 +251,31 @@ impl QuillApp {
                 play_once,
             );
             if sent.is_ok() {
-                self.connection
-                    .set_note(StatusNote::silent(tr(keys::Q_MISC_SENDING_VOICE_NOTE)));
+                self.set_note(StatusNote::silent(tr(keys::Q_MISC_SENDING_VOICE_NOTE)));
                 self.composer_ui.clear_draft_on_success =
                     Some(DraftClear::whole_composer(target.chat_id));
             } else {
                 let _ = std::fs::remove_file(&draft.path);
                 self.restore_composer_after_failed_send(target, window, cx);
-                self.connection.set_note(StatusNote::error(tr(
+                self.set_note(StatusNote::error(tr(
                     keys::Q_MISC_COULD_NOT_SEND_VOICE_NOTE,
                 )));
             }
         } else if self.demo_session.is_some() {
             if target.is_open(self.open_chat_id()) {
                 self.apply_demo_voice(&draft, &target.caption, target.reply.as_ref());
-                self.connection.set_note(StatusNote::silent(tr(
+                self.set_note(StatusNote::silent(tr(
                     keys::Q_MISC_DEMO_VOICE_NOTE_APPLIED_LOCALLY,
                 )));
             } else {
                 let _ = std::fs::remove_file(&draft.path);
-                self.connection.set_note(StatusNote::silent(tr(
+                self.set_note(StatusNote::silent(tr(
                     keys::Q_NOTES_RECORDING_NOT_SENT_CHAT_CHANGED,
                 )));
             }
         } else {
             let _ = std::fs::remove_file(&draft.path);
-            self.connection.set_note(StatusNote::silent(tr(
+            self.set_note(StatusNote::silent(tr(
                 keys::Q_NOTES_RECORDING_NOT_SENT_NO_ACCOUNT,
             )));
         }
@@ -347,7 +346,7 @@ impl QuillApp {
             Ok(draft) => draft,
             Err(err) => {
                 self.restore_composer_after_failed_send(target, window, cx);
-                self.connection.set_note(StatusNote::error(err));
+                self.set_note(StatusNote::error(err));
                 cx.notify();
                 return;
             }
@@ -360,39 +359,38 @@ impl QuillApp {
                 target.reply_to(),
             );
             if sent.is_ok() {
-                self.connection
-                    .set_note(StatusNote::silent(tr(keys::Q_MISC_SENDING_VIDEO_NOTE)));
+                self.set_note(StatusNote::silent(tr(keys::Q_MISC_SENDING_VIDEO_NOTE)));
                 self.composer_ui.clear_draft_on_success =
                     Some(DraftClear::whole_composer(target.chat_id));
             } else {
                 let _ = std::fs::remove_file(&draft.path);
                 self.restore_composer_after_failed_send(target, window, cx);
-                self.connection.set_note(StatusNote::error(tr(
+                self.set_note(StatusNote::error(tr(
                     keys::Q_MISC_COULD_NOT_SEND_VIDEO_NOTE,
                 )));
             }
         } else if self.demo_session.is_some() {
             if !target.is_open(self.open_chat_id()) {
                 let _ = std::fs::remove_file(&draft.path);
-                self.connection.set_note(StatusNote::silent(tr(
+                self.set_note(StatusNote::silent(tr(
                     keys::Q_NOTES_RECORDING_NOT_SENT_CHAT_CHANGED,
                 )));
             } else if let Some(att) =
                 ComposerAttachment::pick(&draft.path, AttachmentKind::VideoNote)
             {
                 self.apply_demo_outgoing("", Some(&att), target.reply.as_ref());
-                self.connection.set_note(StatusNote::silent(tr(
+                self.set_note(StatusNote::silent(tr(
                     keys::Q_MISC_DEMO_VIDEO_NOTE_APPLIED_LOCALLY,
                 )));
             } else {
                 let _ = std::fs::remove_file(&draft.path);
-                self.connection.set_note(StatusNote::silent(tr(
+                self.set_note(StatusNote::silent(tr(
                     keys::Q_MISC_DEMO_RECORDED_CLIP_IS_OUTSIDE,
                 )));
             }
         } else {
             let _ = std::fs::remove_file(&draft.path);
-            self.connection.set_note(StatusNote::silent(tr(
+            self.set_note(StatusNote::silent(tr(
                 keys::Q_NOTES_RECORDING_NOT_SENT_NO_ACCOUNT,
             )));
         }
@@ -455,13 +453,13 @@ impl QuillApp {
                     }
                     CaptureFor::StoryReply => keys::Q_MEDIA_RECORDING_VIDEO_REPLY,
                 };
-                self.connection.set_note(StatusNote::silent(tr(note)));
+                self.set_note(StatusNote::silent(tr(note)));
             }
             Ok(capture) => {
                 cx.background_spawn(async move { capture.discard() })
                     .detach();
             }
-            Err(err) if wanted => self.connection.set_note(StatusNote::error(err)),
+            Err(err) if wanted => self.set_note(StatusNote::error(err)),
             Err(_) => {}
         }
         cx.notify();
@@ -514,13 +512,13 @@ impl QuillApp {
                     }
                     CaptureFor::StoryReply => keys::Q_MEDIA_RECORDING_VOICE_REPLY,
                 };
-                self.connection.set_note(StatusNote::silent(tr(note)));
+                self.set_note(StatusNote::silent(tr(note)));
             }
             Ok(capture) => {
                 cx.background_spawn(async move { capture.discard() })
                     .detach();
             }
-            Err(err) if wanted => self.connection.set_note(StatusNote::error(err)),
+            Err(err) if wanted => self.set_note(StatusNote::error(err)),
             Err(_) => {}
         }
         cx.notify();

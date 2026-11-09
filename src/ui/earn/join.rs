@@ -164,8 +164,7 @@ impl QuillApp {
                                 .on_click(move |_, _, cx| {
                                     cx.write_to_clipboard(ClipboardItem::new_string(url.clone()));
                                     let _ = copy.update(cx, |this, cx| {
-                                        this.connection
-                                            .set_note(StatusNote::info(tr(keys::STICKERS_COPIED)));
+                                        this.set_note(StatusNote::info(tr(keys::STICKERS_COPIED)));
                                         cx.notify();
                                     });
                                 }),

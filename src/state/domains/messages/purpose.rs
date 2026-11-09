@@ -188,7 +188,7 @@ pub enum MessagesPurpose {
     /// MED4b: `getLinkPreview` (TDLib 1.8.67, `schema/td_api.tl:14792`) —
     /// the composer prefetch. Unit variant to keep the enum `Copy`; the
     /// URL rides `Session::composer_preview_urls`, the result lands in
-    /// `Session::composer_preview`.
+    /// `Session::composer_previews`.
     GetLinkPreview,
     /// M1: `resendMessages`. Response is `messages` (the retried sends).
     ResendMessages,

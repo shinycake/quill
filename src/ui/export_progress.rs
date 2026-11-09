@@ -86,8 +86,7 @@ impl QuillApp {
             }
             self.dialogs.chat_export_seen = None;
             self.dialogs.chat_export_progress_hidden = false;
-            self.connection
-                .set_note(StatusNote::info(ended_note(&progress)));
+            self.set_note(StatusNote::info(ended_note(&progress)));
             return RedrawNeed::Now;
         }
         let changed = self.dialogs.chat_export_seen.as_ref() != Some(&progress);

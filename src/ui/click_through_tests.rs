@@ -125,10 +125,9 @@ fn a_click_on_a_toast_over_the_viewer_leaves_the_viewer_open(cx: &mut TestAppCon
     let vcx = &mut vcx;
     assert!(app.read_with(vcx, |app, _| app.viewer.state.is_open()));
     app.update(vcx, |app, cx| {
-        app.connection
-            .set_note(crate::ui::status_note::StatusNote::info(
-                "Saved to Downloads",
-            ));
+        app.set_note(crate::ui::status_note::StatusNote::info(
+            "Saved to Downloads",
+        ));
         cx.notify();
     });
     vcx.update(|window, cx| window.render_frame(cx));

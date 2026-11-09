@@ -43,8 +43,7 @@ impl QuillApp {
     pub(super) fn open_money(&mut self, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
             if live.driver.open_money_page().is_err() {
-                self.connection
-                    .set_note(StatusNote::error(tr(keys::Q_MONEY_COULD_NOT_OPEN_MONEY)));
+                self.set_note(StatusNote::error(tr(keys::Q_MONEY_COULD_NOT_OPEN_MONEY)));
             }
         } else if let Some(wallet) = self.ton_wallet_mut()
             && wallet.can_use
@@ -134,7 +133,7 @@ impl QuillApp {
     fn set_money_currency(&mut self, code: &'static str, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
             if live.driver.set_wallet_currency(code).is_err() {
-                self.connection.set_note(StatusNote::error(tr(
+                self.set_note(StatusNote::error(tr(
                     keys::Q_MONEY_COULD_NOT_SAVE_THE_CURRENCY,
                 )));
             }

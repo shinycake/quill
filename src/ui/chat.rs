@@ -34,7 +34,7 @@ impl QuillApp {
         let Some(wait) = self.slow_mode_wait_secs_for(chat_id) else {
             return false;
         };
-        self.connection.set_note(StatusNote::info(tr_with(
+        self.set_note(StatusNote::info(tr_with(
             keys::Q_REST_SLOW_MODE_WAIT_S_BEFORE,
             &[("wait", &wait.to_string())],
         )));
@@ -69,8 +69,7 @@ impl QuillApp {
         if messages <= 1 || !self.session().is_some_and(|s| s.slow_mode_applies(chat_id)) {
             return false;
         }
-        self.connection
-            .set_note(StatusNote::info(tr(keys::SLOWMODE_NO_MANY)));
+        self.set_note(StatusNote::info(tr(keys::SLOWMODE_NO_MANY)));
         cx.notify();
         true
     }

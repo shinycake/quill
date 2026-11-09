@@ -201,3 +201,114 @@ fn a_box_opened_in_a_chat_window_survives_the_main_windows_frames(cx: &mut TestA
     });
     assert_eq!(open, Some(chat), "the main window's frames keep it");
 }
+
+/// Round 15 (area B, findings 2 and 3): the box's answer is taken in the
+/// frame of the window it was opened in, so it lands while the main
+/// window draws nothing (minimized), and its error toast shows in that
+/// window, not behind it in the main one.
+#[gpui_kit::test]
+fn a_chat_windows_box_takes_its_answer_and_toasts_in_its_own_frame(cx: &mut TestAppContext) {
+    let (app, mut main) = open_main(cx);
+    let chat = app
+        .read_with(&main, |app, _| app.session().and_then(|s| s.open_chat))
+        .expect("the demo opens a chat");
+    app.update_in(&mut main, |app, window, cx| {
+        app.open_chat_in_new_window(chat, window, cx)
+    });
+    main.run_until_parked();
+    let main_id = main.update(|window, _| window.window_handle().window_id());
+    let other = cx
+        .windows()
+        .into_iter()
+        .find(|handle| handle.window_id() != main_id)
+        .expect("the chat window");
+    cx.update_window(other, |_, window, cx| {
+        app.update(cx, |app, cx| {
+            app.in_window_of(window, cx, |app, window, cx| {
+                app.set_composer_markup(DRAFT, window, cx);
+                app.open_ai_compose(window, cx);
+                app.ai_compose_update(window, cx, |ai| ai.set_mode(AiComposeMode::Fix));
+            });
+        });
+    })
+    .expect("the chat window is open");
+    app.update(cx, |app, cx| {
+        app.demo_ai_answer(Err(AiBoxError::FloodPremium));
+        cx.notify();
+    });
+    // Only the chat window draws: the main window is minimized.
+    let mut window = VisualTestContext::from_window(other, cx);
+    frames(&mut window);
+    assert_eq!(
+        footer(&app, &mut window),
+        Some(FooterAction::IncreaseLimit),
+        "the answer landed without a main-window frame"
+    );
+    assert_eq!(
+        window.update(|window, cx| window.notifications(cx).len()),
+        1,
+        "the limit toast shows in the chat window"
+    );
+    assert_eq!(
+        main.update(|window, cx| window.notifications(cx).len()),
+        0,
+        "not in the main window"
+    );
+}
+
+/// Round 15 follow-up: the style preview a link opens in a chat window
+/// takes its answer in that window's frame, so it lands while the main
+/// window is minimized, and its toast shows there.
+#[gpui_kit::test]
+fn a_chat_windows_style_preview_takes_its_answer_in_its_own_frame(cx: &mut TestAppContext) {
+    let (app, mut main) = open_main(cx);
+    let chat = app
+        .read_with(&main, |app, _| app.session().and_then(|s| s.open_chat))
+        .expect("the demo opens a chat");
+    app.update_in(&mut main, |app, window, cx| {
+        app.open_chat_in_new_window(chat, window, cx)
+    });
+    main.run_until_parked();
+    let main_id = main.update(|window, _| window.window_handle().window_id());
+    let other = cx
+        .windows()
+        .into_iter()
+        .find(|handle| handle.window_id() != main_id)
+        .expect("the chat window");
+    cx.update_window(other, |_, window, cx| {
+        app.update(cx, |app, cx| {
+            app.in_window_of(window, cx, |app, window, cx| {
+                app.open_ai_style_preview("formal".into(), window, cx);
+            });
+        });
+    })
+    .expect("the chat window is open");
+    app.update(cx, |app, cx| {
+        let token = app.ai_compose.preview.as_ref().map(|p| p.token);
+        if let (Some(token), Some(session)) = (token, app.demo_session.as_mut()) {
+            session.messages.ai_compose.style_lookup = Some(quill::state::StyleLookup {
+                token,
+                name: "formal".into(),
+                outcome: Some(Err(quill::state::StyleError::Invalid)),
+            });
+        }
+        cx.notify();
+    });
+    // Only the chat window draws: the main window is minimized.
+    let mut window = VisualTestContext::from_window(other, cx);
+    frames(&mut window);
+    assert!(
+        app.read_with(&window, |app, _| app.ai_compose.preview.is_none()),
+        "the answer landed without a main-window frame"
+    );
+    assert_eq!(
+        window.update(|window, cx| window.notifications(cx).len()),
+        1,
+        "the toast shows in the chat window"
+    );
+    assert_eq!(
+        main.update(|window, cx| window.notifications(cx).len()),
+        0,
+        "not in the main window"
+    );
+}

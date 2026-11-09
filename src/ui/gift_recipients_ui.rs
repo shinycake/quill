@@ -39,8 +39,7 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut()
             && live.driver.load_gift_recipients().is_err()
         {
-            self.connection
-                .set_note(StatusNote::error(tr(keys::Q_MONEY_COULDNT_OPEN_THE_GIFTS)));
+            self.set_note(StatusNote::error(tr(keys::Q_MONEY_COULDNT_OPEN_THE_GIFTS)));
             cx.notify();
             return;
         }

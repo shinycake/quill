@@ -214,7 +214,7 @@ impl QuillApp {
                 if let Some(live) = self.live.as_mut() {
                     let _ = live.driver.fetch_chat_boost_status(chat_id);
                 }
-                self.connection.set_note(StatusNote::silent(tr(
+                self.set_note(StatusNote::silent(tr(
                     keys::Q_MISC_CHECKING_THE_BOOST_LEVEL_PRESS,
                 )));
             }
@@ -225,14 +225,14 @@ impl QuillApp {
             }
             ApplyOutcome::Send(plan) => {
                 let Some(live) = self.live.as_mut() else {
-                    self.connection.set_note(StatusNote::info(tr(
+                    self.set_note(StatusNote::info(tr(
                         keys::Q_MISC_DEMO_MODE_APPEARANCE_NEEDS_A,
                     )));
                     cx.notify();
                     return;
                 };
                 let result = live.driver.apply_chat_appearance(chat_id, plan);
-                self.connection.set_note(if result.is_err() {
+                self.set_note(if result.is_err() {
                     StatusNote::error(tr(keys::Q_MISC_COULD_NOT_CHANGE_THE_APPEARANCE))
                 } else {
                     StatusNote::silent(tr(keys::Q_MISC_APPEARANCE_UPDATE_REQUESTED))

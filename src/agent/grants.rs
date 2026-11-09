@@ -233,6 +233,13 @@ pub fn generation() -> u64 {
     GENERATION.load(Ordering::SeqCst)
 }
 
+/// Moves the generation as a grant change would, without touching any
+/// account's grants on disk.
+#[cfg(test)]
+pub(crate) fn bump_generation_for_test() {
+    GENERATION.fetch_add(1, Ordering::SeqCst);
+}
+
 /// Change the grants of `account` and save them. Refused while the UI
 /// driver injects an agent's input: an agent never widens its own grants.
 pub fn update(account: &AccountKey, change: impl FnOnce(&mut AccountGrants)) {

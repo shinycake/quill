@@ -31,7 +31,7 @@ impl QuillApp {
         match self.live.as_mut() {
             Some(live) => {
                 if live.driver.hide_suggested_action(ACTION).is_err() {
-                    self.connection.set_note(StatusNote::error(tr(
+                    self.set_note(StatusNote::error(tr(
                         keys::Q_MISC_COULD_NOT_HIDE_THE_SUGGESTION,
                     )));
                 }

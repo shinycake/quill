@@ -394,8 +394,8 @@ impl<S: JsonSender> ConnectDriver<S> {
         };
         // MED4b: capture the `getLinkPreview` answer before `apply` takes
         // the pending request; the composer chip reads
-        // `Session::composer_preview`. A late answer for a superseded URL
-        // is dropped (the chip only cares about the latest request).
+        // `Session::composer_previews`. A late answer for a URL no longer
+        // kept is dropped.
         let link_preview_answer: Option<ComposerLinkPreview> = match &owned.envelope.payload {
             EnvelopePayload::Messages(MessagesPayload::LinkPreview { preview }) => owned
                 .envelope
@@ -801,23 +801,13 @@ impl<S: JsonSender> ConnectDriver<S> {
         // chip; a 404 becomes "no link info" (`Some(None)`); answers for
         // superseded URLs are dropped.
         if let Some(answer) = link_preview_answer {
-            let current = self.session.messages.composer_preview.as_ref();
-            if current.is_none_or(|p| p.url == answer.url) {
-                self.session.messages.composer_preview = Some(answer);
-            }
-        }
-        if let Some(url) = link_preview_failed
-            && self
-                .session
+            self.session
                 .messages
-                .composer_preview
-                .as_ref()
-                .is_some_and(|p| p.url == url && p.preview.is_none())
-        {
-            self.session.messages.composer_preview = Some(ComposerLinkPreview {
-                url,
-                preview: Some(None),
-            });
+                .composer_previews
+                .answered(&answer.url, answer.preview.flatten());
+        }
+        if let Some(url) = link_preview_failed {
+            self.session.messages.composer_previews.answered(&url, None);
         }
         // M1 fix-up: "Share link" gate — chain to `getMessageLink` only
         // when `messageProperties.can_get_link` passed; otherwise tell

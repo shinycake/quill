@@ -177,14 +177,14 @@ impl QuillApp {
         };
         let username = dialog.username_text(cx);
         if username.is_empty() {
-            self.connection.set_note(StatusNote::silent(tr(
+            self.set_note(StatusNote::silent(tr(
                 keys::Q_PEOPLE_ENTER_A_USERNAME_TO_CHECK,
             )));
             cx.notify();
             return;
         }
         let Some(live) = self.live.as_mut() else {
-            self.connection.set_note(StatusNote::info(tr(
+            self.set_note(StatusNote::info(tr(
                 keys::Q_PEOPLE_DEMO_MODE_PROFILE_EDITS_NEED,
             )));
             cx.notify();
@@ -192,7 +192,7 @@ impl QuillApp {
         };
         live.driver.session.users_state.profile_edit_error = None;
         if let Err(err) = live.driver.check_username(&username) {
-            self.connection.set_note(StatusNote::error(user_error_for(
+            self.set_note(StatusNote::error(user_error_for(
                 keys::Q_NOTES_FAILED_USERNAME_CHECK,
                 &err,
             )));
@@ -221,14 +221,14 @@ impl QuillApp {
                 text == username && result == UsernameCheckResult::Available
             });
         if !username.is_empty() && username != editable && !checked_ok {
-            self.connection.set_note(StatusNote::silent(tr(
+            self.set_note(StatusNote::silent(tr(
                 keys::Q_PEOPLE_CHECK_AVAILABILITY_FIRST_THE_TEXT,
             )));
             cx.notify();
             return;
         }
         let Some(live) = self.live.as_mut() else {
-            self.connection.set_note(StatusNote::info(tr(
+            self.set_note(StatusNote::info(tr(
                 keys::Q_PEOPLE_DEMO_MODE_PROFILE_EDITS_NEED,
             )));
             cx.notify();
@@ -236,10 +236,10 @@ impl QuillApp {
         };
         live.driver.session.users_state.profile_edit_error = None;
         match live.driver.set_username(&username) {
-            Ok(_) => self.connection.set_note(StatusNote::silent(tr(
+            Ok(_) => self.set_note(StatusNote::silent(tr(
                 keys::Q_PEOPLE_USERNAME_UPDATE_REQUESTED,
             ))),
-            Err(err) => self.connection.set_note(StatusNote::error(user_error_for(
+            Err(err) => self.set_note(StatusNote::error(user_error_for(
                 keys::Q_NOTES_FAILED_SET_USERNAME,
                 &err,
             ))),
@@ -275,7 +275,7 @@ impl QuillApp {
         let mut new_order = order;
         new_order.swap(pos, swap);
         let Some(live) = self.live.as_mut() else {
-            self.connection.set_note(StatusNote::info(tr(
+            self.set_note(StatusNote::info(tr(
                 keys::Q_PEOPLE_DEMO_MODE_PROFILE_EDITS_NEED,
             )));
             cx.notify();
@@ -283,7 +283,7 @@ impl QuillApp {
         };
         live.driver.session.users_state.profile_edit_error = None;
         if let Err(err) = live.driver.reorder_active_usernames(&new_order) {
-            self.connection.set_note(StatusNote::error(user_error_for(
+            self.set_note(StatusNote::error(user_error_for(
                 keys::Q_NOTES_FAILED_REORDER_USERNAMES,
                 &err,
             )));
@@ -299,7 +299,7 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         let Some(live) = self.live.as_mut() else {
-            self.connection.set_note(StatusNote::info(tr(
+            self.set_note(StatusNote::info(tr(
                 keys::Q_PEOPLE_DEMO_MODE_PROFILE_EDITS_NEED,
             )));
             cx.notify();
@@ -307,10 +307,10 @@ impl QuillApp {
         };
         live.driver.session.users_state.profile_edit_error = None;
         match live.driver.toggle_username_is_active(username, is_active) {
-            Ok(_) => self.connection.set_note(StatusNote::silent(tr(
+            Ok(_) => self.set_note(StatusNote::silent(tr(
                 keys::Q_PEOPLE_USERNAME_UPDATE_REQUESTED,
             ))),
-            Err(err) => self.connection.set_note(StatusNote::error(user_error_for(
+            Err(err) => self.set_note(StatusNote::error(user_error_for(
                 keys::Q_NOTES_FAILED_USERNAME_TOGGLE,
                 &err,
             ))),
@@ -327,14 +327,14 @@ impl QuillApp {
             .and_then(|me| self.session().and_then(|s| s.user_full_info(me)))
             .and_then(|info| info.photo_id);
         let Some(photo_id) = photo_id else {
-            self.connection.set_note(StatusNote::silent(tr(
+            self.set_note(StatusNote::silent(tr(
                 keys::Q_PEOPLE_NO_PROFILE_PHOTO_TO_REMOVE,
             )));
             cx.notify();
             return;
         };
         let Some(live) = self.live.as_mut() else {
-            self.connection.set_note(StatusNote::info(tr(
+            self.set_note(StatusNote::info(tr(
                 keys::Q_PEOPLE_DEMO_MODE_PROFILE_EDITS_NEED,
             )));
             cx.notify();
@@ -342,10 +342,10 @@ impl QuillApp {
         };
         live.driver.session.users_state.profile_edit_error = None;
         match live.driver.delete_profile_photo(photo_id) {
-            Ok(_) => self.connection.set_note(StatusNote::silent(tr(
+            Ok(_) => self.set_note(StatusNote::silent(tr(
                 keys::Q_PEOPLE_PHOTO_REMOVAL_REQUESTED,
             ))),
-            Err(err) => self.connection.set_note(StatusNote::error(user_error_for(
+            Err(err) => self.set_note(StatusNote::error(user_error_for(
                 keys::Q_NOTES_FAILED_REMOVE_PHOTO,
                 &err,
             ))),

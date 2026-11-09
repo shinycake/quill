@@ -116,7 +116,7 @@ impl QuillApp {
         }
         self.open_group_edit_box(ChatId(chat), window, cx);
         self.open_group_type_box(window, cx);
-        self.connection.set_note(StatusNote::silent(note));
+        self.set_note(StatusNote::silent(note));
         cx.notify();
     }
 

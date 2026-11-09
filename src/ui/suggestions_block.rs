@@ -31,7 +31,7 @@ impl QuillApp {
         match self.live.as_mut() {
             Some(live) => {
                 if live.driver.hide_suggestion(suggestion).is_err() {
-                    self.connection.set_note(StatusNote::error(tr(
+                    self.set_note(StatusNote::error(tr(
                         keys::Q_MISC_COULD_NOT_HIDE_THE_SUGGESTION,
                     )));
                     cx.notify();
@@ -50,7 +50,7 @@ impl QuillApp {
             }
         }
         if matches!(suggestion, Suggestion::Birthdays(_)) {
-            self.connection.set_note(StatusNote::info(tr(
+            self.set_note(StatusNote::info(tr(
                 keys::DIALOGS_SUGGESTIONS_BIRTHDAY_CONTACT_DISMISS,
             )));
         }
@@ -218,7 +218,7 @@ impl QuillApp {
                                 .small()
                                 .ghost()
                                 .on_click(cx.listener(|this, _, _, cx| {
-                                    this.connection.set_note(StatusNote::silent(
+                                    this.set_note(StatusNote::silent(
                                         quill::phone_suggestion::CHANGE_NOTE,
                                     ));
                                     cx.notify();

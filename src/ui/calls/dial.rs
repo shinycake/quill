@@ -30,7 +30,7 @@ impl QuillApp {
         {
             return false;
         }
-        self.connection.set_note(StatusNote::error(tr(
+        self.set_note(StatusNote::error(tr(
             keys::Q_OPS_CALLS_ARE_UNAVAILABLE_THE_AUDIO,
         )));
         cx.notify();
@@ -64,7 +64,7 @@ impl QuillApp {
             .as_ref()
             .is_some_and(|live| live.driver.session.is_offline())
         {
-            self.connection.set_note(StatusNote::error(tr(
+            self.set_note(StatusNote::error(tr(
                 keys::Q_OPS_YOURE_OFFLINE_CANT_START_A,
             )));
             cx.notify();
@@ -110,14 +110,14 @@ impl QuillApp {
     fn send_dial(&mut self, user_id: i64, is_video: bool, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
             if live.driver.session.is_offline() {
-                self.connection.set_note(StatusNote::error(tr(
+                self.set_note(StatusNote::error(tr(
                     keys::Q_OPS_YOURE_OFFLINE_CANT_START_A,
                 )));
                 cx.notify();
                 return;
             }
             let result = live.driver.start_call(user_id, is_video);
-            self.connection.set_note(match result {
+            self.set_note(match result {
                 Ok(_) => {
                     if is_video {
                         StatusNote::silent(tr(keys::Q_OPS_STARTING_VIDEO_CALL))
@@ -128,8 +128,7 @@ impl QuillApp {
                 Err(_) => StatusNote::error(tr(keys::Q_OPS_COULD_NOT_START_THE_CALL)),
             });
         } else if self.demo_session.is_some() {
-            self.connection
-                .set_note(StatusNote::silent(tr(keys::Q_OPS_DEMO_CALL_START_NO_LIVE)));
+            self.set_note(StatusNote::silent(tr(keys::Q_OPS_DEMO_CALL_START_NO_LIVE)));
         }
         cx.notify();
     }

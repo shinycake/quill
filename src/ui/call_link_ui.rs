@@ -24,8 +24,7 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         let Some(live) = self.live.as_mut() else {
-            self.connection
-                .set_note(StatusNote::info(tr(keys::Q_OPS_CALLS_NEED_A_SIGNED_IN)));
+            self.set_note(StatusNote::info(tr(keys::Q_OPS_CALLS_NEED_A_SIGNED_IN)));
             cx.notify();
             return;
         };
@@ -42,21 +41,19 @@ impl QuillApp {
                 if matches!(step, CallLinkStep::Busy) {
                     self.open_box(crate::ui::shell::DialogKind::CallLinkLeave);
                 }
-                self.screen
-                    .connection
-                    .set_note(match step_note(step, live_stream) {
-                        Some(note) => StatusNote::info(note),
-                        None if matches!(step, CallLinkStep::Offer { .. }) => {
-                            if live_stream {
-                                StatusNote::silent(tr(keys::Q_OPS_OPENING_THE_LIVE_STREAM))
-                            } else {
-                                StatusNote::silent(tr(keys::Q_OPS_OPENING_THE_VOICE_CHAT))
-                            }
+                self.set_note(match step_note(step, live_stream) {
+                    Some(note) => StatusNote::info(note),
+                    None if matches!(step, CallLinkStep::Offer { .. }) => {
+                        if live_stream {
+                            StatusNote::silent(tr(keys::Q_OPS_OPENING_THE_LIVE_STREAM))
+                        } else {
+                            StatusNote::silent(tr(keys::Q_OPS_OPENING_THE_VOICE_CHAT))
                         }
-                        None => self.screen.connection.note().clone(),
-                    });
+                    }
+                    None => self.screen.connection.note().clone(),
+                });
             }
-            Err(_) => self.connection.set_note(StatusNote::info(BAD_LINK_NOTE)),
+            Err(_) => self.set_note(StatusNote::info(BAD_LINK_NOTE)),
         }
         cx.notify();
     }
@@ -72,8 +69,7 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut()
             && live.driver.confirm_call_link_leave().is_err()
         {
-            self.connection
-                .set_note(StatusNote::error(tr(keys::Q_OPS_COULDNT_LEAVE_THE_CALL)));
+            self.set_note(StatusNote::error(tr(keys::Q_OPS_COULDNT_LEAVE_THE_CALL)));
         }
         cx.notify();
     }

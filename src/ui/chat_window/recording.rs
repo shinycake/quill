@@ -95,7 +95,7 @@ impl QuillApp {
             return;
         }
         self.cancel_recording(cx);
-        self.connection.set_note(StatusNote::silent(tr(
+        self.set_note(StatusNote::silent(tr(
             keys::Q_MISC_RECORDING_DISCARDED_ITS_WINDOW_CLOSED,
         )));
         cx.notify();

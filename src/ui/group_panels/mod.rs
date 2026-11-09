@@ -225,14 +225,14 @@ impl QuillApp {
                 InfoPanelTarget::Earn(_) => Ok(()),
             };
             if let Err(err) = fetch {
-                self.connection.set_note(StatusNote::error(user_error_for(
+                self.set_note(StatusNote::error(user_error_for(
                     keys::Q_NOTES_FAILED_GROUP_INFO,
                     &err,
                 )));
             } else if let InfoPanelTarget::User(user_id) = target
                 && let Err(err) = live.driver.download_user_photo(user_id)
             {
-                self.connection.set_note(StatusNote::error(user_error_for(
+                self.set_note(StatusNote::error(user_error_for(
                     keys::Q_NOTES_FAILED_GROUP_PHOTO,
                     &err,
                 )));

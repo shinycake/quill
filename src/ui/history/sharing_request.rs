@@ -146,8 +146,7 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         let Some(live) = self.live.as_mut() else {
-            self.connection
-                .set_note(StatusNote::info(tr(keys::Q_PEOPLE_DEMO_MODE_THIS_NEEDS_A)));
+            self.set_note(StatusNote::info(tr(keys::Q_PEOPLE_DEMO_MODE_THIS_NEEDS_A)));
             cx.notify();
             return;
         };
@@ -155,7 +154,7 @@ impl QuillApp {
             .driver
             .answer_sharing_request(chat_id, message_id, approve)
         {
-            self.connection.set_note(StatusNote::error(user_error_for(
+            self.set_note(StatusNote::error(user_error_for(
                 keys::Q_PEOPLE_COULDNT_REACH_TELEGRAM_TRY_AGAIN,
                 &err,
             )));

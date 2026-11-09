@@ -70,8 +70,7 @@ impl QuillApp {
     ) {
         match self.pane_mode() {
             PaneMode::Connecting => {
-                self.connection
-                    .set_note(StatusNote::silent(tr(keys::Q_CHAT_SIGN_IN_BEFORE_SENDING)));
+                self.set_note(StatusNote::silent(tr(keys::Q_CHAT_SIGN_IN_BEFORE_SENDING)));
                 cx.notify();
             }
             PaneMode::Ready => {
@@ -82,7 +81,7 @@ impl QuillApp {
                     return;
                 }
                 if self.session().is_some_and(|s| s.is_frozen()) {
-                    self.connection.set_note(StatusNote::error(tr(
+                    self.set_note(StatusNote::error(tr(
                         keys::Q_CHAT_YOUR_ACCOUNT_IS_FROZEN_AND,
                     )));
                     cx.notify();
@@ -109,8 +108,7 @@ impl QuillApp {
                 if self.tray_renders_an_edit() {
                     let once = self.send_once();
                     self.update_pending_send(|send| send.held_send = Some((text, once)));
-                    self.connection
-                        .set_note(StatusNote::silent(tr(keys::Q_OPS_PREPARING_THE_FILES)));
+                    self.set_note(StatusNote::silent(tr(keys::Q_OPS_PREPARING_THE_FILES)));
                     cx.notify();
                     return;
                 }
@@ -123,7 +121,7 @@ impl QuillApp {
                 // can't go by any route yet.
                 self.check_tray_videos(cx);
                 if self.tray_thumbnails_pending() || self.tray_media_checks_pending() {
-                    self.connection.set_note(StatusNote::silent(tr(
+                    self.set_note(StatusNote::silent(tr(
                         keys::Q_CHAT_PREPARING_THE_FILE_SEND_AGAIN,
                     )));
                     cx.notify();
@@ -151,14 +149,12 @@ impl QuillApp {
                 });
                 if let Some((open_chat, view_generation, supported)) = plan {
                     let Some(chat_id) = open_chat else {
-                        self.connection
-                            .set_note(StatusNote::silent(tr(keys::Q_CHAT_SELECT_A_CHAT_TO_SEND)));
+                        self.set_note(StatusNote::silent(tr(keys::Q_CHAT_SELECT_A_CHAT_TO_SEND)));
                         cx.notify();
                         return;
                     };
                     if supported != Some(true) {
-                        self.connection
-                            .set_note(StatusNote::silent(tr(keys::Q_CHAT_THIS_CHAT_TYPE_IS_NOT)));
+                        self.set_note(StatusNote::silent(tr(keys::Q_CHAT_THIS_CHAT_TYPE_IS_NOT)));
                         cx.notify();
                         return;
                     }
@@ -168,7 +164,7 @@ impl QuillApp {
                     // A video's sound track is still being read: wait, so a
                     // soundless one is sent as a GIF.
                     if self.tray_videos_checking() {
-                        self.connection.set_note(StatusNote::silent(tr(
+                        self.set_note(StatusNote::silent(tr(
                             keys::Q_CHAT_CHECKING_THE_VIDEO_SEND_AGAIN,
                         )));
                         cx.notify();
@@ -178,8 +174,7 @@ impl QuillApp {
                     // read: this Send is refused for now (it does not
                     // queue), so the messages keep their order.
                     if self.tray_preparing() {
-                        self.connection
-                            .set_note(StatusNote::silent(tr(keys::Q_OPS_PREPARING_THE_FILES)));
+                        self.set_note(StatusNote::silent(tr(keys::Q_OPS_PREPARING_THE_FILES)));
                         cx.notify();
                         return;
                     }
@@ -305,7 +300,7 @@ impl QuillApp {
                         snap.media = media_options;
                     }
                     if snaps.first().is_none_or(ComposerSnapshot::is_empty) {
-                        self.connection.set_note(StatusNote::silent(tr(
+                        self.set_note(StatusNote::silent(tr(
                             keys::Q_CHAT_TYPE_A_MESSAGE_OR_ATTACH,
                         )));
                         cx.notify();
@@ -324,7 +319,7 @@ impl QuillApp {
                             let mut cut = quill::text_split::SplitText::of(&only.text, limit);
                             let parts = std::mem::take(&mut cut.parts);
                             if parts.is_empty() {
-                                self.connection.set_note(StatusNote::silent(tr(
+                                self.set_note(StatusNote::silent(tr(
                                     keys::Q_CHAT_MESSAGE_TOO_LONG_TO_SEND,
                                 )));
                                 cx.notify();
@@ -388,8 +383,7 @@ impl QuillApp {
                         att.kind == AttachmentKind::VideoNote
                             && quill::video::probe_local_video_note(&att.path).is_err()
                     }) {
-                        self.connection
-                            .set_note(StatusNote::silent(tr(keys::Q_CHAT_VIDEO_NOTE_MUST_BE_A)));
+                        self.set_note(StatusNote::silent(tr(keys::Q_CHAT_VIDEO_NOTE_MUST_BE_A)));
                         cx.notify();
                         return;
                     }
@@ -436,7 +430,7 @@ impl QuillApp {
                     }
                     self.composer
                         .update(cx, |input, cx| input.set_value("", window, cx));
-                    self.connection.set_note(StatusNote::silent(tr(
+                    self.set_note(StatusNote::silent(tr(
                         keys::Q_CHAT_DEMO_SEND_APPLIED_LOCALLY_NO,
                     )));
                     cx.notify();
@@ -485,7 +479,7 @@ impl QuillApp {
             match quill::rich::RichDraft::from_parsed(parsed) {
                 Some(rich) => self.refuse_rich_send(&rich, window, cx),
                 None => {
-                    self.connection.set_note(StatusNote::info(tr(
+                    self.set_note(StatusNote::info(tr(
                         keys::Q_CHAT_RICH_MESSAGES_REQUIRE_TELEGRAM_PREMIUM,
                     )));
                     cx.notify();
@@ -494,14 +488,12 @@ impl QuillApp {
             return;
         }
         let Some(chat_id) = open_chat else {
-            self.connection
-                .set_note(StatusNote::silent(tr(keys::Q_CHAT_SELECT_A_CHAT_TO_SEND)));
+            self.set_note(StatusNote::silent(tr(keys::Q_CHAT_SELECT_A_CHAT_TO_SEND)));
             cx.notify();
             return;
         };
         if supported != Some(true) {
-            self.connection
-                .set_note(StatusNote::silent(tr(keys::Q_CHAT_THIS_CHAT_TYPE_IS_NOT)));
+            self.set_note(StatusNote::silent(tr(keys::Q_CHAT_THIS_CHAT_TYPE_IS_NOT)));
             cx.notify();
             return;
         }
@@ -542,7 +534,7 @@ impl QuillApp {
         // limit): refuse over-limit drafts before the emptiness check so
         // the note names the limit instead of "type a message".
         if quill::rich::rich_blocks_char_len(&blocks) > quill::rich::RICH_TEXT_MAX_CHARS {
-            self.connection.set_note(StatusNote::silent(tr_with(
+            self.set_note(StatusNote::silent(tr_with(
                 keys::Q_CHAT_RICH_MESSAGE_TOO_LONG_MAX,
                 &[(
                     "quill_rich_rich_text_max_chars",
@@ -553,7 +545,7 @@ impl QuillApp {
             return;
         }
         if quill::rich::input_rich_message(&blocks).is_none() {
-            self.connection.set_note(StatusNote::silent(tr(
+            self.set_note(StatusNote::silent(tr(
                 keys::Q_CHAT_TYPE_A_MESSAGE_OR_ATTACH,
             )));
             cx.notify();
@@ -580,12 +572,10 @@ impl QuillApp {
                 self.composer
                     .update(cx, |input, cx| input.set_value("", window, cx));
                 self.forget_local_draft(chat_id);
-                self.screen
-                    .connection
-                    .set_note(self.send_started_note(options.scheduling, tr(keys::Q_CHAT_SENDING)));
+                self.set_note(self.send_started_note(options.scheduling, tr(keys::Q_CHAT_SENDING)));
             }
             Err(_) => {
-                self.connection.set_note(StatusNote::error(tr(
+                self.set_note(StatusNote::error(tr(
                     keys::Q_CHAT_COULD_NOT_SEND_RICH_MESSAGE,
                 )));
             }
@@ -607,8 +597,7 @@ impl QuillApp {
                     self.set_edit_replacement(only, cx);
                 }
                 _ => {
-                    self.connection
-                        .set_note(StatusNote::silent(tr(keys::Q_CHAT_DROP_A_SINGLE_FILE_TO)));
+                    self.set_note(StatusNote::silent(tr(keys::Q_CHAT_DROP_A_SINGLE_FILE_TO)));
                     cx.notify();
                 }
             }
@@ -619,7 +608,7 @@ impl QuillApp {
         }) else {
             return;
         };
-        self.connection.set_note(match appended {
+        self.set_note(match appended {
             Ok(count) => StatusNote::silent(trn(keys::Q_CHAT_ATTACHED_FILES_SEND_TO_UPLOAD, count)),
             Err(note) => StatusNote::error(note),
         });
@@ -711,7 +700,7 @@ impl QuillApp {
                 });
                 self.check_tray_videos(cx);
                 if let Some(added) = added {
-                    self.connection.set_note(match added {
+                    self.set_note(match added {
                         Ok(_) => StatusNote::silent(tr_with(
                             keys::Q_CHAT_ATTACHED_NAME,
                             &[("name", &att.file_name)],
@@ -721,8 +710,7 @@ impl QuillApp {
                 }
             }
             None => {
-                self.connection
-                    .set_note(StatusNote::error(tr(keys::Q_CHAT_COULD_NOT_PASTE_IMAGE)));
+                self.set_note(StatusNote::error(tr(keys::Q_CHAT_COULD_NOT_PASTE_IMAGE)));
             }
         }
         cx.notify();
@@ -758,8 +746,7 @@ impl QuillApp {
     pub(super) fn clear_attachment(&mut self, cx: &mut Context<Self>) {
         // MED1: the grouping override goes with the tray.
         self.clear_pending_attachments();
-        self.connection
-            .set_note(StatusNote::silent(tr(keys::Q_CHAT_ATTACHMENT_CLEARED)));
+        self.set_note(StatusNote::silent(tr(keys::Q_CHAT_ATTACHMENT_CLEARED)));
         cx.notify();
     }
 
@@ -809,7 +796,7 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         self.update_pending_send(|send| send.self_destruct = next);
-        self.connection.set_note(match next {
+        self.set_note(match next {
             None => StatusNote::silent(tr(keys::Q_CHAT_SELF_DESTRUCT_OFF)),
             Some(SelfDestructSend::Timer(secs)) => StatusNote::silent(tr_with(
                 keys::Q_CHAT_SELF_DESTRUCT_S,

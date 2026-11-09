@@ -15,13 +15,12 @@ use quill::telegram::envelope::MessageSender;
 impl QuillApp {
     pub(super) fn enable_private_sharing(&mut self, chat_id: ChatId, cx: &mut Context<Self>) {
         let Some(live) = self.live.as_mut() else {
-            self.connection
-                .set_note(StatusNote::info(tr(keys::Q_PEOPLE_DEMO_MODE_THIS_NEEDS_A)));
+            self.set_note(StatusNote::info(tr(keys::Q_PEOPLE_DEMO_MODE_THIS_NEEDS_A)));
             cx.notify();
             return;
         };
         if let Err(err) = live.driver.enable_private_sharing(chat_id) {
-            self.connection.set_note(StatusNote::error(user_error_for(
+            self.set_note(StatusNote::error(user_error_for(
                 keys::Q_PEOPLE_COULDNT_REACH_TELEGRAM_TRY_AGAIN,
                 &err,
             )));
@@ -52,12 +51,11 @@ impl QuillApp {
         };
         let Some(live) = self.live.as_mut() else {
             self.close_sharing_request_box(cx);
-            self.connection
-                .set_note(StatusNote::info(tr(keys::Q_PEOPLE_DEMO_MODE_THIS_NEEDS_A)));
+            self.set_note(StatusNote::info(tr(keys::Q_PEOPLE_DEMO_MODE_THIS_NEEDS_A)));
             return;
         };
         if let Err(err) = live.driver.send_sharing_request() {
-            self.connection.set_note(StatusNote::error(user_error_for(
+            self.set_note(StatusNote::error(user_error_for(
                 keys::Q_PEOPLE_COULDNT_REACH_TELEGRAM_TRY_AGAIN,
                 &err,
             )));

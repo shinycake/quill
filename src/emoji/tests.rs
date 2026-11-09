@@ -107,8 +107,7 @@ fn message_custom_emoji_ids_to_resolve_scans_open_chat() {
     session
         .stickers
         .emoji
-        .status_resolution_attempted
-        .insert(12345);
+        .begin_custom_emoji_lookup(crate::ids::RequestId(1), &[12345]);
     assert!(session.message_custom_emoji_ids_to_resolve().is_empty());
 }
 

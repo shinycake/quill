@@ -128,8 +128,7 @@ impl QuillApp {
         if let Some(session) = self.demo_session.as_mut() {
             session.payments.hub.gift_value = lookup;
         }
-        self.connection
-            .set_note(StatusNote::silent("screenshot demo — gift value"));
+        self.set_note(StatusNote::silent("screenshot demo — gift value"));
         cx.notify();
     }
 }

@@ -348,8 +348,7 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         let Some(kind) = direct_media_kind_for(&path) else {
-            self.connection
-                .set_note(StatusNote::silent(tr(keys::Q_MEDIA_CHOOSE_A_PHOTO_OR_A)));
+            self.set_note(StatusNote::silent(tr(keys::Q_MEDIA_CHOOSE_A_PHOTO_OR_A)));
             cx.notify();
             return;
         };
@@ -425,7 +424,7 @@ impl QuillApp {
         }
         // Nothing waiting: the option was removed or its media replaced.
         if let Some(note) = note {
-            self.connection.set_note(StatusNote::error(note));
+            self.set_note(StatusNote::error(note));
         }
         cx.notify();
     }
@@ -621,8 +620,7 @@ impl QuillApp {
             return;
         };
         if url.is_empty() {
-            self.connection
-                .set_note(StatusNote::info(tr(keys::Q_MEDIA_ENTER_THE_LINKS_ADDRESS)));
+            self.set_note(StatusNote::info(tr(keys::Q_MEDIA_ENTER_THE_LINKS_ADDRESS)));
             cx.notify();
             return;
         }

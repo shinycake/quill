@@ -781,7 +781,7 @@ impl QuillApp {
                 Ok(())
             }
         };
-        self.connection.set_note(match result {
+        self.set_note(match result {
             Ok(()) => StatusNote::silent(tr_with(
                 keys::Q_CHATLIST_FOLDER_ADDED_2,
                 &[("name", &spec.name.to_string())],
@@ -795,7 +795,7 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut()
             && let Err(err) = live.driver.fetch_recommended_chat_folders()
         {
-            self.connection.set_note(StatusNote::error(user_error_for(
+            self.set_note(StatusNote::error(user_error_for(
                 keys::Q_NOTES_FAILED_RECOMMENDED_FOLDERS,
                 &err,
             )));
@@ -834,7 +834,7 @@ impl QuillApp {
         } else if let Some(live) = self.live.as_mut()
             && let Err(err) = live.driver.fetch_chat_folder(folder_id)
         {
-            self.connection.set_note(StatusNote::error(user_error_for(
+            self.set_note(StatusNote::error(user_error_for(
                 keys::Q_NOTES_FAILED_FOLDER,
                 &err,
             )));

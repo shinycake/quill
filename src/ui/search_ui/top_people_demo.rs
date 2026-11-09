@@ -67,7 +67,6 @@ impl QuillApp {
         session.search.search.top_chats = top;
         session.search.search.chat_ids = vec![ChatId(11), ChatId(12)];
         session.search.search.recents = true;
-        self.connection
-            .set_note(StatusNote::silent("screenshot demo — top people strip"));
+        self.set_note(StatusNote::silent("screenshot demo — top people strip"));
     }
 }

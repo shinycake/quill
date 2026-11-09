@@ -3,6 +3,7 @@
 //! (`Iv::Editor::OfferRichMessagePremiumChoice`) and the Premium toast
 //! (`ShowRichMessagesPremiumToast`).
 
+use super::RichDraftBox;
 use crate::ui::ai_compose::marked_link;
 use crate::ui::app::QuillApp;
 use crate::ui::shell::{DialogKind, QuillShell};
@@ -23,13 +24,35 @@ const ICON_CIRCLE: f32 = 64.;
 
 impl QuillApp {
     fn close_rich_discard_confirm(&mut self, cx: &mut Context<Self>) {
-        self.composer_ui.rich_draft.discard_confirm = false;
+        if self.chat_ui.rich_draft_box == RichDraftBox::Discard {
+            self.chat_ui.rich_draft_box = RichDraftBox::Closed;
+        }
         cx.notify();
     }
 
     fn close_rich_premium_choice(&mut self, cx: &mut Context<Self>) {
-        self.composer_ui.rich_draft.premium_choice = None;
+        if matches!(self.chat_ui.rich_draft_box, RichDraftBox::PremiumChoice(_)) {
+            self.chat_ui.rich_draft_box = RichDraftBox::Closed;
+        }
         cx.notify();
+    }
+
+    /// "Send Without Formatting": the flattened text the box holds, taken
+    /// with the box. `None` once the window shows another chat than the
+    /// one the box was opened for (its `ChatUi` is replaced at the next
+    /// frame, and a click can land before that).
+    pub(super) fn take_rich_premium_choice(&mut self) -> Option<String> {
+        if !self.chat_ui_is_current() {
+            self.chat_ui.rich_draft_box = RichDraftBox::Closed;
+            return None;
+        }
+        match std::mem::take(&mut self.chat_ui.rich_draft_box) {
+            RichDraftBox::PremiumChoice(plain) => Some(plain),
+            other => {
+                self.chat_ui.rich_draft_box = other;
+                None
+            }
+        }
     }
 
     /// tdesktop `ShowRichMessagesPremiumToast`: a star, the requirement and
@@ -87,8 +110,11 @@ impl QuillApp {
                         .label(tr(keys::RECORD_LOCK_DISCARD))
                         .danger()
                         .on_click(cx.listener(|this, _, window, cx| {
+                            let current = this.chat_ui_is_current();
                             this.close_rich_discard_confirm(cx);
-                            this.discard_rich_draft(cx);
+                            if current {
+                                this.discard_rich_draft(cx);
+                            }
                             this.close_kit_dialog_if_done(DialogKind::RichDraftDiscard, window, cx);
                         })),
                 );
@@ -195,7 +221,7 @@ impl QuillApp {
                         .label(tr(keys::ARTICLE_PREMIUM_CHOICE_PLAIN))
                         .outline()
                         .on_click(cx.listener(|this, _, window, cx| {
-                            let plain = this.composer_ui.rich_draft.premium_choice.take();
+                            let plain = this.take_rich_premium_choice();
                             this.close_kit_dialog_if_done(
                                 DialogKind::RichPremiumChoice,
                                 window,
@@ -246,7 +272,7 @@ crate::ui::shell::register_dialogs! {
     /// tdesktop's "discard this message?" box for a rich draft.
     RichDraftDiscard => DialogSpec::new(
         7626,
-        |app| app.composer_ui.rich_draft.discard_confirm,
+        |app| app.chat_ui.rich_draft_box == RichDraftBox::Discard,
         QuillApp::build_rich_discard_dialog,
     )
     .per_window()
@@ -254,7 +280,7 @@ crate::ui::shell::register_dialogs! {
     /// tdesktop's "Remove Formatting" box for a non-Premium rich send.
     RichPremiumChoice => DialogSpec::new(
         7627,
-        |app| app.composer_ui.rich_draft.premium_choice.is_some(),
+        |app| matches!(app.chat_ui.rich_draft_box, RichDraftBox::PremiumChoice(_)),
         QuillApp::build_rich_premium_choice_dialog,
     )
     .per_window()

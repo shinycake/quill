@@ -64,7 +64,7 @@ impl QuillApp {
         let Some(note) = self.send_denial(kind) else {
             return false;
         };
-        self.connection.set_note(StatusNote::error(note));
+        self.set_note(StatusNote::error(note));
         cx.notify();
         true
     }
@@ -81,7 +81,7 @@ impl QuillApp {
         else {
             return false;
         };
-        self.connection.set_note(StatusNote::error(note));
+        self.set_note(StatusNote::error(note));
         cx.notify();
         true
     }

@@ -54,7 +54,7 @@ impl QuillApp {
                 .zoom_stat_graph(ChatId(chat_id), token, x)
                 .is_err()
             {
-                self.connection.set_note(StatusNote::error(tr(
+                self.set_note(StatusNote::error(tr(
                     keys::Q_MONEY_COULD_NOT_LOAD_THE_CHART,
                 )));
             }

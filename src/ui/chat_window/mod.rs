@@ -413,8 +413,7 @@ impl QuillApp {
             return;
         };
         if !self.can_open_chat_window(&chat) {
-            self.connection
-                .set_note(StatusNote::error(tr(keys::Q_MISC_THIS_CHAT_CANT_OPEN_IN)));
+            self.set_note(StatusNote::error(tr(keys::Q_MISC_THIS_CHAT_CANT_OPEN_IN)));
             cx.notify();
             return;
         }
@@ -426,7 +425,7 @@ impl QuillApp {
         // window lets go of it, so TDLib keeps it open.
         if let Some(live) = self.live.as_mut() {
             if let Err(err) = live.driver.open_chat_window(chat_id) {
-                self.connection.set_note(StatusNote::error(user_error_for(
+                self.set_note(StatusNote::error(user_error_for(
                     keys::Q_NOTES_FAILED_CHAT_WINDOW,
                     &err,
                 )));
@@ -465,7 +464,7 @@ impl QuillApp {
                 Err(_) => {
                     owner.update(cx, |app, cx| {
                         app.in_screen_scope(screen, cx, |app, cx| {
-                            app.connection.set_note(StatusNote::error(tr(
+                            app.set_note(StatusNote::error(tr(
                                 keys::Q_MISC_COULDNT_OPEN_THE_CHAT_WINDOW,
                             )));
                             app.chat_window_closed(chat_id, None, cx);
@@ -572,9 +571,6 @@ impl QuillApp {
         self.stop_gif_of_window(chat_id);
         if self.windows.last_press == Some(chat_id) {
             self.windows.last_press = None;
-        }
-        if self.connection.note_window == Some(chat_id) {
-            self.connection.note_window = None;
         }
         self.connection
             .toasts

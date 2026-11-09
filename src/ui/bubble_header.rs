@@ -258,8 +258,7 @@ pub(super) fn forward_header_line(
                         message_id: None,
                     } => this.select_search_chat(chat_id, window, cx),
                     ForwardLink::Imported => {
-                        this.connection
-                            .set_note(StatusNote::info(imported_note.clone().unwrap_or_default()));
+                        this.set_note(StatusNote::info(imported_note.clone().unwrap_or_default()));
                         cx.notify();
                     }
                     ForwardLink::Hidden | ForwardLink::None => {}

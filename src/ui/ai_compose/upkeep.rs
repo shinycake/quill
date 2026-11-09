@@ -1,6 +1,15 @@
 //! Per-frame upkeep for the AI compose box: the composer button's blink,
 //! the box's answers, a changed style list and the style pills' custom
 //! emoji, plus the error toasts (tdesktop `ComposeAiContent::showError`).
+//!
+//! The box and the apply-in-place shortcut belong to the window they were
+//! opened in (a chat window's composer, or the main window's). Their
+//! answers are taken in that window's frame (`ai_compose_window_upkeep`,
+//! a step of every window's upkeep), so they land while the main window
+//! is minimized and their toasts show in that window. The style preview
+//! a link opens is taken in the frame of the window that shows it. What is
+//! the session's (the button's blink, the style notice, emoji files) stays
+//! in the main window's upkeep.
 
 use super::{MarkedLink, marked_link, session_mut};
 use crate::ui::app::QuillApp;
@@ -19,16 +28,59 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         self.sync_ai_compose_button(cx);
-        // The box goes when its own window (a chat window's, or the main
-        // window's) shows another chat, or closes.
-        if let Some((chat, scope)) = self.ai_compose.open.as_ref().map(|o| (o.chat_id, o.window)) {
-            let shown = self
-                .in_window_scope(scope, cx, |app, _| app.session().and_then(|s| s.open_chat))
-                .flatten();
-            if shown != Some(chat) {
+        self.ai_style_notice_upkeep(window, cx);
+        self.fetch_ai_compose_emoji();
+        self.fetch_ai_style_icons();
+    }
+
+    /// The window in place's own part: the box opened over its composer
+    /// and the shortcut it asked for. The box goes when its window shows
+    /// another chat (checked in that window's frame), or closed (checked
+    /// in any).
+    pub(in crate::ui) fn ai_compose_window_upkeep(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let here = self.windows.scope;
+        if let Some((chat, owner)) = self.ai_compose.open.as_ref().map(|o| (o.chat_id, o.window)) {
+            let closed = owner.is_some_and(|chat| !self.windows.has(chat));
+            let left = owner == here && self.session().and_then(|s| s.open_chat) != Some(chat);
+            if closed || left {
                 self.close_ai_compose(cx);
             }
         }
+        if self
+            .ai_compose
+            .open
+            .as_ref()
+            .is_none_or(|open| open.window == here)
+        {
+            self.ai_compose_box_upkeep(window, cx);
+        }
+        if self.ai_style_preview_is_here() {
+            self.ai_style_preview_upkeep(window, cx);
+        }
+        self.ai_apply_in_place_upkeep(window, cx);
+    }
+
+    /// The style preview's answers land in the window that shows its box,
+    /// or in the main window once that window closed.
+    fn ai_style_preview_is_here(&self) -> bool {
+        if self.ai_compose.preview.is_none() {
+            return false;
+        }
+        let here = self.windows.scope;
+        let owner = self
+            .windows
+            .window_of_box(crate::ui::shell::DialogKind::AiStylePreview)
+            .filter(|chat| self.windows.has(*chat));
+        owner == here
+    }
+
+    /// The box's answers, in its own window's frame (or any, with no box
+    /// open: the answer is dropped).
+    fn ai_compose_box_upkeep(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let answer = session_mut(self).and_then(|s| s.messages.ai_compose.box_answer.take());
         if let Some(answer) = answer {
             let error = self
@@ -47,11 +99,6 @@ impl QuillApp {
         self.ai_style_edit_upkeep(window, cx);
         self.refresh_ai_compose_styles(window, cx);
         self.select_saved_ai_style(window, cx);
-        self.ai_style_notice_upkeep(window, cx);
-        self.ai_apply_in_place_upkeep(window, cx);
-        self.ai_style_preview_upkeep(window, cx);
-        self.fetch_ai_compose_emoji();
-        self.fetch_ai_style_icons();
     }
 
     /// A style list that changed under the open box (tdesktop

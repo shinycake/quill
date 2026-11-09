@@ -162,13 +162,12 @@ impl QuillApp {
     /// checked again (tdesktop goes back to Public and checks it).
     fn revoke_public_link(&mut self, chat_id: ChatId, cx: &mut Context<Self>) {
         let Some(live) = self.live.as_mut() else {
-            self.connection
-                .set_note(StatusNote::info(tr(keys::Q_PEOPLE_DEMO_MODE_THIS_NEEDS_A)));
+            self.set_note(StatusNote::info(tr(keys::Q_PEOPLE_DEMO_MODE_THIS_NEEDS_A)));
             cx.notify();
             return;
         };
         if live.driver.revoke_public_link(chat_id).is_err() {
-            self.connection.set_note(StatusNote::error(tr(
+            self.set_note(StatusNote::error(tr(
                 keys::Q_PEOPLE_COULDNT_SEND_THE_CHANGE_TRY,
             )));
             cx.notify();

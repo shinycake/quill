@@ -122,3 +122,4 @@ src/ui/notifications/mod.rs::poll_live -> deliver_notifications | runs-locked | 
 src/ui/notifications/mod.rs::poll_live -> redraw_polled | runs-locked | asks for a redraw, which draws only the lock screen
 src/ui/notifications/mod.rs::poll_live -> discard_stopped_media_playback | runs-locked | drops a parked play whose download failed
 src/ui/notifications/mod.rs::poll_live -> restart_live_connection | runs-locked | a remote log out under the lock: the old client closes, and the new connection waits for the unlock (`connect_waits_for_unlock`)
+src/ui/notifications/mod.rs::poll_live -> set_note | runs-locked | the status note of an answer (a failed send, a lost connection), as `connection.set_note` did before round 15; it opens and starts nothing, and the lock screen draws no toast over the chats

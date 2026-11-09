@@ -224,7 +224,7 @@ impl QuillApp {
                                     this.photo_editor_mut(|editor| editor.place(image), cx)
                                 }
                                 None => {
-                                    this.connection.set_note(StatusNote::error(tr(
+                                    this.set_note(StatusNote::error(tr(
                                         keys::Q_MISC_COULDNT_DRAW_THAT_EMOJI,
                                     )));
                                     cx.notify();
@@ -287,8 +287,7 @@ impl QuillApp {
             if let Some(live) = self.live.as_mut() {
                 let _ = live.driver.download_file(file_id, 16);
             }
-            self.connection
-                .set_note(StatusNote::silent(tr(keys::Q_MISC_DOWNLOADING_THE_STICKER)));
+            self.set_note(StatusNote::silent(tr(keys::Q_MISC_DOWNLOADING_THE_STICKER)));
             cx.notify();
             return;
         };
@@ -297,8 +296,7 @@ impl QuillApp {
             |this, image, cx| match image {
                 Some(image) => this.photo_editor_mut(|editor| editor.place(image), cx),
                 None => {
-                    this.connection
-                        .set_note(StatusNote::error(tr(keys::Q_MISC_COULDNT_USE_THAT_STICKER)));
+                    this.set_note(StatusNote::error(tr(keys::Q_MISC_COULDNT_USE_THAT_STICKER)));
                     cx.notify();
                 }
             },

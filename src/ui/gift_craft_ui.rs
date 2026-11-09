@@ -185,8 +185,7 @@ impl QuillApp {
         if started {
             self.market_replace(MarketBox::Craft, cx);
         } else {
-            self.connection
-                .set_note(StatusNote::error(tr(keys::Q_MONEY_COULDNT_START_CRAFTING)));
+            self.set_note(StatusNote::error(tr(keys::Q_MONEY_COULDNT_START_CRAFTING)));
             cx.notify();
         }
     }
@@ -225,8 +224,7 @@ impl QuillApp {
         if started {
             self.gift_market.forge_started = Some(Instant::now());
         } else {
-            self.connection
-                .set_note(StatusNote::error(tr(keys::Q_MONEY_COULDNT_CRAFT_THE_GIFT)));
+            self.set_note(StatusNote::error(tr(keys::Q_MONEY_COULDNT_CRAFT_THE_GIFT)));
         }
         cx.notify();
     }
@@ -301,8 +299,7 @@ impl QuillApp {
                 }
             }
             Some(CraftResult::InvalidGift) => {
-                self.connection
-                    .set_note(StatusNote::error(tr(keys::Q_MONEY_THIS_GIFT_CANT_BE_USED)));
+                self.set_note(StatusNote::error(tr(keys::Q_MONEY_THIS_GIFT_CANT_BE_USED)));
                 cx.notify();
             }
             // An error: its note is shown, the craft box stays.

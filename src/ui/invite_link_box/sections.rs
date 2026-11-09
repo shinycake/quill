@@ -109,8 +109,7 @@ impl QuillApp {
                         locked = form.toggle_subscription() == SubscriptionToggle::Locked;
                     });
                     if locked {
-                        this.connection
-                            .set_note(StatusNote::info(tr(keys::GROUP_INVITE_SUBSCRIPTION_TOAST)));
+                        this.set_note(StatusNote::info(tr(keys::GROUP_INVITE_SUBSCRIPTION_TOAST)));
                     }
                 })),
         );

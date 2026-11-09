@@ -128,7 +128,7 @@ fn refused_list_fetch_is_kept_as_failed_for_retry() {
 fn profile_photos_answer_caches_gallery_and_files() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
-    let extra = session.request_for_user(RequestPurpose::GetUserProfilePhotos, 31);
+    let extra = session.ask_user_photos_page(31);
     apply_json(
         &mut session,
         &seq,
@@ -169,7 +169,7 @@ fn set_main_photo_ok_drops_the_own_gallery() {
             ProfilePhotosFetch::Loaded {
                 total_count: 0,
                 photos: Vec::new(),
-                loading_more: false,
+                next_page: PhotoPage::Idle,
             },
         );
     }
@@ -255,7 +255,7 @@ fn user_full_info_keeps_unofficial_flag_and_personal_photo_first_in_gallery() {
         info.extras.personal_photo.as_ref().map(|p| p.id),
         Some(9500)
     );
-    let extra = session.request_for_user(RequestPurpose::GetUserProfilePhotos, 31);
+    let extra = session.ask_user_photos_page(31);
     apply_json(
         &mut session,
         &seq,
@@ -419,4 +419,107 @@ fn a_failed_follow_up_page_keeps_the_listed_groups() {
     assert!(!paging.loading_more);
     // The list ends here, as in tdesktop, so Load more cannot repeat.
     assert!(paging.exhausted);
+}
+
+/// A user's photo that changes (here or on another device) drops their
+/// cached gallery, so the viewer fetches the new list; an `updateUser`
+/// with the same photo keeps it.
+#[test]
+fn a_changed_user_photo_drops_their_gallery() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    let user = |photo: &str| {
+        format!(
+            r#"{{"@type":"updateUser","user":{{"id":31,"first_name":"X","type":{{"@type":"userTypeRegular"}}{photo}}}}}"#
+        )
+    };
+    let with_photo = |id: i64| {
+        user(&format!(
+            r#","profile_photo":{{"@type":"profilePhoto","id":{id},"small":{},"big":{},"has_animation":false,"is_personal":false}}"#,
+            media_file_json(11, "\"\"", false),
+            media_file_json(12, "\"\"", false),
+        ))
+    };
+    let cache = |session: &mut Session| {
+        session.users_state.user_profile_photos.insert(
+            31,
+            ProfilePhotosFetch::Loaded {
+                total_count: 1,
+                photos: Vec::new(),
+                next_page: PhotoPage::Idle,
+            },
+        );
+    };
+    apply_json(&mut session, &seq, &sink, &with_photo(901));
+    cache(&mut session);
+    apply_json(&mut session, &seq, &sink, &with_photo(901));
+    assert!(session.users_state.user_profile_photos.contains_key(&31));
+    apply_json(&mut session, &seq, &sink, &with_photo(902));
+    assert!(!session.users_state.user_profile_photos.contains_key(&31));
+    cache(&mut session);
+    apply_json(&mut session, &seq, &sink, &user(""));
+    assert!(
+        !session.users_state.user_profile_photos.contains_key(&31),
+        "deleted"
+    );
+}
+
+/// The user's photo changes while a page of their gallery is out: the
+/// dropped fetch's answer (first page or a later one) never lands, and the
+/// refetch's does. A failure of the dropped fetch changes nothing either.
+#[test]
+fn a_user_photo_change_while_a_page_is_out_drops_its_answer() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    let user = |id: i64| {
+        format!(
+            r#"{{"@type":"updateUser","user":{{"id":31,"first_name":"X","type":{{"@type":"userTypeRegular"}},"profile_photo":{{"@type":"profilePhoto","id":{id},"small":{},"big":{},"has_animation":false,"is_personal":false}}}}}}"#,
+            media_file_json(11, "\"\"", false),
+            media_file_json(12, "\"\"", false),
+        )
+    };
+    let page = |extra: RequestId, photo: i64| {
+        format!(
+            r#"{{"@type":"chatPhotos","@extra":"{}","total_count":2,"photos":[{}]}}"#,
+            extra.0,
+            photo_json(photo, 21, 22)
+        )
+    };
+    let listed = |session: &Session| match session.users_state.user_profile_photos.get(&31) {
+        Some(ProfilePhotosFetch::Loaded { photos, .. }) => {
+            photos.iter().map(|p| p.id).collect::<Vec<_>>()
+        }
+        _ => Vec::new(),
+    };
+    apply_json(&mut session, &seq, &sink, &user(901));
+    // The first page is out when the photo changes.
+    let stale = session.ask_user_photos_page(31);
+    apply_json(&mut session, &seq, &sink, &user(902));
+    let fresh = session.ask_user_photos_page(31);
+    apply_json(&mut session, &seq, &sink, &page(stale, 901));
+    assert!(matches!(
+        session.users_state.user_profile_photos.get(&31),
+        Some(ProfilePhotosFetch::Loading(id)) if *id == fresh
+    ));
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"error","@extra":"{}","code":500,"message":"X"}}"#,
+            stale.0
+        ),
+    );
+    assert!(matches!(
+        session.users_state.user_profile_photos.get(&31),
+        Some(ProfilePhotosFetch::Loading(_))
+    ));
+    apply_json(&mut session, &seq, &sink, &page(fresh, 902));
+    assert_eq!(listed(&session), [902]);
+    // A later page is out when the photo changes: nothing of it lands,
+    // not even as the first page of a new list.
+    let more = session.ask_user_photos_page(31);
+    apply_json(&mut session, &seq, &sink, &user(903));
+    apply_json(&mut session, &seq, &sink, &page(more, 901));
+    assert!(!session.users_state.user_profile_photos.contains_key(&31));
 }

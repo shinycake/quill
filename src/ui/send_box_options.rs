@@ -341,8 +341,7 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         let Some(cover) = cover_send_path(path) else {
-            self.connection
-                .set_note(StatusNote::silent(quill::composer::EDIT_MEDIA_INVALID_FILE));
+            self.set_note(StatusNote::silent(quill::composer::EDIT_MEDIA_INVALID_FILE));
             cx.notify();
             return;
         };
@@ -358,7 +357,7 @@ impl QuillApp {
         {
             return;
         }
-        self.connection.set_note(StatusNote::silent(tr_with(
+        self.set_note(StatusNote::silent(tr_with(
             keys::Q_OPS_COVER_WILL_BE_SENT_WITH,
             &[("unwrap_or", &name)],
         )));
@@ -370,8 +369,7 @@ impl QuillApp {
             .update_pending_attachment(index, |attachment| attachment.extras.cover = None)
             .is_some()
         {
-            self.connection
-                .set_note(StatusNote::silent(tr(keys::Q_OPS_COVER_CLEARED)));
+            self.set_note(StatusNote::silent(tr(keys::Q_OPS_COVER_CLEARED)));
             cx.notify();
         }
     }
@@ -432,7 +430,7 @@ impl QuillApp {
                 self.composer_ui.send_box.price = None;
                 self.composer_sends
                     .update(&slot, |send| send.paid_stars = price);
-                self.connection.set_note(if price > 0 {
+                self.set_note(if price > 0 {
                     StatusNote::silent(tr_with(
                         keys::Q_OPS_THE_MEDIA_WILL_UNLOCK_FOR,
                         &[("price", &price.to_string())],

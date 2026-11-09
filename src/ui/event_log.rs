@@ -103,7 +103,7 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut() {
             live.driver.set_chat_event_log_query(chat_id, &query);
             if live.driver.refresh_chat_event_log(chat_id).is_err() {
-                self.connection.set_note(StatusNote::error(tr(
+                self.set_note(StatusNote::error(tr(
                     keys::Q_OPS_COULD_NOT_SEARCH_RECENT_ACTIONS,
                 )));
             }
@@ -116,14 +116,13 @@ impl QuillApp {
             match live.driver.refresh_chat_event_log(chat_id) {
                 Ok(_) => {}
                 Err(_) => {
-                    self.connection.set_note(StatusNote::error(tr(
+                    self.set_note(StatusNote::error(tr(
                         keys::Q_OPS_COULD_NOT_REFRESH_RECENT_ACTIONS,
                     )));
                 }
             }
         } else {
-            self.connection
-                .set_note(StatusNote::info(tr(keys::Q_OPS_RECENT_ACTIONS_NEED_A_LIVE)));
+            self.set_note(StatusNote::info(tr(keys::Q_OPS_RECENT_ACTIONS_NEED_A_LIVE)));
         }
         cx.notify();
     }
@@ -210,14 +209,13 @@ impl QuillApp {
             match live.driver.fetch_chat_event_log_more(chat_id) {
                 Ok(_) => {}
                 Err(_) => {
-                    self.connection.set_note(StatusNote::error(tr(
+                    self.set_note(StatusNote::error(tr(
                         keys::Q_OPS_COULD_NOT_LOAD_MORE_ACTIONS,
                     )));
                 }
             }
         } else {
-            self.connection
-                .set_note(StatusNote::info(tr(keys::Q_OPS_RECENT_ACTIONS_NEED_A_LIVE)));
+            self.set_note(StatusNote::info(tr(keys::Q_OPS_RECENT_ACTIONS_NEED_A_LIVE)));
         }
         cx.notify();
     }

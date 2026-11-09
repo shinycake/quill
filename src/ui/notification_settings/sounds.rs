@@ -63,7 +63,7 @@ impl QuillApp {
             let result = live
                 .driver
                 .set_chat_sound(chat_id, use_default_sound, sound_id);
-            self.connection.set_note(match result {
+            self.set_note(match result {
                 Ok(_) => StatusNote::silent(tr(keys::Q_PREFS_SOUND_UPDATED)),
                 Err(_) => StatusNote::error(tr(keys::Q_PREFS_COULD_NOT_CHANGE_SOUND)),
             });
@@ -79,8 +79,7 @@ impl QuillApp {
                 },
                 cx,
             );
-            self.connection
-                .set_note(StatusNote::silent(tr(keys::Q_PREFS_SOUND_UPDATED_2)));
+            self.set_note(StatusNote::silent(tr(keys::Q_PREFS_SOUND_UPDATED_2)));
             cx.notify();
         }
     }
@@ -95,7 +94,7 @@ impl QuillApp {
     ) {
         if let Some(live) = self.live.as_mut() {
             let result = live.driver.set_chat_show_preview(chat_id, show_preview);
-            self.connection.set_note(match result {
+            self.set_note(match result {
                 Ok(_) => StatusNote::silent(tr(keys::Q_PREFS_PREVIEW_SETTING_UPDATED)),
                 Err(_) => StatusNote::error(tr(keys::Q_PREFS_COULD_NOT_CHANGE_PREVIEW)),
             });
@@ -111,7 +110,7 @@ impl QuillApp {
                 },
                 cx,
             );
-            self.connection.set_note(StatusNote::silent(tr(
+            self.set_note(StatusNote::silent(tr(
                 keys::Q_PREFS_PREVIEW_SETTING_UPDATED_2,
             )));
             cx.notify();
@@ -128,7 +127,7 @@ impl QuillApp {
     ) {
         if let Some(live) = self.live.as_mut() {
             let result = live.driver.set_chat_story_mute(chat_id, mute_stories);
-            self.connection.set_note(match result {
+            self.set_note(match result {
                 Ok(_) => StatusNote::silent(tr(keys::Q_PREFS_STORY_MUTE_UPDATED)),
                 Err(_) => StatusNote::error(tr(keys::Q_PREFS_COULD_NOT_CHANGE_STORY_MUTE)),
             });
@@ -144,8 +143,7 @@ impl QuillApp {
                 },
                 cx,
             );
-            self.connection
-                .set_note(StatusNote::silent(tr(keys::Q_PREFS_STORY_MUTE_UPDATED_2)));
+            self.set_note(StatusNote::silent(tr(keys::Q_PREFS_STORY_MUTE_UPDATED_2)));
             cx.notify();
         }
     }
@@ -162,7 +160,7 @@ impl QuillApp {
             let result = live
                 .driver
                 .set_chat_story_poster(chat_id, show_story_poster);
-            self.connection.set_note(match result {
+            self.set_note(match result {
                 Ok(_) => StatusNote::silent(tr(keys::Q_PREFS_STORY_POSTER_SETTING_UPDATED)),
                 Err(_) => StatusNote::error(tr(keys::Q_PREFS_COULD_NOT_CHANGE_STORY_POSTER_2)),
             });
@@ -178,7 +176,7 @@ impl QuillApp {
                 },
                 cx,
             );
-            self.connection.set_note(StatusNote::silent(tr(
+            self.set_note(StatusNote::silent(tr(
                 keys::Q_PREFS_STORY_POSTER_SETTING_UPDATED_2,
             )));
             cx.notify();
@@ -199,7 +197,7 @@ impl QuillApp {
             let result =
                 live.driver
                     .set_chat_story_sound(chat_id, use_default_story_sound, story_sound_id);
-            self.connection.set_note(match result {
+            self.set_note(match result {
                 Ok(_) => StatusNote::silent(tr(keys::Q_PREFS_STORY_SOUND_UPDATED)),
                 Err(_) => StatusNote::error(tr(keys::Q_PREFS_COULD_NOT_CHANGE_STORY_SOUND)),
             });
@@ -215,8 +213,7 @@ impl QuillApp {
                 },
                 cx,
             );
-            self.connection
-                .set_note(StatusNote::silent(tr(keys::Q_PREFS_STORY_SOUND_UPDATED_2)));
+            self.set_note(StatusNote::silent(tr(keys::Q_PREFS_STORY_SOUND_UPDATED_2)));
             cx.notify();
         }
     }

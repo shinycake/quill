@@ -189,13 +189,16 @@ impl QuillApp {
         approve: bool,
         cx: &mut Context<Self>,
     ) {
-        self.screen.connection.set_note(match self.live.as_mut() {
-            Some(live) => match live.driver.process_all_chat_join_requests(chat_id, approve) {
-                Ok(_) => StatusNote::silent(tr(keys::Q_CHAT_PROCESSING_JOIN_REQUESTS)),
-                Err(_) => StatusNote::error(tr(keys::Q_CHAT_COULD_NOT_PROCESS_JOIN_REQUESTS)),
+        self.screen.connection.set_note_for(
+            &self.screen.windows,
+            match self.live.as_mut() {
+                Some(live) => match live.driver.process_all_chat_join_requests(chat_id, approve) {
+                    Ok(_) => StatusNote::silent(tr(keys::Q_CHAT_PROCESSING_JOIN_REQUESTS)),
+                    Err(_) => StatusNote::error(tr(keys::Q_CHAT_COULD_NOT_PROCESS_JOIN_REQUESTS)),
+                },
+                None => StatusNote::info(tr(keys::Q_CHAT_JOIN_REQUESTS_NEED_A_LIVE)),
             },
-            None => StatusNote::info(tr(keys::Q_CHAT_JOIN_REQUESTS_NEED_A_LIVE)),
-        });
+        );
         cx.notify();
     }
 

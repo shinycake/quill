@@ -223,7 +223,7 @@ impl QuillApp {
         if !blocked {
             if let Some(live) = self.live.as_mut() {
                 if live.driver.set_user_blocked(user_id, true).is_err() {
-                    self.connection.set_note(StatusNote::error(tr(
+                    self.set_note(StatusNote::error(tr(
                         keys::Q_MEDIA_COULDNT_REACH_TELEGRAM_TRY_AGAIN,
                     )));
                 }
@@ -247,7 +247,7 @@ impl QuillApp {
                 if let Some(live) = self.live.as_mut()
                     && live.driver.set_user_blocked(user_id, false).is_err()
                 {
-                    self.connection.set_note(StatusNote::error(tr(
+                    self.set_note(StatusNote::error(tr(
                         keys::Q_MEDIA_COULDNT_REACH_TELEGRAM_TRY_AGAIN,
                     )));
                 }

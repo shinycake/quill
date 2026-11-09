@@ -113,7 +113,7 @@ impl QuillApp {
                 .description_input
                 .update(cx, |input, cx| input.set_value(description, window, cx));
         }
-        self.connection.set_note(StatusNote::silent(note));
+        self.set_note(StatusNote::silent(note));
         cx.notify();
     }
 

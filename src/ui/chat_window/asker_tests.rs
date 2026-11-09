@@ -75,7 +75,12 @@ fn a_queued_link_takes_the_asking_window_not_the_pointers(cx: &mut TestAppContex
     h.app.update(cx, |app, _| {
         app.note_window_pointer(Some(OTHER));
         app.as_asked_by(None, |app| app.queue_deep_link("https://t.me/os".into()));
-        assert_eq!(app.links.window_pending_link, None);
+        let queued = |app: &crate::ui::app::QuillApp| {
+            app.pending_deep_link
+                .as_ref()
+                .map(|q| (q.link.clone(), q.window))
+        };
+        assert_eq!(queued(app), Some(("https://t.me/os".to_string(), None)));
         // The poll loop runs with the main window in place; the answer
         // carries the chat window that pressed.
         app.set_window_scope(None);
@@ -85,15 +90,15 @@ fn a_queued_link_takes_the_asking_window_not_the_pointers(cx: &mut TestAppContex
             });
         });
         assert_eq!(
-            app.links.window_pending_link,
-            Some(("https://t.me/answer".to_string(), OTHER))
+            queued(app),
+            Some(("https://t.me/answer".to_string(), Some(OTHER)))
         );
         // A click in the chat window, with its state in place.
         app.note_window_press(Some(OTHER));
         app.queue_deep_link("https://t.me/click".into());
         assert_eq!(
-            app.links.window_pending_link,
-            Some(("https://t.me/click".to_string(), OTHER))
+            queued(app),
+            Some(("https://t.me/click".to_string(), Some(OTHER)))
         );
     });
 }
@@ -402,6 +407,130 @@ fn the_gif_tab_follows_its_windows_field(cx: &mut TestAppContext) {
             app.session().is_some_and(|s| !s.stickers.gifs.search_mode),
             "an empty field shows the saved GIFs"
         );
+    });
+}
+
+/// Round 15 (area B, finding 8): a footer emoji empties the field but
+/// stays the window's section, so entering the GIF tab again keeps it.
+/// And two windows with the tab open each show their own section: the
+/// window pressed last asks for its own again, and the other shows its
+/// own kept from before, without asking.
+#[gpui_kit::test]
+fn each_window_keeps_its_own_gif_section(cx: &mut TestAppContext) {
+    use crate::ui::gifs_ui::GifSection;
+    use crate::ui::media_panel::PanelTab;
+    const EMOJI: &str = "\u{1F602}";
+    let h = new_app(cx);
+    let _chat_window = h.open_in_new_window(OTHER, cx);
+    h.app.update(cx, |app, cx| {
+        let searching = |app: &crate::ui::app::QuillApp| {
+            app.session().and_then(|s| {
+                let gifs = &s.stickers.gifs;
+                gifs.search_mode.then(|| gifs.search_query.clone())
+            })
+        };
+        app.choose_gif_section(GifSection::Emoji(EMOJI.into()), cx);
+        app.follow_gif_field(cx);
+        assert_eq!(
+            searching(app).as_deref(),
+            Some(EMOJI),
+            "the emoji section stays"
+        );
+        app.pickers.media_panel.open = true;
+        app.pickers.media_panel.tab = PanelTab::Gifs;
+        // The chat window opens its GIF tab; the main window's stays open.
+        app.note_window_press(Some(OTHER));
+        app.pickers.media_panel.open = true;
+        app.pickers.media_panel.tab = PanelTab::Gifs;
+        app.gif_tab_upkeep(cx);
+        assert_eq!(
+            searching(app),
+            None,
+            "the chat window's tab shows its saved GIFs"
+        );
+        app.set_window_scope(None);
+        let kept = app.session().is_some_and(|s| {
+            matches!(
+                app.gif_shown(&s.stickers.gifs),
+                crate::ui::gifs_ui::GifShown::Found(_)
+            )
+        });
+        assert!(kept, "the main window shows its emoji section's GIFs");
+        app.gif_tab_upkeep(cx);
+        assert_eq!(searching(app), None, "and leaves the chat window's list");
+        // A press back in the main window asks for its emoji again.
+        app.note_window_press(None);
+        app.gif_tab_upkeep(cx);
+        assert_eq!(searching(app).as_deref(), Some(EMOJI));
+    });
+}
+
+/// Round 15 follow-up: a window whose GIF section was never answered
+/// asks for it on its first frame with the tab open, without a press, and
+/// only once; the window in use then takes the list back for paging and
+/// the other keeps showing its answer.
+#[gpui_kit::test]
+fn a_gif_tab_shows_its_section_without_a_press(cx: &mut TestAppContext) {
+    use crate::ui::gifs_ui::{GifShown, GifWanted};
+    use crate::ui::media_panel::PanelTab;
+    let h = new_app(cx);
+    let _chat_window = h.open_in_new_window(OTHER, cx);
+    h.app.update(cx, |app, cx| {
+        let searching = |app: &crate::ui::app::QuillApp| {
+            app.session().and_then(|s| {
+                let gifs = &s.stickers.gifs;
+                gifs.search_mode.then(|| gifs.search_query.clone())
+            })
+        };
+        let shown_found = |app: &crate::ui::app::QuillApp| {
+            app.session()
+                .is_some_and(|s| matches!(app.gif_shown(&s.stickers.gifs), GifShown::Found(_)))
+        };
+        // The main window searched "dogs" and is in use.
+        app.note_window_press(None);
+        app.pickers.media_panel.open = true;
+        app.pickers.media_panel.tab = PanelTab::Gifs;
+        app.pickers.gif_wanted = GifWanted::Search("dogs".into());
+        app.gif_tab_upkeep(cx);
+        assert_eq!(searching(app).as_deref(), Some("dogs"));
+        // The chat window's tab wants "cats", never answered.
+        app.set_window_scope(Some(OTHER));
+        app.pickers.media_panel.open = true;
+        app.pickers.media_panel.tab = PanelTab::Gifs;
+        app.pickers.gif_wanted = GifWanted::Search("cats".into());
+        app.gif_tab_upkeep(cx);
+        assert_eq!(
+            searching(app).as_deref(),
+            Some("cats"),
+            "it asks without a press"
+        );
+        // The main window in use takes the list back.
+        app.set_window_scope(None);
+        app.gif_tab_upkeep(cx);
+        assert_eq!(searching(app).as_deref(), Some("dogs"));
+        // The chat window shows its answer and does not ask again.
+        app.set_window_scope(Some(OTHER));
+        assert!(shown_found(app), "the chat window shows its cats");
+        app.gif_tab_upkeep(cx);
+        assert_eq!(searching(app).as_deref(), Some("dogs"));
+    });
+}
+
+/// Round 15 (area B, finding 4): work whose window is gone finds the
+/// window that shows its target now: the main window for its chat, a
+/// chat window for its own.
+#[gpui_kit::test]
+fn window_where_finds_the_window_showing_a_chat(cx: &mut TestAppContext) {
+    let h = new_app(cx);
+    let chat_window = h.open_in_new_window(OTHER, cx);
+    h.app.update(cx, |app, cx| {
+        let found = app.window_where(cx, |app| app.open_chat_id() == Some(OTHER));
+        assert_eq!(found, Some((Some(OTHER), chat_window)));
+        let found = app.window_where(cx, |app| app.open_chat_id() == Some(OPEN));
+        assert_eq!(found.map(|(scope, _)| scope), Some(None));
+        let found = app.window_where(cx, |app| app.open_chat_id() == Some(quill::ids::ChatId(-1)));
+        assert_eq!(found, None);
+        assert_eq!(app.windows.scope, None, "the scope in place is put back");
     });
 }
 
