@@ -2422,3 +2422,100 @@ Not done, or not tested:
 - The window close path is tested through `ChatWindowView::close`. The
   platform's close button and a chat that goes away use the same
   `closing(.., Some(window), ..)` path but have no test of their own.
+
+### Phase 13 (area C)
+
+Round 13 of the review, area C, on `claude/sm-review13-c`. The finding
+numbers are the review's ranked list. Area A took 7 (`wait_for_message`
+across the lock) and 13 (recent hashtags), and area B took 21 (the topic
+edit's window).
+
+- **The lock screen's Log out lifts the lock only when the wipe started
+  (1).** `begin_local_wipe` returns why it did not start, and
+  `confirm_lock_logout_in` keeps Quill locked with the reason on the lock
+  screen. This covers an unwritable record and a missing data folder.
+  Before, a read-only `accounts.json` unlocked Quill with no passcode typed.
+- **What runs while locked** is now a rule
+  (docs/decisions/lock-is-a-render-state.md, "What runs while locked"),
+  for 2–6, 8–12 and 16–18:
+  - **Pumps wait.** The main frame's upkeep returns on `lock_waits()` after
+    notification delivery, so `per_window_upkeep`, the sign-in sync, story
+    opens and the Grams and gift follow-ups wait with their state kept
+    (8, 11). The poll's drains moved to `notifications/poll_drains.rs`,
+    which runs only while unlocked: payment verification, callback and
+    login-URL answers, profile galleries, story stealth and the Earn drain
+    (2, 11). Parked plays wait too.
+  - **Opens are queued, not dropped (2).** Every `os_open.rs` open under the
+    lock is queued with `wait_for_unlock` and runs after the unlock. The
+    lock screen's Log out drops the queue.
+  - **Calls (4, 5, 18).** The lock closes the call windows' boxes and hides
+    the stream key (`calls::lock_layers`). Their openers, the RTMP copy and
+    revoke actions and the stream PiP refuse while locked. A background
+    account's ringing call shows on the lock screen with Answer and
+    Decline, and its OS notification keeps its buttons. Closing the stream
+    boxes or the stream window hides the key again.
+  - **Not looked at (6).** `app_active` is false while locked. The lock
+    clears `active_window_chats`, and a locked chat window does not set it
+    again, so the open chat notifies and sounds. Story playback and the
+    cover's video avatar stop.
+  - **Media controls (8).** Now Playing is cleared and media keys are
+    ignored while locked. The unlock publishes again.
+  - **Connections (10).** `start_connection` and a `LockedStore` refusal
+    under the lock defer to the unlock. `ensure_background_accounts`
+    starts nothing while locked and starts the accounts at the unlock.
+  - **Quit (9).** Under the lock, Quit stops the exports and quits instead
+    of opening a box nobody can see.
+  - **Kit close (12).** `close_kit_dialog_if_done` does nothing while
+    locked, and the video editor's encode continuation goes through it.
+  - **Passcode job (16).** A lock asked during a passcode job lands with
+    its answer (`lock_after_job`).
+  - **Full screen (17).** A chat window's locked frame runs
+    `viewer_follow_window_fullscreen`.
+- **The guard.** `lock_surfaces.py` check 4 lists every step that the main
+  frame upkeep and `poll_live` run outside the gate. Each such step needs a
+  `runs-locked` entry with a reason. A new one fails the check, and so does
+  a listed one that is gone. The locked frames must run no upkeep.
+  `scripts/test_lock_surfaces.py` tests the check.
+- **A request or update acts for its owner (14, 19).**
+  - A failed quick reply message load is marked failed (`messages_failed`)
+    instead of un-requested, so the poll stops rather than re-sending every
+    tick. Opening the box clears the error line and retries once, and an
+    `ok` clears the line too. The dialog owns its poll task
+    (`QuickRepliesDialog::watch`), so a submit cannot stack a second loop,
+    and closing the box ends the poll.
+  - A call declined as busy is remembered (`busy_declined_calls`), and its
+    later `updateCall`s are dropped, the terminal one included. The call
+    window no longer shows that caller's "Call ended".
+- **The sticker set box is claimed in one place (15).**
+  `claim_sticker_set_box` handles viewing a set and "Attached Stickers".
+  It closes the box in the other windows, and every window's photo or video
+  editor for another set.
+- **A window's state is cleaned when it goes (20, 22, 23, 24).**
+  - A track whose chat was deleted stops, and every stop clears
+    `playback.player.chat`.
+  - The checkout prefill runs in `per_window_upkeep`, in the window that
+    hosts the box.
+  - A closed chat window drops its GIF autoplay marks.
+  - Leaving Privacy closes the "Last seen" warning.
+- **Tests.**
+  - `passcode/lock_waits_tests.rs`: a link and a Grams withdrawal wait and
+    then open; Log out drops the queue; a locked window is not looked at; a
+    lock during a job; the call boxes; the deferred connection.
+  - `deleting_tests` `a_lock_screen_log_out_that_cannot_start_the_wipe_stays_locked`.
+  - `background_accounts::tests`
+    `a_call_on_another_account_can_be_answered_from_the_lock_screen`.
+  - `export_quit` `a_quit_from_the_lock_screen_stops_the_export_and_quits`.
+  - `notify_call` `a_locked_app_hides_the_caller_and_keeps_the_call_answerable`.
+  - The tests for 14 to 24 are in `connect/tests/quick_replies.rs`,
+    `ui/quick_replies/tests.rs`, `state/conference_invite_tests.rs`,
+    `chat_window/player_box_tests.rs` and `privacy/premium_rows_tests.rs`.
+- **Not done, or not tested.**
+  - With no live client, nothing tests the poll's drains, the
+    `app_active` change in `poll_live` or the background start deferral.
+  - The full-screen hand-back and the stream PiP refusal are untested.
+  - The 1:1 device menu stays usable under the lock.
+  - Finding 10's sibling, an export box closed without its `on_close`,
+    was not confirmed and is not fixed.
+  - A deleted chat's history is trimmed to its closed tail, not
+    forgotten (`chat_is_gone` needs the chat entry).
+  - The video editor branch of 15 has no test.

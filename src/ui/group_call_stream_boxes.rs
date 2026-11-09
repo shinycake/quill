@@ -52,6 +52,11 @@ pub(crate) enum StreamOverlay {
 
 impl QuillApp {
     pub(super) fn open_stream_overlay(&mut self, overlay: StreamOverlay, cx: &mut Context<Self>) {
+        // A box over the call window waits for no one under the lock
+        // (`calls::lock_layers`).
+        if self.refused_while_locked() {
+            return;
+        }
         self.group_call.stream.overlay = Some(overlay);
         if overlay == StreamOverlay::Speakers
             && let Some(live) = self.live.as_mut()
@@ -63,6 +68,8 @@ impl QuillApp {
 
     pub(super) fn close_stream_overlay(&mut self, cx: &mut Context<Self>) {
         self.group_call.stream.overlay = None;
+        // The key shows again only after the warning.
+        self.group_call.stream.key_shown = false;
         cx.notify();
     }
 

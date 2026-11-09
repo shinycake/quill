@@ -245,6 +245,13 @@ impl QuillApp {
                 self.close_later(client.key, live, false, cx);
             }
         }
+        // Under the lock the master key is cleared: a start would fail on
+        // it and never be retried. The unlock starts them
+        // (`resume_after_unlock`).
+        if self.refused_while_locked() && !self.account.passcode.demo {
+            self.spawn_background_poll(cx);
+            return;
+        }
         for record in accounts {
             let key = record.key;
             // A client still closing keeps its database until Closed; the
@@ -307,6 +314,13 @@ impl QuillApp {
                         || active_account(&root) == key
                         || this.background.client(&key).is_some()
                         || this.background.closing.may_be_open(&key)
+                    {
+                        return;
+                    }
+                    // Prepared before a lock that cleared the key: it
+                    // starts again at the unlock, not as a failed account.
+                    if matches!(prepared, Err(ConnectBlocker::LockedStore))
+                        && this.refused_while_locked()
                     {
                         return;
                     }

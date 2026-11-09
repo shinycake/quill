@@ -497,7 +497,7 @@ impl QuillApp {
                     Ok(output) if current => {
                         this.apply_video_edit(output, source, edits, info, cx);
                         this.close_video_editor(cx);
-                        window.close_dialog(cx);
+                        this.close_kit_dialog_if_done(DialogKind::VideoEditor, window, cx);
                     }
                     Ok(output) => {
                         let _ = std::fs::remove_file(output);

@@ -100,11 +100,80 @@ between windows under the lock. A box asked for while locked opens after the unl
   - `switch_account` refuses while locked. A notification click from another account only shows the window,
     and the Dock's account items are hidden and refused when stale. A ringing call's Answer still switches
     (`switch_account_even_locked`), because calls stay usable.
-  - Every OS open goes through `ui/os_open.rs` and refuses while locked.
+  - Every OS open goes through `ui/os_open.rs`. While locked it waits for the unlock as a queued intent
+    (`wait_for_unlock`), see "What runs while locked" below.
   - Links wait for the unlock, and recordings, the camera, mini apps and the OS window menu are refused.
 - `close_for_lock` stops what keeps running without being drawn: recordings, viewers and their
   Picture-in-Picture, the mini app, notification windows, the device-linking scanner, the profile photo camera
   (`close_cameras_for_lock`, whose `CameraDraft` drop kills ffmpeg), and both key captures.
+
+### What runs while locked
+
+Round 13 of the review (area C) found that drawing was only half of it. The main window's frame upkeep and
+the poll pass ran every frame while locked, so late answers opened viewers, submitted a login code, dropped
+links and closed a checkout with no bank page behind the lock. Background work also kept treating a locked,
+focused window as "the user is here". The rule that replaced those patches:
+
+1. **Ingest, timers, delivery and teardown run as always.** Updates are applied, notifications go out (with
+   the sender hidden), sounds play, exports keep running, and things whose subject went away close.
+2. **Work that comes from the user or from a late answer and would show or start something waits for the
+   unlock, or is refused.** Nothing is dropped without a word.
+   - A pump that drains stored state waits by not running. Its state stays where it landed and is drained
+     at the first frame or pass after the unlock. `QuillApp::lock_waits()` is that gate. The main frame's
+     upkeep returns on it right after notification delivery (`app_render/frame_upkeep.rs`), which also
+     skips the main window's `per_window_upkeep`, as a chat window's locked frame always did. The poll's
+     drains moved into `notifications/poll_drains.rs`, which `poll_live` runs only while unlocked. A parked
+     voice note or song (`resume_play_intent`) waits too.
+   - A starter reached outside those pumps queues itself (`passcode::UnlockIntents`, `wait_for_unlock`) and
+     runs again after the unlock, asking every gate a second time. Every open in `os_open.rs` does this,
+     so a 3-D Secure page, an Earn or Grams withdrawal, a gift's Fragment page or a bot's URL opens after
+     the unlock. The lock screen's Log out drops the queue, since it was for the wiped accounts.
+   - A box or secret over a call window, Picture-in-Picture and a kit dialog close are refused (below).
+3. **Calls follow tdesktop's per-layer rule** (`Application::lockByPasscode` calls
+   `Calls::Instance::hidePanelLayers`; `Panel::addPeople` and the share link actions ask for the passcode
+   first). The call windows stay drawn and answerable. At the lock their boxes close (Add People, rename,
+   Settings, the screen privacy box, the stream window's boxes) and the stream key is hidden again
+   (`calls::lock_layers`). While locked their openers refuse, the stream URL and key are not drawn, and
+   Add People is not offered. A call ringing on another account shows on the main window's lock screen
+   with Answer and Decline (`background_ring_lock_card`), and its OS notification keeps its buttons while
+   locked, with the caller hidden. tdesktop's call panel shows for any account under the lock.
+4. **A locked Quill is not looked at.** `session.app_active` is false while locked, whichever window has
+   the focus, and the lock clears `active_window_chats`. A chat window's locked frame does not mark its
+   chat active again. So the open chat's messages notify and sound, as in tdesktop, whose `markingAsRead`
+   needs the main widget shown. The story viewer and the info cover's video avatar do not play, and the
+   background accounts' sessions get the same `app_active`.
+5. **The OS media controls go off.** `publish_now_playing` clears Now Playing while locked and the media
+   keys do nothing (`drain_media_commands`). The unlock publishes again. tdesktop disables its system
+   media controls on lock (`system_media_controls_manager.cpp`) and keeps the audio playing.
+6. **Nothing connects on the cleared key.** The lock clears the master key, so a preparation fails with
+   `LockedStore`. A connection asked while locked (`start_connection`, for example after a remote log
+   out) waits for the unlock (`connect_waits_for_unlock`, `deferred_connect`), and one prepared before
+   the lock that lands refused by it waits too. Background accounts start at the unlock, not as failed
+   entries that nothing retries.
+7. **Quit from the lock screen quits safely.** The "Stop and quit?" box would be a box of a locked window,
+   never drawn, holding every later Quit and the OS shutdown. Under the lock, Quit stops the exports, as
+   that box's Stop does, and the quit's teardown waits for them to end (`close_all_for_quit`).
+8. **Passcode jobs and kit closes.** A lock asked while a passcode job runs lands with the job's answer
+   (`lock_after_job`). So a Turn off cannot finish under a lock that then has no passcode to lift it.
+   `close_kit_dialog_if_done` closes nothing while locked, because every flag reads closed then and the
+   window's top box would close under a flag still set. The shell's sync after the unlock closes what is
+   done.
+9. **The lock screen's Log out lifts the lock only when the wipe started.** With no data folder, or when
+   the deletion record cannot be written, the data and the passcode stay. Quill stays locked and the lock
+   screen says why (`confirm_lock_logout_in`).
+10. **Agents.** Area A of the same round handles the agent socket across the lock: `agent::access::LOCKS`
+    counts locks, `wait_for` wakes on a lock and returns nothing, and `call_on` withholds a result when
+    Quill locked during the call.
+
+**The guard.** `scripts/lock_surfaces.py` (check 4) reads the bodies of the main frame upkeep and of
+`poll_live`. Each must test `lock_waits()` in a condition, and every `self.method(` call outside the gated
+part must be listed in `scripts/lock-surfaces.txt` as `path::fn -> method | runs-locked | reason`. A new
+step added there that would show or start something fails the check until it goes behind the gate or is
+listed with why it may run, and a listed step that is gone fails too. The locked frames (`locked_root`,
+`render_locked`) must not run any upkeep. `refuses` entries pin the new gates (the call window openers, the
+stream PiP, the kit close, the export quit, the media session and the connection deferral).
+`scripts/test_lock_surfaces.py` tests the check itself. The check reads one level only: what a
+`runs-locked` step calls in turn is read in review.
 
 ### The agent socket
 
@@ -136,10 +205,24 @@ even in a comment.
   - an armed push-to-talk or shortcut capture is disarmed, and a key typed while locked binds nothing.
 - `agent::access` `a_locked_quill_answers_no_tool_and_no_resource`.
 - `chat_window::dialog_host_tests::a_chat_windows_box_stays_there_through_a_lock`.
+- Round 13, what runs while locked: `passcode::lock_waits_tests` (a late link and a Grams withdrawal open
+  after the unlock, Log out drops what waited, a locked window is not looked at, a lock during a passcode
+  job, the call windows' boxes, the deferred connection), `deleting_tests`
+  `a_lock_screen_log_out_that_cannot_start_the_wipe_stays_locked`, `background_accounts::tests`
+  `a_call_on_another_account_can_be_answered_from_the_lock_screen`, `export_quit`
+  `a_quit_from_the_lock_screen_stops_the_export_and_quits`, and `scripts/test_lock_surfaces.py`.
 - The existing `chat_window::lock_tests` still pass, `locking_with_a_chat_window_open_lets_both_windows_go_idle`
   among them.
 
 ## What is left
+
+- Round 13: the poll's drains, the app-active change in `poll_live` and the background start deferral have
+  no test that drives them, because the demo has no TDLib client. The guard covers their placement, and the
+  tests drive the same gates through the frame upkeep, the OS opens and `start_connection`.
+- Round 13: the chat window's full-screen hand-back under the lock (`viewer_follow_window_fullscreen` in
+  `render_locked`) and the stream PiP refusal have no tests: the test platform has no full screen and no
+  stream player.
+- The 1:1 call window's device menu stays usable under the lock. It lists audio devices, not the account.
 
 - The profile camera's close on lock has no test: starting the camera needs ffmpeg and a device.
 - The notification-click and Dock refusals are tested only by reading. The demo has no second signed-in

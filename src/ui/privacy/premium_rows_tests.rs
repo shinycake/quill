@@ -183,6 +183,28 @@ fn a_free_account_confirms_hiding_last_seen_once(cx: &mut TestAppContext) {
     assert_ne!(dialog(&shell, vcx), Some(DialogKind::LastSeenWarning));
 }
 
+/// Leaving Settings (a notification click, a link) while the warning is up
+/// closes it, so it does not float over the chat and save the rule there.
+#[gpui_kit::test]
+fn leaving_settings_closes_the_last_seen_warning(cx: &mut TestAppContext) {
+    let (app, shell, mut vcx) = new_app(cx, false);
+    let vcx = &mut vcx;
+    let key = PrivacySettingKey::ShowStatus;
+    open_editor(&app, vcx, key);
+    show_last_seen_to_everybody(&app, vcx);
+    choose(&app, vcx, key, PrivacyWho::Nobody);
+    assert_eq!(dialog(&shell, vcx), Some(DialogKind::LastSeenWarning));
+    app.update(vcx, |app, cx| {
+        app.settings.page = Some(quill::settings_catalog::Page::Privacy);
+        app.close_settings();
+        cx.notify();
+    });
+    frames(vcx);
+    assert!(app.read_with(vcx, |app, _| app.privacy.last_seen_warning.is_none()));
+    assert_ne!(dialog(&shell, vcx), Some(DialogKind::LastSeenWarning));
+    assert_eq!(rule_who(&app, vcx, key), Some(PrivacyWho::Everybody));
+}
+
 #[gpui_kit::test]
 fn voice_messages_offer_premium_to_a_free_account(cx: &mut TestAppContext) {
     let (app, _shell, mut vcx) = new_app(cx, false);

@@ -9,6 +9,7 @@
 use super::*;
 use crate::ui::shell::{DialogKind, QuillShell};
 use crate::ui::status_note::StatusNote;
+use gpui_kit::component::ActiveTheme as _;
 use gpui_kit::component::button::*;
 use gpui_kit::component::dialog::Dialog;
 use quill::lang::{keys, tr, tr_with};
@@ -144,10 +145,11 @@ impl QuillApp {
     }
 
     /// The OS notification for the ringing call, once, when no Quill window
-    /// is in front (the prompt shows otherwise).
+    /// is in front (the prompt shows otherwise). A locked Quill counts as
+    /// not looked at: only the main window's lock screen shows the call.
     fn notify_background_ring(&mut self, cx: &mut Context<Self>) {
-        let app_active = cx.active_window().is_some();
         let locked = self.account.passcode.is_locked();
+        let app_active = cx.active_window().is_some() && !locked;
         let Some(ring) = self.background.ringing.as_mut() else {
             return;
         };
@@ -264,6 +266,96 @@ impl QuillApp {
         }
     }
 
+    /// The prompt's title and line: the kind of call, and who calls which
+    /// account.
+    fn background_ring_text(&self) -> Option<(String, String)> {
+        let ring = self.background.ringing.as_ref()?;
+        let kind = if ring.is_video {
+            tr(keys::Q_OPS_INCOMING_VIDEO_CALL)
+        } else {
+            tr(keys::Q_OPS_INCOMING_VOICE_CALL)
+        };
+        Some((
+            kind.to_string(),
+            tr_with(
+                keys::Q_OPS_IS_CALLING_2,
+                &[
+                    ("caller", &ring.caller.to_string()),
+                    ("account_name", &ring.account_name.to_string()),
+                ],
+            ),
+        ))
+    }
+
+    /// The ringing background call on the main window's lock screen. Calls
+    /// stay answerable under the lock, as tdesktop's call panel shows for
+    /// any account while locked; the kit prompt is a box of the locked
+    /// window, so it is not drawn. Answer switches to the call's account
+    /// behind the lock (`switch_account_even_locked`), whose call window
+    /// then takes the call.
+    pub(in crate::ui) fn background_ring_lock_card(
+        &self,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        if !self.background_ring_audible() {
+            return None;
+        }
+        let (title, body) = self.background_ring_text()?;
+        let theme = cx.theme();
+        Some(
+            div()
+                .id("lock-background-call")
+                .absolute()
+                .top(px(48.))
+                .left_0()
+                .right_0()
+                .flex()
+                .justify_center()
+                .child(
+                    div()
+                        .w(px(360.))
+                        .p_3()
+                        .gap_2()
+                        .flex()
+                        .flex_col()
+                        .rounded_md()
+                        .border_1()
+                        .border_color(theme.border)
+                        .bg(theme.popover)
+                        .child(
+                            div()
+                                .text_sm()
+                                .font_weight(FontWeight::SEMIBOLD)
+                                .child(title),
+                        )
+                        .child(div().text_sm().child(body))
+                        .child(
+                            div()
+                                .flex()
+                                .justify_end()
+                                .gap_2()
+                                .child(
+                                    Button::new("lock-background-call-decline")
+                                        .label(tr(keys::CALL_DECLINE))
+                                        .danger()
+                                        .on_click(cx.listener(|this, _, _, cx| {
+                                            this.decline_background_call(cx);
+                                        })),
+                                )
+                                .child(
+                                    Button::new("lock-background-call-answer")
+                                        .label(tr(keys::Q_OPS_ANSWER))
+                                        .primary()
+                                        .on_click(cx.listener(|this, _, window, cx| {
+                                            this.answer_background_call(window, cx);
+                                        })),
+                                ),
+                        ),
+                )
+                .into_any_element(),
+        )
+    }
+
     /// The incoming-call prompt for a background account.
     fn build_background_call_dialog(
         app: &Entity<QuillApp>,
@@ -279,28 +371,7 @@ impl QuillApp {
                 cx.notify();
             });
         app.update(cx, |this, cx| {
-            let (title, body) = this
-                .background
-                .ringing
-                .as_ref()
-                .map(|ring| {
-                    let kind = if ring.is_video {
-                        tr(keys::Q_OPS_INCOMING_VIDEO_CALL)
-                    } else {
-                        tr(keys::Q_OPS_INCOMING_VOICE_CALL)
-                    };
-                    (
-                        kind.to_string(),
-                        tr_with(
-                            keys::Q_OPS_IS_CALLING_2,
-                            &[
-                                ("caller", &ring.caller.to_string()),
-                                ("account_name", &ring.account_name.to_string()),
-                            ],
-                        ),
-                    )
-                })
-                .unwrap_or_default();
+            let (title, body) = this.background_ring_text().unwrap_or_default();
             let footer = div()
                 .flex()
                 .justify_end()

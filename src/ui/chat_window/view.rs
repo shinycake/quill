@@ -344,8 +344,14 @@ impl ChatWindowView {
             self.title_shown = title;
         }
         let body = app.update(cx, |app, cx| {
+            // A locked window is not looked at, focused or not: its chat
+            // notifies and sounds (`shown_in_active_window`).
+            app.set_window_chat_active(chat_id, false);
             let outer = app.windows.scope;
             app.set_window_scope(Some(chat_id));
+            // The viewer the lock closed gives the window back its full
+            // screen Space here too, before its deadline passes unseen.
+            app.viewer_follow_window_fullscreen(window);
             let body = app.chat_window_body(chat_id, window, cx);
             app.set_window_scope(outer);
             body

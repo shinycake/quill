@@ -913,6 +913,7 @@ pub(super) mod live_pip;
 #[cfg(feature = "demo-capture")]
 mod live_pip_demo;
 mod live_pip_follow;
+mod lock_layers;
 #[cfg(test)]
 #[cfg(feature = "demo-capture")]
 mod rating_owner_tests;

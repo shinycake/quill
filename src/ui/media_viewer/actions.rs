@@ -658,7 +658,8 @@ impl QuillApp {
         else {
             return;
         };
-        self.message_ui.menu_ui.sticker_set_open = true;
+        // The set is not known yet; the box is this window's alone.
+        self.claim_sticker_set_box(None, cx);
         if let Some(live) = self.live.as_mut()
             && live.driver.fetch_attached_sticker_sets(file_id).is_err()
         {

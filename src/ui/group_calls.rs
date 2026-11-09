@@ -602,6 +602,11 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // A box over the call window waits for no one under the lock
+        // (`calls::lock_layers`).
+        if self.refused_while_locked() {
+            return;
+        }
         let current = self
             .session()
             .and_then(|s| s.calls.active_group_call.as_ref())
@@ -749,6 +754,11 @@ impl QuillApp {
     /// Phase C2h: `replaceVideoChatRtmpUrl` — regenerate URL + key
     /// (owner only).
     pub(super) fn replace_video_chat_rtmp_url(&mut self, cx: &mut Context<Self>) {
+        // A box over the call window waits for no one under the lock
+        // (`calls::lock_layers`).
+        if self.refused_while_locked() {
+            return;
+        }
         if let Some(live) = self.live.as_mut() {
             self.screen
                 .connection
@@ -765,6 +775,11 @@ impl QuillApp {
 
     /// Phase C2h: copy the RTMP URL or stream key.
     pub(super) fn copy_rtmp_value(&mut self, label: &str, value: &str, cx: &mut Context<Self>) {
+        // A box over the call window waits for no one under the lock
+        // (`calls::lock_layers`).
+        if self.refused_while_locked() {
+            return;
+        }
         cx.write_to_clipboard(ClipboardItem::new_string(value.to_string()));
         self.connection.set_note(StatusNote::info(tr_with(
             keys::Q_NOTES_VALUE_COPIED,

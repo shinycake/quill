@@ -576,13 +576,19 @@ impl QuillApp {
     /// run `on_close`, so the action itself clears the app-side open flag
     /// first; this closes the kit dialog only when the flag is actually
     /// cleared — validation failures and non-closing actions keep the
-    /// dialog open.
+    /// dialog open. While locked nothing closes here: every flag reads
+    /// closed then, so the window's top box would close under a flag still
+    /// set, and the shell, which does not sync under the lock, would never
+    /// rebuild it. Its sync after the unlock closes what is done.
     pub(crate) fn close_kit_dialog_if_done(
         &self,
         kind: DialogKind,
         window: &mut Window,
         cx: &mut App,
     ) {
+        if self.refused_while_locked() {
+            return;
+        }
         if !QuillShell::dialog_is_open(self, kind) {
             window.close_dialog(cx);
         }

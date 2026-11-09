@@ -1,6 +1,7 @@
 //! Per-frame upkeep that `render` runs before building the window: things
 //! that need `&mut Window` (inputs, notifications, deep links, story and
-//! payment follow-ups) or keep timers ticking.
+//! payment follow-ups) or keep timers ticking. Only notification delivery
+//! runs while Quill is locked.
 
 use super::*;
 use crate::ui::status_note::StatusNote;
@@ -14,6 +15,15 @@ impl QuillApp {
         // main-only: notification clicks, other accounts and delivery are the
         // app's; a chat they open goes through the router (`route_chat_open`).
         self.flush_notifications(window, cx);
+        // Locked: the steps below turn stored requests and answers into
+        // something shown or started (a box, a viewer, a sign-in, a page).
+        // Their state waits for the first frame after the unlock, as a
+        // chat window's locked frame runs none of them either
+        // (docs/decisions/lock-is-a-render-state.md, "What runs while
+        // locked"; `scripts/lock_surfaces.py` checks this order).
+        if self.lock_waits() {
+            return;
+        }
         // What every window's frame runs, here with the main window's
         // state in place (`window_upkeep`).
         self.per_window_upkeep(window, cx);
@@ -32,16 +42,6 @@ impl QuillApp {
         self.rtmp_start_frame_upkeep(window, cx);
         // Starting a video chat: the "join as" list, a refused create.
         self.group_call_create_frame_upkeep(window, cx);
-        // Slice P1 fix-up: the checkout dialog opens on Buy press before
-        // the form arrives — prefill the saved order info once, on the
-        // first frame after the form answer lands. (This can't live in
-        // `poll_live`: prefill needs a `&mut Window` for the inputs.)
-        if self.payments.dialog.as_ref().is_some_and(|d| !d.prefilled) {
-            let payment_form = self.session().and_then(|s| s.payments.form.clone());
-            if let (Some(dialog), Some(form)) = (self.payments.dialog.as_mut(), payment_form) {
-                dialog.prefill_from_form(&form, window, cx);
-            }
-        }
         // main-only: the AI compose box carries the window it was opened in.
         self.ai_compose_frame_upkeep(window, cx);
         self.premium_limit_toast_upkeep(window, cx);

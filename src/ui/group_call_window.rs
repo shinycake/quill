@@ -171,6 +171,7 @@ impl QuillApp {
                                 .map(|c| c.id);
                             app.group_call_screen.stream_join = None;
                             app.group_call.stream.overlay = None;
+                            app.group_call.stream.key_shown = false;
                             app.sync_group_call_large_tile();
                             cx.notify();
                         });

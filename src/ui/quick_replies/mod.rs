@@ -15,6 +15,7 @@ use gpui_kit::*;
 use quill::ids::ChatId;
 use quill::lang::{keys, tr};
 use quill::quick_replies::{self as qr, NAME_TAKEN_LINE};
+use std::rc::Rc;
 use std::time::Duration;
 
 /// Which screen of the dialog is showing.
@@ -42,6 +43,9 @@ pub(super) struct QuickRepliesDialog {
     pub(super) editing: Option<i64>,
     pub(super) confirm_delete: bool,
     pub(super) local_error: Option<String>,
+    /// The poll for the open shortcut's id and messages, at most one.
+    /// Closing the box drops it, which ends the poll.
+    pub(super) watch: Option<Rc<Task<()>>>,
 }
 
 impl QuillApp {
@@ -64,8 +68,14 @@ impl QuillApp {
             editing: None,
             confirm_delete: false,
             local_error: None,
+            watch: None,
         });
         self.open_box(crate::ui::shell::DialogKind::QuickReplies);
+        // A new look: the last refusal's line goes, and a shortcut whose
+        // load failed is asked for once more.
+        if let Some(session) = self.session_mut() {
+            session.settings.quick_replies.reopen();
+        }
         if let Some(live) = self.live.as_mut() {
             let _ = live.driver.ensure_quick_reply_shortcuts();
         }
@@ -154,32 +164,50 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut() {
             let _ = live.driver.ensure_quick_reply_messages(shortcut_id);
         }
-        let loaded = self
+        // A failed load is settled too: the poll stops, and the next open
+        // of the box asks again.
+        let settled = self
             .session()
-            .is_some_and(|s| s.settings.quick_replies.messages.contains_key(&shortcut_id));
+            .is_some_and(|s| s.settings.quick_replies.messages_settled(shortcut_id));
         cx.notify();
-        loaded || self.live.is_none()
+        settled || self.live.is_none()
     }
 
     /// Poll for the id and the messages of a shortcut the server is about to
     /// report (the updates arrive on the poll, not as an answer), until both
-    /// are in or the shortcut's screen goes. A cap left a late id unset, so
-    /// the shortcut's messages never listed.
+    /// are in, the load fails, or the box closes. A cap left a late id
+    /// unset, so the shortcut's messages never listed. One poll runs at a
+    /// time; a submit while it runs leaves it to pick up the new state.
     pub(super) fn quick_replies_watch(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.spawn_screen_in(window, cx, async move |this, cx| {
+        if self
+            .dialogs
+            .quick_replies_dialog
+            .as_ref()
+            .is_none_or(|dialog| dialog.watch.is_some())
+        {
+            return;
+        }
+        let task = self.spawn_screen_in(window, cx, async move |this, cx| {
             loop {
                 cx.background_executor()
                     .timer(Duration::from_millis(200))
                     .await;
                 let Ok(done) = this.update(cx, |this, cx| this.quick_replies_pump(cx)) else {
-                    break;
+                    return;
                 };
                 if done {
                     break;
                 }
             }
-        })
-        .detach();
+            let _ = this.update(cx, |this, _| {
+                if let Some(dialog) = this.quick_replies_mut() {
+                    dialog.watch = None;
+                }
+            });
+        });
+        if let Some(dialog) = self.quick_replies_mut() {
+            dialog.watch = Some(Rc::new(task));
+        }
     }
 
     /// Save of the name field: a new shortcut or a rename.

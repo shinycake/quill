@@ -209,21 +209,25 @@ impl QuillApp {
     /// The lock-screen log out: close every client and delete every
     /// account's local data once they have closed, then connect afresh.
     /// The passcode goes at once, and the folders are recorded first, so a
-    /// quit before the clients have closed still logs out.
-    pub(in crate::ui) fn begin_local_wipe(&mut self, root: PathBuf, cx: &mut Context<Self>) {
+    /// quit before the clients have closed still logs out. `Err` says why
+    /// nothing started: the data and the passcode both stay, so the caller
+    /// must keep Quill locked.
+    pub(in crate::ui) fn begin_local_wipe(
+        &mut self,
+        root: PathBuf,
+        cx: &mut Context<Self>,
+    ) -> Result<(), String> {
         if self.background.wiping {
-            return;
+            return Ok(());
         }
         let accounts: Vec<AccountKey> = list_accounts(&root).into_iter().map(|r| r.key).collect();
         if let Err(e) = mark_for_deletion(&root, &accounts) {
             // Without the record, a quit before the clients close would
             // keep the data but lose the passcode: keep both.
-            self.connection.set_note(StatusNote::error(tr_with(
-                keys::Q_REST_COULD_NOT_LOG_OUT_E,
-                &[("e", &e.to_string())],
-            )));
+            let message = tr_with(keys::Q_REST_COULD_NOT_LOG_OUT_E, &[("e", &e.to_string())]);
+            self.connection.set_note(StatusNote::error(message.clone()));
             cx.notify();
-            return;
+            return Err(message);
         }
         quill::passcode::forget_passcode(&root, &quill::passcode::global_unlock());
         self.background.wiping = true;
@@ -250,6 +254,7 @@ impl QuillApp {
             },
             cx,
         );
+        Ok(())
     }
 
     /// Delete `keys`' folders (already recorded in `accounts.json`) once

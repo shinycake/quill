@@ -54,7 +54,8 @@ impl QuillApp {
             }))
             .on_action(|_: &ZoomWindow, window, _| window.zoom_window())
             .on_action(|_: &ToggleFullscreen, window, _| window.toggle_fullscreen())
-            .child(self.lock_overlay(cx));
+            .child(self.lock_overlay(cx))
+            .children(self.background_ring_lock_card(cx));
         self.set_window_scope(outer_scope);
         WindowScope::new(cx.weak_entity(), None, root.into_any_element())
     }

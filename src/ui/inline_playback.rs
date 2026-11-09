@@ -122,8 +122,9 @@ impl QuillApp {
         }
     }
 
-    /// The window `chat` closed: a GIF its row played stops, and its clip
-    /// goes. Left marked, it would block autoplay in the other windows.
+    /// The window `chat` closed: a GIF its row played stops, its clip
+    /// goes, and the chat's autoplay marks go, so its GIFs autoplay when
+    /// it opens in another window (left marked, they would not).
     pub(in crate::ui) fn stop_gif_of_window(&mut self, chat: ChatId) {
         if self
             .playback
@@ -132,6 +133,7 @@ impl QuillApp {
         {
             self.stop_animation_playback();
         }
+        self.playback.autoplayed_gifs.retain(|gif| gif.chat != chat);
     }
 
     pub(super) fn stop_animation_playback(&mut self) {

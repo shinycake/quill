@@ -374,10 +374,11 @@ impl QuillApp {
     }
 
     /// After updates land: the track's message was deleted (a tombstone:
-    /// deleted by anyone, a cleared history, a deleted chat), so the track
-    /// stops and the bar goes, as tdesktop stops on `itemRemoved`. A
-    /// message only paged out of the loaded history plays on, and so does
-    /// a profile's saved track, which is no message.
+    /// deleted by anyone, a cleared history, a deleted chat), or its chat
+    /// is gone (`deleteChat` removes the chat with no message update), so
+    /// the track stops and the bar goes, as tdesktop stops on
+    /// `itemRemoved`. A message only paged out of the loaded history plays
+    /// on, and so does a profile's saved track, which is no message.
     pub(in crate::ui) fn check_playing_track(&mut self, cx: &mut Context<Self>) {
         let Some(key) = self.active_playback_key() else {
             return;
@@ -385,18 +386,27 @@ impl QuillApp {
         if self.playing_saved_track() {
             return;
         }
-        let deleted = self
-            .session()
-            .and_then(|session| session.histories.get(&key.chat.0))
-            .is_some_and(|history| history.is_tombstone(key.message));
+        let deleted = self.session().is_some_and(|session| {
+            !session.chats.contains_key(&key.chat.0)
+                || session
+                    .histories
+                    .get(&key.chat.0)
+                    .is_some_and(|history| history.is_tombstone(key.message))
+        });
         if deleted {
             self.close_player(cx);
         }
     }
 
     /// Apply what the OS asked for (media keys, the Now Playing widget).
+    /// While locked the OS controls are off, as tdesktop turns its system
+    /// media controls off under the lock: a key pressed then does nothing.
     pub(super) fn drain_media_commands(&mut self, cx: &mut Context<Self>) {
-        for command in media_session::take_commands() {
+        let commands = media_session::take_commands();
+        if self.refused_while_locked() {
+            return;
+        }
+        for command in commands {
             let playing = self.is_playing();
             match command {
                 Command::Play if !playing => self.toggle_active_playback(cx),
@@ -412,7 +422,13 @@ impl QuillApp {
     }
 
     /// Tell the OS what is playing (cheap: deduplicated downstream).
+    /// Nothing while locked: Now Playing would name the sender or the song
+    /// over the lock. The unlock publishes again (`resume_after_unlock`).
     pub(super) fn publish_now_playing(&mut self) {
+        if self.refused_while_locked() {
+            media_session::publish(None);
+            return;
+        }
         let (Some(id), Some(duration), Some(position)) = (
             self.active_playback_id(),
             self.playback.track_duration(),

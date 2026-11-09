@@ -204,7 +204,7 @@ fn the_lock_screen_log_out_wipes_only_after_every_client_closed(cx: &mut TestApp
         app.background
             .closing
             .push(account(1), background.boxed(), true);
-        app.begin_local_wipe(root.clone(), cx);
+        app.begin_local_wipe(root.clone(), cx).unwrap();
         assert!(app.background.wiping);
         // Nothing connects while the data is being wiped.
         let generation = app.connect.generation;
@@ -264,7 +264,7 @@ fn a_quit_before_the_clients_closed_still_removes_and_logs_out_on_the_next_start
         app.background
             .closing
             .push(AccountKey::primary(), screen.boxed(), false);
-        app.begin_local_wipe(root.clone(), cx);
+        app.begin_local_wipe(root.clone(), cx).unwrap();
         // Quit: neither answers within the shared deadline.
         let started = Instant::now();
         app.close_all_for_quit(started + Duration::from_millis(100));
@@ -354,7 +354,7 @@ fn a_log_out_that_cannot_be_recorded_keeps_the_passcode_and_says_why(cx: &mut Te
     std::fs::remove_file(&record).unwrap();
     std::fs::create_dir_all(record.join("held")).unwrap();
     app.update_in(&mut vcx, |app, _, cx| {
-        app.begin_local_wipe(root.clone(), cx);
+        assert!(app.begin_local_wipe(root.clone(), cx).is_err());
     });
     assert!(config.exists(), "the passcode stays");
     assert!(folder(&root, &AccountKey::primary()));
@@ -382,7 +382,7 @@ fn an_unconfirmed_log_out_tells_the_user_to_restart_quill(cx: &mut TestAppContex
         app.background
             .closing
             .push(AccountKey::primary(), Fake::default().boxed(), false);
-        app.begin_local_wipe(root.clone(), cx);
+        app.begin_local_wipe(root.clone(), cx).unwrap();
         app.close_all_for_quit(started + Duration::from_millis(100));
     });
     run_for(&mut vcx, 100);
@@ -421,5 +421,40 @@ fn a_removed_account_takes_its_composer_choices_with_it(cx: &mut TestAppContext)
             "other accounts keep theirs"
         );
     });
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// Round 13 C finding 1: the lock screen's Log out lifts the lock only when
+/// the wipe started. With the record unwritable nothing is wiped, so Quill
+/// stays locked with its passcode, and the lock screen says why.
+#[gpui_kit::test]
+fn a_lock_screen_log_out_that_cannot_start_the_wipe_stays_locked(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let root = temp_root();
+    isolate(&app, &mut vcx, &root, &[]);
+    let config = quill::passcode::config_path(&root);
+    std::fs::write(&config, b"{}").unwrap();
+    let record = root.join("accounts.json");
+    std::fs::remove_file(&record).unwrap();
+    std::fs::create_dir_all(record.join("held")).unwrap();
+    app.update_in(&mut vcx, |app, window, cx| {
+        app.account.passcode.enabled = true;
+        app.lock_by_passcode(cx);
+        app.account.passcode.logout_confirm = true;
+        app.confirm_lock_logout_in(Some(root.clone()), window, cx);
+        // No data folder at all: the same.
+        app.confirm_lock_logout_in(None, window, cx);
+    });
+    vcx.run_until_parked();
+    app.read_with(&vcx, |app, _| {
+        let passcode = &app.account.passcode;
+        assert!(passcode.is_locked(), "no passcode was typed");
+        assert!(passcode.enabled, "the passcode is still set");
+        assert!(!passcode.logout_confirm);
+        assert!(passcode.lock_error.is_some(), "the lock screen says why");
+        assert!(!app.background.wiping, "nothing started");
+    });
+    assert!(config.exists(), "the passcode stays on disk");
+    assert!(folder(&root, &AccountKey::primary()), "nothing was wiped");
     let _ = std::fs::remove_dir_all(&root);
 }

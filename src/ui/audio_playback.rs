@@ -101,6 +101,7 @@ impl QuillApp {
         if let Some(message) = self.playback.playing_voice.take() {
             self.drop_play_intent_for_message(message);
         }
+        self.release_player_chat();
     }
 
     pub(super) fn stop_audio_playback(&mut self) {
@@ -110,6 +111,16 @@ impl QuillApp {
         self.clear_playback_state();
         if let Some(message) = self.playback.playing_audio.take() {
             self.drop_play_intent_for_message(message);
+        }
+        self.release_player_chat();
+    }
+
+    /// No track is active: the bar's chat goes, and with it the claim that
+    /// keeps that chat's history whole (`sync_history_holds`).
+    fn release_player_chat(&mut self) {
+        if self.active_playback_id().is_none() {
+            self.playback.player.chat = None;
+            self.playback.player.meta = None;
         }
     }
 
