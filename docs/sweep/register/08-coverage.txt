@@ -101,3 +101,17 @@ src/ui/chat_row/mod.rs 969 read
 src/ui/chat_row/pin_lift.rs 63 read
 src/ui/chat_row/promoted_demo.rs 97 read
 src/ui/chat_row/row_badges.rs 34 read
+src/ui/chat_row/selected_fg.rs 62 read
+src/ui/chat_row/topic_fit.rs 464 read
+src/ui/chat_row/topic_titles.rs 216 read
+src/ui/chat_row/with_call_badge.rs 326 read
+src/ui/chat_setting_dialogs.rs 123 read
+src/ui/chat_setting_dialogs_demo.rs 28 read
+src/ui/chat_swipe_ui.rs 321 read
+src/ui/chat_theme.rs 446 read
+src/ui/chat_ui_state.rs 425 read
+src/ui/chat_wide_ui.rs 173 read
+src/ui/chat_window/body.rs 163 read
+src/ui/chat_window/cover.rs 310 read
+src/ui/chat_window/dialog_hosts.rs 297 read
+src/ui/chat_window/mod.rs 676 read
