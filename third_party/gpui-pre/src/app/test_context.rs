@@ -245,21 +245,6 @@ impl TestAppContext {
         self.app.borrow_mut().shutdown();
     }
 
-    /// Quill: the OS asks to quit. Returns the app's answer, as the platform
-    /// would hear it from [`App::on_quit_request`].
-    pub fn simulate_quit_request(&self) -> crate::QuitAnswer {
-        let callback = self.test_platform.quit_request_callback.borrow_mut().take();
-        let Some(mut callback) = callback else {
-            return crate::QuitAnswer::Allow;
-        };
-        let allowed = callback();
-        self.test_platform
-            .quit_request_callback
-            .borrow_mut()
-            .get_or_insert(callback);
-        allowed
-    }
-
     /// Register cleanup to run when the test ends.
     pub fn on_quit(&mut self, f: impl FnOnce() + 'static) {
         self.on_quit.borrow_mut().push(Box::new(f));
@@ -480,22 +465,6 @@ impl TestAppContext {
     /// Simulates the user resizing the window to the new size.
     pub fn simulate_window_resize(&self, window_handle: AnyWindowHandle, size: Size<Pixels>) {
         self.test_window(window_handle).simulate_resize(size);
-    }
-
-    /// Simulates the user moving the window's top left corner to `origin`
-    /// (Quill).
-    pub fn simulate_window_move(&self, window_handle: AnyWindowHandle, origin: Point<Pixels>) {
-        self.test_window(window_handle).simulate_move(origin);
-    }
-
-    /// Simulates the window moving to the display `display_id` (Quill).
-    pub fn simulate_window_move_to_display(
-        &self,
-        window_handle: AnyWindowHandle,
-        display_id: DisplayId,
-    ) {
-        self.test_window(window_handle)
-            .simulate_move_to_display(display_id);
     }
 
     /// Simulates a change in whether the platform is presenting the window.

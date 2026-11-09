@@ -421,7 +421,7 @@ impl<E: IntoElement + 'static> Element for AnimationElement<E> {
                     // Reduce modulo the duration before f32 conversion, which loses sub-second precision at scale.
                     Duration::from_nanos((elapsed.as_nanos() % duration.as_nanos()) as u64)
                 } else {
-                    cx.background_executor().now().duration_since(state.start)
+                    cx.background_executor().now() - state.start
                 };
                 let mut delta = elapsed.as_secs_f32() / duration.as_secs_f32();
 

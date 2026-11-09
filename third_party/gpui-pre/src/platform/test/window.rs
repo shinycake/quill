@@ -1,5 +1,3 @@
-// Modified by the Quill project (2026) from gpui-pre 0.3.9 (Apache-2.0):
-// `capture_image` answers with `render_to_image`. See third_party/gpui-pre/QUILL-CHANGES.md.
 use crate::{
     AnyWindowHandle, Bounds, DevicePixels, DispatchEventResult, DisplayId, GpuSpecs, HeadlessAtlas,
     Pixels, PlatformAtlas, PlatformDisplay, PlatformHeadlessRenderer, PlatformInput,
@@ -178,20 +176,6 @@ impl TestWindow {
         if let Some(mut callback) = callback {
             callback(visibility);
             self.0.lock().visibility_callback = Some(callback);
-        }
-    }
-
-    /// Moves the window's top left corner to `origin`, as the platform
-    /// reports a window the user dragged (Quill).
-    pub fn simulate_move(&self, origin: Point<Pixels>) {
-        let callback = {
-            let mut state = self.0.lock();
-            state.bounds.origin = origin;
-            state.moved_callback.take()
-        };
-        if let Some(mut callback) = callback {
-            callback();
-            self.0.lock().moved_callback = Some(callback);
         }
     }
 
@@ -597,12 +581,6 @@ impl PlatformWindow for TestWindow {
         } else {
             anyhow::bail!("render_to_image not available: no HeadlessRenderer configured")
         }
-    }
-
-    // Quill: a test window captures through its headless renderer.
-    #[cfg(any(test, feature = "test-support"))]
-    fn capture_image(&self, scene: &Scene) -> anyhow::Result<RgbaImage> {
-        self.render_to_image(scene)
     }
 
     fn as_test(&mut self) -> Option<&mut TestWindow> {
