@@ -1,2 +1,3 @@
 # Bools that name a stage word but are not a stage (scripts/check-implicit-state.py).
 # One per line: Struct::field <reason>
+State::frame_requested mirrors the C qw_state struct field by field (repr(C)); it is a per-poll flag from the native side, not a stage Quill keeps

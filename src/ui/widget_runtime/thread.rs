@@ -34,11 +34,20 @@ impl Canvas {
     }
 }
 
+/// How far the UI has heard the widget get. `Stopped` is final: a dead
+/// widget is never reported as started afterwards.
+#[derive(Default, Clone, Copy, PartialEq, Eq)]
+enum ToldStage {
+    #[default]
+    Loading,
+    Started,
+    Stopped,
+}
+
 /// What the thread has told the UI already, to say only changes.
 #[derive(Default)]
 struct Told {
-    started: bool,
-    stopped: bool,
+    stage: ToldStage,
     height: f32,
 }
 
@@ -199,9 +208,9 @@ fn events(json: &str, told: &mut Told) -> Vec<RuntimeEvent> {
     match event.get("type").and_then(Value::as_str).unwrap_or("") {
         "change" => {
             if let Some(dead) = event.get("dead").and_then(Value::as_str)
-                && !told.stopped
+                && told.stage != ToldStage::Stopped
             {
-                told.stopped = true;
+                told.stage = ToldStage::Stopped;
                 out.push(RuntimeEvent::Stopped(dead.to_owned()));
             }
             let height = event.get("height").and_then(Value::as_f64).unwrap_or(0.0) as f32;
@@ -209,8 +218,10 @@ fn events(json: &str, told: &mut Told) -> Vec<RuntimeEvent> {
                 told.height = height;
                 out.push(RuntimeEvent::Height(height));
             }
-            if event.get("rendered").and_then(Value::as_bool) == Some(true) && !told.started {
-                told.started = true;
+            if event.get("rendered").and_then(Value::as_bool) == Some(true)
+                && told.stage == ToldStage::Loading
+            {
+                told.stage = ToldStage::Started;
                 out.push(RuntimeEvent::Started);
             }
         }
