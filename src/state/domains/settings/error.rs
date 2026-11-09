@@ -76,15 +76,21 @@ impl Session {
                 self.settings.privacy.insert(key, PrivacyKeyState::Failed);
             }
             Some(RequestPurpose::GetReadDatePrivacy) => {
-                self.settings.read_date_loading = false;
-                self.settings.read_date_error = true;
+                if pending
+                    .is_some_and(|p| self.settings.read_date_stage == ReadDateStage::Getting(p.id))
+                {
+                    self.settings.read_date_stage = ReadDateStage::Failed;
+                }
             }
             Some(RequestPurpose::SetReadDatePrivacy) => {
-                self.settings.read_date_loading = false;
-                self.settings.read_date_error = true;
-                // The optimistic value is dropped; the next
-                // fetch restores the truth.
-                self.settings.read_date_show = None;
+                if pending
+                    .is_some_and(|p| self.settings.read_date_stage == ReadDateStage::Setting(p.id))
+                {
+                    self.settings.read_date_stage = ReadDateStage::Failed;
+                    // The optimistic value is dropped; the next
+                    // fetch restores the truth.
+                    self.settings.read_date_show = None;
+                }
             }
             Some(RequestPurpose::Settings(SettingsPurpose::GetBlockedSenders { .. })) => {
                 self.settings

@@ -524,20 +524,19 @@ impl<S: JsonSender> ConnectDriver<S> {
         *send = SendGiftState {
             open: true,
             recipient: Some(recipient),
-            gifts_loading: true,
             ..Default::default()
         };
         let extra = self.session.request(
             RequestPurpose::Payments(PaymentsPurpose::GetAvailableGifts),
             None,
         );
-        self.session.payments.gifts_manage.send.gifts_request = Some(extra);
+        self.session.payments.gifts_manage.send.gifts_fetch = GiftListFetch::Asking(extra);
         if self
             .send_json_request(extra, &rq::get_available_gifts(extra))
             .is_err()
         {
             let send = &mut self.session.payments.gifts_manage.send;
-            send.gifts_loading = false;
+            send.gifts_fetch = GiftListFetch::Failed;
             send.error = Some("Couldn't load the gifts.".into());
         }
         if with_premium {
@@ -545,8 +544,13 @@ impl<S: JsonSender> ConnectDriver<S> {
                 RequestPurpose::Payments(PaymentsPurpose::GetPremiumGiftOptions),
                 None,
             );
-            self.session.payments.gifts_manage.send.premium_request = Some(extra);
-            let _ = self.send_json_request(extra, &rq::get_premium_gift_payment_options(extra));
+            self.session.payments.gifts_manage.send.premium_fetch = GiftListFetch::Asking(extra);
+            if self
+                .send_json_request(extra, &rq::get_premium_gift_payment_options(extra))
+                .is_err()
+            {
+                self.session.payments.gifts_manage.send.premium_fetch = GiftListFetch::Failed;
+            }
         }
         if self.session.payments.gift_text_length_max.is_none()
             && !self
@@ -572,7 +576,7 @@ impl<S: JsonSender> ConnectDriver<S> {
 
     pub fn select_send_gift(&mut self, id: Option<i64>) {
         let send = &mut self.session.payments.gifts_manage.send;
-        if send.sending {
+        if send.sending() {
             return;
         }
         send.selected = id.filter(|id| send.gifts.iter().any(|g| g.id == *id));
@@ -603,7 +607,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         let upgrade_ok = gift.upgrade_star_count > 0 && !recipient.is_self;
         if !self.chats_path_active()
             || !send.open
-            || send.sending
+            || send.sending()
             || gift.gate(&recipient, premium, now_unix()) != SendGate::Ready
             || (pay_for_upgrade && !upgrade_ok)
             || (!text.is_empty() && limit.is_none_or(|max| text.chars().count() > max))
@@ -616,7 +620,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             None,
         );
         let send = &mut self.session.payments.gifts_manage.send;
-        send.sending = true;
+        send.request = Some(extra);
         send.error = None;
         send.done = None;
         let json = rq::send_gift(
@@ -628,10 +632,9 @@ impl<S: JsonSender> ConnectDriver<S> {
             pay_for_upgrade,
         );
         if let Err(err) = self.send_json_request(extra, &json) {
-            self.session.payments.gifts_manage.send.sending = false;
+            self.session.payments.gifts_manage.send.request = None;
             return Err(err);
         }
-        self.session.payments.gifts_manage.send.request = Some(extra);
         Ok(extra)
     }
 }

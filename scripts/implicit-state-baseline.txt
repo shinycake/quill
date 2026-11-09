@@ -227,11 +227,6 @@ SearchTabsState::loading_more
 SearchTabsState::more_failed
 SearchTabsState::recommended_loaded
 SearchTabsState::recommended_loading
-SendGiftState::gifts_loaded
-SendGiftState::gifts_loading
-SendGiftState::gifts_loading+error
-SendGiftState::premium_loaded
-SendGiftState::sending
 SettingsSearch::pending_clear
 SettingsState::account_ttl_loading
 SettingsState::auto_download_presets_loading
@@ -239,7 +234,6 @@ SettingsState::connected_websites_loading
 SettingsState::default_auto_delete_busy
 SettingsState::pending_attention
 SettingsState::pending_attention+default_auto_delete_error
-SettingsState::read_date_loading
 SettingsState::saved_sounds_loaded
 SettingsState::saved_sounds_stale
 SettingsState::storage_limits_seed_sent

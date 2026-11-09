@@ -3769,3 +3769,51 @@ seam.
   - None of them waits on time.
   - No test for 13, 17, 18 and 20. They need a live connection or a
     native window that the offline harness lacks.
+
+### Phase 18 (area A)
+
+Round 18 of the review, area A (core outside `src/ui`). Findings 1 and 2
+were fixed and the `SendGiftState` dodge was converted. Finding 3 (widget
+query tokens restarting on an account switch) moved to the area-B fixer,
+who rewrites `ui/widgets_ui.rs` this round.
+
+**Approve all on one link leaves another link's list alone (1).** The
+`ok` of `processChatJoinRequests` for one invite link emptied whatever
+link list was open for the chat and took every in-flight
+`GetLinkJoinRequests` page. Opening link L2 before L1's Approve all
+answered left L2 empty, total 0 and not loading, with its page dropped.
+`GroupsPurpose` is `Copy`, so the link rides the pending request instead:
+`PendingRequest::invite_link`, stamped by
+`Session::request_for_invite_link`. The ok arm empties the open list only
+when its `invite_link` matches, and takes only that list's page in flight
+(`state.request`). The chat-wide list and badge refetch as before. Test:
+`approve_all_for_one_link_keeps_another_links_list`; the old
+`approve_all_for_a_link_drops_its_page_in_flight` now stamps its link.
+
+**A get answered after a set no longer flips "Hide read time" back
+(2).** `settings.read_date_loading` was one bool for "a get or a set is in
+flight", cleared by whichever answer came first. TDLib sends no update for
+this setting, so a `getReadDatePrivacySettings` answer that landed after
+the click wrote the old value over the optimistic one and stayed. It is
+now `settings.read_date_stage: ReadDateStage` (`Idle`, `Getting(id)`,
+`Setting(id)`, `Failed`), which also replaces `read_date_error`. Only the
+answer or error of the request named in the stage lands. A set supersedes
+a get in flight, and `fetch_read_date_privacy` sends nothing while a set
+is in flight, because the set already holds the value the server will
+have. Test: `read_date_get_answered_after_a_set_is_ignored`; the old
+roundtrip test reads the stage.
+
+**The send-gift lists are one stage each (dodge).** `SendGiftState` kept
+`gifts_loading`, `gifts_loaded` and `gifts_request`, and `premium_loaded`
+with `premium_request`, in step by hand. Each list is now one
+`GiftListFetch` (`NotAsked`, `Asking(id)`, `Answered`, `Failed`).
+`asked_gifts` / `asked_premium` match the id in `Asking`. A Premium
+options request that fails to send now ends as `Failed` instead of
+staying unanswered. "No gifts are available" shows only after an answer,
+not under the load error line. `sending` was the same pair with
+`request`; `SendGiftState::sending()` now reads `request`. The baseline
+lost the four `SendGiftState` lines and `SettingsState::read_date_loading`.
+
+Neither fix has a visible result in the offline demos: both are races
+between two TDLib answers, which the demos do not replay. None of the
+tests waits on time.

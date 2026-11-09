@@ -132,7 +132,9 @@ impl QuillApp {
             .session()
             .and_then(|s| s.settings.read_date_show)
             .unwrap_or(true);
-        let loading = self.session().is_some_and(|s| s.settings.read_date_loading);
+        let loading = self
+            .session()
+            .is_some_and(|s| s.settings.read_date_stage.in_flight());
         div()
             .id("privacy-hide-read-time")
             .role(gpui_kit::Role::Button)

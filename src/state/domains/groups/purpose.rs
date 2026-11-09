@@ -93,7 +93,8 @@ pub enum GroupsPurpose {
     DeleteRevokedChatInviteLink,
     /// B8: `deleteAllRevokedChatInviteLinks`.
     DeleteAllRevokedChatInviteLinks,
-    /// `processChatJoinRequests` for one invite link.
+    /// `processChatJoinRequests` for one invite link; the link is
+    /// `PendingRequest::invite_link`.
     ProcessLinkJoinRequests {
         approve: bool,
     },

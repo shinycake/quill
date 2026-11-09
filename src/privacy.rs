@@ -310,7 +310,7 @@ mod tests {
     use crate::diagnostics::{DiagnosticSink, MemorySink};
     use crate::ids::AccountKey;
     use crate::state::SettingsPurpose;
-    use crate::state::{RequestPurpose, Session};
+    use crate::state::{ReadDateStage, RequestPurpose, Session};
     use crate::telegram::client::copy_and_parse;
     use crate::telegram::requests_privacy::PrivacySettingKey;
     use std::sync::Arc;
@@ -441,14 +441,14 @@ mod tests {
     }
 
     /// Slice S3: the read-date roundtrip — `get` stores the value and
-    /// clears loading; a failed `set` flags the error and drops the
+    /// ends the stage; a failed `set` fails the stage and drops the
     /// optimistic value.
     #[test]
     fn read_date_get_and_set_failure() {
         let (mut session, sink) = session();
         let seq = AtomicU64::new(0);
-        session.settings.read_date_loading = true;
         let extra = session.request(RequestPurpose::GetReadDatePrivacy, None);
+        session.settings.read_date_stage = ReadDateStage::Getting(extra);
         apply_json(
             &mut session,
             &seq,
@@ -459,11 +459,11 @@ mod tests {
             ),
         );
         assert_eq!(session.settings.read_date_show, Some(false));
-        assert!(!session.settings.read_date_loading);
-        assert!(!session.settings.read_date_error);
+        assert_eq!(session.settings.read_date_stage, ReadDateStage::Idle);
 
-        session.settings.read_date_show = Some(true); // optimistic set
         let extra = session.request(RequestPurpose::SetReadDatePrivacy, None);
+        session.settings.read_date_show = Some(true); // optimistic set
+        session.settings.read_date_stage = ReadDateStage::Setting(extra);
         apply_json(
             &mut session,
             &seq,
@@ -473,9 +473,43 @@ mod tests {
                 extra.0,
             ),
         );
-        assert!(session.settings.read_date_error);
-        assert!(!session.settings.read_date_loading);
+        assert_eq!(session.settings.read_date_stage, ReadDateStage::Failed);
         assert_eq!(session.settings.read_date_show, None);
+    }
+
+    /// A get answered after a set went out does not overwrite the set
+    /// value, and the set's own `ok` ends the stage with that value.
+    #[test]
+    fn read_date_get_answered_after_a_set_is_ignored() {
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        let get = session.request(RequestPurpose::GetReadDatePrivacy, None);
+        session.settings.read_date_stage = ReadDateStage::Getting(get);
+        let set = session.request(RequestPurpose::SetReadDatePrivacy, None);
+        session.settings.read_date_show = Some(false); // optimistic set
+        session.settings.read_date_stage = ReadDateStage::Setting(set);
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"readDatePrivacySettings","@extra":"{}","show_read_date":true}}"#,
+                get.0,
+            ),
+        );
+        assert_eq!(session.settings.read_date_show, Some(false));
+        assert_eq!(
+            session.settings.read_date_stage,
+            ReadDateStage::Setting(set)
+        );
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, set.0),
+        );
+        assert_eq!(session.settings.read_date_show, Some(false));
+        assert_eq!(session.settings.read_date_stage, ReadDateStage::Idle);
     }
 
     /// Slice S3: blocked-senders paging — page 0 replaces, later pages

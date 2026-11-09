@@ -503,6 +503,8 @@ pub struct PendingRequest {
     /// `CloseSecretChat` so the id-less `secretChat` response and
     /// purpose-gating correlate to the right secret chat.
     pub secret_chat_id: Option<i32>,
+    /// The invite link a `ProcessLinkJoinRequests` acts on.
+    pub invite_link: Option<String>,
     /// Slice G1: rollback for requests the driver applies optimistically
     /// at send time (`setChatPermissions`,
     /// `toggleSupergroupJoinByRequest`, `setSupergroupUsername`). On a
@@ -573,6 +575,7 @@ impl RequestRegistry {
             folder_id: None,
             scope: None,
             secret_chat_id: None,
+            invite_link: None,
             rollback: None,
             window: self.window,
             created_at: Instant::now(),

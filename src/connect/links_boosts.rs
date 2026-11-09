@@ -261,9 +261,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         }) {
             return Ok(None);
         }
-        let extra = self.session.request(
+        let extra = self.session.request_for_invite_link(
             RequestPurpose::Groups(GroupsPurpose::ProcessLinkJoinRequests { approve }),
-            Some(chat_id),
+            chat_id,
+            &link,
         );
         let payload = process_chat_join_requests(extra, chat_id.0, &link, approve);
         self.links_boosts_send(extra, &payload)

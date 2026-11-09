@@ -215,14 +215,16 @@ impl QuillApp {
                         &[("stars", &(stars(balance.stars)).to_string())],
                     )));
                 }
-                if send.gifts_loading {
+                if send.gifts_fetch.is_loading() {
                     body = body.child(
                         div()
                             .text_sm()
                             .text_color(muted)
                             .child(tr(keys::Q_MONEY_LOADING_GIFTS)),
                     );
-                } else if send.gifts.is_empty() && send.gifts_loaded {
+                } else if send.gifts.is_empty()
+                    && send.gifts_fetch == quill::gift_manage::GiftListFetch::Answered
+                {
                     body = body.child(
                         div()
                             .text_sm()
@@ -537,7 +539,7 @@ fn selected_gift_panel(
     col.child(
         footer.child(
             Button::new("send-gift-confirm")
-                .label(if send.sending {
+                .label(if send.sending() {
                     tr(keys::Q_MONEY_SENDING).to_string()
                 } else if recipient.is_self {
                     tr_with(
@@ -550,7 +552,7 @@ fn selected_gift_panel(
                         &[("stars", &(stars(total)).to_string())],
                     )
                 })
-                .disabled(send.sending || too_poor)
+                .disabled(send.sending() || too_poor)
                 .on_click(cx.listener(move |this, _, _, cx| this.submit_send_gift(id, cx))),
         ),
     )

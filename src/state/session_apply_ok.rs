@@ -539,12 +539,11 @@ impl Session {
         // `setMessageSenderBlockList` are fully optimistic: a
         // confirming `ok` needs no state change; failures are
         // handled in the error arm below.
-        if matches!(
-            pending.map(|p| p.purpose),
-            Some(RequestPurpose::SetReadDatePrivacy)
-        ) {
-            self.settings.read_date_loading = false;
-            self.settings.read_date_error = false;
+        if let Some(pending) = pending
+            && pending.purpose == RequestPurpose::SetReadDatePrivacy
+            && self.settings.read_date_stage == ReadDateStage::Setting(pending.id)
+        {
+            self.settings.read_date_stage = ReadDateStage::Idle;
         }
         // `resetAllNotificationSettings` needs nothing here: TDLib sends
         // `updateScopeNotificationSettings` for each scope it reset before
@@ -685,18 +684,19 @@ impl Session {
                 _,
                 Some(chat_id),
             )) => {
-                // A page asked before this went out would bring handled
-                // requests back.
-                for append in [true, false] {
-                    self.requests.take_purpose_for_chat(
-                        RequestPurpose::GetLinkJoinRequests { append },
-                        chat_id,
-                    );
-                }
-                if let Some(state) = self.groups.invite_pages.join_requests_mut(chat_id.0) {
+                // Only the list of the link that was processed empties;
+                // another link opened meanwhile keeps its rows and page.
+                // That link's page asked before this went out would bring
+                // handled requests back, so it is dropped.
+                let link = pending.and_then(|p| p.invite_link.as_deref());
+                if let Some(state) = self.groups.invite_pages.join_requests_mut(chat_id.0)
+                    && link == Some(state.invite_link.as_str())
+                {
+                    if let Some(page) = state.request.take() {
+                        self.requests.take(page);
+                    }
                     state.requests.clear();
                     state.total_count = 0;
-                    state.request = None;
                 }
                 // The requests list and badge may now be stale; refetch.
                 self.drop_chat_join_request_pages(chat_id);

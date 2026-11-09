@@ -3,8 +3,8 @@
 //! lists stale and the connect driver refetches them from the server.
 use crate::earn::EarnErrorHint;
 use crate::gift_manage::{
-    ExportError, GiftManagePayload, GiftManageState, GiftTransferred, ProbeOutcome, TransferPicker,
-    TransferStage,
+    ExportError, GiftListFetch, GiftManagePayload, GiftManageState, GiftTransferred, ProbeOutcome,
+    TransferPicker, TransferStage,
 };
 use crate::lang::{keys, tr_with};
 use crate::state::*;
@@ -73,8 +73,7 @@ impl Session {
                 if !send.asked_gifts(pending) {
                     return;
                 }
-                send.gifts_loading = false;
-                send.gifts_loaded = true;
+                send.gifts_fetch = GiftListFetch::Answered;
                 send.gifts = gifts;
             }
             (
@@ -85,7 +84,7 @@ impl Session {
                 if !send.asked_premium(pending) {
                     return;
                 }
-                send.premium_loaded = true;
+                send.premium_fetch = GiftListFetch::Answered;
                 send.premium_options = options;
             }
             (
@@ -157,7 +156,6 @@ impl Session {
                     return;
                 }
                 manage.send.request = None;
-                manage.send.sending = false;
                 manage.send.error = None;
                 manage.send.selected = None;
                 manage.send.done = Some("Gift sent.".into());
@@ -315,11 +313,12 @@ impl Session {
             PaymentsPurpose::GetAvailableGifts if !manage.send.asked_gifts(pending) => {}
             PaymentsPurpose::GetPremiumGiftOptions if !manage.send.asked_premium(pending) => {}
             PaymentsPurpose::GetAvailableGifts => {
-                manage.send.gifts_loading = false;
-                manage.send.gifts_loaded = true;
+                manage.send.gifts_fetch = GiftListFetch::Failed;
                 manage.send.error = Some(format!("Couldn't load the gifts: {reason}"));
             }
-            PaymentsPurpose::GetPremiumGiftOptions => manage.send.premium_loaded = true,
+            PaymentsPurpose::GetPremiumGiftOptions => {
+                manage.send.premium_fetch = GiftListFetch::Failed;
+            }
             PaymentsPurpose::DeleteGift => {
                 manage.deleting = None;
                 self.payments.hub.gift_mutating = false;
@@ -337,7 +336,6 @@ impl Session {
                     return;
                 }
                 manage.send.request = None;
-                manage.send.sending = false;
                 manage.send.error = Some(format!(
                     "Couldn't send the gift: {reason}. The gift may be sold out."
                 ));

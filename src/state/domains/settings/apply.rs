@@ -82,13 +82,12 @@ impl Session {
             }
             // Slice S3: `readDatePrivacySettings` answer.
             SettingsPayload::ReadDatePrivacySettings { show_read_date } => {
-                if matches!(
-                    pending.map(|p| p.purpose),
-                    Some(RequestPurpose::GetReadDatePrivacy)
-                ) {
+                if let Some(pending) = pending
+                    && pending.purpose == RequestPurpose::GetReadDatePrivacy
+                    && self.settings.read_date_stage == ReadDateStage::Getting(pending.id)
+                {
                     self.settings.read_date_show = Some(show_read_date);
-                    self.settings.read_date_loading = false;
-                    self.settings.read_date_error = false;
+                    self.settings.read_date_stage = ReadDateStage::Idle;
                 }
             }
             // Slice S3: `messageSenders` answer — one blocked-senders
