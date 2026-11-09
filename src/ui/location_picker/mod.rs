@@ -410,5 +410,6 @@ crate::ui::shell::register_dialogs! {
         3795,
         |app| app.location_picker_open(),
         QuillApp::build_location_picker_dialog,
-    ),
+    )
+    .close(|app, _, cx| app.close_location_picker(cx)),
 }

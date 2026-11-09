@@ -185,6 +185,11 @@ impl QuillApp {
         cx.notify();
     }
 
+    pub(super) fn close_emoji_set_style(&mut self, cx: &mut Context<Self>) {
+        self.preferences.emoji_style.open = false;
+        cx.notify();
+    }
+
     fn emoji_set_state(&self, id: EmojiSetId) -> SetState {
         let state = &self.preferences.emoji_style;
         let loading = state
@@ -431,8 +436,7 @@ impl QuillApp {
     ) -> Dialog {
         let on_close =
             QuillShell::on_close_kind(app, shell, DialogKind::EmojiSetStyle, |this, _, cx| {
-                this.preferences.emoji_style.open = false;
-                cx.notify();
+                this.close_emoji_set_style(cx);
             });
         app.update(cx, |this, cx| {
             let mut list = div().id("emoji-sets").flex().flex_col().gap_1();
@@ -468,8 +472,7 @@ impl QuillApp {
                 Button::new("emoji-sets-close")
                     .label(tr(keys::CLOSE))
                     .on_click(cx.listener(|this, _, window, cx| {
-                        this.preferences.emoji_style.open = false;
-                        cx.notify();
+                        this.close_emoji_set_style(cx);
                         this.close_kit_dialog_if_done(DialogKind::EmojiSetStyle, window, cx);
                     })),
             );
@@ -573,7 +576,8 @@ crate::ui::shell::register_dialogs! {
         7250,
         |app| app.preferences.emoji_style.open,
         QuillApp::build_emoji_set_style_dialog,
-    ),
+    )
+    .close(|app, _, cx| app.close_emoji_set_style(cx)),
 }
 
 #[cfg(test)]

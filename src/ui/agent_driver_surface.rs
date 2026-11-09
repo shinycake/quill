@@ -377,6 +377,21 @@ mod tests {
         assert!(missing.is_empty(), "no close: {missing:?}");
     }
 
+    /// A close runs when a chat window that owns the box closes. These two
+    /// have no dismissal that sends nothing: Esc on an agent's request
+    /// answers it "no", Esc on the call swap declines the incoming call.
+    const WITHOUT_CLOSE: &[&str] = &["AgentRequest", "CallSwap"];
+
+    #[test]
+    fn every_dialog_spec_has_a_close() {
+        let closable = QuillShell::closable_dialog_names();
+        let missing: Vec<_> = QuillShell::dialog_names()
+            .into_iter()
+            .filter(|name| !closable.contains(name) && !WITHOUT_CLOSE.contains(name))
+            .collect();
+        assert!(missing.is_empty(), "no close: {missing:?}");
+    }
+
     #[test]
     fn every_listed_layer_exists_and_no_layer_is_both() {
         let names: Vec<_> = ESC_LAYERS.iter().map(|layer| layer.name).collect();
