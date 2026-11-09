@@ -89,3 +89,15 @@ src/ui/calls/history_demo.rs 63 read
 src/ui/calls/live_pip.rs 433 read
 src/ui/calls/live_pip_demo.rs 47 read
 src/ui/calls/live_pip_follow.rs 101 read
+src/ui/chat_list_keys.rs 787 read
+src/ui/chat_list_state.rs 114 read
+src/ui/chat_look_ui.rs 961 read
+src/ui/chat_look_ui/apply.rs 117 read
+src/ui/chat_look_ui/demo.rs 180 read
+src/ui/chat_palette.rs 321 read
+src/ui/chat_row/folder_tag_context.rs 237 read
+src/ui/chat_row/forum_titles_demo.rs 122 read
+src/ui/chat_row/mod.rs 969 read
+src/ui/chat_row/pin_lift.rs 63 read
+src/ui/chat_row/promoted_demo.rs 97 read
+src/ui/chat_row/row_badges.rs 34 read
