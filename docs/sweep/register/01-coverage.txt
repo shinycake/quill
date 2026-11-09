@@ -148,3 +148,7 @@ src/calls/engine/types.rs	313	read
 src/calls/group_call_create.rs	332	read
 src/calls/level_tap.rs	87	read
 src/calls/live_video/convert.rs	550	read
+src/calls/tile_pin.rs	178	read
+src/capture_choice.rs	255	read
+src/chat_appearance.rs	584	read
+src/chat_bottom_bar.rs	269	read
