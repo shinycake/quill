@@ -1,10 +1,8 @@
-// Modified for gpui-pre (snapshot of zed@f816e1f): adapt device queues and sRGB detection to wgpu 30.0.1.
+// Modified for gpui-pre (snapshot of zed@d2a4fb6): adapt device queues and sRGB detection to wgpu 30.0.1.
 #[cfg(not(target_family = "wasm"))]
 use crate::{WgpuRenderer, WgpuSurfaceConfig};
 #[cfg(not(target_family = "wasm"))]
 use anyhow::Context as _;
-#[cfg(not(target_family = "wasm"))]
-use crate::device_recovery::Adapters;
 #[cfg(not(target_family = "wasm"))]
 use gpui_util::ResultExt;
 use parking_lot::Mutex;
@@ -53,12 +51,6 @@ impl DeviceErrorState {
             move |error| errors.record(error.to_string())
         }));
         errors
-    }
-
-    /// Quill: report this device lost although it works, so every renderer
-    /// on it recovers onto the GPU that came back (`probe_hardware`).
-    pub(crate) fn retire(&self) {
-        self.lost.store(true, Ordering::Relaxed);
     }
 
     /// Returns true if the GPU device was lost (e.g., due to driver crash, suspend/resume).
@@ -145,17 +137,26 @@ impl WgpuContext {
         config: &WgpuSurfaceConfig,
         compositor_gpu: Option<CompositorGpuHint>,
     ) -> anyhow::Result<Self> {
-        Self::new_on(instance, surface, config, compositor_gpu, Adapters::Any)
+        Self::new_with_options(instance, surface, config, compositor_gpu, false)
     }
 
-    /// Quill: a context on the first adapter of the kinds `adapters` admits.
     #[cfg(not(target_family = "wasm"))]
-    pub(crate) fn new_on(
+    pub fn new_rejecting_software(
         instance: wgpu::Instance,
         surface: &wgpu::Surface<'_>,
         config: &WgpuSurfaceConfig,
         compositor_gpu: Option<CompositorGpuHint>,
-        adapters: Adapters,
+    ) -> anyhow::Result<Self> {
+        Self::new_with_options(instance, surface, config, compositor_gpu, true)
+    }
+
+    #[cfg(not(target_family = "wasm"))]
+    fn new_with_options(
+        instance: wgpu::Instance,
+        surface: &wgpu::Surface<'_>,
+        config: &WgpuSurfaceConfig,
+        compositor_gpu: Option<CompositorGpuHint>,
+        reject_software: bool,
     ) -> anyhow::Result<Self> {
         let device_id_filter = Self::device_id_filter();
 
@@ -168,7 +169,7 @@ impl WgpuContext {
                 surface,
                 config,
                 compositor_gpu.as_ref(),
-                adapters,
+                reject_software,
             ))?;
 
         Ok(Self::from_native_adapter_and_device(
@@ -513,7 +514,7 @@ impl WgpuContext {
         surface: &wgpu::Surface<'_>,
         config: &WgpuSurfaceConfig,
         compositor_gpu: Option<&CompositorGpuHint>,
-        admitted: Adapters,
+        reject_software: bool,
     ) -> anyhow::Result<(
         wgpu::Adapter,
         wgpu::Device,
@@ -551,10 +552,9 @@ impl WgpuContext {
         for adapter in adapters {
             let info = adapter.get_info();
 
-            if !admitted.admits(info.device_type == wgpu::DeviceType::Cpu) {
+            if reject_software && info.device_type == wgpu::DeviceType::Cpu {
                 log::info!(
-                    "Skipping {:?} adapter for {admitted:?}: {} ({:?})",
-                    info.device_type,
+                    "Skipping software renderer: {} ({:?})",
                     info.name,
                     info.backend
                 );

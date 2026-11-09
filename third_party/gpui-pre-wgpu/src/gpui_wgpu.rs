@@ -1,9 +1,7 @@
 mod cosmic_text_system;
-mod device_recovery;
 mod wgpu_atlas;
 mod wgpu_context;
 mod wgpu_renderer;
-mod yuv_surfaces;
 
 pub use cosmic_text_system::*;
 pub use wgpu;
@@ -14,4 +12,4 @@ pub use wgpu_context::*;
     any(test, feature = "bench-support", feature = "test-support")
 ))]
 pub use wgpu_renderer::WgpuHeadlessRenderer;
-pub use wgpu_renderer::{GpuContext, GpuSlot, Recovery, WgpuRenderer, WgpuSurfaceConfig, on_device_gone};
+pub use wgpu_renderer::{GpuContext, WgpuRenderer, WgpuSurfaceConfig};
