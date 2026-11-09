@@ -129,3 +129,17 @@ src/ui/communities/mute_for.rs 105 read
 src/ui/communities/outcomes.rs 141 read
 src/ui/communities/requests.rs 549 read
 src/ui/communities/row.rs 473 read
+src/ui/communities/row_menu.rs 397 read
+src/ui/composer/attach_picker.rs 95 read
+src/ui/composer/bar_clicks.rs 49 read
+src/ui/composer/cancel_edit_confirm.rs 129 read
+src/ui/composer/command_menu.rs 260 read
+src/ui/composer/copy_inline_text.rs 350 read
+src/ui/composer/field_placeholder.rs 216 read
+src/ui/composer/mod.rs 974 read
+src/ui/composer/send_bot_command.rs 96 read
+src/ui/composer/toggle_composer_silent.rs 770 read
+src/ui/composer_boxes.rs 136 read
+src/ui/composer_date.rs 282 read
+src/ui/composer_events.rs 144 read
+src/ui/composer_field.rs 586 read
