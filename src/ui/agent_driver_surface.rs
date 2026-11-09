@@ -35,6 +35,8 @@ pub(super) const HARD_DIALOGS: &[&str] = &[
     // Answering switches to the ringing account and takes the call.
     "BackgroundCall",
     "LogOut",
+    // Settings → Connection on the sign-in screen; Settings is hard too.
+    "ProxyList",
     "AccountLifecycle",
     "Passcode",
     "TwoFa",

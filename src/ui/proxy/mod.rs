@@ -38,6 +38,9 @@ pub(crate) struct ProxyUi {
     pub(crate) notice: Option<String>,
     /// The "this exposes your IP" warning was confirmed for this run.
     pub(crate) ip_warning_acked: bool,
+    /// The proxy list as a box of its own (tdesktop's `ProxiesBox`), for
+    /// the sign-in screen, which has no Settings window to hold it.
+    pub(crate) list_box: bool,
 }
 
 /// The add / edit box.
@@ -94,9 +97,16 @@ fn input(
 }
 
 impl QuillApp {
-    /// Settings → Connection, with the proxy list freshly fetched.
+    /// Settings → Connection, with the proxy list freshly fetched. The
+    /// sign-in screen draws no Settings window, so there the list opens
+    /// as a box over it.
     pub(crate) fn open_proxy_list(&mut self, cx: &mut Context<Self>) {
-        self.open_settings(Some(quill::settings_catalog::Page::Connection), cx);
+        if self.pane_mode() == super::app::PaneMode::Connecting {
+            self.settings.proxy.list_box = true;
+            self.open_box(DialogKind::ProxyList);
+        } else {
+            self.open_settings(Some(quill::settings_catalog::Page::Connection), cx);
+        }
         self.fetch_proxy_list();
         cx.notify();
     }
@@ -855,6 +865,15 @@ crate::ui::shell::register_dialogs! {
     )
     .close(|app, _, cx| app.close_proxy_editor(cx)),
 
+    /// The proxy list over the sign-in screen; under the edit and link
+    /// boxes it opens.
+    ProxyList => DialogSpec::new(
+        3200,
+        |app| app.settings.proxy.list_box,
+        QuillApp::build_proxy_list_dialog,
+    )
+    .close(|app, _, cx| app.close_proxy_list_box(cx)),
+
     ProxyLink => DialogSpec::new(
         3100,
         |app| app.settings.proxy.link.is_some(),
@@ -864,6 +883,9 @@ crate::ui::shell::register_dialogs! {
 }
 
 mod build_proxy_edit_dialog;
+mod build_proxy_list_dialog;
+#[cfg(test)]
+mod login_box_tests;
 mod proxy_row;
 mod web_demo;
 #[cfg(test)]

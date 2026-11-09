@@ -6,7 +6,7 @@ use crate::ui::app::QuillApp;
 use crate::ui::connect_ui::ConnectUiStatus;
 use crate::ui::screenshot_demo::{DemoSpec, register_demos};
 use quill::auth::StartupFailure;
-use quill::telegram::envelope::AuthorizationState;
+use quill::telegram::envelope::{AuthorizationState, ConnectionState};
 
 register_demos![
     DemoSpec::signed_out("need-tdjson", || {
@@ -44,6 +44,27 @@ register_demos![
         )
     })
     .setup(|app, _, _| app.demo_phone_countries()),
+    // The phone step while connecting through a proxy: the connection
+    // strip shows its "Proxy settings" link.
+    DemoSpec::signed_out("wait-phone-proxy", || {
+        (
+            ConnectUiStatus::DemoWaitPhone,
+            "screenshot demo — WaitPhoneNumber via proxy (injected auth, no live Telegram)".into(),
+            AuthorizationState::WaitPhoneNumber,
+        )
+    })
+    .setup(|app, _, _| {
+        app.demo_phone_countries();
+        // The strip reads the session's connection, which a signed-out
+        // demo has none of.
+        let mut session = quill::state::Session::new(
+            quill::ids::AccountKey::primary(),
+            std::sync::Arc::new(quill::diagnostics::MemorySink::new()),
+        );
+        session.auth = AuthorizationState::WaitPhoneNumber;
+        session.connection = ConnectionState::ConnectingToProxy;
+        app.demo_session = Some(Box::new(session));
+    }),
     DemoSpec::signed_out("wait-premium", || {
         (
             ConnectUiStatus::DemoWaitPhone,
