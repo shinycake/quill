@@ -53,8 +53,11 @@ pub(crate) enum StreamOverlay {
 impl QuillApp {
     pub(super) fn open_stream_overlay(&mut self, overlay: StreamOverlay, cx: &mut Context<Self>) {
         // A box over the call window waits for no one under the lock
-        // (`calls::lock_layers`).
-        if self.refused_while_locked() {
+        // (`calls::lock_layers`). Leave and End reveal nothing, and a
+        // manager has no other way out: tdesktop's `Panel::endCall` shows
+        // its `LeaveBox` locked or not.
+        let leaving = matches!(overlay, StreamOverlay::Leave { .. });
+        if !leaving && self.refused_while_locked() {
             return;
         }
         self.group_call.stream.overlay = Some(overlay);

@@ -270,7 +270,17 @@ impl QuillApp {
                 return;
             }
         }
-        if self.account.passcode.is_locked() || !self.live_pip_source_alive(source) {
+        let locked = self.account.passcode.is_locked();
+        if locked || !self.live_pip_source_alive(source) {
+            // The lock, not the user, closes a stream's PiP: its call
+            // window comes back and draws under the lock, as call windows
+            // do, so the call keeps a window and a picture.
+            if let LivePipSource::Stream { call_id } = source
+                && locked
+                && self.group_call_screen.window_closed_by_user == Some(call_id)
+            {
+                self.group_call_screen.window_closed_by_user = None;
+            }
             self.close_live_pip(cx);
             return;
         }

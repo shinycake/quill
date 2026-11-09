@@ -145,6 +145,25 @@ impl QuillApp {
         cx.notify();
     }
 
+    /// `account` logged out: its mini app closes first, and the returned
+    /// receiver hears once the helper is gone, so its web view data is
+    /// removed after (`account_data::forget_after_helper`).
+    pub(in crate::ui) fn close_mini_app_for_forget(
+        &mut self,
+        account: &quill::ids::AccountKey,
+    ) -> Option<std::sync::mpsc::Receiver<()>> {
+        if self.current_account().as_ref() != Some(account) {
+            return None;
+        }
+        let window = self.mini_apps.window.take()?;
+        let launch_id = window.launch.launch_id;
+        let gone = window.close_with_notice();
+        if let Some(live) = self.live.as_mut() {
+            let _ = live.driver.close_web_app(launch_id);
+        }
+        gone
+    }
+
     /// Poll the helper and the session's mini-app answers while something
     /// is going on; stops by itself when nothing is left.
     pub(super) fn ensure_mini_app_poll(&mut self, cx: &mut Context<Self>) {

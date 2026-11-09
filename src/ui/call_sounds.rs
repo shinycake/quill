@@ -228,8 +228,11 @@ impl super::app::QuillApp {
                     });
                 }
             }
+            // An older call's end screen does not silence a call ringing
+            // on an account in the background: the summary stays until
+            // its own buttons dismiss it, so the ring sounds over it.
             (None, Some(summary)) => {
-                sounds.keep_looping(None);
+                sounds.keep_looping(background_ring.then_some(CallSound::Incoming));
                 if marks.call_id == Some(summary.call_id) && !marks.ended {
                     marks.ended = true;
                     sounds.play(if summary.busy {

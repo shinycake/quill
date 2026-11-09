@@ -495,8 +495,11 @@ impl QuillApp {
     /// log, mini app trust, hashtags, and the rest), as tdesktop's
     /// `Storage::Account::reset` does.
     pub(in crate::ui) fn forget_account_sends(&mut self, account: &AccountKey) {
+        // Its mini app's helper has the web view data open: it closes
+        // first, and the data goes once the helper is gone.
+        let helper_gone = self.close_mini_app_for_forget(account);
         if let Some(root) = self.accounts_root() {
-            quill::account_data::forget(&root, account);
+            quill::account_data::forget_after_helper(&root, account, helper_gone);
         }
         self.screen.recent_hashtags.forget(account);
         self.composer_ui.send_box.prep.cancel_account(account);

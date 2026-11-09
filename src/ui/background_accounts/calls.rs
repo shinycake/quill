@@ -199,7 +199,9 @@ impl QuillApp {
         let Some(account) = self.background_ring_account().cloned() else {
             return;
         };
-        self.background.ringing = None;
+        // Its OS "Incoming call" notification goes with the ring: an
+        // answer from the lock card (or the prompt) leaves no stale toast.
+        self.end_background_ring(cx);
         self.switch_account_even_locked(&account, "", window, cx);
         let ready = self.session().is_some_and(|session| {
             session.account == account && ringing_incoming_call(session).is_some()

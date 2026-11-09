@@ -35,7 +35,7 @@ src/ui/group_calls.rs::open_group_call_title_dialog | refuses | a box over the c
 src/ui/group_calls.rs::copy_rtmp_value | refuses | the stream URL and key are secrets, not drawn under the lock
 src/ui/group_calls.rs::replace_video_chat_rtmp_url | refuses | as copy_rtmp_value
 src/ui/group_call_settings.rs::open_group_call_settings | refuses | a box over the call window, with the share link rows
-src/ui/group_call_stream_boxes.rs::open_stream_overlay | refuses | the stream window's boxes, the stream key's among them
+src/ui/group_call_stream_boxes.rs::open_stream_overlay | refuses | the stream window's boxes, the stream key's among them; Leave/End is exempt (it reveals nothing, and is a manager's only way out, as tdesktop's `Panel::endCall`)
 src/ui/calls/live_pip.rs::open_stream_pip | refuses | the lock closes Picture-in-Picture, so the stream window would close for a PiP that never shows
 src/ui/shell.rs::close_kit_dialog_if_done | refuses | every flag reads closed under the lock, so a close from a late continuation would close a box whose flag is set; the sync after the unlock closes it
 src/ui/export_quit.rs::exit_held_by_export | refuses | the "Stop and quit?" box cannot show over the lock: a Quit there stops the exports and quits

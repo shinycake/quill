@@ -60,7 +60,9 @@ impl QuillApp {
     }
 
     pub(super) fn close_group_settings_dialog(&mut self, cx: &mut Context<Self>) {
-        self.admin.group_settings_dialog = None;
+        if let Some(dialog) = self.admin.group_settings_dialog.take() {
+            self.drop_invite_link_pages(Some(dialog.chat_id));
+        }
         cx.notify();
     }
 

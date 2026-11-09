@@ -66,7 +66,8 @@ pub(crate) struct AdminUi {
 
 /// The boost box keeps its state in the session (`groups.boost_box`),
 /// which goes to the background with the account: it closes here so it
-/// does not come back on switch-back.
+/// does not come back on switch-back. So do the invite-link pages the
+/// Group Settings box opened there (`drop_invite_link_pages`).
 impl crate::ui::on_screen::Farewell for AdminUi {
     fn farewell(
         app: &mut QuillApp,
@@ -79,6 +80,7 @@ impl crate::ui::on_screen::Farewell for AdminUi {
         {
             app.close_boost_box_state(cx);
         }
+        app.drop_invite_link_pages(None);
     }
 }
 

@@ -249,6 +249,27 @@ fn a_set_image_is_padded_to_a_square_and_the_corners_cut(cx: &mut TestAppContext
     let _ = std::fs::remove_file(&create.path);
 }
 
+/// An image picked (or decoded) for a set lands after the box moved to
+/// another set: no editor opens to fill the other set's "New Sticker".
+#[gpui_kit::test]
+fn a_set_image_that_lands_after_the_box_moved_on_opens_nothing(cx: &mut TestAppContext) {
+    let (app, _shell, mut vcx) = open_demo(cx);
+    let vcx = &mut vcx;
+    app.update(vcx, |app, cx| {
+        let image = image::RgbaImage::from_pixel(300, 300, image::Rgba([10, 20, 30, 255]));
+        app.edit_pixels_for_set(
+            79,
+            quill::sticker_set_box::SetKind::Stickers,
+            Some(image),
+            cx,
+        );
+        assert!(
+            app.viewer.photo_editor.is_none(),
+            "the box shows set 78, not 79"
+        );
+    });
+}
+
 #[gpui_kit::test]
 fn an_image_the_editor_refuses_toasts_could_not_load(cx: &mut TestAppContext) {
     let (app, _shell, mut vcx) = open_demo(cx);

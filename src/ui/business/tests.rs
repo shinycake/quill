@@ -358,6 +358,69 @@ fn leaving_a_screen_saves_it(cx: &mut TestAppContext) {
     assert_eq!(note(&app, vcx), None);
 }
 
+/// A screen built before the full info arrived (or before the phone
+/// changed it) and left untouched writes nothing: leaving compares the
+/// draft with what it was built from, not with the server's value now.
+#[gpui_kit::test]
+fn an_untouched_screen_never_overwrites_a_newer_saved_value(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    seed(&app, vcx, true);
+    app.update(vcx, |app, _| {
+        if let Some(session) = app.demo_session.as_mut() {
+            session.my_user_id = Some(777);
+        }
+    });
+    open(&app, vcx);
+    for screen in [View::Greeting, View::Hours, View::Location, View::StartPage] {
+        go(&app, vcx, screen);
+        app.update(vcx, |app, _| {
+            let session = app.demo_session.as_mut().expect("demo session");
+            let me = 777;
+            let business = quill::business_info::BusinessInfo {
+                greeting: Some(quill::business_settings::GreetingSettings {
+                    shortcut_id: 2,
+                    recipients: quill::business_settings::BusinessRecipients::everyone(),
+                    inactivity_days: 7,
+                }),
+                opening_hours: Some(quill::business_info::OpeningHours::new(
+                    "Europe/London".into(),
+                    vec![(600, 1020)],
+                )),
+                location: Some(quill::business_info::BusinessLocation {
+                    address: "1 Main St".into(),
+                    point_e6: None,
+                }),
+                start_page: Some(quill::business_start_page::StartPage {
+                    title: "Welcome".into(),
+                    message: "Hi".into(),
+                    sticker: None,
+                }),
+                ..Default::default()
+            };
+            session.users_state.user_full_infos.insert(
+                me,
+                quill::state::UserFullInfoData {
+                    extras: quill::telegram::envelope::UserProfileExtras {
+                        business: Some(business),
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                },
+            );
+        });
+        back(&app, vcx);
+        assert_eq!(view(&app, vcx), View::Hub);
+        assert_eq!(note(&app, vcx), None, "{screen:?} sent nothing");
+        app.update(vcx, |app, _| {
+            let session = app.demo_session.as_mut().expect("demo session");
+            if let Some(me) = session.my_user_id {
+                session.users_state.user_full_infos.remove(&me);
+            }
+        });
+    }
+}
+
 #[gpui_kit::test]
 fn an_away_message_needs_messages_and_a_valid_range(cx: &mut TestAppContext) {
     let (app, mut vcx) = new_app(cx);

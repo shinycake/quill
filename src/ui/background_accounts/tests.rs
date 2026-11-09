@@ -122,6 +122,49 @@ fn the_tick_loops_another_accounts_ringtone_with_no_poll(cx: &mut TestAppContext
 }
 
 #[gpui_kit::test]
+fn an_older_call_summary_does_not_silence_another_accounts_ring(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    app.update_in(&mut vcx, |app, _, _| {
+        let Some(session) = app.demo_session.as_deref_mut() else {
+            panic!("the demo has a session");
+        };
+        session.calls.active_call = None;
+        // A 1:1 call ended on this account; its window closed with the
+        // summary still there.
+        session.calls.summary = Some(quill::state::CallSummary {
+            call_id: 5,
+            user_id: 12,
+            is_outgoing: true,
+            is_video: false,
+            duration_secs: 30,
+            had_audio: true,
+            end_line: String::new(),
+            need_rating: false,
+            busy: false,
+            need_debug_information: false,
+            need_log: false,
+            rating_sent: false,
+            debug_information_sent: false,
+            debug_information_error: None,
+            log_sent: false,
+            log_error: None,
+            final_transport: None,
+            reconnect_attempts: 0,
+            muted: false,
+        });
+        app.sync_call_sounds();
+        assert_eq!(app.calls.sounds.looping(), None);
+        app.background.ringing = Some(ring());
+        app.sync_call_sounds();
+        assert_eq!(
+            app.calls.sounds.looping(),
+            Some(CallSound::Incoming),
+            "the background call rings"
+        );
+    });
+}
+
+#[gpui_kit::test]
 fn the_main_menu_counts_the_other_accounts(cx: &mut TestAppContext) {
     let (app, mut vcx) = new_app(cx);
     app.update_in(&mut vcx, |app, _, cx| {

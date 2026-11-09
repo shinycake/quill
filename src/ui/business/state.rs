@@ -6,7 +6,9 @@ use gpui_kit::component::time_field::TimeFieldState;
 use gpui_kit::*;
 use quill::business_bots::BotRights;
 use quill::business_hours_edit::Interval;
-use quill::business_settings::{BusinessChats, BusinessRecipients};
+use quill::business_info::{BusinessLocation, OpeningHours};
+use quill::business_settings::{AwaySettings, BusinessChats, BusinessRecipients, GreetingSettings};
+use quill::business_start_page::StartPage;
 use quill::telegram::envelope::StickerItem;
 
 /// Which screen of the dialog is showing.
@@ -112,13 +114,21 @@ pub(crate) enum ScheduleChoice {
     Custom,
 }
 
+// Each screen's draft keeps the saved value it was built from (`base`).
+// Leaving saves only when the draft differs from that value, never from
+// the server's value now: a screen left untouched writes nothing, even
+// when the full info arrived (or changed on another device) after it was
+// built. tdesktop never writes a section that was not changed.
+
 pub(crate) struct GreetingDraft {
+    pub(super) base: Option<GreetingSettings>,
     pub(super) enabled: bool,
     pub(super) recipients: BusinessRecipients,
     pub(super) days: i32,
 }
 
 pub(crate) struct AwayDraft {
+    pub(super) base: Option<AwaySettings>,
     pub(super) enabled: bool,
     pub(super) recipients: BusinessRecipients,
     pub(super) schedule: ScheduleChoice,
@@ -128,6 +138,7 @@ pub(crate) struct AwayDraft {
 }
 
 pub(crate) struct HoursDraft {
+    pub(super) base: Option<OpeningHours>,
     pub(super) enabled: bool,
     /// Minutes of the week, normalized.
     pub(super) week: Vec<Interval>,
@@ -142,6 +153,7 @@ pub(crate) struct DayRow {
 }
 
 pub(crate) struct LocationDraft {
+    pub(super) base: Option<BusinessLocation>,
     pub(super) address: Entity<InputState>,
     /// The saved map point, kept until it is switched off.
     pub(super) point_e6: Option<(i32, i32)>,
@@ -155,6 +167,7 @@ pub(crate) struct PickerDraft {
 }
 
 pub(crate) struct StartPageDraft {
+    pub(super) base: StartPage,
     pub(super) title: Entity<InputState>,
     pub(super) message: Entity<InputState>,
     pub(super) sticker: Option<StickerItem>,

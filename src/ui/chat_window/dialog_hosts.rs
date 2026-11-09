@@ -63,8 +63,14 @@ impl QuillApp {
     /// Input, deferred work (`scoped`) and a window's frame each run with
     /// their window's state in place, so this is the window of the action.
     pub(in crate::ui) fn open_box(&mut self, kind: DialogKind) {
-        let here = self.windows.asking.unwrap_or(self.windows.scope);
+        let here = self.asking_window();
         self.windows.open_box_in(kind, here);
+    }
+
+    /// The window of the action running now: the one a flow asked from
+    /// (`as_asked_by`), else the one whose state is in place.
+    pub(in crate::ui) fn asking_window(&self) -> Option<ChatId> {
+        self.windows.asking.unwrap_or(self.windows.scope)
     }
 
     /// Run `f`, the part of a flow that runs away from the window that

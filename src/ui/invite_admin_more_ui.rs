@@ -59,6 +59,43 @@ impl QuillApp {
         cx.notify();
     }
 
+    /// The pages the Invite Links section opened in the session (another
+    /// admin's links, a link's join requests and members) close with the
+    /// Group Settings box for `chat` (`None`: every chat, when the account
+    /// leaves the screen). They live in the `Session`, so nothing else
+    /// would close them: the box would reopen on that admin's lists, and
+    /// "Delete all revoked" would act on them. A late answer finds no page
+    /// and is dropped.
+    pub(super) fn drop_invite_link_pages(&mut self, chat: Option<ChatId>) {
+        if self
+            .admin
+            .invite_link_details
+            .as_ref()
+            .is_some_and(|(open, _)| chat.is_none_or(|chat| *open == chat))
+        {
+            self.admin.invite_link_details = None;
+        }
+        if chat.is_none() || self.admin.revoked_links_open == chat {
+            self.admin.revoked_links_open = None;
+        }
+        let Some(session) = self.session_mut() else {
+            return;
+        };
+        let groups = &mut session.groups;
+        match chat {
+            Some(chat) => {
+                groups.admin_invite_links.remove(&chat.0);
+                groups.link_join_requests.remove(&chat.0);
+                groups.invite_link_members.remove(&chat.0);
+            }
+            None => {
+                groups.admin_invite_links.clear();
+                groups.link_join_requests.clear();
+                groups.invite_link_members.clear();
+            }
+        }
+    }
+
     fn close_admin_links(&mut self, chat_id: ChatId, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
             live.driver.close_admin_invite_links(chat_id);

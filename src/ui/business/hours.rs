@@ -58,6 +58,7 @@ impl QuillApp {
     pub(super) fn new_hours_draft(&self) -> HoursDraft {
         let saved = self.my_business().opening_hours;
         HoursDraft {
+            base: saved.clone(),
             enabled: saved.is_some(),
             week: saved
                 .as_ref()
@@ -441,12 +442,12 @@ impl QuillApp {
     /// open day, removes the hours (tdesktop sends an empty
     /// `WorkingHours` then).
     pub(super) fn save_business_hours(&mut self, cx: &mut Context<Self>) -> Leave {
-        let Some((enabled, week)) = self
+        let Some((enabled, week, base)) = self
             .dialogs
             .business_dialog
             .as_ref()
             .and_then(|d| d.hours.as_ref())
-            .map(|h| (h.enabled, h.week.clone()))
+            .map(|h| (h.enabled, h.week.clone(), h.base.clone()))
         else {
             return Leave::Go(None);
         };
@@ -463,7 +464,7 @@ impl QuillApp {
         } else {
             None
         };
-        if wanted == self.my_business().opening_hours {
+        if wanted == base {
             return Leave::Go(None);
         }
         self.business_send(tr(keys::Q_OPS_BUSINESS_HOURS_2), |driver| {

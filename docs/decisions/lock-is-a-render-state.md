@@ -127,7 +127,11 @@ focused window as "the user is here". The rule that replaced those patches:
    - A starter reached outside those pumps queues itself (`passcode::UnlockIntents`, `wait_for_unlock`) and
      runs again after the unlock, asking every gate a second time. Every open in `os_open.rs` does this,
      so a 3-D Secure page, an Earn or Grams withdrawal, a gift's Fragment page or a bot's URL opens after
-     the unlock. The lock screen's Log out drops the queue, since it was for the wiped accounts.
+     the unlock. The lock screen's Log out drops the queue, since it was for the wiped accounts. Each
+     intent keeps who asked (round 14): the account on screen and the window (`asking_window`). It runs
+     as that window (`in_window_scope` and `as_asked_by`; the main window when that one closed), not the
+     one the passcode was typed in, and is dropped when another account came on screen meanwhile (the
+     lock card's Answer switches accounts under the lock).
    - A box or secret over a call window, Picture-in-Picture and a kit dialog close are refused (below).
 3. **Calls follow tdesktop's per-layer rule** (`Application::lockByPasscode` calls
    `Calls::Instance::hidePanelLayers`; `Panel::addPeople` and the share link actions ask for the passcode
@@ -136,7 +140,13 @@ focused window as "the user is here". The rule that replaced those patches:
    (`calls::lock_layers`). While locked their openers refuse, the stream URL and key are not drawn, and
    Add People is not offered. A call ringing on another account shows on the main window's lock screen
    with Answer and Decline (`background_ring_lock_card`), and its OS notification keeps its buttons while
-   locked, with the caller hidden. tdesktop's call panel shows for any account under the lock.
+   locked, with the caller hidden. tdesktop's call panel shows for any account under the lock. Round 14:
+   the stream window's Leave/End box is not refused (tdesktop's `Panel::endCall` shows `LeaveBox` locked
+   or not, and a manager has no other way out). A stream PiP the lock closes is closed by the lock, not
+   the user: `window_closed_by_user` is cleared, so the stream window comes back and draws under the lock.
+   The background ring sounds over an older call's end screen, and an answer from the lock card dismisses
+   its OS notification (`end_background_ring`). The lock also stops every window's inline clips
+   (`leave_window`): a locked chat window runs no frame upkeep, so its round video kept its sound.
 4. **A locked Quill is not looked at.** `session.app_active` is false while locked, whichever window has
    the focus, and the lock clears `active_window_chats`. A chat window's locked frame does not mark its
    chat active again. So the open chat's messages notify and sound, as in tdesktop, whose `markingAsRead`
@@ -148,13 +158,17 @@ focused window as "the user is here". The rule that replaced those patches:
 6. **Nothing connects on the cleared key.** The lock clears the master key, so a preparation fails with
    `LockedStore`. A connection asked while locked (`start_connection`, for example after a remote log
    out) waits for the unlock (`connect_waits_for_unlock`, `deferred_connect`), and one prepared before
-   the lock that lands refused by it waits too. Background accounts start at the unlock, not as failed
+   the lock that lands refused by it waits too. A switch under the lock that puts a background client on
+   screen (`adopt_live`) clears the mark, and the unlock connects only when the screen has no client, so
+   it never closes the account (and the call) just answered from the lock card. Background accounts start at the unlock, not as failed
    entries that nothing retries.
 7. **Quit from the lock screen quits safely.** The "Stop and quit?" box would be a box of a locked window,
    never drawn, holding every later Quit and the OS shutdown. Under the lock, Quit stops the exports, as
    that box's Stop does, and the quit's teardown waits for them to end (`close_all_for_quit`).
 8. **Passcode jobs and kit closes.** A lock asked while a passcode job runs lands with the job's answer
-   (`lock_after_job`). So a Turn off cannot finish under a lock that then has no passcode to lift it.
+   (`PasscodeJob::RunningThenLock`). So a Turn off cannot finish under a lock that then has no passcode to
+   lift it. The job is its own value (`PasscodeUi::job`, round 14), not the box's `busy` flag: closing the
+   box (Esc, "Lock now") leaves it running, so a lock asked then still waits for the answer.
    `close_kit_dialog_if_done` closes nothing while locked, because every flag reads closed then and the
    window's top box would close under a flag still set. The shell's sync after the unlock closes what is
    done.

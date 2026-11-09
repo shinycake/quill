@@ -7,18 +7,33 @@
 //! running (`lock_waits`); a starter reached outside those pumps, such as an
 //! OS open from a late answer, queues itself here. Each intent runs the
 //! starter again after the unlock, so it asks every gate a second time.
+//!
+//! An intent keeps who asked: the account on screen and the window. The
+//! lock card's Answer can switch accounts under the lock, and the unlock
+//! runs in the window the passcode was typed in, so neither is the one in
+//! place when it runs. It runs as its window (the main window when that
+//! one closed), and is dropped when its account is no longer on screen: a
+//! link resolved for one account must not open in another.
 #![deny(clippy::indexing_slicing)]
 
 use super::super::app::QuillApp;
 use gpui_kit::Context;
+use quill::ids::{AccountKey, ChatId};
 
 type Intent = Box<dyn FnOnce(&mut QuillApp, &mut Context<QuillApp>)>;
+
+struct Queued {
+    account: Option<AccountKey>,
+    /// The window that asked (`None`: the main window).
+    window: Option<ChatId>,
+    run: Intent,
+}
 
 /// The queue. Late answers are few (one per request the user made before
 /// the lock), so it is not capped.
 #[derive(Default)]
 pub(in crate::ui) struct UnlockIntents {
-    queued: Vec<Intent>,
+    queued: Vec<Queued>,
 }
 
 impl UnlockIntents {
@@ -39,19 +54,31 @@ impl QuillApp {
         &mut self,
         intent: impl FnOnce(&mut QuillApp, &mut Context<QuillApp>) + 'static,
     ) {
-        self.account
-            .passcode
-            .unlock_intents
-            .queued
-            .push(Box::new(intent));
+        let queued = Queued {
+            account: self.current_account(),
+            window: self.asking_window(),
+            run: Box::new(intent),
+        };
+        self.account.passcode.unlock_intents.queued.push(queued);
     }
 
     /// The unlock: what waited runs now. An intent that finds Quill locked
     /// again (it locked inside an earlier one) queues itself once more.
     pub(super) fn run_unlock_intents(&mut self, cx: &mut Context<Self>) {
         let intents = std::mem::take(&mut self.account.passcode.unlock_intents.queued);
-        for intent in intents {
-            intent(self, cx);
+        for Queued {
+            account,
+            window,
+            run,
+        } in intents
+        {
+            if account != self.current_account() {
+                continue;
+            }
+            let window = window.filter(|chat| self.windows.has(*chat));
+            self.in_window_scope(window, cx, |this, cx| {
+                this.as_asked_by(window, |this| run(this, cx))
+            });
         }
     }
 }

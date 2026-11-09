@@ -118,11 +118,6 @@ impl QuillApp {
                         tr(keys::Q_PEOPLE_CLEAR_THIS_BOTS_CHAT_HISTORY).to_string(),
                         tr(keys::Q_PEOPLE_RESTART).to_string(),
                     ),
-                    GroupConfirmAction::AbortRecoveryEmailSetup => (
-                        tr(keys::Q_PEOPLE_ABORT_RECOVERY_EMAIL_SETUP).to_string(),
-                        tr(keys::Q_PEOPLE_ARE_YOU_SURE_YOU_WANT).to_string(),
-                        tr(keys::Q_PEOPLE_ABORT).to_string(),
-                    ),
                     GroupConfirmAction::BlockContact { user_id, block } => {
                         let name = this.contact_display_name(user_id);
                         if block {
