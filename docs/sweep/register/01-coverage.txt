@@ -95,3 +95,17 @@ src/bubble_layout.rs	977	read
 src/business_bot_bar.rs	201	read
 src/business_bots.rs	381	read
 src/business_chat_links.rs	197	read
+src/agent/ui_driver/guard.rs	607	read
+src/agent/ui_driver/keys.rs	328	read
+src/agent/ui_driver/mod.rs	21	read
+src/agent/ui_driver/policy.rs	181	read
+src/agent/ui_driver/redact.rs	607	read
+src/agent/ui_driver/shot.rs	210	read
+src/agent/ui_driver/surface.rs	149	read
+src/agent/ui_driver/takeover.rs	640	read
+src/agent/ui_driver/tree.rs	390	read
+src/ai_compose/box_state.rs	424	read
+src/ai_compose/diff.rs	308	read
+src/ai_compose/limit.rs	66	read
+src/ai_compose/mod.rs	35	read
+src/ai_compose/prefs.rs	102	read
