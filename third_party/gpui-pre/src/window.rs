@@ -1,3 +1,7 @@
+// Modified by the Quill project (2026) from gpui-pre 0.3.9 (Apache-2.0):
+// `Window::paint_surface_frame`; the paint filter and `Window::capture_frame`;
+// `Window::frame_number`.
+// See third_party/gpui-pre/QUILL-CHANGES.md.
 #[cfg(feature = "profiler")]
 use crate::DebugFrameOverlayMode;
 #[cfg(any(feature = "inspector", debug_assertions))]
@@ -6,6 +10,7 @@ use crate::Inspector;
 use crate::profiler;
 use crate::subscription::SingleSubscriberSet;
 use crate::taffy::TaffyLayoutEngine;
+use crate::input_rate::InputRateTracker;
 use crate::{
     Action, AnyDrag, AnyElement, AnyImageCache, AnyTooltip, AnyView, App, AppContext, Arena, Asset,
     AsyncWindowContext, AtlasTile, AvailableSpace, Background, BorderStyle, Bounds, BoxShadow,
@@ -68,9 +73,10 @@ use std::{
 use uuid::Uuid;
 
 pub(crate) mod a11y;
+mod live_views;
 mod prompts;
 
-pub use a11y::A11ySubtreeBuilder;
+pub use a11y::{A11yNodeSnapshot, A11ySubtreeBuilder, A11yTreeSnapshot};
 
 use self::a11y::A11y;
 #[cfg(not(target_family = "wasm"))]
@@ -269,6 +275,16 @@ impl WindowInvalidator {
         self.inner.borrow_mut().dirty_views = views;
     }
 
+    /// Quill: some view waits to be drawn, and `pred` holds for each one.
+    pub(crate) fn all_views(&self, pred: impl Fn(EntityId) -> bool) -> bool {
+        let inner = self.inner.borrow();
+        !inner.dirty_views.is_empty() && inner.dirty_views.iter().all(|view| pred(*view))
+    }
+
+    pub(crate) fn clear_views(&self) {
+        self.inner.borrow_mut().dirty_views.clear();
+    }
+
     pub fn not_drawing(&self) -> bool {
         self.inner.borrow().draw_phase == DrawPhase::None
     }
@@ -454,6 +470,23 @@ impl Drop for ElementArenaScope {
             );
         }
     }
+}
+
+/// Quill: what [`Window::set_paint_filter`] takes.
+#[derive(Clone)]
+pub struct PaintFilter {
+    /// Given the tags of the elements being painted, outermost first,
+    /// whether their paint is drawn.
+    pub allows: std::rc::Rc<dyn Fn(&[SharedString]) -> bool>,
+    /// What covers the bounds of a tagged element whose paint the filter
+    /// refuses while its parent's was drawn, and the whole window when
+    /// paint outside every tagged element is refused: the hidden part
+    /// reads as hidden rather than empty.
+    pub hidden: Hsla,
+    /// What goes under a tagged element the filter draws while its
+    /// parent's paint was refused, standing in for the backgrounds the
+    /// filter left out (the window's own, usually).
+    pub shown: Hsla,
 }
 
 /// Returned when the element arena has been used and so must be cleared before the next draw.
@@ -1047,8 +1080,17 @@ pub(crate) struct Frame {
     pub(crate) dispatch_tree: DispatchTree,
     pub(crate) scene: Scene,
     pub(crate) hitboxes: Vec<Hitbox>,
+    /// [`InteractiveElement::a11y_tag`] per tagged hitbox
+    /// ([`Window::hovered_a11y_tags`]).
+    pub(crate) hitbox_tags: FxHashMap<HitboxId, SharedString>,
+    /// The tags of the focused element and its tagged ancestors, outermost
+    /// first, each time a focused element was painted this frame; the last
+    /// is the one [`Window::focused_a11y_tags`] reads.
+    pub(crate) focus_tags: Vec<Vec<SharedString>>,
     pub(crate) window_control_hitboxes: Vec<(WindowControlArea, Hitbox)>,
     pub(crate) deferred_draws: Vec<DeferredDraw>,
+    /// Quill: the [`Entity::live`] views of this frame.
+    pub(crate) live_views: Vec<live_views::LiveView>,
     pub(crate) input_handlers: Vec<Option<PlatformInputHandler>>,
     pub(crate) tooltip_requests: Vec<Option<TooltipRequest>>,
     pub(crate) cursor_styles: Vec<CursorStyleRequest>,
@@ -1071,6 +1113,8 @@ pub(crate) struct PrepaintStateIndex {
     dispatch_tree_index: usize,
     accessed_element_states_index: usize,
     line_layout_index: LineLayoutIndex,
+    a11y_index: crate::window::a11y::A11yIndex,
+    focus: Option<FocusId>,
 }
 
 #[derive(Clone, Default)]
@@ -1084,6 +1128,7 @@ pub(crate) struct PaintIndex {
     accessed_element_states_index: usize,
     tab_handle_index: usize,
     line_layout_index: LineLayoutIndex,
+    focus_tags_index: usize,
 }
 
 impl Frame {
@@ -1103,8 +1148,11 @@ impl Frame {
             dispatch_tree,
             scene: Scene::default(),
             hitboxes: Vec::new(),
+            hitbox_tags: FxHashMap::default(),
+            focus_tags: Vec::new(),
             window_control_hitboxes: Vec::new(),
             deferred_draws: Vec::new(),
+            live_views: Vec::new(),
             input_handlers: Vec::new(),
             tooltip_requests: Vec::new(),
             cursor_styles: Vec::new(),
@@ -1124,17 +1172,24 @@ impl Frame {
     }
 
     pub(crate) fn clear(&mut self) {
+        self.scene.clear();
+        self.clear_all_but_scene();
+    }
+
+    fn clear_all_but_scene(&mut self) {
         self.element_states.clear();
         self.accessed_element_states.clear();
         self.mouse_listeners.clear();
         self.dispatch_tree.clear();
-        self.scene.clear();
         self.input_handlers.clear();
         self.tooltip_requests.clear();
         self.cursor_styles.clear();
         self.hitboxes.clear();
+        self.hitbox_tags.clear();
+        self.focus_tags.clear();
         self.window_control_hitboxes.clear();
         self.deferred_draws.clear();
+        self.live_views.clear();
         self.tab_stops.clear();
         self.focus = None;
 
@@ -1164,6 +1219,16 @@ impl Frame {
                 })),
             })
             .into_inner()
+    }
+
+    fn hitbox_bounds<'a>(
+        &'a self,
+        hit_test: &'a HitTest,
+    ) -> impl Iterator<Item = Bounds<Pixels>> + 'a {
+        self.hitboxes
+            .iter()
+            .filter(|hitbox| hit_test.ids.contains(&hitbox.id))
+            .map(|hitbox| hitbox.bounds)
     }
 
     pub(crate) fn hit_test(&self, position: Point<Pixels>) -> HitTest {
@@ -1216,11 +1281,40 @@ enum InputModality {
     Touch,
 }
 
+/// Quill: what a closed window marked with [`Window::keep_when_closed`]
+/// leaves behind, for the window that replaces it ([`Window::take_over`]).
+/// Everything else in a window belongs to the platform surface or one frame.
+pub struct KeptWindow {
+    id: WindowId,
+    root: Option<AnyView>,
+    focus: Option<FocusId>,
+    element_states: FxHashMap<(GlobalElementId, TypeId), ElementStateBox>,
+    next_frame_callbacks: Vec<FrameCallback>,
+    display_observers: SingleSubscriberSet<AnyObserver>,
+    focus_listeners: SingleSubscriberSet<AnyWindowFocusListener>,
+    focus_lost_listeners: SingleSubscriberSet<AnyObserver>,
+    bounds_observers: SingleSubscriberSet<AnyObserver>,
+    appearance_observers: SingleSubscriberSet<AnyObserver>,
+    button_layout_observers: SingleSubscriberSet<AnyObserver>,
+    visibility_observers: SingleSubscriberSet<Box<dyn FnMut(WindowVisibility, &mut Window, &mut App) -> bool>>,
+    activation_observers: SingleSubscriberSet<AnyObserver>,
+    pending_input_observers: SingleSubscriberSet<AnyObserver>,
+}
+
+impl KeptWindow {
+    /// The closed window's root view.
+    pub fn root(&self) -> Option<&AnyView> {
+        self.root.as_ref()
+    }
+}
+
 /// Holds the state for a specific window.
 pub struct Window {
     pub(crate) handle: AnyWindowHandle,
     pub(crate) invalidator: WindowInvalidator,
     pub(crate) removed: bool,
+    /// Quill: see [`Window::keep_when_closed`].
+    pub(crate) keep_when_closed: bool,
     pub(crate) platform_window: Box<dyn PlatformWindow>,
     pub(crate) display_id: Option<DisplayId>,
     pub(crate) display_observers: SingleSubscriberSet<AnyObserver>,
@@ -1245,6 +1339,8 @@ pub struct Window {
     pub(crate) element_opacity: f32,
     pub(crate) content_mask_stack: Vec<ContentMask<Pixels>>,
     pub(crate) requested_autoscroll: Option<Bounds<Pixels>>,
+    /// QUILL: frames this window began drawing ([`Window::frame_number`]).
+    frames_begun: u64,
     /// The [`TextInputConfiguration`] most recently forwarded to the platform
     /// window, so that only actual changes are forwarded (reconfiguring a live
     /// input session can restart the IME connection).
@@ -1253,6 +1349,9 @@ pub struct Window {
     pub(crate) image_cache_stack: Vec<AnyImageCache>,
     pub(crate) rendered_frame: Frame,
     pub(crate) next_frame: Frame,
+    /// QUILL: `next_frame`'s scene is `rendered_frame`'s with its live views
+    /// drawn again, and the one to show ([`Self::shown_scene`]).
+    scene_patched: bool,
     next_hitbox_id: HitboxId,
     pub(crate) next_tooltip_id: TooltipId,
     pub(crate) tooltip_bounds: Option<TooltipBounds>,
@@ -1264,6 +1363,23 @@ pub struct Window {
     default_prevented: bool,
     mouse_position: Point<Pixels>,
     mouse_hit_test: HitTest,
+    /// Quill: the mouse position the drag ghost was last painted for.
+    drag_painted_at: Option<Point<Pixels>>,
+    /// QUILL: the boxes of the hitboxes under the pointer in the last frame
+    /// drawn during a drag.
+    drag_hovered: Option<SmallVec<[Bounds<Pixels>; 8]>>,
+    drag_target_moved: bool,
+    /// The [`InteractiveElement::a11y_tag`]s of the elements being painted,
+    /// outermost first (pushed and popped around each tagged element's
+    /// paint), so the focused element can record the tags above it.
+    pub(crate) a11y_tag_stack: Vec<SharedString>,
+    /// Quill: decides from [`Self::a11y_tag_stack`] whether what is painted
+    /// now reaches the scene ([`Self::set_paint_filter`]).
+    paint_filter: Option<PaintFilter>,
+    /// Quill: under a paint filter, the tag stack each tooltip's owner was
+    /// painted under; the tooltip is painted under the same tags, so it is
+    /// cut with its owner ([`Self::record_tooltip_tags`]).
+    tooltip_tags: Vec<(TooltipId, Vec<SharedString>)>,
     modifiers: Modifiers,
     capslock: Capslock,
     scale_factor: f32,
@@ -1313,17 +1429,6 @@ pub struct Window {
 struct ModifierState {
     modifiers: Modifiers,
     saw_other_input: bool,
-}
-
-/// Tracks input event timestamps to determine if input is arriving at a high rate.
-/// Used for selective VRR (Variable Refresh Rate) optimization.
-#[derive(Clone, Debug)]
-pub(crate) struct InputRateTracker {
-    timestamps: Vec<Instant>,
-    window: Duration,
-    inputs_per_second: u32,
-    sustain_until: Instant,
-    sustain_duration: Duration,
 }
 
 const FRAME_INTERVAL_TOLERANCE: Duration = Duration::from_millis(1);
@@ -1384,40 +1489,6 @@ fn minimum_frame_interval(
     .into_iter()
     .flatten()
     .max()
-}
-
-impl Default for InputRateTracker {
-    fn default() -> Self {
-        Self {
-            timestamps: Vec::new(),
-            window: Duration::from_millis(100),
-            inputs_per_second: 60,
-            sustain_until: Instant::now(),
-            sustain_duration: Duration::from_secs(1),
-        }
-    }
-}
-
-impl InputRateTracker {
-    pub fn record_input(&mut self) {
-        let now = Instant::now();
-        self.timestamps.push(now);
-        self.prune_old_timestamps(now);
-
-        let min_events = self.inputs_per_second as u128 * self.window.as_millis() / 1000;
-        if self.timestamps.len() as u128 >= min_events {
-            self.sustain_until = now + self.sustain_duration;
-        }
-    }
-
-    pub fn is_high_rate(&self) -> bool {
-        Instant::now() < self.sustain_until
-    }
-
-    fn prune_old_timestamps(&mut self, now: Instant) {
-        self.timestamps
-            .retain(|&t| now.duration_since(t) <= self.window);
-    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -1930,7 +2001,7 @@ impl Window {
                     mem::take(&mut deferred_force_render) || request_frame_options.force_render;
 
                 let power_state = handle
-                    .update(&mut cx, |_, _, cx| (cx.thermal_state(), cx.power_mode()))
+                    .update(&mut cx, |_, _, cx| (cx.thermal_state(), cx.frame_power_mode()))
                     .with_context(|| {
                         format!(
                             "reading power state for frame request for window {:?}",
@@ -1941,7 +2012,8 @@ impl Window {
 
                 // Keep presenting briefly after high-rate input to prevent display
                 // underclocking, but subject to the same power limits as redraws.
-                let high_rate_input = input_rate_tracker.borrow_mut().is_high_rate();
+                let now = Instant::now();
+                let high_rate_input = input_rate_tracker.borrow().is_high_rate(now);
                 let has_next_frame_callbacks = !next_frame_callbacks.borrow().is_empty();
                 let has_frame_demand = invalidator.is_dirty()
                     || force_render
@@ -1965,7 +2037,6 @@ impl Window {
                     power_mode,
                 );
 
-                let now = Instant::now();
                 // Idle display-link ticks must neither consume a frame slot nor
                 // wake a demand-driven frame source.
                 if has_frame_demand && frame_pacer.should_defer(now, min_frame_interval) {
@@ -2352,6 +2423,7 @@ impl Window {
             handle,
             invalidator,
             removed: false,
+            keep_when_closed: false,
             platform_window,
             display_id,
             display_observers: SingleSubscriberSet::new(),
@@ -2372,11 +2444,13 @@ impl Window {
             content_mask_stack: Vec::new(),
             element_opacity: 1.0,
             requested_autoscroll: None,
+            frames_begun: 0,
             last_text_input_configuration: None,
             focused_text_input: None,
             rendered_frame: Frame::new(DispatchTree::new(cx.keymap.clone(), cx.actions.clone())),
             next_frame: Frame::new(DispatchTree::new(cx.keymap.clone(), cx.actions.clone())),
             next_frame_callbacks,
+            scene_patched: false,
             next_hitbox_id: HitboxId(0),
             next_tooltip_id: TooltipId::default(),
             tooltip_bounds: None,
@@ -2387,6 +2461,12 @@ impl Window {
             default_prevented: true,
             mouse_position,
             mouse_hit_test: HitTest::default(),
+            drag_painted_at: None,
+            drag_hovered: None,
+            drag_target_moved: false,
+            a11y_tag_stack: Vec::new(),
+            tooltip_tags: Vec::new(),
+            paint_filter: None,
             modifiers,
             capslock,
             scale_factor,
@@ -2582,6 +2662,44 @@ impl Window {
             .map(|view| view.clone().downcast::<E>().ok())
     }
 
+    /// How many subscriptions this window holds, by kind; see
+    /// [`App::live_subscription_counts`].
+    #[cfg(feature = "test-support")]
+    pub fn live_subscription_counts(&self) -> std::collections::BTreeMap<&'static str, usize> {
+        let mut counts = std::collections::BTreeMap::new();
+        counts.insert("focus_listeners", self.focus_listeners.subscriber_count());
+        counts.insert(
+            "focus_lost_listeners",
+            self.focus_lost_listeners.subscriber_count(),
+        );
+        counts.insert("bounds_observers", self.bounds_observers.subscriber_count());
+        counts.insert(
+            "appearance_observers",
+            self.appearance_observers.subscriber_count(),
+        );
+        counts.insert(
+            "button_layout_observers",
+            self.button_layout_observers.subscriber_count(),
+        );
+        counts.insert(
+            "activation_observers",
+            self.activation_observers.subscriber_count(),
+        );
+        counts.insert(
+            "visibility_observers",
+            self.visibility_observers.subscriber_count(),
+        );
+        counts.insert(
+            "display_observers",
+            self.display_observers.subscriber_count(),
+        );
+        counts.insert(
+            "pending_input_observers",
+            self.pending_input_observers.subscriber_count(),
+        );
+        counts
+    }
+
     /// Obtain a handle to the window that belongs to this context.
     pub fn window_handle(&self) -> AnyWindowHandle {
         self.handle
@@ -2598,6 +2716,88 @@ impl Window {
     /// Close this window.
     pub fn remove_window(&mut self) {
         self.removed = true;
+    }
+
+    /// Quill: when this window closes, keep its root view and everything
+    /// registered on the window, for [`App::take_kept_window`].
+    pub fn keep_when_closed(&mut self) {
+        self.keep_when_closed = true;
+    }
+
+    /// Quill: what is left of this window, once it is closing.
+    pub(crate) fn into_kept(mut self: Box<Self>) -> KeptWindow {
+        KeptWindow {
+            id: self.handle.id,
+            root: self.root.take(),
+            focus: self.focus,
+            element_states: mem::take(&mut self.rendered_frame.element_states),
+            next_frame_callbacks: self.next_frame_callbacks.take(),
+            display_observers: mem::replace(&mut self.display_observers, SingleSubscriberSet::new()),
+            focus_listeners: mem::replace(&mut self.focus_listeners, SingleSubscriberSet::new()),
+            focus_lost_listeners: mem::replace(
+                &mut self.focus_lost_listeners,
+                SingleSubscriberSet::new(),
+            ),
+            bounds_observers: mem::replace(&mut self.bounds_observers, SingleSubscriberSet::new()),
+            appearance_observers: mem::replace(
+                &mut self.appearance_observers,
+                SingleSubscriberSet::new(),
+            ),
+            button_layout_observers: mem::replace(
+                &mut self.button_layout_observers,
+                SingleSubscriberSet::new(),
+            ),
+            visibility_observers: mem::replace(
+                &mut self.visibility_observers,
+                SingleSubscriberSet::new(),
+            ),
+            activation_observers: mem::replace(
+                &mut self.activation_observers,
+                SingleSubscriberSet::new(),
+            ),
+            pending_input_observers: mem::replace(
+                &mut self.pending_input_observers,
+                SingleSubscriberSet::new(),
+            ),
+        }
+    }
+
+    /// Quill: become the window `kept` came from. Its subscriptions fire here
+    /// and its handles reach this window, so no entity needs to know it moved.
+    /// Call this first, from the build closure of the window that replaces it;
+    /// the closure then returns the kept root view.
+    pub fn take_over(&mut self, kept: KeptWindow, cx: &mut App) {
+        let KeptWindow {
+            id,
+            root: _,
+            focus,
+            element_states,
+            next_frame_callbacks,
+            display_observers,
+            focus_listeners,
+            focus_lost_listeners,
+            bounds_observers,
+            appearance_observers,
+            button_layout_observers,
+            visibility_observers,
+            activation_observers,
+            pending_input_observers,
+        } = kept;
+        self.focus = focus;
+        self.rendered_frame.element_states = element_states;
+        self.next_frame_callbacks
+            .borrow_mut()
+            .extend(next_frame_callbacks);
+        self.display_observers = display_observers;
+        self.focus_listeners = focus_listeners;
+        self.focus_lost_listeners = focus_lost_listeners;
+        self.bounds_observers = bounds_observers;
+        self.appearance_observers = appearance_observers;
+        self.button_layout_observers = button_layout_observers;
+        self.visibility_observers = visibility_observers;
+        self.activation_observers = activation_observers;
+        self.pending_input_observers = pending_input_observers;
+        cx.note_window_replaced(id, self.handle.id);
     }
 
     /// Obtain the currently focused [`FocusHandle`]. If no elements are focused, returns `None`.
@@ -3093,8 +3293,7 @@ impl Window {
     /// to capture what would be rendered without displaying it or requiring the window to be visible.
     #[cfg(any(test, feature = "test-support"))]
     pub fn render_to_image(&self) -> anyhow::Result<image::RgbaImage> {
-        self.platform_window
-            .render_to_image(&self.rendered_frame.scene)
+        self.platform_window.render_to_image(self.shown_scene())
     }
 
     /// Borrows the most recently rendered frame's scene, so benchmarks can validate their
@@ -3110,13 +3309,13 @@ impl Window {
     /// whose bounds don't intersect their content mask are culled at paint time and won't appear.
     #[cfg(any(test, feature = "test-support"))]
     pub fn painted_quads(&self) -> Vec<Quad> {
-        self.rendered_frame.scene.quads.clone()
+        self.shown_scene().quads.clone()
     }
 
     /// Returns the underlines in the most recently rendered frame's scene.
     #[cfg(any(test, feature = "test-support"))]
     pub fn painted_underlines(&self) -> Vec<Underline> {
-        self.rendered_frame.scene.underlines.clone()
+        self.shown_scene().underlines.clone()
     }
 
     /// Set the content size of the window.
@@ -3280,6 +3479,12 @@ impl Window {
         self.a11y.set_window_title(title.to_string());
     }
 
+    /// Quill: the reason Windows shows while this window holds back the end
+    /// of the session, or `None` to stop showing it.
+    pub fn set_shutdown_block_reason(&self, reason: Option<&str>) {
+        self.platform_window.set_shutdown_block_reason(reason);
+    }
+
     /// Sets the position of the macOS traffic light buttons.
     #[cfg(target_os = "macos")]
     pub fn set_traffic_light_position(&self, position: Point<Pixels>) {
@@ -3306,6 +3511,12 @@ impl Window {
     /// On macOS, this sets the window's accessibility document property (AXDocument).
     pub fn set_document_path(&self, path: Option<&std::path::Path>) {
         self.platform_window.set_document_path(path);
+    }
+
+    /// QUILL: the id of the display the window is on, as last seen when the
+    /// window moved, without asking the platform for its display list.
+    pub fn display_id(&self) -> Option<DisplayId> {
+        self.display_id
     }
 
     /// Determine the display on which the window is visible.
@@ -3668,9 +3879,23 @@ impl Window {
         // Set up the per-App arena for element allocation during this draw.
         // This ensures that multiple test Apps have isolated arenas.
         let arena_scope = ElementArenaScope::enter(&cx.element_arena);
+        self.frames_begun += 1;
 
         if self.platform_window.prepare_frame() {
             self.refresh();
+        }
+        let after_patch = mem::take(&mut self.scene_patched);
+        if after_patch {
+            self.next_frame.scene.clear();
+        }
+        if self.only_live_views_changed(cx) {
+            self.patch_live_views(cx);
+            #[cfg(feature = "profiler")]
+            self.end_draw_profile(cx, frame_dirty);
+            return arena_scope.exit(&cx.element_arena);
+        }
+        if after_patch {
+            self.dirty_patched_live_views();
         }
         self.invalidate_entities();
         cx.entities.clear_accessed();
@@ -3695,6 +3920,10 @@ impl Window {
                 self.rendered_frame.input_handlers.push(Some(input_handler));
             }
         }
+        self.next_frame.scene.filtered = self.paint_filter.is_some();
+        self.tooltip_tags.clear();
+        self.update_paint_suppression();
+        self.cover_refused_window();
         if !cx.mode.skip_drawing() {
             self.draw_roots(cx);
             #[cfg(feature = "profiler")]
@@ -3795,24 +4024,27 @@ impl Window {
         // panel). `Window::focus` suppresses `refresh` while a draw is in progress, so
         // schedule another frame here to render the new focus state and dispatch the
         // resulting focus events.
-        if self.focus != focus_before_listeners {
+        if self.focus != focus_before_listeners || mem::take(&mut self.drag_target_moved) {
             self.refresh();
         }
         self.needs_present.set(true);
 
         #[cfg(feature = "profiler")]
-        {
-            self.window_profiler
-                .set_refresh_interval(self.refresh_interval(cx));
-            let draw_duration = self
-                .window_profiler
-                .end_draw(frame_dirty.dirty_at, frame_dirty.invalidations);
-            self.debug_frame_overlay.record_frame(draw_duration);
-        }
+        self.end_draw_profile(cx, frame_dirty);
 
         // Exit the scope to obtain the arena-clear token this draw owes; the
         // scope's teardown itself happens in `ElementArenaScope::drop`.
         arena_scope.exit(&cx.element_arena)
+    }
+
+    #[cfg(feature = "profiler")]
+    fn end_draw_profile(&mut self, cx: &App, frame_dirty: FrameDirtyAccumulator) {
+        self.window_profiler
+            .set_refresh_interval(self.refresh_interval(cx));
+        let draw_duration = self
+            .window_profiler
+            .end_draw(frame_dirty.dirty_at, frame_dirty.invalidations);
+        self.debug_frame_overlay.record_frame(draw_duration);
     }
 
     fn record_entities_accessed(&mut self, cx: &mut App) {
@@ -3841,7 +4073,7 @@ impl Window {
         let _foreground_turn = profiler::journal::foreground_turn();
         #[cfg(feature = "profiler")]
         let present_start = Instant::now();
-        self.platform_window.draw(&self.rendered_frame.scene);
+        self.platform_window.draw(self.shown_scene());
         #[cfg(feature = "profiler")]
         self.window_profiler.record_present(
             present_start,
@@ -3907,7 +4139,13 @@ impl Window {
 
         self.a11y.sync_active_flag();
         if self.a11y.is_active() {
-            self.a11y.begin_frame();
+            // A cached view replays its part of the last frame's tree; with
+            // none to replay, every view renders.
+            if !self.a11y.begin_frame() {
+                self.refreshing = true;
+            }
+        } else {
+            self.a11y.skip_frame();
         }
 
         let _inspector_width: Pixels = rems(30.0).to_pixels(self.rem_size());
@@ -3968,11 +4206,13 @@ impl Window {
             element.prepaint_as_root(offset, AvailableSpace::min_size(), self, cx);
             active_drag_element = Some(element);
             cx.active_drag = Some(active_drag);
+            self.drag_painted_at = Some(self.mouse_position);
         } else {
             tooltip_element = self.prepaint_tooltip(cx);
         }
 
         self.mouse_hit_test = self.next_frame.hit_test(self.mouse_position);
+        self.note_drag_hover(cx);
 
         // Now actually paint the elements.
         #[cfg(feature = "profiler")]
@@ -3990,7 +4230,29 @@ impl Window {
         } else if let Some(mut drag_element) = active_drag_element {
             drag_element.paint(self, cx);
         } else if let Some(mut tooltip_element) = tooltip_element {
+            // Quill: under a paint filter the tooltip is painted under its
+            // owner's tags, so the filter decides it as it decided the
+            // owner.
+            let tags = self
+                .tooltip_bounds
+                .as_ref()
+                .filter(|_| self.paint_filter.is_some())
+                .and_then(|tooltip| {
+                    self.tooltip_tags
+                        .iter()
+                        .find(|(id, _)| *id == tooltip.id)
+                        .map(|(_, tags)| (tags.clone(), tooltip.bounds))
+                });
+            let pushed = tags.as_ref().map_or(0, |(tags, _)| tags.len());
+            if let Some((tags, bounds)) = tags {
+                for tag in tags {
+                    self.push_a11y_tag(tag, bounds);
+                }
+            }
             tooltip_element.paint(self, cx);
+            for _ in 0..pushed {
+                self.pop_a11y_tag();
+            }
         }
 
         #[cfg(any(feature = "inspector", debug_assertions))]
@@ -4006,10 +4268,13 @@ impl Window {
 
         // a11y may have been activated/deactivated halfway through the frame
         let a11y_active_start_of_frame = self.a11y.is_active();
+        let a11y_system_active_start_of_frame = self.a11y.is_system_active();
         self.a11y.sync_active_flag();
-        let a11y_active_end_of_frame = self.a11y.is_active();
+        let a11y_system_active_end_of_frame = self.a11y.is_system_active();
 
-        let should_send_a11y_update = a11y_active_start_of_frame && a11y_active_end_of_frame;
+        // A tree built only because it was forced stays in-process.
+        let should_send_a11y_update =
+            a11y_system_active_start_of_frame && a11y_system_active_end_of_frame;
 
         if a11y_active_start_of_frame {
             // Harvest frame metadata for the debug dump while the live window
@@ -4214,7 +4479,9 @@ impl Window {
                 });
                 deferred_draw.accessed_entities.extend(accessed_entities);
             } else {
-                self.reuse_paint(deferred_draw.paint_range.clone());
+                let replayed = deferred_draw.paint_range.clone();
+                self.reuse_paint(replayed.clone());
+                self.replay_live_views(&deferred_draw.element_id_stack, &replayed, &paint_start);
             }
             let paint_end = self.paint_index();
             deferred_draw.paint_range = paint_start..paint_end;
@@ -4238,15 +4505,33 @@ impl Window {
             dispatch_tree_index: self.next_frame.dispatch_tree.len(),
             accessed_element_states_index: self.next_frame.accessed_element_states.len(),
             line_layout_index: self.text_system.layout_index(),
+            a11y_index: self.a11y.index(),
+            focus: self.focus,
         }
     }
 
+    /// While the accessibility tree is built, whether the focus is not the
+    /// one a cached view's last prepaint saw from start to end. Its focus
+    /// claims were made for that focus, so it renders instead of replaying.
+    /// Focus moved outside a draw refreshes the window anyway; this catches
+    /// a move during one (a view that focuses something as it renders).
+    pub(crate) fn a11y_focus_moved(&self, range: &Range<PrepaintStateIndex>) -> bool {
+        self.a11y.is_active() && (range.start.focus != self.focus || range.end.focus != self.focus)
+    }
+
     pub(crate) fn reuse_prepaint(&mut self, range: Range<PrepaintStateIndex>) {
-        self.next_frame.hitboxes.extend(
-            self.rendered_frame.hitboxes[range.start.hitboxes_index..range.end.hitboxes_index]
-                .iter()
-                .cloned(),
-        );
+        let hitboxes =
+            &self.rendered_frame.hitboxes[range.start.hitboxes_index..range.end.hitboxes_index];
+        for hitbox in hitboxes {
+            if let Some(tag) = self.rendered_frame.hitbox_tags.get(&hitbox.id) {
+                self.next_frame.hitbox_tags.insert(hitbox.id, tag.clone());
+            }
+        }
+        self.next_frame.hitboxes.extend(hitboxes.iter().cloned());
+        if self.a11y.is_active() {
+            self.a11y
+                .replay(range.start.a11y_index..range.end.a11y_index);
+        }
         self.next_frame.tooltip_requests.extend(
             self.rendered_frame.tooltip_requests
                 [range.start.tooltips_index..range.end.tooltips_index]
@@ -4304,6 +4589,7 @@ impl Window {
             accessed_element_states_index: self.next_frame.accessed_element_states.len(),
             tab_handle_index: self.next_frame.tab_stops.paint_index(),
             line_layout_index: self.text_system.layout_index(),
+            focus_tags_index: self.next_frame.focus_tags.len(),
         }
     }
 
@@ -4343,6 +4629,10 @@ impl Window {
         self.next_frame.tab_stops.replay(
             &self.rendered_frame.tab_stops.insertion_history
                 [range.start.tab_handle_index..range.end.tab_handle_index],
+        );
+        self.next_frame.focus_tags.extend_from_slice(
+            &self.rendered_frame.focus_tags
+                [range.start.focus_tags_index..range.end.focus_tags_index],
         );
 
         self.text_system
@@ -4458,7 +4748,9 @@ impl Window {
         result
     }
 
-    pub(crate) fn with_element_opacity<R>(
+    /// QUILL: draw `f` at `opacity` of the current element opacity, which a
+    /// view drawing another view's content out of its tree has to carry over.
+    pub fn with_element_opacity<R>(
         &mut self,
         opacity: Option<f32>,
         f: impl FnOnce(&mut Self) -> R,
@@ -4484,8 +4776,10 @@ impl Window {
     pub fn transact<T, U>(&mut self, f: impl FnOnce(&mut Self) -> Result<T, U>) -> Result<T, U> {
         self.invalidator.debug_assert_prepaint();
         let index = self.prepaint_index();
+        let live_views = self.next_frame.live_views.len();
         let result = f(self);
         if result.is_err() {
+            self.next_frame.live_views.truncate(live_views);
             self.next_frame.hitboxes.truncate(index.hitboxes_index);
             self.next_frame
                 .tooltip_requests
@@ -4551,7 +4845,7 @@ impl Window {
     /// Obtain the current element opacity. This method should only be called during the
     /// prepaint phase of element drawing.
     #[inline]
-    pub(crate) fn element_opacity(&self) -> f32 {
+    pub fn element_opacity(&self) -> f32 {
         self.invalidator.debug_assert_paint_or_prepaint();
         self.element_opacity
     }
@@ -5421,6 +5715,26 @@ impl Window {
         });
     }
 
+    /// QUILL: paint CPU surface pixels into the scene for the next frame at
+    /// the current z-index (platforms without CoreVideo).
+    ///
+    /// This method should only be called as part of the paint phase of element drawing.
+    #[cfg(not(any(target_os = "macos", target_os = "ios")))]
+    pub fn paint_surface_frame(&mut self, bounds: Bounds<Pixels>, frame: Arc<crate::SurfaceFrame>) {
+        use crate::PaintSurface;
+
+        self.invalidator.debug_assert_paint();
+
+        let bounds = self.snap_bounds(bounds);
+        let content_mask = self.snapped_content_mask();
+        self.next_frame.scene.insert_primitive(PaintSurface {
+            order: 0,
+            bounds,
+            content_mask,
+            frame,
+        });
+    }
+
     /// Removes an image from the sprite atlas.
     pub fn drop_image(&mut self, data: Arc<RenderImage>) -> Result<()> {
         for frame_index in 0..data.frame_count() {
@@ -5433,6 +5747,54 @@ impl Window {
         }
 
         Ok(())
+    }
+
+    /// QUILL: how many frames this window has begun drawing, counting the one
+    /// being drawn. Work done while laying out or painting one frame shares
+    /// the number, so a cache can tell one frame's requests from the next.
+    pub fn frame_number(&self) -> u64 {
+        self.frames_begun
+    }
+
+    /// QUILL: how many color emoji glyphs this window's sprite atlas holds.
+    /// GPUI keeps every glyph it rasterized until the window closes.
+    pub fn emoji_glyph_count(&self) -> usize {
+        self.sprite_atlas.emoji_glyph_count()
+    }
+
+    /// QUILL: start dropping the color emoji glyphs this window no longer
+    /// draws. The atlas marks what frames ask for from here on, and the
+    /// next frame redraws every view, cached ones too, so each glyph on
+    /// screen gets marked. Call between frames; pass the result to
+    /// [`Window::sweep_emoji_glyphs`].
+    pub fn begin_emoji_glyph_sweep(&mut self) -> u64 {
+        let mark = self.sprite_atlas.next_use_mark();
+        self.refresh();
+        mark
+    }
+
+    /// QUILL: drop the color emoji glyphs no frame drew since
+    /// [`Window::begin_emoji_glyph_sweep`] returned `mark`; how many went.
+    /// Call once the frame that redrew everything has finished: before it,
+    /// a view replaying its cache may still show a glyph left unmarked.
+    pub fn sweep_emoji_glyphs(&mut self, mark: u64) -> usize {
+        self.sprite_atlas.remove_emoji_glyphs_unused_since(mark)
+    }
+
+    /// QUILL: how many text glyphs this window's sprite atlas holds.
+    pub fn text_glyph_count(&self) -> usize {
+        self.sprite_atlas.text_glyph_count()
+    }
+
+    /// QUILL: [`Window::sweep_emoji_glyphs`] for text glyphs.
+    pub fn sweep_text_glyphs(&mut self, mark: u64) -> usize {
+        self.sprite_atlas.remove_text_glyphs_unused_since(mark)
+    }
+
+    /// QUILL: this window's atlas, for tests that seed it.
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn sprite_atlas(&self) -> &Arc<dyn PlatformAtlas> {
+        &self.sprite_atlas
     }
 
     /// Returns whether every frame of an image is present in the sprite atlas.
@@ -5558,6 +5920,174 @@ impl Window {
         hitbox
     }
 
+    /// Record the [`InteractiveElement::a11y_tag`] of a hitbox inserted this
+    /// frame, for [`Self::hovered_a11y_tags`].
+    pub(crate) fn tag_hitbox(&mut self, id: HitboxId, tag: SharedString) {
+        self.next_frame.hitbox_tags.insert(id, tag);
+    }
+
+    /// The tags ([`InteractiveElement::a11y_tag`]) of the hitboxes under the
+    /// mouse as of the last mouse event, topmost first: the hitboxes a
+    /// mouse event would reach, as [`Hitbox::is_hovered`] sees them. The
+    /// walk ends with the hitboxes that only scroll would reach
+    /// ([`HitboxBehavior::BlockMouseExceptScroll`]) and at an occluding
+    /// hitbox ([`HitboxBehavior::BlockMouse`]), tagged or not, so an
+    /// overlay over a tagged region hides the region's tag.
+    pub fn hovered_a11y_tags(&self) -> Vec<SharedString> {
+        let hit_test = &self.mouse_hit_test;
+        let frame = &self.rendered_frame;
+        let mut tags = Vec::new();
+        for id in hit_test.ids.iter().take(hit_test.hover_hitbox_count) {
+            if let Some(tag) = frame.hitbox_tags.get(id) {
+                tags.push(tag.clone());
+            }
+            let occludes = frame
+                .hitboxes
+                .iter()
+                .any(|hitbox| hitbox.id == *id && hitbox.behavior == HitboxBehavior::BlockMouse);
+            if occludes {
+                break;
+            }
+        }
+        tags
+    }
+
+    /// Whether the focused element registered a text input handler in the
+    /// last frame ([`Self::handle_input`]): typed characters go into a text
+    /// field, not to key bindings alone.
+    pub fn focused_text_input(&self) -> bool {
+        !self.rendered_frame.input_handlers.is_empty()
+    }
+
+    /// The tags ([`InteractiveElement::a11y_tag`]) of the focused element
+    /// and the elements it was painted inside, innermost first, from the
+    /// last frame: what a key event would reach, read the way
+    /// [`Self::hovered_a11y_tags`] reads a click. Recorded when a focused
+    /// element registers a text input handler or tracks its focus handle;
+    /// empty when nothing focused was painted (focus in a deferred draw
+    /// records the tags of that draw's own ancestors only).
+    pub fn focused_a11y_tags(&self) -> Vec<SharedString> {
+        self.rendered_frame
+            .focus_tags
+            .last()
+            .map(|tags| tags.iter().rev().cloned().collect())
+            .unwrap_or_default()
+    }
+
+    /// Paint-time: an element tagged `tag` starts painting (its own
+    /// background and border included). Under a paint filter, an element
+    /// whose tag turns paint off is covered with the filter's `hidden`
+    /// fill over `bounds`, and one whose tag turns it back on gets the
+    /// `shown` fill under it.
+    pub(crate) fn push_a11y_tag(&mut self, tag: SharedString, bounds: Bounds<Pixels>) {
+        let was_hidden = self.next_frame.scene.suppressed;
+        self.a11y_tag_stack.push(tag);
+        self.update_paint_suppression();
+        let hidden = self.next_frame.scene.suppressed;
+        let Some(filter) = self.paint_filter.as_ref() else {
+            return;
+        };
+        let color = match (was_hidden, hidden) {
+            (false, true) => filter.hidden,
+            (true, false) => filter.shown,
+            _ => return,
+        };
+        self.next_frame.scene.suppressed = false;
+        self.paint_quad(fill(bounds, color));
+        self.next_frame.scene.suppressed = hidden;
+    }
+
+    /// Draw-time, under a paint filter that refuses paint outside every
+    /// tagged element: the window starts covered with the `hidden` fill.
+    fn cover_refused_window(&mut self) {
+        let Some(hidden) = self.paint_filter.as_ref().map(|filter| filter.hidden) else {
+            return;
+        };
+        if !self.next_frame.scene.suppressed {
+            return;
+        }
+        let bounds = Bounds::new(Point::default(), self.viewport_size()).scale(self.scale_factor());
+        self.next_frame.scene.suppressed = false;
+        self.next_frame.scene.insert_primitive(Quad {
+            bounds,
+            content_mask: ContentMask { bounds },
+            background: hidden.into(),
+            ..Quad::default()
+        });
+        self.next_frame.scene.suppressed = true;
+    }
+
+    /// Paint-time: the element [`Self::push_a11y_tag`] named is painted.
+    pub(crate) fn pop_a11y_tag(&mut self) {
+        self.a11y_tag_stack.pop();
+        self.update_paint_suppression();
+    }
+
+    fn update_paint_suppression(&mut self) {
+        self.next_frame.scene.suppressed = self
+            .paint_filter
+            .as_ref()
+            .is_some_and(|filter| !(filter.allows)(&self.a11y_tag_stack));
+    }
+
+    /// Draw only what `filter` allows from now on, `None` to draw
+    /// everything again. The filter gets the [`InteractiveElement::a11y_tag`]s
+    /// of the elements being painted, outermost first, and answers whether
+    /// what they paint reaches the scene; anything painted outside every
+    /// tagged element gets an empty list. A tagged element refused while
+    /// its parent was drawn is covered with the filter's `hidden` fill, one
+    /// drawn while its parent was refused gets the `shown` fill under it. A filtered frame renders every
+    /// view again (cached paint was never filtered and is not replayed).
+    /// Meant for one [`Self::draw`] followed by [`Self::capture_frame`]:
+    /// clear it and draw again before the frame is presented.
+    pub fn set_paint_filter(&mut self, filter: Option<PaintFilter>) {
+        self.paint_filter = filter;
+        self.refresh();
+    }
+
+    /// Whether a paint filter is set ([`Self::set_paint_filter`]).
+    pub fn has_paint_filter(&self) -> bool {
+        self.paint_filter.is_some()
+    }
+
+    /// The last drawn frame, rendered offscreen by the window's own
+    /// renderer and read back, in device pixels. Nothing is presented and
+    /// the screen is not read, so no other window can appear in it. An
+    /// error where the platform's renderer has no readback.
+    pub fn capture_frame(&self) -> anyhow::Result<image::RgbaImage> {
+        self.platform_window.capture_image(self.shown_scene())
+    }
+
+    /// Quill, paint-time: the element that owns tooltip `id` is being
+    /// painted. Under a paint filter, keep the tag stack above it, so the
+    /// tooltip is filtered as its owner is (it is drawn later, at the
+    /// root, where the stack is empty).
+    pub(crate) fn record_tooltip_tags(&mut self, id: Option<TooltipId>) {
+        let Some(id) = id else {
+            return;
+        };
+        if self.paint_filter.is_none() {
+            return;
+        }
+        self.tooltip_tags.push((id, self.a11y_tag_stack.clone()));
+    }
+
+    /// Paint-time: the focused element is being painted; keep the tag
+    /// stack above it for [`Self::focused_a11y_tags`].
+    pub(crate) fn record_focus_tags(&mut self) {
+        self.next_frame.focus_tags.push(self.a11y_tag_stack.clone());
+    }
+
+    /// The caret (or the start of the text being composed) of the text
+    /// input the platform types into, in window logical pixels: the
+    /// rectangle the input method's candidate window is placed by.
+    pub fn focused_text_caret(&mut self, cx: &mut App) -> Option<Bounds<Pixels>> {
+        let mut handler = self.platform_window.take_input_handler()?;
+        let bounds = handler.selected_bounds(self, cx);
+        self.platform_window.set_input_handler(handler);
+        bounds
+    }
+
     /// Set a hitbox which will act as a control area of the platform window.
     ///
     /// This method should only be called as part of the paint phase of element drawing.
@@ -5647,6 +6177,7 @@ impl Window {
         self.invalidator.debug_assert_paint();
 
         if focus_handle.is_focused(self) {
+            self.record_focus_tags();
             let cx = self.to_async(cx);
             self.next_frame.input_handlers.push(Some(
                 PlatformInputHandler::new(cx, Box::new(input_handler)).with_focus(focus_handle.id),
@@ -5941,6 +6472,7 @@ impl Window {
                             external_payload_source: None,
                         });
                     }
+                    self.refresh();
                     PlatformInput::MouseMove(MouseMoveEvent {
                         position,
                         pressed_button: Some(MouseButton::Left),
@@ -6026,7 +6558,9 @@ impl Window {
 
         let caused_invalidation = self.invalidator.update_count() > update_count_before;
         if caused_invalidation {
-            self.input_rate_tracker.borrow_mut().record_input();
+            self.input_rate_tracker
+                .borrow_mut()
+                .record_input(Instant::now());
         }
         #[cfg(feature = "profiler")]
         self.window_profiler.end_input(caused_invalidation);
@@ -6210,8 +6744,26 @@ impl Window {
         });
     }
 
+    /// QUILL: a cached view replays `drag_over` styles for the hitboxes it was
+    /// painted under, so when content moves under a still pointer the next
+    /// frame renders every view. Hitbox ids change with each render, so this
+    /// compares their boxes. A frame that refreshed needs no second one.
+    fn note_drag_hover(&mut self, cx: &App) {
+        let hovered = cx.active_drag.is_some().then(|| {
+            self.next_frame
+                .hitbox_bounds(&self.mouse_hit_test)
+                .collect::<SmallVec<_>>()
+        });
+        let previous = mem::replace(&mut self.drag_hovered, hovered);
+        self.drag_target_moved = !self.refreshing && previous.is_some() && previous != self.drag_hovered;
+    }
+
     fn dispatch_mouse_event(&mut self, event: &dyn Any, cx: &mut App) {
-        self.mouse_hit_test = self.rendered_frame.hit_test(self.mouse_position());
+        let hit_test = self.rendered_frame.hit_test(self.mouse_position());
+        // Quill: a drag redraws on a move only when the hovered hitboxes change
+        // (below). The cursor is resolved at the end, after the listeners.
+        let hit_test_changed = hit_test != self.mouse_hit_test;
+        self.mouse_hit_test = hit_test;
 
         #[cfg(any(feature = "inspector", debug_assertions))]
         if self.is_inspector_picking(cx) {
@@ -6248,9 +6800,17 @@ impl Window {
 
         if cx.has_active_drag() {
             if event.is::<MouseMoveEvent>() {
-                // If this was a mouse move event, redraw the window so that the
-                // active drag can follow the mouse cursor.
-                self.refresh();
+                // Quill: the ghost is painted on every draw, cached views or
+                // not, so a move only needs a redraw, and a platform update at
+                // the same spot needs nothing. Cached views render again only
+                // for `drag_over` styles, which follow the hovered hitboxes.
+                if hit_test_changed {
+                    self.refresh();
+                } else if self.drag_painted_at != Some(self.mouse_position)
+                    && self.invalidator.not_drawing()
+                {
+                    self.invalidator.set_dirty(true);
+                }
             } else if event.is::<MouseUpEvent>() {
                 // If this was a mouse up event, cancel the active drag and redraw
                 // the window.
@@ -7304,6 +7864,43 @@ impl Window {
         self.a11y.debug_tree_json()
     }
 
+    /// Build the accessibility tree every frame whether or not assistive
+    /// technology is connected, so an in-process reader can read it with
+    /// [`Self::a11y_tree_snapshot`]. The tree is not sent to the platform
+    /// while only this asks for it. Turning it on or off redraws the window.
+    pub fn set_a11y_forced(&mut self, on: bool) {
+        if self.a11y.set_forced(on) {
+            self.refresh();
+        }
+    }
+
+    /// Whether [`Self::set_a11y_forced`] is on.
+    pub fn is_a11y_forced(&self) -> bool {
+        self.a11y.is_forced()
+    }
+
+    /// Whether assistive technology asked for the tree this frame. Unlike
+    /// [`Self::is_a11y_active`], a tree forced with [`Self::set_a11y_forced`]
+    /// does not count, so behaviour meant for screen-reader users (focus
+    /// announcements, key handling) can key off this.
+    pub fn is_a11y_system_active(&self) -> bool {
+        self.a11y.is_system_active()
+    }
+
+    /// The accessibility tree of the last frame that built one, with bounds
+    /// in window logical pixels. `None` until a frame built a tree (see
+    /// [`Self::is_a11y_active`] and [`Self::set_a11y_forced`]).
+    pub fn a11y_tree_snapshot(&self) -> Option<A11yTreeSnapshot> {
+        self.a11y.snapshot(self.scale_factor)
+    }
+
+    /// How many frames built an accessibility tree so far (the
+    /// `frame_number` the next [`Self::a11y_tree_snapshot`] carries), without
+    /// copying the tree.
+    pub fn a11y_tree_frame(&self) -> u64 {
+        self.a11y.frame_number()
+    }
+
     /// Register a listener for an accessibility action on a specific node.
     /// The listener will be called when a screen reader requests the given
     /// action on the node identified by `node_id`.
@@ -7320,6 +7917,27 @@ impl Window {
             .entry(node_id)
             .or_default()
             .push((action, Box::new(listener)));
+    }
+
+    /// Test support: handle `action` on `node` as if assistive technology
+    /// asked for it.
+    #[cfg(all(not(target_family = "wasm"), any(test, feature = "test-support")))]
+    pub fn simulate_a11y_action(
+        &mut self,
+        node: accesskit::NodeId,
+        action: accesskit::Action,
+        data: Option<accesskit::ActionData>,
+        cx: &mut App,
+    ) {
+        self.handle_a11y_action(
+            accesskit::ActionRequest {
+                action,
+                target_tree: accesskit::TreeId::ROOT,
+                target_node: node,
+                data,
+            },
+            cx,
+        );
     }
 
     #[cfg(not(target_family = "wasm"))]

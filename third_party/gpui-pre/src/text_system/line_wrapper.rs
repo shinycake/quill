@@ -1,3 +1,5 @@
+// Modified by the Quill project (2026) from gpui-pre (Apache-2.0): `width_for_char`
+// is public for the input's long-line wrap. See third_party/gpui-pre/QUILL-CHANGES.md.
 use crate::{FontId, Pixels, SharedString, TextRun, TextSystem, px};
 use collections::HashMap;
 use std::{borrow::Cow, iter, sync::Arc};
@@ -547,8 +549,9 @@ impl LineWrapper {
             .segment_str(text)
     }
 
+    /// The width of one character on its own, cached for this font and size.
     #[inline(always)]
-    fn width_for_char(&mut self, c: char) -> Pixels {
+    pub fn width_for_char(&mut self, c: char) -> Pixels {
         width_for_char(
             &mut self.char_widths,
             c,

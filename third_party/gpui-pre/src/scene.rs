@@ -1,3 +1,8 @@
+// Modified by the Quill project (2026) from gpui-pre 0.3.9 (Apache-2.0):
+// `SurfaceFrame` (RGBA16F and NV12, `YuvColor`) and the non-Apple `PaintSurface::frame`;
+// primitives a window's paint filter refuses never enter the scene; a replayed
+// range enters the bounds tree once.
+// See third_party/gpui-pre/QUILL-CHANGES.md.
 // todo("windows"): remove
 #![cfg_attr(windows, allow(dead_code))]
 
@@ -11,6 +16,7 @@ use crate::{
 use std::{
     fmt::Debug,
     iter::Peekable,
+    mem,
     ops::{Add, Range, Sub},
     slice,
 };
@@ -50,6 +56,16 @@ pub struct Scene {
     pub subpixel_sprites: Vec<SubpixelSprite>,
     pub polychrome_sprites: Vec<PolychromeSprite>,
     pub surfaces: Vec<PaintSurface>,
+    /// Quill: the sort keys of `finish`, kept so it allocates nothing once
+    /// the scene has grown.
+    sort_keys: Vec<(u64, u32)>,
+    /// Quill: the window's paint filter refuses the tags being painted
+    /// now, so primitives inserted meanwhile are dropped
+    /// (`Window::set_paint_filter`).
+    pub(crate) suppressed: bool,
+    /// Quill: this scene is drawn under a paint filter, so cached
+    /// primitives are not replayed (they were never filtered).
+    pub(crate) filtered: bool,
 }
 
 #[expect(missing_docs)]
@@ -66,6 +82,9 @@ impl Scene {
         self.subpixel_sprites.clear();
         self.polychrome_sprites.clear();
         self.surfaces.clear();
+        self.sort_keys.clear();
+        self.suppressed = false;
+        self.filtered = false;
     }
 
     pub fn len(&self) -> usize {
@@ -85,10 +104,11 @@ impl Scene {
     }
 
     pub fn insert_primitive(&mut self, primitive: impl Into<Primitive>) {
-        let mut primitive = primitive.into();
-        let clipped_bounds = primitive
-            .bounds()
-            .intersect(&primitive.content_mask().bounds);
+        if self.suppressed {
+            return;
+        }
+        let primitive = primitive.into();
+        let clipped_bounds = primitive.clipped_bounds();
 
         if clipped_bounds.is_empty() {
             return;
@@ -99,6 +119,10 @@ impl Scene {
             .last()
             .copied()
             .unwrap_or_else(|| self.primitive_bounds.insert(clipped_bounds));
+        self.push_primitive(primitive, order);
+    }
+
+    fn push_primitive(&mut self, mut primitive: Primitive, order: DrawOrder) {
         match &mut primitive {
             Primitive::Shadow(shadow) => {
                 shadow.order = order;
@@ -139,7 +163,19 @@ impl Scene {
     }
 
     pub fn replay(&mut self, range: Range<usize>, prev_scene: &Scene) {
-        for operation in &prev_scene.paint_operations[range] {
+        if self.filtered {
+            return;
+        }
+        let operations = &prev_scene.paint_operations[range];
+        if self.suppressed || !self.layer_stack.is_empty() {
+            self.repaint_operations(operations);
+        } else {
+            self.replay_as_one(operations);
+        }
+    }
+
+    fn repaint_operations(&mut self, operations: &[PaintOperation]) {
+        for operation in operations {
             match operation {
                 PaintOperation::Primitive(primitive) => self.insert_primitive(primitive.clone()),
                 PaintOperation::StartLayer(bounds) => self.push_layer(*bounds),
@@ -148,18 +184,63 @@ impl Scene {
         }
     }
 
+    fn replay_as_one(&mut self, operations: &[PaintOperation]) {
+        let extent = operations
+            .iter()
+            .filter_map(|operation| match operation {
+                PaintOperation::Primitive(primitive) => {
+                    Some((primitive.clipped_bounds(), primitive.order(), primitive.order()))
+                }
+                PaintOperation::StartLayer(_) | PaintOperation::EndLayer => None,
+            })
+            .reduce(|(bounds, lowest, highest), (next, low, high)| {
+                (bounds.union(&next), lowest.min(low), highest.max(high))
+            });
+        let shift = extent.map_or(0, |(bounds, lowest, highest)| {
+            self.primitive_bounds
+                .insert_span(bounds, highest - lowest)
+                .wrapping_sub(lowest)
+        });
+        for operation in operations {
+            match operation {
+                PaintOperation::Primitive(primitive) => {
+                    self.push_primitive(primitive.clone(), primitive.order().wrapping_add(shift));
+                }
+                PaintOperation::StartLayer(bounds) => {
+                    self.paint_operations
+                        .push(PaintOperation::StartLayer(*bounds));
+                }
+                PaintOperation::EndLayer => self.paint_operations.push(PaintOperation::EndLayer),
+            }
+        }
+    }
+
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn refuse_paint_for_test(&mut self, filtered: bool, suppressed: bool) {
+        self.filtered = filtered;
+        self.suppressed = suppressed;
+    }
+
     pub fn finish(&mut self) {
-        self.shadows.sort_by_key(|shadow| shadow.order);
-        self.quads.sort_by_key(|quad| quad.order);
-        self.paths.sort_by_key(|path| path.order);
-        self.underlines.sort_by_key(|underline| underline.order);
-        self.monochrome_sprites
-            .sort_by_key(|sprite| (sprite.order, sprite.tile.texture_id.index));
-        self.subpixel_sprites
-            .sort_by_key(|sprite| (sprite.order, sprite.tile.texture_id.index));
-        self.polychrome_sprites
-            .sort_by_key(|sprite| (sprite.order, sprite.tile.texture_id.index));
-        self.surfaces.sort_by_key(|surface| surface.order);
+        let keys = &mut self.sort_keys;
+        sort_primitives(&mut self.shadows, keys, |shadow| u64::from(shadow.order));
+        sort_primitives(&mut self.quads, keys, |quad| u64::from(quad.order));
+        sort_primitives(&mut self.paths, keys, |path| u64::from(path.order));
+        sort_primitives(&mut self.underlines, keys, |underline| {
+            u64::from(underline.order)
+        });
+        sort_primitives(&mut self.monochrome_sprites, keys, |sprite| {
+            sprite_sort_key(sprite.order, &sprite.tile)
+        });
+        sort_primitives(&mut self.subpixel_sprites, keys, |sprite| {
+            sprite_sort_key(sprite.order, &sprite.tile)
+        });
+        sort_primitives(&mut self.polychrome_sprites, keys, |sprite| {
+            sprite_sort_key(sprite.order, &sprite.tile)
+        });
+        sort_primitives(&mut self.surfaces, keys, |surface| {
+            u64::from(surface.order)
+        });
     }
 
     #[cfg_attr(
@@ -187,6 +268,38 @@ impl Scene {
             polychrome_sprites_iter: self.polychrome_sprites.iter().peekable(),
             surfaces_start: 0,
             surfaces_iter: self.surfaces.iter().peekable(),
+        }
+    }
+}
+
+fn sprite_sort_key(order: DrawOrder, tile: &AtlasTile) -> u64 {
+    u64::from(order) << 32 | u64::from(tile.texture_id.index)
+}
+
+/// QUILL: a stable sort by `key` that moves the primitives only once their
+/// places are known. `sort_by_key` needed a scratch buffer of whole structs on
+/// each frame, for a list that often comes in order already.
+fn sort_primitives<T>(primitives: &mut [T], keys: &mut Vec<(u64, u32)>, key: impl Fn(&T) -> u64) {
+    if primitives.is_sorted_by_key(&key) {
+        return;
+    }
+    keys.clear();
+    keys.extend(
+        primitives
+            .iter()
+            .zip(0u32..)
+            .map(|(primitive, at)| (key(primitive), at)),
+    );
+    keys.sort_unstable();
+    for start in 0..primitives.len() {
+        let mut slot = start;
+        while let Some(entry) = keys.get_mut(slot) {
+            let source = mem::replace(&mut entry.1, slot as u32) as usize;
+            if source == start {
+                break;
+            }
+            primitives.swap(slot, source);
+            slot = source;
         }
     }
 }
@@ -255,6 +368,35 @@ impl Primitive {
             Primitive::SubpixelSprite(sprite) => &sprite.content_mask,
             Primitive::PolychromeSprite(sprite) => &sprite.content_mask,
             Primitive::Surface(surface) => &surface.content_mask,
+        }
+    }
+
+    /// QUILL: the box the primitive draws in, which for a drop shadow reaches
+    /// as far as its blur (the shaders' margin). Draw order goes by this box,
+    /// so a tail sorts the same painted or replayed.
+    pub fn painted_bounds(&self) -> Bounds<ScaledPixels> {
+        match self {
+            Primitive::Shadow(shadow) if shadow.inset != 0 => shadow.element_bounds,
+            Primitive::Shadow(shadow) => shadow.bounds.dilate(shadow.blur_radius * 3.),
+            primitive => *primitive.bounds(),
+        }
+    }
+
+    fn clipped_bounds(&self) -> Bounds<ScaledPixels> {
+        self.painted_bounds()
+            .intersect(&self.content_mask().bounds)
+    }
+
+    fn order(&self) -> DrawOrder {
+        match self {
+            Primitive::Shadow(shadow) => shadow.order,
+            Primitive::Quad(quad) => quad.order,
+            Primitive::Path(path) => path.order,
+            Primitive::Underline(underline) => underline.order,
+            Primitive::MonochromeSprite(sprite) => sprite.order,
+            Primitive::SubpixelSprite(sprite) => sprite.order,
+            Primitive::PolychromeSprite(sprite) => sprite.order,
+            Primitive::Surface(surface) => surface.order,
         }
     }
 }
@@ -771,7 +913,303 @@ pub struct PaintSurface {
     pub content_mask: ContentMask<ScaledPixels>,
     #[cfg(any(target_os = "macos", target_os = "ios"))]
     pub image_buffer: objc2_core_foundation::CFRetained<objc2_core_video::CVPixelBuffer>,
+    /// QUILL: CPU pixels where CoreVideo doesn't exist.
+    #[cfg(not(any(target_os = "macos", target_os = "ios")))]
+    pub frame: std::sync::Arc<SurfaceFrame>,
 }
+
+/// QUILL: the pixel layout of a `SurfaceFrame`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SurfaceFormat {
+    /// Four little-endian IEEE half floats per pixel (R, G, B, A), linear
+    /// extended sRGB, premultiplied alpha: an HDR still.
+    Rgba16Float,
+    /// 8-bit 4:2:0 YUV, bi-planar: `width * height` luma bytes, then
+    /// `height / 2` rows of `width / 2` interleaved (Cb, Cr) pairs. Both
+    /// sides are even. Opaque; the frame's [`YuvColor`] says how its
+    /// samples map to RGB. A video picture as most decoders produce it.
+    Nv12,
+}
+
+impl SurfaceFormat {
+    /// Bytes a tightly packed `width` x `height` frame of this format
+    /// holds (`w * h * 8` for RGBA16F, `w * h * 3 / 2` for NV12).
+    pub fn byte_len(self, width: u32, height: u32) -> Result<usize, SurfaceFrameError> {
+        if width == 0 || height == 0 {
+            return Err(SurfaceFrameError::Empty);
+        }
+        let pixels = (width as usize)
+            .checked_mul(height as usize)
+            .ok_or(SurfaceFrameError::TooLarge)?;
+        match self {
+            SurfaceFormat::Rgba16Float => pixels.checked_mul(8).ok_or(SurfaceFrameError::TooLarge),
+            SurfaceFormat::Nv12 => {
+                if !width.is_multiple_of(2) || !height.is_multiple_of(2) {
+                    return Err(SurfaceFrameError::OddSize { width, height });
+                }
+                // Luma, plus a quarter as many chroma pairs of two bytes.
+                pixels
+                    .checked_add(pixels / 2)
+                    .ok_or(SurfaceFrameError::TooLarge)
+            }
+        }
+    }
+}
+
+/// QUILL: why [`SurfaceFrame::new`] refused its pixels.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SurfaceFrameError {
+    /// A side is zero.
+    Empty,
+    /// NV12 needs even sides (its chroma is half the size on each axis).
+    OddSize {
+        /// The frame's width.
+        width: u32,
+        /// The frame's height.
+        height: u32,
+    },
+    /// The byte count overflows.
+    TooLarge,
+    /// The buffer is not exactly as long as the format and size say.
+    Length {
+        /// What the format and size need.
+        expected: usize,
+        /// What the buffer holds.
+        actual: usize,
+    },
+}
+
+impl std::fmt::Display for SurfaceFrameError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            SurfaceFrameError::Empty => f.write_str("empty surface frame"),
+            SurfaceFrameError::OddSize { width, height } => {
+                write!(f, "NV12 frame of {width}x{height} has an odd side")
+            }
+            SurfaceFrameError::TooLarge => f.write_str("surface frame too large"),
+            SurfaceFrameError::Length { expected, actual } => {
+                write!(f, "surface frame has {actual} bytes, expected {expected}")
+            }
+        }
+    }
+}
+
+impl std::error::Error for SurfaceFrameError {}
+
+/// QUILL: the matrix a YUV frame's samples were encoded with.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum YuvMatrix {
+    /// ITU-R BT.601 (standard definition).
+    Bt601,
+    /// ITU-R BT.709 (high definition).
+    #[default]
+    Bt709,
+}
+
+/// QUILL: how a YUV frame's samples map to RGB.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct YuvColor {
+    /// The encoding matrix.
+    pub matrix: YuvMatrix,
+    /// Full range (luma 0-255, "JPEG"); otherwise limited (luma 16-235,
+    /// chroma 16-240, "TV"), which is what video almost always is.
+    pub full_range: bool,
+}
+
+impl YuvColor {
+    /// The affine map from sampled (Y, Cb, Cr) in 0..1 (an 8-bit sample
+    /// over 255, as a UNORM texture reads it) to gamma-encoded R'G'B' in
+    /// 0..1 (clamp afterwards): `rgb[i] = rows[i][0] * y + rows[i][1] * cb
+    /// + rows[i][2] * cr + rows[i][3]`. Renderers upload these rows, so
+    /// the matrix and range are picked here, in one place.
+    pub fn rgb_rows(self) -> [[f32; 4]; 3] {
+        let (kr, kb) = match self.matrix {
+            YuvMatrix::Bt601 => (0.299_f32, 0.114_f32),
+            YuvMatrix::Bt709 => (0.2126_f32, 0.0722_f32),
+        };
+        let kg = 1.0 - kr - kb;
+        // Y' = (y - y0) * ys and C' = (c - c0) * cs.
+        let (y0, ys, cs) = if self.full_range {
+            (0.0, 1.0, 1.0)
+        } else {
+            (16.0 / 255.0, 255.0 / 219.0, 255.0 / 224.0)
+        };
+        let c0 = 128.0 / 255.0;
+        let r_cr = 2.0 * (1.0 - kr) * cs;
+        let g_cb = -2.0 * kb * (1.0 - kb) / kg * cs;
+        let g_cr = -2.0 * kr * (1.0 - kr) / kg * cs;
+        let b_cb = 2.0 * (1.0 - kb) * cs;
+        let offset = |cb: f32, cr: f32| -y0 * ys - c0 * (cb + cr);
+        [
+            [ys, 0.0, r_cr, offset(0.0, r_cr)],
+            [ys, g_cb, g_cr, offset(g_cb, g_cr)],
+            [ys, b_cb, 0.0, offset(b_cb, 0.0)],
+        ]
+    }
+}
+
+/// QUILL: pixels a renderer uploads to a texture and draws like a
+/// CoreVideo surface. The renderer may cache the upload by `id`, so a
+/// frame's pixels never change; its HDR headroom may.
+///
+/// Which platforms draw them: Windows (the vendored DirectX renderer)
+/// draws both formats, Linux (the vendored gpui-pre-wgpu renderer) draws
+/// NV12, and macOS draws CoreVideo buffers instead. The
+/// renderer reports each frame's [`SurfaceDrawState`]; a producer replaces
+/// a refused frame with an image.
+#[derive(Debug)]
+pub struct SurfaceFrame {
+    id: u64,
+    width: u32,
+    height: u32,
+    format: SurfaceFormat,
+    bytes: std::sync::Arc<[u8]>,
+    /// How YUV samples map to RGB (YUV formats only).
+    yuv: YuvColor,
+    /// f32 bits of the display headroom to tone-map to (1.0 = SDR).
+    headroom: std::sync::atomic::AtomicU32,
+    /// [`SurfaceDrawState`]: 0 pending, 1 drawn, 2 refused.
+    draw_state: std::sync::atomic::AtomicU8,
+}
+
+impl SurfaceFrame {
+    /// A frame of `width` x `height` tightly packed pixels. Refused when
+    /// `bytes` is not exactly [`SurfaceFormat::byte_len`] long or the
+    /// format can't have that size (a zero side, or an odd one for NV12).
+    pub fn new(
+        width: u32,
+        height: u32,
+        format: SurfaceFormat,
+        bytes: std::sync::Arc<[u8]>,
+    ) -> Result<Self, SurfaceFrameError> {
+        static NEXT_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+        let expected = format.byte_len(width, height)?;
+        if bytes.len() != expected {
+            return Err(SurfaceFrameError::Length {
+                expected,
+                actual: bytes.len(),
+            });
+        }
+        Ok(Self {
+            id: NEXT_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
+            width,
+            height,
+            format,
+            bytes,
+            yuv: YuvColor::default(),
+            headroom: std::sync::atomic::AtomicU32::new(1.0_f32.to_bits()),
+            draw_state: std::sync::atomic::AtomicU8::new(0),
+        })
+    }
+
+    /// The same frame with `yuv` as its colour (YUV formats).
+    pub fn with_yuv(mut self, yuv: YuvColor) -> Self {
+        self.yuv = yuv;
+        self
+    }
+
+    /// How YUV samples map to RGB.
+    pub fn yuv(&self) -> YuvColor {
+        self.yuv
+    }
+
+    /// NV12: the luma plane (`width * height` bytes) and the interleaved
+    /// chroma plane (`width * height / 2` bytes). `None` for other formats.
+    pub fn nv12_planes(&self) -> Option<(&[u8], &[u8])> {
+        if self.format != SurfaceFormat::Nv12 {
+            return None;
+        }
+        let luma = (self.width as usize).checked_mul(self.height as usize)?;
+        let (y, uv) = self.bytes.split_at_checked(luma)?;
+        (uv.len() == luma / 2).then_some((y, uv))
+    }
+
+    /// Unique per frame; a renderer's texture cache key.
+    pub fn id(&self) -> u64 {
+        self.id
+    }
+
+    /// Width in pixels.
+    pub fn width(&self) -> u32 {
+        self.width
+    }
+
+    /// Height in pixels.
+    pub fn height(&self) -> u32 {
+        self.height
+    }
+
+    /// Pixel layout.
+    pub fn format(&self) -> SurfaceFormat {
+        self.format
+    }
+
+    /// Tightly packed rows of pixels.
+    pub fn bytes(&self) -> &[u8] {
+        &self.bytes
+    }
+
+    /// The display headroom to tone-map to (at least 1.0).
+    pub fn headroom(&self) -> f32 {
+        let headroom = f32::from_bits(self.headroom.load(std::sync::atomic::Ordering::Relaxed));
+        if headroom.is_finite() { headroom.max(1.0) } else { 1.0 }
+    }
+
+    /// Set the display headroom to tone-map to.
+    pub fn set_headroom(&self, headroom: f32) {
+        self.headroom
+            .store(headroom.to_bits(), std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// What the renderer last did with the frame (renderers that draw
+    /// this format report it; see [`SurfaceDrawState`]).
+    pub fn draw_state(&self) -> SurfaceDrawState {
+        match self.draw_state.load(std::sync::atomic::Ordering::Relaxed) {
+            1 => SurfaceDrawState::Drawn,
+            2 => SurfaceDrawState::Refused,
+            _ => SurfaceDrawState::Pending,
+        }
+    }
+
+    /// Renderer: the frame is on screen.
+    pub fn mark_drawn(&self) {
+        // A refusal stays: the producer replaces the frame.
+        let _ = self.draw_state.compare_exchange(
+            0,
+            1,
+            std::sync::atomic::Ordering::Relaxed,
+            std::sync::atomic::Ordering::Relaxed,
+        );
+    }
+
+    /// Renderer: the frame could not be drawn (its textures failed, or the
+    /// pipeline is missing); the producer should show it another way.
+    pub fn mark_refused(&self) {
+        self.draw_state
+            .store(2, std::sync::atomic::Ordering::Relaxed);
+    }
+}
+
+/// QUILL: what a renderer did with a [`SurfaceFrame`], so its producer can
+/// replace a frame this window can't draw (with an image) without a
+/// process-wide switch: each window's renderer answers for itself.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SurfaceDrawState {
+    /// Not drawn yet.
+    Pending,
+    /// Drawn at least once.
+    Drawn,
+    /// The renderer could not draw it.
+    Refused,
+}
+
+impl PartialEq for SurfaceFrame {
+    fn eq(&self, other: &Self) -> bool {
+        self.id == other.id
+    }
+}
+
+impl Eq for SurfaceFrame {}
 
 impl From<PaintSurface> for Primitive {
     fn from(surface: PaintSurface) -> Self {
