@@ -221,6 +221,15 @@ impl QuillApp {
         self.forget_storage_sliders();
     }
 
+    /// Arriving on the page: the sliders start from the account shown, and
+    /// a failure line from an earlier visit goes (only a success cleared it).
+    pub(crate) fn arrive_data_storage(&mut self) {
+        self.forget_storage_sliders();
+        if let Some(session) = self.session_mut() {
+            session.settings.data_storage_error = None;
+        }
+    }
+
     /// The two limit sliders hold the account's TDLib limits: each visit
     /// of the page starts them again from the account shown
     /// (`ensure_storage_sliders`). An account switch leaves no page, so

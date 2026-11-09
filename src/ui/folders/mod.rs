@@ -892,3 +892,7 @@ crate::ui::shell::register_dialogs! {
 }
 
 mod save_folder_editor;
+
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+mod menu_tests;

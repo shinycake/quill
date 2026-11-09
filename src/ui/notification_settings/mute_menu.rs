@@ -38,7 +38,7 @@ impl QuillApp {
         self.notify.mute_menu_open = true;
         self.notify.mute_chat = chat;
         self.notify.ttl_picker = None;
-        self.folders.menu_open = false;
+        self.folders.menu_chat = None;
         self.notify.mute_custom_open = false;
         self.queue_mute_time_inputs(cx);
         if let Some(chat_id) = chat {

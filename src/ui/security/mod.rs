@@ -544,6 +544,11 @@ impl QuillApp {
         self.privacy.sessions_confirm = None;
         self.privacy.extra.session_details = None;
         self.privacy.extra.renaming_device = false;
+        // An earlier visit's failure line goes: with a list held, the
+        // guarded fetch below sends nothing that would replace it.
+        if let Some(session) = self.session_mut() {
+            session.settings.sessions.clear_error();
+        }
         if let Some(live) = self.live.as_mut() {
             let _ = live.driver.maybe_fetch_active_sessions();
         } else if let Some(demo) = self.demo_session.as_mut() {
@@ -561,6 +566,9 @@ impl QuillApp {
         self.goto_twofa_view(TwofaView::Status);
         self.twofa
             .current_password
+            .update(cx, |input, cx| input.set_value("", window, cx));
+        self.twofa
+            .status_check_password
             .update(cx, |input, cx| input.set_value("", window, cx));
         self.twofa
             .new_password
