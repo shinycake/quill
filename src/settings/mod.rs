@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
 mod accounts;
+mod app_prefs;
 mod appearance;
 mod badge;
 mod chat_prefs;
@@ -18,6 +19,7 @@ mod settings_search;
 mod video_pip;
 mod window_save;
 pub use accounts::*;
+pub use app_prefs::*;
 pub use appearance::*;
 pub use badge::*;
 pub use chat_prefs::*;

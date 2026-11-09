@@ -15,7 +15,11 @@ pub struct AccountPaths {
 
 impl AccountPaths {
     pub fn for_root(app_root: &Path, account: &AccountKey) -> Self {
-        let root = app_root.join("accounts").join(&account.0);
+        Self::in_folder(app_root.join("accounts").join(&account.0))
+    }
+
+    /// The layout under `root`, any folder.
+    pub(crate) fn in_folder(root: PathBuf) -> Self {
         Self {
             tdlib_database: root.join("tdlib"),
             tdlib_files: root.join("files"),
