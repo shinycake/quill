@@ -23,12 +23,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// story's comments that are neither known nor already asked for.
     /// Called from `ingest`.
     pub(crate) fn maybe_resolve_live_story_custom_emoji(&mut self) -> Result<(), ConnectSendError> {
-        if !self.chats_path_active()
-            || self
-                .session
-                .requests
-                .has_purpose(RequestPurpose::GetCustomEmojiStickers)
-        {
+        if !self.chats_path_active() || !self.custom_emoji_lookup_idle() {
             return Ok(());
         }
         let Some(group_call_id) = self.session.stories.live.as_ref().map(|l| l.group_call_id)
@@ -65,19 +60,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         ids.sort_unstable();
         ids.dedup();
         ids.truncate(MAX_EMOJI_LOOKUP);
-        if ids.is_empty() {
-            return Ok(());
-        }
-        self.session
-            .stickers
-            .emoji
-            .status_resolution_attempted
-            .extend(ids.iter().copied());
-        let extra = self
-            .session
-            .request(RequestPurpose::GetCustomEmojiStickers, None);
-        let json = crate::telegram::requests_emoji::get_custom_emoji_stickers(extra, &ids);
-        self.send_json_request(extra, &json).map(|_| ())
+        self.lookup_custom_emoji(&ids).map(|_| ())
     }
 
     /// Ban User from a comment's delete box: a user is banned from the

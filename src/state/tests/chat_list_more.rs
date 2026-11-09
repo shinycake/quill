@@ -704,6 +704,7 @@ fn searching_a_background_keeps_the_answer_without_installing_it() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
     let extra = session.request(RequestPurpose::SearchBackground, None);
+    session.chats_state.background_search = Some(extra);
     apply_json(
         &mut session,
         &seq,
@@ -722,6 +723,48 @@ fn searching_a_background_keeps_the_answer_without_installing_it() {
         Some(8)
     );
     assert!(session.chats_state.default_backgrounds.is_empty());
+}
+
+/// Link A's search answers (or fails) after link B's preview opened: B
+/// shows only B's background, and A's failure never shows under B.
+#[test]
+fn a_late_background_search_answer_never_lands_under_another_link() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    let background = |extra: RequestId, id: i64| {
+        format!(
+            r#"{{"@type":"background","@extra":"{}","id":{id},"name":"n{id}","type":{{"@type":"backgroundTypeFill","fill":{{"@type":"backgroundFillSolid","color":3}}}}}}"#,
+            extra.0
+        )
+    };
+    let link_a = session.request(RequestPurpose::SearchBackground, None);
+    let failing_a = session.request(RequestPurpose::SearchBackground, None);
+    let link_b = session.request(RequestPurpose::SearchBackground, None);
+    session.chats_state.background_search = Some(link_b);
+    apply_json(&mut session, &seq, &sink, &background(link_a, 8));
+    assert!(
+        session.chats_state.searched_background.is_none(),
+        "A's answer"
+    );
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"error","@extra":"{}","code":400,"message":"WALLPAPER_INVALID"}}"#,
+            failing_a.0
+        ),
+    );
+    assert!(session.chats_state.background_error.is_none(), "A's error");
+    apply_json(&mut session, &seq, &sink, &background(link_b, 9));
+    assert_eq!(
+        session
+            .chats_state
+            .searched_background
+            .as_ref()
+            .map(|b| b.id),
+        Some(9)
+    );
 }
 
 #[test]

@@ -149,6 +149,7 @@ impl QuillApp {
         self.dialogs.wallpaper_preview = None;
         if let Some(session) = self.wallpaper_session_mut() {
             session.chats_state.searched_background = None;
+            session.chats_state.background_search = None;
             session.chats_state.background_url = None;
         }
         cx.notify();

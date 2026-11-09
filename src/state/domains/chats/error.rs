@@ -20,13 +20,19 @@ impl Session {
             ) => {
                 self.chats_state.appearance_error = Some(error_reason(err));
             }
+            // Only the search the link preview waits for: an earlier
+            // link's failure never shows under a later one.
+            Some(RequestPurpose::SearchBackground) => {
+                if pending.map(|p| p.id) == self.chats_state.background_search {
+                    self.chats_state.background_error = Some(error_reason(err));
+                }
+            }
             Some(
                 RequestPurpose::GetInstalledBackgrounds
                 | RequestPurpose::SetDefaultBackground
                 | RequestPurpose::DeleteDefaultBackground
                 | RequestPurpose::RemoveInstalledBackground
                 | RequestPurpose::SetDefaultBackgroundLocal
-                | RequestPurpose::SearchBackground
                 | RequestPurpose::SetChatBackground
                 | RequestPurpose::DeleteChatBackground
                 | RequestPurpose::SetChatTheme

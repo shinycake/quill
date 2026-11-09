@@ -155,11 +155,13 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(ConnectSendError::InvalidRequest);
         }
         self.session.chats_state.searched_background = None;
+        self.session.chats_state.background_search = None;
         let extra = self.session.request(RequestPurpose::SearchBackground, None);
         if let Err(err) = self.sender.send_json(&search_background(extra, name)) {
             self.session.requests.take(extra);
             return Err(err);
         }
+        self.session.chats_state.background_search = Some(extra);
         Ok(extra)
     }
 
