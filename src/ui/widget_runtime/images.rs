@@ -42,7 +42,9 @@ fn data_url(url: &str) -> Option<(String, Vec<u8>)> {
         let clean: String = body.chars().filter(|c| !c.is_ascii_whitespace()).collect();
         base64::engine::general_purpose::STANDARD
             .decode(clean.as_bytes())
-            .or_else(|_| base64::engine::general_purpose::STANDARD_NO_PAD.decode(clean.trim_end_matches('=')))
+            .or_else(|_| {
+                base64::engine::general_purpose::STANDARD_NO_PAD.decode(clean.trim_end_matches('='))
+            })
             .ok()?
     } else {
         percent_decode(body)
@@ -87,7 +89,11 @@ fn svg(bytes: &[u8]) -> Option<Pixmap> {
         return None;
     }
     let mut pixmap = Pixmap::new(size.width(), size.height())?;
-    resvg::render(&tree, tiny_skia::Transform::identity(), &mut pixmap.as_mut());
+    resvg::render(
+        &tree,
+        tiny_skia::Transform::identity(),
+        &mut pixmap.as_mut(),
+    );
     Some(pixmap)
 }
 
@@ -108,8 +114,14 @@ mod tests {
 
     #[test]
     fn data_urls_decode_base64_and_percent_forms() {
-        assert_eq!(data_url("data:text/plain;base64,UXVpbGw="), Some(("text/plain".into(), b"Quill".to_vec())));
-        assert_eq!(data_url("data:image/svg+xml,%3Csvg%3E"), Some(("image/svg+xml".into(), b"<svg>".to_vec())));
+        assert_eq!(
+            data_url("data:text/plain;base64,UXVpbGw="),
+            Some(("text/plain".into(), b"Quill".to_vec()))
+        );
+        assert_eq!(
+            data_url("data:image/svg+xml,%3Csvg%3E"),
+            Some(("image/svg+xml".into(), b"<svg>".to_vec()))
+        );
         assert_eq!(data_url("https://example.com/a.png"), None);
     }
 
@@ -118,7 +130,11 @@ mod tests {
         let mut images = Images::default();
         let svg = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8'%3E%3Crect width='12' height='8' fill='red'/%3E%3C/svg%3E";
         assert_eq!(images.load(1, svg), Some((12.0, 8.0)));
-        assert!(images.get(1).is_some_and(|image| image.pixel(3, 3).is_some_and(|px| px.red() == 255)));
+        assert!(
+            images
+                .get(1)
+                .is_some_and(|image| image.pixel(3, 3).is_some_and(|px| px.red() == 255))
+        );
         assert_eq!(images.load(2, "data:image/png;base64,AAAA"), None);
     }
 }

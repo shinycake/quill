@@ -27,7 +27,9 @@ pub struct Stored {
 
 /// The bytes an area takes against [`QUOTA_BYTES`].
 pub fn area_bytes(area: &Area) -> usize {
-    area.iter().map(|(key, value)| key.len() + value.len()).sum()
+    area.iter()
+        .map(|(key, value)| key.len() + value.len())
+        .sum()
 }
 
 impl Stored {

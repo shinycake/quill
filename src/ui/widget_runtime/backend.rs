@@ -13,7 +13,11 @@ pub struct Resources {
 
 impl Resources {
     pub fn run_canvas(&mut self, id: i32, width: i32, height: i32, ops: &str) {
-        let Self { fonts, images, canvases } = self;
+        let Self {
+            fonts,
+            images,
+            canvases,
+        } = self;
         canvases.run(id, width, height, ops, fonts, images);
     }
 }

@@ -19,7 +19,12 @@ const KEY: WidgetKey = WidgetKey {
     message_id: MessageId(7 << 20),
 };
 
-fn driver_parts() -> (ConnectDriver<Recorder>, Recorder, Arc<dyn DiagnosticSink>, AtomicU64) {
+fn driver_parts() -> (
+    ConnectDriver<Recorder>,
+    Recorder,
+    Arc<dyn DiagnosticSink>,
+    AtomicU64,
+) {
     let store = MemorySecretStore::new();
     let (_dir, prepared) = prepared_tmp(&store);
     let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
@@ -29,7 +34,12 @@ fn driver_parts() -> (ConnectDriver<Recorder>, Recorder, Arc<dyn DiagnosticSink>
     (driver, recorder, sink, seq)
 }
 
-fn feed(driver: &mut ConnectDriver<Recorder>, seq: &AtomicU64, sink: &Arc<dyn DiagnosticSink>, value: serde_json::Value) {
+fn feed(
+    driver: &mut ConnectDriver<Recorder>,
+    seq: &AtomicU64,
+    sink: &Arc<dyn DiagnosticSink>,
+    value: serde_json::Value,
+) {
     driver
         .ingest(copy_and_parse(&value.to_string(), seq, sink).unwrap())
         .unwrap();
@@ -70,7 +80,12 @@ fn a_late_bot_is_a_timeout_and_a_flood_wait_is_rate_limited() {
     let (mut driver, recorder, sink, seq) = driver_parts();
     for (token, code, message, failure) in [
         (1, 502, "Bot did not answer", QueryFailure::Timeout),
-        (2, 429, "Too Many Requests: retry after 8", QueryFailure::RateLimited),
+        (
+            2,
+            429,
+            "Too Many Requests: retry after 8",
+            QueryFailure::RateLimited,
+        ),
         (3, 400, "WIDGET_INVALID", QueryFailure::Failed),
     ] {
         driver.send_widget_query(KEY, token, b"x").unwrap();
@@ -131,7 +146,10 @@ fn one_public_data_poll_at_a_time_and_its_period_is_held_to_bounds() {
             data: Some(("{\"n\":2}".into(), Duration::from_secs(5))),
         }]
     );
-    assert!(driver.poll_widget_public_data(KEY).unwrap().is_some(), "answered: may poll again");
+    assert!(
+        driver.poll_widget_public_data(KEY).unwrap().is_some(),
+        "answered: may poll again"
+    );
     let again = sent_request(&recorder, "getWidgetPublicData");
     feed(
         &mut driver,
@@ -141,6 +159,9 @@ fn one_public_data_poll_at_a_time_and_its_period_is_held_to_bounds() {
     );
     assert_eq!(
         driver.take_widget_answers(),
-        vec![WidgetAnswer::PublicData { key: KEY, data: None }]
+        vec![WidgetAnswer::PublicData {
+            key: KEY,
+            data: None
+        }]
     );
 }

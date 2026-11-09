@@ -5,8 +5,15 @@ use tiny_skia::{Mask, Pixmap, PremultipliedColorU8};
 /// `target` takes `drawn`'s pixels where `mask` covers it (blended by its
 /// coverage) and keeps its own elsewhere; all three are the same size.
 pub fn take_masked(target: &mut Pixmap, drawn: &Pixmap, mask: &Mask) {
-    let mix = |from: u8, to: u8, m: u16| ((u16::from(from) * (255 - m) + u16::from(to) * m + 127) / 255) as u8;
-    for ((out, new), m) in target.pixels_mut().iter_mut().zip(drawn.pixels()).zip(mask.data()) {
+    let mix = |from: u8, to: u8, m: u16| {
+        ((u16::from(from) * (255 - m) + u16::from(to) * m + 127) / 255) as u8
+    };
+    for ((out, new), m) in target
+        .pixels_mut()
+        .iter_mut()
+        .zip(drawn.pixels())
+        .zip(mask.data())
+    {
         let m = u16::from(*m);
         let mixed = PremultipliedColorU8::from_rgba(
             mix(out.red(), new.red(), m),
@@ -27,7 +34,9 @@ pub fn blur(pixmap: &mut Pixmap, sigma: f32) {
     }
     let (width, height) = (pixmap.width() as usize, pixmap.height() as usize);
     // Three box widths whose passes add up to the Gaussian (W3C filter spec).
-    let d = ((sigma * 3.0 * (2.0 * std::f32::consts::PI).sqrt() / 4.0) + 0.5).floor().max(1.0) as usize;
+    let d = ((sigma * 3.0 * (2.0 * std::f32::consts::PI).sqrt() / 4.0) + 0.5)
+        .floor()
+        .max(1.0) as usize;
     let data = pixmap.data_mut();
     let mut scratch = vec![0u8; data.len()];
     for _ in 0..3 {
@@ -37,9 +46,26 @@ pub fn blur(pixmap: &mut Pixmap, sigma: f32) {
 }
 
 /// One box pass of `size`, along rows (`horizontal`) or columns.
-fn box_pass(src: &[u8], dst: &mut [u8], width: usize, height: usize, size: usize, horizontal: bool) {
-    let (lines, len) = if horizontal { (height, width) } else { (width, height) };
-    let index = |line: usize, at: usize| if horizontal { (line * width + at) * 4 } else { (at * width + line) * 4 };
+fn box_pass(
+    src: &[u8],
+    dst: &mut [u8],
+    width: usize,
+    height: usize,
+    size: usize,
+    horizontal: bool,
+) {
+    let (lines, len) = if horizontal {
+        (height, width)
+    } else {
+        (width, height)
+    };
+    let index = |line: usize, at: usize| {
+        if horizontal {
+            (line * width + at) * 4
+        } else {
+            (at * width + line) * 4
+        }
+    };
     let before = size / 2;
     let after = size - before - 1;
     let size = size as u32;
@@ -93,7 +119,12 @@ pub enum ColorFilter {
 impl ColorFilter {
     /// The 4×5 matrix of the filter (rows R, G, B, A; last column the offset, 0..1).
     fn matrix(self) -> [[f32; 5]; 4] {
-        let identity = [[1.0, 0.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 0.0, 1.0, 0.0]];
+        let identity = [
+            [1.0, 0.0, 0.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0, 1.0, 0.0],
+        ];
         let rgb = |m: [[f32; 3]; 3]| {
             let mut out = identity;
             for (row, [r, g, b]) in out.iter_mut().zip(m) {
@@ -126,14 +157,30 @@ impl ColorFilter {
             Self::HueRotate(degrees) => {
                 let (sin, cos) = degrees.to_radians().sin_cos();
                 rgb([
-                    [0.213 + cos * 0.787 - sin * 0.213, 0.715 - cos * 0.715 - sin * 0.715, 0.072 - cos * 0.072 + sin * 0.928],
-                    [0.213 - cos * 0.213 + sin * 0.143, 0.715 + cos * 0.285 + sin * 0.140, 0.072 - cos * 0.072 - sin * 0.283],
-                    [0.213 - cos * 0.213 - sin * 0.787, 0.715 - cos * 0.715 + sin * 0.715, 0.072 + cos * 0.928 + sin * 0.072],
+                    [
+                        0.213 + cos * 0.787 - sin * 0.213,
+                        0.715 - cos * 0.715 - sin * 0.715,
+                        0.072 - cos * 0.072 + sin * 0.928,
+                    ],
+                    [
+                        0.213 - cos * 0.213 + sin * 0.143,
+                        0.715 + cos * 0.285 + sin * 0.140,
+                        0.072 - cos * 0.072 - sin * 0.283,
+                    ],
+                    [
+                        0.213 - cos * 0.213 - sin * 0.787,
+                        0.715 - cos * 0.715 + sin * 0.715,
+                        0.072 + cos * 0.928 + sin * 0.072,
+                    ],
                 ])
             }
             Self::Invert(v) => {
                 let v = v.clamp(0.0, 1.0);
-                let mut out = rgb([[1.0 - 2.0 * v, 0.0, 0.0], [0.0, 1.0 - 2.0 * v, 0.0], [0.0, 0.0, 1.0 - 2.0 * v]]);
+                let mut out = rgb([
+                    [1.0 - 2.0 * v, 0.0, 0.0],
+                    [0.0, 1.0 - 2.0 * v, 0.0],
+                    [0.0, 0.0, 1.0 - 2.0 * v],
+                ]);
                 for row in out.iter_mut().take(3) {
                     row[4] = v;
                 }
@@ -151,9 +198,27 @@ impl ColorFilter {
 /// `saturate(s)`; `grayscale(v)` is `saturate(1 - v)`.
 fn saturation_like(s: f32) -> [[f32; 5]; 4] {
     [
-        [0.213 + 0.787 * s, 0.715 - 0.715 * s, 0.072 - 0.072 * s, 0.0, 0.0],
-        [0.213 - 0.213 * s, 0.715 + 0.285 * s, 0.072 - 0.072 * s, 0.0, 0.0],
-        [0.213 - 0.213 * s, 0.715 - 0.715 * s, 0.072 + 0.928 * s, 0.0, 0.0],
+        [
+            0.213 + 0.787 * s,
+            0.715 - 0.715 * s,
+            0.072 - 0.072 * s,
+            0.0,
+            0.0,
+        ],
+        [
+            0.213 - 0.213 * s,
+            0.715 + 0.285 * s,
+            0.072 - 0.072 * s,
+            0.0,
+            0.0,
+        ],
+        [
+            0.213 - 0.213 * s,
+            0.715 - 0.715 * s,
+            0.072 + 0.928 * s,
+            0.0,
+            0.0,
+        ],
         [0.0, 0.0, 0.0, 1.0, 0.0],
     ]
 }
@@ -167,11 +232,21 @@ pub fn apply(pixmap: &mut Pixmap, filter: ColorFilter) {
         if a <= 0.0 && !lifts_transparent {
             continue;
         }
-        let (r, g, b) = if a > 0.0 { (r / a, g / a, b / a) } else { (0.0, 0.0, 0.0) };
-        let [nr, ng, nb, alpha] =
-            m.map(|row| (row[0] * r + row[1] * g + row[2] * b + row[3] * a + row[4]).clamp(0.0, 1.0));
+        let (r, g, b) = if a > 0.0 {
+            (r / a, g / a, b / a)
+        } else {
+            (0.0, 0.0, 0.0)
+        };
+        let [nr, ng, nb, alpha] = m.map(|row| {
+            (row[0] * r + row[1] * g + row[2] * b + row[3] * a + row[4]).clamp(0.0, 1.0)
+        });
         let channel = |v: f32| (v * alpha * 255.0 + 0.5) as u8;
-        (*pr, *pg, *pb, *pa) = (channel(nr), channel(ng), channel(nb), (alpha * 255.0 + 0.5) as u8);
+        (*pr, *pg, *pb, *pa) = (
+            channel(nr),
+            channel(ng),
+            channel(nb),
+            (alpha * 255.0 + 0.5) as u8,
+        );
     }
 }
 
@@ -186,10 +261,22 @@ mod tests {
         let i = (10 * 21 + 10) * 4;
         pixmap.data_mut()[i..i + 4].copy_from_slice(&[255, 255, 255, 255]);
         blur(&mut pixmap, 2.0);
-        let alpha: u32 = pixmap.data().as_chunks::<4>().0.iter().map(|px| u32::from(px[3])).sum();
+        let alpha: u32 = pixmap
+            .data()
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .map(|px| u32::from(px[3]))
+            .sum();
         assert!(pixmap.data()[i + 3] < 255);
-        assert!(pixmap.data()[((10 * 21 + 12) * 4) + 3] > 0, "the blur reaches 2 px over");
-        assert!((200..=310).contains(&alpha), "about one pixel's worth of alpha: {alpha}");
+        assert!(
+            pixmap.data()[((10 * 21 + 12) * 4) + 3] > 0,
+            "the blur reaches 2 px over"
+        );
+        assert!(
+            (200..=310).contains(&alpha),
+            "about one pixel's worth of alpha: {alpha}"
+        );
     }
 
     #[test]

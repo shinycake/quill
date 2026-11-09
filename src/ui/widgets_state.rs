@@ -123,5 +123,6 @@ pub(crate) struct WidgetsUi {
     pub(super) poll_timer: Option<(Instant, Task<()>)>,
     /// The next storage write's timer.
     pub(super) save_timer: Option<Task<()>>,
+    /// The scale of the window drawn last: widgets start at it (0 before a frame).
+    pub(super) scale: f32,
 }
-

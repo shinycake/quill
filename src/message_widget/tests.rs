@@ -1,4 +1,4 @@
-use super::storage::{self, Stored, QUOTA_BYTES};
+use super::storage::{self, QUOTA_BYTES, Stored};
 use super::*;
 use crate::telegram::envelope::TdError;
 
@@ -86,8 +86,18 @@ fn a_card_takes_the_bots_width_within_the_bubble() {
 
 #[test]
 fn stopped_and_failed_both_show_the_stopped_label() {
-    assert!(Lifecycle::Stopped { reason: "cpu".into() }.is_stopped());
-    assert!(Lifecycle::Failed { reason: "bundle".into() }.is_stopped());
+    assert!(
+        Lifecycle::Stopped {
+            reason: "cpu".into()
+        }
+        .is_stopped()
+    );
+    assert!(
+        Lifecycle::Failed {
+            reason: "bundle".into()
+        }
+        .is_stopped()
+    );
     assert!(!Lifecycle::Released.is_stopped());
     assert!(Lifecycle::Loading.is_live() && Lifecycle::Running.is_live());
     assert!(!Lifecycle::Waiting.is_live());

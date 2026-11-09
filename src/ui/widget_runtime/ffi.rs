@@ -108,14 +108,18 @@ unsafe extern "C" {
     fn qw_string_free(s: *mut c_char);
 }
 
-const SANDBOX_JS: &[u8] =
-    include_bytes!("../../../third_party/widgets/sandbox/packages/desktop/WidgetJS/sandbox-bundle.js");
-const SANDBOX_QBC: &[u8] =
-    include_bytes!("../../../third_party/widgets/sandbox/packages/desktop/WidgetJS/sandbox-bundle.qbc");
-const VALIDATOR_JS: &[u8] =
-    include_bytes!("../../../third_party/widgets/sandbox/packages/desktop/WidgetJS/validator-bundle.js");
-const VALIDATOR_QBC: &[u8] =
-    include_bytes!("../../../third_party/widgets/sandbox/packages/desktop/WidgetJS/validator-bundle.qbc");
+const SANDBOX_JS: &[u8] = include_bytes!(
+    "../../../third_party/widgets/sandbox/packages/desktop/WidgetJS/sandbox-bundle.js"
+);
+const SANDBOX_QBC: &[u8] = include_bytes!(
+    "../../../third_party/widgets/sandbox/packages/desktop/WidgetJS/sandbox-bundle.qbc"
+);
+const VALIDATOR_JS: &[u8] = include_bytes!(
+    "../../../third_party/widgets/sandbox/packages/desktop/WidgetJS/validator-bundle.js"
+);
+const VALIDATOR_QBC: &[u8] = include_bytes!(
+    "../../../third_party/widgets/sandbox/packages/desktop/WidgetJS/validator-bundle.qbc"
+);
 
 /// Hands the WidgetJS bundles to the C side, once per process.
 fn resources_ready() -> bool {
@@ -211,7 +215,11 @@ impl Native {
         Ok(Self { widget, shared })
     }
 
-    fn with_text(&mut self, text: &str, call: unsafe extern "C" fn(*mut Widget, *const c_char, usize)) {
+    fn with_text(
+        &mut self,
+        text: &str,
+        call: unsafe extern "C" fn(*mut Widget, *const c_char, usize),
+    ) {
         // SAFETY: a live widget and a valid buffer for the call.
         unsafe { call(self.widget, text.as_ptr().cast(), text.len()) }
     }
@@ -238,12 +246,40 @@ impl Native {
             Err(code) => (code, ""),
         };
         // SAFETY: a live widget and a valid buffer for the call.
-        unsafe { qw_respond(self.widget, token, failure, text.as_ptr().cast(), text.len()) }
+        unsafe {
+            qw_respond(
+                self.widget,
+                token,
+                failure,
+                text.as_ptr().cast(),
+                text.len(),
+            )
+        }
     }
 
-    pub fn pointer(&mut self, action: i32, x: f64, y: f64, primary: bool, modifiers: i32, button: i32) {
+    pub fn pointer(
+        &mut self,
+        action: i32,
+        x: f64,
+        y: f64,
+        primary: bool,
+        modifiers: i32,
+        button: i32,
+    ) {
         // SAFETY: a live widget.
-        unsafe { qw_pointer(self.widget, action, x, y, 1, primary, true, modifiers, button) }
+        unsafe {
+            qw_pointer(
+                self.widget,
+                action,
+                x,
+                y,
+                1,
+                primary,
+                true,
+                modifiers,
+                button,
+            )
+        }
     }
     pub fn hover(&mut self, action: i32, x: f64, y: f64, modifiers: i32) {
         // SAFETY: a live widget.
@@ -365,7 +401,9 @@ extern "C" fn on_delete_font(ctx: *mut c_void, font: i32) {
 }
 
 extern "C" fn on_text_width(ctx: *mut c_void, font: i32, value: *const c_char, len: usize) -> f32 {
-    with_resources(ctx, 0.0, |resources| resources.fonts.width(font, text(value, len)))
+    with_resources(ctx, 0.0, |resources| {
+        resources.fonts.width(font, text(value, len))
+    })
 }
 
 extern "C" fn on_load_image(
@@ -393,8 +431,17 @@ extern "C" fn on_load_image(
     })
 }
 
-extern "C" fn on_canvas_run(ctx: *mut c_void, id: i32, width: i32, height: i32, ops: *const c_char, len: usize) {
-    with_resources(ctx, (), |resources| resources.run_canvas(id, width, height, text(ops, len)));
+extern "C" fn on_canvas_run(
+    ctx: *mut c_void,
+    id: i32,
+    width: i32,
+    height: i32,
+    ops: *const c_char,
+    len: usize,
+) {
+    with_resources(ctx, (), |resources| {
+        resources.run_canvas(id, width, height, text(ops, len))
+    });
 }
 
 #[allow(clippy::too_many_arguments)]

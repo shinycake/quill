@@ -154,7 +154,10 @@ fn widgets(manifest: &Path) -> Result<(), String> {
         let mut files: Vec<PathBuf> = std::fs::read_dir(dir)
             .map_err(|err| format!("{}: {err}", dir.display()))?
             .filter_map(|entry| entry.ok().map(|e| e.path()))
-            .filter(|path| path.extension().is_some_and(|ext| ext == "cpp" || ext == "c"))
+            .filter(|path| {
+                path.extension()
+                    .is_some_and(|ext| ext == "cpp" || ext == "c")
+            })
             .filter(|path| {
                 path.file_name()
                     .and_then(|name| name.to_str())
@@ -190,7 +193,10 @@ fn widgets(manifest: &Path) -> Result<(), String> {
     if !windows {
         sandbox_skip.push("icu_intl.cpp");
     }
-    cpp.files(cpp_files(&sandbox.join("desktop/sandbox/src"), &sandbox_skip)?);
+    cpp.files(cpp_files(
+        &sandbox.join("desktop/sandbox/src"),
+        &sandbox_skip,
+    )?);
     cpp.files(cpp_files(&core.join("src"), &[])?);
     cpp.files(cpp_files(&litehtml.join("src"), &[])?);
     cpp.file(glue.join("quill_widget.cpp"));

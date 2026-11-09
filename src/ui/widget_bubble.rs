@@ -33,8 +33,13 @@ impl QuillApp {
         media_max: f32,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
-        let MessageContent::Widget(content) = &message.content else { return None };
-        let key = WidgetKey { chat_id: message.chat_id, message_id: message.id };
+        let MessageContent::Widget(content) = &message.content else {
+            return None;
+        };
+        let key = WidgetKey {
+            chat_id: message.chat_id,
+            message_id: message.id,
+        };
         let width = Self::widget_card_width(content, media_max);
         self.note_widget(key, width);
         let entry = self.widgets.entries.get(&key);
@@ -72,8 +77,14 @@ impl QuillApp {
                 .w(px(*w))
                 .h(px(*h))
                 .overflow_hidden()
-                .child(img(ImageSource::Render((**image).clone())).w(px(*w)).h(px(*h)))
-                .when(!stopped, |card| card.child(self.widget_input_layer(key, entry.map(|e| e.cursor.as_str()), cx)))
+                .child(
+                    img(ImageSource::Render((**image).clone()))
+                        .w(px(*w))
+                        .h(px(*h)),
+                )
+                .when(!stopped, |card| {
+                    card.child(self.widget_input_layer(key, entry.map(|e| e.cursor.as_str()), cx))
+                })
                 .when(stopped, |card| card.child(stopped_pill(cx)))
                 .into_any_element(),
             (Look::Fallback, _) => fallback_card(id),
@@ -89,7 +100,12 @@ impl QuillApp {
     }
 
     /// The layer over a running widget's frame that hands it the mouse.
-    fn widget_input_layer(&self, key: WidgetKey, cursor: Option<&str>, cx: &mut Context<Self>) -> AnyElement {
+    fn widget_input_layer(
+        &self,
+        key: WidgetKey,
+        cursor: Option<&str>,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let cursor = cursor.and_then(cursor_style);
         let app = cx.weak_entity();
         canvas(
@@ -127,7 +143,9 @@ impl QuillApp {
                     let (x, y) = at(event.position);
                     let over = moved.1.is_hovered(window);
                     let modifiers = modifier_bits(event.modifiers);
-                    let _ = moved.0.update(cx, |this, _| this.widget_pointer_move(key, over, x, y, modifiers));
+                    let _ = moved.0.update(cx, |this, _| {
+                        this.widget_pointer_move(key, over, x, y, modifiers)
+                    });
                 });
                 let up = app.clone();
                 window.on_mouse_event(move |event: &MouseUpEvent, phase, _, cx| {
@@ -148,9 +166,20 @@ impl QuillApp {
     /// A press on a widget: the primary button always goes to it, the
     /// secondary only while it holds presses. True when the press is the
     /// widget's alone.
-    fn widget_pointer_down(&mut self, key: WidgetKey, button: MouseButton, x: f64, y: f64, modifiers: i32) -> bool {
-        let Some(entry) = self.widgets.entries.get_mut(&key) else { return false };
-        let Some(runtime) = &entry.runtime else { return false };
+    fn widget_pointer_down(
+        &mut self,
+        key: WidgetKey,
+        button: MouseButton,
+        x: f64,
+        y: f64,
+        modifiers: i32,
+    ) -> bool {
+        let Some(entry) = self.widgets.entries.get_mut(&key) else {
+            return false;
+        };
+        let Some(runtime) = &entry.runtime else {
+            return false;
+        };
         let button = match button {
             MouseButton::Left => 0,
             MouseButton::Right if entry.hold => 2,
@@ -159,28 +188,64 @@ impl QuillApp {
         if button == 0 {
             entry.pressed = true;
         }
-        runtime.input(Input::Pointer { action: 0, x, y, modifiers, button });
+        runtime.input(Input::Pointer {
+            action: 0,
+            x,
+            y,
+            modifiers,
+            button,
+        });
         button == 2
     }
 
     fn widget_pointer_move(&mut self, key: WidgetKey, over: bool, x: f64, y: f64, modifiers: i32) {
-        let Some(entry) = self.widgets.entries.get_mut(&key) else { return };
-        let Some(runtime) = &entry.runtime else { return };
+        let Some(entry) = self.widgets.entries.get_mut(&key) else {
+            return;
+        };
+        let Some(runtime) = &entry.runtime else {
+            return;
+        };
         if entry.pressed {
-            runtime.input(Input::Pointer { action: 1, x, y, modifiers, button: 0 });
+            runtime.input(Input::Pointer {
+                action: 1,
+                x,
+                y,
+                modifiers,
+                button: 0,
+            });
         } else if over {
             entry.hovered = true;
-            runtime.input(Input::Hover { action: 0, x, y, modifiers });
+            runtime.input(Input::Hover {
+                action: 0,
+                x,
+                y,
+                modifiers,
+            });
         } else if std::mem::take(&mut entry.hovered) {
-            runtime.input(Input::Hover { action: 1, x, y, modifiers });
+            runtime.input(Input::Hover {
+                action: 1,
+                x,
+                y,
+                modifiers,
+            });
         }
     }
 
     fn widget_pointer_up(&mut self, key: WidgetKey, x: f64, y: f64, modifiers: i32) {
-        let Some(entry) = self.widgets.entries.get_mut(&key) else { return };
-        let Some(runtime) = &entry.runtime else { return };
+        let Some(entry) = self.widgets.entries.get_mut(&key) else {
+            return;
+        };
+        let Some(runtime) = &entry.runtime else {
+            return;
+        };
         if std::mem::take(&mut entry.pressed) {
-            runtime.input(Input::Pointer { action: 2, x, y, modifiers, button: 0 });
+            runtime.input(Input::Pointer {
+                action: 2,
+                x,
+                y,
+                modifiers,
+                button: 0,
+            });
             // What the press selected, for the message menu's copy.
             runtime.selection(false);
         }
@@ -248,6 +313,11 @@ fn fallback_card(id: u64) -> AnyElement {
         .role(Role::Label)
         .aria_label(tr(keys::Q_CHAT_WIDGET_FAILED))
         .child(div().font_semibold().child(tr(keys::IN_DLG_WIDGET)))
-        .child(div().text_sm().opacity(0.8).child(tr(keys::Q_CHAT_WIDGET_FAILED)))
+        .child(
+            div()
+                .text_sm()
+                .opacity(0.8)
+                .child(tr(keys::Q_CHAT_WIDGET_FAILED)),
+        )
         .into_any_element()
 }

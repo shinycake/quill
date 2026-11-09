@@ -741,7 +741,13 @@ pub(crate) fn parse_message_widget(value: &Value) -> (MessageContent, Vec<Parsed
     };
     let (caption, caption_entities) = parse_caption(value.get("caption"));
     let flag = |name: &str| value.get(name).and_then(Value::as_bool).unwrap_or(false);
-    let text = |name: &str| value.get(name).and_then(Value::as_str).unwrap_or("").to_string();
+    let text = |name: &str| {
+        value
+            .get(name)
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string()
+    };
     (
         MessageContent::Widget(WidgetContent {
             width: size("width"),

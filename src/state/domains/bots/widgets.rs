@@ -15,9 +15,15 @@ fn widget_key(pending: &PendingRequest) -> Option<WidgetKey> {
 
 impl Session {
     /// `widgetQueryAnswer` / `widgetPublicData` for our own request.
-    pub(crate) fn apply_widget_answer(&mut self, payload: BotsPayload, pending: Option<&PendingRequest>) {
+    pub(crate) fn apply_widget_answer(
+        &mut self,
+        payload: BotsPayload,
+        pending: Option<&PendingRequest>,
+    ) {
         let Some(pending) = pending else { return };
-        let Some(key) = widget_key(pending) else { return };
+        let Some(key) = widget_key(pending) else {
+            return;
+        };
         let answer = match (payload, pending.purpose) {
             (
                 BotsPayload::WidgetQueryAnswer { data },
@@ -28,7 +34,10 @@ impl Session {
                 outcome: QueryOutcome::Answered(data),
             },
             (
-                BotsPayload::WidgetPublicData { data, poll_period: period },
+                BotsPayload::WidgetPublicData {
+                    data,
+                    poll_period: period,
+                },
                 RequestPurpose::Bots(BotsPurpose::GetWidgetPublicData),
             ) => WidgetAnswer::PublicData {
                 key,
@@ -41,7 +50,11 @@ impl Session {
 
     /// A widget request failed: the widget hears why (a query) or polls
     /// again a period later (public data). True when it was one.
-    pub(crate) fn apply_widget_error(&mut self, err: &TdError, pending: Option<&PendingRequest>) -> bool {
+    pub(crate) fn apply_widget_error(
+        &mut self,
+        err: &TdError,
+        pending: Option<&PendingRequest>,
+    ) -> bool {
         let Some(pending) = pending else { return false };
         let answer = match pending.purpose {
             RequestPurpose::Bots(BotsPurpose::GetWidgetQueryAnswer { token }) => {

@@ -71,7 +71,10 @@ impl QuillApp {
             .map(|(_, text)| text)
             // A widget's selection lives in its runtime (`widgets_ui.rs`).
             .or_else(|| {
-                let key = quill::message_widget::WidgetKey { chat_id: menu.chat_id, message_id: menu.message_id };
+                let key = quill::message_widget::WidgetKey {
+                    chat_id: menu.chat_id,
+                    message_id: menu.message_id,
+                };
                 self.widget_selection(key).map(str::to_owned)
             });
         self.message_ui.reactions_expanded = false;

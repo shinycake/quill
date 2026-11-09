@@ -39,11 +39,31 @@ pub const MIN_WIDTH: f32 = 200.0;
 /// The faces behind a widget's generic font families, first installed
 /// wins: each OS's interface text (macOS, Windows, GNOME, then common
 /// Linux faces), as browsers pick them.
-pub const SANS_FONTS: &[&str] =
-    &["Helvetica Neue", "Segoe UI", "Cantarell", "Noto Sans", "DejaVu Sans", "Liberation Sans", "Arial"];
-pub const SERIF_FONTS: &[&str] = &["Times", "Times New Roman", "Noto Serif", "DejaVu Serif", "Liberation Serif"];
-pub const MONO_FONTS: &[&str] =
-    &["SF Mono", "Menlo", "Consolas", "Noto Sans Mono", "DejaVu Sans Mono", "Liberation Mono", "Courier New"];
+pub const SANS_FONTS: &[&str] = &[
+    "Helvetica Neue",
+    "Segoe UI",
+    "Cantarell",
+    "Noto Sans",
+    "DejaVu Sans",
+    "Liberation Sans",
+    "Arial",
+];
+pub const SERIF_FONTS: &[&str] = &[
+    "Times",
+    "Times New Roman",
+    "Noto Serif",
+    "DejaVu Serif",
+    "Liberation Serif",
+];
+pub const MONO_FONTS: &[&str] = &[
+    "SF Mono",
+    "Menlo",
+    "Consolas",
+    "Noto Sans Mono",
+    "DejaVu Sans Mono",
+    "Liberation Mono",
+    "Courier New",
+];
 
 /// Where one widget's runtime is. Every stage has a way out: off screen a
 /// running widget is released (keeping its last frame) or kept, back on

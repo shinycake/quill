@@ -7,8 +7,8 @@ use super::effects::{self, ColorFilter};
 use super::geometry::{self as g, at};
 use serde_json::Value;
 use tiny_skia::{
-    BlendMode, Color, FillRule, FilterQuality, IntRect, Mask, Paint, Path, PathBuilder, Pattern, Pixmap,
-    PixmapPaint, Rect, Shader, SpreadMode, Transform,
+    BlendMode, Color, FillRule, FilterQuality, IntRect, Mask, Paint, Path, PathBuilder, Pattern,
+    Pixmap, PixmapPaint, Rect, Shader, SpreadMode, Transform,
 };
 
 /// One group or filter that draws into a layer of its own until its pop.
@@ -37,7 +37,14 @@ struct Painter<'a> {
 
 /// Paints `list` into `frame` (`scale` device px per CSS px) inside `damage`
 /// (CSS px; `None` paints everything), over `background`.
-pub fn paint(resources: &Resources, list: &[Value], scale: f32, damage: Option<&[Rect]>, background: Color, frame: &mut Pixmap) {
+pub fn paint(
+    resources: &Resources,
+    list: &[Value],
+    scale: f32,
+    damage: Option<&[Rect]>,
+    background: Color,
+    frame: &mut Pixmap,
+) {
     let base = Transform::from_scale(scale, scale);
     let clip = damage.and_then(|rects| {
         let mut mask = Mask::new(frame.width(), frame.height())?;
@@ -53,7 +60,9 @@ pub fn paint(resources: &Resources, list: &[Value], scale: f32, damage: Option<&
         // Nothing moved.
         return;
     }
-    let Some(placeholder) = Pixmap::new(1, 1) else { return };
+    let Some(placeholder) = Pixmap::new(1, 1) else {
+        return;
+    };
     let target = std::mem::replace(frame, placeholder);
     let mut painter = Painter {
         resources,
@@ -132,7 +141,13 @@ impl Painter<'_> {
         }
     }
 
-    fn stroke(&mut self, path: &Path, shader: Shader<'_>, stroke: &tiny_skia::Stroke, clip: Option<&Mask>) {
+    fn stroke(
+        &mut self,
+        path: &Path,
+        shader: Shader<'_>,
+        stroke: &tiny_skia::Stroke,
+        clip: Option<&Mask>,
+    ) {
         let transform = self.transform;
         if let Some(target) = self.target() {
             let paint = Paint {
@@ -164,7 +179,9 @@ impl Painter<'_> {
         let clip = clip.as_ref();
         match kind {
             0 | 1 => {
-                let Some(path) = g::rect(c, "r").and_then(|r| g::rounded(r, &radii)) else { return };
+                let Some(path) = g::rect(c, "r").and_then(|r| g::rounded(r, &radii)) else {
+                    return;
+                };
                 let shader = Shader::SolidColor(g::color(c, "c"));
                 if kind == 0 {
                     self.fill(&path, shader, FillRule::Winding, clip);
@@ -177,7 +194,9 @@ impl Painter<'_> {
                 }
             }
             2 | 3 => {
-                let Some(path) = g::rect(c, "r").and_then(PathBuilder::from_oval) else { return };
+                let Some(path) = g::rect(c, "r").and_then(PathBuilder::from_oval) else {
+                    return;
+                };
                 let shader = Shader::SolidColor(g::color(c, "c"));
                 if kind == 2 {
                     self.fill(&path, shader, FillRule::Winding, clip);
@@ -192,7 +211,9 @@ impl Painter<'_> {
             4 => self.text(c, clip),
             5 => self.image(c, &radii, clip),
             6..=8 => {
-                let Some(path) = g::rect(c, "r").and_then(|r| g::rounded(r, &radii)) else { return };
+                let Some(path) = g::rect(c, "r").and_then(|r| g::rounded(r, &radii)) else {
+                    return;
+                };
                 if let Some(shader) = g::box_gradient(kind, &g::floats(c, "a"), g::stops(c, "s")) {
                     self.fill(&path, shader, FillRule::Winding, clip);
                 }
@@ -255,9 +276,16 @@ impl Painter<'_> {
     }
 
     fn push_group(&mut self, c: &Value) {
-        let opacity = c.get("o").and_then(Value::as_f64).map_or(1.0, |o| o as f32).clamp(0.0, 1.0);
+        let opacity = c
+            .get("o")
+            .and_then(Value::as_f64)
+            .map_or(1.0, |o| o as f32)
+            .clamp(0.0, 1.0);
         let hides = g::flag(c, "h");
-        let layered = self.hidden == 0 && !hides && opacity < 1.0 && self.push_layer(Layer::Group { opacity });
+        let layered = self.hidden == 0
+            && !hides
+            && opacity < 1.0
+            && self.push_layer(Layer::Group { opacity });
         self.groups.push((self.transform, layered, hides));
         self.transform = self.transform.pre_concat(g::matrix(c, "m"));
         if hides {
@@ -279,8 +307,13 @@ impl Painter<'_> {
     }
 
     fn push_filter(&mut self, c: &Value) {
-        let filters = c.get("fl").and_then(Value::as_array).cloned().unwrap_or_default();
-        let layered = self.hidden == 0 && !filters.is_empty() && self.push_layer(Layer::Filter { filters });
+        let filters = c
+            .get("fl")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+        let layered =
+            self.hidden == 0 && !filters.is_empty() && self.push_layer(Layer::Filter { filters });
         self.filters.push(layered);
     }
 
@@ -298,7 +331,11 @@ impl Painter<'_> {
 
     /// The CSS filter functions ([kind, amount, x, y, ARGB]) over `pixmap`, in order.
     fn run_filters(&self, pixmap: &mut Pixmap, filters: &[Value]) {
-        let device = { let (sx, sy) = self.transform.get_scale(); sx.max(sy) }.max(self.scale.abs());
+        let device = {
+            let (sx, sy) = self.transform.get_scale();
+            sx.max(sy)
+        }
+        .max(self.scale.abs());
         for filter in filters {
             let f: Vec<f64> = filter
                 .as_array()
@@ -313,7 +350,13 @@ impl Painter<'_> {
                 }
                 ColorFilterKind::DropShadow => {
                     let color = g::argb(f.get(4).copied().unwrap_or(0.0) as u64);
-                    drop_shadow(pixmap, item(2) * device, item(3) * device, amount * device, color);
+                    drop_shadow(
+                        pixmap,
+                        item(2) * device,
+                        item(3) * device,
+                        amount * device,
+                        color,
+                    );
                     continue;
                 }
                 ColorFilterKind::Color(filter) => filter(amount),
@@ -330,17 +373,33 @@ impl Painter<'_> {
         }
         let t = self.transform;
         let device = (t.sx * t.sx + t.ky * t.ky).sqrt().max(0.01);
-        let Some(shaped) = self.resources.fonts.shape(g::int(c, "f") as i32, text, device) else {
+        let Some(shaped) = self
+            .resources
+            .fonts
+            .shape(g::int(c, "f") as i32, text, device)
+        else {
             return;
         };
         let origin = self.transform.pre_translate(g::num(c, "x"), g::num(c, "y"));
         let saved = std::mem::replace(&mut self.transform, origin);
         if let Some(outline) = &shaped.outline {
-            self.fill(outline, Shader::SolidColor(g::color(c, "c")), FillRule::Winding, clip);
+            self.fill(
+                outline,
+                Shader::SolidColor(g::color(c, "c")),
+                FillRule::Winding,
+                clip,
+            );
         }
         let glyphs = origin.pre_scale(1.0 / device, 1.0 / device);
         for glyph in &shaped.color {
-            draw_rgba(self.target(), &glyph.rgba, glyph.width, glyph.height, glyphs.pre_translate(glyph.left, glyph.top), clip);
+            draw_rgba(
+                self.target(),
+                &glyph.rgba,
+                glyph.width,
+                glyph.height,
+                glyphs.pre_translate(glyph.left, glyph.top),
+                clip,
+            );
         }
         self.transform = saved;
     }
@@ -353,10 +412,25 @@ impl Painter<'_> {
             None => resources.images.get(g::int(c, "i") as i32),
         };
         let Some(pixmap) = pixmap else { return };
-        let Some(path) = g::rounded(rect, radii) else { return };
+        let Some(path) = g::rounded(rect, radii) else {
+            return;
+        };
         let (iw, ih) = (pixmap.width() as f32, pixmap.height() as f32);
-        let place = Transform::from_row(rect.width() / iw, 0.0, 0.0, rect.height() / ih, rect.x(), rect.y());
-        let shader = Pattern::new(pixmap.as_ref(), SpreadMode::Pad, FilterQuality::Bilinear, 1.0, place);
+        let place = Transform::from_row(
+            rect.width() / iw,
+            0.0,
+            0.0,
+            rect.height() / ih,
+            rect.x(),
+            rect.y(),
+        );
+        let shader = Pattern::new(
+            pixmap.as_ref(),
+            SpreadMode::Pad,
+            FilterQuality::Bilinear,
+            1.0,
+            place,
+        );
         self.fill(&path, shader, FillRule::Winding, clip);
     }
 
@@ -393,9 +467,17 @@ impl Painter<'_> {
         let (dx, dy, blur, spread) = (at(&a, 0), at(&a, 1), at(&a, 2), at(&a, 3));
         let inset = g::flag(c, "n");
         let color = g::color(c, "c");
-        let Some(box_path) = g::rounded(rect, radii) else { return };
-        let sigma = blur / 2.0 * { let (sx, sy) = self.transform.get_scale(); sx.max(sy) }.max(1e-3);
-        let Some(mut layer) = Pixmap::new(self.width, self.height) else { return };
+        let Some(box_path) = g::rounded(rect, radii) else {
+            return;
+        };
+        let sigma = blur / 2.0 * {
+            let (sx, sy) = self.transform.get_scale();
+            sx.max(sy)
+        }
+        .max(1e-3);
+        let Some(mut layer) = Pixmap::new(self.width, self.height) else {
+            return;
+        };
         let mut paint = Paint::default();
         paint.set_color(color);
         paint.anti_alias = true;
@@ -406,49 +488,86 @@ impl Painter<'_> {
                 && let Some(hole) = g::rounded(hole, &hole_radii)
             {
                 paint.blend_mode = BlendMode::Clear;
-                layer.fill_path(&hole, &paint, FillRule::Winding, self.transform.pre_translate(dx, dy), None);
+                layer.fill_path(
+                    &hole,
+                    &paint,
+                    FillRule::Winding,
+                    self.transform.pre_translate(dx, dy),
+                    None,
+                );
             }
         } else if let Some((grown, grown_radii)) = g::inflate(rect, radii, spread)
             && let Some(shape) = g::rounded(grown, &grown_radii)
         {
-            layer.fill_path(&shape, &paint, FillRule::Winding, self.transform.pre_translate(dx, dy), None);
+            layer.fill_path(
+                &shape,
+                &paint,
+                FillRule::Winding,
+                self.transform.pre_translate(dx, dy),
+                None,
+            );
         }
         effects::blur(&mut layer, sigma);
         // An outer shadow never shows under its box; an inset one only does.
         let mut mask = match clip {
             Some(clip) => clip.clone(),
             None => {
-                let Some(mut full) = Mask::new(self.width, self.height) else { return };
+                let Some(mut full) = Mask::new(self.width, self.height) else {
+                    return;
+                };
                 full.invert();
                 full
             }
         };
-        let Some(mut shape) = Mask::new(self.width, self.height) else { return };
+        let Some(mut shape) = Mask::new(self.width, self.height) else {
+            return;
+        };
         shape.fill_path(&box_path, FillRule::Winding, true, self.transform);
         if !inset {
             shape.invert();
         }
         multiply_masks(&mut mask, &shape);
         if let Some(target) = self.target() {
-            target.draw_pixmap(0, 0, layer.as_ref(), &PixmapPaint::default(), Transform::identity(), Some(&mask));
+            target.draw_pixmap(
+                0,
+                0,
+                layer.as_ref(),
+                &PixmapPaint::default(),
+                Transform::identity(),
+                Some(&mask),
+            );
         }
     }
 
     /// `backdrop-filter`: what is under the box so far, filtered, inside it.
     fn backdrop(&mut self, c: &Value, radii: &[f32], clip: Option<&Mask>) {
         let Some(rect) = g::rect(c, "r") else { return };
-        let filters = c.get("fl").and_then(Value::as_array).cloned().unwrap_or_default();
-        let Some(bounds) = g::device_bounds(rect, self.transform) else { return };
-        let Some(area) = bounds.intersect(&IntRect::from_xywh(0, 0, self.width, self.height).unwrap_or(bounds)) else {
+        let filters = c
+            .get("fl")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+        let Some(bounds) = g::device_bounds(rect, self.transform) else {
             return;
         };
-        let Some(mut under) = self.targets.last().and_then(|t| t.clone_rect(area)) else { return };
+        let Some(area) =
+            bounds.intersect(&IntRect::from_xywh(0, 0, self.width, self.height).unwrap_or(bounds))
+        else {
+            return;
+        };
+        let Some(mut under) = self.targets.last().and_then(|t| t.clone_rect(area)) else {
+            return;
+        };
         self.run_filters(&mut under, &filters);
-        let Some(path) = g::rounded(rect, radii) else { return };
+        let Some(path) = g::rounded(rect, radii) else {
+            return;
+        };
         let mut mask = match clip {
             Some(clip) => clip.clone(),
             None => {
-                let Some(mut full) = Mask::new(self.width, self.height) else { return };
+                let Some(mut full) = Mask::new(self.width, self.height) else {
+                    return;
+                };
                 full.invert();
                 full
             }
@@ -456,7 +575,14 @@ impl Painter<'_> {
         mask.intersect_path(&path, FillRule::Winding, true, self.transform);
         if let Some(target) = self.target() {
             // Over, not Source: see `clear`.
-            target.draw_pixmap(area.x(), area.y(), under.as_ref(), &PixmapPaint::default(), Transform::identity(), Some(&mask));
+            target.draw_pixmap(
+                area.x(),
+                area.y(),
+                under.as_ref(),
+                &PixmapPaint::default(),
+                Transform::identity(),
+                Some(&mask),
+            );
         }
     }
 }
@@ -489,17 +615,46 @@ impl From<i64> for ColorFilterKind {
 
 /// `drop-shadow()`: the layer's own shape, tinted, blurred and moved, under it.
 fn drop_shadow(pixmap: &mut Pixmap, dx: f32, dy: f32, sigma: f32, color: Color) {
-    let Some(mut shadow) = Pixmap::new(pixmap.width(), pixmap.height()) else { return };
+    let Some(mut shadow) = Pixmap::new(pixmap.width(), pixmap.height()) else {
+        return;
+    };
     let tint = color.premultiply().to_color_u8();
-    for ([r, g, b, a], [.., alpha]) in shadow.data_mut().as_chunks_mut::<4>().0.iter_mut().zip(pixmap.data().as_chunks::<4>().0) {
+    for ([r, g, b, a], [.., alpha]) in shadow
+        .data_mut()
+        .as_chunks_mut::<4>()
+        .0
+        .iter_mut()
+        .zip(pixmap.data().as_chunks::<4>().0)
+    {
         let alpha = u16::from(*alpha);
         let scale = |c: u8| ((u16::from(c) * alpha + 127) / 255) as u8;
-        (*r, *g, *b, *a) = (scale(tint.red()), scale(tint.green()), scale(tint.blue()), scale(tint.alpha()));
+        (*r, *g, *b, *a) = (
+            scale(tint.red()),
+            scale(tint.green()),
+            scale(tint.blue()),
+            scale(tint.alpha()),
+        );
     }
     effects::blur(&mut shadow, sigma);
-    let Some(mut out) = Pixmap::new(pixmap.width(), pixmap.height()) else { return };
-    out.draw_pixmap(0, 0, shadow.as_ref(), &PixmapPaint::default(), Transform::from_translate(dx, dy), None);
-    out.draw_pixmap(0, 0, pixmap.as_ref(), &PixmapPaint::default(), Transform::identity(), None);
+    let Some(mut out) = Pixmap::new(pixmap.width(), pixmap.height()) else {
+        return;
+    };
+    out.draw_pixmap(
+        0,
+        0,
+        shadow.as_ref(),
+        &PixmapPaint::default(),
+        Transform::from_translate(dx, dy),
+        None,
+    );
+    out.draw_pixmap(
+        0,
+        0,
+        pixmap.as_ref(),
+        &PixmapPaint::default(),
+        Transform::identity(),
+        None,
+    );
     *pixmap = out;
 }
 
@@ -511,12 +666,23 @@ fn multiply_masks(mask: &mut Mask, other: &Mask) {
 }
 
 /// Straight RGBA drawn under `transform` (device px of the image).
-pub fn draw_rgba(target: Option<&mut Pixmap>, rgba: &[u8], width: u32, height: u32, transform: Transform, clip: Option<&Mask>) {
+pub fn draw_rgba(
+    target: Option<&mut Pixmap>,
+    rgba: &[u8],
+    width: u32,
+    height: u32,
+    transform: Transform,
+    clip: Option<&Mask>,
+) {
     let Some(target) = target else { return };
     let mut data = rgba.to_vec();
     super::images::premultiply(&mut data);
-    let Some(size) = tiny_skia::IntSize::from_wh(width, height) else { return };
-    let Some(image) = Pixmap::from_vec(data, size) else { return };
+    let Some(size) = tiny_skia::IntSize::from_wh(width, height) else {
+        return;
+    };
+    let Some(image) = Pixmap::from_vec(data, size) else {
+        return;
+    };
     let paint = PixmapPaint {
         quality: FilterQuality::Bilinear,
         ..PixmapPaint::default()
