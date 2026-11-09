@@ -207,6 +207,13 @@ fn widgets(manifest: &Path) -> Result<(), String> {
     }
     if cpp.get_compiler().is_like_msvc() {
         cpp.flag("/utf-8").flag("/EHsc").flag("/Zc:__cplusplus");
+    } else {
+        // litehtml's inline tables and function statics are weak definitions.
+        // Exported from the executable, they mark it MH_WEAK_DEFINES on macOS,
+        // which costs a cold launch (scripts/check-bundle-macho.sh). Nothing
+        // outside the binary links against them.
+        cpp.flag("-fvisibility=hidden")
+            .flag("-fvisibility-inlines-hidden");
     }
     cpp.try_compile("quill_widgets")
         .map_err(|err| err.to_string())?;
@@ -234,7 +241,9 @@ fn widgets(manifest: &Path) -> Result<(), String> {
         c.include(litehtml.join("src/gumbo/visualc/include"))
             .flag("/utf-8");
     } else {
-        c.define("_GNU_SOURCE", None).flag("-fno-strict-aliasing");
+        c.define("_GNU_SOURCE", None)
+            .flag("-fno-strict-aliasing")
+            .flag("-fvisibility=hidden");
     }
     c.try_compile("quill_widgets_c")
         .map_err(|err| err.to_string())?;
