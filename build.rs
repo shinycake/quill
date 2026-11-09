@@ -20,6 +20,9 @@ fn main() -> Result<(), String> {
     let out = PathBuf::from(env("OUT_DIR")?);
     lang_keys(&manifest, &out)?;
     thorvg(&manifest, &out)?;
+    if std::env::var_os("CARGO_FEATURE_UI").is_some() {
+        widgets(&manifest)?;
+    }
     #[cfg(windows)]
     windows_icon(&manifest, &out)?;
     windows_main_stack();
@@ -128,6 +131,122 @@ fn thorvg(manifest: &Path, out: &Path) -> Result<(), String> {
             .flag("-fno-math-errno");
     }
     build.try_compile("thorvg").map_err(|err| err.to_string())
+}
+
+/// The message-widget runtime (`third_party/widgets`, docs/decisions/message-widgets.md):
+/// widget-sandbox's QuickJS sandbox and WidgetHost, its QuickJS fork,
+/// TwidgetCore with its litehtml fork, and Quill's C ABI over them
+/// (`native/widget`). Only for the `ui` feature. Optimised in every profile,
+/// as widget-sandbox's own build does: an -O0 QuickJS spends ~10 KB of C stack
+/// per JS call and lays widgets out several times slower.
+fn widgets(manifest: &Path) -> Result<(), String> {
+    let root = manifest.join("third_party").join("widgets");
+    let glue = manifest.join("native").join("widget");
+    println!("cargo:rerun-if-changed={}", root.display());
+    println!("cargo:rerun-if-changed={}", glue.display());
+    let sandbox = root.join("sandbox").join("packages");
+    let qjs_include = sandbox.join("ios/Sources/CQuickJS/include");
+    let quickjs = root.join("quickjs");
+    let litehtml = root.join("twidget").join("litehtml");
+    let core = root.join("twidget").join("core");
+    let windows = std::env::var("CARGO_CFG_TARGET_OS").is_ok_and(|os| os == "windows");
+    let cpp_files = |dir: &Path, skip: &[&str]| -> Result<Vec<PathBuf>, String> {
+        let mut files: Vec<PathBuf> = std::fs::read_dir(dir)
+            .map_err(|err| format!("{}: {err}", dir.display()))?
+            .filter_map(|entry| entry.ok().map(|e| e.path()))
+            .filter(|path| path.extension().is_some_and(|ext| ext == "cpp" || ext == "c"))
+            .filter(|path| {
+                path.file_name()
+                    .and_then(|name| name.to_str())
+                    .is_none_or(|name| !skip.contains(&name))
+            })
+            .collect();
+        files.sort();
+        Ok(files)
+    };
+
+    // C++20: the sandbox, the core, litehtml and the glue.
+    let mut cpp = cc::Build::new();
+    cpp.cpp(true)
+        .std("c++20")
+        .opt_level(2)
+        .debug(false)
+        .warnings(false)
+        .cargo_warnings(false)
+        .define("TW_LITEHTML_TWIDGET", None)
+        .define("NDEBUG", None)
+        .include(sandbox.join("desktop/sandbox/include"))
+        .include(&qjs_include)
+        .include(&quickjs)
+        .include(core.join("src"))
+        .include(core.join("include"))
+        .include(root.join("twidget").join("generated"))
+        .include(litehtml.join("include"))
+        .include(litehtml.join("include").join("litehtml"))
+        .include(litehtml.join("gumbo-include"))
+        .include(litehtml.join("src"))
+        .include(&glue);
+    let mut sandbox_skip = vec![];
+    if !windows {
+        sandbox_skip.push("icu_intl.cpp");
+    }
+    cpp.files(cpp_files(&sandbox.join("desktop/sandbox/src"), &sandbox_skip)?);
+    cpp.files(cpp_files(&core.join("src"), &[])?);
+    cpp.files(cpp_files(&litehtml.join("src"), &[])?);
+    cpp.file(glue.join("quill_widget.cpp"));
+    if windows {
+        cpp.define("NOMINMAX", None)
+            .define("WIN32_LEAN_AND_MEAN", None)
+            .define("_CRT_SECURE_NO_WARNINGS", None);
+    }
+    if cpp.get_compiler().is_like_msvc() {
+        cpp.flag("/utf-8").flag("/EHsc").flag("/Zc:__cplusplus");
+    }
+    cpp.try_compile("quill_widgets")
+        .map_err(|err| err.to_string())?;
+
+    // C: QuickJS with widget-sandbox's shim, and gumbo (litehtml's HTML parser).
+    let mut c = cc::Build::new();
+    c.std("c11")
+        .opt_level(2)
+        .debug(false)
+        .warnings(false)
+        .cargo_warnings(false)
+        .define("QUICKJS_NG_BUILD", None)
+        .define("NDEBUG", None)
+        .include(&qjs_include)
+        .include(&quickjs)
+        .include(litehtml.join("gumbo-include"))
+        .include(litehtml.join("gumbo-include").join("gumbo"))
+        .include(litehtml.join("src").join("gumbo"));
+    for name in ["quickjs.c", "dtoa.c", "libregexp.c", "libunicode.c"] {
+        c.file(quickjs.join(name));
+    }
+    c.file(sandbox.join("ios/Sources/CQuickJS/shim/qjs_shim.c"));
+    c.files(cpp_files(&litehtml.join("src").join("gumbo"), &[])?);
+    if c.get_compiler().is_like_msvc() {
+        c.include(litehtml.join("src/gumbo/visualc/include"))
+            .flag("/utf-8");
+    } else {
+        c.define("_GNU_SOURCE", None).flag("-fno-strict-aliasing");
+    }
+    c.try_compile("quill_widgets_c")
+        .map_err(|err| err.to_string())?;
+
+    match std::env::var("CARGO_CFG_TARGET_OS").as_deref() {
+        // litehtml's date input reads the calendar through CoreFoundation.
+        Ok("macos") => println!("cargo:rustc-link-lib=framework=CoreFoundation"),
+        // A CSPRNG for QuickJS and Intl on the system's ICU (Windows 10 1903 and later).
+        Ok("windows") => {
+            println!("cargo:rustc-link-lib=bcrypt");
+            println!("cargo:rustc-link-lib=icu");
+        }
+        _ => {
+            println!("cargo:rustc-link-lib=m");
+            println!("cargo:rustc-link-lib=pthread");
+        }
+    }
+    Ok(())
 }
 
 fn env(name: &str) -> Result<String, String> {
