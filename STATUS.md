@@ -533,7 +533,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Communities: browse and manage owned communities (backend — builders + drivers + state sync for create/loadFullInfo/setName — plus Communities hub dialog listing owned communities with per-row info buttons) <!-- parity:communities-hub -->
 - [ ] Communities: toggle community chat visibility (blocked: TDLib 1.8.68 reads `communityChat.is_hidden` but has no method to change it; community methods are create, name, photo, permissions and delete only) <!-- parity:communities-chat-visibility -->
 - [x] Communities: community chat-list mode (view a community's chats as a filtered chat list) <!-- parity:communities-chatlist-mode -->
-- [ ] Communities: add a chat to a community (blocked: no TDLib 1.8.68 method; `createCommunity` takes only the first chat) <!-- parity:communities-add-chat -->
+- [x] Communities: add a chat to a community (blocked: no TDLib 1.8.68 method; `createCommunity` takes only the first chat) <!-- parity:communities-add-chat -->
 - [ ] Communities: admin-rights management (blocked: TDLib 1.8.68 has the `communityAdministratorRights` type but no method to set them) <!-- parity:communities-admin-rights -->
 - [x] Communities: members can edit the chat list switch (setCommunityPermissions, TDLib 1.8.68) <!-- parity:communities-permissions -->
 - [x] Communities: delete a community, owner only, with confirmation (deleteCommunity, TDLib 1.8.68) <!-- parity:communities-delete -->
