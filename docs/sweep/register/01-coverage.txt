@@ -122,3 +122,16 @@ src/calls/capture/system_audio.rs	105	read
 src/calls/capture/system_audio_cpal.rs	96	read
 src/calls/engine/api.rs	361	read
 src/calls/engine/conference.rs	109	read
+src/business_hours_edit.rs	269	read
+src/business_info.rs	464	read
+src/business_settings.rs	587	read
+src/business_start_page.rs	150	read
+src/call_device_prefs.rs	77	read
+src/call_link.rs	289	read
+src/calls/audio_level.rs	377	read
+src/calls/capture/denoise.rs	318	read
+src/calls/capture/device_thread.rs	206	read
+src/calls/capture/feeder.rs	548	read
+src/calls/capture/mic_cpal.rs	208	read
+src/calls/capture/mod.rs	249	read
+src/calls/capture/pipewire_dl.rs	458	read
