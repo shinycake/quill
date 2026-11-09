@@ -2,7 +2,7 @@
 #![deny(clippy::indexing_slicing)]
 
 /// crates.io `gpui-kit` version (`=0.9.0` in Cargo.toml, 2026-11-02). The
-/// whole UI family is this Kit release, with GPUI from the `gpui-pre` 0.3.11
+/// whole UI family is this Kit release, with GPUI from the `gpui-pre` 0.3.12
 /// snapshot crates; `gpui-base`, `gpui-component`, `gpui-pre` and
 /// `gpui-pre-{apple,macos,linux,windows,wgpu}` are patched copies in
 /// `third_party/` (docs/decisions/gpui-kit-0-9-0.md).
