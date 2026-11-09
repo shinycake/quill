@@ -37,6 +37,7 @@ jobs:
         run: |
           python3 -m unittest discover -s scripts -p 'test_dialog_hosts.py'
           python3 -m unittest discover -s scripts -p 'test_note_hosts.py'
+          python3 -m unittest discover -s scripts -p 'test_main_frame_queues.py'
       # docs/decisions/account-scoped-ui-state.md: the account's UI is OnScreen.
       - name: screen state
         run: python3 scripts/check-screen-state.py

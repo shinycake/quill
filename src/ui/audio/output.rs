@@ -350,6 +350,20 @@ impl SharedOutput {
         self.0.lock().open(&self.0)
     }
 
+    /// A live device is up. A closed or stale one starts opening on a
+    /// thread of its own (as [`Self::outlet`]), so a later look finds it
+    /// up, but says no until then: a device still opening may yet fail.
+    pub(in crate::ui) fn ready_or_wake(&self) -> bool {
+        #[cfg(test)]
+        if let Some(forced) = &self.0.forced {
+            self.0.wakes.fetch_add(1, Ordering::Relaxed);
+            return forced.is_some();
+        }
+        let mut state = self.0.lock();
+        state.open(&self.0);
+        state.device.is_some()
+    }
+
     /// A device is up, or opening.
     fn has_device(&self) -> bool {
         #[cfg(test)]
@@ -1104,6 +1118,24 @@ mod tests {
         let played = gate.pull(19_200);
         assert!(played.iter().any(|s| *s > 0.4), "the sound plays");
         assert_eq!(gate.asked(), 1, "one open for the outlet, sound and play");
+    }
+
+    /// A let-go soundtrack is tapped again only once a device is up: one
+    /// still opening may fail, and each reattach restarts the decoder.
+    #[test]
+    fn ready_says_no_while_the_device_opens_or_after_it_failed() {
+        let (output, gate) = SharedOutput::gated();
+        assert!(!output.ready_or_wake(), "opening, not up");
+        assert!(!output.ready_or_wake(), "still opening");
+        gate.answer(false);
+        output.settle_device();
+        assert!(!output.ready_or_wake(), "failed: no device to tap");
+        let (output, gate) = SharedOutput::gated();
+        assert!(!output.ready_or_wake());
+        gate.answer(true);
+        output.settle_device();
+        assert!(output.ready_or_wake(), "up");
+        assert_eq!(gate.asked(), 1);
     }
 
     /// The app mixer runs at the first device's layout, so a sound at the

@@ -211,7 +211,7 @@ fn a_closed_boxs_video_pick_opens_no_editor(cx: &mut TestAppContext) {
             emoji: None,
             window: None,
         });
-        app.sticker_box_frame_upkeep(window, cx);
+        app.sticker_box_window_upkeep(window, cx);
         assert!(
             app.sticker_box.pending_video.is_none(),
             "the pick is dropped"

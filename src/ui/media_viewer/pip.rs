@@ -35,6 +35,14 @@ pub(in crate::ui) struct PipLink {
 }
 
 impl QuillApp {
+    /// Whether the viewer's clip may go to Picture-in-Picture: never one
+    /// from a secret chat, whose window keeps it out of screen capture
+    /// (`capture_block`); a floating window would show it to anything
+    /// that captures the screen.
+    pub(in crate::ui) fn viewer_may_pip(&self, item: &MediaViewerItem) -> bool {
+        !self.chat_is_secret(item.chat_id.0)
+    }
+
     /// The viewer's Picture-in-Picture button (and the Touch Bar's): hand
     /// the playing clip to a floating window and close the viewer.
     pub(in crate::ui) fn open_video_pip(&mut self, cx: &mut Context<Self>) {
@@ -48,7 +56,7 @@ impl QuillApp {
         let Some(item) = self.viewer.state.current().cloned() else {
             return;
         };
-        if self.viewer.video != Some(item.message_id) {
+        if self.viewer.video != Some(item.message_id) || !self.viewer_may_pip(&item) {
             return;
         }
         let Some(player) = self.viewer.player.take() else {

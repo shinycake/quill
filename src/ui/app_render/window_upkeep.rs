@@ -78,6 +78,9 @@ impl QuillApp {
             self.premium_limit_toast_upkeep(window, cx);
         }
         self.gift_boxes_upkeep(window, cx);
+        // A video chosen for an owned set finished downloading: its editor,
+        // in the window the pick was made in.
+        self.sticker_box_window_upkeep(window, cx);
         self.call_boxes_upkeep(window, cx);
         self.box_answers_upkeep(window, cx);
         self.checkout_prefill_upkeep(window, cx);

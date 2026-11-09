@@ -153,15 +153,19 @@ impl Session {
                 }
             }
             Some(RequestPurpose::SetDirectMessagesGroup) => {
-                self.payments.paid_messages.error = None;
-                self.payments.paid_messages.saving = false;
+                self.payments.paid_messages.save = crate::paid_messages::PaidSave::Idle;
             }
             _ => {}
         }
     }
 
     /// Failure of this block's purposes.
-    pub(crate) fn apply_privacy_data_error(&mut self, purpose: RequestPurpose, err: &TdError) {
+    pub(crate) fn apply_privacy_data_error(
+        &mut self,
+        purpose: RequestPurpose,
+        pending: Option<&PendingRequest>,
+        err: &TdError,
+    ) {
         match purpose {
             RequestPurpose::Settings(SettingsPurpose::HideSuggestedAction { action }) => {
                 self.chat_list
@@ -227,9 +231,22 @@ impl Session {
                 // box hides the refund line.
             }
             RequestPurpose::AllowUnpaidMessages | RequestPurpose::SetDirectMessagesGroup => {
-                self.payments.paid_messages.saving = false;
-                self.payments.paid_messages.error =
-                    Some(sessions_error_line("change the paid message settings", err));
+                use crate::paid_messages::{PaidSave, PaidTarget};
+                let target = match purpose {
+                    RequestPurpose::AllowUnpaidMessages => {
+                        pending.and_then(|p| p.user_id).map(PaidTarget::User)
+                    }
+                    _ => pending
+                        .and_then(|p| p.chat_id)
+                        .map(|chat| PaidTarget::Channel(chat.0)),
+                };
+                self.payments.paid_messages.save = match target {
+                    Some(target) => PaidSave::Failed {
+                        target,
+                        line: sessions_error_line("change the paid message settings", err),
+                    },
+                    None => PaidSave::Idle,
+                };
             }
             RequestPurpose::GetNetworkStatistics => {
                 data.network_loading = false;
@@ -253,8 +270,7 @@ impl Session {
     /// free now, so the Remove Fee bar and the paid total go away.
     pub fn finish_unpaid_exception(&mut self, user_id: i64) {
         let paid = &mut self.payments.paid_messages;
-        paid.saving = false;
-        paid.error = None;
+        paid.save = crate::paid_messages::PaidSave::Idle;
         paid.revenue.remove(&user_id);
         if let Some(info) = self.users_state.user_full_infos.get_mut(&user_id) {
             info.extras.incoming_paid_message_star_count = 0;

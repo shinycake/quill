@@ -77,7 +77,9 @@ pub(crate) struct GroupEditBox {
 pub(crate) enum EditBoxState {
     Editing,
     Saving,
-    /// TDLib refused the title or the description.
+    /// TDLib refused the title, the description, the link, or a step
+    /// that is no field (`GroupInfoField::Settings`): the box stays open
+    /// with what was typed.
     Failed {
         field: GroupInfoField,
         reason: String,
@@ -432,6 +434,7 @@ impl QuillApp {
                 .gap_4()
                 .child(self.group_edit_photo(edit, cx))
                 .child(form)
+                .children(failed(GroupInfoField::Settings))
                 .child(self.group_edit_box_manage_rows(edit.chat_id, cx))
                 .into_any_element(),
         )

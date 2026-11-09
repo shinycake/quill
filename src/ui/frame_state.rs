@@ -93,6 +93,14 @@ pub(crate) struct FrameUi {
 }
 
 impl FrameUi {
+    /// A new OS window took the main window's place (a lost GPU): what was
+    /// handed to the old one went with it, so the next render hands it
+    /// over again. Every per-native-window cache resets here.
+    pub(super) fn forget_native_window(&mut self) {
+        self.window_title_shown.borrow_mut().clear();
+        self.capture_blocked = false;
+    }
+
     pub(super) fn new(cx: &mut Context<QuillApp>) -> Self {
         let stored = quill::settings::load_window_state();
         Self {

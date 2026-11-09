@@ -213,7 +213,12 @@ impl QuillApp {
         if pays == 0 {
             return None;
         }
-        let error = session.payments.paid_messages.error.clone();
+        let error = session
+            .payments
+            .paid_messages
+            .save
+            .error_for(quill::paid_messages::PaidTarget::User(user_id))
+            .map(str::to_string);
         Some(
             div()
                 .id("paid-messages-pays-me")
@@ -264,7 +269,7 @@ impl QuillApp {
             |u| u.display_name(),
         );
         if let Some(session) = self.paid_session_mut() {
-            session.payments.paid_messages.error = None;
+            session.payments.paid_messages.save = quill::paid_messages::PaidSave::Idle;
         }
         self.paid_messages.remove_fee = Some(RemoveFeeBox {
             user_id,

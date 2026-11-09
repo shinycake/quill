@@ -24,8 +24,23 @@ pub(super) fn should_block(open_chat_secret: bool, viewer_chat_secret: bool) -> 
     open_chat_secret || viewer_chat_secret
 }
 
-#[cfg(target_os = "macos")]
+/// Keep `window` out of screen capture (`blocked`) or let it be captured.
+/// Every window that can show a secret chat's content goes through here.
 pub(super) fn apply_sharing(window: &Window, blocked: bool) {
+    #[cfg(test)]
+    SHARING_APPLIED.with(|applied| applied.borrow_mut().push(blocked));
+    apply_native_sharing(window, blocked);
+}
+
+#[cfg(test)]
+thread_local! {
+    /// Tests: every `apply_sharing` call's `blocked`, in order.
+    pub(super) static SHARING_APPLIED: std::cell::RefCell<Vec<bool>> =
+        const { std::cell::RefCell::new(Vec::new()) };
+}
+
+#[cfg(target_os = "macos")]
+fn apply_native_sharing(window: &Window, blocked: bool) {
     use objc2_app_kit::{NSView, NSWindowSharingType};
     use raw_window_handle::{HasWindowHandle, RawWindowHandle};
     if let Ok(handle) = HasWindowHandle::window_handle(window)
@@ -44,7 +59,7 @@ pub(super) fn apply_sharing(window: &Window, blocked: bool) {
 }
 
 #[cfg(target_os = "windows")]
-pub(super) fn apply_sharing(window: &Window, blocked: bool) {
+fn apply_native_sharing(window: &Window, blocked: bool) {
     use raw_window_handle::{HasWindowHandle, RawWindowHandle};
     use windows_sys::Win32::UI::WindowsAndMessaging::{
         SetWindowDisplayAffinity, WDA_EXCLUDEFROMCAPTURE, WDA_NONE,
@@ -63,7 +78,7 @@ pub(super) fn apply_sharing(window: &Window, blocked: bool) {
 }
 
 #[cfg(not(any(target_os = "macos", target_os = "windows")))]
-pub(super) fn apply_sharing(_window: &Window, _blocked: bool) {}
+fn apply_native_sharing(_window: &Window, _blocked: bool) {}
 
 /// Whether this platform can keep a window out of screen capture.
 pub(super) const CAPTURE_BLOCK_SUPPORTED: bool =
@@ -135,7 +150,7 @@ impl QuillApp {
         )
     }
 
-    fn chat_is_secret(&self, chat_id: i64) -> bool {
+    pub(super) fn chat_is_secret(&self, chat_id: i64) -> bool {
         self.session()
             .as_ref()
             .and_then(|s| s.chats.get(&chat_id))

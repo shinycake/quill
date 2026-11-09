@@ -69,42 +69,45 @@ impl QuillApp {
         false
     }
 
-    /// Each main-window frame: the chosen video's download finished, so
-    /// the editor opens on it (the poll has no window to do this), in the
-    /// window the pick was made in. A pick whose chat window closed, or
-    /// whose box closed there, is dropped with it.
-    pub(in crate::ui) fn sticker_box_frame_upkeep(
+    /// Each window's frame (`per_window_upkeep`): the chosen video's
+    /// download finished, so the editor opens on it in the window the pick
+    /// was made in, in that window's own frame (the poll has no window to
+    /// do this, and a minimized main window draws none). A pick whose chat
+    /// window closed, or whose box closed there, is dropped with it.
+    pub(in crate::ui) fn sticker_box_window_upkeep(
         &mut self,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(pending) = self.sticker_box.pending_video.clone() else {
+        let Some(pending) = self.sticker_box.pending_video.as_ref() else {
             return;
         };
-        let box_open = self
-            .in_window_scope(pending.window, cx, |app, _| {
-                app.message_ui.menu_ui.sticker_set_open
-            })
-            .unwrap_or(false);
-        if !box_open {
+        let host = pending.window;
+        if host.is_some_and(|chat| !self.windows.has(chat)) {
+            self.sticker_box.pending_video = None;
+            return;
+        }
+        if host != self.windows.scope {
+            return;
+        }
+        if !self.message_ui.menu_ui.sticker_set_open {
             self.sticker_box.pending_video = None;
             return;
         }
         let Some(path) = self.local_media_path(pending.file_id) else {
             return;
         };
-        self.sticker_box.pending_video = None;
-        let path = PathBuf::from(path);
-        let host = pending.window;
-        let super::state::PendingVideo { pick, emoji, .. } = pending;
-        let open = move |app: &mut Self, window: &mut Window, cx: &mut Context<Self>| {
-            app.open_set_video_editor(pick.set_id, pick.kind, path, emoji, window, cx);
+        let Some(pending) = self.sticker_box.pending_video.take() else {
+            return;
         };
-        match host {
-            Some(chat) => {
-                let _ = self.hand_to_chat_window(chat, cx, open);
-            }
-            None => open(self, window, cx),
-        }
+        let super::state::PendingVideo { pick, emoji, .. } = pending;
+        self.open_set_video_editor(
+            pick.set_id,
+            pick.kind,
+            PathBuf::from(path),
+            emoji,
+            window,
+            cx,
+        );
     }
 }

@@ -51,6 +51,16 @@ impl QuillApp {
         if let Some(session) = self.demo_session.as_mut() {
             self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
             apply_ready_video_viewer(session, &self.demo_ui.sink, &self.demo_ui.seq);
+            // `QUILL_DEMO_SECRET_CHAT=1`: the clip's chat is a secret chat,
+            // whose clips never go to Picture-in-Picture.
+            if std::env::var("QUILL_DEMO_SECRET_CHAT").is_ok_and(|v| v == "1")
+                && let Some(chat) = session.chats.get_mut(&11)
+            {
+                chat.kind = quill::telegram::envelope::ChatKind::Secret {
+                    secret_chat_id: 9,
+                    user_id: quill::ids::UserId(11),
+                };
+            }
         }
         // The Media seed plus a downloaded 12 s video (204, "Demo clip",
         // file 96), played by the viewer's player. Under

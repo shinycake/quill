@@ -165,6 +165,25 @@ fn sharing_without_a_connection_answers_cancelled(cx: &mut TestAppContext) {
     });
 }
 
+/// Round 17: the checkout waits for the main window's frame, so a request
+/// from a mini app brings that window back (minimized or hidden draws no
+/// frame, and activating the app alone does not restore it).
+#[gpui_kit::test]
+fn an_invoice_request_brings_the_main_window_forward(cx: &mut TestAppContext) {
+    use gpui_kit::test::TestWindowExt as _;
+    let (app, mut vcx) = new_app(cx);
+    vcx.update(|window, cx| window.render_frame(cx));
+    vcx.deactivate_window();
+    vcx.run_until_parked();
+    assert!(!vcx.update(|window, _| window.is_window_active()));
+    app.update_in(&mut vcx, |app, _, cx| {
+        let _received = open_window(app, cx);
+        app.handle_web_app_event(WebAppEvent::OpenInvoice { slug: "abc".into() }, cx);
+    });
+    vcx.run_until_parked();
+    assert!(vcx.update(|window, _| window.is_window_active()));
+}
+
 #[gpui_kit::test]
 fn an_invoice_request_opens_the_checkout_at_render_time(cx: &mut TestAppContext) {
     let (app, mut vcx) = new_app(cx);

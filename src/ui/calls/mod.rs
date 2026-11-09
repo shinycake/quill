@@ -319,6 +319,9 @@ impl QuillApp {
     }
 
     fn answer_call(&mut self, cx: &mut Context<Self>) {
+        // An answered call's rating, or a failed answer, is the main
+        // window's: the call came to no chat window.
+        self.call_boxes.card_window = None;
         if let Some(live) = self.live.as_mut() {
             let result = live.driver.accept_call();
             self.set_note(match result {

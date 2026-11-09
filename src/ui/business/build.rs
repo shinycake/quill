@@ -329,14 +329,22 @@ impl QuillApp {
             let server_error = this
                 .session()
                 .and_then(|s| s.settings.business.error.clone());
-            if let Some(line) = local_error.or(server_error) {
-                body = body.child(
-                    div()
-                        .id("business-error")
-                        .text_xs()
-                        .text_color(cx.theme().danger)
-                        .child(line),
-                );
+            // The screen's own line and TDLib's refusal both show: a local
+            // "still loading" must not hide why the load failed.
+            let server_error = server_error.filter(|line| local_error.as_ref() != Some(line));
+            for (id, line) in [
+                ("business-error", local_error),
+                ("business-server-error", server_error),
+            ] {
+                if let Some(line) = line {
+                    body = body.child(
+                        div()
+                            .id(id)
+                            .text_xs()
+                            .text_color(cx.theme().danger)
+                            .child(line),
+                    );
+                }
             }
             let footer = this.business_footer(view, cx);
             let content = div()

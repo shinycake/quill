@@ -129,7 +129,7 @@ pub fn attach_main_window(
     view.update(cx, |this, _| {
         // "Show taskbar icon" off: the window starts out of the taskbar.
         this.apply_taskbar_icon(window);
-        this.frame.window_title_shown.borrow_mut().clear();
+        this.frame.forget_native_window();
     });
     // The title-bar close button (`QuillApp::close_main_window`).
     window.on_window_should_close(cx, {

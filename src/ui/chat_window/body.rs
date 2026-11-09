@@ -156,6 +156,8 @@ impl QuillApp {
             .when_some(self.link_tooltip_overlay(cx), |this, overlay| {
                 this.child(overlay)
             })
+            // A call pressed here that failed to start, or its rating.
+            .when_some(self.call_overlay(cx), |this, overlay| this.child(overlay))
             .into_any_element()
     }
 }

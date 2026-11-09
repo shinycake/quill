@@ -90,6 +90,11 @@ window's own is `.per_window()`; every other open calls
 `open_box(DialogKind::X)` or `open_box_in(DialogKind::X, window)`, or says
 why it names none with `// box-host: <why>`.
 
+The main-frame queue rule (scripts/main_frame_queues.py, round 17): a
+request that waits for the main window's frame brings that window
+forward with `raise_main_window_later`, or says why with
+`// main-frame: <why>`.
+
 Known limits: a method is matched by name, not type; a field reached
 through a local binding (`let h = &mut this.history;` in an outer
 function, captured by the closure) or a helper on another type is not
@@ -106,6 +111,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import dialog_hosts  # noqa: E402
+import main_frame_queues  # noqa: E402
 import note_hosts  # noqa: E402
 import ui_statics  # noqa: E402
 import view_reads  # noqa: E402
@@ -634,6 +640,14 @@ def main() -> int:
             "A toast that names its window for another reason says why with\n"
             "`// note-host: <why>`.\n"
         )
+    unraised = main_frame_queues.problems(str(root.parent.parent))
+    if unraised:
+        print("\n".join(unraised))
+        print(
+            f"\n{len(unraised)} main-frame queue write(s) leave a minimized or hidden main window\n"
+            "behind: its frame never runs them. Bring it forward with\n"
+            "QuillApp::raise_main_window_later (src/ui/deep_links.rs) or hold_resolved_link.\n"
+        )
     unrouted = unrouted_opens(root, texts)
     if unrouted:
         print("\n".join(unrouted))
@@ -684,6 +698,7 @@ def main() -> int:
         or shared_statics
         or unhosted
         or unhosted_notes
+        or unraised
     ):
         return 1
     print("window scope: OK")
@@ -691,6 +706,7 @@ def main() -> int:
     print("core view reads: OK")
     print("ui statics: OK")
     print("dialog hosts: OK")
+    print("main-frame queues: OK")
     return 0
 
 

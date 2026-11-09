@@ -169,9 +169,7 @@ OwnershipState::check_in_flight+check_error
 Paged::loaded
 Paged::loading
 Paged::loading+error
-PaidMessages::saving
 PaidMessages::trust_loaded
-PaidMessages::trust_loaded+error
 PanelMotion::opening
 ParsedFile::uploading
 ParsedGroupCall::loaded_all_participants

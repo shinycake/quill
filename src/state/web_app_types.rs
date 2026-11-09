@@ -69,8 +69,9 @@ pub struct WebApps {
     /// `updateAttachmentMenuBots`: the bots in the attachment menu.
     pub attachment_menu_bots: Vec<AttachmentMenuBot>,
     /// One-shot: `getAttachmentMenuBot` answer (for adding a bot), or a
-    /// failure message.
-    pub attachment_menu_bot: Option<Result<AttachmentMenuBot, String>>,
+    /// failure message, with the bot it was asked for: the flow waiting
+    /// takes only its own bot's answer.
+    pub attachment_menu_bot: Option<(i64, Result<AttachmentMenuBot, String>)>,
     /// One-shot: `toggleBotIsAddedToAttachmentMenu` outcome,
     /// `(bot_user_id, added)` or a failure message.
     pub attachment_menu_toggled: Option<Result<(i64, bool), String>>,
@@ -79,9 +80,10 @@ pub struct WebApps {
     /// One-shot: `toggleBotCanManageEmojiStatus` outcome,
     /// `(bot_user_id, done)`.
     pub emoji_access: Option<(i64, bool)>,
-    /// One-shot: `searchWebApp` answer for a `t.me/bot/app` link,
-    /// `(bot_user_id, app)` or a failure message.
-    pub found: Option<Result<(i64, FoundWebApp), String>>,
+    /// One-shot: `searchWebApp` answer for a `t.me/bot/app` link, the app
+    /// or a failure message, with the bot it was asked for: a second link
+    /// clicked before the first answered takes only its own answer.
+    pub found: Option<(i64, Result<FoundWebApp, String>)>,
     /// `req_id`s of custom requests in flight, by `RequestId`.
     pub custom_requests: HashMap<u64, String>,
     /// One-shot: custom request answers.

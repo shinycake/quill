@@ -186,43 +186,47 @@ impl QuillApp {
                 expiration_date,
                 member_limit,
                 creates_join_request,
-            } => driver
-                .create_chat_invite_link(
-                    chat_id,
-                    name,
-                    *expiration_date,
-                    *member_limit,
-                    *creates_join_request,
-                )
-                .map(drop),
+            } => driver.create_chat_invite_link(
+                chat_id,
+                name,
+                *expiration_date,
+                *member_limit,
+                *creates_join_request,
+            ),
             InviteLinkRequest::Edit {
                 link,
                 name,
                 expiration_date,
                 member_limit,
                 creates_join_request,
-            } => driver
-                .edit_chat_invite_link(
-                    chat_id,
-                    link,
-                    name,
-                    *expiration_date,
-                    *member_limit,
-                    *creates_join_request,
-                )
-                .map(drop),
-            InviteLinkRequest::CreateSubscription { name, star_count } => driver
-                .create_chat_subscription_invite_link(chat_id, name, *star_count)
-                .map(drop),
-            InviteLinkRequest::EditSubscription { link, name } => driver
-                .edit_chat_subscription_invite_link(chat_id, link, name)
-                .map(drop),
+            } => driver.edit_chat_invite_link(
+                chat_id,
+                link,
+                name,
+                *expiration_date,
+                *member_limit,
+                *creates_join_request,
+            ),
+            InviteLinkRequest::CreateSubscription { name, star_count } => {
+                driver.create_chat_subscription_invite_link(chat_id, name, *star_count)
+            }
+            InviteLinkRequest::EditSubscription { link, name } => {
+                driver.edit_chat_subscription_invite_link(chat_id, link, name)
+            }
         };
+        // `Ok(None)` is a refusal to send (the same create still in flight,
+        // or the invite right gone), not a request on its way: the box
+        // stays with what was typed and says so.
+        let sent = matches!(sent, Ok(Some(_)));
+        if !sent {
+            // box-host: put back after a refused save; it stays where it shows
+            self.admin.invite_link_box = Some(link_box);
+        }
         let note = match (sent, creating) {
-            (Ok(()), true) => StatusNote::info(tr(keys::Q_PEOPLE_CREATING_INVITE_LINK)),
-            (Ok(()), false) => StatusNote::info(tr(keys::Q_PEOPLE_SAVING_INVITE_LINK)),
-            (Err(_), true) => StatusNote::error(tr(keys::Q_PEOPLE_COULD_NOT_CREATE_INVITE_LINK)),
-            (Err(_), false) => StatusNote::error(tr(keys::Q_PEOPLE_COULD_NOT_SAVE_INVITE_LINK)),
+            (true, true) => StatusNote::info(tr(keys::Q_PEOPLE_CREATING_INVITE_LINK)),
+            (true, false) => StatusNote::info(tr(keys::Q_PEOPLE_SAVING_INVITE_LINK)),
+            (false, true) => StatusNote::error(tr(keys::Q_PEOPLE_COULD_NOT_CREATE_INVITE_LINK)),
+            (false, false) => StatusNote::error(tr(keys::Q_PEOPLE_COULD_NOT_SAVE_INVITE_LINK)),
         };
         self.set_note(note);
         cx.notify();

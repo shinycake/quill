@@ -356,6 +356,7 @@ fn attachment_menu_bots_and_custom_requests_round_trip() {
         .attachment_menu_bot
         .clone()
         .unwrap()
+        .1
         .unwrap();
     assert_eq!(bot.bot_user_id, 43);
     assert!(!bot.is_added);
@@ -394,6 +395,38 @@ fn attachment_menu_bots_and_custom_requests_round_trip() {
     assert!(h.driver.session.bots.web_apps.custom_requests.is_empty());
 }
 
+/// Round 17 C finding 15: a refused search names the bot it was for, so a
+/// second link clicked before the first answered is not cancelled (or
+/// launched without its consent box) by the first one's answer.
+#[test]
+fn a_search_answer_names_its_bot_even_when_refused() {
+    let mut h = Harness::ready();
+    let extra = h.driver.search_web_app(42, "shop").expect("sent");
+    h.ingest(&format!(
+        r#"{{"@type":"error","@extra":"{}","code":404,"message":"Not Found"}}"#,
+        extra.as_extra()
+    ));
+    let (bot_id, app) = h.driver.session.bots.web_apps.found.clone().unwrap();
+    assert_eq!(bot_id, 42);
+    assert!(app.is_err());
+}
+
+/// Round 17 C finding 19: a data send keeps the mini-app poll alive until
+/// TDLib answers, so its outcome is reported then, not by a later flow.
+#[test]
+fn a_data_send_is_due_until_it_answers() {
+    let mut h = Harness::ready();
+    assert!(!h.driver.session.web_app_answer_due());
+    let extra = h.driver.send_web_app_data(42, "Go", "{}").expect("sent");
+    assert!(h.driver.session.web_app_answer_due());
+    h.ingest(&format!(
+        r#"{{"@type":"ok","@extra":"{}"}}"#,
+        extra.as_extra()
+    ));
+    assert!(!h.driver.session.web_app_answer_due());
+    assert_eq!(h.driver.session.bots.web_apps.data_sent, Some(Ok(())));
+}
+
 #[test]
 fn named_app_links_search_first() {
     let mut h = Harness::ready();
@@ -403,15 +436,8 @@ fn named_app_links_search_first() {
         r#"{{"@type":"foundWebApp","@extra":"{}","web_app":{{"@type":"webApp","short_name":"shop","title":"Shop","description":""}},"request_write_access":true,"skip_confirmation":false}}"#,
         extra.as_extra()
     ));
-    let (bot_id, app) = h
-        .driver
-        .session
-        .bots
-        .web_apps
-        .found
-        .clone()
-        .unwrap()
-        .unwrap();
+    let (bot_id, app) = h.driver.session.bots.web_apps.found.clone().unwrap();
+    let app = app.unwrap();
     assert_eq!(bot_id, 42);
     assert_eq!(app.title, "Shop");
     assert!(app.request_write_access);

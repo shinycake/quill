@@ -105,6 +105,59 @@ fn a_listing_opens_the_buy_steps(cx: &mut TestAppContext) {
     });
 }
 
+/// Round 17 C finding 8: Escape on the Buy box while the purchase is in
+/// flight keeps the purchase, so its answer still lands (toast, listing
+/// out, craft slot); a box closed with nothing sent drops it.
+#[gpui_kit::test]
+fn closing_the_buy_box_mid_purchase_keeps_the_purchase(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx, "ready-gift-resale");
+    let vcx = &mut vcx;
+    vcx.run_until_parked();
+    app.update_in(vcx, |app, _, cx| {
+        let name = app
+            .session()
+            .and_then(|s| s.payments.gift_market.resale.as_ref())
+            .and_then(|search| search.listings.first())
+            .map(|listing| listing.gift.name.clone())
+            .unwrap_or_default();
+        app.pick_resale_listing(name, cx);
+        if let Some(buy) = app
+            .demo_session
+            .as_mut()
+            .and_then(|s| s.payments.gift_market.buy.as_mut())
+        {
+            buy.sending = true;
+            buy.request = 41;
+        }
+        app.market_back(cx);
+        assert_eq!(app.gift_market.top(), Some(&MarketBox::Resale));
+        assert!(
+            app.session()
+                .and_then(|s| s.payments.gift_market.buy.as_ref())
+                .is_some_and(|buy| buy.request == 41),
+            "the purchase in flight stays for its answer"
+        );
+    });
+}
+
+/// Round 17 C finding 16: "Hide My Name" is cleared once the market's
+/// boxes are all closed, so the next auction does not bid anonymously.
+#[gpui_kit::test]
+fn hide_my_name_does_not_carry_to_the_next_auction(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx, "ready-gift-auction");
+    let vcx = &mut vcx;
+    vcx.run_until_parked();
+    app.update_in(vcx, |app, _, cx| {
+        app.gift_market.stack = vec![MarketBox::AuctionBid {
+            gift_id: AUCTION_GIFT,
+        }];
+        app.gift_market.hide_name = true;
+        app.market_back(cx);
+        assert!(app.gift_market.stack.is_empty());
+        assert!(!app.gift_market.hide_name);
+    });
+}
+
 #[gpui_kit::test]
 fn the_bid_slider_sets_the_button(cx: &mut TestAppContext) {
     let (app, mut vcx) = new_app(cx, "ready-gift-auction");

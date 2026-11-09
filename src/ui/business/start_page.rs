@@ -63,6 +63,18 @@ impl QuillApp {
         )
     }
 
+    /// The sticker pick is over (a sticker, Back, another screen, the box
+    /// closing): the account's sticker panel it opened closes too, or the
+    /// main window's first Esc would close a panel nobody sees, and its
+    /// downloads would go on.
+    pub(super) fn close_start_page_stickers(&mut self) {
+        if let Some(live) = self.live.as_mut() {
+            live.driver.close_sticker_panel();
+        } else if let Some(session) = self.demo_session.as_mut() {
+            session.stickers.stickers.close();
+        }
+    }
+
     /// The sticker panel opens on the installed sets.
     pub(super) fn open_start_page_stickers(&mut self, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
@@ -109,6 +121,7 @@ impl QuillApp {
             }
             d.view = View::StartPage;
         }
+        self.close_start_page_stickers();
         cx.notify();
         true
     }

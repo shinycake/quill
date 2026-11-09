@@ -823,10 +823,24 @@ fn a_let_go_soundtrack_is_tapped_again() {
         player.reattach_audio_tap().is_none(),
         "no second tap while the first is held"
     );
+    assert!(!player.sound_detached(), "the tap is out and attached");
     drop(tap);
     assert!(!player.has_sound(), "the clip runs on its wall clock");
+    assert!(player.sound_detached());
     let again = player.reattach_audio_tap();
     assert!(again.is_some(), "a new tap for the same sound");
     assert!(player.has_sound(), "the sound is the clock again");
+    assert!(!player.sound_detached());
     assert!(player.reattach_audio_tap().is_none());
+}
+
+/// A clip with no soundtrack (or one not asked for) never reads as a
+/// sound let go: the player's frame loop must not wake an output device
+/// for it.
+#[test]
+fn a_silent_clip_has_no_detached_sound() {
+    let (mut player, calls) = scripted_player(None, false, 3);
+    assert!(wait_until(|| calls.load(Ordering::SeqCst) >= 1));
+    assert!(player.take_audio_tap().is_none());
+    assert!(!player.sound_detached());
 }

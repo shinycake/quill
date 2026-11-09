@@ -60,7 +60,7 @@ impl QuillApp {
             .filter(|dialog| {
                 matches!(
                     dialog.view,
-                    GroupSettingsView::RecentActions | GroupSettingsView::RecentActionsFilter
+                    GroupSettingsView::RecentActions | GroupSettingsView::RecentActionsFilter(_)
                 )
             })
             .map(|dialog| dialog.chat_id)

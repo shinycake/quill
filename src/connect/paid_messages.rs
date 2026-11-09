@@ -4,7 +4,7 @@
 //! Stars: the Stars leave only with a `sendMessage` the user confirmed.
 use super::*;
 use crate::ids::{ChatId, RequestId};
-use crate::paid_messages::PaidTrust;
+use crate::paid_messages::{PaidSave, PaidTarget, PaidTrust};
 use crate::paid_messages_guard::HeldSend;
 use crate::state::{RequestPurpose, unix_ms_now};
 use crate::telegram::envelope::{EnvelopePayload, GroupsPayload, SettingsPayload};
@@ -214,11 +214,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         let extra = self
             .session
             .request_for_user(RequestPurpose::AllowUnpaidMessages, user_id);
-        self.session.payments.paid_messages.saving = true;
-        self.session.payments.paid_messages.error = None;
+        self.session.payments.paid_messages.save = PaidSave::Saving(PaidTarget::User(user_id));
         let json = allow_unpaid_messages_from_user(extra, user_id, refund);
         self.send_json_request(extra, &json).inspect_err(|_| {
-            self.session.payments.paid_messages.saving = false;
+            self.session.payments.paid_messages.save = PaidSave::Idle;
         })
     }
 
@@ -239,11 +238,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         let extra = self
             .session
             .request(RequestPurpose::SetDirectMessagesGroup, Some(chat_id));
-        self.session.payments.paid_messages.saving = true;
-        self.session.payments.paid_messages.error = None;
+        self.session.payments.paid_messages.save = PaidSave::Saving(PaidTarget::Channel(chat_id.0));
         let json = set_chat_direct_messages_group(extra, chat_id, choice.enabled, choice.stars);
         self.send_json_request(extra, &json).inspect_err(|_| {
-            self.session.payments.paid_messages.saving = false;
+            self.session.payments.paid_messages.save = PaidSave::Idle;
         })
     }
 }

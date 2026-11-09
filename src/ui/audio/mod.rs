@@ -162,14 +162,16 @@ thread_local! {
     static VIDEO_OUTPUT: RefCell<Option<SharedOutput>> = const { RefCell::new(None) };
 }
 
-/// Whether a video soundtrack can start now (an output device is up, or
-/// its opening is not held back by a recent failure).
-pub(in crate::ui) fn video_output_up() -> bool {
+/// For a soundtrack the output let go of: whether a device is up now to
+/// tap it again. One that is closed starts opening (unless one failed
+/// lately), so a later frame finds it up. Only a clip whose sound was let
+/// go asks, never a silent one, and a device still opening says no: a
+/// reattach restarts the decoder, so it waits for a device that is there.
+pub(in crate::ui) fn video_output_ready() -> bool {
     VIDEO_OUTPUT.with(|slot| {
         slot.borrow()
             .as_ref()
-            .and_then(SharedOutput::outlet)
-            .is_some()
+            .is_some_and(SharedOutput::ready_or_wake)
     })
 }
 

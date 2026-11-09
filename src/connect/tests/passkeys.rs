@@ -274,3 +274,29 @@ fn a_failed_registration_forgets_the_options() {
     assert!(state.ceremony.is_none());
     assert!(state.error.is_some());
 }
+
+/// Round 17 C finding 23: options that landed after the lock (and were never
+/// started) do not start the next Create's ceremony: a new request drops
+/// them, and the fresh answer is the one the dialog starts.
+#[test]
+fn a_new_options_request_drops_unstarted_options() {
+    if !crate::passkeys::webauthn_supported() {
+        return;
+    }
+    let mut p = parts();
+    listed(&mut p);
+    assert!(p.0.begin_register().unwrap().is_some());
+    answer(
+        &mut p,
+        "getPasskeyParameters",
+        json!({"@type": "text", "text": OPTIONS}),
+    );
+    assert!(p.0.session.settings.passkeys.ceremony.is_some());
+    // The options went stale while nobody started them.
+    p.0.session.settings.passkeys.registration = None;
+    assert!(p.0.begin_register().unwrap().is_some());
+    assert!(
+        p.0.session.settings.passkeys.ceremony.is_none(),
+        "the stale options never start a ceremony"
+    );
+}
