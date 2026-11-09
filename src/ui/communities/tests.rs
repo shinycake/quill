@@ -1,9 +1,10 @@
 //! The community screens' rules: when a ban warns, how long an answer
 //! can be undone, and which section a community chat sits in.
 use super::UndoAction;
-use super::ban::{BanStep, ban_step};
+use super::ban::{BanStart, BanStep, ban_start, ban_step};
 use super::info::{ChatSection, chat_section};
 use super::requests::UNDO_DURATION;
+use super::{CommunitiesUi, CommunityBox};
 use quill::state::fetch::Fetch;
 use quill::telegram::envelope::{CommunityMemberChats, ParsedCommunityChat};
 use std::time::{Duration, Instant};
@@ -77,4 +78,70 @@ fn joined_chats_come_first_and_bots_are_never_just_viewable() {
         chat_section(&chat(false), false, false),
         ChatSection::Requestable
     );
+}
+
+fn waiting(chat_id: i64) -> UndoAction {
+    UndoAction {
+        chat_id,
+        approve: true,
+        started: Instant::now(),
+        _timer: None,
+    }
+}
+
+#[test]
+fn replacing_the_requests_list_hands_back_its_waiting_answer() {
+    let mut ui = CommunitiesUi {
+        open: Some(CommunityBox::Requests {
+            community_id: 42,
+            undo: Some(waiting(70)),
+        }),
+        ..Default::default()
+    };
+    let hidden = CommunityBox::HiddenChat {
+        community_id: 42,
+        chat_id: 71,
+        owner_user_id: 5,
+    };
+    let sent = ui
+        .replace_box(Some(hidden))
+        .map(|(id, undo)| (id, undo.chat_id));
+    assert_eq!(sent, Some((42, 70)), "the answer goes, not lost");
+    assert!(matches!(
+        ui.open,
+        Some(CommunityBox::HiddenChat { chat_id: 71, .. })
+    ));
+    assert!(ui.replace_box(None).is_none(), "other boxes hold no answer");
+    assert!(ui.open.is_none());
+
+    ui.open = Some(CommunityBox::Requests {
+        community_id: 42,
+        undo: None,
+    });
+    assert!(
+        ui.replace_box(None).is_none(),
+        "an undone answer is not sent"
+    );
+}
+
+#[test]
+fn a_ban_waits_only_for_an_ask_that_will_answer() {
+    use quill::connect::ConnectSendError;
+    use quill::ids::RequestId;
+    assert!(matches!(
+        ban_start(Ok(Some(RequestId(9))), false),
+        BanStart::Wait
+    ));
+    assert!(
+        matches!(ban_start(Ok(None), true), BanStart::Wait),
+        "the same ask is already in flight"
+    );
+    assert!(
+        matches!(ban_start(Ok(None), false), BanStart::Refused),
+        "nothing went: the community is gone or not accessible"
+    );
+    assert!(matches!(
+        ban_start(Err(ConnectSendError::InvalidRequest), false),
+        BanStart::Failed(_)
+    ));
 }

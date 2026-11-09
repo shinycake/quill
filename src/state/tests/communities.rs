@@ -196,3 +196,64 @@ fn owned_bots_come_from_our_own_ask() {
     assert!(fetch.error().is_some());
     assert_eq!(fetch.data(), Some(&vec![5, 6]));
 }
+
+#[test]
+fn add_all_counts_the_requests_left_once_single_answers_are_out() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        r#"{"@type":"updateCommunityFullInfo","community_id":42,"community_full_info":{"@type":"communityFullInfo","chats":[],"administrator_count":1,"banned_count":0,"add_chat_request_count":3}}"#,
+    );
+    assert_eq!(session.community_add_chat_requests_left(42), 3);
+    let extra = session.request_for_community(
+        RequestPurpose::Communities(CommunitiesPurpose::ProcessAddChatRequest {
+            chat_id: 7,
+            approve: true,
+        }),
+        42,
+    );
+    assert_eq!(
+        session.community_add_chat_requests_left(42),
+        2,
+        "the answered row is not counted"
+    );
+    // TDLib's reloaded count comes before the `ok`; then the row is out
+    // of flight and counted once.
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        r#"{"@type":"updateCommunityFullInfo","community_id":42,"community_full_info":{"@type":"communityFullInfo","chats":[],"administrator_count":1,"banned_count":0,"add_chat_request_count":2}}"#,
+    );
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra.0),
+    );
+    assert_eq!(session.community_add_chat_requests_left(42), 2);
+    assert_eq!(session.community_add_chat_requests_left(404), 0);
+}
+
+#[test]
+fn show_as_one_chat_is_busy_while_its_toggle_is_in_flight() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    assert!(!session.community_collapse_in_flight(42));
+    let extra = session.request_for_community(
+        RequestPurpose::Communities(CommunitiesPurpose::ToggleCollapsed { collapsed: true }),
+        42,
+    );
+    assert!(session.community_collapse_in_flight(42));
+    assert!(!session.community_collapse_in_flight(43));
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra.0),
+    );
+    assert!(!session.community_collapse_in_flight(42));
+}

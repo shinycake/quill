@@ -388,7 +388,8 @@ impl<S: JsonSender> ConnectDriver<S> {
     }
 
     /// The full info of every collapsed community, which its chat-list
-    /// entry is built from; asked once per community.
+    /// entry is built from; asked once per community, and after a failure
+    /// only once the community changes.
     pub fn sync_collapsed_communities(&mut self) -> Result<(), ConnectSendError> {
         if !self.chats_path_active() {
             return Ok(());
@@ -403,7 +404,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .filter(|id| !self.session.groups.community_full_infos.contains_key(id))
             .collect();
         for community_id in missing {
-            self.get_community_full_info(community_id)?;
+            self.want_community_full_info(community_id)?;
         }
         Ok(())
     }

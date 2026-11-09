@@ -256,3 +256,62 @@ fn the_row_menu_mute_submenu_opens_and_leads_to_mute_for(cx: &mut TestAppContext
     let shown = app.read_with(&vcx, |app, cx| app.community_mute_for_value(cx));
     assert_eq!(shown, 8 * 60 * 60, "the fields open on tdesktop's 8 hours");
 }
+
+#[gpui_kit::test]
+fn the_mute_submenu_stays_inside_the_window_near_its_edge(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    frames(&mut vcx);
+    app.update(&mut vcx, |app, cx| {
+        app.admin.community.flow.row_menu = Some(super::RowMenu::at(
+            RUSTACEANS,
+            gpui_kit::point(px(1000.), px(740.)),
+        ));
+        app.open_chat_submenu(crate::ui::menu_states::ChatMenuSubmenu::Mute, cx);
+    });
+    frames(&mut vcx);
+    let submenu = vcx
+        .debug_bounds("community-mute-submenu")
+        .expect("the Mute submenu is drawn");
+    let window = vcx.update(|window, _| window.viewport_size());
+    assert!(
+        submenu.origin.x >= px(0.)
+            && submenu.origin.y >= px(0.)
+            && submenu.right() <= window.width
+            && submenu.bottom() <= window.height,
+        "{submenu:?} inside {window:?}"
+    );
+}
+
+#[gpui_kit::test]
+fn ungroup_waits_while_show_as_one_chat_is_changing(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    frames(&mut vcx);
+    app.update(&mut vcx, |app, cx| {
+        if let Some(session) = app.demo_session.as_mut() {
+            session.request_for_community(
+                quill::state::RequestPurpose::Communities(
+                    quill::state::CommunitiesPurpose::ToggleCollapsed { collapsed: true },
+                ),
+                RUSTACEANS,
+            );
+        }
+        app.show_community_box(
+            CommunityBox::Ungroup {
+                community_id: RUSTACEANS,
+            },
+            cx,
+        );
+        app.confirm_community_box(cx);
+    });
+    frames(&mut vcx);
+    let open = app.read_with(&vcx, |app, _| {
+        matches!(
+            app.admin.community.flow.open,
+            Some(CommunityBox::Ungroup { .. })
+        )
+    });
+    assert!(
+        open,
+        "Enter on Ungroup does nothing while the toggle is in flight"
+    );
+}

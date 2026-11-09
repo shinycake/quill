@@ -393,12 +393,12 @@ impl QuillApp {
                 !approve,
                 session.is_some_and(|s| s.community_requests_processing(*community_id)),
             ),
-            CommunityBox::Ungroup { .. } => (
+            CommunityBox::Ungroup { community_id } => (
                 Some(tr(keys::COMMUNITY_UNGROUP_TITLE).to_string()),
                 tr(keys::COMMUNITY_UNGROUP_TEXT).to_string(),
                 tr(keys::COMMUNITY_UNGROUP).to_string(),
                 true,
-                false,
+                session.is_some_and(|s| s.community_collapse_in_flight(*community_id)),
             ),
             CommunityBox::BanWarning {
                 community_id,
@@ -424,7 +424,12 @@ impl QuillApp {
         })
     }
 
-    fn confirm_community_box(&mut self, cx: &mut Context<Self>) {
+    /// The confirm button or Enter; nothing while the box's request is
+    /// in flight (the button shows it loading).
+    pub(super) fn confirm_community_box(&mut self, cx: &mut Context<Self>) {
+        if self.community_confirm_copy().is_some_and(|(.., busy)| busy) {
+            return;
+        }
         match self.admin.community.flow.open {
             Some(CommunityBox::ConfirmAdd {
                 community_id,

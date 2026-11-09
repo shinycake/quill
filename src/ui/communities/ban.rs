@@ -26,6 +26,42 @@ pub(crate) fn ban_step(fetch: &Fetch<quill::telegram::envelope::CommunityMemberC
     }
 }
 
+/// What a ban does once its `getCommunityMemberChats` ask was tried.
+#[derive(Debug)]
+pub(crate) enum BanStart {
+    /// The ask is in flight: the ban waits for it ([`ban_step`]).
+    Wait,
+    /// Nothing went and nothing will answer: the community is gone or no
+    /// longer accessible.
+    Refused,
+    Failed(quill::connect::ConnectSendError),
+}
+
+/// Whether an answer to the member-chats ask is on its way (the ask just
+/// went, or the same one is already in flight).
+pub(crate) fn answer_coming(
+    session: &quill::state::Session,
+    community_id: i64,
+    member: CommunityMember,
+) -> bool {
+    session
+        .communities
+        .member_chats(community_id, member)
+        .is_loading()
+}
+
+pub(crate) fn ban_start(
+    sent: Result<Option<quill::ids::RequestId>, quill::connect::ConnectSendError>,
+    answer_coming: bool,
+) -> BanStart {
+    match sent {
+        Ok(Some(_)) => BanStart::Wait,
+        Ok(None) if answer_coming => BanStart::Wait,
+        Ok(None) => BanStart::Refused,
+        Err(err) => BanStart::Failed(err),
+    }
+}
+
 impl QuillApp {
     /// Moves a waiting ban on once its member chats answered.
     pub(super) fn drain_pending_ban(&mut self, cx: &mut Context<Self>) -> bool {
@@ -127,7 +163,7 @@ impl QuillApp {
             return;
         };
         if let Some(live) = self.live.as_mut() {
-            let _ = live.driver.get_community_full_info(community_id);
+            let _ = live.driver.want_community_full_info(community_id);
         }
     }
 }

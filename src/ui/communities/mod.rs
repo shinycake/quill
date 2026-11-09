@@ -143,6 +143,21 @@ pub(crate) struct PendingBan {
     pub(crate) name: String,
 }
 
+impl CommunitiesUi {
+    /// Put `open` in place of the open box. An answer the Requests box
+    /// still holds for its undo time comes back to be sent: it goes when
+    /// the list closes, whatever replaces it.
+    pub(crate) fn replace_box(&mut self, open: Option<CommunityBox>) -> Option<(i64, UndoAction)> {
+        match std::mem::replace(&mut self.open, open) {
+            Some(CommunityBox::Requests {
+                community_id,
+                undo: Some(undo),
+            }) => Some((community_id, undo)),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Default)]
 pub(crate) struct CommunitiesUi {
     pub(crate) open: Option<CommunityBox>,
@@ -203,16 +218,14 @@ impl QuillApp {
         // box-host: every community box opens here, in the box's own kind
         // (`CommunityBox::kind`).
         self.open_box(open.kind());
-        self.admin.community.flow.open = Some(open);
+        if let Some((community_id, undo)) = self.admin.community.flow.replace_box(Some(open)) {
+            self.perform_request_action(community_id, undo, cx);
+        }
         cx.notify();
     }
 
     pub(super) fn flush_and_close_community_box(&mut self, cx: &mut Context<Self>) {
-        if let Some(CommunityBox::Requests {
-            community_id,
-            undo: Some(undo),
-        }) = self.admin.community.flow.open.take()
-        {
+        if let Some((community_id, undo)) = self.admin.community.flow.replace_box(None) {
             self.perform_request_action(community_id, undo, cx);
         }
         cx.notify();
@@ -397,18 +410,22 @@ impl QuillApp {
         let Some(live) = self.live.as_mut() else {
             return;
         };
-        match live
+        let sent = live
             .driver
-            .fetch_community_member_chats(community_id, member)
-        {
-            Ok(_) => {
+            .fetch_community_member_chats(community_id, member);
+        let asking = ban::answer_coming(&live.driver.session, community_id, member);
+        match ban::ban_start(sent, asking) {
+            ban::BanStart::Wait => {
                 self.admin.community.flow.pending_ban = Some(PendingBan {
                     community_id,
                     member,
                     name,
                 });
             }
-            Err(err) => self
+            ban::BanStart::Refused => self
+                .connection
+                .set_note(StatusNote::error(tr(keys::Q_COMMUNITY_BAN_UNAVAILABLE))),
+            ban::BanStart::Failed(err) => self
                 .connection
                 .set_note(StatusNote::error(user_error(&err))),
         }

@@ -10,16 +10,13 @@ use super::*;
 use crate::ui::context_menu_keys::{MenuKeyTarget, context_menu_item, submenu_key};
 use crate::ui::dismiss_layer::DismissLayer;
 use crate::ui::menu_states::ChatMenuSubmenu;
-use crate::ui::menu_surface::MenuSurface;
+use crate::ui::menu_surface::{MENU_WIDTH, MenuSurface, submenu_panel};
 use gpui_kit::assets::IconName;
 use gpui_kit::component::*;
 use quill::telegram::envelope::{
     ChatNotificationSettings, MUTE_FOR_1_HOUR, MUTE_FOR_2_DAYS, MUTE_FOR_8_HOURS, MUTE_FOREVER,
 };
 
-/// Width of the menu; the submenu opens beside it.
-const MENU_WIDTH: f32 = 240.;
-const PANEL_PADDING: f32 = 4.;
 /// The Mute row's place among the menu's keyboard items (after View
 /// community info and Ungroup), which its submenu rows sort under.
 const MUTE_ROW_ORDER: u8 = 2;
@@ -295,24 +292,9 @@ impl QuillApp {
             }))
             .into_any_element(),
         );
-        // Beside the row, its top rows level with it; drawn after the
-        // menu so it stays on top.
-        let submenu = div()
-            .absolute()
-            .top(px(-PANEL_PADDING))
-            .left_full()
-            .child(deferred(
-                div()
-                    .id("community-mute-submenu")
-                    .occlude()
-                    .flex()
-                    .flex_col()
-                    .w(px(MENU_WIDTH))
-                    .p_1()
-                    .menu_surface(cx)
-                    .children(rows),
-            ));
-        parent.child(submenu).into_any_element()
+        parent
+            .child(submenu_panel("community-mute-submenu", rows, cx))
+            .into_any_element()
     }
 
     /// The row's right-click menu.

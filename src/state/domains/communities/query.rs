@@ -49,6 +49,15 @@ impl Session {
         })
     }
 
+    /// Whether "Show as One Chat" is being changed: the switch and
+    /// Ungroup wait for the answer, so the last choice is the one TDLib
+    /// keeps (a second toggle would be dropped while one is in flight).
+    pub fn community_collapse_in_flight(&self, community_id: i64) -> bool {
+        self.community_request_in_flight(community_id, |purpose| {
+            matches!(purpose, CommunitiesPurpose::ToggleCollapsed { .. })
+        })
+    }
+
     /// The community's notification settings: the newest ones sent and
     /// not yet answered, else the full info's.
     pub fn community_notification_settings(
@@ -75,6 +84,26 @@ impl Session {
         self.community_request_in_flight(community_id, |purpose| {
             matches!(purpose, CommunitiesPurpose::AddChat { chat_id: c, .. } if c == chat_id)
         })
+    }
+
+    /// The pending requests Add All / Decline All would answer: the full
+    /// info's count (TDLib's, reloaded before each answer's `ok`) less the
+    /// single answers still in flight.
+    pub fn community_add_chat_requests_left(&self, community_id: i64) -> i32 {
+        let count = self
+            .groups
+            .community_full_infos
+            .get(&community_id)
+            .map_or(0, |info| info.add_chat_request_count);
+        let answering = self
+            .community_pending(community_id)
+            .filter(|(_, purpose)| {
+                matches!(purpose, CommunitiesPurpose::ProcessAddChatRequest { .. })
+            })
+            .count();
+        count
+            .saturating_sub(i32::try_from(answering).unwrap_or(i32::MAX))
+            .max(0)
     }
 
     /// Whether the pending requests list has an Add/Decline (one or all)

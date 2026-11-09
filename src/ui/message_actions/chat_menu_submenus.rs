@@ -7,7 +7,7 @@
 use super::*;
 use crate::ui::context_menu_keys::ContextMenuItems;
 use crate::ui::menu_states::{ChatMenuState, ChatMenuSubmenu};
-use crate::ui::menu_surface::MenuSurface;
+use crate::ui::menu_surface::submenu_panel;
 use gpui_kit::TestSupportExt;
 use gpui_kit::assets::IconName;
 use quill::chatlist_menu::{ExitEntry, exit_entry, mute_offered};
@@ -17,10 +17,7 @@ use quill::telegram::envelope::{
     ChannelMemberStatus, MUTE_FOR_1_HOUR, MUTE_FOR_2_DAYS, MUTE_FOR_8_HOURS, MUTE_FOREVER,
 };
 
-/// Width of the menu panel; a submenu opens beside it.
-pub(super) const MENU_WIDTH: f32 = 240.;
-
-const PANEL_PADDING: f32 = 4.;
+pub(super) use crate::ui::menu_surface::MENU_WIDTH;
 
 /// Sort order of the Mute row (and Unmute, which takes its place), shared by
 /// the row's key and its submenu-parent mark so the two cannot drift.
@@ -63,24 +60,6 @@ pub(super) fn menu_row(
             None => div().size(px(16.)).into_any_element(),
         })
         .child(div().flex_1().child(label))
-}
-
-fn submenu_panel(rows: Vec<AnyElement>, cx: &App) -> AnyElement {
-    anchored()
-        .offset(point(px(MENU_WIDTH - PANEL_PADDING), px(-PANEL_PADDING)))
-        .snap_to_window_with_margin(px(8.))
-        .child(
-            div()
-                .id("chat-menu-submenu")
-                .occlude()
-                .flex()
-                .flex_col()
-                .w(px(MENU_WIDTH))
-                .p_1()
-                .menu_surface(cx)
-                .children(rows),
-        )
-        .into_any_element()
 }
 
 impl QuillApp {
@@ -315,7 +294,11 @@ impl QuillApp {
             }))
             .into_any_element(),
         );
-        Some(parent.child(submenu_panel(rows, cx)).into_any_element())
+        Some(
+            parent
+                .child(submenu_panel("chat-menu-submenu", rows, cx))
+                .into_any_element(),
+        )
     }
 
     /// The "Add to folder" row (order 45) with a submenu that lists every
@@ -387,7 +370,11 @@ impl QuillApp {
                 .into_any_element(),
             );
         }
-        Some(parent.child(submenu_panel(rows, cx)).into_any_element())
+        Some(
+            parent
+                .child(submenu_panel("chat-menu-submenu", rows, cx))
+                .into_any_element(),
+        )
     }
 
     /// The delete or leave row (order 90): "Delete chat" for a user,

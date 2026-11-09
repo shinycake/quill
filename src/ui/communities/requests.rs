@@ -150,12 +150,12 @@ impl QuillApp {
         else {
             return;
         };
+        // The waiting answer goes first, so the count leaves its row out.
+        self.flush_and_close_community_box(cx);
         let count = self
             .session()
-            .and_then(|s| s.groups.community_full_infos.get(&community_id))
-            .map_or(0, |info| info.add_chat_request_count)
+            .map_or(0, |s| s.community_add_chat_requests_left(community_id))
             .max(1);
-        self.flush_and_close_community_box(cx);
         self.show_community_box(
             CommunityBox::ConfirmProcessAll {
                 community_id,

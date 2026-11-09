@@ -6,7 +6,7 @@ use crate::state::*;
 use crate::telegram::envelope::{
     ChatNotificationSettings, CommunityAddChatRequest, CommunityMemberChats, OptionValue,
 };
-use std::collections::VecDeque;
+use std::collections::{HashSet, VecDeque};
 
 /// The loaded add-chat requests of one community.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -115,6 +115,11 @@ pub struct CommunitiesState {
     pub notification_sends: HashMap<RequestId, (i64, ChatNotificationSettings)>,
     /// Finished requests the UI has not told about yet.
     pub outcomes: VecDeque<CommunityOutcome>,
+    /// Communities whose `getCommunityFullInfo` failed. The background
+    /// asks (collapsed rows, the moderation ban) wait until TDLib sends
+    /// something new about the community (`updateCommunity`, a full info),
+    /// so a failure is not asked again on every poll.
+    pub full_info_failed: HashSet<i64>,
     /// TDLib options `community_chat_count_max` and
     /// `community_bot_count_max`, for the limit toast.
     pub chat_count_max: i64,
@@ -135,6 +140,7 @@ impl CommunitiesState {
             member_chats: HashMap::new(),
             notification_sends: HashMap::new(),
             outcomes: VecDeque::new(),
+            full_info_failed: HashSet::new(),
             chat_count_max: DEFAULT_COMMUNITY_PEERS_MAX,
             bot_count_max: DEFAULT_COMMUNITY_PEERS_MAX,
         }

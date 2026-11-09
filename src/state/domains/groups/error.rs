@@ -35,6 +35,7 @@ impl Session {
             self.note_premium_limit(err, pending);
         }
         self.record_group_info_edit_error(err, pending);
+        self.note_community_full_info_failed(pending);
         self.apply_group_type_error(err, pending);
         match pending.map(|p| p.purpose) {
             Some(RequestPurpose::CanTransferOwnership) => {

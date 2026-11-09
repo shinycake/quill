@@ -167,30 +167,39 @@ impl Session {
     }
 
     /// A handled request leaves the list (`chat_id`), or every request
-    /// does (`None`); the pending count in the full info follows.
+    /// does (`None`). The pending count in the full info is TDLib's
+    /// alone: it reloads the full info before answering `ok`
+    /// (`CommunityManager::on_change_community_dialogs`), so the new count
+    /// has already come with `updateCommunityFullInfo`.
     fn drop_add_chat_requests(&mut self, community_id: i64, chat_id: Option<i64>) {
-        if let Some(list) = self
+        let Some(list) = self
             .communities
             .add_chat_requests
             .get_mut(&community_id)
             .and_then(Fetch::data_mut)
-        {
-            match chat_id {
-                Some(chat_id) => {
-                    let before = list.requests.len();
-                    list.requests.retain(|r| r.chat_id != chat_id);
-                    if list.requests.len() < before {
-                        list.total_count = list.total_count.saturating_sub(1).max(0);
-                    }
+        else {
+            return;
+        };
+        match chat_id {
+            Some(chat_id) => {
+                let before = list.requests.len();
+                list.requests.retain(|r| r.chat_id != chat_id);
+                if list.requests.len() < before {
+                    list.total_count = list.total_count.saturating_sub(1).max(0);
                 }
-                None => *list = AddChatRequestList::default(),
             }
+            None => *list = AddChatRequestList::default(),
         }
-        if let Some(info) = self.groups.community_full_infos.get_mut(&community_id) {
-            info.add_chat_request_count = match chat_id {
-                Some(_) => info.add_chat_request_count.saturating_sub(1).max(0),
-                None => 0,
-            };
+    }
+
+    /// A failed `getCommunityFullInfo`: not asked again in the background
+    /// until the community changes (`CommunitiesState::full_info_failed`).
+    pub(crate) fn note_community_full_info_failed(&mut self, pending: Option<&PendingRequest>) {
+        if let Some(pending) = pending
+            && pending.purpose == RequestPurpose::GetCommunityFullInfo
+            && let Some(community_id) = pending.community_id
+        {
+            self.communities.full_info_failed.insert(community_id);
         }
     }
 

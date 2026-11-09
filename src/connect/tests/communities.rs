@@ -239,6 +239,11 @@ fn add_chat_requests_page_and_process() {
     assert_eq!(v["@type"], "processCommunityAddChatRequest");
     assert_eq!(v["approve"], false);
     assert!(rig.driver.session.community_requests_processing(OWNED));
+    // TDLib reloads the full info before its `ok`; the count it sends is
+    // the one that stays, not dropped once more.
+    rig.ingest(
+        r#"{"@type":"updateCommunityFullInfo","community_id":42,"community_full_info":{"@type":"communityFullInfo","chats":[],"administrator_count":1,"banned_count":0,"add_chat_request_count":2}}"#,
+    );
     rig.ok(extra);
     let ids: Vec<i64> = rig
         .driver
@@ -276,6 +281,9 @@ fn add_chat_requests_page_and_process() {
             .process_community_add_chat_requests(OWNED, true, 2)
             .unwrap()
             .is_none()
+    );
+    rig.ingest(
+        r#"{"@type":"updateCommunityFullInfo","community_id":42,"community_full_info":{"@type":"communityFullInfo","chats":[],"administrator_count":1,"banned_count":0,"add_chat_request_count":0}}"#,
     );
     rig.ok(extra);
     assert_eq!(
@@ -485,6 +493,35 @@ fn collapsed_communities_get_their_full_info_once() {
     let before = rig.sent_count();
     rig.driver.sync_collapsed_communities().unwrap();
     assert_eq!(rig.sent_count(), before);
+}
+
+#[test]
+fn a_failed_full_info_is_asked_again_only_once_the_community_changes() {
+    let mut rig = Rig::new();
+    let collapsed = r#"{"@type":"updateCommunity","community":{"@type":"community","id":43,"have_access":true,"name":"Theirs","date":1,"status":{"@type":"communityMemberStatusMember"},"permissions":{"@type":"communityPermissions","can_edit_chat_list":false},"are_chats_collapsed":true}}"#;
+    rig.ingest(collapsed);
+    rig.driver.sync_collapsed_communities().unwrap();
+    assert_eq!(rig.last()["@type"], "getCommunityFullInfo");
+    let extra = crate::ids::RequestId(rig.last()["@extra"].as_str().unwrap().parse().unwrap());
+    rig.error(extra, "CHANNEL_PRIVATE");
+    let before = rig.sent_count();
+    for _ in 0..3 {
+        rig.driver.sync_collapsed_communities().unwrap();
+        assert_eq!(rig.driver.want_community_full_info(MEMBER).unwrap(), None);
+    }
+    assert_eq!(
+        rig.sent_count(),
+        before,
+        "a failure is not asked on every poll"
+    );
+    rig.ingest(collapsed);
+    rig.driver.sync_collapsed_communities().unwrap();
+    assert_eq!(
+        rig.sent_count(),
+        before + 1,
+        "a new updateCommunity asks again"
+    );
+    assert_eq!(rig.last()["@type"], "getCommunityFullInfo");
 }
 
 #[test]

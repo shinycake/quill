@@ -21,3 +21,30 @@ pub(crate) trait MenuSurface: Styled + Sized {
 }
 
 impl<E: Styled> MenuSurface for E {}
+
+/// Width of a context menu panel and of the submenu beside it.
+pub(crate) const MENU_WIDTH: f32 = 240.;
+/// A menu panel's inner padding, which a submenu's top rows level with.
+pub(crate) const PANEL_PADDING: f32 = 4.;
+
+/// A submenu beside its parent row (a child of that row), its top rows
+/// level with it, moved back inside the window when the row sits near an
+/// edge.
+pub(crate) fn submenu_panel(id: &'static str, rows: Vec<AnyElement>, cx: &App) -> AnyElement {
+    anchored()
+        .offset(point(px(MENU_WIDTH - PANEL_PADDING), px(-PANEL_PADDING)))
+        .snap_to_window_with_margin(px(8.))
+        .child(
+            div()
+                .id(id)
+                .debug_selector(move || id.to_string())
+                .occlude()
+                .flex()
+                .flex_col()
+                .w(px(MENU_WIDTH))
+                .p_1()
+                .menu_surface(cx)
+                .children(rows),
+        )
+        .into_any_element()
+}

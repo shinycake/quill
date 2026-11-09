@@ -181,6 +181,7 @@ impl QuillApp {
         };
         let can_edit = community.can_edit_chat_list;
         let collapsed = session.community_chats_collapsed(community_id);
+        let toggling = session.community_collapse_in_flight(community_id);
         let info = session.groups.community_full_infos.get(&community_id);
         let requests = info.map_or(0, |info| info.add_chat_request_count);
         let muted = cx.theme().muted_foreground;
@@ -199,6 +200,7 @@ impl QuillApp {
                     .child(
                         Switch::new(("community-show-as-one", community_id as u64))
                             .checked(collapsed)
+                            .disabled(toggling)
                             .accessibility_label(tr(keys::COMMUNITY_SHOW_AS_ONE))
                             .on_click(cx.listener(move |this, &on, _, cx| {
                                 this.set_community_collapsed(community_id, on, cx);
