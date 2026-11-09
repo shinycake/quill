@@ -175,6 +175,8 @@ on_screen_fields! {
     paid_messages: super::paid_messages_state::PaidMessagesUi,
     /// The Star reaction box (`ui/paid_reaction_state.rs`).
     paid_reaction: super::paid_reaction_state::PaidReactionUi,
+    /// Message widgets: lifecycles, runtimes, frames (`ui/widgets_state.rs`).
+    widgets: super::widgets_state::WidgetsUi,
     /// Suggested posts: price, time and decision boxes (`ui/suggested_posts_state.rs`).
     suggested_posts: super::suggested_posts_state::SuggestedPostsUi,
     /// Channel direct messages: the admin's and the writer's boxes (`ui/direct_messages_state.rs`).
@@ -343,6 +345,7 @@ impl OnScreen {
             giveaway: super::giveaway_state::GiveawayUi::new(),
             paid_messages: super::paid_messages_state::PaidMessagesUi::new(),
             paid_reaction: super::paid_reaction_state::PaidReactionUi::new(),
+            widgets: Default::default(),
             suggested_posts: super::suggested_posts_state::SuggestedPostsUi::new(),
             direct_messages: super::direct_messages_state::DirectMessagesUi::new(),
             privacy: super::privacy_state::PrivacyState::new(window, cx),

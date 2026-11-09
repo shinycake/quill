@@ -68,7 +68,12 @@ impl QuillApp {
         // (Telegram Desktop's Quote & Reply, Copy Selected Text).
         self.message_ui.menu_selection = super::selectable_text::selected_message_text(window, cx)
             .filter(|(key, _)| *key == (menu.chat_id.0, menu.message_id.0 as u64))
-            .map(|(_, text)| text);
+            .map(|(_, text)| text)
+            // A widget's selection lives in its runtime (`widgets_ui.rs`).
+            .or_else(|| {
+                let key = quill::message_widget::WidgetKey { chat_id: menu.chat_id, message_id: menu.message_id };
+                self.widget_selection(key).map(str::to_owned)
+            });
         self.message_ui.reactions_expanded = false;
         if let Some(live) = self.live.as_mut() {
             let _ = live

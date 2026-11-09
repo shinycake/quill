@@ -381,6 +381,7 @@ impl QuillApp {
             self.history.pane_width.get(),
             cx,
         );
+        self.begin_widget_pass(target, cx);
         let surface = self.history_userpic_surface();
         self.players
             .userpic_videos

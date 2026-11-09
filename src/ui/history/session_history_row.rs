@@ -31,6 +31,8 @@ pub(in crate::ui) fn session_history_row(
     animated_emoji: HashMap<i64, super::super::sticker_player::StickerView>,
     // The row's clip playing inline (muted autoplay), if any.
     inline: Option<super::super::inline_video::InlineFrame>,
+    // A widget message's card (`QuillApp::widget_bubble`).
+    widget: Option<AnyElement>,
     revealed: &std::collections::HashSet<(i64, u64, u64, bool)>,
     // Phase B4: whether the row's chat is a secret chat — selects the
     // "Self-destruct" vs "Auto-delete" service-row wording.
@@ -563,17 +565,7 @@ pub(in crate::ui) fn session_history_row(
         // Slice G9: the join-from-community service row renders no extra
         // media either (the name ships in the centered row text).
         | MessageContent::ChatJoinFromCommunity { .. } => None,
-        // Quill has no widget runtime (Telegram Desktop's is `tgw/`): a
-        // card names the widget, the caption renders as usual.
-        MessageContent::Widget(_) => Some(
-            div().id(("widget-card", message.id.0 as u64))
-                .flex().flex_col().gap_1().p_3()
-                .role(Role::Label)
-                .aria_label(tr(keys::Q_CHAT_WIDGET_NOT_SUPPORTED))
-                .child(div().font_semibold().child(tr(keys::IN_DLG_WIDGET)))
-                .child(div().text_sm().opacity(0.8).child(tr(keys::Q_CHAT_WIDGET_NOT_SUPPORTED)))
-                .into_any_element(),
-        ),
+        MessageContent::Widget(_) => widget,
         MessageContent::Unsupported { .. } => Some(
             div().id(("unsupported-update-card", message.id.0 as u64))
                 .flex().flex_col().gap_2().p_3()
