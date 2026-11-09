@@ -135,6 +135,24 @@ fn invite_link_join_over_the_limit_opens_the_channels_box() {
     );
 }
 
+/// Round 17 (area B, finding 4): a Join answered after its flow ended (an
+/// account switch ends it) opens no limit box, which would otherwise wait
+/// in this session for the switch back.
+#[test]
+fn a_stale_invite_link_join_opens_no_limit_box() {
+    let (mut session, sink) = session();
+    session.chats_state.deep_link = None;
+    fail(
+        &mut session,
+        &sink,
+        RequestPurpose::Chats(ChatsPurpose::DeepLinkJoin { generation: 3 }),
+        None,
+        "CHANNELS_TOO_MUCH",
+    );
+    assert_eq!(session.chats_state.deep_link, None);
+    assert_eq!(session.payments.hub.limit_box, None);
+}
+
 #[test]
 fn a_saved_messages_pin_over_the_limit_opens_its_own_box() {
     let (mut session, sink) = session();

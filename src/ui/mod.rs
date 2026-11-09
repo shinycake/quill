@@ -351,6 +351,7 @@ mod forward;
 mod forward_box;
 mod forward_box_demo;
 mod forward_drag_source;
+mod forward_stage;
 mod fragment_link;
 mod fragment_password;
 mod gif_clip;

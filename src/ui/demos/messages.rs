@@ -133,9 +133,9 @@ impl QuillApp {
             ForwardDraft::from_message(ChatId(11), quill::ids::TopicId::None, MessageId(101), false)
         {
             draft.toggle(ChatId(11), quill::ids::TopicId::None, MessageId(102), false);
-            self.share.pending_forward = Some(draft);
+            self.share.forward = crate::ui::forward_stage::ForwardStage::Selecting(draft);
         }
-        self.share.forward_picker_open = true;
+        self.share.forward.open_picker();
         self.share.search_input.update(cx, |input, cx| {
             input.set_value("Demo chat B", window, cx);
             input.focus(window, cx);

@@ -11,7 +11,7 @@ use quill::composer::ForwardDraft;
 
 impl QuillApp {
     /// The selection or forward draft as it stands now, `None` when no
-    /// picked message is left. Read this, not `share.pending_forward`, for
+    /// picked message is left. Read this, not `share.forward`, for
     /// anything shown or done with the selected messages.
     ///
     /// A selection (no forward bar waits for it) is the conversation's it
@@ -20,14 +20,14 @@ impl QuillApp {
     /// deletes or forwards it in the frame before `sync_chat_ui` drops it.
     pub(super) fn forward_draft(&self) -> Option<ForwardDraft> {
         let live = self.live_forward_draft()?;
-        let elsewhere = self.share.forward_bar_dest.is_none()
+        let elsewhere = self.share.forward.selection().is_some()
             && live.from_topic != self.open_topic_id(live.from_chat_id);
         (!elsewhere).then_some(live)
     }
 
     /// The stored draft without the ids deleted since they were picked.
     fn live_forward_draft(&self) -> Option<ForwardDraft> {
-        let draft = self.share.pending_forward.as_ref()?;
+        let draft = self.share.forward.draft()?;
         let session = self.session();
         let live = draft.clone().retaining(|id| {
             session.is_none_or(|session| !session.message_deleted(draft.from_chat_id, id))
@@ -42,7 +42,7 @@ impl QuillApp {
             .live_forward_draft()
             .map(|draft| draft.message_ids)
             .unwrap_or_default();
-        if let Some(draft) = self.share.pending_forward.as_mut() {
+        if let Some(draft) = self.share.forward.draft_mut() {
             draft.message_ids = live;
         }
     }

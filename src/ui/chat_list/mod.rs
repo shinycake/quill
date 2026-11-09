@@ -405,22 +405,18 @@ impl QuillApp {
 
     /// Slice CL3: "Select unread" — check every listed chat with unread
     /// messages or a marked-as-unread flag (TGX `ChatsController`
-    /// select-unread), main list and archive alike.
+    /// select-unread): the rows of the folder or category shown, the
+    /// archive's where it is listed. A chat outside them is not checked.
     pub(super) fn select_unread_chats(&mut self, cx: &mut Context<Self>) {
-        // Collect first: `session()` borrows `self`, so the ids must be
-        // owned before touching `selected_chats`.
+        // Collect first: the listed chats borrow `self`, so the ids must be
+        // owned before touching `selected`.
         let unread: Vec<i64> = self
-            .session()
-            .map(|session| {
-                session
-                    .ordered_chats()
-                    .into_iter()
-                    .chain(session.ordered_archived_chats())
-                    .filter(|chat| chat.is_unread())
-                    .map(|chat| chat.id.0)
-                    .collect()
-            })
-            .unwrap_or_default();
+            .listed_main_chats()
+            .into_iter()
+            .chain(self.listed_archived_chats())
+            .filter(|chat| chat.is_unread())
+            .map(|chat| chat.id.0)
+            .collect();
         self.drop_unlisted_selection();
         for id in unread {
             self.chat_list.selected.insert(id);

@@ -73,7 +73,7 @@ fn closing_the_emoji_panel_returns_focus_to_the_composer(cx: &mut TestAppContext
     assert!(!composer_focused(&app, vcx));
 
     app.update(vcx, |app, cx| {
-        assert!(app.pickers.media_panel.open);
+        assert!(app.pickers.media_panel.is_open());
         app.close_media_panel(cx);
     });
     frames(vcx);
@@ -90,7 +90,7 @@ fn the_close_button_returns_focus_to_the_composer(cx: &mut TestAppContext) {
     focus_search(&app, vcx);
     vcx.update(|window, cx| window.click("media-panel-close", cx));
     frames(vcx);
-    app.update(vcx, |app, _| assert!(!app.pickers.media_panel.open));
+    app.update(vcx, |app, _| assert!(!app.pickers.media_panel.is_open()));
     assert!(composer_focused(&app, vcx));
 }
 

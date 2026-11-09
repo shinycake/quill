@@ -20,6 +20,7 @@ use quill::lang::{keys, tr, tr_with};
 use quill::share_box::{ShareSend, forward_bar_lines, share_done_label};
 use quill::telegram::envelope::ChatKind;
 
+use super::forward_stage::ForwardStage;
 impl QuillApp {
     pub(super) fn toggle_share_destination(&mut self, id: ChatId, cx: &mut Context<Self>) {
         self.share.selection.toggle(id);
@@ -28,7 +29,7 @@ impl QuillApp {
 
     /// The typed query changed: ask the server too (`searchChatsOnServer`).
     pub(super) fn sync_share_search(&mut self, text: &str, cx: &mut Context<Self>) {
-        if !self.share.forward_picker_open && !self.share.reply_elsewhere_open {
+        if !self.share.forward.picker_open() && !self.share.reply_elsewhere_open {
             return;
         }
         if let Some(live) = self.live.as_mut() {
@@ -152,9 +153,7 @@ impl QuillApp {
             }
         }
         if failed < dests.len() {
-            self.share.pending_forward = None;
-            self.share.forward_bar_dest = None;
-            self.share.forward_picker_open = false;
+            self.share.forward = ForwardStage::None;
             self.share.selection.clear();
         }
         cx.notify();
@@ -189,9 +188,7 @@ impl QuillApp {
             return;
         }
         let comment = self.share.comment_input.read(cx).value().trim().to_string();
-        let draft = self.share.pending_forward.take();
-        self.share.forward_bar_dest = None;
-        self.share.forward_picker_open = false;
+        let draft = self.share.forward.take_draft();
         self.share.selection.clear();
         self.share
             .search_input
@@ -209,11 +206,10 @@ impl QuillApp {
 
     /// The forward bar is showing in the open chat.
     pub(super) fn forward_bar_here(&self) -> bool {
-        let Some(dest) = self.share.forward_bar_dest else {
+        let Some(dest) = self.share.forward.bar_shown() else {
             return false;
         };
-        !self.share.forward_picker_open
-            && !self.chat_ui.is_editing()
+        !self.chat_ui.is_editing()
             && self.forward_draft().is_some()
             && self.session().and_then(|s| s.open_chat) == Some(dest)
     }
@@ -227,7 +223,8 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let (Some(dest), Some(draft)) = (self.share.forward_bar_dest, self.forward_draft()) else {
+        let (Some(dest), Some(draft)) = (self.share.forward.bar_shown(), self.forward_draft())
+        else {
             return;
         };
         if let Some(note) = self.share_dest_refusal(dest, cx) {
@@ -237,9 +234,15 @@ impl QuillApp {
         }
         let options = self.composer_send_options();
         if !text.trim().is_empty() || !self.pending_attachments().is_empty() {
-            self.share.forward_bar_dest = None;
+            // The comment goes as a plain message: the bar is lowered to
+            // the selection while it does, so the composer does not route
+            // it back here.
+            self.share.forward.drop_bar();
             self.submit_composer(text, window, cx);
-            self.share.forward_bar_dest = Some(dest);
+            self.share.forward = match self.share.forward.take_draft() {
+                Some(draft) => ForwardStage::Bar { draft, dest },
+                None => ForwardStage::None,
+            };
             // The comment did not go out (the composer keeps it): stop.
             if !self.composer.read(cx).value().trim().is_empty()
                 || !self.pending_attachments().is_empty()
@@ -254,8 +257,7 @@ impl QuillApp {
             match result {
                 Ok(_) => {
                     self.set_note(StatusNote::silent(tr(keys::Q_OPS_FORWARDING)));
-                    self.share.pending_forward = None;
-                    self.share.forward_bar_dest = None;
+                    self.share.forward = ForwardStage::None;
                     self.update_pending_send(|send| {
                         send.scheduling = quill::composer::ComposerScheduling::None
                     });
@@ -280,7 +282,7 @@ impl QuillApp {
     /// "Hide sender name": forward as copies (`forwardMessages.send_copy`);
     /// showing names again shows captions too.
     pub(super) fn set_forward_send_copy(&mut self, on: bool, cx: &mut Context<Self>) {
-        if let Some(draft) = self.share.pending_forward.as_mut() {
+        if let Some(draft) = self.share.forward.draft_mut() {
             draft.send_copy = on;
             if !on {
                 draft.remove_caption = false;
@@ -291,14 +293,14 @@ impl QuillApp {
 
     fn forward_remove_caption(&self) -> bool {
         self.share
-            .pending_forward
-            .as_ref()
+            .forward
+            .draft()
             .is_some_and(|draft| draft.remove_caption)
     }
 
     /// "Hide captions" (`remove_caption`), which only copies can drop.
     pub(super) fn toggle_forward_remove_caption(&mut self, cx: &mut Context<Self>) {
-        if let Some(draft) = self.share.pending_forward.as_mut()
+        if let Some(draft) = self.share.forward.draft_mut()
             && draft.send_copy
         {
             draft.remove_caption = !draft.remove_caption;
@@ -311,13 +313,13 @@ impl QuillApp {
     fn forward_option_checkboxes(&self, prefix: &'static str, cx: &mut Context<Self>) -> Div {
         let send_copy = self
             .share
-            .pending_forward
-            .as_ref()
+            .forward
+            .draft()
             .is_some_and(|draft| draft.send_copy);
         let remove_caption = self
             .share
-            .pending_forward
-            .as_ref()
+            .forward
+            .draft()
             .is_some_and(|draft| draft.remove_caption);
         let multiple = self.forward_draft().is_some_and(|draft| draft.count() > 1);
         div()
@@ -447,7 +449,7 @@ impl QuillApp {
     /// "Change recipient": reopen the share box with the current chat
     /// ticked; Cancel there returns to the bar.
     pub(super) fn change_forward_recipient(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let dest = self.share.forward_bar_dest;
+        let dest = self.share.forward.bar_shown();
         self.open_forward_picker(window, cx);
         if let Some(dest) = dest {
             self.share.selection.toggle(dest);

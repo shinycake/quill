@@ -4,16 +4,13 @@
 use super::*;
 use gpui_kit::component::input::TextareaState;
 use gpui_kit::*;
-use quill::composer::ForwardDraft;
-use quill::ids::ChatId;
 use quill::lang::{keys, tr};
 use quill::state::ForwardResult;
 
 pub(crate) struct ShareUi {
-    /// tdesktop `Data::ForwardDraft` / history multi-select.
-    pub(super) pending_forward: Option<ForwardDraft>,
-    /// ShareBox / `ShowForwardMessagesBox` dest picker overlay.
-    pub(super) forward_picker_open: bool,
+    /// The forward being built: the selection, the share box over it, or
+    /// the forward bar it became (`ForwardStage`).
+    pub(super) forward: super::forward_stage::ForwardStage,
     /// "Reply in Another Chat": the chat chooser for the composer's reply.
     pub(super) reply_elsewhere_open: bool,
     /// Destinations ticked in the share box.
@@ -24,9 +21,6 @@ pub(crate) struct ShareUi {
     /// The forward box just opened: its search field takes focus once the
     /// dialog has mounted (the dialog focuses itself as it opens).
     pub(super) focus_search: bool,
-    /// The forward bar is showing above this chat's composer
-    /// (`pending_forward` follows the user into the destination).
-    pub(super) forward_bar_dest: Option<ChatId>,
     /// Last successful (or failed) `forwardMessages` result.
     pub(super) forward_result: Option<ForwardResult>,
     /// Text of a share link while its chat chooser is open.
@@ -48,14 +42,12 @@ impl ShareUi {
                 .submit_on_enter(false)
         });
         Self {
-            pending_forward: None,
-            forward_picker_open: false,
+            forward: Default::default(),
             reply_elsewhere_open: false,
             selection: quill::share_box::ShareSelection::default(),
             comment_input: share_comment_input,
             search_input: forward_search_input,
             focus_search: false,
-            forward_bar_dest: None,
             forward_result: None,
             link_text: None,
             content_dialog: None,

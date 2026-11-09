@@ -129,7 +129,7 @@ impl super::ChatWindows {
         self.slots()
             .filter_map(|slot| {
                 let slot = slot.try_borrow().ok()?;
-                let forward = slot.share.pending_forward.as_ref().map(|d| d.from_chat_id);
+                let forward = slot.share.forward.draft().map(|d| d.from_chat_id);
                 let reply = slot.chat_ui.reply().map(|reply| reply.chat_id);
                 Some(forward.into_iter().chain(reply).collect::<Vec<_>>())
             })

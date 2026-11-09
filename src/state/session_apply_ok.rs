@@ -92,11 +92,11 @@ impl Session {
             }
             Some(RequestPurpose::Messages(MessagesPurpose::DeleteMessageReactionsFromSender {
                 message_id,
-                user_id,
+                sender,
             })) => {
                 self.messages.message_action_note = Some("reaction deleted".into());
                 if let Some(chat_id) = pending.and_then(|p| p.chat_id) {
-                    self.drop_reactor_from_audience(chat_id, MessageId(message_id), user_id);
+                    self.drop_reactor_from_audience(chat_id, MessageId(message_id), sender);
                 }
             }
             Some(RequestPurpose::Groups(GroupsPurpose::TransferChatOwnership { user_id })) => {

@@ -100,7 +100,7 @@ impl QuillApp {
             ForwardDraft::from_message(CHAT, quill::ids::TopicId::None, MessageId(101), false)
         {
             draft.toggle(CHAT, quill::ids::TopicId::None, MessageId(102), false);
-            self.share.pending_forward = Some(draft);
+            self.share.forward = crate::ui::forward_stage::ForwardStage::Selecting(draft);
         }
     }
 

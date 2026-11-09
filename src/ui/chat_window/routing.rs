@@ -248,9 +248,10 @@ impl QuillApp {
         draft: ForwardDraft,
         cx: &mut Context<Self>,
     ) {
-        self.share.pending_forward = Some(draft);
-        self.share.forward_bar_dest = Some(chat_id);
-        self.share.forward_picker_open = false;
+        self.share.forward = crate::ui::forward_stage::ForwardStage::Bar {
+            draft,
+            dest: chat_id,
+        };
         self.share.selection.clear();
         self.set_note(StatusNote::silent(tr(
             keys::Q_OPS_FORWARD_BAR_READY_PRESS_SEND,

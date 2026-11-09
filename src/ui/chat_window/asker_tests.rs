@@ -436,11 +436,11 @@ fn each_window_keeps_its_own_gif_section(cx: &mut TestAppContext) {
             Some(EMOJI),
             "the emoji section stays"
         );
-        app.pickers.media_panel.open = true;
+        app.pickers.media_panel.panel_mode = crate::ui::media_panel::PanelMode::Compose;
         app.pickers.media_panel.tab = PanelTab::Gifs;
         // The chat window opens its GIF tab; the main window's stays open.
         app.note_window_press(Some(OTHER));
-        app.pickers.media_panel.open = true;
+        app.pickers.media_panel.panel_mode = crate::ui::media_panel::PanelMode::Compose;
         app.pickers.media_panel.tab = PanelTab::Gifs;
         app.gif_tab_upkeep(cx);
         assert_eq!(
@@ -488,14 +488,14 @@ fn a_gif_tab_shows_its_section_without_a_press(cx: &mut TestAppContext) {
         };
         // The main window searched "dogs" and is in use.
         app.note_window_press(None);
-        app.pickers.media_panel.open = true;
+        app.pickers.media_panel.panel_mode = crate::ui::media_panel::PanelMode::Compose;
         app.pickers.media_panel.tab = PanelTab::Gifs;
         app.pickers.gif_wanted = GifWanted::Search("dogs".into());
         app.gif_tab_upkeep(cx);
         assert_eq!(searching(app).as_deref(), Some("dogs"));
         // The chat window's tab wants "cats", never answered.
         app.set_window_scope(Some(OTHER));
-        app.pickers.media_panel.open = true;
+        app.pickers.media_panel.panel_mode = crate::ui::media_panel::PanelMode::Compose;
         app.pickers.media_panel.tab = PanelTab::Gifs;
         app.pickers.gif_wanted = GifWanted::Search("cats".into());
         app.gif_tab_upkeep(cx);
@@ -597,4 +597,30 @@ fn a_qr_share_opens_the_chooser_in_the_window_that_pressed(cx: &mut TestAppConte
         assert!(app.share.link_text.is_some(), "the chat window's chooser");
         app.set_window_scope(None);
     });
+}
+
+/// Round 17 (area B, finding 2): a menu-bar or Dock command runs as the
+/// main window's, which it raises, even after a press in a chat window
+/// left that window's state in place: Window > Add Contact shows its box
+/// in main, not in the chat window now behind it.
+#[gpui_kit::test]
+fn a_menu_bar_command_runs_as_the_main_window(cx: &mut TestAppContext) {
+    let h = new_app(cx);
+    let chat_window = h.open_in_new_window(OTHER, cx);
+    h.app
+        .update(cx, |app, _| app.note_window_press(Some(OTHER)));
+    let app = h.app.clone();
+    cx.update_window(h.main, |_, window, cx| {
+        app.update(cx, |app, cx| {
+            app.as_main_window_command(window, cx, |app, window, cx| {
+                assert_eq!(app.asking_window(), Some(None));
+                app.open_new_contact_dialog(window, cx);
+            });
+            assert_eq!(app.asking_window(), Some(Some(OTHER)), "put back");
+        })
+    })
+    .unwrap();
+    draw_both(&h, chat_window, cx);
+    assert_eq!(shown(&h.shell, cx), Some(DialogKind::AddContact));
+    assert_eq!(shown(&chat_window_shell(&h, cx), cx), None);
 }

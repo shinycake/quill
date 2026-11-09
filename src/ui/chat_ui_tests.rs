@@ -254,13 +254,24 @@ fn another_forum_topic_drops_the_edit(cx: &mut TestAppContext) {
         app.chat_ui.enter_edit(edit, String::new(), None);
         cx.notify();
     });
+    app.update_in(&mut vcx, |app, window, cx| {
+        app.set_composer_markup("the edited message", window, cx);
+    });
     frames(&mut vcx);
     assert!(app.read_with(&vcx, |app, _| app.chat_ui.is_editing()));
 
+    // A switch no menu made (no draft restore asked for), as a Saved
+    // sublist or a thread inside the topic switches.
     select(&app, &mut vcx, RELEASES_TOPIC);
-    app.read_with(&vcx, |app, _| {
+    app.read_with(&vcx, |app, cx| {
         assert!(!app.chat_ui.is_editing(), "the edit was the other topic's");
         assert_eq!(app.chat_ui.chat(), Some(FORUM_CHAT));
+        // Round 17 (area B, finding 1): the edited text did not stay in
+        // the field as a plain draft for Enter to send as a new message.
+        assert_ne!(
+            app.composer.read(cx).value().to_string(),
+            "the edited message"
+        );
     });
 }
 
@@ -397,7 +408,115 @@ fn a_selection_made_in_one_topic_goes_with_it(cx: &mut TestAppContext) {
     });
     frames(&mut vcx);
     app.read_with(&vcx, |app, _| {
-        assert!(app.share.pending_forward.is_none(), "it went on the switch");
+        assert!(app.share.forward.draft().is_none(), "it went on the switch");
         assert!(!app.selecting_in(FORUM_CHAT));
+    });
+}
+
+/// The forum demo, with the forum open in topic 1 and messages 20 and 21
+/// selected there.
+fn forum_with_selection(cx: &mut TestAppContext) -> (Entity<QuillApp>, VisualTestContext) {
+    use crate::ui::demos::composer::FORUM_CHAT;
+    cx.update(gpui_kit::init);
+    let slot = Rc::new(std::cell::RefCell::new(None));
+    let slot_in = slot.clone();
+    let handle = cx.open_window(size(px(1100.), px(800.)), move |window, cx| {
+        let view = cx.new(|cx| {
+            QuillApp::new_with_demo(
+                window,
+                cx,
+                None,
+                Some(ScreenshotDemo::named("ready-composer-bars")),
+            )
+        });
+        let shell = cx.new(|_| QuillShell::new(view.clone()));
+        *slot_in.borrow_mut() = Some(view);
+        Root::new(shell, window, cx)
+    });
+    let app = slot.borrow().clone().expect("the app view");
+    let mut vcx = VisualTestContext::from_window(handle.into(), cx);
+    open(&app, &mut vcx, FORUM_CHAT);
+    select_forum_topic(&app, &mut vcx, 1);
+    app.update(&mut vcx, |app, cx| {
+        app.toggle_forward_select(FORUM_CHAT, MessageId(20), false, cx);
+        app.toggle_forward_select(FORUM_CHAT, MessageId(21), false, cx);
+    });
+    (app, vcx)
+}
+
+fn select_forum_topic(app: &Entity<QuillApp>, vcx: &mut VisualTestContext, topic: i32) {
+    use crate::ui::demos::composer::FORUM_CHAT;
+    app.update(vcx, |app, cx| {
+        if let Some(session) = app.demo_session.as_mut() {
+            session.select_topic(FORUM_CHAT, topic);
+        }
+        cx.notify();
+    });
+    frames(vcx);
+}
+
+/// Round 17 (area B, finding 6): a selection forwarded into its own forum
+/// becomes the forward bar there, which is no selection mode: no topic of
+/// the forum shows "2 selected" or a Delete over ids it does not show.
+#[gpui_kit::test]
+fn a_forward_bar_into_the_selections_forum_is_no_selection_mode(cx: &mut TestAppContext) {
+    use crate::ui::demos::composer::{FORUM_CHAT, RELEASES_TOPIC};
+    use crate::ui::forward_stage::ForwardStage;
+    let (app, mut vcx) = forum_with_selection(cx);
+    app.update(&mut vcx, |app, cx| {
+        let draft = app.share.forward.take_draft().expect("a selection");
+        // What choosing the forum in the share box hands the window.
+        app.share.forward = ForwardStage::Bar {
+            draft,
+            dest: FORUM_CHAT,
+        };
+        cx.notify();
+    });
+    frames(&mut vcx);
+    app.read_with(&vcx, |app, _| {
+        assert!(app.forward_bar_here(), "the bar waits in the forum");
+        assert!(
+            !app.selecting_in(FORUM_CHAT),
+            "not in the topic picked from"
+        );
+    });
+    select_forum_topic(&app, &mut vcx, RELEASES_TOPIC);
+    app.read_with(&vcx, |app, _| {
+        assert_eq!(app.share.forward.bar_shown(), Some(FORUM_CHAT));
+        assert!(!app.selecting_in(FORUM_CHAT), "nor in another topic");
+    });
+}
+
+/// Round 17 (area B, finding 7): a forward's answer ends the selection it
+/// was sent from, not a newer one made since in another topic of the same
+/// chat.
+#[gpui_kit::test]
+fn a_forward_answer_keeps_a_newer_selection_of_another_topic(cx: &mut TestAppContext) {
+    use crate::ui::demos::composer::{FORUM_CHAT, RELEASES_TOPIC};
+    use quill::ids::TopicId;
+    let (app, mut vcx) = forum_with_selection(cx);
+    let answer = |topic: TopicId| quill::state::ForwardResult {
+        dest_chat_id: ChatId(12),
+        dest_title: "B".into(),
+        from_chat_id: FORUM_CHAT,
+        from_topic: topic,
+        requested: 1,
+        forwarded_ids: vec![MessageId(1)],
+    };
+    app.update(&mut vcx, |app, cx| {
+        app.present_forward_result(answer(TopicId::forum(RELEASES_TOPIC)), cx);
+    });
+    app.read_with(&vcx, |app, _| {
+        assert!(
+            app.selecting_in(FORUM_CHAT),
+            "the selection of topic 1 stays"
+        );
+        assert_eq!(app.forward_draft().map(|draft| draft.count()), Some(2));
+    });
+    app.update(&mut vcx, |app, cx| {
+        app.present_forward_result(answer(TopicId::forum(1)), cx);
+    });
+    app.read_with(&vcx, |app, _| {
+        assert!(!app.selecting_in(FORUM_CHAT), "its own answer ends it");
     });
 }

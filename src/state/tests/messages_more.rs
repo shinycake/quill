@@ -66,6 +66,7 @@ fn forward_messages_result_upserts_dest_and_labels_origin() {
         extra,
         dest_chat_id: ChatId(12),
         from_chat_id: ChatId(11),
+        from_topic: Default::default(),
         requested: 1,
     });
     apply_json(

@@ -3,7 +3,7 @@ use super::*;
 use crate::ids::FileId;
 use crate::ids::RequestId;
 use crate::state::StickersPurpose;
-use crate::state::{RequestPurpose, StickerTab};
+use crate::state::{RequestPurpose, StickerSearch, StickerTab};
 use crate::sticker_suggest::{SUGGEST_LIMIT, StickerSuggestMode, suggest_emoji_for};
 use crate::telegram::requests::{
     add_favorite_sticker, change_sticker_set, clear_recent_stickers, get_archived_sticker_sets,
@@ -259,10 +259,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.session.stickers.stickers.failed = false;
         self.session.stickers.stickers.search_offset = 0;
         self.session.stickers.stickers.search_has_more = false;
-        self.session.stickers.stickers.search_query = query.trim().to_string();
+        self.session.stickers.stickers.searched = StickerSearch::Typed(query.trim().to_string());
         self.session.stickers.stickers.found_sets.clear();
         self.session.stickers.stickers.found_stickers.clear();
-        let query = self.session.stickers.stickers.search_query.clone();
+        let query = self.session.stickers.stickers.searched.typed().to_string();
         if query.is_empty() {
             return Ok(());
         }
@@ -276,7 +276,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     }
 
     pub fn more_sticker_search_results(&mut self) -> Result<Option<RequestId>, ConnectSendError> {
-        let query = self.session.stickers.stickers.search_query.clone();
+        let query = self.session.stickers.stickers.searched.typed().to_string();
         let offset = self.session.stickers.stickers.search_offset;
         if query.is_empty() || !self.session.stickers.stickers.search_has_more {
             return Ok(None);

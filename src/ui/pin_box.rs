@@ -165,8 +165,7 @@ impl QuillApp {
                                 this.unpin_from_banner(chat_id, id, cx);
                             }
                         }
-                        this.share.pending_forward = None;
-                        this.share.forward_picker_open = false;
+                        this.share.forward = crate::ui::forward_stage::ForwardStage::None;
                         cx.notify();
                     });
                     true

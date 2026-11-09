@@ -204,7 +204,7 @@ impl QuillApp {
                         })
                         .when(
                             self.forward_draft().is_some()
-                                && !self.share.forward_picker_open
+                                && !self.share.forward.picker_open()
                                 && !self.forward_bar_here()
                                 // Selecting here: the header carries the buttons.
                                 && !self

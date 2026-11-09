@@ -10,7 +10,7 @@ impl QuillApp {
         use quill::state::ReactionChoice;
         let mut rows = Vec::new();
         let mut sections = Vec::new();
-        let (Some(session), Some(target)) = (self.session(), self.pickers.media_panel.reaction)
+        let (Some(session), Some(target)) = (self.session(), self.pickers.media_panel.reaction())
         else {
             return (rows, sections);
         };
@@ -83,7 +83,7 @@ impl QuillApp {
     /// `EmojiListWidget`, `premiumRequired`).
     pub(super) fn reaction_pack_locked(&self, set_id: Option<i64>) -> bool {
         set_id.is_some()
-            && self.pickers.media_panel.reaction.is_some()
+            && self.pickers.media_panel.reaction().is_some()
             && self
                 .session()
                 .is_some_and(|s| !s.my_is_premium() && s.premium_possible())

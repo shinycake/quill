@@ -132,7 +132,7 @@ impl Session {
         &mut self,
         chat_id: ChatId,
         message_id: MessageId,
-        user_id: i64,
+        sender: MessageSender,
     ) {
         let Some(audience) = self
             .messages
@@ -144,8 +144,7 @@ impl Session {
         };
         if let Audience::Ready(page) = &mut audience.reactions {
             let before = page.reactions.len();
-            page.reactions
-                .retain(|r| r.sender != MessageSender::User { user_id });
+            page.reactions.retain(|r| r.sender != sender);
             let removed = (before - page.reactions.len()) as i32;
             page.total_count = (page.total_count - removed).max(0);
         }
@@ -215,7 +214,7 @@ mod tests {
             next_offset: String::new(),
         });
         session.messages.message_audience = Some(audience);
-        session.drop_reactor_from_audience(chat, msg, 8);
+        session.drop_reactor_from_audience(chat, msg, MessageSender::User { user_id: 8 });
         let page = session
             .messages
             .message_audience
@@ -227,7 +226,7 @@ mod tests {
         assert_eq!(page.total_count, 1);
         assert_eq!(page.reactions.len(), 1);
         // Another message's list is left alone.
-        session.drop_reactor_from_audience(chat, MessageId(51), 9);
+        session.drop_reactor_from_audience(chat, MessageId(51), MessageSender::User { user_id: 9 });
         assert_eq!(
             session
                 .messages
@@ -239,6 +238,44 @@ mod tests {
                 .reactions
                 .len(),
             1
+        );
+    }
+
+    /// Round 17 (area B, finding 9): a channel's or an anonymous admin's
+    /// row goes too; it was matched as user 0 before.
+    #[test]
+    fn a_deleted_channel_reaction_leaves_the_who_reacted_list() {
+        use crate::telegram::envelope::{AddedReaction, AddedReactionsPage, ReactionType};
+        let sink = std::sync::Arc::new(crate::diagnostics::MemorySink::new());
+        let mut session = Session::new(crate::ids::AccountKey::primary(), sink);
+        let (chat, msg) = (ChatId(-100), MessageId(50));
+        let reaction = |sender| AddedReaction {
+            reaction_type: ReactionType::emoji("👍"),
+            sender,
+            is_outgoing: false,
+            date: 0,
+        };
+        let channel = MessageSender::Chat { chat_id: -200 };
+        let mut audience = MessageAudience::new(chat, msg);
+        audience.reactions = Audience::Ready(AddedReactionsPage {
+            total_count: 2,
+            reactions: vec![
+                reaction(channel),
+                reaction(MessageSender::User { user_id: 8 }),
+            ],
+            next_offset: String::new(),
+        });
+        session.messages.message_audience = Some(audience);
+        session.drop_reactor_from_audience(chat, msg, channel);
+        let page = session
+            .messages
+            .message_audience
+            .as_ref()
+            .and_then(|audience| audience.reactions.ready());
+        assert_eq!(page.map(|page| page.total_count), Some(1));
+        assert_eq!(
+            page.map(|page| page.reactions.iter().map(|r| r.sender).collect::<Vec<_>>()),
+            Some(vec![MessageSender::User { user_id: 8 }])
         );
     }
 

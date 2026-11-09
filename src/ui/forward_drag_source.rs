@@ -156,8 +156,8 @@ impl QuillApp {
         // Most rows are not selected: leave before anything is cloned.
         let draft = self
             .share
-            .pending_forward
-            .as_ref()
+            .forward
+            .draft()
             .filter(|d| d.from_chat_id == chat && d.contains(pressed))?;
         drag_for(self.session()?, chat, pressed, &draft.message_ids)
     }

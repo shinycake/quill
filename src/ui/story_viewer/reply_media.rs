@@ -53,9 +53,9 @@ impl QuillApp {
                 self.stories.viewer_ui().reply_open,
                 self.stories.viewer_ui().reply_panel,
             )
-            && self.pickers.media_panel.open
-            && self.pickers.media_panel.reaction.is_none()
-            && self.pickers.media_panel.status.is_none()
+            && self.pickers.media_panel.is_open()
+            && self.pickers.media_panel.reaction().is_none()
+            && self.pickers.media_panel.status().is_none()
     }
 
     /// A recording started from the story reply row is in progress.

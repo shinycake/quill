@@ -382,7 +382,7 @@ impl QuillApp {
     /// another topic of the same chat, is replaced. On a topic change the
     /// reply comes along (the new topic's draft restore decides it, as for
     /// any slot change); an edit does not, since its message is the old
-    /// topic's.
+    /// topic's, and the slot's draft goes back into the field it held.
     pub(super) fn sync_chat_ui(&mut self) {
         let Some(chat) = self.session().and_then(|session| session.open_chat) else {
             return;
@@ -399,7 +399,18 @@ impl QuillApp {
             Some(_) if self.chat_ui.topic != topic => {
                 let mut next = ChatUi::for_topic(chat, topic);
                 next.pending_reply = self.screen.chat_ui.pending_reply.take();
+                // The field still holds the edited message (or the rich
+                // editor's markup), which the new value no longer marks:
+                // put the slot's draft back on this frame, or Enter sent
+                // the edit as a new message and the upkeep saved it as the
+                // draft. A Saved sublist or a thread inside a forum topic
+                // keeps the draft slot, so no switch path restores it.
+                let field_is_not_the_draft =
+                    self.chat_ui.is_editing() || self.chat_ui.rich_editor_open;
                 self.replace_chat_ui(next);
+                if field_is_not_the_draft {
+                    self.request_draft_restore();
+                }
                 // The selection was the old conversation's messages.
                 self.dismiss_forward_for_view(chat);
             }

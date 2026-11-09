@@ -11,6 +11,7 @@
 
 use super::*;
 use quill::lang::{keys, tr};
+use quill::state::StickerSearch;
 use quill::telegram::EmojiCategorySource;
 
 /// Side of a category chip.
@@ -48,21 +49,23 @@ impl QuillApp {
                 .is_some_and(|item| item.requires_premium)
     }
 
-    /// Ask TDLib for the stickers of the chosen category.
-    pub(super) fn search_chosen_sticker_category(&mut self) {
-        let Some(index) = self.pickers.media_panel.category else {
-            return;
-        };
-        let Some(source) = self
-            .session()
-            .and_then(|s| s.stickers.emoji.sticker_categories.get(index))
-            .map(|category| category.source.clone())
-        else {
-            return;
-        };
-        if let Some(live) = self.live.as_mut() {
-            let _ = live.driver.search_sticker_category(&source);
+    /// What this window's sticker tab lists from the session's found
+    /// stickers: the typed query's, else the chosen category's; `None`
+    /// while it lists the sets. The found list is one per session, so a
+    /// window shows it only while it is for this (another window may have
+    /// searched since), and asks again otherwise.
+    pub(super) fn wanted_sticker_search(&self, query: &str) -> Option<StickerSearch> {
+        if !query.is_empty() {
+            return Some(StickerSearch::Typed(query.to_string()));
         }
+        let index = self.pickers.media_panel.category?;
+        let category = self
+            .session()?
+            .stickers
+            .emoji
+            .sticker_categories
+            .get(index)?;
+        Some(StickerSearch::Category(category.source.clone()))
     }
 
     /// Choose a category, or leave it (`None`).
