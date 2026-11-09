@@ -19,6 +19,34 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.send_json_request(extra, &json).map(|_| ())
     }
 
+    /// The own full info the Business screens are built from: asked when
+    /// it is not in, and the wait (`BusinessSettingsState::own_info`) ends
+    /// with its answer, its error or a send error. A request already on
+    /// its way (the profile asked) settles it too.
+    pub fn fetch_business_own_info(&mut self) -> Result<(), ConnectSendError> {
+        let Some(me) = self.session.my_user_id else {
+            return Ok(());
+        };
+        if self.session.users_state.user_full_infos.contains_key(&me) {
+            self.session.settings.business.own_info.succeed(());
+            return Ok(());
+        }
+        self.session.settings.business.own_info.begin();
+        self.fetch_user_full_info(me)
+            .map(|_| ())
+            .inspect_err(|err| {
+                let reason = match err {
+                    ConnectSendError::Native => crate::lang::keys::Q_NOTES_NO_CONNECTION,
+                    _ => crate::lang::keys::Q_NOTES_SOMETHING_WENT_WRONG,
+                };
+                self.session
+                    .settings
+                    .business
+                    .own_info
+                    .fail(crate::lang::tr(reason));
+            })
+    }
+
     /// `getTimeZones`, once per session unless it failed.
     pub fn ensure_time_zones(&mut self) -> Result<(), ConnectSendError> {
         let state = &mut self.session.settings.business;

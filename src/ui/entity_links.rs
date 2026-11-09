@@ -218,12 +218,7 @@ impl QuillApp {
                 .update(cx, |input, cx| input.set_value(&query, window, cx));
             self.sync_chat_search_query(tag, cx);
         } else {
-            self.open_search_ui(window, cx);
-            let query = tag.to_string();
-            self.search_ui
-                .input
-                .update(cx, |input, cx| input.set_value(&query, window, cx));
-            self.sync_search_query(tag, cx);
+            self.open_global_search_for(tag, window, cx);
         }
     }
 

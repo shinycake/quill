@@ -485,13 +485,14 @@ impl QuillApp {
             let mut keep = vec![anchor];
             keep.extend(select);
             self.add_to_selection(chat_id, keep);
+            let topic = self.open_topic_id(chat_id);
             if let Some(draft) = self.share.pending_forward.as_mut() {
                 let leaving: Vec<_> = deselect
                     .into_iter()
                     .filter(|id| draft.contains(*id))
                     .collect();
                 for id in leaving {
-                    draft.toggle(chat_id, id, false);
+                    draft.toggle(chat_id, topic, id, false);
                 }
             }
             self.chat_ui.selection_anchor = Some(anchor);

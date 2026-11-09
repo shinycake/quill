@@ -174,12 +174,24 @@ impl MessageKey {
 }
 
 /// Typed topic identity. Numeric thread IDs are not interchangeable.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum TopicId {
+    /// The chat itself.
+    #[default]
     None,
-    Forum { forum_topic_id: i64 },
-    DirectMessages { direct_messages_chat_topic_id: i64 },
-    SavedMessages { saved_messages_topic_id: i64 },
+    /// A comment or reply thread (`messageTopicThread`), by its root.
+    Thread {
+        message_thread_id: i64,
+    },
+    Forum {
+        forum_topic_id: i64,
+    },
+    DirectMessages {
+        direct_messages_chat_topic_id: i64,
+    },
+    SavedMessages {
+        saved_messages_topic_id: i64,
+    },
 }
 
 impl TopicId {

@@ -196,7 +196,7 @@ impl Session {
         match result {
             UsernameCheckResult::PublicChatsTooMany => {
                 state.public_limit_reached = Some(true);
-                self.payments.hub.limit_box = Some((PremiumLimitKind::PublicLinks, 0));
+                self.open_premium_limit(PremiumLimitKind::PublicLinks, 0);
             }
             UsernameCheckResult::PublicGroupsUnavailable => {
                 state.public_unavailable.insert(chat_id.0);

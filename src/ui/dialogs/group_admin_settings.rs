@@ -29,8 +29,14 @@ pub struct GroupSettingsDialog {
     pub(crate) view: GroupSettingsView,
     /// The invite link whose "who joined" details are expanded.
     pub(crate) details_link: Option<String>,
-    /// The revoked-links list is expanded (and was fetched).
+    /// The revoked-links list is shown expanded: a disclosure, not a fetch
+    /// stage (the list's own fetch is `groups.revoked_invite_links`, an
+    /// `InviteLinkFetch` with its answer and error).
     pub(crate) revoked_open: bool,
+    /// The Recent Actions filter box, on the `RecentActionsFilter` page
+    /// only: it goes with any other page (`set_group_settings_view`) and
+    /// with the box, so it is always this chat's.
+    pub(in crate::ui) event_log_filter: Option<crate::ui::event_log_filter_box::EventLogFilterBox>,
 }
 
 impl GroupSettingsDialog {
@@ -40,6 +46,7 @@ impl GroupSettingsDialog {
             view,
             details_link: None,
             revoked_open: false,
+            event_log_filter: None,
         }
     }
 }

@@ -219,11 +219,10 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.privacy.passkeys.ticking {
+        if self.privacy.passkeys.ticker.is_some() || self.refused_while_locked() {
             return;
         }
-        self.privacy.passkeys.ticking = true;
-        self.spawn_screen_in(window, cx, async move |this, cx| {
+        let ticker = self.spawn_screen_in(window, cx, async move |this, cx| {
             loop {
                 cx.background_executor().timer(TICK).await;
                 let keep = this
@@ -235,9 +234,9 @@ impl QuillApp {
                     break;
                 }
             }
-            let _ = this.update(cx, |this, _| this.privacy.passkeys.ticking = false);
-        })
-        .detach();
+            let _ = this.update(cx, |this, _| this.privacy.passkeys.ticker = None);
+        });
+        self.privacy.passkeys.ticker = Some(ticker);
     }
 
     /// One tick: start the ceremony once the options are there, follow
@@ -248,6 +247,14 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
+        // Locked: no ceremony starts or goes on. Options that land after
+        // the lock are dropped as the lock closed the box they were for
+        // (the registration's options stay for the next Create), and the
+        // ticker ends; tdesktop's lock closes its boxes the same way.
+        if self.refused_while_locked() {
+            self.close_passkey_ceremony_for_lock();
+            return false;
+        }
         let mut changed = false;
         let (start, start_login, added) = match self.live.as_mut() {
             Some(live) => {
@@ -456,6 +463,8 @@ impl QuillApp {
     /// boxes: the key gets CTAPHID_CANCEL and a PIN sheet on its way never
     /// takes focus from the passcode field. The PIN field goes with any
     /// digits in it; the next ceremony makes a new one.
+    /// The ticker stops with it, and options already queued for a
+    /// ceremony are dropped, so none starts under the lock.
     pub(in crate::ui) fn close_passkey_ceremony_for_lock(&mut self) {
         if let Some(ui) = self.privacy.passkeys.ceremony.take()
             && let Some(ceremony) = ui.ceremony
@@ -463,6 +472,12 @@ impl QuillApp {
             ceremony.cancel();
         }
         self.privacy.passkeys.pin_input = None;
+        self.privacy.passkeys.ticker = None;
+        if let Some(live) = self.live.as_mut() {
+            let state = &mut live.driver.session.settings.passkeys;
+            state.ceremony = None;
+            state.login.ceremony = None;
+        }
     }
 
     fn build_passkey_ceremony_dialog(

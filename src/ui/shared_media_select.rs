@@ -350,6 +350,7 @@ impl QuillApp {
         }
         let draft = ForwardDraft {
             from_chat_id: chat_id,
+            from_topic: self.open_topic_id(chat_id),
             message_ids: state.selected_ids(),
             send_copy: false,
             remove_caption: false,

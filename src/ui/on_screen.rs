@@ -492,7 +492,12 @@ impl QuillApp {
 
     /// A client fills the empty screen: the chat list, folders and counters
     /// are its from the next frame. The only place `self.live` is filled.
-    pub(in crate::ui) fn put_on_screen(&mut self, live: LiveConnect) {
+    /// What the account's last screen asked and was answered while the
+    /// account was in the background is not told on this one: a community
+    /// request's toast (`CommunityOutcome`) belonged to the screen that
+    /// asked, which is gone.
+    pub(in crate::ui) fn put_on_screen(&mut self, mut live: LiveConnect) {
+        live.driver.session.communities.forget_outcomes();
         debug_assert!(self.live.is_none(), "a client is already on screen");
         debug_assert!(
             !self.screen.goodbyes_due,

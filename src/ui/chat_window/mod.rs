@@ -572,6 +572,7 @@ impl QuillApp {
         if self.windows.last_press == Some(chat_id) {
             self.windows.last_press = None;
         }
+        self.mini_app_window_closed(chat_id);
         self.connection
             .toasts
             .window_closed(chat_id, std::time::Instant::now());

@@ -34,6 +34,15 @@ impl Session {
     /// Show the box for `kind`, or its toast for the kinds tdesktop tells
     /// about with one.
     pub fn open_premium_limit(&mut self, kind: PremiumLimitKind, extra: i64) {
+        // The public links box lists the chats as they are now (tdesktop's
+        // `PublicsController::prepare` asks each time the box is made): an
+        // earlier answer or failure is not reused.
+        if kind == PremiumLimitKind::PublicLinks {
+            let fetch = &mut self.groups.group_type.public_chats;
+            if *fetch != crate::state::PublicChatsFetch::Loading {
+                *fetch = crate::state::PublicChatsFetch::None;
+            }
+        }
         if kind.shows_toast() {
             self.payments.hub.limit_toast = Some(kind);
         } else {

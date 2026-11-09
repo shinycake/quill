@@ -546,18 +546,11 @@ impl Session {
             self.settings.read_date_loading = false;
             self.settings.read_date_error = false;
         }
-        // Parity slice: `resetAllNotificationSettings` confirmed — drop the
-        // cached scope defaults so the next fetch (or the authoritative
-        // `updateScopeNotificationSettings` answers) shows the
-        // server-confirmed defaults instead of the stale pre-reset ones.
-        // (`notification_exceptions` lives on the sibling
-        // settings-notif-exceptions branch; its per-chat updates prune it.)
-        if matches!(
-            pending.map(|p| p.purpose),
-            Some(RequestPurpose::ResetAllNotificationSettings)
-        ) {
-            self.settings.scope_notification_settings.clear();
-        }
+        // `resetAllNotificationSettings` needs nothing here: TDLib sends
+        // `updateScopeNotificationSettings` for each scope it reset before
+        // its `ok` (`Requests::on_request` resets, then `send_result`), and
+        // a scope it left alone is already right. Clearing the cache here
+        // wiped those fresh values and left the page on "Loading…".
         // A short OK is not exhaustion; 404 is. A page that went through
         // ends the wait after an earlier failure.
         match pending.map(|p| p.purpose) {

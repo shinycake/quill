@@ -268,14 +268,20 @@ impl Session {
                 // Parity slice: the exceptions list for the chat's scope is
                 // stale now. A reset to the scope default (e.g. our own
                 // "Reset to default") just prunes the chat from the cached
-                // list; any other change drops the list so the next dialog
-                // open refetches it.
+                // list; any other change drops the list, and the page that
+                // shows it asks again (`notifications_page`).
                 if fully_default {
                     if kind_unknown {
                         for list in self.settings.notification_exceptions.values_mut() {
-                            list.retain(|id| *id != chat_id.0);
+                            if let Some(list) = list.data_mut() {
+                                list.retain(|id| *id != chat_id.0);
+                            }
                         }
-                    } else if let Some(list) = self.settings.notification_exceptions.get_mut(&scope)
+                    } else if let Some(list) = self
+                        .settings
+                        .notification_exceptions
+                        .get_mut(&scope)
+                        .and_then(crate::state::fetch::Fetch::data_mut)
                     {
                         list.retain(|id| *id != chat_id.0);
                     }

@@ -698,8 +698,9 @@ impl Session {
         {
             self.settings
                 .notification_exceptions
-                .insert(scope, chat_ids.iter().map(|id| id.0).collect());
-            self.settings.notification_exceptions_loading.remove(&scope);
+                .entry(scope)
+                .or_default()
+                .succeed(chat_ids.iter().map(|id| id.0).collect());
         }
         if let Some(pending) = pending
             && matches!(

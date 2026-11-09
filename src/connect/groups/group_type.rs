@@ -75,6 +75,17 @@ impl<S: JsonSender> ConnectDriver<S> {
             .request(purpose(GroupTypePurpose::GetCreatedPublicChats), None);
         self.send_json_request(extra, &crate::earn::get_created_public_chats(extra))
             .map(Some)
+            .inspect_err(|_| {
+                self.session.groups.group_type.public_chats = PublicChatsFetch::Failed;
+            })
+    }
+
+    /// The limit box's Retry after a failed list.
+    pub fn retry_created_public_chats(&mut self) -> Result<Option<RequestId>, ConnectSendError> {
+        if self.session.groups.group_type.public_chats != PublicChatsFetch::Failed {
+            return Ok(None);
+        }
+        self.load_created_public_chats()
     }
 
     /// Revoke from the limit box: the chat loses its link and every

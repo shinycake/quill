@@ -302,8 +302,14 @@ impl QuillApp {
         topic: Option<i32>,
     ) -> Option<quill::composer::ForwardDraft> {
         let first = drag.ids().first().copied()?;
-        let mut draft =
-            quill::composer::ForwardDraft::from_message(drag.from_chat(), first, false)?;
+        // A dropped forward rides to its destination's forward bar, which
+        // keeps it whatever the view shows; it is no selection of a topic.
+        let mut draft = quill::composer::ForwardDraft::from_message(
+            drag.from_chat(),
+            quill::ids::TopicId::None,
+            first,
+            false,
+        )?;
         draft.message_ids = drag.ids().to_vec();
         draft.topic_id = topic;
         Some(draft)
@@ -524,10 +530,18 @@ impl QuillApp {
         let chat = ChatId(11);
         let ids = [quill::ids::MessageId(101), quill::ids::MessageId(102)];
         let drag = ForwardDrag::begin(chat, quill::ids::MessageId(101), &ids, false, |_| true).ok();
-        if let Some(mut draft) =
-            quill::composer::ForwardDraft::from_message(chat, quill::ids::MessageId(101), false)
-        {
-            draft.toggle(chat, quill::ids::MessageId(102), false);
+        if let Some(mut draft) = quill::composer::ForwardDraft::from_message(
+            chat,
+            quill::ids::TopicId::None,
+            quill::ids::MessageId(101),
+            false,
+        ) {
+            draft.toggle(
+                chat,
+                quill::ids::TopicId::None,
+                quill::ids::MessageId(102),
+                false,
+            );
             self.share.pending_forward = Some(draft);
         }
         let state = &mut self.chat_list.drop_on_row;

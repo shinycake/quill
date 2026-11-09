@@ -43,8 +43,10 @@ pub(in crate::ui) struct PasskeysUi {
     pub(in crate::ui) ceremony: Option<super::passkey_ceremony::CeremonyUi>,
     /// The PIN field of the ceremony, kept so it is made once.
     pub(in crate::ui) pin_input: Option<Entity<gpui_kit::component::input::InputState>>,
-    /// Whether the ceremony ticker runs.
-    pub(in crate::ui) ticking: bool,
+    /// The ceremony ticker, held while it runs. Dropping it stops it: the
+    /// lock does (`close_passkey_ceremony_for_lock`), so nothing ticks a
+    /// ceremony under the lock.
+    pub(in crate::ui) ticker: Option<gpui_kit::Task<()>>,
     /// Demos without a session: show "Log in using passkey".
     pub(in crate::ui) demo_login_link: bool,
     /// Demos without a session: the error line under the link.
@@ -117,7 +119,7 @@ impl QuillApp {
         let ui = &mut self.privacy.passkeys;
         *ui = PasskeysUi {
             pin_input: ui.pin_input.take(),
-            ticking: ui.ticking,
+            ticker: ui.ticker.take(),
             ..PasskeysUi::default()
         };
         cx.notify();

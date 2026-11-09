@@ -129,8 +129,10 @@ impl QuillApp {
             apply_ready_forward(session, &self.demo_ui.sink, &self.demo_ui.seq);
             self.share.forward_result = session.messages.last_forward.clone();
         }
-        if let Some(mut draft) = ForwardDraft::from_message(ChatId(11), MessageId(101), false) {
-            draft.toggle(ChatId(11), MessageId(102), false);
+        if let Some(mut draft) =
+            ForwardDraft::from_message(ChatId(11), quill::ids::TopicId::None, MessageId(101), false)
+        {
+            draft.toggle(ChatId(11), quill::ids::TopicId::None, MessageId(102), false);
             self.share.pending_forward = Some(draft);
         }
         self.share.forward_picker_open = true;

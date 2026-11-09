@@ -46,6 +46,7 @@ impl Session {
                         voice_notes_restricted: false,
                     },
                 );
+                self.settle_own_full_info(user_id);
                 if let Some(bot_id) = pending
                     .chat_id
                     .and_then(|chat_id| self.bot_user_id_for_chat(chat_id))

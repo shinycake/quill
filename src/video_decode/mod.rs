@@ -25,6 +25,7 @@ mod decode_loop;
 mod ffi;
 mod nv12;
 mod present;
+mod reattach;
 
 pub use bgra::{BGRA_KEPT, BgraPool, rotate_bgra};
 pub use clock::Clock;

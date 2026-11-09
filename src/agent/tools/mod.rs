@@ -662,6 +662,29 @@ mod tests {
         access::set_enabled(false);
     }
 
+    /// An Allow on a one-off confirmation runs a grants update that changes
+    /// nothing: the write waiting on it still goes. A real change stops it.
+    #[test]
+    fn an_update_that_changes_nothing_lets_a_waiting_write_go() {
+        let _guard = crate::locks::lock_or_recover(&access::TEST_LOCK);
+        crate::fast_buttons::set_persistence(false);
+        access::set_enabled(true);
+        access::set_paused_by_lock(false);
+        let account = crate::ids::AccountKey("grants-noop-test".into());
+        let call = super::CallScope::begin(super::CallStart::now(0));
+        crate::agent::grants::update(&account, |_| {});
+        crate::agent::grants::update(&account, |g| g.contacts = false);
+        assert!(super::still_allowed().is_ok(), "nothing changed");
+        crate::agent::grants::update(&account, |g| g.contacts = true);
+        assert!(matches!(
+            super::still_allowed(),
+            Err(super::ToolError(message)) if message == super::GRANTS_CHANGED_MESSAGE
+        ));
+        drop(call);
+        crate::agent::grants::forget_account(&account);
+        access::set_enabled(false);
+    }
+
     /// Locked, the `quill://unread` watcher's look fails at once, so the
     /// watcher sleeps between looks instead of spinning.
     #[test]

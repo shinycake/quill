@@ -158,17 +158,57 @@ impl CommunitiesUi {
     }
 }
 
+/// A community step waiting for an answer with no box of its own: one
+/// value, so a newer step replaces the older one whole and nothing keeps
+/// two waits in step.
+#[derive(Clone)]
+pub(crate) enum CommunityWait {
+    /// A ban waits for the member's chats (`drain_pending_ban`).
+    Ban(PendingBan),
+    /// "Create a New Chat" from this community's chooser: the new chat
+    /// goes to the visibility box once made (`drain_new_community_chat`).
+    NewChat { community_id: i64 },
+}
+
 #[derive(Default)]
 pub(crate) struct CommunitiesUi {
     pub(crate) open: Option<CommunityBox>,
-    pub(crate) pending_ban: Option<PendingBan>,
-    /// "Create a New Chat" from this community's chooser: the new chat
-    /// goes to the visibility box once made.
-    pub(crate) awaiting_new_chat: Option<i64>,
+    pub(crate) waiting: Option<CommunityWait>,
     pub(crate) row_menu: Option<RowMenu>,
-    /// The pending requests list, which pages on scroll.
-    pub(crate) requests_scroll: ScrollHandle,
-    pub(crate) requests_asked: crate::ui::scroll_load::Asked,
+    /// The pending requests list's scroll, for the community it shows.
+    pub(crate) requests_view: RequestsView,
+}
+
+/// The pending requests list's scroll and paging, keyed by its community:
+/// another community's list starts at the top and asks afresh, and Back
+/// from a chat's details to the same list keeps its place
+/// (`RequestsView::of`).
+#[derive(Default)]
+pub(crate) struct RequestsView {
+    community_id: Option<i64>,
+    pub(crate) scroll: ScrollHandle,
+    pub(crate) asked: crate::ui::scroll_load::Asked,
+}
+
+impl RequestsView {
+    /// The view of `community_id`'s list, made new for another community.
+    pub(crate) fn of(&mut self, community_id: i64) -> &Self {
+        if self.community_id != Some(community_id) {
+            *self = Self {
+                community_id: Some(community_id),
+                ..Self::default()
+            };
+        }
+        self
+    }
+
+    /// A fresh open of a list: from the top.
+    pub(crate) fn reset(&mut self, community_id: i64) {
+        *self = Self {
+            community_id: Some(community_id),
+            ..Self::default()
+        };
+    }
 }
 
 /// "1,200 members" / "5,300 subscribers" under a community chat.
@@ -412,11 +452,11 @@ impl QuillApp {
         let asking = ban::answer_coming(&live.driver.session, community_id, member);
         match ban::ban_start(sent, asking) {
             ban::BanStart::Wait => {
-                self.admin.community.flow.pending_ban = Some(PendingBan {
+                self.admin.community.flow.waiting = Some(CommunityWait::Ban(PendingBan {
                     community_id,
                     member,
                     name,
-                });
+                }));
             }
             ban::BanStart::Refused => {
                 self.set_note(StatusNote::error(tr(keys::Q_COMMUNITY_BAN_UNAVAILABLE)))

@@ -288,7 +288,7 @@ fn run(args: &Value) -> Result<ToolOutput, ToolError> {
                 let target = grants.writable(first_chat)?;
                 send(&ctx, &target, &method, request)
             } else {
-                td::call(&ctx.client, request).map_err(write_error)
+                td::call(&ctx.client, request).map_err(write_error(&ctx))
             }
         }
         Class::Granted(Scope::Read) => {
@@ -305,7 +305,7 @@ fn run(args: &Value) -> Result<ToolOutput, ToolError> {
             let target = grants.writable(first_chat)?;
             confirm(&ctx, &target, &request)?;
             take_write_turn(&ctx, target.chat_id)?;
-            td::call(&ctx.client, request).map_err(write_error)
+            td::call(&ctx.client, request).map_err(write_error(&ctx))
         }
         Class::Send => {
             grants.require(&named, Scope::ReadWrite)?;

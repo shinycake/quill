@@ -196,3 +196,28 @@ fn toast_kinds_queue_a_toast_instead_of_a_box() {
         Some(PremiumLimitKind::FavoriteStickers)
     );
 }
+
+#[test]
+fn the_public_links_box_lists_the_chats_afresh_each_time() {
+    let (mut session, _sink) = session();
+    session.groups.group_type.public_chats = PublicChatsFetch::Failed;
+    session.open_premium_limit(PremiumLimitKind::PublicLinks, 0);
+    assert_eq!(
+        session.groups.group_type.public_chats,
+        PublicChatsFetch::None,
+        "a failure is not the answer for the next box"
+    );
+    session.groups.group_type.public_chats = PublicChatsFetch::Loaded(vec![ChatId(5)]);
+    session.open_premium_limit(PremiumLimitKind::PublicLinks, 0);
+    assert_eq!(
+        session.groups.group_type.public_chats,
+        PublicChatsFetch::None
+    );
+    session.groups.group_type.public_chats = PublicChatsFetch::Loading;
+    session.open_premium_limit(PremiumLimitKind::PublicLinks, 0);
+    assert_eq!(
+        session.groups.group_type.public_chats,
+        PublicChatsFetch::Loading,
+        "a request on its way is kept"
+    );
+}

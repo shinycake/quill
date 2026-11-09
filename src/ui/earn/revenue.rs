@@ -534,13 +534,13 @@ impl QuillApp {
         if !history.next_offset.is_empty() {
             list = list.child(
                 Button::new("earn-ton-more")
-                    .label(if history.loading {
+                    .label(if history.load.is_loading() {
                         tr(keys::Q_MONEY_LOADING)
                     } else {
                         tr(keys::Q_MONEY_SHOW_MORE)
                     })
                     .ghost()
-                    .disabled(history.loading)
+                    .disabled(history.load.is_loading())
                     .on_click(cx.listener(|this, _, _, cx| {
                         if let Some(live) = this.live.as_mut() {
                             let _ = live.driver.more_earn_ton_history();
@@ -578,13 +578,13 @@ impl QuillApp {
         if !history.next_offset.is_empty() {
             list = list.child(
                 Button::new(("earn-star-more", filter as usize))
-                    .label(if history.loading {
+                    .label(if history.load.is_loading() {
                         tr(keys::Q_MONEY_LOADING)
                     } else {
                         tr(keys::Q_MONEY_SHOW_MORE)
                     })
                     .ghost()
-                    .disabled(history.loading)
+                    .disabled(history.load.is_loading())
                     .on_click(cx.listener(move |this, _, _, cx| {
                         if let Some(live) = this.live.as_mut() {
                             let _ = live.driver.more_earn_star_history(filter);

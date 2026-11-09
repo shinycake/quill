@@ -10,6 +10,7 @@ use crate::agent::pacing::{self, Refusal};
 use crate::agent::prompts::{self, Ask, Decision};
 use crate::agent::td::{self, TdError};
 use crate::agent::{access, grants::ChatClass};
+use crate::ids::AccountKey;
 use serde_json::{Value, json};
 use std::time::Duration;
 
@@ -377,7 +378,7 @@ fn sent_ids(messages: &[Value]) -> Vec<i64> {
 /// [`change`]'s queue turn and switch check, for writes that build their
 /// own call.
 pub fn take_write_turn(ctx: &Ctx, chat_id: i64) -> Result<(), ToolError> {
-    pacing::take_turn(ctx.client.id(), chat_id, 1, false).map_err(refusal_error)?;
+    pacing::take_turn(&ctx.account, ctx.client.id(), chat_id, 1, false).map_err(refusal_error)?;
     still_allowed()
 }
 
@@ -410,7 +411,7 @@ pub fn change_steps(
     let result = requests
         .into_iter()
         .try_for_each(|request| td::call(&ctx.client, request).map(drop))
-        .map_err(write_error);
+        .map_err(write_error(ctx));
     log_on(ctx, target, tool, summary, result.is_ok(), Vec::new());
     result
 }
@@ -425,14 +426,18 @@ pub fn change_on(
     ids: Vec<i64>,
 ) -> Result<Value, ToolError> {
     take_write_turn(ctx, target.chat_id)?;
-    let result = td::call(&ctx.client, request).map_err(write_error);
+    let result = td::call(&ctx.client, request).map_err(write_error(ctx));
     log_on(ctx, target, tool, summary, result.is_ok(), ids);
     result
 }
 
-/// A TDLib error from a write, as the agent's next step. Flood waits also
-/// pause every agent send.
-pub fn write_error(error: TdError) -> ToolError {
+/// A TDLib error from a write on `ctx`'s account, as the agent's next
+/// step. Flood waits also pause every agent send on that account.
+pub fn write_error(ctx: &Ctx) -> impl Fn(TdError) -> ToolError + '_ {
+    |error| write_error_on(&ctx.account, error)
+}
+
+fn write_error_on(account: &AccountKey, error: TdError) -> ToolError {
     match error {
         TdError::Td {
             code: 429,
@@ -443,7 +448,7 @@ pub fn write_error(error: TdError) -> ToolError {
             ref message,
         } => {
             let seconds = pacing::flood_seconds(message).unwrap_or(60);
-            pacing::flood(seconds);
+            pacing::flood(account, seconds);
             ToolError::new(format!(
                 "Telegram asked Quill to slow down. Agent sends are paused for {seconds} seconds; retry after that."
             ))
@@ -550,7 +555,14 @@ pub fn admit(ctx: &Ctx, target: &Target, count: u32) -> Result<(), ToolError> {
         return Err(paid_refusal());
     }
     let new_peer = is_new_peer(ctx, target);
-    pacing::take_turn(ctx.client.id(), target.chat_id, count, new_peer).map_err(refusal_error)?;
+    pacing::take_turn(
+        &ctx.account,
+        ctx.client.id(),
+        target.chat_id,
+        count,
+        new_peer,
+    )
+    .map_err(refusal_error)?;
     still_allowed()
 }
 
@@ -591,7 +603,7 @@ fn send_inner(
     count: u32,
 ) -> Result<Vec<Value>, ToolError> {
     admit(ctx, target, count)?;
-    let answer = td::call(&ctx.client, request).map_err(write_error)?;
+    let answer = td::call(&ctx.client, request).map_err(write_error(ctx))?;
     let pending: Vec<Value> = match answer.get("messages").and_then(Value::as_array) {
         Some(list) => list.clone(),
         None => vec![answer],
@@ -612,7 +624,7 @@ fn send_inner(
         match outcome {
             Some(Sent::Delivered(final_message)) => delivered.push(final_message),
             Some(Sent::Failed(code, message)) => {
-                return Err(write_error(TdError::Td { code, message }));
+                return Err(write_error(ctx)(TdError::Td { code, message }));
             }
             None => delivered.push(message),
         }

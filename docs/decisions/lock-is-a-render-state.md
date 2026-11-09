@@ -126,12 +126,15 @@ focused window as "the user is here". The rule that replaced those patches:
      voice note or song does not wait (round 15, as tdesktop's player plays on under the lock): `poll_live`
      resumes it locked (`runs-locked`). The lock drops parked clips, the viewer's and the inline ones
      (`drop_play_intents_for_lock`), as tdesktop's lock closes the media viewer.
-   - Something parked for a late answer records the lock count (`PasscodeUi::locks`, round 15) and is
+   - Something parked for a late answer records the lock count (`PasscodeUi::lock_state`, round 15; one
+     `LockState` value since round 16, so the flag and its count cannot drift) and is
      dropped when `locked_since(count)`: a lock happened in between, even if Quill is unlocked again when
      the answer lands. The pending profile gallery uses it.
    - The lock closes the passkey ceremony box, as tdesktop's lock closes its boxes
      (`close_passkey_ceremony_for_lock`, round 15): the key is told to stop, and a PIN sheet on its way
-     cannot take focus from the passcode field.
+     cannot take focus from the passcode field. Round 16: the ceremony's tick refuses while locked
+     (`tick_passkey_ceremony` checks `refused_while_locked` and closes it), the lock drops the tick task
+     (`PasskeysUi::ticker`) and the session's ceremony state, and no tick starts under the lock.
    - A starter reached outside those pumps queues itself (`passcode::UnlockIntents`, `wait_for_unlock`) and
      runs again after the unlock, asking every gate a second time. Every open in `os_open.rs` does this,
      so a 3-D Secure page, an Earn or Grams withdrawal, a gift's Fragment page or a bot's URL opens after
@@ -159,6 +162,9 @@ focused window as "the user is here". The rule that replaced those patches:
    End & Answer (`swap_call_lock_card`), since its swap box is a box of the locked main window. Both lock
    cards come from one builder (`lock_call_card`), stacked by `locked_root`. A conference invitation with
    no call keeps the call tick, so its ringtone keeps looping (`call_tick_wanted`).
+   Round 16: the call window draws the same card (`swap_call_window_card`), locked or not. The swap box
+   is session-wide and shows in the window of the last press, which can be a main window hidden to the
+   tray or behind the call, so the window the user is in during a call answers the second call too.
 4. **A locked Quill is not looked at.** `session.app_active` is false while locked, whichever window has
    the focus, and the lock clears `active_window_chats`. A chat window's locked frame does not mark its
    chat active again. So the open chat's messages notify and sound, as in tdesktop, whose `markingAsRead`

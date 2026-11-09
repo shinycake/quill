@@ -28,7 +28,7 @@ drawn. It claims exactly this, and no more:
    - `-` says, in the reason, why the lock need not reach it.
    A listed entry must still hold a start; `refuses` pins a function that
    must keep testing a gate, for paths no pattern finds (links, launches).
-2. One writer. `passcode.locked` (the `locked` field) is assigned only in
+2. One writer. `passcode.lock_state` (locked or not, with the count) is assigned only in
    `set_locked` (src/ui/passcode/lock_gate.rs).
 3. The render gate is mounted: `lock_layer.rs` registers `LockLayer` as a
    root plugin, and `PasscodeUi::new` calls `lock_layer::register`.
@@ -102,7 +102,7 @@ TEST_MOD = re.compile(
 )
 TEST_ITEM = re.compile(r"#\[cfg\(test\)\]\s*\n(?:\s*#\[[^\n]*\]\s*\n)*\s*(?:pub(?:\([^)]*\))?\s+)?fn\s")
 FN = re.compile(r"\bfn ([a-z_][a-z0-9_]*)\s*(?:<[^>(]*>)?\(")
-LOCKED_WRITE = re.compile(r"\.locked\s*=[^=]")
+LOCKED_WRITE = re.compile(r"\.(?:locked|lock_state)\s*=[^=]")
 
 
 def balanced(text, start):
@@ -389,7 +389,7 @@ def problems():
                 path == GATE_FILE and name == "set_locked"
             ):
                 out.append(f"{path}::{name}: calls `{FLAG_SETTER}`; only `set_locked` may")
-            elif re.search(r"passcode\.locked\s*=[^=]", body) and path != GATE_FILE:
+            elif re.search(r"passcode\.(?:locked|lock_state)\s*=[^=]", body) and path != GATE_FILE:
                 out.append(f"{path}::{name}: writes `passcode.locked`; only `set_locked` may")
     # What runs while locked.
     out += upkeep_problems(bodies, steps)

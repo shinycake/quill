@@ -106,7 +106,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         let want_stars = screen == EarnScreen::Stars || !is_bot;
         if want_ton {
             page.ton = Load::Loading;
-            page.ton_history.loading = true;
+            page.ton_history.load.start(false);
         }
         if want_stars {
             page.stars = Load::Loading;
@@ -124,7 +124,8 @@ impl<S: JsonSender> ConnectDriver<S> {
                     append: false,
                 },
                 |extra| get_chat_revenue_transactions(extra, chat_id, "", TON_FIRST_SLICE),
-            )?;
+            )
+            .inspect_err(|_| self.fail_earn_ton_history())?;
         }
         if want_stars {
             self.send_earn(EarnPurpose::StarStats { peer }, |extra| {
@@ -166,7 +167,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Ok(());
         };
         let history = page.history_mut(filter);
-        if history.loading && append {
+        if history.load.is_loading() && append {
             return Ok(());
         }
         let offset = if append {
@@ -174,7 +175,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         } else {
             String::new()
         };
-        history.loading = true;
+        history.load.start(append);
         self.send_earn(
             EarnPurpose::StarTransactions {
                 peer,
@@ -184,6 +185,17 @@ impl<S: JsonSender> ConnectDriver<S> {
             |extra| get_star_transactions(extra, peer, filter, &offset, STAR_TX_LIMIT),
         )
         .map(|_| ())
+        .inspect_err(|_| {
+            if let Some(page) = self.session.payments.earn.page.as_mut() {
+                page.history_mut(filter).load.fail();
+            }
+        })
+    }
+
+    fn fail_earn_ton_history(&mut self) {
+        if let Some(page) = self.session.payments.earn.page.as_mut() {
+            page.ton_history.load.fail();
+        }
     }
 
     /// "Show more" under the TON history.
@@ -194,16 +206,17 @@ impl<S: JsonSender> ConnectDriver<S> {
         };
         let peer = page.peer;
         let history = &mut page.ton_history;
-        if history.loading || history.next_offset.is_empty() {
+        if history.load.is_loading() || history.next_offset.is_empty() {
             return Ok(());
         }
-        history.loading = true;
+        history.load.start(true);
         let offset = history.next_offset.clone();
         self.send_earn(
             EarnPurpose::TonTransactions { peer, append: true },
             |extra| get_chat_revenue_transactions(extra, peer.chat_id(), &offset, TON_MORE_SLICE),
         )
         .map(|_| ())
+        .inspect_err(|_| self.fail_earn_ton_history())
     }
 
     /// The next page of a Stars history list.
@@ -423,10 +436,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         let Some(join) = self.session.payments.earn.join.as_mut() else {
             return Ok(());
         };
-        if join.mine.loading {
+        if join.mine.load.is_loading() {
             return Ok(());
         }
-        join.mine.loading = true;
+        join.mine.load.start(append);
         let offset = if append {
             join.mine.next_offset.clone()
         } else {
@@ -437,6 +450,11 @@ impl<S: JsonSender> ConnectDriver<S> {
             get_connected_affiliate_programs(extra, affiliate, &offset, PROGRAMS_PER_PAGE)
         })
         .map(|_| ())
+        .inspect_err(|_| {
+            if let Some(join) = self.session.payments.earn.join.as_mut() {
+                join.mine.load.fail();
+            }
+        })
     }
 
     fn fetch_found_programs(
@@ -465,10 +483,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         let Some(list) = list else {
             return Ok(());
         };
-        if list.loading && append {
+        if list.load.is_loading() && append {
             return Ok(());
         }
-        list.loading = true;
+        list.load.start(append);
         let offset = if append {
             list.next_offset.clone()
         } else {
@@ -479,6 +497,17 @@ impl<S: JsonSender> ConnectDriver<S> {
             search_affiliate_programs(extra, affiliate, sort, &offset, PROGRAMS_PER_PAGE)
         })
         .map(|_| ())
+        .inspect_err(|_| {
+            let earn = &mut self.session.payments.earn;
+            let list = if for_box {
+                earn.programs_box.as_mut()
+            } else {
+                earn.join.as_mut().map(|j| &mut j.found)
+            };
+            if let Some(list) = list {
+                list.load.fail();
+            }
+        })
     }
 
     /// The "Sort by" menu reloads the programs list.
@@ -517,6 +546,34 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.fetch_connected_programs(true)
         } else {
             self.fetch_found_programs(for_box, true)
+        }
+    }
+
+    /// A failed list's Retry: the page that failed, again (the first one
+    /// when no page came in). A failed list is never asked again by
+    /// itself (`PageLoad::may_page`).
+    pub fn retry_starref_programs(
+        &mut self,
+        mine: bool,
+        for_box: bool,
+    ) -> Result<(), ConnectSendError> {
+        self.earn_ready()?;
+        let earn = &self.session.payments.earn;
+        let load = if mine {
+            earn.join.as_ref().map(|j| j.mine.load)
+        } else if for_box {
+            earn.programs_box.as_ref().map(|b| b.load)
+        } else {
+            earn.join.as_ref().map(|j| j.found.load)
+        };
+        let append = match load {
+            Some(PageLoad::Failed { more }) => more,
+            _ => return Ok(()),
+        };
+        if mine {
+            self.fetch_connected_programs(append)
+        } else {
+            self.fetch_found_programs(for_box, append)
         }
     }
 

@@ -174,3 +174,34 @@ fn zero_and_primary_zero_toggle_fit_and_natural_size(cx: &mut TestAppContext) {
     press(vcx, "0");
     assert!(close(scale(&app, vcx), 1.0), "from 2x to natural size");
 }
+
+/// A drag-pan released off the picture (where its mouse-up never fires)
+/// ends at the next move without the button: the picture no longer
+/// follows the pointer. Closing the viewer drops a held drag too.
+#[gpui_kit::test]
+fn a_drag_released_off_the_picture_stops_panning(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    add_photo(&app, vcx, 8915, WIDE);
+    open(&app, vcx, 8915);
+    press(vcx, "+");
+    press(vcx, "+");
+    app.update_in(vcx, |app, _, cx| {
+        app.viewer.drag = Some((100., 100.));
+        app.viewer_drag_moved((90., 95.), true, cx);
+    });
+    let (panned, drag) = app.read_with(vcx, |app, _| (app.viewer.zoom.pan, app.viewer.drag));
+    assert_eq!(drag, Some((90., 95.)), "a held drag pans and follows");
+    app.update_in(vcx, |app, _, cx| {
+        app.viewer_drag_moved((40., 40.), false, cx)
+    });
+    app.read_with(vcx, |app, _| {
+        assert_eq!(app.viewer.drag, None, "the release ended the drag");
+        assert_eq!(app.viewer.zoom.pan, panned, "no pan without the button");
+    });
+    app.update_in(vcx, |app, _, cx| {
+        app.viewer.drag = Some((1., 1.));
+        app.close_media_viewer(cx);
+    });
+    assert_eq!(app.read_with(vcx, |app, _| app.viewer.drag), None);
+}

@@ -290,6 +290,20 @@ pub(super) struct MiniApps {
 }
 
 impl QuillApp {
+    /// The window the mini-app flow runs for (`None`: the main window).
+    #[cfg(test)]
+    pub(in crate::ui) fn mini_app_window(&self) -> Option<quill::ids::ChatId> {
+        self.mini_apps.from_window
+    }
+
+    /// The chat window `chat` closed: a mini-app flow started there goes
+    /// on as the main window's (its boxes and toasts show there).
+    pub(in crate::ui) fn mini_app_window_closed(&mut self, chat: quill::ids::ChatId) {
+        if self.mini_apps.from_window == Some(chat) {
+            self.mini_apps.from_window = None;
+        }
+    }
+
     /// The account a mini app opens for: its web view storage and its
     /// first-open consent are this account's.
     pub(super) fn web_app_account(&self) -> String {
@@ -953,6 +967,16 @@ mod invoice;
 mod phone;
 mod spawn_mini_app_window;
 
+crate::ui::shell::register_dialogs! {
+    /// Mini apps: the first-open terms box / add to the attachment menu.
+    WebAppConfirm => DialogSpec::new(
+        2550,
+        |app| app.mini_apps.confirm.is_some(),
+        QuillApp::build_web_app_confirm_dialog,
+    )
+    .close(|app, _, cx| { app.mini_apps.confirm = None; cx.notify(); }),
+}
+
 #[cfg(test)]
 mod tests {
     // No `super::*`: the kit's glob brings its own `test` attribute.
@@ -979,14 +1003,4 @@ mod tests {
         assert_eq!(hsla_rgb(gpui_kit::white()), Rgb(255, 255, 255));
         assert_eq!(hsla_rgb(gpui_kit::black()), Rgb(0, 0, 0));
     }
-}
-
-crate::ui::shell::register_dialogs! {
-    /// Mini apps: the first-open terms box / add to the attachment menu.
-    WebAppConfirm => DialogSpec::new(
-        2550,
-        |app| app.mini_apps.confirm.is_some(),
-        QuillApp::build_web_app_confirm_dialog,
-    )
-    .close(|app, _, cx| { app.mini_apps.confirm = None; cx.notify(); }),
 }

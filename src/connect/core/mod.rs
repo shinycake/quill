@@ -4,7 +4,9 @@ use super::*;
 use crate::composer::DraftSaveClock;
 use crate::credentials::TelegramCredentials;
 use crate::ids::{ChatId, MessageId, RequestId};
-use crate::state::{ComposerLinkPreview, InstantViewPage, RequestPurpose, Session, ShutdownPhase};
+use crate::state::{
+    ComposerLinkPreview, InstantViewPage, LinkPreviewFetch, RequestPurpose, Session, ShutdownPhase,
+};
 use crate::state::{GroupsPurpose, MessagesPurpose, StickersPurpose, ThreadsPurpose};
 use crate::telegram::client::OwnedEnvelope;
 use crate::telegram::envelope::StoryListView;
@@ -411,21 +413,33 @@ impl<S: JsonSender> ConnectDriver<S> {
                         .remove(&id)
                         .map(|url| ComposerLinkPreview {
                             url,
-                            preview: Some(preview.clone()),
+                            fetch: match preview.clone() {
+                                Some(preview) => LinkPreviewFetch::Loaded(Box::new(preview)),
+                                None => LinkPreviewFetch::NotFound,
+                            },
                         })
                 }),
             _ => None,
         };
-        // MED4b: a failed `getLinkPreview` (TDLib 404 = no preview for
-        // this URL) is "no link info" (TGX `LinkPreview.isNotFound`) —
-        // never a card, never a crash.
-        let link_preview_failed: Option<String> = match &owned.envelope.payload {
-            EnvelopePayload::Error(_) => owned.envelope.extra.and_then(|id| {
+        // MED4b: a 404/400 or an empty answer is "no link info" (TGX
+        // `isNotFound`); any other error is `Failed`, asked again when the URL
+        // is typed again. Every answer ends "Getting link info".
+        let link_preview_failed: Option<(String, LinkPreviewFetch)> = match &owned.envelope.payload
+        {
+            EnvelopePayload::Messages(MessagesPayload::LinkPreview { .. }) => None,
+            payload => owned.envelope.extra.and_then(|id| {
+                let miss = match payload {
+                    EnvelopePayload::Error(err) if err.code == 404 || err.code == 400 => {
+                        LinkPreviewFetch::NotFound
+                    }
+                    EnvelopePayload::Error(_) => LinkPreviewFetch::Failed,
+                    _ => LinkPreviewFetch::NotFound,
+                };
                 (self.session.requests.purpose(id) == Some(RequestPurpose::GetLinkPreview))
                     .then_some(id)
                     .and_then(|id| self.session.messages.composer_preview_urls.remove(&id))
+                    .map(|url| (url, miss))
             }),
-            _ => None,
         };
         // Slice CL2: our `createPrivateChat` answer — the bare `chat`
         // parses as `UpdateNewChat`; the `@extra` tells it apart from a
@@ -804,10 +818,10 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session
                 .messages
                 .composer_previews
-                .answered(&answer.url, answer.preview.flatten());
+                .answered(&answer.url, answer.fetch);
         }
-        if let Some(url) = link_preview_failed {
-            self.session.messages.composer_previews.answered(&url, None);
+        if let Some((url, miss)) = link_preview_failed {
+            self.session.messages.composer_previews.answered(&url, miss);
         }
         // M1 fix-up: "Share link" gate — chain to `getMessageLink` only
         // when `messageProperties.can_get_link` passed; otherwise tell

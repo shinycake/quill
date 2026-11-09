@@ -33,9 +33,31 @@ impl Session {
 
     /// The community `chat_id` was added to: `supergroupFullInfo` /
     /// `userFullInfo.community_id`, else a loaded community listing it.
+    /// A community the user lost access to (deleted) has no chats.
     pub fn chat_community_id(&self, chat_id: i64) -> Option<i64> {
+        let linked = self.cached_chat_community(chat_id)?;
+        match linked {
+            Some(0) => None,
+            Some(id) => Some(id).filter(|id| {
+                self.groups
+                    .communities
+                    .get(id)
+                    .is_none_or(|community| community.have_access)
+            }),
+            None => self
+                .groups
+                .community_full_infos
+                .iter()
+                .find(|(_, info)| info.chats.iter().any(|c| c.chat_id == chat_id))
+                .map(|(id, _)| *id),
+        }
+    }
+
+    /// The community id in the chat's cached full info: `Some(None)` when
+    /// that full info is not cached, `None` for an unknown chat.
+    fn cached_chat_community(&self, chat_id: i64) -> Option<Option<i64>> {
         let chat = self.chats.get(&chat_id)?;
-        let linked = match chat.kind {
+        Some(match chat.kind {
             ChatKind::Supergroup { supergroup_id, .. } => self
                 .supergroup_full_info(supergroup_id)
                 .map(|info| info.profile.community_id),
@@ -45,16 +67,39 @@ impl Session {
                 .get(&user_id.0)
                 .map(|info| info.extras.community_id),
             _ => None,
+        })
+    }
+
+    /// Our `addCommunityChat` (`community_id` is the community) or
+    /// `removeCommunityChat` (0) answered `ok`: the chat's cached full info
+    /// says so too. TDLib reloads only the community's full info before
+    /// its `ok` (`CommunityManager::on_change_community_dialogs`); the
+    /// chat's `supergroupFullInfo.community_id` changes only on its next
+    /// full fetch (`ChatManager::on_update_channel_linked_community_id`
+    /// changes the supergroup alone), so without this the manage screen
+    /// keeps offering Remove after a Remove. A remove only clears a link
+    /// that still names `from`.
+    pub(crate) fn note_chat_community(&mut self, chat_id: i64, from: Option<i64>, to: i64) {
+        let Some(chat) = self.chats.get(&chat_id) else {
+            return;
         };
-        match linked {
-            Some(0) => None,
-            Some(id) => Some(id),
-            None => self
+        let linked = match chat.kind {
+            ChatKind::Supergroup { supergroup_id, .. } => self
                 .groups
-                .community_full_infos
-                .iter()
-                .find(|(_, info)| info.chats.iter().any(|c| c.chat_id == chat_id))
-                .map(|(id, _)| *id),
+                .supergroup_full_infos
+                .get_mut(&supergroup_id)
+                .map(|info| &mut info.profile.community_id),
+            ChatKind::Private { user_id } => self
+                .users_state
+                .user_full_infos
+                .get_mut(&user_id.0)
+                .map(|info| &mut info.extras.community_id),
+            _ => None,
+        };
+        if let Some(linked) = linked
+            && from.is_none_or(|from| *linked == from)
+        {
+            *linked = to;
         }
     }
 

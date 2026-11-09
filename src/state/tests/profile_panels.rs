@@ -1,6 +1,7 @@
 //! State reducer tests: B10 profile and contact panels.
 use super::common::*;
 use super::*;
+use crate::state::fetch::Fetch;
 
 fn photo_json(id: i64, thumb: i32, full: i32) -> String {
     format!(
@@ -522,4 +523,53 @@ fn a_user_photo_change_while_a_page_is_out_drops_its_answer() {
     apply_json(&mut session, &seq, &sink, &user(903));
     apply_json(&mut session, &seq, &sink, &page(more, 901));
     assert!(!session.users_state.user_profile_photos.contains_key(&31));
+}
+
+/// The Business screens wait for the own full info: a failed (or lost)
+/// `getUserFullInfo` ends the wait with its reason, and the answer to the
+/// Retry ends it as ready.
+#[test]
+fn the_business_wait_ends_with_the_own_full_info_error_or_answer() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    session.my_user_id = Some(31);
+    session.settings.business.own_info.begin();
+    let extra = session.request_for_user(RequestPurpose::GetUserFullInfo, 31);
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"error","@extra":"{}","code":408,"message":"Request timeout"}}"#,
+            extra.0
+        ),
+    );
+    assert!(
+        session.settings.business.own_info.error().is_some(),
+        "a failure is not an endless Loading"
+    );
+    // Another user's failure leaves the wait alone.
+    session.settings.business.own_info.begin();
+    let other = session.request_for_user(RequestPurpose::GetUserFullInfo, 32);
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"error","@extra":"{}","code":400,"message":"BAD"}}"#,
+            other.0
+        ),
+    );
+    assert!(session.settings.business.own_info.is_loading());
+    let extra = session.request_for_user(RequestPurpose::GetUserFullInfo, 31);
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"userFullInfo","@extra":"{}","bio":null,"bot_info":null}}"#,
+            extra.0
+        ),
+    );
+    assert_eq!(session.settings.business.own_info, Fetch::Ready(()));
 }

@@ -26,7 +26,23 @@ pub struct EditContactDialog {
     pub(crate) first_name_input: Entity<TextareaState>,
     pub(crate) last_name_input: Entity<TextareaState>,
     pub(crate) note_input: Entity<TextareaState>,
+    /// Whether `note_input` holds the contact's real note yet. The note is
+    /// in the full user info, which can land after the box opens; until
+    /// then an empty field means "not known", and saving it would clear
+    /// the note (`setUserNote` and `addContact` take the whole note).
+    pub(crate) note: ContactNote,
     pub(crate) share_phone: bool,
+}
+
+/// The edit-contact box's private note, by whether it is known.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ContactNote {
+    /// The full user info has not arrived: the field is empty and the
+    /// note is fetched (`fetch_user_full_info`).
+    Waiting,
+    /// The field was filled from the full user info (or the user typed
+    /// over it), so Save sends what it shows.
+    Seeded,
 }
 
 /// B10: birthday form for the current user (tdesktop's birthday box).
@@ -90,13 +106,21 @@ impl EditContactDialog {
         user_id: i64,
         first_name: &str,
         last_name: &str,
-        note: &str,
+        note: Option<&str>,
     ) -> Self {
+        let placeholder = match note {
+            Some(_) => tr(keys::Q_OPS_NOTE_ONLY_VISIBLE_TO_YOU),
+            None => tr(keys::Q_PEOPLE_LOADING),
+        };
         Self {
             user_id,
             first_name_input: field(window, cx, tr(keys::Q_OPS_FIRST_NAME), first_name),
             last_name_input: field(window, cx, tr(keys::Q_OPS_LAST_NAME), last_name),
-            note_input: field(window, cx, tr(keys::Q_OPS_NOTE_ONLY_VISIBLE_TO_YOU), note),
+            note_input: field(window, cx, placeholder, note.unwrap_or_default()),
+            note: match note {
+                Some(_) => ContactNote::Seeded,
+                None => ContactNote::Waiting,
+            },
             share_phone: false,
         }
     }

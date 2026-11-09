@@ -387,25 +387,30 @@ impl<S: JsonSender> ConnectDriver<S> {
         )
     }
 
-    /// The full info of every collapsed community, which its chat-list
-    /// entry is built from; asked once per community, and after a failure
-    /// only once the community changes.
-    pub fn sync_collapsed_communities(&mut self) -> Result<(), ConnectSendError> {
+    /// The full info of every community the user can see: it holds the
+    /// community's notification settings, which its chats fall back to
+    /// (`use_default_mute_for`), and the chat list a collapsed row is built
+    /// from. Asked once per community, and after a failure only once the
+    /// community changes. Runs in every account's poll (`poll_ticks`), so a
+    /// background account's toasts and badge follow a community's mute too.
+    /// True when it asked for something.
+    pub fn sync_community_full_infos(&mut self) -> Result<bool, ConnectSendError> {
         if !self.chats_path_active() {
-            return Ok(());
+            return Ok(false);
         }
         let missing: Vec<i64> = self
             .session
             .groups
             .communities
             .values()
-            .filter(|community| community.have_access && community.are_chats_collapsed)
+            .filter(|community| community.have_access)
             .map(|community| community.id)
             .filter(|id| !self.session.groups.community_full_infos.contains_key(id))
             .collect();
+        let mut asked = false;
         for community_id in missing {
-            self.want_community_full_info(community_id)?;
+            asked |= self.want_community_full_info(community_id)?.is_some();
         }
-        Ok(())
+        Ok(asked)
     }
 }

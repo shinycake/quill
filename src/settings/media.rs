@@ -195,6 +195,7 @@ mod tests {
         // effective default follows the remember flag.
         let dir =
             std::env::temp_dir().join(format!("quill-media-prefs-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
         let paths = AccountPaths::for_root(&dir, &AccountKey::primary());
         assert_eq!(load_media_prefs(&paths), MediaPrefs::default());
         assert!(MediaPrefs::default().default_grouping());
@@ -223,6 +224,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         let corrupt =
             std::env::temp_dir().join(format!("quill-media-prefs-corrupt-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&corrupt);
         let paths = AccountPaths::for_root(&corrupt, &AccountKey::primary());
         std::fs::create_dir_all(corrupt.join("accounts/primary")).unwrap();
         std::fs::write(

@@ -48,7 +48,9 @@ fn agents_need_the_switch_and_this_launchs_token() {
     );
     let app_root = crate::settings::safe_app_root().unwrap_or_default();
 
-    assert!(!access::enabled(), "off by default");
+    // Off, whatever a test before this one left behind.
+    access::set_enabled(false);
+    assert!(!access::enabled());
     assert_eq!(access::read_published_token(&app_root), None);
     let answers = session(&endpoint, &[auth("x")]);
     assert_eq!(answers[0]["error"]["code"], super::code::ACCESS_OFF);

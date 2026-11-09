@@ -44,8 +44,6 @@ pub(crate) struct AdminUi {
     pub(super) event_log_hooked: bool,
     /// The list length an automatic "load earlier" was last asked for.
     pub(super) event_log_autoload: std::cell::Cell<usize>,
-    /// The open filter box (Save applies it, Cancel drops it).
-    pub(super) event_log_filter: Option<super::event_log_filter_box::EventLogFilterBox>,
     /// The chat whose recent-actions poll is running (one timer task).
     pub(super) event_log_poll: Option<ChatId>,
     /// B7: group / channel settings dialog (topics, history, reactions,
@@ -62,13 +60,18 @@ pub(crate) struct AdminUi {
 /// The boost box keeps its state in the session (`groups.boost_box`),
 /// which goes to the background with the account: it closes here so it
 /// does not come back on switch-back. So do the invite-link pages the
-/// Group Settings box opened there (`drop_invite_link_pages`).
+/// Group Settings box opened there (`drop_invite_link_pages`). A Pending
+/// Requests Add or Decline still in its undo time is sent now, through the
+/// leaving account's client, as closing the list does
+/// (`flush_and_close_community_box`): the screen's replacement drops its
+/// timer, and the answer would be lost.
 impl crate::ui::on_screen::Farewell for AdminUi {
     fn farewell(
         app: &mut QuillApp,
         _: &mut gpui_kit::Window,
         cx: &mut gpui_kit::Context<QuillApp>,
     ) {
+        app.flush_and_close_community_box(cx);
         if app
             .session()
             .is_some_and(|session| session.groups.boost_box.is_some())
@@ -100,7 +103,6 @@ impl AdminUi {
             event_log_keystroke: 0,
             event_log_hooked: false,
             event_log_autoload: std::cell::Cell::new(0),
-            event_log_filter: None,
             event_log_poll: None,
             group_settings_dialog: None,
             join_requests_dialog: None,

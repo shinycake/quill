@@ -73,28 +73,59 @@ pub(in crate::ui) fn lock_call_card(
         .into_any_element()
 }
 
+/// The element ids of one second-call card: the lock screen's and the
+/// call window's are in different windows, and tests name each.
+struct SwapCardIds {
+    card: &'static str,
+    decline: &'static str,
+    answer: &'static str,
+}
+
 impl QuillApp {
     /// A second call ringing in during a call, on the lock screen. Its
     /// prompt is a kit box of the main window, not drawn while locked, and
     /// the call windows stay answerable under the lock, so this one must
     /// be too: Decline, or End & Answer.
     pub(in crate::ui) fn swap_call_lock_card(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        self.swap_call_card(
+            SwapCardIds {
+                card: "lock-swap-call",
+                decline: "lock-swap-call-decline",
+                answer: "lock-swap-call-answer",
+            },
+            cx,
+        )
+    }
+
+    /// The same card over the call window, locked or not. The kit box
+    /// (`CallSwap`) is session-wide and shows in the window of the last
+    /// press, which can be a main window hidden to the tray or behind the
+    /// call: the call window, where the user is during a call, answers
+    /// the second call too.
+    pub(in crate::ui) fn swap_call_window_card(
+        &self,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        self.swap_call_card(
+            SwapCardIds {
+                card: "call-window-swap-call",
+                decline: "call-window-swap-call-decline",
+                answer: "call-window-swap-call-answer",
+            },
+            cx,
+        )
+    }
+
+    fn swap_call_card(&self, ids: SwapCardIds, cx: &mut Context<Self>) -> Option<AnyElement> {
         let (title, caller) = self.swap_call_text()?;
-        let decline = Button::new("lock-swap-call-decline")
+        let decline = Button::new(ids.decline)
             .label(tr(keys::CALL_DECLINE))
             .danger()
             .on_click(cx.listener(|this, _, _, cx| this.decline_swap_call(cx)));
-        let answer = Button::new("lock-swap-call-answer")
+        let answer = Button::new(ids.answer)
             .label(tr(keys::Q_OPS_END_ANSWER))
             .primary()
             .on_click(cx.listener(|this, _, _, cx| this.answer_swap_call(cx)));
-        Some(lock_call_card(
-            "lock-swap-call",
-            title,
-            caller,
-            decline,
-            answer,
-            cx,
-        ))
+        Some(lock_call_card(ids.card, title, caller, decline, answer, cx))
     }
 }

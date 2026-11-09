@@ -61,6 +61,7 @@ impl QuillApp {
                     .stickers
                     .emoji
                     .keyword_emojis
+                    .for_query(query)
                     .iter()
                     .map(|emoji| emoji_key(emoji)),
             );

@@ -436,6 +436,9 @@ mod more_menu;
 mod photo_delete;
 mod photo_viewer;
 pub(in crate::ui) use photo_viewer::PendingGallery;
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+mod edit_contact_note_tests;
 mod sharing_request_box;
 mod submit_personal_photo;
 

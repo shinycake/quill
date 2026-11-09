@@ -331,10 +331,52 @@ impl QuillApp {
             }
             page = page.child(found);
         }
-        if join.mine.loading || join.found.loading {
+        if join.mine.load.is_loading() || join.found.load.is_loading() {
             page = page.child(div().flex().justify_center().py_2().child(Spinner::new()));
+        } else if join.mine.load.is_failed() || join.found.load.is_failed() {
+            page = page.child(self.programs_retry_row(
+                "earn-join-retry",
+                join.mine.load.is_failed(),
+                false,
+                cx,
+            ));
         }
         page.into_any_element()
+    }
+
+    /// A program list whose page failed: what failed and a Retry (a
+    /// failed list is never asked again by itself, `PageLoad::may_page`).
+    pub(super) fn programs_retry_row(
+        &self,
+        id: &'static str,
+        mine: bool,
+        for_box: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        div()
+            .flex()
+            .items_center()
+            .justify_center()
+            .gap_2()
+            .py_2()
+            .child(
+                div()
+                    .text_sm()
+                    .text_color(cx.theme().muted_foreground)
+                    .child(tr(keys::Q_MONEY_COULDNT_LOAD_THE_PROGRAMS)),
+            )
+            .child(
+                Button::new(id)
+                    .label(tr(keys::Q_CHAT_RETRY))
+                    .ghost()
+                    .small()
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.earn_call(tr(keys::Q_MONEY_COULDNT_LOAD_THE_PROGRAMS), cx, |driver| {
+                            driver.retry_starref_programs(mine, for_box)
+                        });
+                    })),
+            )
+            .into_any_element()
     }
 
     /// "Sort by Profitability" and its menu (tdesktop `setupSort`).
@@ -381,14 +423,16 @@ impl QuillApp {
         }
         let page_more = earn.join.as_ref().map(|join| {
             (
-                !join.mine.loading && !join.mine.next_offset.is_empty(),
-                !join.found.loading && !join.found.next_offset.is_empty(),
+                join.mine.may_page(),
+                // tdesktop loads "My Programs" to the end before the rest;
+                // a failed "My Programs" page holds the rest back too.
+                !join.mine.load.is_failed() && join.found.may_page(),
             )
         });
         let box_more = earn
             .programs_box
             .as_ref()
-            .is_some_and(|list| !list.loading && !list.next_offset.is_empty());
+            .is_some_and(ProgramList::may_page);
         let join_open = matches!(
             self.session().and_then(|s| s.users_state.open_info_panel),
             Some(InfoPanelTarget::Earn(EarnPanel::Join { .. }))

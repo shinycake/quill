@@ -328,7 +328,7 @@ impl QuillApp {
                 .get(&bot)
                 .and_then(|info| info.as_ref()?.affiliate_program)
                 .is_some_and(|p| p.params.commission_per_mille > 0);
-            if list.loaded && !has_program {
+            if list.load.has_first_page() && !has_program {
                 rows = rows.child(
                     div()
                         .id("earn-programs-add")
@@ -366,9 +366,11 @@ impl QuillApp {
                     cx,
                 ));
             }
-            if !list.loaded {
+            if list.load.is_failed() {
+                rows = rows.child(this.programs_retry_row("earn-box-retry", false, true, cx));
+            } else if !list.load.has_first_page() {
                 rows = rows.child(about(tr(keys::Q_MONEY_LOADING_2)).py_2());
-            } else if list.loading {
+            } else if list.load.is_loading() {
                 rows = rows.child(div().flex().justify_center().py_2().child(Spinner::new()));
             }
             let body = div()

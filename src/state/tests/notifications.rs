@@ -1,6 +1,7 @@
 //! State reducer tests: notifications.
 use super::common::*;
 use super::*;
+use crate::state::fetch::Fetch;
 
 #[test]
 fn notification_settings_mute_and_unmute() {
@@ -374,12 +375,11 @@ fn chat_action_choosing_sticker_label() {
 }
 
 #[test]
-fn reset_all_notification_settings_ok_clears_cached_scope_settings() {
-    // Parity slice: `resetAllNotificationSettings` (schema 1.8.67, line
-    // 13671) confirmed — the cached
-    // scope defaults drop so the next fetch (or the authoritative
-    // `updateScopeNotificationSettings` answers) shows the server-confirmed
-    // defaults instead of the stale pre-reset ones.
+fn reset_all_notification_settings_keeps_the_scopes_its_updates_set() {
+    // `resetAllNotificationSettings`: TDLib sends the reset scopes'
+    // `updateScopeNotificationSettings` before its `ok`
+    // (td/telegram/Requests.cpp resets, then `send_result`). The `ok` must
+    // not wipe them, or Settings > Notifications stays on "Loading…".
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
     session.settings.scope_notification_settings.insert(
@@ -394,9 +394,20 @@ fn reset_all_notification_settings_ok_clears_cached_scope_settings() {
         &mut session,
         &seq,
         &sink,
+        r#"{"@type":"updateScopeNotificationSettings","scope":{"@type":"notificationSettingsScopeGroupChats"},"notification_settings":{"@type":"scopeNotificationSettings","mute_for":0,"sound_id":"0","show_preview":true,"use_default_mute_stories":true,"mute_stories":false,"story_sound_id":"0","show_story_poster":true,"disable_pinned_message_notifications":false,"disable_mention_notifications":false}}"#,
+    );
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
         &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra.0),
     );
-    assert!(session.settings.scope_notification_settings.is_empty());
+    let group = session
+        .settings
+        .scope_notification_settings
+        .get(&NotificationSettingsScope::GroupChats)
+        .map(|s| s.mute_for);
+    assert_eq!(group, Some(0), "the reset value from the update stays");
 }
 
 #[test]
@@ -452,8 +463,10 @@ fn notification_exceptions_answer_lands_per_scope() {
     );
     session
         .settings
-        .notification_exceptions_loading
-        .insert(NotificationSettingsScope::PrivateChats);
+        .notification_exceptions
+        .entry(NotificationSettingsScope::PrivateChats)
+        .or_default()
+        .begin();
     apply_json(
         &mut session,
         &seq,
@@ -465,20 +478,12 @@ fn notification_exceptions_answer_lands_per_scope() {
     );
     assert_eq!(
         session.settings.notification_exceptions[&NotificationSettingsScope::PrivateChats],
-        vec![11, 12]
-    );
-    assert!(
-        !session
-            .settings
-            .notification_exceptions_loading
-            .contains(&NotificationSettingsScope::PrivateChats)
+        Fetch::Ready(vec![11, 12])
     );
 }
 
-/// Parity slice: a failed `getChatNotificationSettingsExceptions` must
-/// not keep the scope in `notification_exceptions_loading` — otherwise
-/// every later dialog open skips the fetch and the list stays
-/// unfetchable.
+/// A failed `getChatNotificationSettingsExceptions` leaves its loading
+/// stage for a failure (shown with a Retry), never stuck on Loading.
 #[test]
 fn failed_notification_exceptions_fetch_retries() {
     let (mut session, sink) = session();
@@ -489,8 +494,10 @@ fn failed_notification_exceptions_fetch_retries() {
     );
     session
         .settings
-        .notification_exceptions_loading
-        .insert(NotificationSettingsScope::GroupChats);
+        .notification_exceptions
+        .entry(NotificationSettingsScope::GroupChats)
+        .or_default()
+        .begin();
     apply_json(
         &mut session,
         &seq,
@@ -500,18 +507,9 @@ fn failed_notification_exceptions_fetch_retries() {
             extra.0
         ),
     );
-    assert!(
-        !session
-            .settings
-            .notification_exceptions_loading
-            .contains(&NotificationSettingsScope::GroupChats)
-    );
-    assert!(
-        !session
-            .settings
-            .notification_exceptions
-            .contains_key(&NotificationSettingsScope::GroupChats)
-    );
+    let fetch = &session.settings.notification_exceptions[&NotificationSettingsScope::GroupChats];
+    assert!(!fetch.is_loading());
+    assert!(fetch.error().is_some());
 }
 
 /// Parity slice: `local_notification_exceptions` finds chats with any
@@ -560,10 +558,10 @@ fn chat_notification_settings_update_refreshes_exceptions() {
         &sink,
         r#"{"@type":"updateNewChat","chat":{"id":7,"title":"m","type":{"@type":"chatTypePrivate","user_id":7},"unread_count":0}}"#,
     );
-    session
-        .settings
-        .notification_exceptions
-        .insert(NotificationSettingsScope::PrivateChats, vec![7, 9]);
+    session.settings.notification_exceptions.insert(
+        NotificationSettingsScope::PrivateChats,
+        Fetch::Ready(vec![7, 9]),
+    );
     // Reset to default prunes just the chat.
     apply_json(
         &mut session,
@@ -576,7 +574,7 @@ fn chat_notification_settings_update_refreshes_exceptions() {
     );
     assert_eq!(
         session.settings.notification_exceptions[&NotificationSettingsScope::PrivateChats],
-        vec![9]
+        Fetch::Ready(vec![9])
     );
     // A custom change drops the whole cached list.
     apply_json(
