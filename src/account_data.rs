@@ -108,6 +108,7 @@ pub fn forget_after_helper(
         crate::agent::grants::forget_account(key);
         crate::agent::activity::forget_account(key);
         crate::agent::prompts::deny_account(key);
+        crate::agent::pacing::forget_account(key);
         crate::web_app::trust::forget_account(account);
         crate::notify_volume::forget_account(account);
         crate::settings::forget_chat_windows_of(account);

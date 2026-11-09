@@ -289,7 +289,6 @@ StoryViewersState::loading
 StoryViewersState::loading+error
 StreamFacts::transport_failed
 StreamWindow::hide_armed
-StyleEditor::pending
 StyleExamples::loading
 Tempo::done
 Tempo::inner_done

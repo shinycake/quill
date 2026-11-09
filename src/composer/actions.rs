@@ -60,6 +60,11 @@ impl DeleteConfirm {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ForwardDraft {
     pub from_chat_id: ChatId,
+    /// The conversation inside `from_chat_id` the messages were picked in
+    /// (a forum topic, a thread, a Saved sublist). With the chat it is the
+    /// selection's key: a forum's topics share the chat id, so a selection
+    /// made in one topic must not show, delete or forward from the next.
+    pub from_topic: TopicId,
     pub message_ids: Vec<MessageId>,
     /// M1: `forwardMessages.send_copy` — drop the "Forwarded from"
     /// attribution (TGX "Hide sender name"; schema 1.8.67 line 12237).
@@ -74,12 +79,18 @@ pub struct ForwardDraft {
 
 impl ForwardDraft {
     /// Already-sent history only. Pending / local ids cannot be forwarded.
-    pub fn from_message(chat_id: ChatId, message_id: MessageId, pending: bool) -> Option<Self> {
+    pub fn from_message(
+        chat_id: ChatId,
+        topic: TopicId,
+        message_id: MessageId,
+        pending: bool,
+    ) -> Option<Self> {
         if pending || message_id.0 <= 0 {
             return None;
         }
         Some(Self {
             from_chat_id: chat_id,
+            from_topic: topic,
             message_ids: vec![message_id],
             send_copy: false,
             remove_caption: false,
@@ -91,18 +102,31 @@ impl ForwardDraft {
         self.message_ids.contains(&message_id)
     }
 
+    /// Whether the messages were picked in `topic` of `chat_id`.
+    pub fn is_from(&self, chat_id: ChatId, topic: TopicId) -> bool {
+        self.from_chat_id == chat_id && self.from_topic == topic
+    }
+
     pub fn is_empty(&self) -> bool {
         self.message_ids.is_empty()
     }
 
-    /// Toggle a same-chat id. Cross-chat selection is not official history
-    /// multi-select — start a new draft instead.
-    pub fn toggle(&mut self, chat_id: ChatId, message_id: MessageId, pending: bool) {
+    /// Toggle an id of the same conversation. Cross-chat (or cross-topic)
+    /// selection is not official history multi-select — start a new draft
+    /// instead.
+    pub fn toggle(
+        &mut self,
+        chat_id: ChatId,
+        topic: TopicId,
+        message_id: MessageId,
+        pending: bool,
+    ) {
         if pending || message_id.0 <= 0 {
             return;
         }
-        if chat_id != self.from_chat_id {
+        if !self.is_from(chat_id, topic) {
             self.from_chat_id = chat_id;
+            self.from_topic = topic;
             self.message_ids = vec![message_id];
             return;
         }
@@ -147,16 +171,23 @@ mod tests {
 
     #[test]
     fn forward_draft_sorts_and_rejects_pending() {
-        assert!(ForwardDraft::from_message(ChatId(11), MessageId(-1), true).is_none());
-        assert!(ForwardDraft::from_message(ChatId(11), MessageId(0), false).is_none());
-        let mut draft = ForwardDraft::from_message(ChatId(11), MessageId(102), false).unwrap();
-        draft.toggle(ChatId(11), MessageId(101), false);
+        let none = TopicId::None;
+        assert!(ForwardDraft::from_message(ChatId(11), none, MessageId(-1), true).is_none());
+        assert!(ForwardDraft::from_message(ChatId(11), none, MessageId(0), false).is_none());
+        let mut draft =
+            ForwardDraft::from_message(ChatId(11), none, MessageId(102), false).unwrap();
+        draft.toggle(ChatId(11), none, MessageId(101), false);
         assert_eq!(draft.message_ids, vec![MessageId(101), MessageId(102)]);
-        draft.toggle(ChatId(11), MessageId(102), false);
+        draft.toggle(ChatId(11), none, MessageId(102), false);
         assert_eq!(draft.message_ids, vec![MessageId(101)]);
-        draft.toggle(ChatId(12), MessageId(40), false);
+        draft.toggle(ChatId(12), none, MessageId(40), false);
         assert_eq!(draft.from_chat_id, ChatId(12));
         assert_eq!(draft.message_ids, vec![MessageId(40)]);
+        // Another topic of the same chat starts a new selection.
+        let topic = TopicId::forum(3);
+        draft.toggle(ChatId(12), topic, MessageId(41), false);
+        assert!(draft.is_from(ChatId(12), topic));
+        assert_eq!(draft.message_ids, vec![MessageId(41)]);
         let (cleared, picker) = cancel_forward_draft(Some(draft));
         assert_eq!(cleared, None);
         assert!(!picker);

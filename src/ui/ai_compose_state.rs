@@ -8,7 +8,7 @@ use super::app::QuillApp;
 use gpui_kit::component::input::{InputEvent, TextareaState};
 use gpui_kit::*;
 use quill::ai_compose::{AiComposeBox, StyleExample, StyleExamples, TextCompositionStyle};
-use quill::ids::{ChatId, OfAccount};
+use quill::ids::{ChatId, ConversationKey, OfAccount};
 use quill::lang::{keys, tr};
 use std::collections::HashSet;
 use std::ops::Range;
@@ -46,18 +46,36 @@ pub(crate) struct StyleEditor {
     /// "Add a link to my account".
     pub(super) show_creator: bool,
     pub(super) warning: Option<EditorWarning>,
+    pub(super) save: StyleSave,
+}
+
+/// Where the editor's Create or Save stands.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum StyleSave {
+    /// Being edited: Create or Save may be pressed.
+    Editing,
     /// Create or Save was sent and has no answer yet.
-    pub(super) pending: bool,
+    Sent,
+}
+
+/// Where the style preview stands: the lookup its link started, the style
+/// it shows, and whether Remove or Delete was confirmed in it.
+pub(crate) enum PreviewStage {
+    /// The `searchTextCompositionStyle` request with this token runs.
+    LookingUp {
+        token: u64,
+    },
+    Shown(TextCompositionStyle),
+    /// Remove or Delete was confirmed here, so its toast shows and the
+    /// preview closes (tdesktop shows those toasts only from this box).
+    Removing(TextCompositionStyle),
 }
 
 /// The style preview an `addstyle/<name>` link opens (tdesktop
 /// `PreviewAiToneBox`).
 pub(crate) struct AiStylePreview {
     pub(super) name: String,
-    /// The `searchTextCompositionStyle` request's token.
-    pub(super) token: u64,
-    /// `None` while the lookup runs.
-    pub(super) style: Option<TextCompositionStyle>,
+    pub(super) stage: PreviewStage,
     pub(super) examples: StyleExamples,
     /// The example shown; one at a time.
     pub(super) example: Option<StyleExample>,
@@ -65,16 +83,46 @@ pub(crate) struct AiStylePreview {
     /// When the example being loaded was asked for (the refresh icon spins
     /// from here).
     pub(super) example_asked_at: Option<Instant>,
-    /// Remove or Delete was confirmed here, so its toast shows and the
-    /// preview closes (tdesktop shows those toasts only from this box).
-    pub(super) removing: bool,
+}
+
+impl AiStylePreview {
+    /// The style, once the lookup answered.
+    pub(super) fn style(&self) -> Option<&TextCompositionStyle> {
+        match &self.stage {
+            PreviewStage::LookingUp { .. } => None,
+            PreviewStage::Shown(style) | PreviewStage::Removing(style) => Some(style),
+        }
+    }
+
+    pub(super) fn into_style(self) -> Option<TextCompositionStyle> {
+        match self.stage {
+            PreviewStage::LookingUp { .. } => None,
+            PreviewStage::Shown(style) | PreviewStage::Removing(style) => Some(style),
+        }
+    }
+
+    /// The lookup's token while it runs.
+    pub(super) fn lookup_token(&self) -> Option<u64> {
+        match self.stage {
+            PreviewStage::LookingUp { token } => Some(token),
+            _ => None,
+        }
+    }
+
+    pub(super) fn removing(&self) -> bool {
+        matches!(self.stage, PreviewStage::Removing(_))
+    }
 }
 
 /// The apply-in-place shortcut's request (tdesktop `TriggerAiApplyInPlace`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ApplyInPlace {
     pub(super) token: u64,
-    pub(super) chat_id: ChatId,
+    /// The conversation whose composer asked: its chat and topic, thread
+    /// or Saved sublist. The answer lands only while the view shows it, so
+    /// a rewrite asked in one forum topic never replaces the next topic's
+    /// draft.
+    pub(super) conversation: ConversationKey,
     /// The window whose composer asked (`None`: the main window's); the
     /// answer rewrites that composer.
     pub(super) window: Option<ChatId>,
@@ -86,7 +134,10 @@ pub(crate) struct ApplyInPlace {
 }
 
 pub(crate) struct AiComposeOpen {
-    pub(super) chat_id: ChatId,
+    /// The conversation whose draft the box rewrites (chat and topic,
+    /// thread or Saved sublist). The box closes when its window shows
+    /// another one, and Apply and Send act only while it is shown.
+    pub(super) conversation: ConversationKey,
     /// The window whose composer the box was opened over (`None`: the
     /// main window's). The box closes when that window shows another
     /// chat, not when the main window does.

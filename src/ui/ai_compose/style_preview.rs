@@ -7,7 +7,7 @@ use super::card::section_title;
 use super::style_menu::{ai_apply_shortcut_text, bound_to, set_bound_style};
 use super::style_notices::text_toast;
 use super::{attention_button, pill_radius, session_mut};
-use crate::ui::ai_compose_state::AiStylePreview;
+use crate::ui::ai_compose_state::{AiStylePreview, PreviewStage};
 use crate::ui::app::QuillApp;
 use crate::ui::message_text::rich_text_line;
 use crate::ui::shell::{DialogKind, QuillShell, scrollable_dialog_content};
@@ -69,13 +69,11 @@ impl QuillApp {
         }
         self.ai_compose.preview = Some(AiStylePreview {
             name,
-            token,
-            style: None,
+            stage: PreviewStage::LookingUp { token },
             examples: StyleExamples::new(false),
             example: None,
             example_token: 0,
             example_asked_at: None,
-            removing: false,
         });
         self.open_box(DialogKind::AiStylePreview);
         cx.notify();
@@ -99,8 +97,7 @@ impl QuillApp {
             .ai_compose
             .preview
             .as_ref()
-            .filter(|preview| preview.style.is_none())
-            .map(|preview| preview.token)
+            .and_then(AiStylePreview::lookup_token)
         else {
             return;
         };
@@ -119,7 +116,7 @@ impl QuillApp {
                 if let Some(preview) = self.ai_compose.preview.as_mut() {
                     preview.examples = StyleExamples::new(style.english_example.is_some());
                     preview.example = style.english_example.clone();
-                    preview.style = Some(style);
+                    preview.stage = PreviewStage::Shown(style);
                 }
                 let loaded = self
                     .ai_compose
@@ -250,7 +247,7 @@ impl QuillApp {
         };
         let theme = cx.theme();
         let (circle, muted) = (theme.muted, theme.muted_foreground);
-        let Some(style) = preview.style.as_ref() else {
+        let Some(style) = preview.style() else {
             return v_flex()
                 .debug_selector(|| "ai-style-preview-loading".into())
                 .items_center()
@@ -342,11 +339,11 @@ impl QuillApp {
             theme.muted_foreground,
             theme.muted_foreground.opacity(0.25),
         );
-        let loading = preview.examples.loading() || preview.style.is_none();
+        let loading = preview.examples.loading() || preview.style().is_none();
         let max = self
             .session()
             .and_then(|s| s.messages.ai_compose.limits.example_count);
-        let another = preview.style.is_some() && preview.examples.can_show_another(max);
+        let another = preview.style().is_some() && preview.examples.can_show_another(max);
         let angle = preview
             .example_asked_at
             .map_or(0., |at| spin_angle(at.elapsed()));
@@ -498,7 +495,7 @@ impl QuillApp {
             .ai_compose
             .preview
             .as_ref()
-            .and_then(|preview| preview.style.as_ref())
+            .and_then(|preview| preview.style())
         else {
             return div().into_any_element();
         };

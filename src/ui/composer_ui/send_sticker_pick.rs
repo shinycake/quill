@@ -153,19 +153,26 @@ impl QuillApp {
         // No URL: nothing to fetch. The chip reads the preview of its own
         // composer's URL, so another window's stays.
         let Some(url) = self.chosen_preview_url(&text) else {
+            self.composer_ui.preview_tried = None;
             return;
         };
         // TGX never prefetches a disabled preview.
         if self.preview_choice().disabled {
             return;
         }
+        // A preview asked for already (loading, loaded or none) is the
+        // session's; one whose request failed is asked again by a composer
+        // that did not ask for it last (the URL typed again).
+        let tried_here = self.composer_ui.preview_tried.as_deref() == Some(url.as_str());
         let already = self.live.as_ref().is_some_and(|live| {
             live.driver
                 .session
                 .messages
                 .composer_previews
                 .get(&url)
-                .is_some()
+                .is_some_and(|stored| {
+                    !matches!(stored.fetch, quill::state::LinkPreviewFetch::Failed) || tried_here
+                })
         });
         if already {
             return;
@@ -188,6 +195,9 @@ impl QuillApp {
                 }
                 if this.preview_choice().disabled {
                     return;
+                }
+                if this.live.is_some() {
+                    this.composer_ui.preview_tried = Some(url.clone());
                 }
                 if let Some(live) = this.live.as_mut()
                     && live.driver.request_composer_link_preview(&url).is_err()
@@ -383,12 +393,12 @@ impl QuillApp {
             .session()
             .and_then(|s| s.messages.composer_previews.get(&first).cloned());
         let fetched: Option<quill::telegram::envelope::LinkPreview> =
-            stored.as_ref().and_then(|p| p.preview.clone()).flatten();
+            stored.as_ref().and_then(|p| p.preview().cloned());
         let preview_line: Option<String> = match &stored {
             // Loaded: title/description (TGX `LinkPreview.getForcedTitle`
             // falls back site → title the same way).
-            Some(s) => match &s.preview {
-                Some(Some(p)) => {
+            Some(s) => match &s.fetch {
+                quill::state::LinkPreviewFetch::Loaded(p) => {
                     let title = if p.title.is_empty() {
                         p.site_name.clone()
                     } else {
@@ -413,9 +423,18 @@ impl QuillApp {
                 }
                 // TDLib 404: "no link info" (TGX
                 // `LinkPreview.isNotFound`) — honest, never a fake card.
-                Some(None) => Some(tr(keys::Q_CHAT_NO_PREVIEW_FOR_THIS_LINK).to_string()),
+                quill::state::LinkPreviewFetch::NotFound => {
+                    Some(tr(keys::Q_CHAT_NO_PREVIEW_FOR_THIS_LINK).to_string())
+                }
+                // A transient failure is not "no preview": it says so, and
+                // the URL typed again asks again.
+                quill::state::LinkPreviewFetch::Failed => {
+                    Some(tr(keys::Q_CHAT_COULDNT_LOAD_LINK_PREVIEW).to_string())
+                }
                 // Request in flight.
-                None => Some(tr(keys::Q_CHAT_GETTING_LINK_INFO).to_string()),
+                quill::state::LinkPreviewFetch::Asked => {
+                    Some(tr(keys::Q_CHAT_GETTING_LINK_INFO).to_string())
+                }
             },
             None => None,
         };

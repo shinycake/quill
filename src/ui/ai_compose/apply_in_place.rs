@@ -24,6 +24,9 @@ impl QuillApp {
         let Some(chat_id) = self.writable_open_chat() else {
             return false;
         };
+        let Some(conversation) = self.open_conversation() else {
+            return false;
+        };
         let Some(style_name) = prefs::current().bound_style_name else {
             self.push_ai_toast(text_toast(tr(keys::AI_COMPOSE_APPLY_UNBOUND)), window, cx);
             return true;
@@ -55,7 +58,7 @@ impl QuillApp {
         }
         self.ai_compose.apply_in_place = Some(ApplyInPlace {
             token,
-            chat_id,
+            conversation,
             window: self.windows.scope,
             selection,
             cursor: selected.end,
@@ -112,7 +115,8 @@ impl QuillApp {
     }
 
     /// Rewrite the composer in place with the answer, while it still
-    /// shows the chat that asked.
+    /// shows the conversation that asked (the same chat in another forum
+    /// topic, thread or Saved sublist is another draft).
     fn apply_ai_in_place_answer(
         &mut self,
         asked: &ApplyInPlace,
@@ -121,7 +125,7 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.session().and_then(|s| s.open_chat) != Some(asked.chat_id) {
+        if self.open_conversation().as_ref() != Some(&asked.conversation) {
             return;
         }
         let replacement = ComposerDoc::from_entities(text, entities);

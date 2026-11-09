@@ -166,7 +166,7 @@ impl QuillApp {
 
     /// Poll the helper and the session's mini-app answers while something
     /// is going on; stops by itself when nothing is left.
-    pub(super) fn ensure_mini_app_poll(&mut self, cx: &mut Context<Self>) {
+    pub(in crate::ui) fn ensure_mini_app_poll(&mut self, cx: &mut Context<Self>) {
         if let Some(window) = self.asking_window() {
             self.mini_apps.from_window = window;
         }

@@ -62,6 +62,9 @@ impl<S: JsonSender> ConnectDriver<S> {
         outcome.progress(self.network_tick(network));
         outcome.progress(self.active_stories_tick(now));
         outcome.progress(self.chat_list_tick(now));
+        // Communities' full infos: their notification settings decide the
+        // mute of chats that keep the default, in the background too.
+        outcome.progress(self.sync_community_full_infos().unwrap_or(false));
         self.pump_exports();
         // Star reactions: commit the ones whose Undo window ended, in the
         // background too (tdesktop's other sessions keep their send timer),

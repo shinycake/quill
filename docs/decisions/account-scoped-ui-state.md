@@ -3016,6 +3016,205 @@ and `each_window_keeps_its_own_gif_section` now checks that the other
 window shows its kept section without asking), `ai_compose/dialog_tests.rs`
 (`a_chat_windows_style_preview_takes_its_answer_in_its_own_frame`).
 
+### Phase 16 (area A)
+
+Round 16 of the review, area A (core outside `src/ui`). All five findings
+were fixed.
+
+**Allowing a confirmed write lets it go again (1).** Round 15 made
+`common::confirm` and `td_call::ask_user` ask `still_allowed()` after the
+user's Allow. The Allow itself runs `grants::update` with `apply_ask`,
+which changes nothing for `Ask::Write` and `Ask::Raw`, but `update` moved
+`grants::generation()` on every call. With "Confirm each send" on, every
+write the user allowed was refused with `GRANTS_CHANGED_MESSAGE`. `update`
+now compares the account's grants before and after the change and saves
+nothing, keeping the generation, when they are equal. This is the shared
+seam: every grant edit goes through it, so a no-op row click doesn't stop
+waiting writes either. Tests: `a_write_request_shows_the_text_and_answers_allow_or_deny`
+and `a_raw_call_shows_the_risk_and_the_request` (`ui/agent_dialogs_tests.rs`)
+press the real Allow button (`answer_agent_request`) and check that the
+generation did not move. `allow_applies_the_grant_then_answers` checks
+that a real grant still moves it. `an_update_that_changes_nothing_lets_a_waiting_write_go`
+(`agent/tools`) checks `still_allowed` on both sides.
+
+**A community's mute holds without opening it (2).** The community's
+notification settings live only in `communityFullInfo`, which was fetched
+for collapsed communities, for the info panel and for a ban.
+`ConnectDriver::sync_community_full_infos` (formerly
+`sync_collapsed_communities`) now asks for the full info of every community
+with `have_access`, once each, and it runs in `poll_ticks` for every
+account, including background ones. The UI drain no longer calls it.
+Test: `every_community_gets_its_full_info_once_in_the_poll`
+(`connect/tests/communities.rs`).
+
+**A flood wait belongs to its account (3).** `pacing::State::flood_until`
+is a map keyed by `AccountKey`. `take_turn` and `flood` take the account,
+`common::write_error(ctx)` passes `ctx.account`, and
+`account_data::forget_after_helper` calls `pacing::forget_account` next to
+`grants::forget_account`, so a log-out clears it. The per-day cap on new
+people stays process-wide (it protects the api_id). Test:
+`a_flood_wait_refuses_that_accounts_sends_until_it_passes`.
+
+**Add All doesn't bring handled requests back (4).** On the `ok` of
+`processCommunityAddChatRequests`, `reset_add_chat_requests` takes every
+in-flight `GetAddChatRequests` request for the community out of the
+registry (`RequestRegistry::take_purpose_for_community`) and sets the list
+to an answered empty one. A page that answers afterwards has no pending
+request and is ignored. The old `drop_add_chat_requests(Option)` is now
+two functions, one for a single request and one for the reset. Test:
+`a_page_asked_before_add_all_does_not_bring_handled_requests_back`.
+
+**The manage screen sees a Remove or Add at once (5).** Checked in the
+TDLib 1.8.70 source: `ToggleCommunityPeerLinkQuery` calls
+`CommunityManager::on_change_community_dialogs`, which reloads only the
+community's full info before the `ok`.
+`ChatManager::on_update_channel_linked_community_id` changes the
+`Channel`, not the `ChannelFull`, so `supergroupFullInfo.community_id`
+changes only on the next full fetch. The `ok` of `addCommunityChat` and
+`removeCommunityChat` now updates the chat's cached supergroup or user full
+info (`Session::note_chat_community`). A remove clears only a link that
+still names that community. An `updateCommunity` with `have_access: false`
+drops that community's cached full info, and `chat_community_id` ignores a
+link to a community without access, so a deleted community's chats no
+longer map to it or follow its mute. Tests:
+`remove_and_add_ok_update_the_chats_cached_community` and
+`a_community_without_access_has_no_chats` (`state/tests/communities.rs`).
+
+**Build.** `origin/main` (af2a519b2) did not build the UI binary
+(`src/ui/communities` called the removed `ConnectionUi::set_note`). This
+branch merges `fix-community-notes` (PR #1415) for that and does not fix
+it separately.
+
+**Guards.** None added. Finding 1 was fixed in `grants::update`, the one
+place every caller goes through. The account-keying in finding 3 can't be
+checked from the source text.
+
+### Phase 16 (area B: every main-only step says why, and per-chat state is per conversation)
+
+Round 16 of the review, area B, on `claude/sm-review16-b`. The numbers are
+the review's ranked findings. The four "dodges" are round-14 and round-15
+state that the implicit-state check did not catch. Two shapes kept coming
+back, so each now has a guard at its seam.
+
+**Main-only frame steps (findings 6, 7 and 11).** `frame_upkeep` runs only
+in the main window's frame. Each round found another step there that a
+chat window's box or press depends on, so with the main window minimized
+that work never moved on. Every step left in `frame_upkeep` now has its
+own `// main-only: <why>` comment directly above it. These are: restoring
+chat windows, the sticker box, the earn pages (only main draws the info
+panel), the AI button's blink, a pending story open, a pending mini-app
+action, the story viewer's upkeep (moved out into `story_frame_upkeep`)
+and sign-in. The rest moved to `per_window_upkeep`:
+
+- The video chat and stream boxes (`call_boxes_upkeep`) run in the window
+  that hosts the box (`dialog_may_show_in`), so "Start video chat" pressed
+  in a chat window's header takes its "join as" answer there (6).
+- The AI style notices run in the preview's window when a preview is open,
+  else in the box's window, else in the window of the last press. The
+  emoji and icon fetches run where the box or preview is drawn (7).
+- The Premium-limit toast runs in the window of the last press (11).
+- The folder editor's prefill and a failed collectible lookup run in the
+  window that hosts their box. The seek slider runs in every window.
+
+*Guard.* `check-window-scope.py` now fails CI on any `self.step(` call in
+`frame_upkeep` without a `// main-only:` comment block directly above it,
+and on any inline `self.field` work there. That work belongs in a step
+that says why it is main-only, or in `per_window_upkeep`. Profiling,
+`lock_waits` and `asked_in_place` are not steps. I checked the guard by
+adding an unmarked step and an inline write: both fail.
+
+**Per-conversation state (findings 1 and 2).** The forward selection and
+the AI box were keyed by chat only. A forum's topics, a direct-messages
+topic, a thread and a Saved Messages sublist share one chat id, so a
+selection made in one topic stayed live in the next topic of the same
+forum. There, Delete or Forward acted on the old topic's messages, and
+the AI answer wrote into the next topic's draft.
+
+- `TopicId` has a `Thread { message_thread_id }` variant and a `None`
+  default. `Session::open_conversation(chat)` gives the full
+  `ConversationKey`. The order is: a thread if one is open, else the
+  direct-messages topic, the forum topic or the Saved sublist.
+- `ForwardDraft` carries `from_topic`. `toggle` restarts the selection
+  when it comes from another conversation. `forward_draft()`, the seam
+  every reader goes through, hides a selection from another topic of the
+  chat on screen, even in the frame before the upkeep drops it. The
+  forward bar's own destination is not affected.
+- `ChatUi.topic` is the full `TopicId`, so a Saved sublist or thread
+  change also replaces `ChatUi` whole. On that change,
+  `dismiss_forward_for_view` drops the selection and its focus.
+- `AiComposeOpen` and `ApplyInPlace` hold a `ConversationKey` in place of
+  the chat id. The box closes, and the shortcut's answer is dropped, when
+  the window shows another conversation.
+
+*Designs considered.* (a) Clear the selection in each topic switcher
+(forum topics, threads, direct-messages topics, Saved sublists): the next
+switcher would forget. Rejected. (b) One selection per conversation, kept
+in a map: it would bring back a selection the user left. Rejected. (c, chosen) The selection names
+its conversation, and the read seam hides one that is not on screen.
+
+**What else was built, by finding.**
+
+3. *A deep-link flow outlived an account switch.* `ChatsState::
+   end_deep_link_flow` clears the link, its agent mark and the original.
+   `LinkUi`'s farewell calls it, so switching back does not replay the
+   flow.
+4. *A toast for a closed window blocked the queue.* `asking_window()`
+   filters `Asker::Window(w)` by `has(w)` in the seam, as `open_box_in`
+   already did. A flow whose window closed (a mini app, the wallpaper file
+   picker) now asks as the main window, so its toasts and boxes show.
+   `forget_chat_window` also tells the mini app its window closed
+   (`mini_app_window_closed`).
+5. *A prep whose Send window now shows another chat.* The prep finishes
+   in that window only while it still shows the slot. Otherwise it falls
+   through to `window_where`, as a closed window does.
+8. *Quick search and hashtag search from a chat window opened the main
+   window's search out of sight.* `open_search_ui` and the global branch
+   of a hashtag search hand the work to the main window
+   (`hand_to_main_window`), which comes to the front. A scoped hashtag
+   search closes that window's chat search first.
+9. *A link-preview failure was kept for the session.* An answer is one
+   `LinkPreviewFetch` (`Asked`, `Loaded`, `NotFound`, `Failed`). Error
+   codes 400 and 404 mean there is no preview. Any other error is
+   `Failed`: the chip says the preview could not load, and the composer
+   asks again once the URL changes (`preview_tried`).
+10. *Sticker and emoji keyword search used per-window "already searched"
+    copies.* `KeywordEmojis` keeps its query, and the readers use
+    `for_query`. `MediaPanel::searched` and `keyword_searched` are gone.
+    Only the window of the last press asks, and only when the session's
+    query differs. Found stickers show only for their own query.
+
+**Dodges.** `StyleEditor::pending` is `StyleSave { Editing, Sent }`. The
+preview's `token`, `style: Option<_>` (used as the "lookup running"
+flag) and `removing` are one `PreviewStage { LookingUp { token },
+Shown(style), Removing(style) }`. The baseline line for
+`StyleEditor::pending` is dropped. The `MediaPanel` copies and the mini
+app's `from_window` are covered by 10 and 4.
+
+*Main build fix.* `origin/main` (af2a519b2) did not build: the
+communities module called `ConnectionUi::set_note`, which phase 15
+removed. This branch is built on `fix-community-notes` (PR #1415), which
+fixes it.
+
+Tests: `chat_ui_tests.rs` (`a_selection_made_in_one_topic_goes_with_it`),
+`ai_compose/dialog_tests.rs`
+(`the_box_closes_when_the_view_moves_to_another_topic`,
+`the_shortcuts_answer_skips_another_topic`), `composer/actions.rs` (a
+toggle from another topic restarts the draft), `on_screen_tests.rs`
+(`a_switch_ends_the_link_flow_the_account_was_running`),
+`chat_window/dialog_host_tests.rs`
+(`a_closed_windows_flow_asks_as_the_main_window`,
+`a_chat_windows_video_chat_start_goes_on_in_its_own_frames`,
+`a_premium_limit_toast_shows_in_the_window_that_hit_it`), the connect
+link-preview test (a 429 is `Failed`), `reactions_live`
+(`for_query`), and `mini_app_flow_tests` (opens a real chat window first,
+so the Asker filter keeps it).
+
+**Not done, or not tested.**
+
+- The prep fallback (5) needs a live client to send. It has no test.
+- Search hand-off (8) and the link-preview retry (9) were not run live.
+
+
 ### Phase 15 (area C)
 
 Round 15 of the review, area C (the rest of `src/ui`), on

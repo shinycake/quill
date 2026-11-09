@@ -694,6 +694,25 @@ impl RequestRegistry {
         self.remove(key)
     }
 
+    /// Drop every in-flight request with `purpose` for `community_id`, so
+    /// an answer that no longer fits the state it would change is ignored
+    /// (a page of add-chat requests asked before Add All reset the list).
+    pub(crate) fn take_purpose_for_community(
+        &mut self,
+        purpose: RequestPurpose,
+        community_id: i64,
+    ) {
+        let keys: Vec<u64> = self
+            .pending
+            .iter()
+            .filter(|(_, req)| req.purpose == purpose && req.community_id == Some(community_id))
+            .map(|(key, _)| *key)
+            .collect();
+        for key in keys {
+            self.remove(key);
+        }
+    }
+
     pub(crate) fn invalidate_auth(&mut self) {
         let auth: Vec<u64> = self
             .pending

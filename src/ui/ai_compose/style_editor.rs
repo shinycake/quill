@@ -3,7 +3,7 @@
 //! account" and, when editing, Delete Style; Create or Save in the footer.
 
 use super::{attention_button, pill_radius};
-use crate::ui::ai_compose_state::{AiComposeView, EditorWarning, StyleEditor};
+use crate::ui::ai_compose_state::{AiComposeView, EditorWarning, StyleEditor, StyleSave};
 use crate::ui::app::QuillApp;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::*;
@@ -70,7 +70,7 @@ impl QuillApp {
                 .is_some_and(|style| style.creator_user_id != 0),
             editing: editing.map(|style| style.name),
             warning: None,
-            pending: false,
+            save: StyleSave::Editing,
         });
         open.view = AiComposeView::StyleEditor;
         cx.notify();
@@ -227,7 +227,7 @@ impl QuillApp {
                     .w_full()
                     .rounded(pill_radius())
                     .label(label)
-                    .disabled(editor.pending)
+                    .disabled(editor.save == StyleSave::Sent)
                     .on_click(cx.listener(|this, _, window, cx| {
                         this.submit_ai_style_editor(window, cx);
                     })),
@@ -256,7 +256,7 @@ impl QuillApp {
         let Some(editor) = self.ai_style_editor_mut() else {
             return;
         };
-        if editor.pending {
+        if editor.save == StyleSave::Sent {
             return;
         }
         editor.warning = if editor.emoji_id == 0 {
@@ -272,7 +272,7 @@ impl QuillApp {
         if editor.warning.is_some() {
             return;
         }
-        editor.pending = true;
+        editor.save = StyleSave::Sent;
         let editor = editor.clone();
         let Some(live) = self.live.as_mut() else {
             return;
@@ -294,7 +294,7 @@ impl QuillApp {
         };
         if sent.is_err() {
             if let Some(editor) = self.ai_style_editor_mut() {
-                editor.pending = false;
+                editor.save = StyleSave::Editing;
             }
             self.ai_compose_error_toast(
                 &quill::ai_compose::AiBoxError::Other(String::new()),

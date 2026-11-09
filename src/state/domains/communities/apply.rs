@@ -110,21 +110,25 @@ impl Session {
             return;
         };
         let outcome = match purpose {
-            CommunitiesPurpose::AddChat { chat_id, .. } => CommunityOutcome::ChatAdded {
-                community_id,
-                chat_id,
-            },
+            CommunitiesPurpose::AddChat { chat_id, .. } => {
+                self.note_chat_community(chat_id, None, community_id);
+                CommunityOutcome::ChatAdded {
+                    community_id,
+                    chat_id,
+                }
+            }
             CommunitiesPurpose::RemoveChat { chat_id } => {
                 if let Some(info) = self.groups.community_full_infos.get_mut(&community_id) {
                     info.chats.retain(|chat| chat.chat_id != chat_id);
                 }
+                self.note_chat_community(chat_id, Some(community_id), 0);
                 CommunityOutcome::ChatRemoved {
                     community_id,
                     chat_id,
                 }
             }
             CommunitiesPurpose::ProcessAddChatRequest { chat_id, approve } => {
-                self.drop_add_chat_requests(community_id, Some(chat_id));
+                self.drop_add_chat_request(community_id, chat_id);
                 CommunityOutcome::RequestProcessed {
                     community_id,
                     chat_id,
@@ -132,7 +136,7 @@ impl Session {
                 }
             }
             CommunitiesPurpose::ProcessAddChatRequests { approve, count } => {
-                self.drop_add_chat_requests(community_id, None);
+                self.reset_add_chat_requests(community_id);
                 CommunityOutcome::AllRequestsProcessed {
                     community_id,
                     approve,
@@ -166,12 +170,11 @@ impl Session {
         self.communities.outcomes.push_back(outcome);
     }
 
-    /// A handled request leaves the list (`chat_id`), or every request
-    /// does (`None`). The pending count in the full info is TDLib's
-    /// alone: it reloads the full info before answering `ok`
-    /// (`CommunityManager::on_change_community_dialogs`), so the new count
-    /// has already come with `updateCommunityFullInfo`.
-    fn drop_add_chat_requests(&mut self, community_id: i64, chat_id: Option<i64>) {
+    /// A handled request leaves the list. The pending count in the full
+    /// info is TDLib's alone: it reloads the full info before answering
+    /// `ok` (`CommunityManager::on_change_community_dialogs`), so the new
+    /// count has already come with `updateCommunityFullInfo`.
+    fn drop_add_chat_request(&mut self, community_id: i64, chat_id: i64) {
         let Some(list) = self
             .communities
             .add_chat_requests
@@ -180,15 +183,26 @@ impl Session {
         else {
             return;
         };
-        match chat_id {
-            Some(chat_id) => {
-                let before = list.requests.len();
-                list.requests.retain(|r| r.chat_id != chat_id);
-                if list.requests.len() < before {
-                    list.total_count = list.total_count.saturating_sub(1).max(0);
-                }
-            }
-            None => *list = AddChatRequestList::default(),
+        let before = list.requests.len();
+        list.requests.retain(|r| r.chat_id != chat_id);
+        if list.requests.len() < before {
+            list.total_count = list.total_count.saturating_sub(1).max(0);
+        }
+    }
+
+    /// Add All or Decline All handled every request. A page asked before
+    /// it would bring handled requests back, so the page in flight is
+    /// dropped (its answer then has no pending request and is ignored) and
+    /// the list is an answered empty one.
+    fn reset_add_chat_requests(&mut self, community_id: i64) {
+        for first_page in [true, false] {
+            self.requests.take_purpose_for_community(
+                RequestPurpose::Communities(CommunitiesPurpose::GetAddChatRequests { first_page }),
+                community_id,
+            );
+        }
+        if let Some(fetch) = self.communities.add_chat_requests.get_mut(&community_id) {
+            *fetch = Fetch::Ready(AddChatRequestList::default());
         }
     }
 

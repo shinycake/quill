@@ -242,12 +242,21 @@ pub(crate) fn bump_generation_for_test() {
 
 /// Change the grants of `account` and save them. Refused while the UI
 /// driver injects an agent's input: an agent never widens its own grants.
+/// A change that leaves the grants as they were (an Allow on a one-off
+/// confirmation) saves nothing and keeps the generation, so it does not
+/// refuse the writes waiting on it.
 pub fn update(account: &AccountKey, change: impl FnOnce(&mut AccountGrants)) {
     if super::ui_driver::guard::refuse_if_injecting("change which chats agents may use") {
         return;
     }
     change_all(|all| {
-        change(all.entry(account.0.clone()).or_default());
+        let before = all.get(&account.0).cloned().unwrap_or_default();
+        let mut after = before.clone();
+        change(&mut after);
+        if after == before {
+            return false;
+        }
+        all.insert(account.0.clone(), after);
         true
     });
 }

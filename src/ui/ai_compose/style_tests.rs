@@ -5,7 +5,7 @@
 //! apply hotkey with no style bound only toasts. Nothing reaches Telegram:
 //! the app has no connection.
 use super::tests::{click, close_box, frames, open_main};
-use crate::ui::ai_compose_state::{AiComposeView, EditorWarning};
+use crate::ui::ai_compose_state::{AiComposeView, EditorWarning, StyleSave};
 use crate::ui::app::QuillApp;
 use crate::ui::keybindings::apply_custom_bindings;
 use gpui_kit::component::WindowExt;
@@ -81,9 +81,13 @@ fn an_empty_name_warns_and_sends_nothing(cx: &mut gpui_kit::TestAppContext) {
             .open
             .as_ref()
             .and_then(|open| open.editor.as_ref())
-            .map(|editor| (editor.warning, editor.pending))
+            .map(|editor| (editor.warning, editor.save))
     });
-    assert_eq!(editor, Some((Some(EditorWarning::Name), false)), "not sent");
+    assert_eq!(
+        editor,
+        Some((Some(EditorWarning::Name), StyleSave::Editing)),
+        "not sent"
+    );
     assert!(main.debug_bounds("ai-style-warning").is_some());
     assert_eq!(view(&app, &mut main), Some(AiComposeView::StyleEditor));
 }

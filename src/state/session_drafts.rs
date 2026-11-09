@@ -4,6 +4,48 @@ use super::*;
 use crate::composer::DraftTopic;
 
 impl Session {
+    /// The conversation the view in place shows inside `chat_id`: a comment
+    /// thread, a forum topic, a channel's direct-messages conversation, a
+    /// Saved Messages sublist, or the chat itself. Two of them in one chat
+    /// show different messages, so what a view opened for one (a selection,
+    /// an AI rewrite) is keyed by this, not by the chat.
+    pub fn open_conversation(&self, chat_id: ChatId) -> crate::ids::ConversationKey {
+        crate::ids::ConversationKey {
+            account: self.account.clone(),
+            chat_id,
+            topic: self.open_topic_id(chat_id),
+        }
+    }
+
+    /// The topic half of [`Session::open_conversation`].
+    pub fn open_topic_id(&self, chat_id: ChatId) -> crate::ids::TopicId {
+        use crate::ids::TopicId;
+        // A thread opened inside a forum topic shows its replies only, so
+        // it is a conversation of its own, unlike its draft slot.
+        if let Some(thread) = self.thread_for_chat(chat_id) {
+            return TopicId::Thread {
+                message_thread_id: thread.thread_id,
+            };
+        }
+        if let Some(topic) = self.open_direct_topic(chat_id) {
+            return TopicId::DirectMessages {
+                direct_messages_chat_topic_id: topic,
+            };
+        }
+        if self.open_chat != Some(chat_id) {
+            return TopicId::None;
+        }
+        if let Some(topic) = self.open_topic {
+            return TopicId::forum(topic);
+        }
+        match self.threads.saved.sublist.as_ref() {
+            Some(sublist) if self.is_saved_messages(chat_id) => TopicId::SavedMessages {
+                saved_messages_topic_id: sublist.topic_id,
+            },
+            _ => TopicId::None,
+        }
+    }
+
     /// The draft slot the composer of `chat_id` writes to right now: the
     /// open reply thread (`messageTopicThread`; inside a forum the thread
     /// stays in its topic, as sends do), else the open forum topic, else

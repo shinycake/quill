@@ -234,16 +234,23 @@ impl QuillApp {
         self.spawn_scoped_in(window, cx, async move |this, cx| {
             let prepared = worker.await;
             let mut done = Some((origin, prepared));
+            // The window Send was tapped in finishes it while it still
+            // shows the slot. One that shows another chat now leaves it to
+            // the window that does show the slot, below: finished here, the
+            // sent caption and reply stayed in that window's composer.
             let _ = this.update_in(cx, |this, window, cx| {
-                if let Some((origin, prepared)) = done.take() {
+                let shown_here = done
+                    .as_ref()
+                    .is_some_and(|(origin, _)| this.send_slot().as_ref() == Some(&origin.slot));
+                if shown_here && let Some((origin, prepared)) = done.take() {
                     this.finish_media_prep(job, origin, prepared, Some(window), cx);
                 }
             });
-            // Its window closed, or another account was on screen since:
-            // the send still goes out, through its own account's client.
-            // A window that shows the slot now (the chat reopened in a new
-            // window, the account back on screen) has its composer cleared
-            // as the one Send was tapped in would have.
+            // Its window closed, shows another chat, or another account
+            // was on screen since: the send still goes out, through its own
+            // account's client. A window that shows the slot now (the chat
+            // reopened in a new window, the account back on screen) has its
+            // composer cleared as the one Send was tapped in would have.
             let shown = this
                 .app()
                 .update(cx, |this, cx| {

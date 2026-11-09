@@ -168,10 +168,15 @@ impl QuillApp {
 impl ChatWindows {
     /// [`QuillApp::asking_window`], for code that holds other parts of
     /// the app borrowed (a note set with the client in hand).
+    ///
+    /// A carried window that has closed since the flow started asks for
+    /// nothing: the main window takes what it asks for, as a box does
+    /// (`open_box_in`). Without this a toast was queued for a window that
+    /// never draws again, and held up every toast behind it.
     pub(in crate::ui) fn asking_window(&self) -> Option<Option<ChatId>> {
         match self.asker {
             Asker::InPlace => Some(self.scope),
-            Asker::Window(window) => Some(window),
+            Asker::Window(window) => Some(window.filter(|chat| self.has(*chat))),
             Asker::Nobody => None,
         }
     }

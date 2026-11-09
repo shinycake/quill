@@ -154,6 +154,11 @@ impl Session {
                     self.remember_files(std::slice::from_ref(photo));
                 }
                 self.communities.full_info_failed.remove(&community.id);
+                // A community the user lost access to (deleted, or left):
+                // its chats no longer belong to it or follow its mute.
+                if !community.have_access {
+                    self.groups.community_full_infos.remove(&community.id);
+                }
                 self.groups.communities.insert(community.id, community);
             }
             // Slice (communities backend core): `updateCommunityFullInfo`

@@ -290,6 +290,20 @@ pub(super) struct MiniApps {
 }
 
 impl QuillApp {
+    /// The window the mini-app flow runs for (`None`: the main window).
+    #[cfg(test)]
+    pub(in crate::ui) fn mini_app_window(&self) -> Option<quill::ids::ChatId> {
+        self.mini_apps.from_window
+    }
+
+    /// The chat window `chat` closed: a mini-app flow started there goes
+    /// on as the main window's (its boxes and toasts show there).
+    pub(in crate::ui) fn mini_app_window_closed(&mut self, chat: quill::ids::ChatId) {
+        if self.mini_apps.from_window == Some(chat) {
+            self.mini_apps.from_window = None;
+        }
+    }
+
     /// The account a mini app opens for: its web view storage and its
     /// first-open consent are this account's.
     pub(super) fn web_app_account(&self) -> String {

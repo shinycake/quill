@@ -105,9 +105,10 @@ impl QuillApp {
         if self.chat_ui.rich_editor_open {
             return;
         }
-        let Some(chat_id) = self.session().and_then(|s| s.open_chat) else {
+        let Some(conversation) = self.open_conversation() else {
             return;
         };
+        let chat_id = conversation.chat_id;
         let secret = self.session().is_some_and(|s| {
             s.chats
                 .get(&chat_id.0)
@@ -128,7 +129,7 @@ impl QuillApp {
         );
         let send = ai.start();
         self.ai_compose.open = Some(AiComposeOpen {
-            chat_id,
+            conversation,
             window: self.windows.scope,
             ai,
             view: AiComposeView::Card,
@@ -175,7 +176,7 @@ impl QuillApp {
         let (Some(send), Some(open)) = (send, self.ai_compose.open.as_ref()) else {
             return;
         };
-        let chat_id: ChatId = open.chat_id;
+        let chat_id: ChatId = open.conversation.chat_id;
         let Some(live) = self.live.as_mut() else {
             return;
         };
@@ -219,9 +220,9 @@ impl QuillApp {
             return;
         };
         let markup = quill::composer::entities_to_markup(&result.text, &result.entities);
-        let chat_id = open.chat_id;
+        let asked = open.conversation.clone();
         self.ai_compose.open = None;
-        if self.session().and_then(|s| s.open_chat) == Some(chat_id) {
+        if self.open_conversation() == Some(asked) {
             self.set_composer_markup(&markup, window, cx);
         }
         cx.notify();
@@ -230,9 +231,13 @@ impl QuillApp {
     /// Apply, then send through the composer's send path (tdesktop
     /// `sendResult`).
     pub(super) fn send_ai_compose(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let chat_id = self.ai_compose.open.as_ref().map(|open| open.chat_id);
+        let asked = self
+            .ai_compose
+            .open
+            .as_ref()
+            .map(|open| open.conversation.clone());
         self.apply_ai_compose(window, cx);
-        if chat_id.is_some() && self.session().and_then(|s| s.open_chat) == chat_id {
+        if asked.is_some() && self.open_conversation() == asked {
             self.submit_from_send_button(window, cx);
         }
     }
@@ -241,13 +246,19 @@ impl QuillApp {
     /// `HistoryWidget::canSendAiComposeDirect`): the send button would
     /// send now, with no slow-mode wait and no Stars charge.
     pub(super) fn ai_compose_can_send(&self) -> bool {
-        let Some(chat_id) = self.ai_compose.open.as_ref().map(|open| open.chat_id) else {
+        let Some(asked) = self
+            .ai_compose
+            .open
+            .as_ref()
+            .map(|open| open.conversation.clone())
+        else {
             return false;
         };
-        let free = self.session().is_some_and(|s| {
-            s.open_chat == Some(chat_id)
-                && s.send_gate(chat_id) == quill::paid_messages::SendGate::Free
-        });
+        let shown = self.open_conversation().as_ref() == Some(&asked);
+        let free = shown
+            && self.session().is_some_and(|s| {
+                s.send_gate(asked.chat_id) == quill::paid_messages::SendGate::Free
+            });
         free && self.send_button_kind_now(false, true) == quill::send_button::SendButtonKind::Send
     }
 }
