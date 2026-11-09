@@ -192,6 +192,16 @@ pub fn update_memory(account: &str, change: impl FnOnce(&mut AccountVolumes)) {
     }
 }
 
+/// `account` logged out or was removed: its volumes go, and the file is
+/// saved without them.
+pub fn forget_account(account: &str) {
+    if with_file(|file| !file.accounts.contains_key(account)) {
+        return;
+    }
+    update_memory(account, |volumes| *volumes = AccountVolumes::default());
+    persist();
+}
+
 /// Save the in-memory volumes on a worker thread (the write syncs the
 /// disk). A failed write keeps the in-memory value for this run.
 pub fn persist() {

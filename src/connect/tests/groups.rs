@@ -686,7 +686,7 @@ fn driver_send_recorded_video_note_to_ignores_the_open_chat() {
     // Recorded in chat 11, finished after chat 12 was opened.
     driver.session.open_chat = Some(ChatId(12));
     let extra = driver
-        .send_recorded_video_note_to(ChatId(11), &draft, None)
+        .send_recorded_video_note_to(ChatId(11), &Default::default(), &draft, None)
         .expect("sends");
     let last = recorder.snapshot().into_iter().last().unwrap();
     let value: Value = serde_json::from_str(&last).unwrap();

@@ -56,6 +56,10 @@ impl QuillApp {
         self.ai_compose
             .style_prompt
             .update(cx, |state, cx| state.set_value(prompt, window, cx));
+        // A save from an editor left earlier never closes this one.
+        if let Some(session) = super::session_mut(self) {
+            session.messages.ai_compose.forget_style_save();
+        }
         let Some(open) = self.ai_compose.open.as_mut() else {
             return;
         };

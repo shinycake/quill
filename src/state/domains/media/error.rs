@@ -45,12 +45,12 @@ impl Session {
                 call_request_error_line(err, "Could not load shared media"),
             );
         }
-        // The gallery's Stories / Gifts tabs load from their own requests.
+        // The gallery's Gifts tab loads from its own request (Stories fail in
+        // the stories error arm, which owns that purpose).
         if let Some(purpose) = pending.map(|p| p.purpose)
             && let Some(chat_id) = pending.and_then(|p| p.chat_id)
         {
             let tab = match purpose {
-                RequestPurpose::GetChatPostedToChatPageStories => Some(SharedMediaTab::Stories),
                 RequestPurpose::Media(MediaPurpose::GetProfileGifts { .. }) => {
                     Some(SharedMediaTab::Gifts)
                 }

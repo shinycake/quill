@@ -153,6 +153,26 @@ fn from_member_search_filters_by_sender_and_pages_with_total() {
             .len(),
         2
     );
+    // So is a late error: the newer query's answer still lands.
+    let zed = fx.last_request("searchChatMembers");
+    fx.feed(&format!(
+        r#"{{"@type":"error","@extra":"{}","code":420,"message":"FLOOD_WAIT_3"}}"#,
+        extra_of(&members)
+    ));
+    fx.feed(&format!(
+        r#"{{"@type":"chatMembers","@extra":"{}","total_count":1,"members":[{{"@type":"chatMember","member_id":{{"@type":"messageSenderUser","user_id":9}},"status":{{"@type":"chatMemberStatusMember"}}}}]}}"#,
+        extra_of(&zed)
+    ));
+    assert_eq!(
+        fx.driver
+            .session
+            .search
+            .chat_search
+            .from_picker
+            .as_ref()
+            .map(|picker| picker.members.clone()),
+        Some(vec![MessageSender::User { user_id: 9 }])
+    );
 
     // Choosing a member searches that sender's messages, no text needed.
     fx.driver

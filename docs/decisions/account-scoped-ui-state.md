@@ -2169,3 +2169,110 @@ need that structure are listed at the end.
 - **Not tested.** The bot-create and Edit Bot polls, the Edit box
   closing on delete or upgrade, and the upgraded chat window's move all
   need a live driver. They have no tests.
+
+### Phase 13 (area A)
+
+Round 13 of the review, area A, on `claude/sm-review13-a`. All eleven
+material findings were fixed. A sweep of core for the same shapes found
+five more, and four of those were fixed too.
+
+**Per-account stores are forgotten in one place (1).** Account keys get
+reused: a logout keeps `account-<n>`, and `add_account` hands out the
+lowest free one. Agent grants, the agent action log, mini app trust,
+notification volumes and chat-window layouts were keyed by that string.
+So were the web view data folder and three files in the account folder.
+A new sign-in in the slot took all of them over. tdesktop's
+`Account::loggedOut` wipes every per-account key through
+`Storage::Account::reset`. Quill now does the same through
+`account_data`:
+
+- `account_data::forget(app_root, key)` drops every store above, plus
+  the folder's `recent_hashtags.json`, `paid_trust.json` and
+  `launch-lines.bin`, and `webview/<key>/`. A prompt the account is
+  still waiting on is answered Denied. Logout and account removal call
+  it (`forget_account_sends`), and so does `delete_account_folder`, so
+  the next start's sweep covers a removal that was cut short.
+- `account_data::claim` records the signed-in user in
+  `accounts/<key>/owner.json`. The first ready session of a different
+  user in that slot forgets the slot before anything reads it. That
+  covers a crash or quit in the middle of a logout.
+- `every_store_is_classified` walks `src/` for file-name literals
+  (`.json`, `.jsonl`, `.bin`, `.key`, `.wrapped`). Each one must be
+  listed as dropped or as kept with a reason, so a new store fails the
+  test until someone decides.
+- Writing the test turned up lost updates in `grants::update` and in
+  web app trust, where read, change and write were separate steps. Both
+  now change under one lock.
+- Kept on purpose: `exports/` (call logs and exports the user saved),
+  device preferences (tdesktop keeps app settings too), and the macOS
+  WKWebView store, which is keyed by a hash of account and bot.
+
+**The lock holds for a whole agent call (2).** `set_paused_by_lock`
+counts locks and wakes every `wait_for`. A wait checks the lock each
+time it wakes, so one that sees the lock returns nothing.
+`call_on` reads the count at the start. If Quill locked at any point
+during the call, a read tool returns the lock message, and a write tool
+returns `LOCKED_WHILE_RUNNING_MESSAGE` ("it may have been done"). Its
+images are dropped too.
+
+**A recording keeps the place it was sent from (3).** `SendTarget` now
+carries a `SendPlace` (topic, thread or direct-messages topic) taken at
+Send. `send_voice_note_to` and `send_recorded_video_note_to` route by
+it, and a closed topic is still refused, whatever chat is open when the
+file finishes.
+
+**Edits drop translations (4).** `updateMessageContent` with different
+text removes that message's translations and their jobs, in every
+language. An answer still in flight for the old text is dropped with
+them.
+
+**Answers settle only their own request (5, 6, 8, 10, 11).**
+
+- A history page dropped by a window reset ends the jump or the date
+  jump that waited for it (`abandon_history_around`).
+- A failed share search answers the search with no results.
+- The gift-code check and apply, the giveaway info and the language
+  link box each store their `RequestId`. Answers for other requests are
+  dropped.
+- The AI style editor waits for `style_save`. Opening an editor
+  forgets the last one's save. A late answer still adds the style to
+  the list but leaves the new editor alone.
+- The bot edit dialog keeps its loads and saves as `RequestId`s, so a
+  reopened dialog for the same bot ignores the old one's answers.
+  `saving` is now `saving()`, the count of saves in flight.
+
+**Recent hashtags stay with the first account (7).** The app prefs move
+no longer takes `recent_hashtags.json`. A file moved by an earlier
+build goes back to the first account's folder, or is removed when that
+account is gone.
+
+**A failed set loads again (9).** Reopening the sticker or emoji panel,
+or reconnecting, clears `media_library.failed`.
+
+**Sweep.**
+
+- The profile gallery's Stories tab never failed. Its purpose belongs
+  to the stories error arm, and the gallery arm sat in the media error
+  arm, which that purpose never reaches. The stories arm now fails the
+  tab. A failed further page no longer zeroes a loaded tab's count.
+- The Premium sticker examples could not be fetched again after a
+  failure. The error arm now clears `asked`.
+- An earlier "From:" picker query's error wiped the newer query's id,
+  so its answer was dropped. The error now has to match the stored id.
+- The affiliate setup page closed on any `setChatAffiliateProgram`
+  answer. It now waits for its own `RequestId` (`SetupPage::waits_for`),
+  so a save from a page you left no longer closes the next page. The
+  toast still shows.
+- Not fixed: the affiliate program lists (the join page and the
+  programs box) take any page answer of their purpose. A late "more"
+  page from an earlier join page or sort can mix into the new one. They
+  need a request id per list.
+
+**Tests.** `account_data_tests.rs` (forget, reuse, prompts, and the
+store classification), the lock tests in `agent/access.rs`,
+`connect/tests/send_place.rs`, and new cases in `translate.rs`,
+`history_window.rs`, `share.rs`, `link_info.rs`, `giveaways.rs`,
+`media_library.rs`, `ai_compose.rs`, `owned_bots.rs`, `earn.rs`,
+`shared_media_tabs.rs`, `find_in_history.rs`, `premium_purchase.rs`
+and `settings/app_prefs.rs`. None of them waits on time. The
+round-trip wait test ends on the lock, not a timeout.

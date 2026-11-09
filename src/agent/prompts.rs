@@ -161,6 +161,20 @@ pub fn answer(id: u64, decision: Decision) {
     crate::wake::AGENT.poke();
 }
 
+/// `account` logged out or was removed: its prompts are answered Denied,
+/// so an Allow given later can't apply to whoever signs in next.
+pub fn deny_account(account: &AccountKey) {
+    let mut queue = crate::locks::lock_or_recover(&QUEUE);
+    let (theirs, rest): (VecDeque<Pending>, VecDeque<Pending>) =
+        queue.drain(..).partition(|p| p.prompt.account == *account);
+    *queue = rest;
+    drop(queue);
+    for pending in theirs {
+        let _ = pending.reply.try_send(Decision::Denied);
+    }
+    crate::wake::AGENT.poke();
+}
+
 /// Turning access off answers every prompt with Denied.
 pub fn deny_all() {
     let drained: Vec<Pending> = crate::locks::lock_or_recover(&QUEUE).drain(..).collect();

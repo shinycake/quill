@@ -4,8 +4,8 @@
 //! file, the Opus encoder is joined), and the user can open another chat
 //! meanwhile. The chat, reply target and caption are therefore fixed when
 //! Send is tapped ([`SendTarget`]) and travel with the background job: the
-//! recording goes to the chat it was sent from, never to whichever chat is
-//! open when the file is ready.
+//! recording goes to the chat, topic and thread it was sent from, never to
+//! whichever is open when the file is ready.
 #![deny(clippy::indexing_slicing)]
 
 use super::account_job::StartedOn;
@@ -29,6 +29,8 @@ pub(super) struct SendTarget {
     /// switched to.
     account: StartedOn,
     chat_id: ChatId,
+    /// The topic and thread inside the chat, fixed at the tap too.
+    place: quill::connect::SendPlace,
     reply: Option<ComposerReplyTo>,
     caption: String,
 }
@@ -43,9 +45,16 @@ impl SendTarget {
         Self {
             account,
             chat_id,
+            place: Default::default(),
             reply,
             caption: caption.trim().to_owned(),
         }
+    }
+
+    /// The topic and thread of the chat the send goes to.
+    fn at(mut self, place: quill::connect::SendPlace) -> Self {
+        self.place = place;
+        self
     }
 
     /// The reply of the request: the pending reply when it belongs to the
@@ -100,7 +109,12 @@ impl QuillApp {
             return None;
         }
         let reply = self.reply_for_send(cx);
-        Some(SendTarget::new(account, chat_id, reply, caption))
+        let place = self
+            .live
+            .as_ref()
+            .map(|live| live.driver.send_place(chat_id))
+            .unwrap_or_default();
+        Some(SendTarget::new(account, chat_id, reply, caption).at(place))
     }
 
     /// The recording consumes the composer when Send is tapped, not when
@@ -230,6 +244,7 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut() {
             let sent = live.driver.send_voice_note_to(
                 target.chat_id,
+                &target.place,
                 &draft,
                 &target.caption,
                 target.reply_to(),
@@ -338,9 +353,12 @@ impl QuillApp {
             }
         };
         if let Some(live) = self.live.as_mut() {
-            let sent =
-                live.driver
-                    .send_recorded_video_note_to(target.chat_id, &draft, target.reply_to());
+            let sent = live.driver.send_recorded_video_note_to(
+                target.chat_id,
+                &target.place,
+                &draft,
+                target.reply_to(),
+            );
             if sent.is_ok() {
                 self.connection
                     .set_note(StatusNote::silent(tr(keys::Q_MISC_SENDING_VIDEO_NOTE)));

@@ -118,6 +118,36 @@ fn the_info_box_asks_tdlib_and_keeps_the_answer() {
     std::fs::remove_dir_all(dir).unwrap();
 }
 
+/// Giveaway A's late answer or error never shows under giveaway B.
+#[test]
+fn the_info_box_takes_only_its_own_answer() {
+    let (dir, prepared) = prepared_tmp(&MemorySecretStore::new());
+    let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+    let recorder = Arc::new(RecordingSender::new());
+    let seq = AtomicU64::new(0);
+    let mut driver = ready_driver(&recorder, prepared, &sink, &seq);
+    let a = driver.request_giveaway_info(-100, 55, summary()).unwrap();
+    let b = driver.request_giveaway_info(-100, 56, summary()).unwrap();
+    let ongoing = |extra: &crate::ids::RequestId| {
+        json!({"@type":"giveawayInfoOngoing","@extra":extra.as_extra(),"creation_date":5,
+            "status":{"@type":"giveawayParticipantStatusParticipating"},"is_ended":false})
+    };
+    feed(&mut driver, &seq, &sink, ongoing(&a));
+    feed(
+        &mut driver,
+        &seq,
+        &sink,
+        json!({"@type":"error","@extra":a.as_extra(),"code":400,"message":"MESSAGE_ID_INVALID"}),
+    );
+    let lookup = driver.session.payments.giveaway.info.as_ref().unwrap();
+    assert_eq!(lookup.message_id, 56);
+    assert!(lookup.loading && lookup.info.is_none() && lookup.error.is_none());
+    feed(&mut driver, &seq, &sink, ongoing(&b));
+    let lookup = driver.session.payments.giveaway.info.as_ref().unwrap();
+    assert!(!lookup.loading && lookup.info.is_some());
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
 #[test]
 fn price_options_only_inform() {
     let (dir, prepared) = prepared_tmp(&MemorySecretStore::new());

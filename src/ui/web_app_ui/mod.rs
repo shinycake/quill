@@ -298,11 +298,7 @@ pub(super) fn helper_path() -> Option<std::path::PathBuf> {
 /// data-store identifier ([`data_store_id`]), so both are passed.
 fn data_dir(account: &str, bot_id: i64) -> Option<std::path::PathBuf> {
     let root = quill::settings::safe_app_root()?;
-    Some(
-        root.join("webview")
-            .join(account)
-            .join(format!("bot-{bot_id}")),
-    )
+    Some(quill::account_data::webview_dir(&root, account).join(format!("bot-{bot_id}")))
 }
 
 /// 16 bytes (as hex) naming the WebKit data store of one bot of one

@@ -15,7 +15,7 @@ use crate::telegram::requests_paid_messages::{
 };
 
 /// Where the trusted prices live, per account.
-const TRUST_FILE: &str = "paid_trust.json";
+pub(crate) const TRUST_FILE: &str = "paid_trust.json";
 
 impl<S: JsonSender> ConnectDriver<S> {
     /// Whether an answer can change what a chat charges.

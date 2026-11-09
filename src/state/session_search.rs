@@ -64,6 +64,13 @@ impl Session {
         seq: u64,
     ) {
         if self.history_page_detached(pending, seq) {
+            // The window it was for was replaced (a jump down, an own send,
+            // a topic switch) or left: the jump it served ends with it,
+            // rather than wait on "Loading message..." for an answer that
+            // was just dropped.
+            if let Some(message_id) = pending.around_message_id {
+                self.abandon_history_around(pending.chat_id, message_id);
+            }
             return;
         }
         let Some(chat_id) = pending.chat_id else {
@@ -74,6 +81,25 @@ impl Session {
         self.store_first_page(chat_id, messages);
         if let Some(message_id) = pending.around_message_id {
             self.finish_history_around(Some(pending), message_id, false, seq);
+        }
+    }
+
+    /// The around page for `message_id` in `chat_id` was dropped unused:
+    /// the search jump and the date jump waiting on it end.
+    fn abandon_history_around(&mut self, chat_id: Option<ChatId>, message_id: MessageId) {
+        let search = &mut self.search.chat_search;
+        if matches!(
+            search.jump,
+            ChatSearchJump::Loading { message_id: current } if current == message_id
+        ) && (search.chat_id.is_none() || search.chat_id == chat_id)
+        {
+            search.jump = ChatSearchJump::None;
+        }
+        if let Some((pending_chat, pending_id, _)) = self.search.date_jump_pending
+            && pending_id == message_id
+            && Some(pending_chat) == chat_id
+        {
+            self.search.date_jump_pending = None;
         }
     }
 

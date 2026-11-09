@@ -123,6 +123,47 @@ fn library_sets_load_lazily_with_a_cap_and_failures_are_not_retried() {
     assert_eq!(h.sent("downloadFile").len(), 1);
 }
 
+fn set_ids_asked(h: &Harness, set_id: i64) -> usize {
+    h.sent("getStickerSet")
+        .iter()
+        .filter(|v| v["set_id"].as_str() == Some(set_id.to_string().as_str()))
+        .count()
+}
+
+fn fail_set_one(h: &mut Harness) {
+    h.driver.ensure_library_sets(&[1]).unwrap();
+    let request = h.sent("getStickerSet").pop().unwrap();
+    h.ingest(&format!(
+        r#"{{"@type":"error","@extra":"{}","code":420,"message":"FLOOD_WAIT_3"}}"#,
+        Harness::extra_of(&request).0
+    ));
+    assert!(h.driver.session.media.media_library.failed.contains(&1));
+    h.driver.ensure_library_sets(&[1]).unwrap();
+}
+
+/// A set whose load failed once (a FLOOD_WAIT while scrolling) is asked
+/// for again when the panel opens next, instead of staying blank.
+#[test]
+fn a_failed_set_loads_again_when_the_panel_reopens() {
+    let mut h = Harness::ready();
+    fail_set_one(&mut h);
+    assert_eq!(set_ids_asked(&h, 1), 1, "not while the panel stays open");
+    h.driver.open_media_panel().unwrap();
+    h.driver.ensure_library_sets(&[1]).unwrap();
+    assert_eq!(set_ids_asked(&h, 1), 2);
+}
+
+/// Coming back online retries it too.
+#[test]
+fn a_failed_set_loads_again_after_a_reconnect() {
+    let mut h = Harness::ready();
+    fail_set_one(&mut h);
+    h.ingest(r#"{"@type":"updateConnectionState","state":{"@type":"connectionStateConnecting"}}"#);
+    h.ingest(r#"{"@type":"updateConnectionState","state":{"@type":"connectionStateReady"}}"#);
+    h.driver.ensure_library_sets(&[1]).unwrap();
+    assert_eq!(set_ids_asked(&h, 1), 2);
+}
+
 #[test]
 fn message_reaction_options_parse_and_custom_emoji_reactions_toggle() {
     let mut h = Harness::ready();

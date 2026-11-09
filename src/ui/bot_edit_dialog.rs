@@ -300,7 +300,7 @@ impl QuillApp {
                     .as_ref()
                     .is_some_and(|e| e.name.is_some() && e.about.is_some());
             let load_failed = edit.as_ref().is_some_and(|e| e.load_failed);
-            let saving = edit.as_ref().is_some_and(|e| e.saving > 0);
+            let saving = edit.as_ref().is_some_and(|e| e.saving() > 0);
             let saved = edit.as_ref().is_some_and(|e| e.saved > 0);
             let server_error = edit.as_ref().and_then(|e| e.error.clone());
             let username = this

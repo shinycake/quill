@@ -247,6 +247,17 @@ impl Session {
         {
             self.finish_history_around(pending, message_id, true, seq);
         }
+        // A failed share box search ends that half with nothing found, as
+        // "Add People" does, so the box says "No matching chats" instead of
+        // "Searching..." for good. Only the current search's requests count.
+        if let Some(pending) = pending
+            && matches!(
+                pending.purpose,
+                RequestPurpose::SearchShareChats | RequestPurpose::SearchShareChatsOnServer
+            )
+        {
+            self.messages.share_search.accept(pending.id, &[]);
+        }
         if pending.map(|p| p.purpose) == Some(RequestPurpose::ForwardMessages)
             && let Some(pending) = pending
         {

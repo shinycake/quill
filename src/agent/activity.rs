@@ -209,6 +209,12 @@ pub fn mark_undone(account: &AccountKey, id: u64) {
     });
 }
 
+/// `account` logged out or was removed: its entries go (chat titles, the
+/// text sent, Undo targets), so the next sign-in under the key sees none.
+pub fn forget_account(account: &AccountKey) {
+    change_log(|store| store.actions.retain(|action| action.account != *account));
+}
+
 /// Empty the log for every account. Ids go on from where they were, so an
 /// Undo the page still holds can't land on a new entry.
 pub fn clear() {

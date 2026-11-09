@@ -340,6 +340,9 @@ pub struct ConnectDriver<S: JsonSender> {
     pub(crate) call_sound_watch: Option<(i32, crate::calls::stream_audio::watch::PlaybackWatch)>,
     pub(crate) credentials: TelegramCredentials,
     pub(crate) paths: AccountPaths,
+    /// The Telegram user this client was last checked against the account
+    /// folder's owner (`account_data::claim`).
+    pub(crate) claimed_owner: Option<i64>,
     pub(crate) database_key: DatabaseKey,
     pub(crate) parameters_sent: bool,
     pub(crate) search_debounce_token: u64,

@@ -250,3 +250,69 @@ fn channel_auto_translate_is_parsed_gated_and_toggled() {
     h.ingest(&json);
     assert!(h.driver.session.chat_auto_translate(ChatId(13)));
 }
+
+/// `updateMessageContent` of message 42 with `text`.
+fn edited(text: &str) -> String {
+    format!(
+        r#"{{"@type":"updateMessageContent","chat_id":7,"message_id":42,"new_content":{{"@type":"messageText","text":{{"@type":"formattedText","text":"{text}","entities":[]}}}}}}"#
+    )
+}
+
+fn answer(extra: &str, text: &str) -> String {
+    format!(r#"{{"@type":"formattedText","text":"{text}","entities":[],"@extra":"{extra}"}}"#)
+}
+
+fn translate_42(h: &mut Harness) -> String {
+    h.driver
+        .translate_message(ChatId(7), MessageId(42), "en")
+        .expect("translate request");
+    sent_request(&h.recorder, "translateMessageText")["@extra"]
+        .as_str()
+        .unwrap()
+        .to_owned()
+}
+
+/// tdesktop drops a message's translation when its text changes: the edit
+/// shows, and a translated chat asks for the new text again.
+#[test]
+fn an_edit_drops_the_translation_of_the_old_text() {
+    let mut h = Harness::new();
+    let extra = translate_42(&mut h);
+    h.ingest(&answer(&extra, "Hello"));
+    assert!(matches!(
+        h.driver
+            .session
+            .message_translation(ChatId(7), MessageId(42), "en"),
+        Some(Translation::Done { .. })
+    ));
+    let revision = h.driver.session.messages.translate.revision;
+    h.ingest(&edited("Hola de nuevo"));
+    assert_eq!(
+        h.driver
+            .session
+            .message_translation(ChatId(7), MessageId(42), "en"),
+        None
+    );
+    assert!(h.driver.session.messages.translate.revision > revision);
+    assert!(
+        h.driver
+            .session
+            .needs_translation(ChatId(7), MessageId(42), "en")
+    );
+}
+
+/// An answer for the text before the edit, landing after it, is not kept
+/// as the translation of the new text.
+#[test]
+fn a_translation_in_flight_across_an_edit_is_dropped() {
+    let mut h = Harness::new();
+    let extra = translate_42(&mut h);
+    h.ingest(&edited("Hola de nuevo"));
+    h.ingest(&answer(&extra, "Hello"));
+    assert_eq!(
+        h.driver
+            .session
+            .message_translation(ChatId(7), MessageId(42), "en"),
+        None
+    );
+}

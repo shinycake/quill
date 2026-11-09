@@ -16,6 +16,23 @@ pub struct GiveawayInfoLookup {
     pub info: Option<GiveawayInfoData>,
     pub loading: bool,
     pub error: Option<String>,
+    /// The `getGiveawayInfo` this box waits for: another box's answer (one
+    /// closed, then another giveaway opened) settles nothing here.
+    pub request: RequestId,
+}
+
+impl GiveawayInfoLookup {
+    /// `pending` is this box's own lookup: settle it.
+    fn take_answer(&mut self, pending: Option<&PendingRequest>) -> bool {
+        let ours = self.loading
+            && pending.is_some_and(|p| {
+                p.purpose == RequestPurpose::GetGiveawayInfo && p.id == self.request
+            });
+        if ours {
+            self.loading = false;
+        }
+        ours
+    }
 }
 
 /// What a new giveaway can be bought with.
@@ -102,10 +119,9 @@ impl Session {
         info: GiveawayInfoData,
         pending: Option<&PendingRequest>,
     ) {
-        if pending.map(|p| p.purpose) == Some(RequestPurpose::GetGiveawayInfo)
-            && let Some(lookup) = self.payments.giveaway.info.as_mut()
+        if let Some(lookup) = self.payments.giveaway.info.as_mut()
+            && lookup.take_answer(pending)
         {
-            lookup.loading = false;
             lookup.error = None;
             lookup.info = Some(info);
         }
@@ -162,8 +178,9 @@ impl Session {
         let state = &mut self.payments.giveaway;
         match pending.map(|p| p.purpose) {
             Some(RequestPurpose::GetGiveawayInfo) => {
-                if let Some(lookup) = state.info.as_mut() {
-                    lookup.loading = false;
+                if let Some(lookup) = state.info.as_mut()
+                    && lookup.take_answer(pending)
+                {
                     lookup.info = None;
                     lookup.error = Some("This giveaway is not available any more.".into());
                 }

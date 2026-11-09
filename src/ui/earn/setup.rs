@@ -435,8 +435,8 @@ impl QuillApp {
                 .label(label)
                 .primary()
                 .w_full()
-                .disabled(locked || setup.saving)
-                .loading(setup.saving)
+                .disabled(locked || setup.is_saving())
+                .loading(setup.is_saving())
                 .on_click(cx.listener(|this, _, _, cx| {
                     if let Some(setup) = this.earn_mut().and_then(|e| e.setup.as_mut()) {
                         setup.confirm = Some(SetupConfirm::Save);

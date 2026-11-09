@@ -137,3 +137,28 @@ fn a_collectible_lookup_sends_the_item_type_and_keeps_the_answer_or_the_failure(
     let lookup = driver.session.payments.hub.collectible.clone().unwrap();
     assert_eq!(lookup.failed.as_deref(), Some("COLLECTIBLE_NOT_FOUND"));
 }
+
+/// A failed fetch of the sticker preview's examples is asked again next
+/// time the preview shows, instead of staying empty for the session.
+#[test]
+fn failed_premium_sticker_examples_are_asked_again() {
+    let store = MemorySecretStore::new();
+    let (_dir, prepared) = prepared_tmp(&store);
+    let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+    let recorder = Arc::new(RecordingSender::new());
+    let seq = AtomicU64::new(0);
+    let mut driver = ready_driver(&recorder, prepared, &sink, &seq);
+    assert!(driver.maybe_fetch_premium_stickers().unwrap().is_some());
+    assert!(driver.maybe_fetch_premium_stickers().unwrap().is_none());
+    let request = sent_request(&recorder, "getPremiumStickerExamples");
+    let error = json!({
+        "@type": "error", "@extra": request["@extra"],
+        "code": 500, "message": "INTERNAL",
+    })
+    .to_string();
+    driver
+        .ingest(copy_and_parse(&error, &seq, &sink).unwrap())
+        .unwrap();
+    assert!(!driver.session.payments.hub.premium_stickers_loading);
+    assert!(driver.maybe_fetch_premium_stickers().unwrap().is_some());
+}

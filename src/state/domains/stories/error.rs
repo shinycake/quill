@@ -141,6 +141,20 @@ impl Session {
                 if purpose == RequestPurpose::SetCloseFriends {
                     self.stories.close_friends_pending = None;
                 }
+                // The profile gallery's Stories tab loads from this request
+                // too: it fails instead of loading forever.
+                if purpose == RequestPurpose::GetChatPostedToChatPageStories
+                    && let Some(chat_id) = pending.and_then(|p| p.chat_id)
+                {
+                    self.fail_profile_tab(
+                        chat_id,
+                        SharedMediaTab::Stories,
+                        crate::state::request_errors::call_request_error_line(
+                            err,
+                            "Could not load this tab",
+                        ),
+                    );
+                }
                 self.fail_story_page_op(pending, error_reason(err).to_string());
             }
             _ => {}

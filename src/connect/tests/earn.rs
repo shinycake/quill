@@ -419,8 +419,42 @@ fn setup_starts_updates_and_ends_a_program() {
     assert!(sent["parameters"].is_null());
     error(&mut p, "setChatAffiliateProgram", "STARREF_HASH_REVOKED");
     let earn = &p.0.session.payments.earn;
-    assert!(!earn.setup.as_ref().unwrap().saving);
+    assert!(!earn.setup.as_ref().unwrap().is_saving());
     assert!(earn.notes[1].starts_with("Failed: "));
+}
+
+/// Save, go back, open the setup page again: the first save's late answer
+/// (or error) leaves the new page open and idle.
+#[test]
+fn a_reopened_setup_page_stays_open_for_an_earlier_save() {
+    let mut p = parts();
+    p.0.open_starref_setup(BOT).unwrap();
+    p.0.save_starref_program().unwrap();
+    p.0.session.payments.earn.setup = None;
+    p.0.open_starref_setup(BOT).unwrap();
+    answer(&mut p, "setChatAffiliateProgram", json!({"@type": "ok"}));
+    let earn = &p.0.session.payments.earn;
+    assert!(earn.setup.is_some() && !earn.setup_closed);
+
+    p.0.end_starref_program().unwrap();
+    p.0.session.payments.earn.setup = None;
+    p.0.open_starref_setup(BOT).unwrap();
+    p.0.save_starref_program().unwrap();
+    let waiting = p.0.session.payments.earn.setup.as_ref().map(|s| s.saving);
+    // The end (sent second to last) fails late: the new save still waits.
+    let end =
+        p.1.snapshot()
+            .iter()
+            .filter_map(|json| serde_json::from_str::<Value>(json).ok())
+            .filter(|value| value["@type"] == "setChatAffiliateProgram")
+            .nth(1)
+            .unwrap();
+    let mut refused = json!({"@type": "error", "code": 400, "message": "STARREF_HASH_REVOKED"});
+    refused["@extra"] = end["@extra"].clone();
+    feed(&mut p, refused);
+    let setup = p.0.session.payments.earn.setup.as_ref().unwrap();
+    assert!(setup.is_saving());
+    assert_eq!(Some(setup.saving), waiting);
 }
 
 #[test]

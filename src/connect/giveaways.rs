@@ -32,6 +32,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             info: None,
             loading: true,
             error: None,
+            request: extra,
         });
         let result = self.send_json_request(extra, &get_giveaway_info(extra, chat_id, message_id));
         if result.is_err() {

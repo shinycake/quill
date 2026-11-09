@@ -541,3 +541,31 @@ fn hiding_the_bar_keeps_reads_held_back() {
     assert!(h.history().opened_with_unread);
     assert!(h.driver.session.message_ids_to_view(ChatId(7)).is_empty());
 }
+
+/// A jump whose around page was dropped because the window was replaced
+/// meanwhile (jump down, an own send) ends: the search bar does not stay on
+/// "Loading message..." for an answer that will never be used.
+#[test]
+fn a_jump_whose_page_was_dropped_by_a_window_reset_ends() {
+    let mut h = Harness::with_unread_chat();
+    let first = h.driver.select_chat(ChatId(7)).unwrap().unwrap();
+    h.answer(first, &[20, 30, 40]);
+    h.driver
+        .select_chat_open(ChatId(7), crate::state::HistoryOpen::Message(MessageId(5)))
+        .unwrap();
+    let around = h.last_history_request();
+    assert_eq!(around["from_message_id"], 5);
+    assert_eq!(
+        h.driver.session.search.chat_search.jump,
+        crate::state::ChatSearchJump::Loading {
+            message_id: MessageId(5)
+        }
+    );
+    let extra: u64 = around["@extra"].as_str().unwrap().parse().unwrap();
+    h.driver.session.reset_history_window(ChatId(7));
+    h.answer(RequestId(extra), &[3, 4, 5, 6, 7]);
+    assert_eq!(
+        h.driver.session.search.chat_search.jump,
+        crate::state::ChatSearchJump::None
+    );
+}

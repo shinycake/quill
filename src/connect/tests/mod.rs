@@ -118,6 +118,7 @@ mod search;
 mod search_tabs;
 mod search_upgrades;
 mod send_box_options;
+mod send_place;
 mod send_prepared;
 mod settings;
 mod settings_account;

@@ -395,6 +395,19 @@ impl Session {
             slot.content = content.clone();
         }
         self.note_conference_invite_content(chat_id, message_id, &content);
+        // An edit of the text drops its translations; a poll's votes keep
+        // them (the content changes, the question does not).
+        let mut same_text = false;
+        self.edit_loaded_message(chat_id, message_id, |message| {
+            same_text |= message.content == content
+                || matches!(
+                    (&message.content, &content),
+                    (MessageContent::Poll(_), MessageContent::Poll(_))
+                );
+        });
+        if !same_text {
+            self.forget_message_translations(chat_id, message_id);
+        }
         let loaded = self.edit_loaded_message(chat_id, message_id, |message| {
             message.content = content.clone();
         });

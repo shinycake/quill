@@ -439,6 +439,7 @@ pub fn call_on(conn: u64, name: &str, arguments: &Value, agent: &str) -> Value {
     let _ = GENERATION.try_with(|current| current.set(crate::agent::access::generation()));
     let _ = CONN.try_with(|current| current.set(conn));
     let _ = ui_shot::take_attached();
+    let locks = crate::agent::access::lock_count();
     let result = match all_tools().find(|tool| tool.name == name) {
         // Locked: no read, send or window step, `quill_status` included
         // (it reads the account).
@@ -447,14 +448,18 @@ pub fn call_on(conn: u64, name: &str, arguments: &Value, agent: &str) -> Value {
         }
         Some(tool) => {
             crate::agent::activity::note_tool(conn, tool.name);
-            (tool.run)(arguments)
+            withheld_if_locked(tool.read_only, locks, (tool.run)(arguments))
         }
         None => Err(ToolError::new(format!(
             "There is no tool named {name}. Call tools/list, or quill_status, to see the tools."
         ))),
     };
-    // Screenshots ride along as image blocks after the text.
-    let images = ui_shot::take_attached();
+    // Screenshots ride along as image blocks after the text, never once
+    // Quill has locked.
+    let mut images = ui_shot::take_attached();
+    if crate::agent::access::locked_since(locks) {
+        images.clear();
+    }
     match result {
         Ok(output) => {
             let mut content = vec![json!({"type": "text", "text": output.text})];
@@ -470,6 +475,25 @@ pub fn call_on(conn: u64, name: &str, arguments: &Value, agent: &str) -> Value {
             "isError": true,
         }),
     }
+}
+
+/// A tool's result, unless Quill locked at any point since `locks` was
+/// read: the lock holds for the whole call, so what a read found (a wait
+/// that ended at the lock included) is withheld, and a write says it may
+/// have been done.
+pub(crate) fn withheld_if_locked(
+    read_only: bool,
+    locks: u64,
+    result: Result<ToolOutput, ToolError>,
+) -> Result<ToolOutput, ToolError> {
+    if !crate::agent::access::locked_since(locks) {
+        return result;
+    }
+    Err(ToolError::new(if read_only {
+        crate::agent::access::LOCKED_MESSAGE
+    } else {
+        crate::agent::access::LOCKED_WHILE_RUNNING_MESSAGE
+    }))
 }
 
 /// An optional bounded integer argument.
