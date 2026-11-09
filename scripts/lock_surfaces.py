@@ -1,19 +1,40 @@
-"""Every surface the passcode lock must reach is closed by it or refused under it.
+"""Every start the passcode lock must reach asks its gate, or is listed.
 
-Imported by scripts/check-screen-state.py. The lock had no single owner:
-each review round found one more surface it did not reach (recordings, a
-mini app opened after it, deep links). `close_for_lock`
-(src/ui/passcode/lock_gate.rs) is the one place that closes or stops them,
-and `refused_while_locked` is the one gate that stops new ones.
+Imported by scripts/check-screen-state.py (`problems()`).
 
-A production function in src/ui that opens an OS window (`.open_window(`),
-starts a helper process (`Command::new(`) or starts a recording
-(`.begin_capture_start(`) must either call `refused_while_locked()` itself
-or be listed in scripts/lock-surfaces.txt as `fn | closer | reason`.
-`closer` is a method `close_for_lock` calls; `-` says, in the reason, why
-the lock does not need to reach it; `refuses` pins a function that must
-keep calling `refused_while_locked()` (link and launch paths no pattern
-finds).
+The lock is a render state (docs/decisions/lock-is-a-render-state.md):
+while locked, every window draws only the lock screen or nothing, so what
+is drawn needs no check. What this guard checks is what runs without being
+drawn. It claims exactly this, and no more:
+
+1. Starts. In the production code of every file under src/ (test modules,
+   `#[cfg(test)]` items and comments removed), each of these calls is a
+   start:
+   - an OS window (`.open_window(`)
+   - a helper process (`Command::new(`, `media_tools::command(`,
+     `quiet_command_for(`)
+   - a microphone or camera capture (`.begin_capture_start(`,
+     `CameraStream::start(`)
+   - an app-wide key hook (`intercept_keystrokes(`, `observe_keystrokes(`)
+   - an app-wide action handler (`cx.on_action(`)
+   - an account switch that skips the lock (`switch_account_even_locked(`)
+   The innermost function holding the call must test a gate in a
+   condition (an `if`, a match guard or a `return`): `refused_while_locked()`,
+   `paused_by_lock()` or `app_locked(`. Otherwise `path::fn` must be listed
+   in scripts/lock-surfaces.txt as `path::fn | closer | reason`:
+   - `closer` is a method `close_for_lock` calls (it stops the surface);
+   - `via:fn` says the function runs only through `fn`, which must itself
+     test a gate in a condition (the guard checks `fn`, not the call graph);
+   - `-` says, in the reason, why the lock need not reach it.
+   A listed entry must still hold a start; `refuses` pins a function that
+   must keep testing a gate, for paths no pattern finds (links, launches).
+2. One writer. `passcode.locked` (the `locked` field) is assigned only in
+   `set_locked` (src/ui/passcode/lock_gate.rs).
+3. The render gate is mounted: `lock_layer.rs` registers `LockLayer` as a
+   root plugin, and `PasscodeUi::new` calls `lock_layer::register`.
+
+It does not prove that a listed `via` function is the only caller, nor that
+a gate's answer is used correctly beyond being tested in a condition.
 """
 
 import os
@@ -21,10 +42,27 @@ import re
 
 LIST = "scripts/lock-surfaces.txt"
 GATE_FILE = "src/ui/passcode/lock_gate.rs"
-STARTS = re.compile(r"\.open_window\(|\bCommand::new\(|\.begin_capture_start\(")
-GATE = "refused_while_locked()"
-TEST_MOD = re.compile(r"^\s*#\[cfg\(test\)\]\s*\n(?:\s*#\[[^\n]*\]\s*\n)*\s*(?:pub(?:\([^)]*\))?\s+)?mod\s+\w+\s*\{", re.M)
+LAYER_FILE = "src/ui/passcode/lock_layer.rs"
+PASSCODE_FILE = "src/ui/passcode/mod.rs"
+STARTS = re.compile(
+    r"\.open_window\(|\bCommand::new\(|\bmedia_tools::command\(|\bquiet_command_for\("
+    r"|\.begin_capture_start\(|\bCameraStream::start\(|\bintercept_keystrokes\("
+    r"|\bobserve_keystrokes\(|\bcx\.on_action\(|\bswitch_account_even_locked\("
+)
+GATES = r"(?:refused_while_locked\(\)|paused_by_lock\(\)|app_locked\()"
+# A gate tested in a condition: `if ..gate..`, a match guard `.. if ..gate.. =>`,
+# `return ..gate..`, or `let .. = ..gate..;` followed by `if`/`return` on it.
+GATED = re.compile(
+    r"\bif\b[^{;]*" + GATES + r"|\breturn\b[^;]*" + GATES + r"|=>[^,;]*" + GATES
+)
+GATE_BINDING = re.compile(r"\blet\s+(\w+)\s*=[^;]*" + GATES + r"[^;]*;")
+TEST_MOD = re.compile(
+    r"^\s*#\[cfg\(test\)\]\s*\n(?:\s*#\[[^\n]*\]\s*\n)*\s*(?:pub(?:\([^)]*\))?\s+)?mod\s+\w+\s*\{",
+    re.M,
+)
+TEST_ITEM = re.compile(r"#\[cfg\(test\)\]\s*\n(?:\s*#\[[^\n]*\]\s*\n)*\s*(?:pub(?:\([^)]*\))?\s+)?fn\s")
 FN = re.compile(r"\bfn ([a-z_][a-z0-9_]*)\s*(?:<[^>(]*>)?\(")
+LOCKED_WRITE = re.compile(r"\.locked\s*=[^=]")
 
 
 def balanced(text, start):
@@ -39,7 +77,40 @@ def balanced(text, start):
     return None
 
 
+def strip_comments(text):
+    """Line comments out, string literals kept: a `//` inside a string stays."""
+    out, i, n = [], 0, len(text)
+    while i < n:
+        c = text[i]
+        if c == '"':
+            j = i + 1
+            while j < n and text[j] != '"':
+                j += 2 if text[j] == "\\" else 1
+            out.append(text[i : j + 1])
+            i = j + 1
+        elif text.startswith("//", i):
+            j = text.find("\n", i)
+            i = n if j == -1 else j
+        elif text.startswith("/*", i):
+            j = text.find("*/", i + 2)
+            i = n if j == -1 else j + 2
+        else:
+            out.append(c)
+            i += 1
+    return "".join(out)
+
+
 def production(text):
+    text = strip_comments(text)
+    # A test-only function: its body goes.
+    while True:
+        match = TEST_ITEM.search(text)
+        if not match:
+            break
+        brace = text.find("{", match.end())
+        span = balanced(text, brace + 1) if brace != -1 else None
+        end = span[1] + 1 if span else match.end()
+        text = text[: match.start()] + text[end:]
     match = TEST_MOD.search(text)
     return text[: match.start()] if match else text
 
@@ -58,8 +129,19 @@ def functions(text):
     return out
 
 
-def ui_sources():
-    for root, _, names in os.walk("src/ui"):
+def gated(body):
+    if GATED.search(body):
+        return True
+    for binding in GATE_BINDING.finditer(body):
+        name = re.escape(binding.group(1))
+        rest = body[binding.end() :]
+        if re.search(rf"\bif\b[^{{;]*\b{name}\b|\breturn\b[^;]*\b{name}\b", rest):
+            return True
+    return False
+
+
+def sources():
+    for root, _, names in os.walk("src"):
         if os.sep + "tests" in root or root.endswith("tests"):
             continue
         for name in sorted(names):
@@ -79,52 +161,78 @@ def listed(path=LIST):
             if not line or line.startswith("#"):
                 continue
             parts = [p.strip() for p in line.split("|", 2)]
-            if len(parts) != 3 or not parts[2]:
-                problems.append(f"{path}:{n}: want `fn | closer | reason`")
+            if len(parts) != 3 or not parts[2] or "::" not in parts[0]:
+                problems.append(f"{path}:{n}: want `path::fn | closer | reason`")
                 continue
+            if parts[0] in out:
+                problems.append(f"{path}:{n}: `{parts[0]}` is listed twice")
             out[parts[0]] = (parts[1], n)
     return out, problems
 
 
 def problems():
     entries, out = listed()
-    starters, bodies, gate_body = {}, {}, None
-    for path, text in ui_sources():
+    starters, bodies, by_name, files = {}, {}, {}, {}
+    for path, text in sources():
+        files[path] = text
         fns = functions(text)
         for name, start, end, body in fns:
-            bodies.setdefault(name, []).append(body)
-            if path == GATE_FILE and name == "close_for_lock":
-                gate_body = body
+            bodies.setdefault(f"{path}::{name}", []).append(body)
+            by_name.setdefault(name, []).append(body)
         for match in STARTS.finditer(text):
             inner = [f for f in fns if f[1] <= match.start() < f[2]]
             if not inner:
                 continue
             # The innermost function holding the call.
             name = min(inner, key=lambda f: f[2] - f[1])[0]
-            starters.setdefault(name, (path, match.group(0)))
+            starters.setdefault(f"{path}::{name}", match.group(0))
+    gate_body = next(iter(bodies.get(f"{GATE_FILE}::close_for_lock", [])), None)
     if gate_body is None:
         return out + [f"{GATE_FILE}: no `close_for_lock`"], len(starters)
-    for name, (path, what) in sorted(starters.items()):
-        if any(GATE in body for body in bodies.get(name, [])):
+    for key, what in sorted(starters.items()):
+        if any(gated(body) for body in bodies.get(key, [])):
             continue
-        if name not in entries:
+        if key not in entries:
             out.append(
-                f"{path}: `{name}` opens a surface (`{what}`) the passcode lock does not "
-                f"know about. Refuse it while locked (`{GATE}`), close it in "
-                f"`close_for_lock`, or list it in {LIST} as `{name} | <closer or -> | <reason>`."
+                f"{key}: starts `{what}` without asking the lock. Test "
+                f"`refused_while_locked()` in a condition, stop it in `close_for_lock`, "
+                f"or list it in {LIST} as `{key} | <closer, via:fn or -> | <reason>`."
             )
-    for name, (closer, n) in sorted(entries.items()):
-        if name not in bodies:
-            out.append(f"{LIST}:{n}: `{name}` is not a function in src/ui")
+    for key, (closer, n) in sorted(entries.items()):
+        if key not in bodies:
+            out.append(f"{LIST}:{n}: `{key}` is not a function")
             continue
         if closer == "refuses":
-            if not any(GATE in body for body in bodies[name]):
-                out.append(f"{LIST}:{n}: `{name}` must call `{GATE}`")
+            if not any(gated(body) for body in bodies[key]):
+                out.append(f"{LIST}:{n}: `{key}` must test a lock gate in a condition")
             continue
-        if name not in starters:
-            out.append(f"{LIST}:{n}: `{name}` opens no window, helper or recording")
-        if closer != "-" and not re.search(rf"\bself\.{re.escape(closer)}\(", gate_body):
-            out.append(f"{LIST}:{n}: `{name}` names `{closer}`, which `close_for_lock` does not call")
+        if key not in starters:
+            out.append(f"{LIST}:{n}: `{key}` starts nothing this guard looks for")
+        if closer.startswith("via:"):
+            via = closer[4:]
+            target = bodies.get(via) if "::" in via else by_name.get(via)
+            if not target:
+                out.append(f"{LIST}:{n}: `{via}` is not a function")
+            elif not any(gated(body) for body in target):
+                out.append(f"{LIST}:{n}: `{via}` must test a lock gate in a condition")
+        elif closer != "-" and not re.search(rf"\bself\.{re.escape(closer)}\(", gate_body):
+            out.append(f"{LIST}:{n}: `{key}` names `{closer}`, which `close_for_lock` does not call")
+    # One writer of the flag.
+    for path, text in files.items():
+        if not path.startswith("src/ui/"):
+            continue
+        for name, start, end, body in functions(text):
+            if LOCKED_WRITE.search(body) and "passcode" in path and not (
+                path == GATE_FILE and name == "set_locked"
+            ):
+                out.append(f"{path}::{name}: writes the lock flag; only `set_locked` may")
+            elif re.search(r"passcode\.locked\s*=[^=]", body) and path != GATE_FILE:
+                out.append(f"{path}::{name}: writes `passcode.locked`; only `set_locked` may")
+    # The render gate is mounted.
+    if "register_plugin::<LockLayer>" not in files.get(LAYER_FILE, ""):
+        out.append(f"{LAYER_FILE}: `LockLayer` is not registered as a root plugin")
+    if "lock_layer::register(" not in files.get(PASSCODE_FILE, ""):
+        out.append(f"{PASSCODE_FILE}: `PasscodeUi::new` must call `lock_layer::register`")
     return out, len(starters)
 
 
@@ -132,4 +240,4 @@ if __name__ == "__main__":
     found, count = problems()
     for line in found:
         print(line)
-    print(f"lock surfaces: {'FAIL' if found else 'OK'} ({count} surface starts)")
+    print(f"lock surfaces: {'FAIL' if found else 'OK'} ({count} starting functions)")

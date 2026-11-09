@@ -303,7 +303,7 @@ impl QuillApp {
         if self.pane_mode() != PaneMode::Ready {
             return blocked("the sign-in screen");
         }
-        if self.account.passcode.locked {
+        if self.account.passcode.is_locked() {
             return blocked("the passcode lock screen");
         }
         if !matches!(self.first_run, FirstRun::Done) {

@@ -80,7 +80,9 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) -> bool {
         if self.business_view() != Some(View::StickerPick)
-            || !self.windows.dialog_may_open_in(self.windows.scope)
+            || !self
+                .windows
+                .dialog_may_show_in(crate::ui::shell::DialogKind::Business, self.windows.scope)
         {
             return false;
         }

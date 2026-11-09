@@ -33,7 +33,8 @@ use quill::notify::custom::{
 use quill::notify::{NotificationAction, OsNotification};
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
-use view::{Content, NotifyView, ViewEvent};
+pub(in crate::ui) use view::NotifyView;
+use view::{Content, ViewEvent};
 
 /// One frame of an animation.
 const FRAME: Duration = Duration::from_millis(16);

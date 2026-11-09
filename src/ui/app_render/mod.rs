@@ -77,10 +77,12 @@ impl Render for QuillApp {
         // Rows the history list painted last frame are what the user saw.
         self.passcode_frame(window, cx);
         self.report_visible_history(
-            window.is_window_active() && !self.account.passcode.locked,
+            window.is_window_active() && !self.account.passcode.is_locked(),
             cx,
         );
-        self.report_visible_sponsored(window.is_window_active() && !self.account.passcode.locked);
+        self.report_visible_sponsored(
+            window.is_window_active() && !self.account.passcode.is_locked(),
+        );
         let history_drawn = self.slices.window.history_drawn();
         self.players.inline_videos.set_scale(window.scale_factor());
         // Picture-in-Picture outlives neither its message, the account
@@ -125,6 +127,10 @@ impl Render for QuillApp {
         self.frame.context_menu_was_open = menu_open;
         self.track_layer_focus(window, cx);
         self.frame_upkeep(window, cx);
+        // Locked: the lock screen is all this window builds.
+        if self.account.passcode.is_locked() {
+            return self.locked_root(outer_scope, cx);
+        }
         let auth_state = self.current_auth();
         let auth = view_for(&auth_state);
         let inputs_live =
@@ -592,10 +598,6 @@ impl Render for QuillApp {
         // ends the mode (`ListWidget::mousePressEvent`).
         let root = self.autoscroll_layer(cx).on(root, cx.weak_entity());
         let root = root.children(self.disk_full_cover(&auth, cx));
-        // The lock screen covers the whole window, above every overlay.
-        let root = root.when(self.account.passcode.locked, |this| {
-            this.child(self.lock_overlay(cx))
-        });
         // An agent driving the window: the glow, the ghost cursor and the
         // pill, deferred above everything (`agent_takeover`).
         let root = root
@@ -616,6 +618,7 @@ impl Render for QuillApp {
 }
 
 mod frame_upkeep;
+mod locked_root;
 mod status_toast;
 mod window_upkeep;
 #[cfg(test)]

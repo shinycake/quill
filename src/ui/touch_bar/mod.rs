@@ -64,7 +64,7 @@ impl QuillApp {
     pub(crate) fn touch_bar_model(&self, window: &Window, cx: &App) -> Bar {
         let inputs = BarInputs {
             signed_in: matches!(self.current_auth(), AuthorizationState::Ready),
-            locked: self.account.passcode.locked,
+            locked: self.account.passcode.is_locked(),
             recording: self.recording_active(),
             viewer: self.touch_bar_viewer(),
             song: self.touch_bar_song(),

@@ -879,7 +879,7 @@ async fn load_thumbnails(
 }
 
 /// The chooser window's view: the app builds its content.
-struct ScreenChooserView {
+pub(in crate::ui) struct ScreenChooserView {
     owner: WeakEntity<QuillApp>,
     _observe: Subscription,
 }

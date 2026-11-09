@@ -40,7 +40,9 @@ fn lock_from_a_chat_window_locks_quill(cx: &mut TestAppContext) {
     })
     .expect("the chat window");
     cx.run_until_parked();
-    let locked = h.app.read_with(cx, |app, _| app.account.passcode.locked);
+    let locked = h
+        .app
+        .read_with(cx, |app, _| app.account.passcode.is_locked());
     assert!(locked, "Cmd/Ctrl+L in a chat window locks the app");
 }
 

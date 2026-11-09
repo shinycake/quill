@@ -288,7 +288,7 @@ impl QuillApp {
 /// The window's root: the panel alone, or for a live stream the picture
 /// under the panel as two cached views, so a new frame redraws only the
 /// picture and the panel's chrome replays.
-struct GroupCallRoot {
+pub(in crate::ui) struct GroupCallRoot {
     owner: WeakEntity<QuillApp>,
     _observe: Subscription,
     panel: Entity<GroupCallPanel>,

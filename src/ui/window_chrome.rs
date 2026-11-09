@@ -30,7 +30,7 @@ impl QuillApp {
 
     fn compute_window_title(&self) -> String {
         // A locked app shows no chat name (tdesktop: `locked ? nullptr`).
-        if self.account.passcode.locked {
+        if self.account.passcode.is_locked() {
             return window_title(None, 0, None);
         }
         let Some(session) = self.session() else {

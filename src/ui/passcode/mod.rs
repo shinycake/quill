@@ -44,8 +44,9 @@ pub(crate) struct PasscodeUi {
     /// A passcode is set (cached from `passcode.json`; refreshed after each
     /// change instead of read per frame).
     pub(crate) enabled: bool,
-    /// The lock screen covers the window.
-    pub(crate) locked: bool,
+    /// Quill is locked: every window draws only the lock screen, or
+    /// nothing (`lock_layer`). Written only by `QuillApp::set_locked`.
+    locked: bool,
     /// Startup was locked: the connection starts after the first unlock.
     pub(crate) deferred_connect: bool,
     /// Offer the system prompt as soon as the lock screen shows.
@@ -117,6 +118,13 @@ impl PasscodeUi {
         let config = root.as_deref().and_then(passcode::load_config);
         let enabled = config.is_some();
         let lock = LockField::new(window, cx, enabled);
+        // Every window opened from now on draws through the lock layer,
+        // the main window's included (its root is built after the app).
+        lock_layer::register(cx);
+        lock_layer::publish(enabled, cx);
+        if enabled {
+            quill::agent::access::set_paused_by_lock(true);
+        }
         Self {
             enabled,
             // The app starts locked when a passcode is set (tdesktop).
@@ -144,6 +152,18 @@ impl PasscodeUi {
             system_unlock_key: None,
             demo: false,
         }
+    }
+
+    /// Whether Quill is locked.
+    pub(crate) fn is_locked(&self) -> bool {
+        self.locked
+    }
+
+    /// Set the flag alone, for tests that need a locked state without the
+    /// lock's closes or the root layer.
+    #[cfg(test)]
+    pub(crate) fn force_locked(&mut self, locked: bool) {
+        self.locked = locked;
     }
 
     fn shake_offset(&self) -> f32 {
@@ -493,7 +513,7 @@ impl QuillApp {
         ) {
             return;
         }
-        if !self.account.passcode.enabled || self.account.passcode.locked {
+        if !self.account.passcode.enabled || self.account.passcode.is_locked() {
             return;
         }
         let state = global_unlock();
@@ -503,9 +523,7 @@ impl QuillApp {
         // The in-memory master key goes away: unlocking needs the passcode
         // (or the system prompt that still holds it for this process).
         state.clear();
-        self.account.passcode.locked = true;
-        quill::wake::PASSCODE.poke();
-        quill::wake::CHROME.poke();
+        self.set_locked(true, cx);
         self.reset_lock_fields();
         self.account.passcode.suggest_system_unlock =
             self.account.passcode.system_unlock_key.is_some();
@@ -516,9 +534,7 @@ impl QuillApp {
     }
 
     fn unlock_done(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.account.passcode.locked = false;
-        quill::wake::PASSCODE.poke();
-        quill::wake::CHROME.poke();
+        self.set_locked(false, cx);
         self.account.passcode.lock_error = None;
         self.account.passcode.flood_until = None;
         self.account.passcode.logout_confirm = false;
@@ -549,7 +565,7 @@ impl QuillApp {
 
     /// Submit on the lock screen.
     pub(crate) fn submit_unlock(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if !self.account.passcode.locked || self.account.passcode.busy {
+        if !self.account.passcode.is_locked() || self.account.passcode.busy {
             return;
         }
         let typed = self.read_field(&self.account.passcode.lock.input, cx);
@@ -705,7 +721,7 @@ impl QuillApp {
         self.account.passcode.system_unlock_key = None;
         self.account.passcode.logout_confirm = false;
         self.account.passcode.deferred_connect = false;
-        self.account.passcode.locked = false;
+        self.set_locked(false, cx);
         self.account
             .passcode
             .lock
@@ -744,7 +760,7 @@ impl QuillApp {
 
     /// Per-frame work for the lock screen (focus, shake clock).
     pub(crate) fn passcode_frame(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let locked = self.account.passcode.locked;
+        let locked = self.account.passcode.is_locked();
         self.account.passcode.lock.frame(locked, window, cx);
         if locked {
             if std::mem::take(&mut self.account.passcode.suggest_system_unlock) {
@@ -893,6 +909,7 @@ impl QuillApp {
         };
         div()
             .id("passcode-lock")
+            .track_focus(&ui.lock.screen)
             .absolute()
             .inset_0()
             .occlude()
@@ -922,5 +939,10 @@ mod lock_gate;
 #[cfg(test)]
 #[cfg(feature = "demo-capture")]
 mod lock_gate_tests;
+pub(crate) mod lock_layer;
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+mod lock_layer_tests;
 mod system_unlock_wait;
 pub(crate) use lock_field::LockField;
+pub(in crate::ui) use lock_gate::intercept_keys_unlocked;

@@ -27,7 +27,7 @@ const CHECK_DELAY: Duration = Duration::from_millis(350);
 /// The keyboard button a dialog answers: after `createBot` the new bot is
 /// handed to the requesting bot with `shareUsersWithBot`.
 #[derive(Clone, Copy)]
-struct ManagedBotShare {
+pub(in crate::ui) struct ManagedBotShare {
     chat_id: ChatId,
     message_id: MessageId,
     button_id: i32,
@@ -130,7 +130,7 @@ impl QuillApp {
         );
     }
 
-    fn open_bot_create(
+    pub(in crate::ui) fn open_bot_create(
         &mut self,
         manager_id: i64,
         suggested_name: String,

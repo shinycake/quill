@@ -50,7 +50,7 @@ impl QuillApp {
 /// and the agent's Escape, before the shortcut capture's.
 pub(in crate::ui) fn intercept_window_keys(cx: &mut Context<QuillApp>) {
     let menu_app = cx.weak_entity();
-    cx.intercept_keystrokes(move |event, window, cx| {
+    super::passcode::intercept_keys_unlocked(cx, move |event, window, cx| {
         // Shortcut capture owns the key. This interceptor is registered
         // first so it observes `keybinding_capture` before the capture
         // handler clears it.

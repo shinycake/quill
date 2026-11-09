@@ -78,7 +78,7 @@ impl QuillApp {
         }
         // Behind the passcode the window comes forward and nothing opens
         // (Telegram Desktop `openNotificationMessage`).
-        if self.account.passcode.locked {
+        if self.account.passcode.is_locked() {
             cx.activate(true);
             window.activate_window();
             return;
@@ -198,7 +198,7 @@ impl QuillApp {
         // A locked app shows no sender or text (tdesktop hides the message
         // preview while the passcode lock is up), and neither does the
         // "Show sender name" switch when off: no picture, no buttons.
-        let locked = self.account.passcode.locked
+        let locked = self.account.passcode.is_locked()
             || self
                 .session()
                 .is_some_and(|s| !s.settings.notify_view.shows_name());

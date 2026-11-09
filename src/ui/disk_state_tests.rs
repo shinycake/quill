@@ -238,7 +238,9 @@ fn space_freed_during_a_held_call_keeps_the_call_client(cx: &mut TestAppContext)
     );
     fill(&app, &mut vcx, Some(0));
     app.update_in(&mut vcx, |app, _, _| app.disk.held_for_call = true);
-    app.update_in(&mut vcx, |app, _, _| app.account.passcode.locked = true);
+    app.update_in(&mut vcx, |app, _, _| {
+        app.account.passcode.force_locked(true)
+    });
     read(&app, &mut vcx, Some(FLOORS.warn_clear));
     app.read_with(&vcx, |app, _| {
         assert!(
@@ -268,7 +270,9 @@ fn recovering_while_locked_connects_at_the_unlock(cx: &mut TestAppContext) {
     let (app, mut vcx) = new_app(cx);
     let start = shown(&app, &mut vcx).2;
     fill(&app, &mut vcx, Some(0));
-    app.update_in(&mut vcx, |app, _, _| app.account.passcode.locked = true);
+    app.update_in(&mut vcx, |app, _, _| {
+        app.account.passcode.force_locked(true)
+    });
     read(&app, &mut vcx, Some(FLOORS.warn_clear));
     assert_eq!(shown(&app, &mut vcx), (false, false, start));
     assert!(app.update_in(&mut vcx, |app, _, _| app.account.passcode.deferred_connect));

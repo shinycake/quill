@@ -101,7 +101,27 @@ impl QuillApp {
     /// a fresh connect for it. The dialog closes first so the main UI
     /// (then the auth UI for the new account) is what the user sees;
     /// errors surface via the status line.
+    ///
+    /// Refused while locked: nothing behind the lock screen changes
+    /// account (tdesktop empties the tray and Dock account items while
+    /// locked, and a notification click only shows the window).
     pub(crate) fn switch_account(
+        &mut self,
+        key: &AccountKey,
+        display_name: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.refused_while_locked() {
+            return;
+        }
+        self.switch_account_even_locked(key, display_name, window, cx);
+    }
+
+    /// The switch itself. Only a ringing call's Answer calls it directly:
+    /// calls stay usable under the lock, as tdesktop's call panel does,
+    /// and the call is on the other account.
+    pub(in crate::ui) fn switch_account_even_locked(
         &mut self,
         key: &AccountKey,
         _display_name: &str,

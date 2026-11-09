@@ -87,7 +87,7 @@ fn locking_with_a_chat_window_open_lets_both_windows_go_idle(cx: &mut TestAppCon
         .expect("the window");
         cx.run_until_parked();
     }
-    app.read_with(cx, |app, _| assert!(app.account.passcode.locked));
+    app.read_with(cx, |app, _| assert!(app.account.passcode.is_locked()));
 }
 
 /// tdesktop's lock widget is per window: what one window's field holds
@@ -244,6 +244,6 @@ fn a_system_unlock_answered_after_its_window_closed_ends_the_wait(cx: &mut TestA
             !app.account.passcode.busy,
             "the lock takes a passcode again"
         );
-        assert!(app.account.passcode.locked);
+        assert!(app.account.passcode.is_locked());
     });
 }

@@ -442,7 +442,7 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
-        if self.account.passcode.locked {
+        if self.account.passcode.is_locked() {
             return false;
         }
         let Some(layer) = ESC_LAYERS
@@ -471,7 +471,7 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
-        if self.account.passcode.locked {
+        if self.account.passcode.is_locked() {
             return false;
         }
         let Some(layer) = self.topmost_esc_layer() else {
@@ -673,11 +673,14 @@ mod dispatch_tests {
         let vcx = &mut vcx;
         app.update_in(vcx, |app, _, _| {
             app.privacy.editor = Some(any_rule());
-            app.account.passcode.locked = true;
+            app.account.passcode.force_locked(true);
         });
         vcx.simulate_keystrokes("escape");
         let (still_open, still_locked) = app.read_with(vcx, |app, _| {
-            (app.privacy.editor.is_some(), app.account.passcode.locked)
+            (
+                app.privacy.editor.is_some(),
+                app.account.passcode.is_locked(),
+            )
         });
         assert!(still_open, "Escape must not touch layers under the lock");
         assert!(still_locked, "Escape must never unlock");

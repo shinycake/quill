@@ -146,7 +146,8 @@ fn a_chat_windows_gift_box_goes_on_without_the_main_window(cx: &mut TestAppConte
     h.app.update(cx, |app, _| {
         // The box was opened from the chat window, its last input.
         app.windows.last_input = Some(OTHER);
-        app.windows.dialog_opened_in(Some(OTHER));
+        app.windows
+            .dialog_opened_in(crate::ui::shell::DialogKind::GiftMarket, Some(OTHER));
         app.gift_market.pending_auction = true;
         if let Some(session) = app.demo_session.as_mut() {
             session.payments.gift_market.auction_ready = Some(5);

@@ -17,6 +17,10 @@ impl QuillApp {
     /// in the browser, a `mailto:` link in the mail client. Every link Quill opens goes
     /// through here, so a refused or failed open is never silent.
     pub(in crate::ui) fn open_link(&mut self, url: &str, cx: &mut Context<Self>) {
+        // Nothing opens over the lock screen: a late open waits for no one.
+        if self.refused_while_locked() {
+            return;
+        }
         // Telegram's own links open in Quill, as tdesktop converts them
         // with `TryConvertUrlToLocal` before anything reaches the browser.
         if self.live.is_some() && quill::deep_link_types::is_telegram_link(url) {
@@ -38,12 +42,20 @@ impl QuillApp {
         failure: impl Into<String> + 'static,
         cx: &mut Context<Self>,
     ) {
+        // Nothing opens over the lock screen: a late open waits for no one.
+        if self.refused_while_locked() {
+            return;
+        }
         let open = quill::platform::open_external_url(url);
         self.report_failed_open(open, failure, cx);
     }
 
     /// Open the mail client on a new message to `address`.
     pub(in crate::ui) fn open_mail_to(&mut self, address: &str, cx: &mut Context<Self>) {
+        // Nothing opens over the lock screen: a late open waits for no one.
+        if self.refused_while_locked() {
+            return;
+        }
         let open = quill::platform::open_mailto(address);
         self.report_failed_open(open, tr(keys::Q_OPS_COULD_NOT_OPEN_THE_MAIL), cx);
     }
@@ -55,6 +67,10 @@ impl QuillApp {
         failure: impl Into<String> + 'static,
         cx: &mut Context<Self>,
     ) {
+        // Nothing opens over the lock screen: a late open waits for no one.
+        if self.refused_while_locked() {
+            return;
+        }
         let open = quill::platform::open_local_file(path);
         self.report_failed_open(open, failure, cx);
     }
@@ -67,6 +83,10 @@ impl QuillApp {
         cx: &mut Context<Self>,
         answered: impl FnOnce(&mut Self, bool, &mut Context<Self>) + 'static,
     ) {
+        if self.refused_while_locked() {
+            answered(self, false, cx);
+            return;
+        }
         let open = quill::platform::open_local_file(path);
         self.when_os_answers(open, cx, answered);
     }
@@ -79,6 +99,10 @@ impl QuillApp {
         failure: impl Into<String> + 'static,
         cx: &mut Context<Self>,
     ) {
+        // Nothing opens over the lock screen: a late open waits for no one.
+        if self.refused_while_locked() {
+            return;
+        }
         let open = quill::platform::open_system_settings(target);
         self.report_failed_open(open, failure, cx);
     }
@@ -99,6 +123,10 @@ impl QuillApp {
         failure: impl Into<String> + 'static,
         cx: &mut Context<Self>,
     ) {
+        // Nothing opens over the lock screen: a late open waits for no one.
+        if self.refused_while_locked() {
+            return;
+        }
         let open = quill::platform::reveal_in_file_manager(path);
         self.report_failed_open(open, failure, cx);
     }
@@ -148,6 +176,9 @@ pub(in crate::ui) fn reveal_from<T: 'static>(
     window: &mut Window,
     cx: &mut Context<T>,
 ) {
+    if super::passcode::lock_layer::app_locked(cx) {
+        return;
+    }
     let open = quill::platform::reveal_in_file_manager(path);
     cx.spawn_in(window, async move |_, cx| {
         if open.opened().await {

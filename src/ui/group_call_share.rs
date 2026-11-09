@@ -100,7 +100,7 @@ impl QuillApp {
     /// wait for the unlock in the main window (tdesktop
     /// `ShowUnlockPasscodeBox` before `addMembers` and the share action).
     pub(super) fn group_call_needs_unlock(&self, cx: &mut Context<Self>) -> bool {
-        if !self.account.passcode.locked {
+        if !self.account.passcode.is_locked() {
             return false;
         }
         self.raise_main_window(cx);
@@ -187,7 +187,7 @@ impl QuillApp {
     ) -> Option<AnyElement> {
         if !self.group_call_boxes.share_open
             || !call.share_links.ready()
-            || self.account.passcode.locked
+            || self.account.passcode.is_locked()
         {
             return None;
         }

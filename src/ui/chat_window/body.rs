@@ -28,7 +28,7 @@ impl QuillApp {
     ) -> AnyElement {
         // The window's lock field: focus while locked, empty once unlocked.
         self.passcode_frame(window, cx);
-        if self.account.passcode.locked {
+        if self.account.passcode.is_locked() {
             // Telegram Desktop's passcode lock covers every window
             // (`Application::lockByPasscode` → `setupPasscodeLock` on each):
             // the same box, unlocking everywhere at once.

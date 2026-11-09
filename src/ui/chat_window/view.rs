@@ -161,6 +161,9 @@ impl Render for ChatWindowView {
             });
             return div().size_full().into_any_element();
         }
+        if app.read(cx).account.passcode.is_locked() {
+            return self.render_locked(&app, window, cx);
+        }
         if self.title_shown != title {
             window.set_window_title(&title);
             self.title_shown = title;
@@ -303,6 +306,64 @@ impl Render for ChatWindowView {
                     )
                     .with_priority(9),
                 )
+            })
+            .into_any_element()
+    }
+}
+
+impl ChatWindowView {
+    /// The window while Quill is locked: its title bar, named Quill, not
+    /// the chat, and the lock screen with this window's own field. Nothing
+    /// else is built or bound, and the window's root layer drops the kit's
+    /// layers (`passcode::lock_layer`), so no box of this window shows.
+    fn render_locked(
+        &mut self,
+        app: &Entity<QuillApp>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let chat_id = self.chat_id;
+        let title = "Quill".to_string();
+        if self.title_shown != title {
+            window.set_window_title(&title);
+            self.title_shown = title;
+        }
+        let body = app.update(cx, |app, cx| {
+            let outer = app.windows.scope;
+            app.set_window_scope(Some(chat_id));
+            let body = app.chat_window_body(chat_id, window, cx);
+            app.set_window_scope(outer);
+            body
+        });
+        let view = cx.weak_entity();
+        let title_bar = super::super::window_frame::FrameTitleBar::new()
+            .on_close_window({
+                let view = view.clone();
+                move |_, window, cx| {
+                    let _ = view.update(cx, |this, cx| this.close(window, cx));
+                }
+            })
+            .caption(
+                div()
+                    .font_semibold()
+                    .text_sm()
+                    .child(self.title_shown.clone()),
+            );
+        div()
+            .id("chat-window-locked-root")
+            .size_full()
+            .relative()
+            .flex()
+            .flex_col()
+            .on_action(move |_: &super::super::actions::CloseWindow, window, cx| {
+                let _ = view.update(cx, |this, cx| this.close(window, cx));
+            })
+            .child(scope_probe(self.owner.clone(), Some(chat_id)))
+            .child(title_bar)
+            .child(WindowScope {
+                app: self.owner.clone(),
+                target: Some(chat_id),
+                child: body,
             })
             .into_any_element()
     }

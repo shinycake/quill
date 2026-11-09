@@ -147,7 +147,7 @@ impl QuillApp {
     /// is in front (the prompt shows otherwise).
     fn notify_background_ring(&mut self, cx: &mut Context<Self>) {
         let app_active = cx.active_window().is_some();
-        let locked = self.account.passcode.locked;
+        let locked = self.account.passcode.is_locked();
         let Some(ring) = self.background.ringing.as_mut() else {
             return;
         };
@@ -198,7 +198,7 @@ impl QuillApp {
             return;
         };
         self.background.ringing = None;
-        self.switch_account(&account, "", window, cx);
+        self.switch_account_even_locked(&account, "", window, cx);
         let ready = self.session().is_some_and(|session| {
             session.account == account && ringing_incoming_call(session).is_some()
         });
@@ -340,7 +340,7 @@ crate::ui::shell::register_dialogs! {
         // A ringing call comes right after what the server says about the
         // account, ahead of every settings dialog.
         150,
-        |app| app.background_ring_audible() && !app.account.passcode.locked,
+        |app| app.background_ring_audible() && !app.account.passcode.is_locked(),
         QuillApp::build_background_call_dialog,
     )
     .close(|app, _, cx| { if let Some(ring) = app.background.ringing.as_mut() { ring.dismissed = true; } cx.notify(); }),
