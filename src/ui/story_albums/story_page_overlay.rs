@@ -13,14 +13,14 @@ impl QuillApp {
     /// Phase 9.7: the chat story page overlay — story albums (list +
     /// opened album), chat-page stories with pin/unpin, and the paginated
     /// archive list. The status line renders the honest
-    /// `Session::story_page_op` state (Sending / Succeeded / Failed).
+    /// `Session::story_page_ops` state (Sending / Succeeded / Failed).
     pub(in crate::ui) fn story_page_overlay(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let Some(page) = self.stories.page.as_ref() else {
             return div().into_any_element();
         };
         let chat_id = page.chat_id;
-        let open_album = page.open_album;
-        let delete_confirm = page.delete_confirm;
+        let open_album = page.view.open_album();
+        let view = page.view;
         let new_album_name = page.new_album_name.clone();
         let rename_input = page.rename_input.clone();
         let title = self
@@ -33,7 +33,7 @@ impl QuillApp {
         // the TDLib reason.
         let op_status = self
             .session()
-            .and_then(|s| s.stories.page_op.clone())
+            .and_then(|s| s.stories.page_ops.status_for(Some(chat_id.0)).cloned())
             .map(|op| match op.state {
                 StoryPageOpState::Checking => format!("{}…", op.label),
                 StoryPageOpState::Sending => format!("{}…", op.label),
@@ -132,7 +132,7 @@ impl QuillApp {
                 )
                 .child(
                     Button::new("story-page-delete")
-                        .label(if delete_confirm == Some(album_id) {
+                        .label(if view.delete_armed(album_id) {
                             tr(keys::Q_MEDIA_CONFIRM_DELETE)
                         } else {
                             tr(keys::Q_MEDIA_DELETE_ALBUM)

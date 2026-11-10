@@ -2,6 +2,7 @@
 //! Added to by features in this domain only; `Session::new` builds it
 //! with `new`.
 use crate::state::*;
+use crate::story_page::StoryPageOps;
 use std::time::{Duration, Instant};
 
 /// How far `loadActiveStories` got through one story list. TDLib sends
@@ -116,7 +117,7 @@ pub struct StoriesState {
     /// story page (`Sending` at send time, `Succeeded` / `Failed` when
     /// the TDLib answer lands). The story page renders it as its status
     /// line.
-    pub page_op: Option<StoryPageOp>,
+    pub page_ops: StoryPageOps,
     /// B14: the close-friends list (`getCloseFriends` / `setCloseFriends`);
     /// `None` until loaded.
     pub close_friends: Option<Vec<i64>>,
@@ -171,7 +172,7 @@ impl StoriesState {
             album_stories: HashMap::new(),
             chat_page_stories: HashMap::new(),
             archived_stories: HashMap::new(),
-            page_op: None,
+            page_ops: StoryPageOps::default(),
             close_friends: None,
             close_friends_pending: None,
             main_paging: ActiveStoriesPaging::default(),

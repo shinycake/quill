@@ -26,32 +26,51 @@ impl Session {
     /// Phase 9.7: start tracking a story-page mutation (`Sending`) sent as
     /// `request`.
     pub fn begin_story_page_op(&mut self, label: impl Into<String>, request: RequestId) {
-        self.stories.page_op = Some(StoryPageOp {
-            label: label.into(),
-            state: StoryPageOpState::Sending,
-            request: Some(request),
-        });
+        self.track_story_page_op(label.into(), StoryPageOpState::Sending, request);
     }
 
     /// Phase 9.7: start tracking a story-page read (`Checking`) sent as
     /// `request`.
     pub fn begin_story_page_check(&mut self, label: impl Into<String>, request: RequestId) {
-        self.stories.page_op = Some(StoryPageOp {
-            label: label.into(),
-            state: StoryPageOpState::Checking,
-            request: Some(request),
+        self.track_story_page_op(label.into(), StoryPageOpState::Checking, request);
+    }
+
+    /// The chat page comes from the pending request the op tracks.
+    fn track_story_page_op(&mut self, label: String, state: StoryPageOpState, request: RequestId) {
+        let chat_id = self
+            .requests
+            .get(request)
+            .and_then(|pending| pending.chat_id)
+            .map(|chat| chat.0);
+        self.stories.page_ops.begin(StoryPageOp {
+            label,
+            state,
+            request,
+            chat_id,
         });
     }
 
-    /// The op tracking the call `pending` answers, if it is still the one
-    /// tracked: an answer to an earlier call of the same kind (another
-    /// story's Hide, say) never settles a later one.
+    /// The driver could not send `request`: its op fails with `reason`.
+    pub fn fail_story_page_send(
+        &mut self,
+        label: String,
+        request: RequestId,
+        chat_id: Option<ChatId>,
+        reason: String,
+    ) {
+        self.stories.page_ops.begin(StoryPageOp {
+            label,
+            state: StoryPageOpState::Failed(reason),
+            request,
+            chat_id: chat_id.map(|chat| chat.0),
+        });
+    }
+
+    /// The op tracking the call `pending` answers, if it is still tracked:
+    /// an answer settles the op of its own request only, whatever else the
+    /// page has in flight.
     fn story_page_op_for(&mut self, pending: Option<&PendingRequest>) -> Option<&mut StoryPageOp> {
-        let pending = pending?;
-        self.stories
-            .page_op
-            .as_mut()
-            .filter(|op| op.request == Some(pending.id))
+        self.stories.page_ops.get_mut(pending?.id)
     }
 
     /// Phase 9.7: mark the story-page op `Succeeded` when its answer lands.
@@ -73,21 +92,20 @@ impl Session {
     /// another chat's page. An op still in flight keeps its line until its
     /// answer.
     pub fn settle_story_page_op(&mut self) {
-        if self.stories.page_op.as_ref().is_some_and(|op| {
-            matches!(
-                op.state,
-                StoryPageOpState::Succeeded | StoryPageOpState::Failed(_)
-            )
-        }) {
-            self.stories.page_op = None;
-        }
+        self.stories.page_ops.settle_finished();
+    }
+
+    /// The story page of `chat_id` was closed: its calls are no longer
+    /// tracked, in flight or finished.
+    pub fn leave_story_page(&mut self, chat_id: i64) {
+        self.stories.page_ops.forget_chat(chat_id);
     }
 
     /// Phase 9.7: clear the story-page op once its load answer landed (the
     /// loaded list itself is the honest state — no status line needed).
     pub(crate) fn clear_story_page_op(&mut self, pending: Option<&PendingRequest>) {
-        if self.story_page_op_for(pending).is_some() {
-            self.stories.page_op = None;
+        if let Some(pending) = pending {
+            self.stories.page_ops.remove(pending.id);
         }
     }
 

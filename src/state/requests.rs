@@ -170,6 +170,7 @@ impl Session {
             }
         }
         self.stale_history_requests.clear();
+        self.stories.page_ops.clear();
     }
 }
 

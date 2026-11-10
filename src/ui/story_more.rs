@@ -535,11 +535,7 @@ impl QuillApp {
     /// off the viewer.
     pub(super) fn viewer_story_page_op(&self) -> Option<quill::story_page::StoryPageOp> {
         let request = self.stories.viewer_ui().page_op?;
-        self.session()?
-            .stories
-            .page_op
-            .clone()
-            .filter(|op| op.request == Some(request))
+        self.session()?.stories.page_ops.get(request).cloned()
     }
 
     /// Per-tick upkeep of the editor: adopt the loaded list while the user

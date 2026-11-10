@@ -600,7 +600,7 @@ fn b14_close_friends_load_and_save_round_trip() {
         ),
     );
     assert_eq!(session.stories.close_friends, Some(vec![31, 33]));
-    assert!(session.stories.page_op.is_none());
+    assert!(session.stories.page_ops.is_empty());
 
     // `setCloseFriends` applies the staged ids on `ok`.
     session.stories.close_friends_pending = Some(vec![33]);
@@ -638,7 +638,7 @@ fn b14_close_friends_error_drops_staged_ids() {
     assert_eq!(session.stories.close_friends, Some(vec![31]));
     assert!(session.stories.close_friends_pending.is_none());
     assert!(matches!(
-        session.stories.page_op.as_ref().map(|op| &op.state),
+        session.stories.page_ops.latest().map(|op| &op.state),
         Some(crate::story_page::StoryPageOpState::Failed(_))
     ));
 }
@@ -660,7 +660,7 @@ fn b14_hide_and_profile_ops_finish_on_ok() {
             &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra.0),
         );
         assert_eq!(
-            session.stories.page_op.as_ref().map(|op| &op.state),
+            session.stories.page_ops.latest().map(|op| &op.state),
             Some(&crate::story_page::StoryPageOpState::Succeeded)
         );
     }
@@ -688,9 +688,13 @@ fn a_stale_answer_does_not_settle_the_op_tracked_now() {
         ),
     );
     assert_eq!(
-        session.stories.page_op.as_ref().map(|op| &op.state),
+        session.stories.page_ops.get(second).map(|op| &op.state),
         Some(&crate::story_page::StoryPageOpState::Sending)
     );
+    assert!(matches!(
+        session.stories.page_ops.get(first).map(|op| &op.state),
+        Some(crate::story_page::StoryPageOpState::Failed(_))
+    ));
 }
 
 /// A failed edit is about the story it edited, and only the answer to the
