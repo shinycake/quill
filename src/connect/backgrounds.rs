@@ -31,17 +31,32 @@ impl<S: JsonSender> ConnectDriver<S> {
         {
             return Ok(None);
         }
+        // Asked from Idle only; a failed list waits for `retry_installed_backgrounds`.
+        if !self.session.chats_state.installed_backgrounds.is_idle() {
+            return Ok(None);
+        }
         let extra = self
             .session
             .request(RequestPurpose::GetInstalledBackgrounds, None);
+        self.session.chats_state.installed_backgrounds.begin();
         if let Err(err) = self
             .sender
             .send_json(&get_installed_backgrounds(extra, for_dark_theme))
         {
             self.session.requests.take(extra);
+            self.session.chats_state.installed_backgrounds.cancel();
             return Err(err);
         }
         Ok(Some(extra))
+    }
+
+    /// The wallpaper page's Retry after a failed list.
+    pub fn retry_installed_backgrounds(
+        &mut self,
+        for_dark_theme: bool,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        self.session.chats_state.installed_backgrounds.clear_error();
+        self.fetch_installed_backgrounds(for_dark_theme)
     }
 
     /// `setDefaultBackground` with an installed or searched background:
@@ -116,7 +131,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session.requests.take(extra);
             return Err(err);
         }
-        if let Some(list) = self.session.chats_state.installed_backgrounds.as_mut() {
+        if let Some(list) = self.session.chats_state.installed_backgrounds.data_mut() {
             list.retain(|b| b.id != background_id);
         }
         Ok(extra)
@@ -304,7 +319,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     pub fn download_background_files(&mut self) {
         let chats = &self.session.chats_state;
         let wanted = gallery_files(
-            chats.installed_backgrounds.iter().flatten(),
+            chats.installed_backgrounds.data().into_iter().flatten(),
             chats.default_backgrounds.values(),
         );
         self.fetch_background_files(wanted.into_iter().cloned().collect());

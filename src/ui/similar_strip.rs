@@ -46,7 +46,15 @@ pub(super) fn similar_channels_strip(
         return None;
     }
     let Some(tiles) = session.similar_strip_tiles(chat_id) else {
-        request_similar_chats(session.account.clone(), chat_id, cx);
+        // A failed fetch is terminal here: only an absent list is asked for,
+        // so an error does not turn drawing into a request loop.
+        let asked = session
+            .users_state
+            .profile_chat_lists
+            .contains_key(&(quill::state::ProfileChatsKind::SimilarChats, chat_id.0));
+        if !asked {
+            request_similar_chats(session.account.clone(), chat_id, cx);
+        }
         return None;
     };
     if tiles.is_empty() {

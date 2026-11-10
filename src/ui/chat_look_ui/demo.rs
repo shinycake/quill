@@ -61,7 +61,7 @@ pub(super) fn seed_backgrounds(session: &mut Session) {
             angle: 0,
         }),
     };
-    session.chats_state.installed_backgrounds = Some(vec![
+    session.chats_state.installed_backgrounds.succeed(vec![
         fill(901, "dawn", 0xF6D365, 0xFDA085),
         fill(902, "sea", 0x84FAB0, 0x8FD3F4),
     ]);

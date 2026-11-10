@@ -568,7 +568,7 @@ fn installed_backgrounds_and_default_updates_are_cached() {
     let list = session
         .chats_state
         .installed_backgrounds
-        .as_ref()
+        .data()
         .expect("list");
     assert_eq!(list.len(), 2);
     assert!(

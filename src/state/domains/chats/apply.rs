@@ -415,7 +415,7 @@ impl Session {
                 for background in &list {
                     self.upsert_background_files(background);
                 }
-                self.chats_state.installed_backgrounds = Some(list);
+                self.chats_state.installed_backgrounds.succeed(list);
             }
             ChatsPayload::Background(background) => {
                 self.upsert_background_files(&background);

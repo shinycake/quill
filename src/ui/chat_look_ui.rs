@@ -339,7 +339,8 @@ impl QuillApp {
                                 let found = session
                                     .chats_state
                                     .installed_backgrounds
-                                    .iter()
+                                    .data()
+                                    .into_iter()
                                     .flatten()
                                     .find(|b| b.id == id)
                                     .cloned();
@@ -568,7 +569,7 @@ impl QuillApp {
         let muted = cx.theme().muted_foreground;
         let Some(list) = self
             .session()
-            .and_then(|s| s.chats_state.installed_backgrounds.clone())
+            .and_then(|s| s.chats_state.installed_backgrounds.data().cloned())
         else {
             return div()
                 .text_xs()
@@ -601,7 +602,8 @@ impl QuillApp {
                             .session
                             .chats_state
                             .installed_backgrounds
-                            .iter()
+                            .data()
+                            .into_iter()
                             .flatten()
                             .find(|b| b.id == id)
                             .cloned()
@@ -668,7 +670,8 @@ impl QuillApp {
                             let bg = s
                                 .chats_state
                                 .installed_backgrounds
-                                .iter()
+                                .data()
+                                .into_iter()
                                 .flatten()
                                 .find(|b| b.id == id)?;
                             session_wallpaper(s, bg)
