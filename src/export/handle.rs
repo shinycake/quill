@@ -16,15 +16,21 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, mpsc};
 use std::time::{Duration, Instant};
 
+/// Which call of the worker a request or an answer belongs to. Calls count
+/// up from 1; [`UNANSWERED`] marks a request nobody waits on.
+type CallId = u64;
+
+const UNANSWERED: CallId = 0;
+
 /// The worker's end: blocks on channels the driver services from the poll
-/// loop.
+/// loop. Every request goes out with the number of its call and every answer
+/// comes back with it, so a call never takes the answer to another one (a
+/// call that gave up, or a request nobody waited on).
 pub(crate) struct ChannelTdlib {
-    requests: mpsc::Sender<Value>,
-    replies: mpsc::Receiver<Value>,
+    requests: mpsc::Sender<(CallId, Value)>,
+    replies: mpsc::Receiver<(CallId, Value)>,
     cancelled: Arc<AtomicBool>,
-    /// Set when a call gave up waiting: the answer to it, if one still
-    /// comes, belongs to no call and the link drops it.
-    abandoned: Arc<AtomicBool>,
+    last_call: CallId,
     leftovers: Option<Leftovers>,
     /// Dropped with the worker, which tells the link it ended.
     _alive: mpsc::Sender<()>,
@@ -36,7 +42,7 @@ impl ChannelTdlib {
         ScriptedWorker {
             requests: self.requests,
             replies: self.replies,
-            abandoned: self.abandoned,
+            last_call: std::cell::Cell::new(self.last_call),
             _alive: self._alive,
         }
     }
@@ -46,25 +52,29 @@ impl ChannelTdlib {
 /// worker counts as running until it is dropped.
 #[cfg(test)]
 pub(crate) struct ScriptedWorker {
-    requests: mpsc::Sender<Value>,
-    replies: mpsc::Receiver<Value>,
-    abandoned: Arc<AtomicBool>,
+    requests: mpsc::Sender<(CallId, Value)>,
+    replies: mpsc::Receiver<(CallId, Value)>,
+    last_call: std::cell::Cell<CallId>,
     _alive: mpsc::Sender<()>,
 }
 
 #[cfg(test)]
 impl ScriptedWorker {
-    pub(crate) fn send(&self, request: Value) -> Result<(), mpsc::SendError<Value>> {
-        self.requests.send(request)
+    /// A new call: the request goes out under the next call number.
+    pub(crate) fn send(&self, request: Value) -> Result<(), mpsc::SendError<(CallId, Value)>> {
+        let call = self.last_call.get() + 1;
+        self.last_call.set(call);
+        self.requests.send((call, request))
     }
 
-    /// The worker's call timed out.
-    pub(crate) fn give_up(&self) {
-        self.abandoned.store(true, Ordering::Release);
+    /// The call number the last `send` used.
+    pub(crate) fn last_call(&self) -> CallId {
+        self.last_call.get()
     }
 
-    /// An answer the link handed the worker, if one is waiting.
-    pub(crate) fn answer(&self) -> Option<Value> {
+    /// An answer the link handed the worker, if one is waiting, with the
+    /// call it answers.
+    pub(crate) fn answer(&self) -> Option<(CallId, Value)> {
         self.replies.try_recv().ok()
     }
 }
@@ -75,8 +85,10 @@ impl Tdlib for ChannelTdlib {
         if cancelled() {
             return Err(ExportError::Cancelled);
         }
+        self.last_call += 1;
+        let call = self.last_call;
         self.requests
-            .send(request)
+            .send((call, request))
             .map_err(|_| ExportError::Cancelled)?;
         // The poll loop forwards the request; do not make it wait out a sleep.
         crate::wake::UPDATES.poke();
@@ -85,26 +97,28 @@ impl Tdlib for ChannelTdlib {
             if cancelled() {
                 return Err(ExportError::Cancelled);
             }
+            if started.elapsed() > timeout {
+                return Err(ExportError::Tdlib("the request timed out".into()));
+            }
             match self.replies.recv_timeout(Duration::from_millis(100)) {
-                Ok(mut value) => {
+                Ok((answered, mut value)) if answered == call => {
                     if let Some(object) = value.as_object_mut() {
                         object.remove("@extra");
                         object.remove("@client_id");
                     }
                     return Ok(value);
                 }
+                // The answer to a call that gave up, or to a request nobody
+                // waited on: it is not this call's.
+                Ok(_) => {}
                 Err(mpsc::RecvTimeoutError::Disconnected) => return Err(ExportError::Cancelled),
-                Err(mpsc::RecvTimeoutError::Timeout) if started.elapsed() > timeout => {
-                    self.abandoned.store(true, Ordering::Release);
-                    return Err(ExportError::Tdlib("the request timed out".into()));
-                }
                 Err(mpsc::RecvTimeoutError::Timeout) => {}
             }
         }
     }
 
     fn post_unanswered(&mut self, request: Value) {
-        if self.requests.send(request).is_ok() {
+        if self.requests.send((UNANSWERED, request)).is_ok() {
             crate::wake::UPDATES.poke();
         }
     }
@@ -126,13 +140,14 @@ pub struct ExportId(u64);
 /// sent and awaits, and the cancel flag.
 pub struct WorkerLink {
     id: ExportId,
-    requests: mpsc::Receiver<Value>,
-    replies: mpsc::Sender<Value>,
+    requests: mpsc::Receiver<(CallId, Value)>,
+    replies: mpsc::Sender<(CallId, Value)>,
     /// The request the driver sent and awaits an answer for.
     pub pending: Option<RequestId>,
+    /// The worker call of the request handed out last: its answer goes
+    /// back under that number.
+    asked: CallId,
     cancelled: Arc<AtomicBool>,
-    /// The worker gave up on its last call (see `ChannelTdlib::abandoned`).
-    abandoned: Arc<AtomicBool>,
     /// Disconnected once the worker ended.
     ended: mpsc::Receiver<()>,
 }
@@ -143,13 +158,12 @@ impl WorkerLink {
         let (request_tx, requests) = mpsc::channel();
         let (replies, reply_rx) = mpsc::channel();
         let cancelled = Arc::new(AtomicBool::new(false));
-        let abandoned = Arc::new(AtomicBool::new(false));
         let (alive, ended) = mpsc::channel();
         let worker = ChannelTdlib {
             requests: request_tx,
             replies: reply_rx,
             cancelled: cancelled.clone(),
-            abandoned: abandoned.clone(),
+            last_call: UNANSWERED,
             leftovers,
             _alive: alive,
         };
@@ -159,8 +173,8 @@ impl WorkerLink {
             requests,
             replies,
             pending: None,
+            asked: UNANSWERED,
             cancelled,
-            abandoned,
             ended,
         };
         (link, worker)
@@ -184,25 +198,24 @@ impl WorkerLink {
     }
 
     /// The next request for TDLib, if the worker has one waiting.
-    pub fn next_request(&self) -> Option<Value> {
-        self.requests.try_recv().ok()
+    pub fn next_request(&mut self) -> Option<Value> {
+        let (call, request) = self.requests.try_recv().ok()?;
+        self.asked = call;
+        Some(request)
     }
 
     /// Answer the worker's request at once: the driver takes it from here.
     pub fn answer_ok(&self) {
-        let _ = self.replies.send(serde_json::json!({"@type": "ok"}));
+        let _ = self
+            .replies
+            .send((self.asked, serde_json::json!({"@type": "ok"})));
     }
 
     /// Hand TDLib's answer to the worker.
     pub fn reply(&mut self, id: RequestId, value: Value) {
         if self.pending == Some(id) {
             self.pending = None;
-            // A call that timed out is not waiting: the answer must not
-            // reach the call that follows it.
-            if self.abandoned.swap(false, Ordering::AcqRel) {
-                return;
-            }
-            let _ = self.replies.send(value);
+            let _ = self.replies.send((self.asked, value));
         }
     }
 
@@ -329,23 +342,66 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_answer_to_a_timed_out_call_does_not_reach_the_next_call() {
+    fn an_answer_goes_back_under_the_call_it_answers() {
         let (mut export, worker) = ChatExport::scripted();
+        worker
+            .send(serde_json::json!({"@type": "getChat"}))
+            .unwrap();
+        assert!(export.link.next_request().is_some());
         export.link.pending = Some(RequestId(1));
-        worker.give_up();
         export
             .link
-            .reply(RequestId(1), serde_json::json!({"@type": "messages"}));
-        assert!(worker.answer().is_none(), "dropped, not queued");
+            .reply(RequestId(1), serde_json::json!({"@type": "chat"}));
+        let (call, _) = worker.answer().expect("answered");
+        assert_eq!(call, worker.last_call());
         assert!(export.link.pending.is_none());
 
         export.link.pending = Some(RequestId(2));
         export
             .link
-            .reply(RequestId(2), serde_json::json!({"@type": "messages"}));
+            .reply(RequestId(9), serde_json::json!({"@type": "chat"}));
         assert!(
-            worker.answer().is_some(),
-            "a live call still gets its answer"
+            worker.answer().is_none(),
+            "another request's answer is ignored"
         );
+    }
+
+    #[test]
+    fn a_call_ignores_the_late_answer_to_an_earlier_one() {
+        let (link, mut tdlib) = WorkerLink::pair(None);
+        // Call 1 gave up waiting; its answer is still on the way.
+        tdlib.last_call = 1;
+        link.replies
+            .send((1, serde_json::json!({"@type": "messages", "stale": true})))
+            .unwrap();
+        link.replies
+            .send((2, serde_json::json!({"@type": "messages"})))
+            .unwrap();
+        let answer = tdlib
+            .call(
+                serde_json::json!({"@type": "getChatHistory"}),
+                Duration::from_secs(3600),
+            )
+            .expect("the real answer");
+        assert_eq!(answer, serde_json::json!({"@type": "messages"}));
+    }
+
+    #[test]
+    fn a_request_nobody_waits_on_gets_no_call_a_later_one_could_take() {
+        let (mut link, mut tdlib) = WorkerLink::pair(None);
+        tdlib.post_unanswered(serde_json::json!({"@type": "deleteFile"}));
+        assert!(link.next_request().is_some());
+        link.pending = Some(RequestId(1));
+        link.reply(RequestId(1), serde_json::json!({"@type": "ok"}));
+        link.replies
+            .send((1, serde_json::json!({"@type": "messages"})))
+            .unwrap();
+        let answer = tdlib
+            .call(
+                serde_json::json!({"@type": "getChatHistory"}),
+                Duration::from_secs(3600),
+            )
+            .expect("the call's own answer");
+        assert_eq!(answer, serde_json::json!({"@type": "messages"}));
     }
 }

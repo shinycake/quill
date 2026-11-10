@@ -49,16 +49,15 @@ fn bulk_delete_acts_on_the_chats_that_were_selected_when_it_opened(cx: &mut Test
     let (first, second) = (chats[0], chats[1]);
     app.update(&mut vcx, |app, cx| {
         app.chat_list.selected = [first, second].into_iter().collect();
-        app.open_group_confirm(ChatId(first), GroupConfirmAction::RemoveSelectedChats, cx);
+        app.delete_selected_chats(cx);
         // The selection changes while the box is up.
         app.chat_list.selected.clear();
     });
     let targets = app.read_with(&vcx, |app, _| {
-        app.admin
-            .group_confirm_dialog
-            .as_ref()
-            .map(|dialog| dialog.targets.clone())
-            .unwrap_or_default()
+        match app.admin.group_confirm_dialog.as_ref().map(|d| &d.action) {
+            Some(GroupConfirmAction::RemoveSelectedChats { ids }) => ids.clone(),
+            _ => Vec::new(),
+        }
     });
     let mut ids: Vec<i64> = targets.iter().map(|chat| chat.0).collect();
     ids.sort_unstable();

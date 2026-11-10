@@ -141,14 +141,27 @@ fn a_failed_next_inline_page_is_remembered_until_the_next_query() {
             .to_string(),
     );
     assert_eq!(
-        driver.session.bots.inline_more_failed,
-        Some((ChatId(1), 77, "n1".to_string()))
+        driver
+            .session
+            .bots
+            .inline_query
+            .as_ref()
+            .and_then(|slot| slot.more_failed.clone()),
+        Some("n1".to_string())
     );
     // A new query replaces the slot and forgets the failed page.
     driver
         .inline_query(77, ChatId(1), "dogs", "")
         .expect("query")
         .expect("request id");
-    assert_eq!(driver.session.bots.inline_more_failed, None);
+    assert_eq!(
+        driver
+            .session
+            .bots
+            .inline_query
+            .as_ref()
+            .and_then(|slot| slot.more_failed.clone()),
+        None
+    );
     let _ = std::fs::remove_dir_all(&dir);
 }

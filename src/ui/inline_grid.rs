@@ -557,14 +557,7 @@ impl QuillApp {
         let (bot_user_id, offset) = (slot.bot_user_id, next_offset.clone());
         // A failed page waits for the next query instead of being asked again
         // on every poll batch.
-        if session
-            .bots
-            .inline_more_failed
-            .as_ref()
-            .is_some_and(|(chat, bot, failed)| {
-                *chat == chat_id && *bot == bot_user_id && *failed == offset
-            })
-        {
+        if slot.more_failed.as_ref() == Some(&offset) {
             return;
         }
         let loading = session

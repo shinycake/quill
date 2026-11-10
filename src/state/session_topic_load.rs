@@ -1,5 +1,5 @@
 //! Load state of a forum topic's first history page, derived from the topic
-//! store, the failure marks and the in-flight requests (the topic twin of
+//! store, the older-end stage and the in-flight requests (the topic twin of
 //! `history_loading` / `history_load_failed`).
 use crate::state::*;
 
@@ -7,13 +7,10 @@ impl Session {
     /// The topic's first page failed or timed out and nothing is loaded:
     /// the pane offers "Couldn't load messages · Retry".
     pub fn topic_history_load_failed(&self, chat_id: ChatId, forum_topic_id: i32) -> bool {
-        let key = (chat_id.0, forum_topic_id);
-        self.threads.topic_load_failed.contains(&key)
-            && self
-                .threads
-                .topic_histories
-                .get(&key)
-                .is_none_or(|h| h.messages.is_empty())
+        self.threads
+            .topic_histories
+            .get(&(chat_id.0, forum_topic_id))
+            .is_some_and(|h| h.older == OlderEnd::Failed && h.messages.is_empty())
     }
 
     /// The topic has nothing to show yet because its first page is on the
@@ -37,19 +34,16 @@ impl Session {
         }
     }
 
-    pub(crate) fn mark_topic_load_failed(&mut self, pending: &PendingRequest) {
-        if let Some(chat_id) = pending.chat_id
-            && let Some(forum_topic_id) = pending.forum_topic_id
-        {
-            self.threads
-                .topic_load_failed
-                .insert((chat_id.0, forum_topic_id));
-        }
-    }
-
+    /// Reopen the topic's older end after a failure (a retry, a landed
+    /// page or re-selecting the topic): the one stage the first-page Retry
+    /// and the older-page Retry strip share.
     pub(crate) fn clear_topic_load_failed(&mut self, chat_id: ChatId, forum_topic_id: i32) {
-        self.threads
-            .topic_load_failed
-            .remove(&(chat_id.0, forum_topic_id));
+        if let Some(history) = self
+            .threads
+            .topic_histories
+            .get_mut(&(chat_id.0, forum_topic_id))
+        {
+            history.older = OlderEnd::Open;
+        }
     }
 }

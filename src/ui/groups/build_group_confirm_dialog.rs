@@ -93,7 +93,7 @@ impl QuillApp {
                             )
                         }
                     }
-                    GroupConfirmAction::RemoveSelectedChats => (
+                    GroupConfirmAction::RemoveSelectedChats { .. } => (
                         tr(keys::Q_PEOPLE_DELETE_CHATS).to_string(),
                         tr(keys::Q_PEOPLE_DELETE_THE_SELECTED_CHATS_AND).to_string(),
                         tr(keys::GROUP_INVITE_CONTEXT_DELETE).to_string(),

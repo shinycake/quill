@@ -75,14 +75,6 @@ pub(crate) fn requested_status(date: i32) -> String {
     }
 }
 
-/// What the action bar's spam button does, chosen when the bar is built: an
-/// archived chat's button only reports; the plain bar's also leaves.
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum ReportSpamAction {
-    ReportOnly,
-    ReportAndLeave,
-}
-
 impl QuillApp {
     /// All bars for the open chat, in tdesktop's order: contact status,
     /// join requests, voice chat.
@@ -227,14 +219,7 @@ impl QuillApp {
                 };
                 push(
                     Self::bar_button("action-bar-report".into(), label, true),
-                    Box::new(move |this, window, cx| {
-                        let action = if unarchive {
-                            ReportSpamAction::ReportOnly
-                        } else {
-                            ReportSpamAction::ReportAndLeave
-                        };
-                        this.bar_report_spam(chat_id, action, window, cx)
-                    }),
+                    Box::new(move |this, window, cx| this.bar_report_spam(chat_id, window, cx)),
                 );
             }
             (ChatActionBar::InviteMembers, _) if can_add_members => {
@@ -407,13 +392,7 @@ impl QuillApp {
     }
 
     /// "Report spam (and leave)": confirm, `reportChat`, then `leaveChat`.
-    fn bar_report_spam(
-        &mut self,
-        chat_id: ChatId,
-        action: ReportSpamAction,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
+    fn bar_report_spam(&mut self, chat_id: ChatId, window: &mut Window, cx: &mut Context<Self>) {
         let channel = self
             .session()
             .and_then(|s| s.chats.get(&chat_id.0))
@@ -433,24 +412,16 @@ impl QuillApp {
                 .cancel_text(tr(keys::CANCEL))
                 .show_cancel(true)
                 .on_ok(move |_, _, cx| {
-                    let _ = app.update(cx, |this, cx| this.submit_bar_report(chat_id, action, cx));
+                    let _ = app.update(cx, |this, cx| this.submit_bar_report(chat_id, cx));
                     true
                 })
         });
     }
 
-    fn submit_bar_report(
-        &mut self,
-        chat_id: ChatId,
-        action: ReportSpamAction,
-        cx: &mut Context<Self>,
-    ) {
+    fn submit_bar_report(&mut self, chat_id: ChatId, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
             let reported = live.driver.report_chat(chat_id);
-            let left = match action {
-                ReportSpamAction::ReportAndLeave => live.driver.leave_channel(chat_id).map(|_| ()),
-                ReportSpamAction::ReportOnly => Ok(()),
-            };
+            let left = live.driver.leave_channel(chat_id);
             self.set_note(if reported.is_ok() && left.is_ok() {
                 StatusNote::info(tr(keys::REPORT_SPAM_DONE))
             } else {

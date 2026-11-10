@@ -28,7 +28,7 @@ use quill::spell_catalog::{
     next_chosen, percent, remove,
 };
 use quill::spell_dict::EngineKind;
-use quill::spell_download::{Progress, download_dictionary};
+use quill::spell_download::{Progress, download_dictionary, run_guarded};
 
 /// The one download in flight (tdesktop also loads a single dictionary at
 /// a time).
@@ -147,8 +147,9 @@ impl QuillApp {
         let worker_progress = progress.clone();
         let worker_code = code.clone();
         let worker = cx.background_spawn(async move {
-            let _done = worker_progress.finish_on_drop();
-            download_dictionary(&dir, &worker_code, &worker_progress)
+            run_guarded(&worker_progress, || {
+                download_dictionary(&dir, &worker_code, &worker_progress)
+            })
         });
         // screen-scope: the spell checker and its dictionaries belong to the
         // app, not to an account; the download finishes on whichever screen

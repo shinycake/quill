@@ -87,10 +87,6 @@ pub struct BotsState {
     /// Bots slice: the single active `getInlineQueryResults` fetch (the
     /// composer has one active inline query, so a slot — not a map).
     pub inline_query: Option<InlineQuerySlot>,
-    /// The page of the active slot that a "load more" request failed on
-    /// (chat, bot, the `next_offset` asked for): not asked again until the
-    /// next query replaces the slot.
-    pub inline_more_failed: Option<(ChatId, i64, String)>,
     /// Bots slice: `@botname` → bot user id resolution for inline mode.
     /// Set by the driver before `searchPublicChat`; the answer (or error)
     /// resolves it. The composer has one active trigger, so a single
@@ -126,7 +122,6 @@ impl BotsState {
             pending_force_reply: None,
             reply_keyboards: ReplyKeyboardState::default(),
             inline_query: None,
-            inline_more_failed: None,
             inline_bot_resolve: None,
             inline_bot_resolve_seq: 0,
             owned: OwnedBotsState::default(),

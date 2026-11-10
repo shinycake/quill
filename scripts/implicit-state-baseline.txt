@@ -81,8 +81,6 @@ EmojiStyleUi::started+file_error
 FastShareFacts::sent
 FieldResult::finished
 FirstRunPrefs::completed
-FolderEditorDialog::fetch_pending
-FolderEditorDialog::fetch_pending+error
 FolderShareDialog::busy
 FolderShareDialog::busy+error
 FooterMeta::pending

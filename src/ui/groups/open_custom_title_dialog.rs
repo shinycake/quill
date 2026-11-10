@@ -118,16 +118,7 @@ impl QuillApp {
         action: GroupConfirmAction,
         cx: &mut Context<Self>,
     ) {
-        let targets = if action == GroupConfirmAction::RemoveSelectedChats {
-            self.selected_chat_ids()
-        } else {
-            Vec::new()
-        };
-        self.admin.group_confirm_dialog = Some(GroupConfirmDialog {
-            chat_id,
-            action,
-            targets,
-        });
+        self.admin.group_confirm_dialog = Some(GroupConfirmDialog { chat_id, action });
         self.open_box(DialogKind::GroupConfirm);
         cx.notify();
     }
@@ -179,13 +170,10 @@ impl QuillApp {
             self.admin.group_confirm_dialog = Some(GroupConfirmDialog {
                 chat_id: dialog.chat_id,
                 action: GroupConfirmAction::BroadcastUpgrade,
-                targets: Vec::new(),
             });
             cx.notify();
             return;
         }
-        // The chats still in the list, read before the live borrow.
-        let selected_chats = dialog.targets.clone();
         // A basic group must be left before its history goes.
         let is_basic_group = self
             .session()
@@ -291,14 +279,11 @@ impl QuillApp {
                     }
                     // Slice CL3: multi-select bulk delete — one
                     // `deleteChatHistory(remove_from_chat_list:true)`
-                    // per selected chat; the selection clears on
-                    // confirm. The ids come from the live selection
-                    // (the dialog blocks selection changes while
-                    // open), so the enum stays `Copy`.
-                    GroupConfirmAction::RemoveSelectedChats => {
-                        let chat_ids: Vec<ChatId> = selected_chats;
+                    // per chat that was selected when the box opened;
+                    // the selection clears on confirm.
+                    GroupConfirmAction::RemoveSelectedChats { ref ids } => {
                         let mut sent = 0;
-                        for id in &chat_ids {
+                        for id in ids {
                             if live
                                 .driver
                                 .remove_chat_from_list(*id)
@@ -307,7 +292,7 @@ impl QuillApp {
                                 sent += 1;
                             }
                         }
-                        let total = chat_ids.len();
+                        let total = ids.len();
                         self.chat_list.selected.clear();
                         Ok(trn_with(
                             keys::Q_PEOPLE_DELETING_OF_CHATS,

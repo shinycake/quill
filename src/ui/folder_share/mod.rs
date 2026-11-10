@@ -853,11 +853,14 @@ impl QuillApp {
                 .filter(|id| !asked.contains(id))
                 .filter(|id| self.session().is_some_and(|s| !s.chats.contains_key(id)))
                 .collect();
-            if let Some(dialog) = self.folders.invite.as_mut() {
+            // Asked once each, marked only once the asks went out: a send
+            // that failed is tried again, an answer that failed is not.
+            let sent = self
+                .live
+                .as_mut()
+                .is_some_and(|live| live.driver.fetch_chats_for_folder_invite(&unknown).is_ok());
+            if sent && let Some(dialog) = self.folders.invite.as_mut() {
                 dialog.asked_chats.extend(unknown.iter().copied());
-            }
-            if let Some(live) = self.live.as_mut() {
-                let _ = live.driver.fetch_chats_for_folder_invite(&unknown);
             }
             if let Some(dialog) = self.folders.invite.as_mut()
                 && !dialog.seeded

@@ -567,10 +567,30 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let muted = cx.theme().muted_foreground;
-        let Some(list) = self
-            .session()
-            .and_then(|s| s.chats_state.installed_backgrounds.data().cloned())
-        else {
+        let fetch = self.session().map(|s| &s.chats_state.installed_backgrounds);
+        let Some(list) = fetch.and_then(|f| f.data().cloned()) else {
+            // A failed list shows its error with a Retry (the Appearance
+            // page's), not a "Loading" nothing will end.
+            if let Some(error) = fetch.and_then(|f| f.error()).map(str::to_owned) {
+                let dark = cx.theme().is_dark();
+                return div()
+                    .flex()
+                    .flex_col()
+                    .gap_1()
+                    .child(div().text_xs().text_color(muted).child(error))
+                    .child(
+                        Button::new("chat-look-wallpaper-retry")
+                            .label(tr(keys::Q_MONEY_RETRY))
+                            .small()
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                if let Some(live) = this.live.as_mut() {
+                                    let _ = live.driver.retry_installed_backgrounds(dark);
+                                }
+                                cx.notify();
+                            })),
+                    )
+                    .into_any_element();
+            }
             return div()
                 .text_xs()
                 .text_color(muted)

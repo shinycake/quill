@@ -505,3 +505,77 @@ fn unavailable_chat_statistics_end_in_an_error() {
         Ok(None)
     );
 }
+
+/// Statistics asked before the chat's full info is known wait for it, ask
+/// for it, and go out (or fail) when it lands (sweep 13-022).
+#[test]
+fn statistics_asked_before_the_full_info_wait_and_go_out_when_it_lands() {
+    let mut rig = Rig::new();
+    rig.driver
+        .ingest(copy_and_parse(
+            r#"{"@type":"updateNewChat","chat":{"id":-100,"title":"News","type":{"@type":"chatTypeSupergroup","supergroup_id":100,"is_channel":true},"unread_count":0}}"#,
+            &rig.seq,
+            &rig.sink,
+        ).unwrap())
+        .unwrap();
+    assert_eq!(
+        rig.driver.fetch_chat_statistics(ChatId(-100), true),
+        Ok(None)
+    );
+    assert_eq!(
+        rig.driver.session.groups.chat_statistics.get(&-100),
+        Some(&ChatStatisticsFetch::WaitingForInfo { is_dark: true })
+    );
+    assert_eq!(rig.last("getSupergroupFullInfo")["supergroup_id"], 100);
+    assert!(!rig.sent().iter().any(|v| v["@type"] == "getChatStatistics"));
+    rig.driver
+        .ingest(copy_and_parse(
+            r#"{"@type":"updateSupergroupFullInfo","supergroup_id":100,"supergroup_full_info":{"description":"","member_count":3,"can_get_statistics":true}}"#,
+            &rig.seq,
+            &rig.sink,
+        ).unwrap())
+        .unwrap();
+    assert_eq!(
+        rig.driver.session.groups.chat_statistics.get(&-100),
+        Some(&ChatStatisticsFetch::Loading)
+    );
+    let request = rig.last("getChatStatistics");
+    assert_eq!(request["chat_id"], -100);
+    assert_eq!(request["is_dark"], true);
+}
+
+#[test]
+fn statistics_waiting_for_a_full_info_that_fails_end_in_an_error() {
+    let mut rig = Rig::new();
+    rig.driver
+        .ingest(copy_and_parse(
+            r#"{"@type":"updateNewChat","chat":{"id":-100,"title":"News","type":{"@type":"chatTypeSupergroup","supergroup_id":100,"is_channel":true},"unread_count":0}}"#,
+            &rig.seq,
+            &rig.sink,
+        ).unwrap())
+        .unwrap();
+    assert_eq!(
+        rig.driver.fetch_chat_statistics(ChatId(-100), false),
+        Ok(None)
+    );
+    let extra = rig.last("getSupergroupFullInfo")["@extra"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    rig.driver
+        .ingest(
+            copy_and_parse(
+                &format!(
+                    r#"{{"@type":"error","@extra":"{extra}","code":500,"message":"Timeout"}}"#
+                ),
+                &rig.seq,
+                &rig.sink,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+    assert!(matches!(
+        rig.driver.session.groups.chat_statistics.get(&-100),
+        Some(ChatStatisticsFetch::Failed(_))
+    ));
+}

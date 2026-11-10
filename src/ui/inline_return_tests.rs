@@ -47,3 +47,21 @@ fn a_failed_bot_lookup_ends_the_round_trip(cx: &mut TestAppContext) {
     app.update(&mut vcx, |app, _| app.cancel_inline_opening());
     assert!(!waiting(&app, &vcx), "the failed lookup leaves nothing");
 }
+
+#[gpui_kit::test]
+fn another_link_ending_in_a_different_chat_ends_the_round_trip(cx: &mut TestAppContext) {
+    let (app, mut vcx) = open(cx);
+    app.update(&mut vcx, |app, _| {
+        app.begin_inline_return(900_001, "somebot", "param");
+        // The bot's own chat is the one this round trip waits for.
+        app.cancel_inline_opening_unless_chat(ChatId(900_001));
+    });
+    assert!(waiting(&app, &vcx), "the bot's chat keeps it waiting");
+    app.update(&mut vcx, |app, _| {
+        app.cancel_inline_opening_unless_chat(ChatId(5));
+    });
+    assert!(
+        !waiting(&app, &vcx),
+        "a link that ended in another chat leaves nothing waiting"
+    );
+}

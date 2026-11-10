@@ -184,8 +184,10 @@ impl QuillApp {
                 }
                 self.screen.links.deep_link_invite = Some(preview.clone());
                 live.driver.session.chats_state.deep_link = Some(preview);
+                self.cancel_inline_opening();
             }
             Some(DeepLinkState::ChatReady { chat_id, action }) => {
+                self.cancel_inline_opening_unless_chat(chat_id);
                 self.links.pending_deep_link_open = Some(PendingOpen {
                     chat_id,
                     action,

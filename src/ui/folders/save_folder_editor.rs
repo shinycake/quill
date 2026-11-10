@@ -9,7 +9,7 @@ impl QuillApp {
     pub(in crate::ui) fn save_folder_editor(&mut self, cx: &mut Context<Self>) {
         let (name, folder_id) = match self.folders.editor.as_ref() {
             // The folder is still loading: its spec would go out blank.
-            Some(dialog) if dialog.fetch_pending => return,
+            Some(dialog) if dialog.load != FolderLoad::Ready => return,
             Some(dialog) => (dialog.name(cx), dialog.folder_id),
             None => return,
         };

@@ -107,8 +107,10 @@ impl QuillApp {
         self.demo_topic_session(|session| {
             session
                 .threads
-                .topic_load_failed
-                .insert((FORUM, OPEN_TOPIC));
+                .topic_histories
+                .entry((FORUM, OPEN_TOPIC))
+                .or_default()
+                .older = quill::state::OlderEnd::Failed;
         });
     }
 

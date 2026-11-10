@@ -588,12 +588,12 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         let first_page = offset.is_empty();
         if first_page {
-            self.session.bots.inline_more_failed = None;
             self.session.bots.inline_query = Some(InlineQuerySlot {
                 chat_id,
                 bot_user_id,
                 query: query.to_string(),
                 fetch: InlineQueryFetch::Loading,
+                more_failed: None,
             });
         }
         let extra = self.session.request(

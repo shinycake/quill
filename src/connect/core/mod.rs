@@ -563,6 +563,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.run_deferred_caption(send_outcome);
         if paid_prices_change {
             self.sync_paid_guard();
+            self.resume_waiting_statistics();
         }
         if let Some((followups, ok)) = admin_followup {
             self.run_admin_followups(followups, ok);

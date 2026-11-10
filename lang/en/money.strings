@@ -905,3 +905,6 @@
 "lng_audio_transcribe_trials_over" = "You have used all your free transcriptions this week. Wait until {date} to use it again or subscribe to {link} now.";
 "lng_settings_privacy_premium_link" = "Telegram Premium";
 "lng_unlock_tags" = "Unlock";
+"qll_money_statistics_unavailable" = "Statistics are not available for this chat.";
+"qll_money_statistics_send_failed" = "Could not send the statistics request.";
+"qll_money_statistics_info_failed" = "Could not load the chat's details.";

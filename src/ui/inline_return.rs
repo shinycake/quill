@@ -13,8 +13,9 @@ use quill::telegram::envelope::ChatKind;
 
 /// Where a round trip stands. Every stage ends: the bot's switch-inline
 /// button takes it back, and a lookup that fails
-/// ([`QuillApp::cancel_inline_opening`]) or another account on screen
-/// drops it.
+/// ([`QuillApp::cancel_inline_opening`]), another link that ends anywhere but
+/// the bot's chat ([`QuillApp::cancel_inline_opening_unless_chat`]) or another
+/// account on screen drops it.
 #[derive(Debug)]
 enum InlineStage {
     /// The bot's chat is being looked up; its start waits to be sent.
@@ -102,6 +103,24 @@ impl QuillApp {
             .as_ref()
             .is_some_and(|ret| !ret.started())
         {
+            self.composer_ui.inline_return = None;
+        }
+    }
+
+    /// Another link ended in `chat_id`. A round trip still opening the bot's
+    /// chat ends unless that is the bot's chat: its start must not be sent
+    /// into a chat the user went to by another route, and a stale error
+    /// from the overtaken lookup will never come to end it.
+    pub(super) fn cancel_inline_opening_unless_chat(&mut self, chat_id: ChatId) {
+        let other = self
+            .composer_ui
+            .inline_return
+            .as_ref()
+            .filter(|ret| !ret.started())
+            .is_some_and(|ret| {
+                chat_id.0 != ret.bot_id && !self.is_private_chat_with(chat_id, ret.bot_id)
+            });
+        if other {
             self.composer_ui.inline_return = None;
         }
     }

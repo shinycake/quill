@@ -26,6 +26,10 @@ pub struct ChatListState {
     /// from a fresh spec ([`ChatListState::fresh_spec`]), or it writes the
     /// old chat lists back for every device.
     pub(crate) folder_specs_stale: HashSet<i32>,
+    /// Folders whose `getChatFolder` failed, with the line to show: the
+    /// folder editor waiting on that spec ends in it (and a Retry) instead
+    /// of loading forever. Cleared when the spec is asked again or lands.
+    pub folder_spec_errors: HashMap<i32, String>,
     /// Parity slice: `getChatListsToAddChat` results per chat id — the chat
     /// lists a chat may be added to. Drives the per-chat folder picker as
     /// the schema intends (`:13347` doc comment).
@@ -173,6 +177,7 @@ impl ChatListState {
     pub(crate) fn store_spec(&mut self, folder_id: i32, spec: ChatFolderSpec) {
         self.folder_specs.insert(folder_id, spec);
         self.folder_specs_stale.remove(&folder_id);
+        self.folder_spec_errors.remove(&folder_id);
     }
 
     /// Something changed `folder_id`: its cached spec stays for display,
@@ -219,6 +224,7 @@ impl ChatListState {
             are_folder_tags_enabled: false,
             folder_specs: HashMap::new(),
             folder_specs_stale: HashSet::new(),
+            folder_spec_errors: HashMap::new(),
             chat_lists_for_add: HashMap::new(),
             folder_chats_exhausted: HashSet::new(),
             folder_remove_queue: Vec::new(),

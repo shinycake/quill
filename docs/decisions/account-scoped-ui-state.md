@@ -4005,30 +4005,51 @@ and 10 are widget items another fixer owns).
   (12-049). The music row's play button carries its message's chat
   (11-p3-001).
 - **Confirms act on what was confirmed.** Manage Topics Delete opens the
-  `DeleteForumTopic` box (10-068). The bulk "Delete chats" box captures its
-  chats in `GroupConfirmDialog::targets` when it opens (09-050, 10-087).
+  `DeleteForumTopic` box (10-068). The bulk "Delete chats" box carries its
+  chats in `GroupConfirmAction::RemoveSelectedChats { ids }`, captured when it
+  opens (09-050, 10-087).
 - **Failed pages wait.** `TopicHistory::older` (`OlderEnd`) keeps a failed
   older thread or topic page from being asked again on every render (06-001,
-  06-002); a failed next inline page, story viewers page, similar-channels
-  list and folder-invite chat are asked once (10-121, 13-144 with a Retry
-  button, 13-044, 09-110). The installed-wallpapers list is a `Fetch` with a
-  Retry (07-035). Thread paging notifies only when a request went out (13-104).
+  06-002). It is also the topic's first-page stage: `topic_load_failed` is
+  gone, "Couldn't load messages" is `older == Failed` with nothing loaded, so
+  Retry (`retry_topic_history`, `retry_topic_older`) reopens the one stage and
+  a failed jump to the latest no longer ends in "No messages in this topic".
+  The thread's first page is `ThreadStatus::Failed`, already one stage. A
+  failed next inline page (`InlineQuerySlot::more_failed`), story viewers
+  page, similar-channels list and folder-invite chat are asked once (10-121,
+  13-144 with a Retry button, 13-044, 09-110: a chat counts as asked only
+  after the ask was sent). The installed-wallpapers list is a `Fetch` with a
+  Retry, on the Appearance page and in the chat look box (07-035). Thread paging notifies only when a request went out (13-104).
   A failed older page of a non-empty thread or topic draws a Retry strip
   over its rows (`conversation/older_retry.rs`); jumping to the latest or
   reopening clears it too.
 - **Ends in an error.** Statistics: a chat that cannot show them, or a send
-  that failed, lands in the Failed state the panel draws (13-021, 13-022). A
+  that failed, lands in the Failed state the panel draws (13-021). A chat
+  whose `supergroupFullInfo` is not known yet is `WaitingForInfo { is_dark }`:
+  the ask for the full info goes out, and the update that stores it
+  (`resume_waiting_statistics`, run where the paid-prices sync runs) sends the
+  statistics request or fails the panel; a failed full-info request fails it
+  too (13-022). No polling. A
   refused live-story join shows the Join button (13-089); the viewer's join
   is one enum, `LiveJoin` (`Idle`, `Watching { target, seen_call }`,
   `Refused(target)`), not `watching`, `seen_call` and `refused_join`.
 - **Smaller.** A language switch whose send fails clears `switching`
   (02-133); `updateChatPendingJoinRequests` with null parses as zero
-  (06-050); the folder editor's Save waits for the folder to load (09-104,
-  09-X052); Report spam on an archived chat only reports (08-049); a story
+  (06-050); the folder editor is `FolderLoad` (`Loading`, `Failed`, `Ready`): Save
+  waits for `Ready`, a failed `getChatFolder` (`folder_spec_errors`) shows its
+  error with Retry instead of loading forever (09-104, 09-X052); 08-049 is
+  skipped: tdesktop's `ContactStatus::setupReportHandler` runs one callback for
+  both Unarchive-or-Report and Report spam, and both call `deleteConversation`
+  (leave), so the bar reports and leaves as before; a story
   text reply keeps the chat's draft (07-005); a second edit keeps the real
   draft (08-127); Promote forgets a selection the new search page hides
-  (10-078); an export call that timed out drops its late answer (03-040); the
-  spell download ends its progress loop when the worker panics (05-002);
+  (10-078); each export worker call carries a call number and its answer comes back
+  under it, so a call never takes the late answer of one that timed out, nor
+  the answer to a request nobody waited on; the `abandoned` flag is gone
+  (03-040; the link cannot know the driver's `RequestId` when the worker
+  sends, so the number is the worker's own); the spell download's worker runs
+  under `run_guarded`: a panic comes back as the row's `Err` and the progress
+  still ends, so awaiting the worker never panics on the UI thread (05-002);
   the agent's download re-checks access after the copy (01-013).
 - **Off the UI thread.** A round video's thumbnail is made by
   `VideoNoteCapture::finish` on its background task and rides in
@@ -4052,5 +4073,7 @@ and 10 are widget items another fixer owns).
 - **Inline results Start.** `InlineReturn` is `Opening { parameter }` then
   `Started { baseline }`, carries its account, and ends when the bot chat's
   lookup fails (`cancel_inline_opening`, from the deep-link outcome and a
-  failed send) or another account is on screen (10-119). No timer: a lookup
+  failed send), when another link ends in any chat but the bot's
+  (`cancel_inline_opening_unless_chat`, an invite preview, a text or typed
+  link), or when another account is on screen (10-119). No timer: a lookup
   that never answers is the deep-link flow's own concern.

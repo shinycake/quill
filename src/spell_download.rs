@@ -123,6 +123,21 @@ pub fn download_dictionary(
     crate::spell_catalog::install(dir, code, &aff, &dic).map_err(|e| e.to_string())
 }
 
+/// The text a row shows when its worker panicked.
+pub const WORKER_PANICKED: &str = "The download stopped unexpectedly.";
+
+/// Runs the download job on the worker. A panic in it comes back as an
+/// `Err` (the row shows it) instead of unwinding into whoever awaits the
+/// worker, and the progress is finished either way.
+pub fn run_guarded(
+    progress: &Progress,
+    job: impl FnOnce() -> Result<(), String>,
+) -> Result<(), String> {
+    let _done = progress.finish_on_drop();
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(job))
+        .unwrap_or_else(|_| Err(WORKER_PANICKED.to_string()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -162,13 +177,23 @@ mod tests {
     }
 
     #[test]
-    fn a_panicking_worker_still_finishes() {
+    fn a_panicking_worker_finishes_and_returns_an_error() {
         let p = Progress::default();
-        let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            let _done = p.finish_on_drop();
-            std::panic::resume_unwind(Box::new("worker failed"));
-        }));
-        assert!(outcome.is_err());
+        let outcome = run_guarded(&p, || std::panic::resume_unwind(Box::new("worker failed")));
+        assert_eq!(outcome, Err(WORKER_PANICKED.to_string()));
+        assert!(p.is_finished());
+    }
+
+    #[test]
+    fn a_worker_result_passes_through() {
+        let p = Progress::default();
+        assert_eq!(run_guarded(&p, || Ok(())), Ok(()));
+        assert!(p.is_finished());
+        let p = Progress::default();
+        assert_eq!(
+            run_guarded(&p, || Err("Cancelled.".to_string())),
+            Err("Cancelled.".to_string())
+        );
         assert!(p.is_finished());
     }
 }

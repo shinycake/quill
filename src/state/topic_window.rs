@@ -227,25 +227,17 @@ impl Session {
         if self.history_pruning.gone_topic_pages.remove(&pending.id.0) {
             return;
         }
-        let history = self.threads.topic_histories.get_mut(&(chat_id.0, topic));
-        if history
-            .as_ref()
-            .is_some_and(|history| history.stale_pages.contains(&pending.id.0))
+        if let Some(history) = self.threads.topic_histories.get_mut(&(chat_id.0, topic))
+            && history.stale_pages.remove(&pending.id.0)
         {
-            if let Some(history) = history {
-                history.stale_pages.remove(&pending.id.0);
-            }
             return;
         }
         match pending.purpose {
             RequestPurpose::GetTopicHistory => {
-                if let Some(history) = history {
-                    history.older = OlderEnd::Failed;
-                }
-                self.mark_topic_load_failed(pending);
+                self.topic_history_entry(chat_id, topic).older = OlderEnd::Failed;
             }
             _ => {
-                if let Some(history) = history {
+                if let Some(history) = self.threads.topic_histories.get_mut(&(chat_id.0, topic)) {
                     history.newer_failed = true;
                 }
             }

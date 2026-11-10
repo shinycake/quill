@@ -139,3 +139,27 @@ fn jumping_to_the_latest_replaces_a_short_window_with_the_latest_page() {
     assert_eq!(f.topic().newest_loaded_id(), Some(MessageId(1000)));
     assert!(!f.topic().has_newer);
 }
+
+#[test]
+fn retry_after_a_failed_jump_asks_for_the_first_page_again() {
+    let mut f = Fixture::topic_open();
+    f.topic().has_newer = true;
+    assert!(f.driver.topic_jump_to_latest().unwrap().is_some());
+    let extra = f.last_search()["@extra"].as_str().unwrap().to_owned();
+    f.ingest(&format!(
+        r#"{{"@type":"error","@extra":"{extra}","code":500,"message":"Timeout"}}"#
+    ));
+    assert!(f.driver.session.topic_history_load_failed(ChatId(16), 3));
+    assert_eq!(
+        f.driver.fetch_topic_history().unwrap(),
+        None,
+        "a failed page waits for Retry"
+    );
+    let sent = f.recorder.snapshot().len();
+    assert!(f.driver.retry_topic_history().unwrap().is_some());
+    assert_eq!(f.recorder.snapshot().len(), sent + 1);
+    assert!(!f.driver.session.topic_history_load_failed(ChatId(16), 3));
+    assert!(f.driver.session.topic_history_loading(ChatId(16), 3));
+    f.answer_page(&(951..=1000).rev().collect::<Vec<_>>(), 951);
+    assert_eq!(f.topic().newest_loaded_id(), Some(MessageId(1000)));
+}

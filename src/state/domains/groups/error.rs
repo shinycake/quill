@@ -2,6 +2,28 @@
 use crate::state::*;
 
 impl Session {
+    /// Statistics panels of this supergroup's chats that waited for its
+    /// full info end in the error the panel draws.
+    fn fail_statistics_waiting_for(&mut self, supergroup_id: i64) {
+        let chats: Vec<i64> = self
+            .chats
+            .values()
+            .filter(|chat| {
+                matches!(chat.kind, ChatKind::Supergroup { supergroup_id: id, .. } if id == supergroup_id)
+            })
+            .map(|chat| chat.id.0)
+            .collect();
+        for chat in chats {
+            if let Some(fetch @ ChatStatisticsFetch::WaitingForInfo { .. }) =
+                self.groups.chat_statistics.get_mut(&chat)
+            {
+                *fetch = ChatStatisticsFetch::Failed(
+                    crate::lang::tr(crate::lang::keys::Q_MONEY_STATISTICS_INFO_FAILED).into(),
+                );
+            }
+        }
+    }
+
     /// Reacts to a failed groups request; called by
     /// [`Session::apply_error`] after the shared handling.
     pub(crate) fn apply_groups_error(
@@ -133,6 +155,13 @@ impl Session {
                     err,
                     "Could not change the group's sticker pack",
                 ));
+            }
+            // A statistics panel waiting for this supergroup's full info
+            // cannot learn whether the chat shows statistics: fail it.
+            Some(RequestPurpose::GetSupergroupFullInfo) => {
+                if let Some(supergroup_id) = pending.and_then(|p| p.supergroup_id) {
+                    self.fail_statistics_waiting_for(supergroup_id);
+                }
             }
             // Phase D2: a failed `getChatStatistics` lands in the
             // fetch state so the statistics panel shows an honest
