@@ -663,8 +663,8 @@ impl QuillApp {
             "story-forward",
             state.forwards_total,
             &state.forwards,
-            state.forwards_loading,
-            state.forwards_error.clone(),
+            state.forwards_loading(),
+            state.forwards_error().map(str::to_string),
             more,
             cx,
         ))

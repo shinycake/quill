@@ -87,11 +87,11 @@ impl QuillApp {
             return;
         };
         if !self.stories.viewer_ui().stats_open
-            || (state.forwards_error.is_some() && !scrolled)
+            || (state.forwards_error().is_some() && !scrolled)
             || !load_due(
                 scrolled_near_end(&self.stories.stats_scroll),
                 !state.forwards_next_offset.is_empty(),
-                state.forwards_loading,
+                state.forwards_loading(),
             )
             || !self
                 .stories
@@ -364,10 +364,10 @@ impl QuillApp {
                 PublicForwardKind::Story { .. } => row.into_any_element(),
             });
         }
-        if let Some(error) = state.forwards_error.clone() {
+        if let Some(error) = state.forwards_error().map(str::to_string) {
             panel = panel.child(div().text_sm().text_color(danger()).child(error));
         }
-        if state.forwards_loading {
+        if state.forwards_loading() {
             panel = panel.child(loading_row("story-forwards-loading", cx));
         } else if state.forwards.is_empty()
             && state.forwards_next_offset.is_empty()

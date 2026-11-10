@@ -240,6 +240,7 @@ fn driver_get_story_interactions_gates_and_dedupes() {
         "storyContentPhoto",
         r#""can_get_interactions":true,"#,
     );
+    driver.session.begin_story_viewers(7, 6);
     let extra = driver
         .get_story_interactions(ChatId(7), 6, "")
         .unwrap()
@@ -257,6 +258,15 @@ fn driver_get_story_interactions_gates_and_dedupes() {
     assert_eq!(v["limit"], 50);
     // In-flight fetch dedupes to None (no second request).
     assert_eq!(driver.get_story_interactions(ChatId(7), 6, ""), Ok(None));
+    // The panel is closed and reopened while that request is still out: the
+    // new panel asks for its own first page instead of being held up by it.
+    driver.session.clear_story_viewers();
+    driver.session.begin_story_viewers(7, 6);
+    let fresh = driver
+        .get_story_interactions(ChatId(7), 6, "")
+        .unwrap()
+        .expect("the reopened panel sends");
+    assert_ne!(fresh, extra);
     let _ = std::fs::remove_dir_all(&dir);
 }
 

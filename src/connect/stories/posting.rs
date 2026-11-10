@@ -146,11 +146,12 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !can_get {
             return Err(ConnectSendError::InvalidRequest);
         }
-        if self.session.requests.has_purpose_for_story(
-            RequestPurpose::GetStoryInteractions,
-            chat_id,
-            story_id,
-        ) {
+        // A page of this panel is on its way; an older request left in the
+        // registry by a panel since closed does not hold a new panel up
+        // (its answer is dropped, `Session::accept_story_interactions`).
+        if self.session.stories.viewers.as_ref().is_some_and(|state| {
+            state.chat_id == chat_id.0 && state.story_id == story_id && state.is_loading()
+        }) {
             return Ok(None);
         }
         let extra =
@@ -159,12 +160,8 @@ impl<S: JsonSender> ConnectDriver<S> {
         let json = get_story_interactions_request(extra, story_id, "", offset, 50);
         match self.sender.send_json(&json) {
             Ok(()) => {
-                if let Some(state) = self.session.stories.viewers.as_mut()
-                    && state.chat_id == chat_id.0
-                    && state.story_id == story_id
-                {
-                    state.loading = true;
-                }
+                self.session
+                    .story_viewers_loading(chat_id.0, story_id, extra);
                 Ok(Some(extra))
             }
             Err(err) => {

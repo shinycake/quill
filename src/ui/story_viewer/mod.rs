@@ -582,29 +582,28 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         if let Some(live) = self.live.as_mut() {
-            if live
-                .driver
-                .session
-                .stories
-                .report
-                .as_ref()
-                .is_none_or(|flow| !flow.is_for(item.chat_id.0, item.story_id))
-            {
-                live.driver
-                    .session
-                    .begin_story_report(item.chat_id.0, item.story_id);
-            } else {
-                live.driver
-                    .session
-                    .story_report_sending(item.chat_id.0, item.story_id);
-            }
             self.screen.connection.set_note_for(
                 &self.screen.windows,
                 match live
                     .driver
                     .report_story(item.chat_id, item.story_id, option_id, text)
                 {
-                    Ok(_) => StatusNote::silent(tr(keys::Q_MEDIA_REPORTING_STORY)),
+                    // The stage is entered once the request is out, with its
+                    // id: only that answer moves the flow.
+                    Ok(request) => {
+                        let session = &mut live.driver.session;
+                        let first = session
+                            .stories
+                            .report
+                            .as_ref()
+                            .is_none_or(|flow| !flow.is_for(item.chat_id.0, item.story_id));
+                        if first {
+                            session.begin_story_report(item.chat_id.0, item.story_id, request);
+                        } else {
+                            session.story_report_sending(item.chat_id.0, item.story_id, request);
+                        }
+                        StatusNote::silent(tr(keys::Q_MEDIA_REPORTING_STORY))
+                    }
                     Err(_) => {
                         // Phase 9.5 review: the driver took the pending
                         // request back, so no answer will ever arrive —

@@ -13,7 +13,7 @@ fn moving_to_another_story_closes_its_report_and_viewers_panels(cx: &mut TestApp
             open.report_open = true;
         }
         if let Some(session) = app.demo_session.as_mut() {
-            session.begin_story_report(105, 3);
+            session.begin_story_report(105, 3, quill::ids::RequestId(1));
             session.stories.manage.error = Some("Pick at least one user".into());
         }
     });
@@ -42,7 +42,9 @@ fn a_report_flow_is_matched_by_poster_and_story() {
     let flow = StoryReportFlow {
         chat_id: 105,
         story_id: 3,
-        stage: StoryReportStage::Checking,
+        stage: StoryReportStage::Checking {
+            request: quill::ids::RequestId(1),
+        },
     };
     assert!(flow.is_for(105, 3));
     assert!(!flow.is_for(52, 3), "the same story id from another poster");

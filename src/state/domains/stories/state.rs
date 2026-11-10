@@ -226,6 +226,23 @@ impl StoriesState {
         self.reply_attempted.remove(&story);
     }
 
+    /// `story` arrived (an answer or `updateStory`): whatever said it was
+    /// gone or waiting no longer applies.
+    pub fn story_arrived(&mut self, story: (i64, i32)) {
+        self.missing.remove(&story);
+        self.story_retry.remove(&story);
+    }
+
+    /// The poster chat became known. TDLib refuses `getStory` with a 400
+    /// while it does not know the chat, which looks the same as a story that
+    /// is gone, so the stories of this poster marked missing are asked for
+    /// again.
+    pub fn poster_chat_known(&mut self, chat_id: i64) {
+        self.missing.retain(|(chat, _)| *chat != chat_id);
+        self.story_retry.retain(|(chat, _), _| *chat != chat_id);
+        self.reply_attempted.retain(|(chat, _)| *chat != chat_id);
+    }
+
     /// The story picker's `getCustomEmojiStickers` failed at `now`.
     pub fn custom_emoji_fetch_failed(&mut self, now: Instant) {
         self.custom_emoji_retry = Some(next_retry(self.custom_emoji_retry, now));
@@ -250,5 +267,6 @@ impl StoriesState {
         self.main_paging = ActiveStoriesPaging::default();
         self.hidden_paging = ActiveStoriesPaging::default();
         self.story_retry.clear();
+        self.missing.clear();
     }
 }

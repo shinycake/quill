@@ -258,13 +258,9 @@ StickerPanel::loading_sets
 StickerPanel::suggest_waiting_for_sets
 StickerSetView::files_requested
 StorageScroll::pending
-StoryInsightsState::forwards_loading
-StoryInsightsState::forwards_loading+forwards_error
 StorySearchState::loading
 StorySearchState::loading+error
 StoryViewerUi::close_friends_saving
-StoryViewersState::loading
-StoryViewersState::loading+error
 StreamFacts::transport_failed
 StyleExamples::loading
 Tempo::done

@@ -6,12 +6,12 @@ use super::*;
 fn story_report_flow_through_option_and_text_steps() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
-    session.begin_story_report(12, 6);
+    let extra = session.request_for_story(RequestPurpose::ReportStory, ChatId(12), 6);
+    session.begin_story_report(12, 6, extra);
     assert!(matches!(
         session.stories.report.as_ref().unwrap().stage,
-        StoryReportStage::Checking
+        StoryReportStage::Checking { .. }
     ));
-    let extra = session.request_for_story(RequestPurpose::ReportStory, ChatId(12), 6);
     apply_json(
         &mut session,
         &seq,
@@ -28,8 +28,8 @@ fn story_report_flow_through_option_and_text_steps() {
         }
         other => panic!("unexpected {other:?}"),
     }
-    session.story_report_sending(12, 6);
     let extra2 = session.request_for_story(RequestPurpose::ReportStory, ChatId(12), 6);
+    session.story_report_sending(12, 6, extra2);
     apply_json(
         &mut session,
         &seq,
@@ -44,6 +44,7 @@ fn story_report_flow_through_option_and_text_steps() {
         StoryReportStage::TextRequired { ref option_id, .. } if option_id == "aGk="
     ));
     let extra3 = session.request_for_story(RequestPurpose::ReportStory, ChatId(12), 6);
+    session.story_report_sending(12, 6, extra3);
     apply_json(
         &mut session,
         &seq,
@@ -76,8 +77,8 @@ fn story_report_flow_through_option_and_text_steps() {
 fn story_report_empty_options_means_reported() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
-    session.begin_story_report(12, 6);
     let extra = session.request_for_story(RequestPurpose::ReportStory, ChatId(12), 6);
+    session.begin_story_report(12, 6, extra);
     apply_json(
         &mut session,
         &seq,
@@ -96,18 +97,64 @@ fn story_report_empty_options_means_reported() {
 #[test]
 fn story_report_send_failure_ends_flow() {
     let (mut session, _sink) = session();
-    session.begin_story_report(12, 6);
+    // The first request never went out: the flow is made already failed.
     session.fail_story_report_send(12, 6, "could not report story".into());
+    let flow = session.stories.report.as_ref().unwrap();
+    assert!(flow.is_for(12, 6));
+    assert!(matches!(flow.stage, StoryReportStage::Failed(_)));
+}
+
+/// An answer to a report request the flow no longer waits for (the box was
+/// closed and reopened, a step was repeated) moves nothing; the answer to
+/// the current request does (sweep 05-280).
+#[test]
+fn a_report_answer_moves_only_the_flow_waiting_for_it() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    let first = session.request_for_story(RequestPurpose::ReportStory, ChatId(12), 6);
+    session.begin_story_report(12, 6, first);
+    // Closed and reopened on the same story before the first answer.
+    session.clear_story_report();
+    let second = session.request_for_story(RequestPurpose::ReportStory, ChatId(12), 6);
+    session.begin_story_report(12, 6, second);
+    let picker = |request: crate::ids::RequestId| {
+        format!(
+            r#"{{"@type":"reportStoryResultOptionRequired","@extra":"{}","title":"Why?","options":[{{"@type":"reportOption","id":"aGk=","text":"Spam"}}]}}"#,
+            request.0
+        )
+    };
+    apply_json(&mut session, &seq, &sink, &picker(first));
+    assert_eq!(
+        session.stories.report.as_ref().unwrap().stage,
+        StoryReportStage::Checking { request: second },
+        "the old answer left the new flow waiting"
+    );
+    apply_json(&mut session, &seq, &sink, &picker(second));
+    assert!(matches!(
+        session.stories.report.as_ref().unwrap().stage,
+        StoryReportStage::PickOption { .. }
+    ));
+    // The step goes out; a late answer to the earlier step cannot mark a
+    // failed report as Reported, or reopen the picker.
+    let third = session.request_for_story(RequestPurpose::ReportStory, ChatId(12), 6);
+    session.story_report_sending(12, 6, third);
+    let failed = format!(
+        r#"{{"@type":"error","@extra":"{}","code":400,"message":"x"}}"#,
+        third.0
+    );
+    apply_json(&mut session, &seq, &sink, &failed);
     assert!(matches!(
         session.stories.report.as_ref().unwrap().stage,
         StoryReportStage::Failed(_)
     ));
-    // A different story's flow is untouched.
-    session.begin_story_report(12, 7);
-    session.fail_story_report_send(12, 6, "could not report story".into());
+    let late_ok = format!(
+        r#"{{"@type":"reportStoryResultOk","@extra":"{}"}}"#,
+        second.0
+    );
+    apply_json(&mut session, &seq, &sink, &late_ok);
     assert!(matches!(
         session.stories.report.as_ref().unwrap().stage,
-        StoryReportStage::Checking
+        StoryReportStage::Failed(_)
     ));
 }
 

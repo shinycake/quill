@@ -83,16 +83,44 @@ pub struct StoryViewersState {
     pub total_count: i32,
     pub rows: Vec<StoryInteractionView>,
     pub next_offset: String,
-    pub loading: bool,
-    pub error: Option<String>,
+    /// Where the page request stands.
+    pub page: ViewersPage,
+}
+
+/// The viewers page request of one panel. A page is applied only when the
+/// answer carries the id it is `Loading` for, so a page asked for by a
+/// panel that was closed and reopened never lands in the new one.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum ViewersPage {
+    /// Nothing is on its way.
+    #[default]
+    Idle,
+    Loading {
+        request: RequestId,
+    },
+    /// The last page failed; Retry asks again.
+    Failed(String),
 }
 
 impl StoryViewersState {
+    /// A page is on its way.
+    pub fn is_loading(&self) -> bool {
+        matches!(self.page, ViewersPage::Loading { .. })
+    }
+
+    /// Why the last page failed.
+    pub fn error(&self) -> Option<&str> {
+        match &self.page {
+            ViewersPage::Failed(error) => Some(error),
+            _ => None,
+        }
+    }
+
     /// Whether scrolling near the end should ask for the next page: one is
     /// left, none is on its way, and the last one did not fail (a failed
     /// page waits for the Retry button, not for the next scroll).
     pub fn wants_next_page(&self) -> bool {
-        !self.loading && self.error.is_none() && !self.next_offset.is_empty()
+        self.page == ViewersPage::Idle && !self.next_offset.is_empty()
     }
 }
 
@@ -101,16 +129,21 @@ impl StoryViewersState {
 /// then `TextRequired` (optional details), then `Ok`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StoryReportStage {
-    /// The initial `reportStory` is in flight.
-    Checking,
+    /// The initial `reportStory` is in flight as `request`; only its
+    /// answer moves the flow.
+    Checking {
+        request: RequestId,
+    },
     /// The user must pick a reason before the flow can continue.
     PickOption {
         title: String,
         options: Vec<ReportOption>,
     },
     /// A follow-up `reportStory` (option picked, or details submitted)
-    /// is in flight.
-    Sending,
+    /// is in flight as `request`; only its answer moves the flow.
+    Sending {
+        request: RequestId,
+    },
     /// The server wants extra text details for `option_id`.
     TextRequired {
         option_id: String,
@@ -126,6 +159,16 @@ pub struct StoryReportFlow {
     pub chat_id: i64,
     pub story_id: i32,
     pub stage: StoryReportStage,
+}
+
+impl StoryReportStage {
+    /// The `reportStory` call the flow waits for, in `Checking` or `Sending`.
+    pub fn waiting_for(&self) -> Option<RequestId> {
+        match self {
+            Self::Checking { request } | Self::Sending { request } => Some(*request),
+            _ => None,
+        }
+    }
 }
 
 impl StoryReportFlow {
@@ -302,8 +345,13 @@ mod viewers_page_tests {
             total_count: 10,
             rows: Vec::new(),
             next_offset: next.to_string(),
-            loading,
-            error: error.map(str::to_string),
+            page: match (loading, error) {
+                (true, _) => ViewersPage::Loading {
+                    request: RequestId(1),
+                },
+                (false, Some(error)) => ViewersPage::Failed(error.to_string()),
+                (false, None) => ViewersPage::Idle,
+            },
         }
     }
 

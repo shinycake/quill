@@ -230,6 +230,9 @@ impl Session {
         self.replace_avatar(old_photo_file_id, photo_file_id);
         // `updateSupergroup` precedes `updateNewChat`: adopt its status now.
         self.adopt_supergroup_status_for_chat(chat_id);
+        // A story of this poster that `getStory` refused before the chat was
+        // known is asked for again.
+        self.stories.poster_chat_known(chat_id.0);
     }
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn apply_update_supergroup(

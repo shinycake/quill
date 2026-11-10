@@ -66,6 +66,7 @@ mod stories;
 mod stories_more;
 mod story_insights;
 mod story_manage;
+mod story_missing;
 mod story_page_ops;
 mod story_tray_load;
 mod subsection_tabs;

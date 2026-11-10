@@ -36,9 +36,7 @@ impl Session {
                         story_id: story.id,
                     };
                 }
-                self.stories
-                    .story_retry
-                    .remove(&(story.poster_chat_id, story.id));
+                self.stories.story_arrived((story.poster_chat_id, story.id));
                 self.stories
                     .stories
                     .insert((story.poster_chat_id, story.id), story);
