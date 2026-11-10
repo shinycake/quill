@@ -25,6 +25,11 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
 use synthetic::BubbleLook;
+/// How far above the ad card's bottom edge the history's visible bottom
+/// may stop and still count the ad viewed: tdesktop's sponsor button
+/// (`historyViewButtonHeight`, 36) plus the bubble's bottom padding.
+const SPONSORED_VIEWED_SLACK: Pixels = px(44.);
+
 /// `ReadySponsored` fixture: open the demo channel (id 13, now ungated) and
 /// inject a `sponsoredMessages` response through the same reducer the live
 /// `getChatSponsoredMessages` path uses — one Sponsored row, one Recommended.
@@ -310,20 +315,44 @@ impl QuillApp {
         let _ = cx;
     }
 
-    /// The sponsored message tdesktop shows after the last message of a
-    /// channel, only while the history is scrolled to the bottom: the ad card
-    /// (Ad label, "About this ad / Report ad / Hide ads" menu, sponsor
-    /// button) plus the report picker and outcome banner. The ids it paints
-    /// are recorded so `report_visible_sponsored` can send the TDLib view
-    /// once they are actually on screen.
-    pub(super) fn sponsored_footer(
-        &self,
-        scrolled_up: bool,
-        cx: &mut Context<Self>,
-    ) -> Option<AnyElement> {
-        if scrolled_up {
+    /// What the channel's sponsored tail shows: the ad, the report picker
+    /// and the outcome banner, by identity. `None` when it shows nothing.
+    /// The history's last row carries the tail and is measured again when
+    /// this changes (`history_message_list`).
+    pub(super) fn sponsored_tail_key(&self) -> Option<u64> {
+        use std::hash::{Hash, Hasher};
+        let session = self.session()?;
+        let chat_id = session.open_chat?;
+        let ad = session.open_sponsored_tail().map(|ad| ad.message_id);
+        let report = session
+            .messages
+            .sponsored_report
+            .as_ref()
+            .filter(|flight| flight.chat_id == chat_id)
+            .map(|flight| (flight.message_id, flight.options.len()));
+        let outcome = session
+            .messages
+            .last_sponsored_report
+            .as_ref()
+            .filter(|outcome| outcome.chat_id == chat_id)
+            .map(|outcome| (outcome.message_id, std::mem::discriminant(&outcome.result)));
+        if ad.is_none() && report.is_none() && outcome.is_none() {
             return None;
         }
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        (chat_id.0, ad, report, outcome).hash(&mut hasher);
+        Some(hasher.finish())
+    }
+
+    /// The sponsored message tdesktop shows after the last message of a
+    /// channel, as part of the history: it scrolls with the messages, so
+    /// it shows once the reader reaches the bottom and never moves the
+    /// view (#1427). The ad card (Ad label, "About this ad / Report ad /
+    /// Hide ads" menu, sponsor button) plus the report picker and outcome
+    /// banner. The ad ids are recorded when the card is painted inside the
+    /// history's viewport, so `report_visible_sponsored` sends the TDLib
+    /// view only once the ad is actually on screen.
+    pub(super) fn sponsored_footer(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let session = self.session()?;
         let chat_id = session.open_chat?;
         let ad = session.open_sponsored_tail().cloned();
@@ -346,6 +375,7 @@ impl QuillApp {
         let media_roots = self.media_display_roots();
         let mut list = div()
             .id("sponsored-footer")
+            .debug_selector(|| "sponsored-footer".to_string())
             .flex()
             .flex_col()
             .flex_none()
@@ -382,11 +412,29 @@ impl QuillApp {
             list = list.child(self.sponsored_report_panel(&flight, cx));
         }
         if let Some(ad) = ad {
-            self.message_ui
-                .rendered_sponsored
-                .borrow_mut()
-                .push((chat_id, ad.message_id));
-            list = list.child(sponsored_message_row(
+            // The history renders rows past its edges (overdraw): record the
+            // ad once the viewport reaches its sponsor button, as tdesktop
+            // does (`Element::markSponsoredViewed`: the visible bottom is
+            // past the card's height less its button and bottom padding).
+            let rendered = self.message_ui.rendered_sponsored.clone();
+            let viewport = self.history.viewport.clone();
+            let ad_id = ad.message_id;
+            let seen_probe = canvas(
+                |_, _, _| {},
+                move |bounds, _, _, _| {
+                    let seen = viewport.get().is_some_and(|view| {
+                        bounds.bottom() > view.top()
+                            && view.bottom() >= bounds.bottom() - SPONSORED_VIEWED_SLACK
+                    });
+                    if seen && let Ok(mut shown) = rendered.try_borrow_mut() {
+                        shown.push((chat_id, ad_id));
+                    }
+                },
+            )
+            .absolute()
+            .inset_0()
+            .size_full();
+            let card = sponsored_message_row(
                 chat_id,
                 &ad,
                 files,
@@ -395,7 +443,8 @@ impl QuillApp {
                 &self.message_ui.spoiler_revealed,
                 look,
                 cx,
-            ));
+            );
+            list = list.child(div().relative().child(card).child(seen_probe));
         }
         Some(list.into_any_element())
     }
@@ -603,3 +652,8 @@ impl QuillApp {
         cx.notify();
     }
 }
+
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+#[path = "sponsored_scroll_tests.rs"]
+mod sponsored_scroll_tests;
