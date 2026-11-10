@@ -265,7 +265,7 @@ fn a_rejoin_replaces_the_instance_and_its_presentation() {
     let second = made(&mut engine, 6, -600, GroupCallRole::Member);
     assert_ne!(first, second);
     assert!(!engine.presentation_active(6));
-    assert!(!engine.groups[&6].connected);
+    assert!(!engine.groups[&6].connected());
     engine.leave_group_call(6).unwrap();
 }
 

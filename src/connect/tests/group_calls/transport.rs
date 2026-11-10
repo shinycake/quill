@@ -453,6 +453,54 @@ fn group_screen_share_toggle_handshake() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// Telegram already lists the share when the native presentation cannot
+/// connect: the driver ends it there, or others watch a dead screen.
+#[test]
+fn a_presentation_that_cannot_connect_is_ended_on_telegram() {
+    let (dir, mut driver, recorder, handle, sink, seq) = ready_group_call_driver();
+    handle.set_devices(vec![MediaDevice {
+        id: "screen-0".into(),
+        name: "Test screen".into(),
+        kind: MediaDeviceKind::Screen,
+    }]);
+    let join_extra = driver.join_video_chat(555).expect("join tracked call");
+    ingest_call_json(
+        &mut driver,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"text","text":"join-answer","@extra":{}}}"#,
+            join_extra.0
+        ),
+    );
+    driver
+        .session
+        .calls
+        .active_group_call
+        .as_mut()
+        .expect("tracked call")
+        .is_joined = true;
+    let start_extra = driver
+        .toggle_group_call_screen_share()
+        .expect("start sharing");
+    handle.fail_next_screen_share_connect();
+    ingest_call_json(
+        &mut driver,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"text","text":"share-answer","@extra":{}}}"#,
+            start_extra.0
+        ),
+    );
+    let end = sent_request(&recorder, "endGroupCallScreenSharing");
+    assert_eq!(end["group_call_id"], 555);
+    let call = driver.session.calls.active_group_call.as_ref().expect("call");
+    assert!(!call.screen_sharing && !call.screen_share_pending);
+    assert!(call.screen_share_error.is_some());
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// Phase C2g: a failed screen-share handshake (the reducer clears
 /// the tracked flags on a `startGroupCallScreenSharing` error)
 /// leaves no stray native presentation: the pump stops it.

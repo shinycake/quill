@@ -44,17 +44,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 }
                 return Ok(extra);
             }
-            let extra = self.session.request(
-                RequestPurpose::Calls(CallsPurpose::EndGroupCallScreenSharing { group_call_id }),
-                None,
-            );
-            if let Err(err) = self
-                .sender
-                .send_json(&end_group_call_screen_sharing(extra, group_call_id))
-            {
-                self.session.requests.take(extra);
-                return Err(err);
-            }
+            let extra = self.send_end_screen_sharing(group_call_id)?;
             if let Some(engine) = self.call_engine.as_deref_mut()
                 && let Err(err) = engine.stop_screen_share(group_call_id)
                 && let Some(call) = self.session.calls.active_group_call.as_mut()
@@ -98,6 +88,26 @@ impl<S: JsonSender> ConnectDriver<S> {
             OfferSend::Screen,
             Ok(()),
         );
+        Ok(extra)
+    }
+
+    /// `endGroupCallScreenSharing`: tells Telegram the screen is no longer
+    /// shared (a stop, or a share whose native side could not connect).
+    pub(super) fn send_end_screen_sharing(
+        &mut self,
+        group_call_id: i32,
+    ) -> Result<RequestId, ConnectSendError> {
+        let extra = self.session.request(
+            RequestPurpose::Calls(CallsPurpose::EndGroupCallScreenSharing { group_call_id }),
+            None,
+        );
+        if let Err(err) = self
+            .sender
+            .send_json(&end_group_call_screen_sharing(extra, group_call_id))
+        {
+            self.session.requests.take(extra);
+            return Err(err);
+        }
         Ok(extra)
     }
 

@@ -24,8 +24,7 @@ pub(super) struct GroupCall {
     handle: Native<qc_group>,
     /// Feeder threads' way in; cleared before the handles go away.
     gate: Arc<sender::Gate>,
-    /// The join answer was applied (`connect_group_call`).
-    connected: bool,
+    join: GroupJoin,
     mode: GroupCallMode,
     muted: bool,
     /// The camera to send, by device id, and its source while it runs.
@@ -43,6 +42,22 @@ pub(super) struct GroupCall {
     outputs: HashSet<String>,
     presentation: Option<Presentation>,
     stream_quality: Option<StreamQuality>,
+}
+
+/// How far `connect_group` got. `Connected` only after every step of the
+/// join worked; a failed step leaves `AnswerApplied`, so the caller's retry
+/// redoes the steps and does not report a join that never finished.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum GroupJoin {
+    Created,
+    AnswerApplied,
+    Connected,
+}
+
+impl GroupCall {
+    fn connected(&self) -> bool {
+        self.join == GroupJoin::Connected
+    }
 }
 
 /// The screen-sharing instance beside a call (tdesktop's `_screenInstance`).
@@ -276,7 +291,7 @@ impl TgcallsEngine {
                 context,
                 handle,
                 gate: Arc::new(sender::Gate::default()),
-                connected: false,
+                join: GroupJoin::Created,
                 mode: GroupCallMode::Rtc,
                 muted: true,
                 camera_id: None,
@@ -306,17 +321,40 @@ impl TgcallsEngine {
     ) -> Result<(), EngineError> {
         let api = self.api;
         let call = self.group_mut(group_call_id)?;
-        if call.connected {
+        if call.connected() {
             return Ok(());
         }
-        let answer = text("qc_group_set_join_response", answer)?;
-        let mode = join_mode(&answer.to_string_lossy());
-        apply_answer(api, call.handle, &answer, mode);
-        crate::advanced::debug_mode::call_log(&format!(
-            "[call] group {group_call_id} tgcalls joined ({mode:?})"
-        ));
-        call.connected = true;
-        call.mode = mode;
+        if call.join == GroupJoin::Created {
+            let answer = text("qc_group_set_join_response", answer)?;
+            let mode = join_mode(&answer.to_string_lossy());
+            apply_answer(api, call.handle, &answer, mode);
+            crate::advanced::debug_mode::call_log(&format!(
+                "[call] group {group_call_id} tgcalls joined ({mode:?})"
+            ));
+            call.mode = mode;
+            call.join = GroupJoin::AnswerApplied;
+        }
+        let mode = call.mode;
+        // The steps below read the call as connected; a failure puts it
+        // back, so a retry runs them again.
+        call.join = GroupJoin::Connected;
+        let steps = self.finish_group_join(group_call_id, camera, mode);
+        if steps.is_err()
+            && let Ok(call) = self.group_mut(group_call_id)
+        {
+            call.join = GroupJoin::AnswerApplied;
+        }
+        steps
+    }
+
+    fn finish_group_join(
+        &mut self,
+        group_call_id: i32,
+        camera: Option<&str>,
+        mode: GroupCallMode,
+    ) -> Result<(), EngineError> {
+        let api = self.api;
+        let call = self.group_mut(group_call_id)?;
         call.camera_id = camera.map(str::to_owned);
         if call.role == GroupCallRole::Member && !mode.is_stream() {
             call.gate.open_group(api, call.handle.as_ptr());
@@ -333,7 +371,7 @@ impl TgcallsEngine {
 
     /// Whether the call sends anything: a member's RTC call does.
     fn group_sends(call: &GroupCall) -> bool {
-        call.connected && call.role == GroupCallRole::Member && !call.mode.is_stream()
+        call.connected() && call.role == GroupCallRole::Member && !call.mode.is_stream()
     }
 
     fn apply_group_mute(&mut self, group_call_id: i32) -> Result<(), EngineError> {
@@ -438,12 +476,12 @@ impl TgcallsEngine {
     ) -> Result<(), EngineError> {
         let api = self.api;
         let call = self.group_mut(group_call_id)?;
-        let unified = (call.connected && call.mode == GroupCallMode::Rtmp)
+        let unified = (call.connected() && call.mode == GroupCallMode::Rtmp)
             .then(|| unified_min_quality(call.stream_quality));
         if call.video_sources != sources {
             call.video_sources = sources.to_vec();
         }
-        let stream = call.connected && call.mode.is_stream();
+        let stream = call.connected() && call.mode.is_stream();
         // A stream shows one picture: the RTMP feed alone, or one speaker
         // (their screen first), so the feed never flips between people.
         let chosen: Vec<GroupVideoSource> = match (stream, unified.is_some()) {
@@ -554,7 +592,7 @@ impl TgcallsEngine {
         muted: bool,
     ) -> Result<(), EngineError> {
         let call = self.group_mut(group_call_id)?;
-        let reopen = call.speaker.as_deref() != speaker && call.connected;
+        let reopen = call.speaker.as_deref() != speaker && call.connected();
         call.speaker = speaker.map(str::to_owned);
         call.playback_muted = muted;
         call.context.sound.set_muted(muted);
@@ -684,7 +722,7 @@ impl TgcallsEngine {
     pub(super) fn connected_group_mode(&self, chat_id: i64) -> Option<GroupCallMode> {
         self.groups
             .values()
-            .find(|call| call.chat_id == chat_id && call.connected)
+            .find(|call| call.chat_id == chat_id && call.connected())
             .map(|call| call.mode)
     }
 

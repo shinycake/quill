@@ -559,6 +559,10 @@ impl<S: JsonSender> ConnectDriver<S> {
             if let Some(call) = self.session.calls.group_call_mut(group_call_id) {
                 call.transport_ready = false;
                 call.join_payload.clear();
+                // The call is gone for good (`GROUPCALL_INVALID`), so no
+                // rejoin is started; the failed join is what the UI shows
+                // (its Join button is the manual retry).
+                call.transport_error = Some("the call has ended".to_string());
             }
         }
         if outcome == ReplyOutcome::Rejoin

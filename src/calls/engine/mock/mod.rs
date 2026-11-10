@@ -65,6 +65,8 @@ struct MockInner {
     /// Test-only: the next `connect_group_call` fails with this code.
     fail_group_connect: Option<i32>,
     fail_group_video_sync: bool,
+    /// Test-only: the next `connect_screen_share` fails.
+    fail_screen_share_connect: bool,
     device_lists: usize,
     /// Device lists not answered yet, while they are held.
     held_lists: Option<Vec<std::sync::mpsc::Sender<Vec<MediaDevice>>>>,
@@ -256,6 +258,11 @@ impl MockEngine {
     /// Test-only: the next `connect_group_call` fails with `code`.
     pub fn fail_next_group_connect(&self, code: i32) {
         self.inner.lock_or_recover().fail_group_connect = Some(code);
+    }
+
+    /// Test-only: the next `connect_screen_share` fails.
+    pub fn fail_next_screen_share_connect(&self) {
+        self.inner.lock_or_recover().fail_screen_share_connect = true;
     }
 
     /// Device lists wait for [`Self::release_device_lists`] from now on.
@@ -811,6 +818,12 @@ impl CallEngine for MockEngine {
         let mut inner = self.inner.lock_or_recover();
         if !inner.available {
             return Err(EngineError::Unavailable);
+        }
+        if std::mem::take(&mut inner.fail_screen_share_connect) {
+            return Err(EngineError::Engine {
+                op: "qc_group_set_join_response",
+                code: -1,
+            });
         }
         inner
             .screen_share_connects

@@ -177,6 +177,9 @@ impl<S: JsonSender> ConnectDriver<S> {
                     }
                     Err(err) => {
                         call.transport_error = Some(err.to_string());
+                        // The answer is spent: only a rejoin or the Join
+                        // button brings a new one, so no update retries it.
+                        call.join_payload.clear();
                     }
                 }
             }
@@ -272,6 +275,11 @@ impl<S: JsonSender> ConnectDriver<S> {
                 return Ok(());
             };
             let result = engine.connect_screen_share(group_call_id, &answer);
+            if result.is_err() {
+                // Telegram already lists the screen as shared: end it, or
+                // the others keep watching a share that never starts.
+                let _ = self.send_end_screen_sharing(group_call_id);
+            }
             if let Some(call) = self.session.calls.group_call_mut(group_call_id) {
                 match result {
                     Ok(()) => {
