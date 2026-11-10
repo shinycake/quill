@@ -249,6 +249,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             eprintln!("quill: warning: {line}");
             crate::advanced::debug_mode::debug_log(&line);
             if let Err(err) = engine.reopen_stream_sound(group_call_id) {
+                watch.reopen_failed(now);
                 eprintln!(
                     "quill: reopening the stream sound output for group call {group_call_id} failed: {err}"
                 );
