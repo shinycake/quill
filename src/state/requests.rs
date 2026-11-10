@@ -543,7 +543,7 @@ const FAILURES_KEPT: usize = 64;
 
 impl RequestRegistry {
     /// Remember that request `id` was refused.
-    pub(crate) fn record_failure(&mut self, id: RequestId, reason: String) {
+    pub fn record_failure(&mut self, id: RequestId, reason: String) {
         if self.failures.len() >= FAILURES_KEPT {
             self.failures.pop_front();
         }

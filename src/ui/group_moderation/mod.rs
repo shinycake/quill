@@ -791,4 +791,7 @@ mod rights_editor_tests;
 mod stops_slider;
 #[cfg(test)]
 #[cfg(feature = "demo-capture")]
+mod submit_tests;
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
 mod stops_slider_tests;
