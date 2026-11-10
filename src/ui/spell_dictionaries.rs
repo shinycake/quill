@@ -147,9 +147,8 @@ impl QuillApp {
         let worker_progress = progress.clone();
         let worker_code = code.clone();
         let worker = cx.background_spawn(async move {
-            let result = download_dictionary(&dir, &worker_code, &worker_progress);
-            worker_progress.finish();
-            result
+            let _done = worker_progress.finish_on_drop();
+            download_dictionary(&dir, &worker_code, &worker_progress)
         });
         // screen-scope: the spell checker and its dictionaries belong to the
         // app, not to an account; the download finishes on whichever screen

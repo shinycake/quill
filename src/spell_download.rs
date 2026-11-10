@@ -41,6 +41,21 @@ impl Progress {
     pub fn finish(&self) {
         self.finished.store(true, Ordering::Release);
     }
+
+    /// Marks the download finished when dropped, so a worker that panics
+    /// still ends the row's progress loop.
+    pub fn finish_on_drop(&self) -> FinishOnDrop<'_> {
+        FinishOnDrop(self)
+    }
+}
+
+/// See [`Progress::finish_on_drop`].
+pub struct FinishOnDrop<'a>(&'a Progress);
+
+impl Drop for FinishOnDrop<'_> {
+    fn drop(&mut self) {
+        self.0.finish();
+    }
 }
 
 /// Only HTTPS URLs on the dictionary host are fetched.
@@ -144,5 +159,16 @@ mod tests {
         p.finish();
         assert!(p.is_cancelled() && p.is_finished());
         assert_eq!(p.received(), 5);
+    }
+
+    #[test]
+    fn a_panicking_worker_still_finishes() {
+        let p = Progress::default();
+        let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _done = p.finish_on_drop();
+            std::panic::resume_unwind(Box::new("worker failed"));
+        }));
+        assert!(outcome.is_err());
+        assert!(p.is_finished());
     }
 }
