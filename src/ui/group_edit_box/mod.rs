@@ -125,7 +125,14 @@ impl GroupEditBox {
                 field: error.field,
                 reason: error.reason.clone(),
             },
-            _ => EditBoxState::Saved,
+            // A request that no field names (Delete, Leave) failed.
+            _ => match sent.iter().find_map(|id| session.requests.failure(*id)) {
+                Some(reason) => EditBoxState::Failed {
+                    field: GroupInfoField::Settings,
+                    reason: reason.to_string(),
+                },
+                None => EditBoxState::Saved,
+            },
         }
     }
 
@@ -267,6 +274,19 @@ impl QuillApp {
             .is_some_and(|edit| edit.chat_id == chat)
         {
             self.close_group_edit_box(cx);
+        }
+    }
+
+    /// Delete or Leave of `chat` is out: its Edit box stays, saving, and
+    /// closes when TDLib answers, or stays with the reason when it refuses.
+    pub(in crate::ui) fn track_chat_exit(&mut self, chat: ChatId, request: RequestId) {
+        if let Some(edit) = self
+            .admin
+            .group_edit_box
+            .as_mut()
+            .filter(|edit| edit.chat_id == chat)
+        {
+            edit.saving = SaveStage::Saving(vec![request]);
         }
     }
 

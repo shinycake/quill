@@ -74,6 +74,16 @@ impl Submit {
         view
     }
 
+    /// Keep a failure the registry reported. `true` when this changed the
+    /// stage, so the box needs a redraw.
+    pub fn keep_failure(&mut self, reason: String) -> bool {
+        if matches!(self, Submit::Failed(kept) if *kept == reason) {
+            return false;
+        }
+        *self = Submit::Failed(reason);
+        true
+    }
+
     pub fn is_sending(&self, requests: Option<&RequestRegistry>) -> bool {
         self.view(requests) == SubmitView::Sending
     }

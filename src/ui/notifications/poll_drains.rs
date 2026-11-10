@@ -58,8 +58,8 @@ impl QuillApp {
         // `getDeepLinkInfo` once auth is Ready, then follow-ups / dialog /
         // deferred chat open from each terminal session state.
         self.pump_deep_link(cx);
-        // A moderation box that sent its request closes on the answer.
-        self.settle_moderation_submits(cx);
+        // A box that sent its request closes on the answer (`box_submits`).
+        self.settle_box_submits(cx);
         // M1 fix-up: a "Share link" gated off by
         // `messageProperties.can_get_link` (or a failed `getMessageLink`)
         // and a failed `resendMessages` surface here instead of silently

@@ -47,6 +47,7 @@ mod background_accounts;
 pub(crate) mod battery_watch;
 mod bidi_line;
 mod bot_about;
+mod box_submits;
 mod bottom_action;
 mod bubble_theme;
 mod calls_state;
