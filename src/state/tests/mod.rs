@@ -60,6 +60,7 @@ mod sessions;
 mod shared_media;
 mod shared_media_profile;
 mod similar_strip;
+mod sponsored_placement;
 mod status_badges;
 mod stickers;
 mod stories;

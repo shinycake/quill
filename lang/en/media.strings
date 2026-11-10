@@ -211,7 +211,6 @@
 "qll_media_bot_3" = "Bot {user_id}";
 "qll_media_bot_about_text" = "Bot about text";
 "qll_media_bot_actions" = "Bot actions";
-"qll_media_bot_answered" = "Bot answered";
 "qll_media_bot_link_copied" = "Bot link copied";
 "qll_media_bot_menu" = "Bot menu";
 "qll_media_bot_started_demo" = "Bot started (demo)";

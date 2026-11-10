@@ -196,6 +196,13 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
+        // Past the end of a channel the next ad joins first and the scroll
+        // runs into it (tdesktop asks for bottom content before
+        // overscrolling).
+        let down = super::sponsored_spots::scroll_down_distance(event.delta, window.line_height());
+        if self.sponsored_bottom_request(down, cx) {
+            return false;
+        }
         // Trackpads only: a mouse wheel has no gesture to follow, and a
         // platform without phases never starts one.
         let ScrollDelta::Pixels(delta) = event.delta else {

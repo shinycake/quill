@@ -540,6 +540,25 @@ fn update_user_full_info_parsed() {
 }
 
 #[test]
+fn bot_info_keeps_its_description_photo() {
+    let json = r#"{"@type":"updateUserFullInfo","user_id":21,"user_full_info":{"@type":"userFullInfo","bot_info":{"@type":"botInfo","short_description":"","description":"Hi","photo":{"@type":"photo","has_stickers":false,"sizes":[{"@type":"photoSize","type":"m","photo":{"@type":"file","id":71,"size":0,"expected_size":0,"local":{"path":"","can_be_downloaded":true,"is_downloading_active":false,"is_downloading_completed":false,"downloaded_size":0},"remote":{"id":"","unique_id":"","is_uploading_active":false,"is_uploading_completed":true,"uploaded_size":0}},"width":320,"height":180,"progressive_sizes":[]}]},"commands":[]}}}"#;
+    let env = parse_envelope(json).unwrap();
+    match env.payload {
+        EnvelopePayload::Users(UsersPayload::UpdateUserFullInfo { bot_info, .. }) => {
+            let info = bot_info.expect("bot_info");
+            let sizes: Vec<_> = info
+                .description_photo
+                .iter()
+                .map(|size| (size.file_id.0, size.width, size.height))
+                .collect();
+            assert_eq!(sizes, [(71, 320, 180)]);
+            assert_eq!(info.description_photo_files.len(), 1);
+        }
+        other => panic!("{other:?}"),
+    }
+}
+
+#[test]
 fn draft_message_text_and_same_chat_reply() {
     let json = r#"{"@type":"updateNewChat","chat":{"id":11,"title":"Ada","type":{"@type":"chatTypePrivate","user_id":11},"unread_count":0,"draft_message":{"@type":"draftMessage","reply_to":{"@type":"inputMessageReplyToMessage","message_id":101,"quote":null,"checklist_task_id":0,"poll_option_id":""},"date":1700000000,"content":{"@type":"draftMessageContentText","text":{"@type":"formattedText","text":"meet at 6","entities":[]},"link_preview_options":null},"effect_id":"0","suggested_post_info":null}}}"#;
     let env = parse_envelope(json).unwrap();

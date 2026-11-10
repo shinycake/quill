@@ -25,11 +25,16 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
 use synthetic::BubbleLook;
+/// How far above the ad card's bottom edge the history's visible bottom
+/// may stop and still count the ad viewed: tdesktop's sponsor button
+/// (`historyViewButtonHeight`, 36) plus the bubble's bottom padding.
+const SPONSORED_VIEWED_SLACK: Pixels = px(44.);
+
 /// `ReadySponsored` fixture: open the demo channel (id 13, now ungated) and
 /// inject a `sponsoredMessages` response through the same reducer the live
 /// `getChatSponsoredMessages` path uses — one Sponsored row, one Recommended.
-/// The demo channel then renders its normal history with the live-path
-/// sponsored footer (the first row) below it.
+/// The first ad then joins the end of the history as when the reader
+/// scrolls past the last post (`Session::place_sponsored_at_end`).
 pub(super) fn apply_ready_sponsored(
     session: &mut Session,
     sink: &Arc<MemorySink>,
@@ -52,12 +57,13 @@ pub(super) fn apply_ready_sponsored(
     let extra = session.request(RequestPurpose::GetChatSponsoredMessages, Some(ChatId(13)));
     let thumb = demo_file_json(61, &demo_thumb_png_path(), true);
     let json = format!(
-        r#"{{"@type":"sponsoredMessages","@extra":"{}","messages_between":3,"messages":[{{"@type":"sponsoredMessage","message_id":9001,"is_recommended":false,"can_be_reported":true,"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":"Sponsored demo ad — open the menu for About, Report and Hide.","entities":[]}}}},"sponsor":{{"@type":"advertisementSponsor","url":"https://example.com/promo","photo":{{"@type":"photo","has_stickers":false,"sizes":[]}},"info":"Example Ads"}},"title":"Summer sale","button_text":"Shop now","accent_color_id":0,"background_custom_emoji_id":"0","additional_info":"Ad by Example"}},{{"@type":"sponsoredMessage","message_id":9002,"is_recommended":true,"can_be_reported":false,"content":{{"@type":"messagePhoto","photo":{{"@type":"photo","has_stickers":false,"sizes":[{{"@type":"photoSize","type":"m","photo":{thumb},"width":240,"height":160,"progressive_sizes":[]}}]}},"caption":{{"@type":"formattedText","text":"Recommended demo photo row.","entities":[]}},"has_spoiler":false,"is_secret":false}},"sponsor":{{"@type":"advertisementSponsor","url":"https://example.com/pick","photo":{{"@type":"photo","has_stickers":false,"sizes":[]}},"info":"Curated"}},"title":"Editors' pick","button_text":"Learn more","accent_color_id":0,"background_custom_emoji_id":"0","additional_info":""}}]}}"#,
+        r#"{{"@type":"sponsoredMessages","@extra":"{}","messages_between":0,"messages":[{{"@type":"sponsoredMessage","message_id":9001,"is_recommended":false,"can_be_reported":true,"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":"Sponsored demo ad — open the menu for About, Report and Hide.","entities":[]}}}},"sponsor":{{"@type":"advertisementSponsor","url":"https://example.com/promo","photo":{{"@type":"photo","has_stickers":false,"sizes":[]}},"info":"Example Ads"}},"title":"Summer sale","button_text":"Shop now","accent_color_id":0,"background_custom_emoji_id":"0","additional_info":"Ad by Example"}},{{"@type":"sponsoredMessage","message_id":9002,"is_recommended":true,"can_be_reported":false,"content":{{"@type":"messagePhoto","photo":{{"@type":"photo","has_stickers":false,"sizes":[{{"@type":"photoSize","type":"m","photo":{thumb},"width":240,"height":160,"progressive_sizes":[]}}]}},"caption":{{"@type":"formattedText","text":"Recommended demo photo row.","entities":[]}},"has_spoiler":false,"is_secret":false}},"sponsor":{{"@type":"advertisementSponsor","url":"https://example.com/pick","photo":{{"@type":"photo","has_stickers":false,"sizes":[]}},"info":"Curated"}},"title":"Editors' pick","button_text":"Learn more","accent_color_id":0,"background_custom_emoji_id":"0","additional_info":""}}]}}"#,
         extra.0,
     );
     if let Some(owned) = copy_and_parse(&json, seq, &dyn_sink) {
         session.apply(owned);
     }
+    session.place_sponsored_at_end(std::time::Instant::now());
 }
 
 /// One `sponsoredMessage` row: Sponsored / Recommended label, title, content,
@@ -164,6 +170,7 @@ pub(super) fn sponsored_message_row(
             false,
             None,
             room,
+            None,
             cx,
         )),
         MessageContent::Photo(photo) => Some(
@@ -310,33 +317,34 @@ impl QuillApp {
         let _ = cx;
     }
 
-    /// The sponsored message tdesktop shows after the last message of a
-    /// channel, only while the history is scrolled to the bottom: the ad card
-    /// (Ad label, "About this ad / Report ad / Hide ads" menu, sponsor
-    /// button) plus the report picker and outcome banner. The ids it paints
-    /// are recorded so `report_visible_sponsored` can send the TDLib view
-    /// once they are actually on screen.
-    pub(super) fn sponsored_footer(
+    /// One ad in the history (`sponsored_spots`), as tdesktop draws it
+    /// after the message it follows: the ad card (Ad label, "About this ad
+    /// / Report ad / Hide ads" menu, sponsor button) with the report picker
+    /// and outcome banner. It scrolls with the posts and never moves the
+    /// view (#1427). The ad id is recorded once the card is painted with
+    /// its button inside the history's viewport, so
+    /// `report_visible_sponsored` sends the TDLib view only then.
+    pub(super) fn sponsored_spot(
         &self,
-        scrolled_up: bool,
+        spot: &super::sponsored_spots::SponsoredSpot,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
-        if scrolled_up {
-            return None;
-        }
         let session = self.session()?;
         let chat_id = session.open_chat?;
-        let ad = session.open_sponsored_tail().cloned();
+        let ad = spot
+            .card
+            .then(|| session.sponsored_message(chat_id, spot.ad_id).cloned())
+            .flatten();
         let report = session
             .messages
             .sponsored_report
             .clone()
-            .filter(|flight| flight.chat_id == chat_id);
+            .filter(|flight| spot.report && flight.chat_id == chat_id);
         let outcome = session
             .messages
             .last_sponsored_report
             .clone()
-            .filter(|outcome| outcome.chat_id == chat_id);
+            .filter(|outcome| spot.outcome && outcome.chat_id == chat_id);
         if ad.is_none() && report.is_none() && outcome.is_none() {
             return None;
         }
@@ -344,8 +352,10 @@ impl QuillApp {
         let files = &session.media.files;
         let downloading = &session.media.downloads;
         let media_roots = self.media_display_roots();
+        let ad_id = spot.ad_id;
         let mut list = div()
-            .id("sponsored-footer")
+            .id(("sponsored-spot", ad_id as u64))
+            .debug_selector(move || format!("sponsored-ad-{ad_id}"))
             .flex()
             .flex_col()
             .flex_none()
@@ -382,11 +392,29 @@ impl QuillApp {
             list = list.child(self.sponsored_report_panel(&flight, cx));
         }
         if let Some(ad) = ad {
-            self.message_ui
-                .rendered_sponsored
-                .borrow_mut()
-                .push((chat_id, ad.message_id));
-            list = list.child(sponsored_message_row(
+            // The history renders rows past its edges (overdraw): record the
+            // ad once the viewport reaches its sponsor button, as tdesktop
+            // does (`Element::markSponsoredViewed`: the visible bottom is
+            // past the card's height less its button and bottom padding).
+            let rendered = self.message_ui.rendered_sponsored.clone();
+            let viewport = self.history.viewport.clone();
+            let ad_id = ad.message_id;
+            let seen_probe = canvas(
+                |_, _, _| {},
+                move |bounds, _, _, _| {
+                    let seen = viewport.get().is_some_and(|view| {
+                        bounds.bottom() > view.top()
+                            && view.bottom() >= bounds.bottom() - SPONSORED_VIEWED_SLACK
+                    });
+                    if seen && let Ok(mut shown) = rendered.try_borrow_mut() {
+                        shown.push((chat_id, ad_id));
+                    }
+                },
+            )
+            .absolute()
+            .inset_0()
+            .size_full();
+            let card = sponsored_message_row(
                 chat_id,
                 &ad,
                 files,
@@ -395,7 +423,8 @@ impl QuillApp {
                 &self.message_ui.spoiler_revealed,
                 look,
                 cx,
-            ));
+            );
+            list = list.child(div().relative().child(card).child(seen_probe));
         }
         Some(list.into_any_element())
     }
@@ -603,3 +632,8 @@ impl QuillApp {
         cx.notify();
     }
 }
+
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+#[path = "sponsored_scroll_tests.rs"]
+mod sponsored_scroll_tests;

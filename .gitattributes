@@ -8,3 +8,7 @@ native/quill-calls/patches/** -text
 src/agent/**/*.md text eol=lf
 # Vendored ThorVG: kept byte for byte as scripts/vendor-thorvg.sh copied it.
 third_party/thorvg/** -text
+# Vendored widget runtime: the JS bundles are hashed against their .qbc and
+# carry a version stamp on their first line, so CRLF on a Windows checkout
+# made every widget refuse to start (#1425).
+third_party/widgets/** -text

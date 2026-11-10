@@ -835,8 +835,14 @@ fn a_reported_ad_stays_hidden_after_its_chat_is_dropped() {
     let seq = AtomicU64::new(0);
     switch(&mut session, 1);
     sponsored_answer(&mut session, &seq, &sink, 1);
-    let shown = |session: &Session| session.open_sponsored_tail().map(|ad| ad.message_id);
-    assert_eq!(shown(&session), Some(9001));
+    let shown = |session: &mut Session| {
+        session.place_sponsored_after(MessageId(1));
+        session
+            .open_sponsored_in_history()
+            .first()
+            .map(|(_, ad)| ad.message_id)
+    };
+    assert_eq!(shown(&mut session), Some(9001));
     assert!(session.begin_sponsored_report(ChatId(1), 9001).is_some());
     let report = session.request(RequestPurpose::ReportChatSponsoredMessage, Some(ChatId(1)));
     apply_json(
@@ -848,7 +854,7 @@ fn a_reported_ad_stays_hidden_after_its_chat_is_dropped() {
             report.0
         ),
     );
-    assert_eq!(shown(&session), None, "the reported ad left the chat");
+    assert_eq!(shown(&mut session), None, "the reported ad left the chat");
     for chat in 2..=(CLOSED_CHATS_MAX as i64 + 2) {
         switch(&mut session, chat);
         feed(&mut session, chat, 1);
@@ -863,7 +869,7 @@ fn a_reported_ad_stays_hidden_after_its_chat_is_dropped() {
     switch(&mut session, 1);
     sponsored_answer(&mut session, &seq, &sink, 1);
     assert!(session.sponsored_message(ChatId(1), 9001).is_some());
-    assert_eq!(shown(&session), None, "the reported ad stays hidden");
+    assert_eq!(shown(&mut session), None, "the reported ad stays hidden");
 }
 
 /// A report still on its way when the chat goes (the UI holds the chat of
@@ -896,9 +902,8 @@ fn a_report_answered_after_the_drop_still_hides_its_ad() {
     switch(&mut session, 1);
     sponsored_answer(&mut session, &seq, &sink, 1);
     assert!(session.sponsored_message(ChatId(1), 9001).is_some());
-    assert_eq!(
-        session.open_sponsored_tail().map(|ad| ad.message_id),
-        None,
+    assert!(
+        !session.place_sponsored_after(MessageId(1)),
         "the reported ad stays hidden"
     );
 }

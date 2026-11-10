@@ -207,6 +207,7 @@ impl Session {
                     crate::peer_qr::theme::ThemeOwner::User(user_id.0),
                     share_theme,
                 );
+                let bot_info = self.received_bot_info(bot_info);
                 self.bots.bot_info.insert(user_id.0, bot_info);
                 self.cache_profile_photo_files(&extras);
                 let photo_file_id = photo.map(|file| {

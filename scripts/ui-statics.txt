@@ -91,3 +91,5 @@ src/ui/frame_trace.rs COUNTS,LAST | a debug trace, off by default
 src/ui/chat_ui_state.rs NEXT | the ChatVisit counter: it only hands out unique ids, and every window may share it
 src/ui/notifications/linux_dbus.rs CONNECT_RETRY | one D-Bus session connection per process; the retry gate belongs to it, not to a window
 src/ui/notifications/native_extras.rs PARKED | typed notification replies keyed by (account, chat), held until that chat is on screen in any window
+src/ui/text_reveal.rs CURRENT | set and restored around one text block's build
+src/ui/bot_stream.rs PINNED | the stream demo's recording clock (demo-capture only)
