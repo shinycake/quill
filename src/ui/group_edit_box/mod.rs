@@ -54,8 +54,8 @@ pub(crate) struct GroupEditBox {
     pub(crate) sources: PhotoSources,
     /// The name field's emoji toggle opened the emoji panel.
     pub(crate) title_emoji: bool,
-    /// The text requests of the last Save; `None` until Save sent any.
-    saving: Option<Vec<RequestId>>,
+    /// Where the last Save is.
+    saving: SaveStage,
     /// Save found the name empty (tdesktop `validateTitle`).
     title_empty: bool,
     /// The Type box, open over this one.
@@ -70,6 +70,20 @@ pub(crate) struct GroupEditBox {
     pub(crate) history_visible: Option<bool>,
     /// The history box, open over this one, with its current choice.
     pub(crate) history_box: Option<bool>,
+}
+
+/// How the last Save went, as far as the box itself knows. TDLib's
+/// answers to the sent requests are read from the session.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(crate) enum SaveStage {
+    /// No Save sent anything yet.
+    #[default]
+    Editing,
+    /// The text and setting requests of the last Save.
+    Saving(Vec<RequestId>),
+    /// A send was refused before it left (no right, a request in flight,
+    /// no connection): the box stays open with the typed edits.
+    Refused(String),
 }
 
 /// Where a box is, derived from its requests and TDLib's answers.
@@ -90,8 +104,15 @@ pub(crate) enum EditBoxState {
 
 impl GroupEditBox {
     fn state(&self, session: Option<&Session>) -> EditBoxState {
-        let Some(sent) = &self.saving else {
-            return EditBoxState::Editing;
+        let sent = match &self.saving {
+            SaveStage::Editing => return EditBoxState::Editing,
+            SaveStage::Refused(reason) => {
+                return EditBoxState::Failed {
+                    field: GroupInfoField::Settings,
+                    reason: reason.clone(),
+                };
+            }
+            SaveStage::Saving(sent) => sent,
         };
         let Some(session) = session else {
             return EditBoxState::Saved;
@@ -221,7 +242,7 @@ impl QuillApp {
             photo: None,
             photo_note: None,
             sources: PhotoSources::default(),
-            saving: None,
+            saving: SaveStage::Editing,
             title_empty: false,
             title_emoji: false,
             type_box: None,
@@ -335,14 +356,15 @@ impl QuillApp {
                 if sent.is_empty() {
                     self.admin.group_edit_box = None;
                 } else {
-                    edit.saving = Some(sent);
+                    edit.saving = SaveStage::Saving(sent);
                 }
             }
             Err(err) => {
-                self.set_note(StatusNote::error(user_error_for(
-                    keys::Q_NOTES_FAILED_SAVE_GROUP_INFO,
-                    &err,
-                )));
+                let line = user_error_for(keys::Q_NOTES_FAILED_SAVE_GROUP_INFO, &err);
+                // Edits sent before the refused one stay sent; their
+                // answers update the chat, so a retry sends the rest.
+                edit.saving = SaveStage::Refused(line.clone());
+                self.set_note(StatusNote::error(line));
             }
         }
         cx.notify();
