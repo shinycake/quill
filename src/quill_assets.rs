@@ -178,7 +178,9 @@ gpui_kit::assets::icon_assets!(
         Smartphone,
         Tablet,
         Laptop,
-        AppWindow
+        AppWindow,
+        // Inline keyboard buy buttons (`ui::message_payments::corner_icon`).
+        CreditCard
     ]
 );
 
