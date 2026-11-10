@@ -628,3 +628,51 @@ fn enable_with_an_unrestorable_key_still_clears_the_accounts_after_it() {
     assert!(store.get(&c).unwrap().is_none());
     let _ = std::fs::remove_dir_all(root);
 }
+
+/// Delete fails for `stuck` and put fails for `no_put`; the rest work.
+struct PartlyStuck {
+    inner: MemorySecretStore,
+    stuck: AccountKey,
+    no_put: AccountKey,
+}
+
+impl SecretStore for PartlyStuck {
+    fn get(&self, a: &AccountKey) -> Result<Option<DatabaseKey>, SecretStoreError> {
+        self.inner.get(a)
+    }
+    fn put(&self, a: &AccountKey, k: &DatabaseKey) -> Result<(), SecretStoreError> {
+        if *a == self.no_put {
+            return Err(SecretStoreError::Locked);
+        }
+        self.inner.put(a, k)
+    }
+    fn delete(&self, a: &AccountKey) -> Result<(), SecretStoreError> {
+        if *a == self.stuck {
+            return Err(SecretStoreError::Locked);
+        }
+        self.inner.delete(a)
+    }
+}
+
+#[test]
+fn enable_with_a_partly_restored_put_back_leaves_no_key_in_the_store_it_can_clear() {
+    let root = temp_root("enable-partly");
+    let (a, b, c) = (acct("primary"), acct("account-1"), acct("account-2"));
+    let store = PartlyStuck {
+        inner: MemorySecretStore::new(),
+        stuck: c.clone(),
+        no_put: a.clone(),
+    };
+    for account in [&a, &b, &c] {
+        store.inner.put(account, &DatabaseKey::generate()).unwrap();
+    }
+    let state = Arc::new(UnlockState::new());
+    let accounts = [a.clone(), b.clone(), c.clone()];
+    enable(&root, &store, &accounts, "pass", FAST, &state).unwrap();
+    assert!(is_enabled(&root));
+    // B was put back, then removed again: it is not plain in the store
+    // while the passcode is on.
+    assert!(store.get(&b).unwrap().is_none());
+    assert!(store.get(&a).unwrap().is_none());
+    let _ = std::fs::remove_dir_all(root);
+}

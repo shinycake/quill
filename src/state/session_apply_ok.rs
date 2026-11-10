@@ -501,7 +501,7 @@ impl Session {
             // new list.
             Some(RequestPurpose::SetCloseFriends) => {
                 if let Some(ids) = self.stories.close_friends_pending.take() {
-                    self.stories.close_friends = Some(ids);
+                    self.stories.close_friends = CloseFriendsList::Ready(ids);
                 }
                 self.succeed_story_page_op(pending);
             }

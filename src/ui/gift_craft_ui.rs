@@ -151,10 +151,10 @@ impl QuillApp {
     pub(super) fn open_craft_info(&mut self, gift: CraftGift, cx: &mut Context<Self>) {
         let gate = gift.gate(true, now_unix());
         if let Some(notice) = gate_notice(gate) {
-            self.gift_market.push(notice);
+            self.open_market_box(notice);
         } else if gate == CraftGate::Ready {
             self.gift_market.craft_primary = Some(gift);
-            self.gift_market.push(MarketBox::CraftInfo);
+            self.open_market_box(MarketBox::CraftInfo);
         }
         self.open_box(crate::ui::shell::DialogKind::GiftMarket);
         cx.notify();

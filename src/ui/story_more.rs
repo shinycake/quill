@@ -454,15 +454,13 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let loading = self.live.as_mut().and_then(|live| {
+        if let Some(live) = self.live.as_mut() {
             let _ = live.driver.fetch_contacts();
-            live.driver.get_close_friends().ok().flatten()
-        });
-        if let Some(request) = loading {
-            self.stories
-                .with_viewer_ui(|open| open.page_op = Some(request));
+            let _ = live.driver.get_close_friends();
         }
-        let loaded = self.session().and_then(|s| s.stories.close_friends.clone());
+        let loaded = self
+            .session()
+            .and_then(|s| s.stories.close_friends.ids().cloned());
         self.stories.with_viewer_ui(|open| {
             open.close_friends = CloseFriendsStage::Loading;
             if let Some(list) = &loaded {
@@ -548,13 +546,19 @@ impl QuillApp {
     /// Per-tick upkeep of the editor: adopt the loaded list while the user
     /// has not touched it, close after a confirmed save.
     pub(super) fn tick_close_friends(&mut self, cx: &mut Context<Self>) {
-        let loaded = self.session().and_then(|s| s.stories.close_friends.clone());
+        let loaded = self
+            .session()
+            .and_then(|s| s.stories.close_friends.ids().cloned());
+        // The list's own load, matched to its request.
+        let load_failed = self
+            .session()
+            .is_some_and(|s| s.stories.close_friends.failed_without_list());
         let failed = self
             .viewer_story_page_op()
             .is_some_and(|op| matches!(op.state, quill::story_page::StoryPageOpState::Failed(_)));
         let Some(loaded) = loaded else {
             // No list yet: a failed request ends the wait with a retry.
-            if failed && let Some(open) = self.stories.viewer_ui_mut() {
+            if load_failed && let Some(open) = self.stories.viewer_ui_mut() {
                 open.close_friends.load_failed();
             }
             return;

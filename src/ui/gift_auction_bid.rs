@@ -245,7 +245,7 @@ impl QuillApp {
             }
             BidAction::Place(n) | BidAction::Increase(n) => n,
         };
-        let Some(recipient) = self.auction_recipient() else {
+        let Some(recipient) = self.auction_recipient(gift_id) else {
             return;
         };
         // A raise keeps the bid's owner and needs no user; only a new bid

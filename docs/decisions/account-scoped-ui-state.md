@@ -4004,6 +4004,27 @@ Payments, Stars, gifts, accounts, sign-in and passcode. Each entry was
 re-read at its spot first.
 
 - **Fixed.**
+  - Re-review pass:
+    - Passcode: when a delete fails and the put-back is partial, every key
+      whose put worked is deleted again (it has a wrapped copy), so no key
+      is plain in the OS store while the passcode is on.
+    - 10-001: a verification answer moves the giveaway launch to
+      `GiveawayLaunch::Verifying { chat_id }` whatever the checkout shows;
+      `is_done_for` covers it, so Start stays refused until the form
+      closes. `close_giveaway_form` refreshes boost status for Paid too.
+    - Star reactions: a refused commit or undo releases its Stars and stops
+      (tdesktop does not re-send); a low balance no longer loops.
+    - 09-X061: failed previews are forgotten when the first box opens
+      (`open_market_box`), not only on close.
+    - 09-122: `auction_recipient(gift_id)` defaults to the owner of the
+      user's existing bid. tdesktop's source was not reachable; this is
+      the smallest safe choice.
+    - 11-p7-001: `OrderInfoStage::validated_for(&order)` is used by render
+      (Pay, shipping options) and submit.
+    - 02-062: reopening the send box for its own in-flight send keeps the
+      typed message; another recipient gets its own note.
+    - 13-140: `CloseFriendsList` carries the `getCloseFriends` request id,
+      so its failure no longer reads the viewer's single page op.
   - 04-052: `passcode::enable` keeps each OS-store key until every delete
     is done; a failed delete puts the already-deleted keys back before
     the wrapped files go, and if a put-back fails the wrapped files stay

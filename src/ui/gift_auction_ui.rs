@@ -410,7 +410,7 @@ impl QuillApp {
             .auction_state(gift_id)
             .and_then(|state| state.my())
             .and_then(|my| name_of(my.owner));
-        let to = name_of(self.auction_recipient());
+        let to = name_of(self.auction_recipient(gift_id));
         let text = change_recipient_text(from.as_deref(), to.as_deref());
         BoxView::new(tr(keys::AUCTION_CHANGE_TITLE), div().text_sm().child(text)).footer(
             div()

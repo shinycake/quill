@@ -530,3 +530,30 @@ fn a_giveaway_verification_step_names_its_chat() {
     assert!(step.closes_checkout);
     assert_eq!(step.giveaway_chat_id, Some(-100));
 }
+
+/// Esc on the checkout while `sendPaymentForm` is out, then a 3-D Secure
+/// answer: the giveaway is still Verifying, so Start cannot buy it twice.
+#[test]
+fn a_giveaway_verification_with_the_checkout_closed_keeps_start_refused() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    session.payments.request = Some(PaymentRequest {
+        invoice: giveaway_invoice(-100),
+    });
+    let extra = session.request(RequestPurpose::SendPaymentForm, Some(ChatId(51)));
+    session.payment_sent(extra);
+    session.close_checkout();
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"paymentResult","@extra":"{}","success":false,"verification_url":"https://pay.example.com/3ds"}}"#,
+            extra.0
+        ),
+    );
+    let step = session.payments.verification_url.clone().expect("step");
+    assert!(!step.closes_checkout);
+    assert!(session.payments.giveaway.launch.is_done_for(-100));
+    assert!(!session.payments.giveaway.launch.is_done_for(-200));
+}

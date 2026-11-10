@@ -12,10 +12,17 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Ok(None);
         }
         let extra = self.session.request(purpose, None);
-        self.session
-            .begin_story_page_check(story_page_op_label(purpose), extra);
+        self.session.stories.close_friends.begin_load(extra);
         let json = get_close_friends_request(extra);
-        self.send_story_page(purpose, extra, &json).map(Some)
+        let sent = match self.sender.send_json(&json) {
+            Ok(()) => Ok(Some(extra)),
+            Err(err) => {
+                self.session.requests.take(extra);
+                self.session.stories.close_friends.fail_load(extra);
+                Err(err)
+            }
+        };
+        sent
     }
 
     /// B14: `setCloseFriends` with the full new list; the ids are staged

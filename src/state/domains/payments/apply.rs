@@ -92,6 +92,11 @@ impl Session {
                         // credentials verification (e.g. 3-D Secure) — the
                         // UI opens it in the OS browser. It is this
                         // payment's own step, shown or not.
+                        // Whatever the checkout shows, the giveaway's
+                        // payment is now in the provider's hands.
+                        if let Some(chat_id) = paid.invoice.giveaway_chat_id() {
+                            self.payments.giveaway.launch = GiveawayLaunch::Verifying { chat_id };
+                        }
                         self.payments.verification_url = Some(PaymentVerification {
                             url: result.verification_url,
                             closes_checkout: shown,

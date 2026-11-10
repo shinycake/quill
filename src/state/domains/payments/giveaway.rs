@@ -70,6 +70,12 @@ pub enum GiveawayLaunch {
     Paid {
         chat_id: i64,
     },
+    /// The payment of a new giveaway for `chat_id` waits on the provider's
+    /// verification page (3-D Secure). The form stays done: Start must not
+    /// buy a second one while that is pending. It ends with the form.
+    Verifying {
+        chat_id: i64,
+    },
     Failed(String),
 }
 
@@ -78,7 +84,7 @@ impl GiveawayLaunch {
     pub fn is_done_for(&self, chat_id: i64) -> bool {
         match self {
             Self::Launched => true,
-            Self::Paid { chat_id: paid } => *paid == chat_id,
+            Self::Paid { chat_id: paid } | Self::Verifying { chat_id: paid } => *paid == chat_id,
             _ => false,
         }
     }

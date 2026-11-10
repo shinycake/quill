@@ -99,9 +99,9 @@ impl Refusal {
 }
 
 /// Where a pending Star reaction is. It leaves the list only on TDLib's
-/// answer to the request it is waiting on: `ok` ends it, an error returns it
-/// to `Waiting` (so the toast and its Undo come back and the Stars stay
-/// reserved), and the request id matches the answer to what asked.
+/// answer to the request it is waiting on: `ok` or an error ends it (an
+/// error also releases the Stars and shows a note; nothing is re-sent on
+/// its own), and the request id matches the answer to what asked.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PaidStage {
     /// Held for the Undo window.
@@ -338,29 +338,14 @@ impl PaidReactions {
         });
     }
 
-    /// TDLib refused `request`: its Stars go back to waiting, with a fresh
-    /// window before the next commit, merged into any newer tap on the
-    /// same message.
+    /// TDLib refused `request` (a commit or an undo): its Stars are
+    /// released and nothing is sent again on its own, as in Telegram
+    /// Desktop. A permanent error (a low balance) would otherwise loop
+    /// with the Stars held for good.
     pub fn refused(&mut self, request: RequestId) {
-        let Some(ix) = self.pending.iter().position(|p| {
-            p.stage == PaidStage::Committing(request) || p.stage == PaidStage::Undoing(request)
-        }) else {
-            return;
-        };
-        let mut back = self.pending.remove(ix);
-        back.stage = PaidStage::Waiting;
-        back.commit_at_ms = self.last_now_ms + ACCUMULATE_MS;
-        match self.pending.iter_mut().find(|p| {
-            p.stage == PaidStage::Waiting
-                && p.chat_id == back.chat_id
-                && p.message_id == back.message_id
-        }) {
-            Some(newer) => {
-                newer.stars += back.stars;
-                newer.commit_at_ms = newer.commit_at_ms.max(back.commit_at_ms);
-            }
-            None => self.pending.push(back),
-        }
+        self.pending.retain(|p| {
+            p.stage != PaidStage::Committing(request) && p.stage != PaidStage::Undoing(request)
+        });
     }
 
     /// Every waiting reaction whose time is up, still waiting: the driver

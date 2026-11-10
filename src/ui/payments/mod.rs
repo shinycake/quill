@@ -16,7 +16,7 @@ use gpui_kit::component::*;
 use gpui_kit::*;
 use quill::ids::{ChatId, MessageId};
 use quill::lang::{keys, tr, tr_with};
-use quill::state::{LoginUrlRequest, OrderInfoStage, Session};
+use quill::state::{LoginUrlRequest, Session};
 use quill::telegram::envelope::{
     LoginUrlInfo, PaymentFormData, PaymentFormTypeData, StarSubscriptionData,
     StarSubscriptionPricing, StarSubscriptionTypeData, format_payment_price, price_parts_total,
@@ -266,7 +266,8 @@ impl QuillApp {
                     })),
             );
         }
-        if let Some(validated) = session.payments.order_info.validated()
+        let typed_order = dialog.order(cx);
+        if let Some(validated) = session.payments.order_info.validated_for(&typed_order)
             && !validated.shipping_options.is_empty()
         {
             // Phase 6: kit RadioGroup (was: buttons with a ◉/○ prefix).
@@ -360,7 +361,12 @@ impl QuillApp {
         }
         let can_pay = {
             let terms_ok = invoice.terms_url.is_empty() || dialog.terms_accepted;
-            let order_ok = !needs_order || session.payments.order_info.validated().is_some();
+            let order_ok = !needs_order
+                || session
+                    .payments
+                    .order_info
+                    .validated_for(&typed_order)
+                    .is_some();
             let creds_ok = match &dialog.credential_choice {
                 PaymentCredentialChoice::Saved(_) => true,
                 PaymentCredentialChoice::NewCard => {
@@ -494,10 +500,7 @@ impl QuillApp {
             || invoice.need_shipping_address;
         // Only the answer to the fields now typed counts: an edit after
         // Continue (or a Continue still out) is validated again.
-        let validated = match &order_info {
-            OrderInfoStage::Validated { order, info } if *order == dialog.order(cx) => Some(info),
-            _ => None,
-        };
+        let validated = order_info.validated_for(&dialog.order(cx));
         if needs_order && validated.is_none() {
             self.set_note(StatusNote::silent(tr(
                 keys::Q_MONEY_VALIDATE_THE_ORDER_INFO_FIRST,

@@ -510,7 +510,14 @@ pub fn enable(
             return Err(err.into());
         }
         // Some key cannot be put back, so the wrapped files stay and the
-        // passcode is on. Every other key still leaves the OS store.
+        // passcode is on. Keys whose put-back worked are plain in the OS
+        // store again: they leave it a second time (each has a wrapped
+        // copy), and so does every key after the failure.
+        for ((done, _), restored) in originals.iter().zip(&put_back) {
+            if *restored {
+                let _ = inner.delete(done);
+            }
+        }
         for (rest, _) in originals.iter().skip(index + 1) {
             let _ = inner.delete(rest);
         }

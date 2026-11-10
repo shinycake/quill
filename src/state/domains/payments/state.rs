@@ -25,6 +25,16 @@ pub enum OrderInfoStage {
 }
 
 impl OrderInfoStage {
+    /// The validated answer, only while it answers `order`, the fields now
+    /// typed: an edit after Continue is validated again. Render and submit
+    /// both ask this.
+    pub fn validated_for(&self, order: &OrderInfoData) -> Option<&ValidatedOrderInfoData> {
+        match self {
+            Self::Validated { order: asked, info } if asked == order => Some(info),
+            _ => None,
+        }
+    }
+
     /// The validated answer, once there is one for the current fields.
     pub fn validated(&self) -> Option<&ValidatedOrderInfoData> {
         match self {

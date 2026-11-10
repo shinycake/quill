@@ -651,6 +651,7 @@
 "qll_money_only_new" = "Only new {who}";
 "qll_money_open_a_chat_with_a" = "Open a chat with a person or a channel to choose who gets the gift.";
 "qll_money_open_app" = "Open App";
+"qll_money_gift_is_being_sent" = "A gift is being sent. Wait for it to finish before choosing someone else.";
 "qll_money_open_sticker_set" = "Open sticker set";
 "qll_money_optional_up_to_characters" = "Optional. Up to {max} characters.";
 "qll_money_outgoing" = "Outgoing";
