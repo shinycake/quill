@@ -239,8 +239,7 @@ impl QuillApp {
             Some(&caption),
         ) {
             Ok(request) => {
-                self.stories.composer.save =
-                    quill::story_composer::SaveStage::Saving { request: request }
+                self.stories.composer.save = quill::story_composer::SaveStage::Saving { request }
             }
             Err(_) => {
                 self.stories.composer.local_error =

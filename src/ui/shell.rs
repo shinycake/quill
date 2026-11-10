@@ -463,9 +463,12 @@ impl QuillShell {
         // coming (it failed, was cancelled, or opened nothing): the ask
         // ends here, so a later open of the kind is not pinned to it.
         app.update(cx, |app, _| {
+            // Only a live client has requests to wait on; a demo stages its
+            // answers by hand.
             if app
-                .session()
-                .is_none_or(|session| session.requests.is_empty())
+                .live
+                .as_ref()
+                .is_some_and(|live| live.driver.session.requests.is_empty())
             {
                 for kind in app.windows.asked_dialogs() {
                     if !Self::flag_open(app, kind) {
