@@ -579,7 +579,21 @@ impl QuillApp {
                     })
                 })
             }
-            MessageSender::Chat { .. } => None,
+            // A bid placed for a channel is raised for that channel, never
+            // for the user.
+            MessageSender::Chat { chat_id } => {
+                let session = self.session()?;
+                session
+                    .gift_recipient(quill::ids::ChatId(chat_id))
+                    .or_else(|| {
+                        Some(quill::gift_manage::GiftRecipient {
+                            sender,
+                            name: session.sender_label(sender),
+                            is_self: false,
+                            is_channel: true,
+                        })
+                    })
+            }
         });
         self.gift_market.recipient = recipient;
         self.market_push(MarketBox::AuctionBid { gift_id }, cx);
