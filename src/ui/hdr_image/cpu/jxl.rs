@@ -81,9 +81,7 @@ pub(super) fn decode(bytes: &[u8], long_edge: u32) -> Result<Option<LinearImage>
     let total = (width as usize)
         .checked_mul(height as usize)
         .ok_or(DecodeError::TooLarge)?;
-    total
-        .checked_mul(channels)
-        .ok_or(DecodeError::TooLarge)?;
+    total.checked_mul(channels).ok_or(DecodeError::TooLarge)?;
     let to_linear = |value: f32| pq_to_nits(value) / SDR_WHITE_NITS;
     // Converted a chunk of pixels at a time straight from the stream into
     // the final buffer: no full-size sample copy next to it.

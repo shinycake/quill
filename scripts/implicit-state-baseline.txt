@@ -158,7 +158,6 @@ MoneyPage::tx_loading+tx_error
 MutedSpeechHint::done
 NewChatView::busy
 NewChatView::busy+failure
-OnDemand::started
 OutputState::opening
 OwnershipState::check_in_flight
 OwnershipState::check_in_flight+check_error

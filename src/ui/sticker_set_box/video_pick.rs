@@ -78,7 +78,9 @@ impl QuillApp {
                 && live.driver.download_file(file_id, 16).is_err()
             {
                 // Nothing was asked for, so nothing will arrive.
-                self.set_note(StatusNote::error(tr(keys::Q_OPS_COULD_NOT_DOWNLOAD_PLEASE_TRY)));
+                self.set_note(StatusNote::error(tr(
+                    keys::Q_OPS_COULD_NOT_DOWNLOAD_PLEASE_TRY,
+                )));
                 cx.notify();
                 return;
             }

@@ -139,10 +139,13 @@ fn stepped(picture: &RgbaImage, steps: &[bool]) -> RgbaImage {
 fn pending_turns_render_the_same_pixels_and_preview() {
     let picture = RgbaImage::from_fn(30, 18, |x, y| Rgba([x as u8 * 8, y as u8 * 13, 50, 255]));
     let steps = [true, false, true, true, false];
-    let mut editor = PhotoEditor::new(EditorPurpose::MessageEdit {
+    let mut editor = PhotoEditor::new(
+        EditorPurpose::MessageEdit {
             chat: quill::ids::ChatId(1),
             message: quill::ids::MessageId(2),
-        }, picture.clone());
+        },
+        picture.clone(),
+    );
     for &rotate in &steps {
         if rotate {
             editor.rotate();

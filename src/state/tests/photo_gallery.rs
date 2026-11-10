@@ -168,6 +168,29 @@ fn a_deleted_change_leaves_the_gallery() {
 }
 
 #[test]
+fn a_viewer_waiting_for_the_current_photo_gives_up_when_its_request_is_gone() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    // Not seen yet: nothing in flight and no photo known.
+    assert!(session.chat_photo_request_ended(ChatId(GROUP)));
+    seed_group(&mut session, &seq, &sink, MEMBER_STATUS);
+    // Its photo is known: nothing to wait for or give up on.
+    assert!(!session.chat_photo_request_ended(ChatId(GROUP)));
+    // Forgotten, with the full-info request in flight: still waiting.
+    session.forget_chat_photos(ChatId(GROUP));
+    let supergroup = session.chats[&GROUP].kind.clone();
+    let ChatKind::Supergroup { supergroup_id, .. } = supergroup else {
+        panic!("the seeded group is a supergroup");
+    };
+    let request =
+        session.request_for_supergroup(RequestPurpose::GetSupergroupFullInfo, supergroup_id);
+    assert!(!session.chat_photo_request_ended(ChatId(GROUP)));
+    // The request failed (taken, no answer stored): the wait is over.
+    session.requests.take(request);
+    assert!(session.chat_photo_request_ended(ChatId(GROUP)));
+}
+
+#[test]
 fn a_new_chat_photo_drops_what_the_viewer_knew() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);

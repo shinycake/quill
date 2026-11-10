@@ -4,6 +4,8 @@
 use crate::state::*;
 
 pub struct UsersState {
+    /// The requests the profile boxes wait on before they close.
+    pub saves: SaveWatch,
     /// B10: chat-id lists behind the profile panels, keyed by
     /// `(kind, user/chat id)`: groups in common, similar channels and
     /// the suitable personal channels. Chat objects themselves arrive via
@@ -149,6 +151,7 @@ impl UsersState {
 
     pub(crate) fn new() -> Self {
         Self {
+            saves: SaveWatch::default(),
             profile_chat_lists: HashMap::new(),
             common_groups_paging: HashMap::new(),
             similar_chat_totals: HashMap::new(),

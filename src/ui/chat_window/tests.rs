@@ -1139,8 +1139,13 @@ fn a_message_photo_edit_whose_chat_window_closed_leaves_no_png(cx: &mut TestAppC
         app.update(cx, |app, cx| {
             app.in_window_of(window, cx, |app, window, cx| {
                 let pixels = image::RgbaImage::from_pixel(59, 11, image::Rgba([4, 5, 6, 255]));
-                app.viewer.photo_editor =
-                    Some(PhotoEditor::new(EditorPurpose::MessageEdit { chat: ChatId(1), message: MessageId(2) }, pixels));
+                app.viewer.photo_editor = Some(PhotoEditor::new(
+                    EditorPurpose::MessageEdit {
+                        chat: ChatId(1),
+                        message: MessageId(2),
+                    },
+                    pixels,
+                ));
                 app.save_photo_editor(window, cx);
             });
         });

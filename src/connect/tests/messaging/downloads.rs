@@ -926,3 +926,99 @@ fn a_saved_pause_found_on_a_low_disk_waits_for_a_healthy_one() {
     assert!(session.media.disk_paused.contains(&77));
     assert!(session.settings.data_storage.disk_paused.contains(&(7, 99)));
 }
+
+#[test]
+fn a_failed_resume_keeps_the_rest_paused_for_the_next_healthy_reading() {
+    use super::super::flood_retry_lost::SwitchSender;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    const MIB: u64 = 1 << 20;
+    let store = MemorySecretStore::new();
+    let (dir, prepared) = prepared_tmp(&store);
+    let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+    let recorder = Arc::new(RecordingSender::new());
+    let down = Arc::new(AtomicBool::new(false));
+    let sender = SwitchSender {
+        inner: recorder.clone(),
+        down: down.clone(),
+    };
+    let session = Session::new(AccountKey::primary(), sink.clone());
+    let mut driver = ConnectDriver::new(session, sender, test_credentials(), prepared);
+    let seq = AtomicU64::new(0);
+    let ingest = |driver: &mut ConnectDriver<SwitchSender>, json: &str| {
+        driver
+            .ingest(copy_and_parse(json, &seq, &sink).unwrap())
+            .unwrap();
+    };
+    ingest(
+        &mut driver,
+        r#"{"@type":"updateAuthorizationState","authorization_state":{"@type":"authorizationStateReady"}}"#,
+    );
+    for (file, message) in [(51, 99), (52, 100)] {
+        driver
+            .download_user_file(FileId(file), Some((ChatId(7), message)))
+            .unwrap();
+        ingest(&mut driver, &file_update(file, 900 * MIB as i64, 0));
+    }
+    driver
+        .note_disk(DiskState::Low, Some(FLOORS.close + 500 * MIB), &FLOORS)
+        .unwrap();
+    for file in [51, 52] {
+        ingest(&mut driver, &paused_update(file, true));
+    }
+    assert_eq!(driver.session.media.disk_paused.len(), 2);
+
+    // The first resume cannot be sent: both stay the disk's to resume.
+    down.store(true, Ordering::SeqCst);
+    assert!(
+        driver
+            .note_disk(DiskState::Healthy, Some(FLOORS.warn_clear), &FLOORS)
+            .is_err()
+    );
+    assert_eq!(driver.session.media.disk_paused.len(), 2);
+    assert_eq!(driver.session.settings.data_storage.disk_paused.len(), 2);
+
+    // The next healthy reading resumes both.
+    down.store(false, Ordering::SeqCst);
+    let base = recorder.snapshot().len();
+    driver
+        .note_disk(DiskState::Healthy, Some(FLOORS.warn_clear), &FLOORS)
+        .unwrap();
+    let resumed = recorder.snapshot()[base..]
+        .iter()
+        .filter(|json| {
+            let v: Value = serde_json::from_str(json).unwrap();
+            v["@type"] == "toggleDownloadIsPaused" && v["is_paused"] == false
+        })
+        .count();
+    assert_eq!(resumed, 2);
+    assert!(driver.session.media.disk_paused.is_empty());
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn a_failed_saved_pause_search_asks_again_and_a_stale_answer_is_ignored() {
+    let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+    let mut session = Session::new(AccountKey::primary(), sink.clone());
+    session.settings.data_storage.disk_paused.insert((7, 99));
+    let request = session.request(
+        crate::state::RequestPurpose::Media(crate::state::MediaPurpose::SearchDiskPausedDownloads),
+        None,
+    );
+    let asked = DiskSearch::Asked {
+        request,
+        keys: [(7, 99)].into_iter().collect(),
+    };
+    session.media.disk_search = asked.clone();
+    // An answer for another request leaves the search waiting.
+    session.apply_disk_paused_found(RequestId(request.0 + 1), vec![paused_found(77, 99)]);
+    assert_eq!(session.media.disk_search, asked);
+    assert!(session.media.disk_resume_due.is_empty());
+    // Its failure returns it to not asked, so the next reading asks again.
+    let seq = AtomicU64::new(1);
+    let failed = format!(
+        r#"{{"@type":"error","@extra":"{}","code":500,"message":"INTERNAL"}}"#,
+        request.0
+    );
+    session.apply(copy_and_parse(&failed, &seq, &sink).unwrap());
+    assert_eq!(session.media.disk_search, DiskSearch::NotAsked);
+}

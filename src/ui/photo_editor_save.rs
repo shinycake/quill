@@ -20,7 +20,11 @@ impl QuillApp {
     /// Stickers mode: whatever closes that editor (Done, Cancel, a window
     /// or account leaving) releases it, not only the mode button.
     pub(super) fn sync_editor_masks(&mut self) {
-        let wanted = self.viewer.photo_editor.as_ref().is_some_and(|editor| editor.mode == super::photo_editor::EditorMode::Stickers)
+        let wanted = self
+            .viewer
+            .photo_editor
+            .as_ref()
+            .is_some_and(|editor| editor.mode == super::photo_editor::EditorMode::Stickers)
             || self.windows.slot_edits_stickers();
         let Some(live) = self.live.as_mut() else {
             return;

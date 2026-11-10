@@ -1012,7 +1012,9 @@ fn clips_of_an_ended_worker_fail_and_new_clips_go_to_the_others() {
     // Worker 0 ends: the clip it owns fails at once.
     let ended = {
         let mut bodies = crate::locks::lock_or_recover(&started);
-        let at = bodies.iter().position(|(name, _)| name == "quill-sticker-0");
+        let at = bodies
+            .iter()
+            .position(|(name, _)| name == "quill-sticker-0");
         at.map(|at| bodies.remove(at))
     };
     drop(ended);

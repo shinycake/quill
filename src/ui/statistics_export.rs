@@ -74,7 +74,8 @@ fn page_sheets(
     match session.groups.stats.page(chat_id) {
         StatsPage::Overview => {
             let stats = chat_stats?;
-            let sheets = chat_statistics_sheets(stats, |graph| resolve(session, chat_id, graph, unsettled));
+            let sheets =
+                chat_statistics_sheets(stats, |graph| resolve(session, chat_id, graph, unsettled));
             Some((sheets, export_file_name(title, None, None, today)))
         }
         StatsPage::Message(message_id) => {
@@ -163,10 +164,7 @@ fn page_sheets(
                     ),
                 ],
             );
-            Some((
-                sheets,
-                export_file_name(title, None, Some(story_id), today),
-            ))
+            Some((sheets, export_file_name(title, None, Some(story_id), today)))
         }
     }
 }

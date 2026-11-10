@@ -99,12 +99,17 @@ impl QuillApp {
             // instead of holding the pick for good.
             let ended = pending.file_id;
             let failed = self.session().is_some_and(|session| {
-                session.media.downloads.status(ended.0, &session.media.files)
+                session
+                    .media
+                    .downloads
+                    .status(ended.0, &session.media.files)
                     == quill::state::DownloadStatus::Failed
             });
             if failed {
                 self.sticker_box.pending_video = None;
-                self.set_note(StatusNote::error(tr(keys::Q_OPS_COULD_NOT_DOWNLOAD_PLEASE_TRY)));
+                self.set_note(StatusNote::error(tr(
+                    keys::Q_OPS_COULD_NOT_DOWNLOAD_PLEASE_TRY,
+                )));
                 cx.notify();
             }
             return;

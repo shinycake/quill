@@ -12,6 +12,9 @@ impl Session {
     ) {
         self.settle_own_reaction(extra, true);
         self.fail_own_full_info(&err, pending);
+        if let Some(id) = extra {
+            self.users_state.saves.failed(id, error_reason(&err));
+        }
         if matches!(
             pending.map(|p| p.purpose),
             Some(
