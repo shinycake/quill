@@ -176,11 +176,11 @@ impl QuillApp {
         let auth = self.current_auth();
         if !matches!(auth, AuthorizationState::WaitPhoneNumber) {
             self.auth_ui.signin.lookups = PhoneLookups::Idle;
-        } else if self.auth_ui.signin.lookups == PhoneLookups::Idle {
+        } else if self.auth_ui.signin.lookups == PhoneLookups::Idle && self.live.is_some() {
+            self.auth_ui.signin.lookups = PhoneLookups::Asked;
             if let Some(live) = self.live.as_mut() {
                 let _ = live.driver.fetch_countries();
                 let _ = live.driver.fetch_country_code();
-                self.auth_ui.signin.lookups = PhoneLookups::Asked;
             }
         }
         match &auth {
