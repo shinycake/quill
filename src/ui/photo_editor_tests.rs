@@ -563,3 +563,27 @@ fn a_send_cancels_a_tap_on_a_rendering_card(cx: &mut TestAppContext) {
         let _ = std::fs::remove_file(edited);
     }
 }
+
+#[gpui_kit::test]
+fn a_render_finishing_after_the_screen_was_replaced_still_lands_and_ends(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let original = picture("switched.png", 43, 19);
+    open_on(&app, &mut vcx, &original);
+    app.update_in(&mut vcx, |app, window, cx| {
+        app.photo_editor_mut(PhotoEditor::rotate, cx);
+        app.save_photo_editor(window, cx);
+        // An account switch moves the epoch while the PNG is rendering.
+        app.replace_screen(window, cx);
+    });
+    vcx.run_until_parked();
+    let edited = tray_path(&app, &mut vcx).expect("still in the tray");
+    assert_ne!(edited, original);
+    assert_eq!(image::image_dimensions(&edited).ok(), Some((19, 43)));
+    app.update_in(&mut vcx, |app, _, _| {
+        let rendering = app
+            .update_pending_send(|send| send.renders_an_edit())
+            .unwrap_or(false);
+        assert!(!rendering, "the card must not stay rendering");
+    });
+    let _ = std::fs::remove_file(edited);
+}

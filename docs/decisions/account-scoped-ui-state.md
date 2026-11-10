@@ -4047,14 +4047,34 @@ re-read at its spot first.
   - 01-051: opening the boost box clears the old chat's intent and slots.
   - 09-X012: closing a chat window no longer dismisses the queued account
     notices (not seen on screen).
+- **Fixed, second pass.**
+  - 04-057: `PendingPaid::stage` is `PaidStage { Waiting, Committing(req),
+    Undoing(req) }`. A due or undone reaction stays in the list, and
+    reserved against the balance and the cap, until TDLib's `ok` for that
+    request id; an error puts it back to `Waiting` with a fresh window, so
+    the toast and Undo return and the next tap counts the old Stars.
+  - 12-001: the render's fallback lands through `ScopedApp::app()` (no
+    screen epoch) instead of `main()`, which kept the stale epoch. The tray
+    sits under its account, so the PNG lands there or goes, and
+    `photo_render` is always cleared.
+  - 01-085: `KeyFilter::resync` gives the `Up` a lost event hid. The macOS
+    tap calls it when re-enabled, the Windows hook on the next event after
+    a skipped one, the X11 thread when its stream ends. The app ends the
+    hold (`ptt_end_hold`) when a new hook starts, one fails to start, or
+    the hook's channel closes. No polling. tdesktop's behaviour here could
+    not be checked, so a key-down of another key does not end a hold (a
+    chord with the push-to-talk key would cut the microphone).
+  - passcode `enable`: when a put-back fails, the accounts after the stuck
+    one still leave the OS store (the passcode is on).
 - **Skipped.** 02-062 (a reopened dialog already drops the earlier send's
-  answer by request id; a test pins it), 02-160 (the Star reaction box is already on `OnScreen`, so
-  per account), 04-057 (the commit is not confirmed back to the local
-  list; needs a committing stage, not done), 12-001 (the tray card needs
-  an owner that outlives the screen epoch), 01-085 (`KeyFilter` only
-  collapses edges; a missed key-up needs the OS key state, which would be
-  a poll).
+  answer by request id; a test pins it), 02-160 (the Star reaction box is
+  already on `OnScreen`, so per account).
 - **Tests.** `enable_failing_midway_keeps_every_database_key`,
+  `enable_with_an_unrestorable_key_still_clears_the_accounts_after_it`,
+  `a_refused_commit_returns_the_stars_to_waiting_and_adds_up_with_a_new_tap`,
+  `a_refused_commit_keeps_the_stars_and_the_next_tap_counts_them`,
+  `a_render_finishing_after_the_screen_was_replaced_still_lands_and_ends`,
+  `resync_ends_a_hold_whose_release_was_missed`,
   `a_zip_reusing_one_local_header_is_refused`,
   `close_friends_stage_waits_for_the_list`,
   `a_failed_send_does_not_leave_the_review_pending`,

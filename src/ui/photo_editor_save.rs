@@ -116,11 +116,13 @@ impl QuillApp {
                     }
                 }
             });
-            // The window closed: the tray outlives it, so the edit still
-            // lands there or its file goes.
+            // The window closed or another account is on screen: the tray
+            // outlives both (it sits under its account), so the edit still
+            // lands there, whatever screen is current, or its file goes.
+            // Without this the card would render forever.
             if landed.is_err()
                 && app
-                    .main()
+                    .app()
                     .update(cx, |this, cx| {
                         this.viewer
                             .photo_editor_after

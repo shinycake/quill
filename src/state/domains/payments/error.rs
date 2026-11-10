@@ -109,12 +109,18 @@ impl Session {
                     Some(format!("Couldn't send Stars: {}", error_reason(err)));
             }
             Some(RequestPurpose::Payments(PaymentsPurpose::CommitPaidReaction { .. })) => {
+                if let Some(p) = pending {
+                    self.payments.paid.refused(p.id);
+                }
                 self.payments.paid.note =
                     Some(format!("Stars were not sent: {}", error_reason(err)));
             }
             Some(RequestPurpose::Payments(PaymentsPurpose::RemovePendingPaidReaction {
                 ..
             })) => {
+                if let Some(p) = pending {
+                    self.payments.paid.refused(p.id);
+                }
                 self.payments.paid.note =
                     Some(format!("Couldn't undo the Stars: {}", error_reason(err)));
             }

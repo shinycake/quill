@@ -1,3 +1,4 @@
+use crate::ids::RequestId;
 use crate::paid_reaction::*;
 
 #[test]
@@ -5,13 +6,16 @@ fn a_tap_waits_for_the_accumulate_period() {
     let mut paid = PaidReactions::default();
     assert_eq!(paid.add(1, 10, QUICK_AMOUNT, None, 1_000), Some(1));
     assert!(paid.has_pending());
-    assert!(paid.take_due(1_000 + ACCUMULATE_MS - 1).is_empty());
-    let due = paid.take_due(1_000 + ACCUMULATE_MS);
+    assert!(paid.due(1_000 + ACCUMULATE_MS - 1).is_empty());
+    let due = paid.due(1_000 + ACCUMULATE_MS);
     assert_eq!(due.len(), 1);
     assert_eq!(
         (due[0].chat_id, due[0].message_id, due[0].stars),
         (1, 10, 1)
     );
+    // Due, but still waiting until its commit request goes out.
+    assert!(paid.has_pending());
+    paid.begin_commit(1, 10, RequestId(1));
     assert!(!paid.has_pending());
 }
 
@@ -22,8 +26,8 @@ fn taps_add_up_and_restart_the_timer() {
     assert_eq!(paid.add(1, 10, 1, None, 4_000), Some(2));
     assert_eq!(paid.pending_stars(1, 10), 2);
     // The first deadline (5.5 s) passed but the second tap pushed it.
-    assert!(paid.take_due(6_000).is_empty());
-    assert_eq!(paid.take_due(9_500).len(), 1);
+    assert!(paid.due(6_000).is_empty());
+    assert_eq!(paid.due(9_500).len(), 1);
 }
 
 #[test]
@@ -33,7 +37,7 @@ fn undo_forgets_the_waiting_stars() {
     assert!(paid.undo(1, 10));
     assert!(!paid.undo(1, 10));
     assert_eq!(paid.total_pending(), 0);
-    assert!(paid.take_due(u64::MAX).is_empty());
+    assert!(paid.due(u64::MAX).is_empty());
 }
 
 #[test]
@@ -75,7 +79,7 @@ fn the_latest_sender_choice_wins() {
     paid.add(1, 10, 1, None, 0);
     paid.add(1, 10, 50, Some(PaidSender::Anonymous), 10);
     paid.add(1, 10, 1, None, 20);
-    let due = paid.take_due(u64::MAX);
+    let due = paid.due(u64::MAX);
     assert_eq!(due[0].sender, Some(PaidSender::Anonymous));
     assert_eq!(due[0].stars, 52);
 }
@@ -214,4 +218,53 @@ fn the_next_change_is_the_soonest_of_every_waiting_reaction() {
     paid.add(1, 11, 1, None, 300);
     assert_eq!(paid.next_change_ms(300), Some(200));
     assert_eq!(paid.next_change_ms(ACCUMULATE_MS), Some(0));
+}
+
+#[test]
+fn a_commit_keeps_its_stars_reserved_until_tdlib_answers() {
+    let mut paid = PaidReactions::default();
+    paid.add(1, 10, 5, None, 0);
+    assert_eq!(paid.due(ACCUMULATE_MS).len(), 1);
+    paid.begin_commit(1, 10, RequestId(7));
+    assert!(!paid.has_pending());
+    assert!(paid.due(u64::MAX).is_empty());
+    assert_eq!(paid.total_pending(), 5);
+    assert!(paid.in_flight());
+    // An answer to some other request settles nothing.
+    paid.settled(RequestId(8));
+    assert_eq!(paid.total_pending(), 5);
+    paid.settled(RequestId(7));
+    assert_eq!(paid.total_pending(), 0);
+    assert!(!paid.in_flight());
+}
+
+#[test]
+fn a_refused_commit_returns_the_stars_to_waiting_and_adds_up_with_a_new_tap() {
+    let mut paid = PaidReactions::default();
+    paid.add(1, 10, 5, None, 0);
+    paid.due(ACCUMULATE_MS);
+    paid.begin_commit(1, 10, RequestId(7));
+    // A tap while the commit is out is a separate waiting entry.
+    assert_eq!(paid.add(1, 10, 2, None, ACCUMULATE_MS + 100), Some(2));
+    assert_eq!(paid.total_pending(), 7);
+    paid.refused(RequestId(7));
+    assert_eq!(paid.pending_stars(1, 10), 7);
+    assert_eq!(paid.total_pending(), 7);
+    assert!(!paid.in_flight());
+    // Not retried at once: a fresh window first.
+    assert!(paid.due(ACCUMULATE_MS + 200).is_empty());
+}
+
+#[test]
+fn a_refused_undo_puts_the_toast_back() {
+    let mut paid = PaidReactions::default();
+    paid.add(1, 10, 3, None, 0);
+    paid.begin_undo(1, 10, RequestId(4));
+    assert!(paid.toast().is_none());
+    assert_eq!(paid.total_pending(), 3);
+    paid.refused(RequestId(4));
+    assert_eq!(paid.toast().map(|p| p.stars), Some(3));
+    paid.begin_undo(1, 10, RequestId(5));
+    paid.settled(RequestId(5));
+    assert_eq!(paid.total_pending(), 0);
 }

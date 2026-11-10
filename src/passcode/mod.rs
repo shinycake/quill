@@ -498,15 +498,21 @@ pub fn enable(
             continue;
         };
         // Keys already removed from the OS store exist only as wrapped
-        // copies now: put them back before the wrapped files go. If any
-        // cannot be put back, the wrapped files stay and passcode is on.
-        let restored = originals
+        // copies now: put them back before the wrapped files go. Every put
+        // is tried, so one failure does not strand the rest.
+        let put_back: Vec<bool> = originals
             .iter()
             .take(index)
-            .all(|(done, key)| inner.put(done, key).is_ok());
-        if restored {
+            .map(|(done, key)| inner.put(done, key).is_ok())
+            .collect();
+        if put_back.iter().all(|ok| *ok) {
             rollback(&written);
             return Err(err.into());
+        }
+        // Some key cannot be put back, so the wrapped files stay and the
+        // passcode is on. Every other key still leaves the OS store.
+        for (rest, _) in originals.iter().skip(index + 1) {
+            let _ = inner.delete(rest);
         }
         break;
     }

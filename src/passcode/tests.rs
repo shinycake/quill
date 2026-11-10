@@ -579,3 +579,52 @@ fn enable_failing_midway_keeps_every_database_key() {
     assert_eq!(store.get(&b).unwrap().unwrap().as_bytes(), key_b.as_bytes());
     let _ = std::fs::remove_dir_all(root);
 }
+
+/// Delete fails for `fail`; once it has, every put fails too.
+struct StuckStore {
+    inner: MemorySecretStore,
+    fail: AccountKey,
+    put_locked: std::sync::atomic::AtomicBool,
+}
+
+impl SecretStore for StuckStore {
+    fn get(&self, a: &AccountKey) -> Result<Option<DatabaseKey>, SecretStoreError> {
+        self.inner.get(a)
+    }
+    fn put(&self, a: &AccountKey, k: &DatabaseKey) -> Result<(), SecretStoreError> {
+        if self.put_locked.load(std::sync::atomic::Ordering::SeqCst) {
+            return Err(SecretStoreError::Locked);
+        }
+        self.inner.put(a, k)
+    }
+    fn delete(&self, a: &AccountKey) -> Result<(), SecretStoreError> {
+        if *a == self.fail {
+            self.put_locked
+                .store(true, std::sync::atomic::Ordering::SeqCst);
+            return Err(SecretStoreError::Locked);
+        }
+        self.inner.delete(a)
+    }
+}
+
+#[test]
+fn enable_with_an_unrestorable_key_still_clears_the_accounts_after_it() {
+    let root = temp_root("enable-stuck");
+    let (a, b, c) = (acct("primary"), acct("account-1"), acct("account-2"));
+    let store = StuckStore {
+        inner: MemorySecretStore::new(),
+        fail: b.clone(),
+        put_locked: std::sync::atomic::AtomicBool::new(false),
+    };
+    for account in [&a, &b, &c] {
+        store.inner.put(account, &DatabaseKey::generate()).unwrap();
+    }
+    let state = Arc::new(UnlockState::new());
+    let accounts = [a.clone(), b.clone(), c.clone()];
+    enable(&root, &store, &accounts, "pass", FAST, &state).unwrap();
+    assert!(is_enabled(&root));
+    assert!(store.get(&a).unwrap().is_none());
+    assert!(store.get(&b).unwrap().is_some());
+    assert!(store.get(&c).unwrap().is_none());
+    let _ = std::fs::remove_dir_all(root);
+}
