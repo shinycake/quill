@@ -193,14 +193,13 @@ impl Session {
             Some(RequestPurpose::Payments(PaymentsPurpose::Grams(purpose))) => {
                 self.apply_grams_error(err, purpose, pending)
             }
-            Some(RequestPurpose::Payments(PaymentsPurpose::TonWallet(purpose))) => {
-                self.apply_ton_wallet_error(
+            Some(RequestPurpose::Payments(PaymentsPurpose::TonWallet(purpose))) => self
+                .apply_ton_wallet_error(
                     err,
                     purpose,
                     pending.and_then(|p| p.user_id),
                     pending.map(|p| p.id),
-                )
-            }
+                ),
             Some(RequestPurpose::Payments(PaymentsPurpose::Earn(purpose))) => {
                 self.apply_earn_error(err, purpose, pending.map(|p| p.id))
             }

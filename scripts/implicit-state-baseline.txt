@@ -92,7 +92,6 @@ GiftCodeLookup::loading+error
 GiftManageState::collections_loading
 GiftManageState::limits_asked
 GiftMarketState::auction_loading
-GiftMarketUi::pending_auction
 GiftPurchase::completed
 GiftPurchase::loading
 GiftPurchase::sending

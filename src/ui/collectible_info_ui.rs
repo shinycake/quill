@@ -13,6 +13,7 @@ use super::chat_row::chat_avatar;
 use super::earn::ton_icon;
 use super::message_text::format_unix_date_time;
 use super::shell::{DialogKind, QuillShell};
+use super::status_note::StatusNote;
 use crate::ui::os_open::open_link_in;
 use gpui_kit::component::button::*;
 use gpui_kit::component::dialog::Dialog;
@@ -49,7 +50,8 @@ impl QuillApp {
     }
 
     /// A lookup that failed: a username that is not a collectible one is
-    /// copied as a link, everything else stays silent.
+    /// copied as a link; any other failure says so in a status note, so the
+    /// tap is not silently dead.
     pub(super) fn pump_collectible_info(&mut self, cx: &mut Context<Self>) {
         let failed = self
             .session()
@@ -69,6 +71,10 @@ impl QuillApp {
             && !lookup.copy_text.is_empty()
         {
             self.copy_profile_text(&lookup.copy_text, tr(keys::STICKERS_COPIED), cx);
+        } else {
+            self.set_note(StatusNote::error(tr(
+                keys::Q_MONEY_COULD_NOT_LOAD_THE_COLLECTIBLE,
+            )));
         }
         cx.notify();
     }

@@ -469,6 +469,8 @@
 "qll_money_could_not_open_the_collection" = "could not open the collection";
 "qll_money_could_not_re_enable_the" = "Couldn't re-enable the subscription";
 "qll_money_could_not_reassign_the_boost" = "Couldn't reassign the boost";
+"qll_money_could_not_load_the_collectible" = "Couldn't load the details";
+"qll_money_could_not_load_this_list" = "Couldn't load this list.";
 "qll_money_could_not_rejoin_the_subscription" = "Couldn't rejoin the subscription";
 "qll_money_could_not_save_the_collection" = "could not save the collection";
 "qll_money_could_not_save_the_currency" = "Couldn't save the currency";

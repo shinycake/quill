@@ -241,21 +241,52 @@ impl<S: JsonSender> ConnectDriver<S> {
         stars: bool,
     ) -> Result<(), ConnectSendError> {
         self.earn_ready()?;
-        if self.session.payments.earn.balances_asked.contains(&peer) {
-            return Ok(());
-        }
-        self.session.payments.earn.balances_asked.push(peer);
-        if ton {
-            self.send_earn(EarnPurpose::TonBalance { peer }, |extra| {
+        let earn = &mut self.session.payments.earn;
+        let (ask_ton, ask_stars) = {
+            let asked = earn.balance_fetch.entry(peer).or_default();
+            let flags = (ton && asked.ton.is_idle(), stars && asked.stars.is_idle());
+            if flags.0 {
+                asked.ton.begin();
+            }
+            if flags.1 {
+                asked.stars.begin();
+            }
+            flags
+        };
+        if ask_ton {
+            let sent = self.send_earn(EarnPurpose::TonBalance { peer }, |extra| {
                 get_chat_revenue_statistics(extra, peer.chat_id(), false)
-            })?;
+            });
+            if let Err(err) = sent {
+                self.fail_balance(peer, true, "not sent");
+                if ask_stars {
+                    self.fail_balance(peer, false, "not sent");
+                }
+                return Err(err);
+            }
         }
-        if stars {
-            self.send_earn(EarnPurpose::StarBalance { peer }, |extra| {
+        if ask_stars {
+            let sent = self.send_earn(EarnPurpose::StarBalance { peer }, |extra| {
                 get_star_transactions(extra, peer, TxFilter::All, "", 1)
-            })?;
+            });
+            if let Err(err) = sent {
+                self.fail_balance(peer, false, "not sent");
+                return Err(err);
+            }
         }
         Ok(())
+    }
+
+    /// A balance request that never left: it stays failed until the
+    /// profile is left, so the upkeep does not send it again every frame.
+    fn fail_balance(&mut self, peer: EarnPeer, ton: bool, reason: &str) {
+        if let Some(asked) = self.session.payments.earn.balance_fetch.get_mut(&peer) {
+            if ton {
+                asked.ton.fail(reason);
+            } else {
+                asked.stars.fail(reason);
+            }
+        }
     }
 
     /// Collect or Withdraw: the first try goes without a password

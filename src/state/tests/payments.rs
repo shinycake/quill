@@ -320,7 +320,15 @@ fn bank_card_info_applies_only_to_own_request_and_clears_on_error() {
         stage: BankCardStage::Loading { request: first },
     });
     apply_json(&mut session, &seq, &sink, &info_json("999"));
-    assert!(session.payments.bank_card.as_ref().unwrap().info().is_none());
+    assert!(
+        session
+            .payments
+            .bank_card
+            .as_ref()
+            .unwrap()
+            .info()
+            .is_none()
+    );
     // The user taps a second card before the first answers.
     let second = session.request(RequestPurpose::GetBankCardInfo, None);
     session.payments.bank_card = Some(BankCardLookup {

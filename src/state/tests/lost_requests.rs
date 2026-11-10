@@ -105,15 +105,17 @@ fn account_loss_resets_the_loading_flags_of_pending_lookups() {
         None,
     );
     session.payments.hub.tx_loading = true;
-    session.request(
+    let history = session.request(
         RequestPurpose::Payments(PaymentsPurpose::GetStarTransactions { append: false }),
         None,
     );
+    session.payments.hub.tx_request = history.0;
     session.payments.hub.gifts_loading = true;
-    session.request(
+    let gifts = session.request(
         RequestPurpose::Payments(PaymentsPurpose::GetReceivedGifts { append: false }),
         None,
     );
+    session.payments.hub.gifts_request = gifts.0;
     session.media.playlists.entry(9).or_default().loading = true;
     session.request_for_user(
         RequestPurpose::Media(MediaPurpose::GetProfileAudios { append: false }),

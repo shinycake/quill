@@ -362,13 +362,26 @@ fn acquired_and_preview_requests() {
             "unique_gift_number": 0, "text": {"text": ""}, "is_private": false}]}),
     );
     assert_eq!(
-        f.driver.session.payments.gift_market.acquired[&800].len(),
-        1
+        f.driver.session.payments.gift_market.acquired[&800]
+            .data()
+            .map(Vec::len),
+        Some(1)
     );
     f.driver.fetch_gift_upgrade_preview(800).unwrap();
     assert_eq!(f.last("getGiftUpgradePreview")["regular_gift_id"], "800");
     // Not twice while in flight.
     assert!(f.driver.fetch_gift_upgrade_preview(800).is_err());
+    // A failure is shown, and the next opening of the box asks again.
+    f.answer(
+        "getGiftUpgradePreview",
+        json!({"@type": "error", "code": 500, "message": "TIMEOUT"}),
+    );
+    assert!(
+        f.driver.session.payments.gift_market.previews[&800]
+            .error()
+            .is_some()
+    );
+    f.driver.fetch_gift_upgrade_preview(800).unwrap();
     f.answer(
         "getGiftUpgradePreview",
         json!({"@type": "giftUpgradePreview", "models": [], "symbols": [], "backdrops": [], "prices": [], "next_prices": []}),
@@ -379,7 +392,9 @@ fn acquired_and_preview_requests() {
             .payments
             .gift_market
             .previews
-            .contains_key(&800)
+            .get(&800)
+            .and_then(|preview| preview.data())
+            .is_some()
     );
 }
 

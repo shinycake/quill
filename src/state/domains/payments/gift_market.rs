@@ -4,6 +4,7 @@ use crate::gift_market::{
     CraftGift, CraftResult, GiftMarketPayload, GiftMarketPurpose, bid_done_toast, error_note,
 };
 use crate::marketplace::GiftPurchaseResult;
+use crate::state::fetch::Fetch;
 use crate::state::*;
 
 fn market_purpose(pending: Option<&PendingRequest>) -> Option<GiftMarketPurpose> {
@@ -77,14 +78,20 @@ impl Session {
             }
             GiftMarketPayload::AcquiredGifts(list) => {
                 if let Some(GiftMarketPurpose::AcquiredGifts { gift_id }) = purpose {
-                    self.payments.gift_market.acquired.insert(gift_id, list);
+                    self.payments
+                        .gift_market
+                        .acquired
+                        .insert(gift_id, Fetch::Ready(list));
                 }
             }
             GiftMarketPayload::UpgradePreview(preview) => {
                 if let Some(GiftMarketPurpose::UpgradePreview { gift_id }) = purpose {
                     let files: Vec<ParsedFile> = preview.files().cloned().collect();
                     self.remember_files(&files);
-                    self.payments.gift_market.previews.insert(gift_id, preview);
+                    self.payments
+                        .gift_market
+                        .previews
+                        .insert(gift_id, Fetch::Ready(preview));
                 }
             }
             GiftMarketPayload::CraftCandidates(candidates) => {
@@ -321,10 +328,21 @@ impl Session {
                 craft.crafting = false;
                 market.notes.push(note);
             }
-            GiftMarketPurpose::OpenAuction
-            | GiftMarketPurpose::CloseAuction
-            | GiftMarketPurpose::AcquiredGifts { .. }
-            | GiftMarketPurpose::UpgradePreview { .. } => {}
+            GiftMarketPurpose::AcquiredGifts { gift_id } => {
+                market
+                    .acquired
+                    .entry(gift_id)
+                    .or_default()
+                    .fail(error_reason(err));
+            }
+            GiftMarketPurpose::UpgradePreview { gift_id } => {
+                market
+                    .previews
+                    .entry(gift_id)
+                    .or_default()
+                    .fail(error_reason(err));
+            }
+            GiftMarketPurpose::OpenAuction | GiftMarketPurpose::CloseAuction => {}
         }
     }
 

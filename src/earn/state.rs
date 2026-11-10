@@ -5,6 +5,7 @@
 
 use super::*;
 use crate::premium_hub::{StarAmount, StarTx, StarTxPage, TxFilter};
+use crate::state::fetch::Fetch;
 use std::collections::HashMap;
 
 /// A fetch the page waits on.
@@ -440,6 +441,19 @@ pub struct RevokeBox {
     pub sending: bool,
 }
 
+/// The two balance requests behind a profile's earn rows.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct BalanceFetch {
+    pub ton: Fetch<()>,
+    pub stars: Fetch<()>,
+}
+
+impl BalanceFetch {
+    fn is_failed(&self) -> bool {
+        self.ton.error().is_some() || self.stars.error().is_some()
+    }
+}
+
 /// Everything the revenue and affiliate screens keep.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct EarnState {
@@ -451,8 +465,10 @@ pub struct EarnState {
     pub ton_balances: HashMap<EarnPeer, TonAmounts>,
     /// Stars balances per peer: `updateStarRevenueStatus` and answers.
     pub star_balances: HashMap<EarnPeer, StarAmount>,
-    /// Peers whose balances were asked for (once per session).
-    pub balances_asked: Vec<EarnPeer>,
+    /// Where each peer's profile balances are: asked once per visit to the
+    /// profile; a failure stays until the profile is left, so the upkeep
+    /// does not ask again every frame.
+    pub balance_fetch: HashMap<EarnPeer, BalanceFetch>,
     pub setup: Option<SetupPage>,
     pub join: Option<JoinPage>,
     pub join_box: Option<JoinBox>,
@@ -485,6 +501,19 @@ impl EarnState {
     }
 
     /// The Stars balance of `peer`, when known.
+    /// Whether a balance wanted for `peer` was not asked yet.
+    pub fn balances_unasked(&self, peer: EarnPeer, ton: bool, stars: bool) -> bool {
+        let asked = self.balance_fetch.get(&peer);
+        (ton && asked.is_none_or(|a| a.ton.is_idle()))
+            || (stars && asked.is_none_or(|a| a.stars.is_idle()))
+    }
+
+    /// The profile was left: a balance that failed is asked again on the
+    /// next visit.
+    pub fn forget_failed_balances(&mut self) {
+        self.balance_fetch.retain(|_, fetch| !fetch.is_failed());
+    }
+
     pub fn star_balance(&self, peer: EarnPeer) -> Option<StarAmount> {
         self.star_balances.get(&peer).copied()
     }

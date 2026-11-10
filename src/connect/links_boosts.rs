@@ -4,8 +4,8 @@ use super::*;
 use crate::ids::{ChatId, RequestId};
 use crate::state::GroupsPurpose;
 use crate::state::{
-    AdminLinksState, BOOSTS_PAGE_SIZE, BoostsListState, BoostsPage, INVITE_ADMIN_PAGE_SIZE, InviteLinkFetch,
-    LinkRequestsState, RequestPurpose,
+    AdminLinksState, BOOSTS_PAGE_SIZE, BoostsListState, BoostsPage, INVITE_ADMIN_PAGE_SIZE,
+    InviteLinkFetch, LinkRequestsState, RequestPurpose,
 };
 use crate::telegram::requests::{
     delete_all_revoked_chat_invite_links, get_chat_boost_link, get_chat_boosts,

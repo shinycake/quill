@@ -6,6 +6,7 @@ use super::{
 };
 use crate::gift_manage::GiftRecipient;
 use crate::marketplace::GiftPrice;
+use crate::state::fetch::Fetch;
 use std::collections::HashMap;
 
 /// One resale search: the resale box, or the market list of the craft
@@ -233,8 +234,10 @@ pub struct GiftMarketState {
     pub auctions: HashMap<i64, AuctionState>,
     /// The auctions with a bid of the user (`updateActiveGiftAuctions`).
     pub active: Vec<AuctionState>,
-    pub acquired: HashMap<i64, Vec<AcquiredGift>>,
-    pub previews: HashMap<i64, UpgradePreview>,
+    /// "N items bought" per auction: a failed list says so and offers Retry.
+    pub acquired: HashMap<i64, Fetch<Vec<AcquiredGift>>>,
+    /// The upgrade preview per gift (the cover cycle, the craftable models).
+    pub previews: HashMap<i64, Fetch<UpgradePreview>>,
     /// The auction `openGiftAuction` follows.
     pub followed: Option<i64>,
     /// A `getGiftAuctionState` the UI waits for (a link or a tile) and

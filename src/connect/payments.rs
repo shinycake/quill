@@ -2,8 +2,8 @@
 use super::*;
 use crate::ids::{ChatId, MessageId, RequestId};
 use crate::payment_invoice::InputInvoice;
-use crate::state::{BankCardLookup, BankCardStage};
 use crate::state::PaymentsPurpose;
+use crate::state::{BankCardLookup, BankCardStage};
 use crate::state::{PaymentRequest, RequestPurpose};
 use crate::telegram::envelope::OrderInfoData;
 use crate::telegram::requests::{

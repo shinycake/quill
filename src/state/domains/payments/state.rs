@@ -184,7 +184,9 @@ pub struct BankCardLookup {
 /// number never lands in a later one.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BankCardStage {
-    Loading { request: RequestId },
+    Loading {
+        request: RequestId,
+    },
     Ready(BankCardInfoData),
     /// No card info: the menu keeps only "Copy Card Number".
     Failed,

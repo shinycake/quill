@@ -365,10 +365,8 @@ impl Session {
                     && let Some(state) = self.groups.chat_boost_lists.get_mut(&chat_id.0)
                     && state.waits_for(pending.id)
                 {
-                    state.page = BoostsPage::Failed(call_request_error_line(
-                        err,
-                        "Could not load boosts",
-                    ));
+                    state.page =
+                        BoostsPage::Failed(call_request_error_line(err, "Could not load boosts"));
                 }
             }
             Some(RequestPurpose::GetChatBoostLink) => {

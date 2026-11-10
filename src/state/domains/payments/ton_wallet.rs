@@ -2,9 +2,7 @@
 //! state, history, NFTs, profile addresses and exchange rates. Answers only
 //! land when they match the request that asked for them.
 use crate::state::*;
-use crate::ton_wallet::{
-    ProfileAddress, TonWalletPayload, TonWalletPurpose, TxLookup, WalletTx,
-};
+use crate::ton_wallet::{ProfileAddress, TonWalletPayload, TonWalletPurpose, TxLookup, WalletTx};
 
 impl Session {
     pub(crate) fn apply_ton_wallet(

@@ -44,6 +44,9 @@ impl Session {
             }
             Some(EarnPurpose::StarBalance { peer }) => {
                 self.payments.earn.star_balances.insert(peer, page.balance);
+                if let Some(asked) = self.payments.earn.balance_fetch.get_mut(&peer) {
+                    asked.stars.succeed(());
+                }
             }
             _ => {}
         }
@@ -85,6 +88,9 @@ impl Session {
             }
             (EarnPayload::TonStats(stats), Some(EarnPurpose::TonBalance { peer })) => {
                 earn.ton_balances.insert(peer, stats.amounts);
+                if let Some(asked) = earn.balance_fetch.get_mut(&peer) {
+                    asked.ton.succeed(());
+                }
             }
             (
                 EarnPayload::TonTransactions(page_data),
@@ -470,9 +476,17 @@ impl Session {
             }
             // Settled either way, so the gates do not ask again each frame.
             EarnPurpose::AppConfig => earn.limits.app_config_loaded = true,
-            EarnPurpose::TonBalance { .. }
-            | EarnPurpose::StarBalance { .. }
-            | EarnPurpose::AdAccountUrl { .. } => {}
+            EarnPurpose::TonBalance { peer } => {
+                if let Some(asked) = earn.balance_fetch.get_mut(&peer) {
+                    asked.ton.fail(reason.clone());
+                }
+            }
+            EarnPurpose::StarBalance { peer } => {
+                if let Some(asked) = earn.balance_fetch.get_mut(&peer) {
+                    asked.stars.fail(reason.clone());
+                }
+            }
+            EarnPurpose::AdAccountUrl { .. } => {}
             EarnPurpose::WithdrawalUrl { with_password } => {
                 if earn.withdraw.as_ref().is_some_and(|w| w.waits_for(request)) {
                     Self::apply_withdrawal_error(earn, err, with_password, &reason);

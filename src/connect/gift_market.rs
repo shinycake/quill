@@ -313,33 +313,43 @@ impl<S: JsonSender> ConnectDriver<S> {
         &mut self,
         gift_id: i64,
     ) -> Result<RequestId, ConnectSendError> {
-        self.send_market(GiftMarketPurpose::AcquiredGifts { gift_id }, |extra| {
+        let acquired = &mut self.session.payments.gift_market.acquired;
+        if acquired.get(&gift_id).is_some_and(|list| list.is_loading()) {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        acquired.entry(gift_id).or_default().begin();
+        let sent = self.send_market(GiftMarketPurpose::AcquiredGifts { gift_id }, |extra| {
             rq::get_gift_auction_acquired_gifts(extra, gift_id)
-        })
+        });
+        if sent.is_err()
+            && let Some(list) = self.session.payments.gift_market.acquired.get_mut(&gift_id)
+        {
+            list.fail("not sent");
+        }
+        sent
     }
 
-    /// `getGiftUpgradePreview`, once per gift.
+    /// `getGiftUpgradePreview`: once per gift, and again after a failure.
+    /// Called when a box opens, never from a render.
     pub fn fetch_gift_upgrade_preview(
         &mut self,
         gift_id: i64,
     ) -> Result<RequestId, ConnectSendError> {
         let purpose = GiftMarketPurpose::UpgradePreview { gift_id };
-        if gift_id == 0
-            || self
-                .session
-                .payments
-                .gift_market
-                .previews
-                .contains_key(&gift_id)
-            || self.session.requests.has_purpose(RequestPurpose::Payments(
-                PaymentsPurpose::GiftMarket(purpose),
-            ))
-        {
+        let previews = &mut self.session.payments.gift_market.previews;
+        if gift_id == 0 || previews.get(&gift_id).is_some_and(|p| !p.can_ask()) {
             return Err(ConnectSendError::InvalidRequest);
         }
-        self.send_market(purpose, |extra| {
+        previews.entry(gift_id).or_default().begin();
+        let sent = self.send_market(purpose, |extra| {
             rq::get_gift_upgrade_preview(extra, gift_id)
-        })
+        });
+        if sent.is_err()
+            && let Some(preview) = self.session.payments.gift_market.previews.get_mut(&gift_id)
+        {
+            preview.fail("not sent");
+        }
+        sent
     }
 
     // ---- Crafting -----------------------------------------------------
