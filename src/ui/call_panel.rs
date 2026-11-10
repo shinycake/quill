@@ -303,6 +303,7 @@ impl QuillApp {
     /// window does not draw, and an incoming call still needs its window
     /// while you work in a chat window.
     pub(in crate::ui) fn sync_call_windows(&mut self, cx: &mut Context<Self>) {
+        self.take_offered_call_link(cx);
         self.sync_call_window(cx);
         self.sync_group_call_window(cx);
         self.sync_screen_share_call(cx);

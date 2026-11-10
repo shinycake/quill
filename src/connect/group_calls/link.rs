@@ -2,7 +2,8 @@
 //! stream link points at (`crate::call_link`).
 use super::*;
 use crate::call_link::{
-    CallLinkConfirm, CallLinkStep, CurrentCall, LeaveKind, PendingCallLink, plan,
+    CallLinkConfirm, CallLinkLeaving, CallLinkStep, CurrentCall, LeaveKind, LeavingCall,
+    OfferedCallLink, PendingCallLink, plan,
 };
 use crate::ids::ChatId;
 
@@ -73,21 +74,47 @@ impl<S: JsonSender> ConnectDriver<S> {
     }
 
     /// The viewer confirmed: leave the current call, then offer the link's
-    /// call once the old one is gone.
+    /// call once the old one is gone. A leave that cannot be sent drops the
+    /// link: the call stays, and nothing is offered later.
     pub fn confirm_call_link_leave(&mut self) -> Result<(), ConnectSendError> {
         let Some(confirm) = self.session.calls.call_link_confirm.take() else {
             return Ok(());
         };
-        match confirm.leave {
-            LeaveKind::PrivateCall => {
-                let _ = self.discard_call();
+        let leaving = match confirm.leave {
+            LeaveKind::PrivateCall => self
+                .session
+                .calls
+                .active_call
+                .as_ref()
+                .map(|call| LeavingCall::Private(call.id)),
+            LeaveKind::GroupCall { .. } => self
+                .session
+                .calls
+                .active_group_call
+                .as_ref()
+                .map(|call| LeavingCall::Group(call.id)),
+        };
+        // The call may have ended while the question was open.
+        let Some(leaving) = leaving else {
+            return self.offer_confirmed_link(confirm);
+        };
+        match leaving {
+            // A hang-up TDLib was not sent leaves the call up: no link
+            // waits for it to end.
+            LeavingCall::Private(_) => {
+                self.discard_call()?;
             }
-            LeaveKind::GroupCall { .. } => {
+            // The group call is dropped here whether or not the leave went
+            // out, as the call screen's own Leave does.
+            LeavingCall::Group(_) => {
                 let _ = self.leave_group_call();
                 self.drop_group_call_locally();
             }
         }
-        self.session.calls.call_link_after_leave = Some((confirm.chat_id, confirm.invite_hash));
+        self.session.calls.call_link_after_leave = Some(CallLinkLeaving {
+            link: confirm,
+            leaving,
+        });
         self.maybe_offer_pending_call_link()
     }
 
@@ -97,23 +124,45 @@ impl<S: JsonSender> ConnectDriver<S> {
     }
 
     /// Offer a confirmed link's call once no call is on. Called from
-    /// `ingest`, like the swap prompt's queued accept.
+    /// `ingest`, like the swap prompt's queued accept. A call other than the
+    /// one being left taking its place drops the link.
     pub(crate) fn maybe_offer_pending_call_link(&mut self) -> Result<(), ConnectSendError> {
-        if self.session.calls.call_link_after_leave.is_none()
-            || self.session.calls.active_call.is_some()
-            || self
-                .session
-                .calls
-                .active_group_call
-                .as_ref()
-                .is_some_and(|call| call.is_joined)
-        {
-            return Ok(());
-        }
-        let Some((chat_id, hash)) = self.session.calls.call_link_after_leave.take() else {
+        let Some(waiting) = self.session.calls.call_link_after_leave.as_ref() else {
             return Ok(());
         };
-        self.offer_call_link(ChatId(chat_id), &hash, false)
-            .map(|_| ())
+        let private = self.session.calls.active_call.as_ref().map(|call| call.id);
+        let group = self
+            .session
+            .calls
+            .active_group_call
+            .as_ref()
+            .filter(|call| call.is_joined)
+            .map(|call| call.id);
+        if private.is_some() || group.is_some() {
+            let same = match waiting.leaving {
+                LeavingCall::Private(id) => private == Some(id) && group.is_none(),
+                LeavingCall::Group(id) => group == Some(id) && private.is_none(),
+            };
+            if !same {
+                self.session.calls.call_link_after_leave = None;
+            }
+            return Ok(());
+        }
+        let Some(CallLinkLeaving { link, .. }) = self.session.calls.call_link_after_leave.take()
+        else {
+            return Ok(());
+        };
+        self.offer_confirmed_link(link)
+    }
+
+    fn offer_confirmed_link(&mut self, link: CallLinkConfirm) -> Result<(), ConnectSendError> {
+        let step = self.offer_call_link(ChatId(link.chat_id), &link.invite_hash, link.live_stream)?;
+        if let CallLinkStep::Offer { group_call_id } = step {
+            self.session.calls.call_link_offered = Some(OfferedCallLink {
+                group_call_id,
+                live_stream: link.live_stream,
+            });
+        }
+        Ok(())
     }
 }

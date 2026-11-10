@@ -156,3 +156,42 @@ fn declining_changes_nothing() {
     assert!(driver.session.calls.active_group_call.is_some());
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn a_confirmed_stream_link_keeps_its_live_stream_into_the_offer() {
+    let (dir, mut driver, _recorder, _handle, _sink, _seq) = ready_group_call_driver();
+    let mut other = tracked_group_call(false, false, false);
+    other.is_joined = true;
+    driver.session.calls.active_group_call = Some(other);
+    driver.offer_call_link(ChatId(51), "AbC", true).unwrap();
+    driver.confirm_call_link_leave().unwrap();
+    assert_eq!(
+        driver.session.calls.call_link_offered,
+        Some(crate::call_link::OfferedCallLink {
+            group_call_id: 555,
+            live_stream: true,
+        })
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn another_call_taking_the_place_drops_the_waiting_link() {
+    let (dir, mut driver, recorder, _handle, _sink, _seq) = ready_group_call_driver();
+    let mut other = tracked_group_call(false, false, false);
+    other.is_joined = true;
+    driver.session.calls.active_group_call = Some(other);
+    driver.offer_call_link(ChatId(51), "AbC", false).unwrap();
+    let confirm = driver.session.calls.call_link_confirm.take().expect("ask");
+    // The call being left is call 999; a different one is joined instead.
+    driver.session.calls.call_link_after_leave = Some(crate::call_link::CallLinkLeaving {
+        link: confirm,
+        leaving: crate::call_link::LeavingCall::Group(999),
+    });
+    let before = recorder.snapshot().len();
+    driver.maybe_offer_pending_call_link().unwrap();
+    assert_eq!(driver.session.calls.call_link_after_leave, None);
+    assert_eq!(recorder.snapshot().len(), before, "nothing was offered");
+    assert_eq!(driver.session.calls.call_link_offered, None);
+    let _ = std::fs::remove_dir_all(&dir);
+}

@@ -152,6 +152,29 @@ impl CallLinkConfirm {
     }
 }
 
+/// A confirmed link waiting for the call it replaces to end. It is dropped
+/// when that call's leave fails, or when another call takes its place.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CallLinkLeaving {
+    pub link: CallLinkConfirm,
+    /// The call being left: a private call's id, or a group call's.
+    pub leaving: LeavingCall,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LeavingCall {
+    Private(i32),
+    Group(i32),
+}
+
+/// The call a confirmed link offered once the old one ended, for the UI to
+/// note (a stream opens in its window, the note says what opens).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct OfferedCallLink {
+    pub group_call_id: i32,
+    pub live_stream: bool,
+}
+
 /// The invite hash of the call a link offered.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PendingCallLink {

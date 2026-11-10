@@ -58,6 +58,25 @@ impl QuillApp {
         cx.notify();
     }
 
+    /// A confirmed link offered its call once the old one ended: what the
+    /// link's own press does, a stream opening in its window and the note.
+    pub(super) fn take_offered_call_link(&mut self, cx: &mut Context<Self>) {
+        let Some(offered) = self
+            .live
+            .as_mut()
+            .and_then(|live| live.driver.session.calls.call_link_offered.take())
+        else {
+            return;
+        };
+        self.note_stream_join_intent(StreamJoinIntent::Call(offered.group_call_id));
+        self.set_note(StatusNote::silent(tr(if offered.live_stream {
+            keys::Q_OPS_OPENING_THE_LIVE_STREAM
+        } else {
+            keys::Q_OPS_OPENING_THE_VOICE_CHAT
+        })));
+        cx.notify();
+    }
+
     pub(super) fn cancel_call_link_leave(&mut self, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
             live.driver.cancel_call_link_leave();
@@ -71,6 +90,7 @@ impl QuillApp {
         {
             self.set_note(StatusNote::error(tr(keys::Q_OPS_COULDNT_LEAVE_THE_CALL)));
         }
+        self.take_offered_call_link(cx);
         cx.notify();
     }
 

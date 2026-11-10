@@ -107,9 +107,10 @@ pub struct CallsState {
     pub call_link: Option<crate::call_link::PendingCallLink>,
     /// A call link arrived while a call is on: the question to leave it.
     pub call_link_confirm: Option<crate::call_link::CallLinkConfirm>,
-    /// The confirmed link `(chat id, hash)`, offered once the old call has
-    /// ended.
-    pub call_link_after_leave: Option<(i64, String)>,
+    /// The confirmed link, offered once the old call has ended.
+    pub call_link_after_leave: Option<crate::call_link::CallLinkLeaving>,
+    /// What that offer found, until the UI takes it.
+    pub call_link_offered: Option<crate::call_link::OfferedCallLink>,
     /// The group call just left with `leaveGroupCall`, until TDLib says
     /// it is no longer joined: a late joined update for it must not take
     /// the slot back.
@@ -220,6 +221,7 @@ impl CallsState {
             call_link: None,
             call_link_confirm: None,
             call_link_after_leave: None,
+            call_link_offered: None,
             left_group_call: None,
             pending_conference: None,
             call_upgrade: None,
