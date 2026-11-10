@@ -438,6 +438,11 @@ impl QuillApp {
             live.driver
                 .validate_payment_order_info(&request.invoice, &order, allow_save)
         });
+        if matches!(sent, Some(Ok(_)))
+            && let Some(dialog) = self.payments.dialog.as_mut()
+        {
+            dialog.validated_order = Some(order);
+        }
         if !matches!(sent, Some(Ok(_))) {
             self.set_note(StatusNote::error(tr(
                 keys::Q_MONEY_COULD_NOT_VALIDATE_ORDER_INFO,
@@ -481,7 +486,8 @@ impl QuillApp {
             || invoice.need_phone_number
             || invoice.need_email_address
             || invoice.need_shipping_address;
-        if needs_order && validated.is_none() {
+        let edited = needs_order && dialog.validated_order.as_ref() != Some(&dialog.order(cx));
+        if needs_order && (validated.is_none() || edited) {
             self.set_note(StatusNote::silent(tr(
                 keys::Q_MONEY_VALIDATE_THE_ORDER_INFO_FIRST,
             )));
