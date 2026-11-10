@@ -113,6 +113,7 @@ gpui_kit::assets::icon_assets!(
         Keyboard,
         MousePointer2,
         KeyboardOff,
+        SquareSlash,
         Cat,
         Book,
         Banknote,

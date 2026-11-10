@@ -88,6 +88,8 @@ pub(crate) struct LinkUi {
     pub(super) callback_password_dialog: Option<CallbackPasswordDialog>,
     /// B1: `loginUrlInfoRequestConfirmation` domain/url awaiting user consent.
     pub(super) login_url_confirm: Option<LoginUrlConfirm>,
+    /// The text of a bot's `show_alert` callback answer, while its box is up.
+    pub(super) bot_alert: Option<String>,
 }
 
 /// The language link box keeps its pack in the session
@@ -127,6 +129,7 @@ impl LinkUi {
             pending_flow_window: None,
             callback_password_dialog: None,
             login_url_confirm: None,
+            bot_alert: None,
         }
     }
 }
