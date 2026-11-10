@@ -102,8 +102,47 @@ impl QuillApp {
                 .groups
                 .join_request_queries
                 .remove(&chat_id.0);
-            let _ = live.driver.refresh_chat_join_requests(chat_id);
         }
+        self.ask_join_requests(chat_id, "", true);
+        cx.notify();
+    }
+
+    /// Ask for the list (`query` empty: the whole list, `refresh`: forget
+    /// the cached one). A send that cannot go out lands in `Failed`, which
+    /// the box draws with Retry, so the box never waits on an answer that
+    /// was not asked for.
+    fn ask_join_requests(&mut self, chat_id: ChatId, query: &str, refresh: bool) {
+        let Some(live) = self.live.as_mut() else {
+            return;
+        };
+        let sent = if query.is_empty() && refresh {
+            live.driver.refresh_chat_join_requests(chat_id)
+        } else {
+            live.driver.search_chat_join_requests(chat_id, query)
+        };
+        let groups = &mut live.driver.session.groups;
+        let settled = matches!(
+            groups.join_requests.get(&chat_id.0),
+            Some(JoinRequestFetch::Loading | JoinRequestFetch::Loaded(_))
+        );
+        if !settled && !matches!(sent, Ok(Some(_))) {
+            groups.join_requests.insert(
+                chat_id.0,
+                JoinRequestFetch::Failed(tr(keys::Q_CHAT_COULD_NOT_LOAD_JOIN_REQUESTS).to_string()),
+            );
+        }
+    }
+
+    /// Retry from the box's error line: the query the field holds now.
+    fn retry_join_requests(&mut self, chat_id: ChatId, cx: &mut Context<Self>) {
+        let query = self
+            .session()
+            .and_then(|s| s.groups.join_request_queries.get(&chat_id.0).cloned())
+            .unwrap_or_default();
+        if let Some(live) = self.live.as_mut() {
+            live.driver.session.groups.join_requests.remove(&chat_id.0);
+        }
+        self.ask_join_requests(chat_id, &query, true);
         cx.notify();
     }
 
@@ -129,7 +168,7 @@ impl QuillApp {
         if current == query {
             return;
         }
-        let _ = live.driver.search_chat_join_requests(chat_id, query);
+        self.ask_join_requests(chat_id, query, false);
         cx.notify();
     }
 
@@ -165,6 +204,9 @@ impl QuillApp {
             )
         };
         let app = cx.entity().downgrade();
+        // The box is the account's: pressing OK after a switch does nothing
+        // (the chat id is the old account's).
+        let screen = self.screen_epoch();
         window.open_alert_dialog(cx, move |alert, _, _| {
             let app = app.clone();
             alert
@@ -175,7 +217,9 @@ impl QuillApp {
                 .show_cancel(true)
                 .on_ok(move |_, _, cx| {
                     let _ = app.update(cx, |this, cx| {
-                        this.process_all_join_requests(chat_id, approve, cx);
+                        this.in_screen_scope(screen, cx, |this, cx| {
+                            this.process_all_join_requests(chat_id, approve, cx);
+                        });
                     });
                     true
                 })
@@ -310,12 +354,21 @@ impl QuillApp {
                     );
                 }
                 Some(JoinRequestFetch::Failed(message)) => {
-                    body = body.child(
-                        div()
-                            .text_sm()
-                            .text_color(cx.theme().muted_foreground)
-                            .child(message),
-                    );
+                    body = body
+                        .child(
+                            div()
+                                .text_sm()
+                                .text_color(cx.theme().muted_foreground)
+                                .child(message),
+                        )
+                        .child(
+                            Button::new("join-requests-retry")
+                                .label(tr(keys::Q_MEDIA_RETRY))
+                                .small()
+                                .on_click(cx.listener(move |this, _, _, cx| {
+                                    this.retry_join_requests(chat_id, cx);
+                                })),
+                        );
                 }
                 Some(JoinRequestFetch::Loaded(list)) => {
                     if list.requests.is_empty() {

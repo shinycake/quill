@@ -1,5 +1,6 @@
 //! The bot command menu above the composer.
 
+use super::send_bot_command::MenuSend;
 use super::*;
 use quill::composer::{commands_with_username, complete_command_at};
 use std::ops::Range;
@@ -219,6 +220,12 @@ impl QuillApp {
             return;
         };
         let command = item.command_text(commands_with_username(&items, &prefix));
+        // The gates run first: a command that cannot go (slow mode, no right
+        // to send, a frozen account) stays typed in the field.
+        let outcome = self.send_menu_command(&command, cx);
+        if outcome == MenuSend::Refused {
+            return;
+        }
         self.close_command_menu(cx);
         // The text after the caret stays in the field (tdesktop keeps
         // `getTextWithTagsPart(cursor)`), with the caret at its end.
@@ -228,7 +235,7 @@ impl QuillApp {
             input.set_selected_range(end..end, cx);
             input.focus(window, cx);
         });
-        if self.send_menu_command(&command, cx) {
+        if outcome == MenuSend::Sent {
             // The send leaves the chat draft alone (`clear_draft` is off for
             // a menu command); the kept text is saved at once.
             if self.composer.read(cx).value().is_empty() {

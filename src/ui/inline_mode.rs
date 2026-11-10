@@ -47,13 +47,63 @@ impl InlineView {
     }
 }
 
+/// The username an [`InlineBotResolve`] is for.
+fn resolve_username(resolve: &InlineBotResolve) -> &str {
+    match resolve {
+        InlineBotResolve::Resolving { username, .. }
+        | InlineBotResolve::Resolved { username, .. }
+        | InlineBotResolve::Failed { username, .. } => username,
+    }
+}
+
+impl QuillApp {
+    /// What is known of the bot `@username` for the composer in place. The
+    /// session keeps one resolution slot that any window's trigger can
+    /// replace, so each window copies out the answer for its own username
+    /// (`ChatUi::inline_bot`) and reads that: a window never reads another
+    /// window's bot. Before the copy is made, the slot answers when it is
+    /// for this username.
+    pub(super) fn inline_bot_for(&self, username: &str) -> Option<&InlineBotResolve> {
+        let slot = self
+            .session()
+            .and_then(|session| session.bots.inline_bot_resolve.as_ref())
+            .filter(|resolve| resolve_username(resolve) == username);
+        let settled = slot.filter(|resolve| !matches!(resolve, InlineBotResolve::Resolving { .. }));
+        let own = self
+            .chat_ui
+            .inline_bot
+            .as_ref()
+            .filter(|resolve| resolve_username(resolve) == username);
+        settled.or(own).or(slot)
+    }
+
+    /// The bot of the `@bot query` trigger in the field, if any.
+    pub(super) fn inline_bot_of_trigger(&self, cx: &gpui_kit::gpui::App) -> Option<&InlineBotResolve> {
+        let text = self.composer.read(cx).value();
+        let (username, _) = inline_query_trigger(&text)?;
+        self.inline_bot_for(username)
+    }
+
+    /// Copy the session's resolution into this window's own when it is for
+    /// `username`.
+    fn capture_inline_bot(&mut self, username: &str) {
+        let slot = self
+            .session()
+            .and_then(|session| session.bots.inline_bot_resolve.clone())
+            .filter(|resolve| resolve_username(resolve) == username);
+        if slot.is_some() {
+            self.chat_ui.inline_bot = slot;
+        }
+    }
+}
+
 /// The panel's content for the current trigger. `None` when there is no
 /// `@bot` trigger (the dropdown stays closed).
 pub(super) fn inline_view(app: &QuillApp, cx: &Context<QuillApp>) -> Option<InlineView> {
     let text = app.composer.read(cx).value().to_string();
     let (username, query) = inline_query_trigger(&text)?;
     let session = app.session()?;
-    let view = match &session.bots.inline_bot_resolve {
+    let view = match app.inline_bot_for(username) {
         None | Some(InlineBotResolve::Resolving { .. }) => {
             InlineView::Status(tr_with(keys::Q_MEDIA_RESOLVING, &[("username", username)]))
         }
@@ -107,8 +157,8 @@ impl QuillApp {
             // Trigger gone: close, and clear a typed-mode alert marker
             // (an empty stash is ours; a non-empty one belongs to a
             // `SwitchInline` button press).
-            if self.composer_ui.pending_inline_bot_alert.as_deref() == Some("") {
-                self.composer_ui.pending_inline_bot_alert = None;
+            if self.chat_ui.pending_inline_bot_alert.as_deref() == Some("") {
+                self.chat_ui.pending_inline_bot_alert = None;
             }
             self.chat_ui.inline_results_open = false;
             self.chat_ui.inline_query_armed = None;
@@ -119,22 +169,15 @@ impl QuillApp {
         // alert before any query is sent. The banner renders while the
         // stash is set; confirming re-syncs (the text is already there).
         if self.open_chat_is_secret() && !self.composer_ui.inline_bot_alert_shown {
-            if self.composer_ui.pending_inline_bot_alert.is_none() {
-                self.composer_ui.pending_inline_bot_alert = Some(String::new());
+            if self.chat_ui.pending_inline_bot_alert.is_none() {
+                self.chat_ui.pending_inline_bot_alert = Some(String::new());
             }
             self.chat_ui.inline_results_open = false;
             cx.notify();
             return;
         }
-        let username_changed = match self
-            .session()
-            .and_then(|s| s.bots.inline_bot_resolve.as_ref())
-        {
-            Some(InlineBotResolve::Resolving { username: u, .. })
-            | Some(InlineBotResolve::Resolved { username: u, .. })
-            | Some(InlineBotResolve::Failed { username: u, .. }) => u != username,
-            None => true,
-        };
+        self.capture_inline_bot(username);
+        let username_changed = self.inline_bot_for(username).is_none();
         if username_changed {
             self.resolve_inline_bot(username);
             // The query goes out once the bot is known (`progress_inline_mode`).
@@ -148,8 +191,7 @@ impl QuillApp {
         // Same username: only bots with inline mode (or unknown
         // capability) get a debounced query.
         let proceed = matches!(
-            self.session()
-                .and_then(|s| s.bots.inline_bot_resolve.as_ref()),
+            self.inline_bot_for(username),
             Some(InlineBotResolve::Resolved {
                 is_inline: Some(true) | None,
                 ..
@@ -194,25 +236,34 @@ impl QuillApp {
         let Some((username, query)) = inline_query_trigger(&text) else {
             return;
         };
-        let resolved_same = self
-            .session()
-            .and_then(|s| s.bots.inline_bot_resolve.as_ref())
-            .is_some_and(|r| match r {
-                InlineBotResolve::Resolved {
-                    username: u,
-                    is_inline: Some(true) | None,
-                    ..
-                } => u == username,
-                _ => false,
-            });
+        self.capture_inline_bot(username);
+        let resolved_same = matches!(
+            self.inline_bot_for(username),
+            Some(InlineBotResolve::Resolved {
+                is_inline: Some(true) | None,
+                ..
+            })
+        );
         if !resolved_same {
-            // Still resolving this bot: wait for the next batch.
-            self.chat_ui.inline_query_waiting = self
-                .session()
-                .and_then(|s| s.bots.inline_bot_resolve.as_ref())
-                .is_some_and(|r| {
-                    matches!(r, InlineBotResolve::Resolving { username: u, .. } if u == username)
-                });
+            // Waiting on this bot's resolution. Another window's trigger
+            // took the session's one slot before ours answered (its answer
+            // was dropped as older): ask again once that one is settled, so
+            // this panel does not wait for an answer that never comes.
+            self.chat_ui.inline_query_waiting = match self.inline_bot_for(username) {
+                Some(InlineBotResolve::Resolving { .. }) => true,
+                Some(_) => false,
+                None => {
+                    let other_in_flight = self
+                        .session()
+                        .and_then(|s| s.bots.inline_bot_resolve.as_ref())
+                        .is_some_and(|r| matches!(r, InlineBotResolve::Resolving { .. }));
+                    if !other_in_flight {
+                        self.resolve_inline_bot(username);
+                        self.capture_inline_bot(username);
+                    }
+                    true
+                }
+            };
             return;
         }
         self.maybe_dispatch_inline_query(username, query, cx);
@@ -221,6 +272,11 @@ impl QuillApp {
     /// Resolve `@username`: local user-cache hit short-circuits (no
     /// request); otherwise `searchPublicChat` via the driver.
     fn resolve_inline_bot(&mut self, username: &str) {
+        self.ask_inline_bot(username);
+        self.capture_inline_bot(username);
+    }
+
+    fn ask_inline_bot(&mut self, username: &str) {
         let hit = self.session().and_then(|session| {
             session
                 .users
@@ -267,12 +323,10 @@ impl QuillApp {
     /// quiet window fires, and it re-checks the trigger survived.
     fn maybe_dispatch_inline_query(&mut self, username: &str, query: &str, cx: &mut Context<Self>) {
         let (user_id, chat_id) = match (
-            self.session()
-                .and_then(|s| s.bots.inline_bot_resolve.as_ref())
-                .and_then(|r| match r {
-                    InlineBotResolve::Resolved { user_id, .. } => Some(*user_id),
-                    _ => None,
-                }),
+            self.inline_bot_for(username).and_then(|r| match r {
+                InlineBotResolve::Resolved { user_id, .. } => Some(*user_id),
+                _ => None,
+            }),
             self.open_chat_id(),
         ) {
             (Some(user_id), Some(chat_id)) => (user_id, chat_id),
@@ -421,6 +475,7 @@ impl QuillApp {
         // Clear first: the schema clears the chat draft on send, so the
         // composer must never show a stale `@bot query` after the round
         // trip.
+        let typed = self.composer_markup(cx);
         self.composer.update(cx, |input, cx| {
             input.set_value(String::new(), window, cx);
         });
@@ -433,6 +488,8 @@ impl QuillApp {
                 .send_inline_query_result(chat_id, query_id, &result_id)
                 .is_err()
         {
+            // Nothing went out: the `@bot query` the user typed comes back.
+            self.set_composer_markup(&typed, window, cx);
             self.set_note(StatusNote::error(tr(
                 keys::Q_MEDIA_COULD_NOT_SEND_THE_INLINE,
             )));

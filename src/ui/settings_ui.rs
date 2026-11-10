@@ -622,7 +622,7 @@ impl QuillApp {
                     "open-emoji-sets",
                     tr(keys::Q_PREFS_EMOJI_SETS),
                     None,
-                    cx.listener(|this, _, _, cx| this.open_emoji_sets(cx)),
+                    cx.listener(|this, _, window, cx| this.open_emoji_sets(window, cx)),
                     cx,
                 ),
                 cx,

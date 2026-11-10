@@ -91,6 +91,8 @@ pub struct Session {
     pub threads: Box<ThreadsState>,
     pub view_generation: ViewGeneration,
     pub requests: RequestRegistry,
+    /// The answer to each request a surface waits on, per request id.
+    pub acks: RequestAcks,
     pub shutdown: ShutdownPhase,
     pub last_seq: u64,
     /// Bots: info, commands, games, inline queries, callback answers, login URLs, mini apps, reply keyboards.

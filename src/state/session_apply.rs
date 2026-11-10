@@ -34,6 +34,13 @@ impl Session {
             });
             return;
         }
+        if let Some(pending) = pending.as_ref() {
+            let answer = match &owned.envelope.payload {
+                EnvelopePayload::Error(err) => Answer::Failed(error_reason(err)),
+                _ => Answer::Done,
+            };
+            self.acks.settle(pending.id, answer);
+        }
         self.apply_payload_in_asking_view(
             owned.envelope.payload,
             pending.as_ref(),

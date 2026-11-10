@@ -28,7 +28,12 @@ impl QuillApp {
         // own bar (the driver asks once per message).
         self.fetch_missing_reply_target();
         // What was open for a chat the view no longer shows goes.
-        self.sync_chat_ui();
+        self.sync_chat_ui(cx);
+        // An edit TDLib answered leaves edit mode (or goes on, on an error).
+        self.settle_edit_send(window, cx);
+        self.settle_sent_text(window, cx);
+        // A forced reply for the chat this window shows arms its composer.
+        self.arm_force_reply_here(window, cx);
         // The histories every window still reads stay whole.
         self.sync_history_holds();
         // The inline results button's round trip back to its chat.
@@ -236,6 +241,26 @@ impl QuillApp {
             }
             _ => None,
         };
+        // The answer is for the draft that was asked about: text typed
+        // since, a message sent meanwhile or an edit begun after the ask
+        // keeps the field as it is.
+        let for_here = ai_text.as_ref().is_some_and(|(c, _)| open_chat == Some(*c))
+            || ai_blocks
+                .as_ref()
+                .is_some_and(|(c, _, _)| open_chat == Some(*c));
+        if !for_here {
+            return;
+        }
+        let asked = std::mem::take(&mut self.chat_ui.ai_ask);
+        let still_asked = matches!(
+            &asked,
+            crate::ui::composer::AiAsk::Asked { markup }
+                if !self.chat_ui.is_editing() && *markup == self.composer_markup(cx)
+        );
+        if !still_asked {
+            self.set_note(StatusNote::info(tr(keys::Q_CHAT_THE_DRAFT_CHANGED_THE_AI_ANSWER)));
+            return;
+        }
         if let Some((chat_id, text)) = ai_text
             && open_chat == Some(chat_id)
         {

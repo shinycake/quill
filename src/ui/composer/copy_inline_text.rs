@@ -1,6 +1,7 @@
 //! Methods moved out of `composer.rs` to keep files under 1000 lines.
 
 use super::*;
+use crate::ui::chat_ui_state::EditStage;
 use crate::ui::status_note::StatusNote;
 use quill::lang::{keys, tr, tr_with};
 
@@ -32,11 +33,18 @@ impl QuillApp {
             multiple: false,
             prompt: Some(tr(keys::Q_CHAT_CHOOSE_FILE).into()),
         });
+        // The file is for the edit that asked; once it is cancelled or
+        // another one started, the answer is dropped.
+        let asked_edit = self.chat_ui.edit_id();
         self.spawn_scoped(cx, async move |this, cx| {
             if let Ok(Ok(Some(paths))) = picker.await
                 && let Some(path) = paths.first().cloned()
             {
-                let _ = this.update(cx, |this, cx| this.set_edit_replacement(&path, cx));
+                let _ = this.update(cx, |this, cx| {
+                    if asked_edit.is_some() && this.chat_ui.edit_id() == asked_edit {
+                        this.set_edit_replacement(&path, cx);
+                    }
+                });
             }
         })
         .detach();
@@ -173,7 +181,16 @@ impl QuillApp {
             self.set_status_note(StatusNote::error(tr(keys::EDIT_ERROR)), cx);
             return;
         };
-        self.clear_pending_attachments();
+        // A tray the user built is not thrown away: tdesktop has no tray to
+        // lose (its files wait in a box of their own), so the edit waits
+        // until the files are sent or removed.
+        if !self.pending_attachments().is_empty() {
+            self.set_status_note(
+                StatusNote::info(tr(keys::Q_CHAT_SEND_OR_REMOVE_THE_ATTACHMENTS_BEFORE)),
+                cx,
+            );
+            return;
+        }
         self.composer_ui.edit_replace_as_file = false;
         // Switching from one edit to another: the first edit's text is not the
         // draft, so put the real draft and reply back before they are stashed.
@@ -203,7 +220,14 @@ impl QuillApp {
     /// Leave edit mode, returning the edit and the stashed draft and reply.
     fn leave_edit_mode(&mut self) -> (Option<ComposerEdit>, String, Option<ComposerReplyTo>) {
         match self.chat_ui.leave_edit() {
-            Some(mode) => (Some(mode.edit), mode.stashed_draft, mode.stashed_reply),
+            Some(mode) => {
+                if let EditStage::Sending(request) = mode.stage
+                    && let Some(live) = self.live.as_mut()
+                {
+                    live.driver.session.acks.forget(request);
+                }
+                (Some(mode.edit), mode.stashed_draft, mode.stashed_reply)
+            }
             None => (None, String::new(), None),
         }
     }
@@ -241,6 +265,10 @@ impl QuillApp {
         let Some(edit) = self.chat_ui.pending_edit().cloned() else {
             return;
         };
+        // Sent already: the answer decides, a second Enter sends nothing.
+        if self.chat_ui.edit_sending().is_some() {
+            return;
+        }
         if self
             .session()
             .is_some_and(|session| session.edit_target_gone(&edit))
@@ -259,13 +287,22 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut() {
             let driver = &mut live.driver;
             let result = if pending {
-                driver.edit_pending_caption(&edit, &text)
+                driver.edit_pending_caption(&edit, &text).map(|()| None)
             } else {
-                driver.edit_snapshot(&edit, &text).map(|_| ())
+                driver.edit_snapshot(&edit, &text).map(Some)
             };
             match result {
-                Ok(_) => {
-                    self.finish_edit_restore_draft(window, cx);
+                Ok(request) => {
+                    match request {
+                        // The edit stays open until TDLib answers: a later
+                        // error (an old message, one deleted by the other
+                        // side) must not lose the edited text.
+                        Some(request) => {
+                            driver.session.acks.expect(request);
+                            self.chat_ui.mark_edit_sending(request);
+                        }
+                        None => self.finish_edit_restore_draft(window, cx),
+                    }
                     self.set_note(
                         self.send_started_note(
                             ComposerScheduling::None,
@@ -296,6 +333,30 @@ impl QuillApp {
                 keys::Q_CHAT_DEMO_EDIT_APPLIED_LOCALLY_NO,
             )));
             cx.notify();
+        }
+    }
+
+    /// Frame upkeep: an edit that was sent leaves edit mode on TDLib's
+    /// answer (the draft comes back), or returns to editing when the answer
+    /// is an error (its note already shows). Runs for each window with its
+    /// own `ChatUi` in place.
+    pub(in crate::ui) fn settle_edit_send(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(request) = self.chat_ui.edit_sending() else {
+            return;
+        };
+        let Some(live) = self.live.as_mut() else {
+            return;
+        };
+        match live.driver.session.acks.take(request) {
+            None => {}
+            Some(quill::state::Answer::Done) => {
+                self.finish_edit_restore_draft(window, cx);
+                cx.notify();
+            }
+            Some(quill::state::Answer::Failed(_)) => {
+                self.chat_ui.back_to_editing();
+                cx.notify();
+            }
         }
     }
 

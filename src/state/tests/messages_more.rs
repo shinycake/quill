@@ -433,8 +433,8 @@ fn b1_force_reply_arms_pending_target() {
         r#"{"@type":"updateNewMessage","message":{"id":306,"chat_id":21,"is_outgoing":false,"reply_markup":{"@type":"replyMarkupForceReply","input_field_placeholder":""},"content":{"@type":"messageText","text":{"@type":"formattedText","text":"x","entities":[]}}}}"#,
     );
     assert_eq!(
-        session.bots.pending_force_reply,
-        Some(ForceReplyTarget {
+        session.bots.pending_force_replies.get(&ChatId(21)),
+        Some(&ForceReplyTarget {
             chat_id: ChatId(21),
             message_id: MessageId(306),
         })
@@ -447,8 +447,8 @@ fn b1_force_reply_arms_pending_target() {
         r#"{"@type":"updateNewMessage","message":{"id":307,"chat_id":21,"is_outgoing":true,"reply_markup":{"@type":"replyMarkupForceReply","input_field_placeholder":""},"content":{"@type":"messageText","text":{"@type":"formattedText","text":"y","entities":[]}}}}"#,
     );
     assert_eq!(
-        session.bots.pending_force_reply,
-        Some(ForceReplyTarget {
+        session.bots.pending_force_replies.get(&ChatId(21)),
+        Some(&ForceReplyTarget {
             chat_id: ChatId(21),
             message_id: MessageId(306),
         })
@@ -461,8 +461,8 @@ fn b1_force_reply_arms_pending_target() {
         r#"{"@type":"updateNewMessage","message":{"id":308,"chat_id":21,"is_outgoing":false,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"z","entities":[]}}}}"#,
     );
     assert_eq!(
-        session.bots.pending_force_reply,
-        Some(ForceReplyTarget {
+        session.bots.pending_force_replies.get(&ChatId(21)),
+        Some(&ForceReplyTarget {
             chat_id: ChatId(21),
             message_id: MessageId(306),
         })

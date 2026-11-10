@@ -47,7 +47,6 @@ ViewerUi.extra.caption.key | carries its chat and message: the caption built for
 # a sticker set, an effect).
 ComposerUi.inline_return * | carries the chat it came from (`origin`) and the bot's; it acts only once the bot's chat answers
 ComposerUi.send_menu * | the send menu carries its chat; it closes when the chat viewed is another (`send_effects`); the rest are effect ids
-ComposerUi.clear_draft_on_success * | carries its chat: the draft cleared is that chat's
 ComposerUi.date_dialog * | a date box over the composer text; `initial` is a unix time, not an id
 ComposerUi.send_box * | the attachment tray's video editor: a sticker set id and times in ms, no chat's ids; the tray is keyed by draft slot
 MessageUi.menu * | carries its chat and message; its actions use them

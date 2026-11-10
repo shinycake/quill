@@ -119,12 +119,15 @@ impl QuillApp {
             BottomBar::Start => self.start_bot_from_bar(chat_id, cx),
             BottomBar::PremiumRequired => self.open_premium_from("require_premium", cx),
             BottomBar::JoinGroup | BottomBar::ApplyToJoin => {
-                self.join_channel(chat_id, cx);
-                self.set_note(if bar == BottomBar::ApplyToJoin {
-                    StatusNote::silent(tr(keys::Q_MEDIA_JOIN_REQUEST_SENT))
-                } else {
-                    StatusNote::silent(tr(keys::Q_MEDIA_JOINING_GROUP))
-                });
+                // Only a send that went out gets its own wording: a failed
+                // one keeps `join_channel`'s error note.
+                if self.join_channel(chat_id, cx) {
+                    self.set_note(if bar == BottomBar::ApplyToJoin {
+                        StatusNote::silent(tr(keys::Q_MEDIA_JOIN_REQUEST_SENT))
+                    } else {
+                        StatusNote::silent(tr(keys::Q_MEDIA_JOINING_GROUP))
+                    });
+                }
             }
             BottomBar::JoinChannel | BottomBar::MuteUnmute { .. } => {}
         }

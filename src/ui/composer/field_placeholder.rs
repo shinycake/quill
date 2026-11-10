@@ -105,7 +105,7 @@ impl QuillApp {
         let session = self.session()?;
         let Some(InlineBotResolve::Resolved {
             username, user_id, ..
-        }) = session.bots.inline_bot_resolve.as_ref()
+        }) = self.inline_bot_of_trigger(cx)
         else {
             return None;
         };

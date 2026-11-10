@@ -48,6 +48,14 @@ impl KeywordLookups {
             && !self.in_flight.values().any(|q| q == query)
     }
 
+    /// `query` has no answer and will get none: every attempt failed and
+    /// nothing is in flight for it.
+    pub fn gave_up(&self, query: &str) -> bool {
+        !self.answers.contains_key(query)
+            && self.failures.get(query).copied().unwrap_or(0) >= ATTEMPTS
+            && !self.in_flight.values().any(|q| q == query)
+    }
+
     pub fn sent(&mut self, id: RequestId, query: String) {
         self.in_flight.insert(id, query);
     }

@@ -388,8 +388,14 @@ impl QuillApp {
         let composer_idle = !self.chat_ui.is_editing()
             && self.chat_ui.reply().is_none()
             && self.composer.read(cx).value().trim().is_empty();
+        let Some(account) = self.session().map(|session| session.account.clone()) else {
+            return;
+        };
         for (chat_id, topic) in clears {
-            let Some(flag) = self.composer_ui.clear_draft_on_success.clone() else {
+            let Some(flag) = self
+                .composer_sends
+                .take_draft_clear(&account, topic.key(chat_id.0))
+            else {
                 continue;
             };
             let stored = self
@@ -399,7 +405,6 @@ impl QuillApp {
             if !flag.matches(chat_id, stored.as_deref()) {
                 continue;
             }
-            self.composer_ui.clear_draft_on_success = None;
             let idle = if open_chat == Some(chat_id) {
                 composer_idle
             } else {
