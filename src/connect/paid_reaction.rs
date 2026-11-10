@@ -55,7 +55,13 @@ impl<S: JsonSender> ConnectDriver<S> {
         chat_id: ChatId,
         message_id: MessageId,
     ) -> Result<(), ConnectSendError> {
-        if !self.session.payments.paid.undo(chat_id.0, message_id.0) {
+        if self
+            .session
+            .payments
+            .paid
+            .pending_stars(chat_id.0, message_id.0)
+            == 0
+        {
             return Ok(());
         }
         let extra = self.session.request(
@@ -65,7 +71,14 @@ impl<S: JsonSender> ConnectDriver<S> {
             Some(chat_id),
         );
         let json = remove_pending_paid_message_reactions(extra, chat_id, message_id);
-        self.send_json_request(extra, &json).map(|_| ())
+        // The Stars are forgotten here only once TDLib was told: a send
+        // that failed leaves them waiting (and their Undo on screen).
+        if let Err(err) = self.send_json_request(extra, &json) {
+            self.session.payments.paid.note = Some("Could not undo the Stars".to_string());
+            return Err(err);
+        }
+        self.session.payments.paid.undo(chat_id.0, message_id.0);
+        Ok(())
     }
 
     /// Commits every Star reaction whose Undo window is over. Returns
