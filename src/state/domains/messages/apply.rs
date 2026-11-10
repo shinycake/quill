@@ -587,11 +587,9 @@ impl Session {
                 })) => {
                     // A ticked gallery row learns its answer whichever row asked
                     // last: the slot below holds only one.
-                    self.media.shared_media.refresh_from_answer(Some((
-                        chat_id,
-                        message_id,
-                        actions.clone(),
-                    )));
+                    self.media
+                        .shared_media
+                        .refresh_from_answer(Some((chat_id, message_id, actions)));
                     self.messages.message_menu_actions = Some((chat_id, message_id, actions));
                 }
                 Some(RequestPurpose::Messages(MessagesPurpose::GetSharingProtection {

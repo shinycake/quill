@@ -173,6 +173,18 @@ fn export_builds_the_page_workbook(cx: &mut TestAppContext) {
         assert!(name.ends_with(".xlsx"));
         assert!(!quill::stat_chart::serialize_workbook(&sheets).is_empty());
         seed_message_statistics(session, CHANNEL, CHANNEL);
+        // The reactions graph is still loading: no workbook that lacks it.
+        assert!(crate::ui::statistics_export::page_workbook(session, CHANNEL).is_none());
+        session.groups.stats.graphs.insert(
+            quill::state::GraphKey {
+                chat_id: CHANNEL,
+                token: "message-reactions".into(),
+                x: 0,
+            },
+            quill::state::GraphFetch::Loaded(quill::telegram::envelope::StatisticalGraph::Error {
+                error_message: String::new(),
+            }),
+        );
         let (sheets, name) =
             crate::ui::statistics_export::page_workbook(session, CHANNEL).expect("message");
         assert_eq!(sheets[1].name, "Interactions");

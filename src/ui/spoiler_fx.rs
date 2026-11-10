@@ -239,7 +239,7 @@ fn build_tile_in_background(cx: &mut App) {
     // screen-scope: the tile belongs to no account.
     cx.spawn(async move |cx| {
         let image = task.await;
-        let _ = cx.update(|cx| {
+        cx.update(|cx| {
             TILE.with(|tile| {
                 *tile.borrow_mut() = TileState::Ready(MediaTile {
                     image,
