@@ -130,19 +130,15 @@ impl Session {
         self.settings.business_extra.connected_bot.succeed(bot);
     }
 
-    /// `ok` of a chat link delete, a bot save or the ads switch: the lists
-    /// are asked for again (the answers carry no data).
+    /// `ok` of a bot save: the bot was written ahead of the answer, which
+    /// carries no data, so TDLib is asked what is connected on the next
+    /// visit. (A chat link delete needs nothing: its row went at once and
+    /// the answer confirms it.)
     pub(crate) fn apply_business_extra_ok(&mut self, pending: Option<&PendingRequest>) {
-        let state = &mut self.settings.business_extra;
-        match pending.map(|p| p.purpose) {
-            // The row went at once and the answer confirms it: the list
-            // shown is the list TDLib holds.
-            Some(RequestPurpose::Settings(SettingsPurpose::SaveConnectedBot)) => {
-                // The bot was written ahead of the answer, which carries no
-                // data: ask TDLib what is connected on the next visit.
-                state.connected_bot = Fetch::Idle;
-            }
-            _ => {}
+        if let Some(RequestPurpose::Settings(SettingsPurpose::SaveConnectedBot)) =
+            pending.map(|p| p.purpose)
+        {
+            self.settings.business_extra.connected_bot = Fetch::Idle;
         }
     }
 
