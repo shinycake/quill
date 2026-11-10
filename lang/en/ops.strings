@@ -890,6 +890,7 @@
 "qll_ops_send" = "Send {name}";
 "qll_ops_send_always" = "Send Always";
 "qll_ops_send_as" = "Send as {name}";
+"qll_ops_send_as_could_not_load" = "Couldn't load the list of senders";
 "qll_ops_send_as_2" = "Send as {title}, {status}";
 "qll_ops_send_away_message" = "Send Away Message";
 "qll_ops_send_contact" = "Send Contact";

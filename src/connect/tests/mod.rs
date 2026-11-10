@@ -122,6 +122,7 @@ mod search_upgrades;
 mod send_box_options;
 mod send_place;
 mod send_prepared;
+mod set_box_change;
 mod settings;
 mod settings_account;
 mod share;

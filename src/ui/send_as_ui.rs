@@ -17,6 +17,7 @@ use gpui_kit::*;
 use quill::ids::ChatId;
 use quill::lang::{keys, tr, tr_with};
 use quill::state::Session;
+use quill::state::fetch::Fetch;
 use quill::telegram::envelope::MessageSender;
 use std::path::PathBuf;
 
@@ -77,6 +78,15 @@ impl QuillApp {
         )
     }
 
+    /// The menu's Retry after the list failed to load.
+    fn retry_send_as(&mut self, cx: &mut Context<Self>) {
+        let chat = self.session().and_then(|s| s.open_chat);
+        if let (Some(chat), Some(live)) = (chat, self.live.as_mut()) {
+            let _ = live.driver.get_chat_available_message_senders(chat);
+        }
+        cx.notify();
+    }
+
     pub(super) fn toggle_send_as(&mut self, cx: &mut Context<Self>) {
         self.chat_ui.send_as_open = !self.chat_ui.send_as_open;
         if self.chat_ui.send_as_open {
@@ -134,7 +144,35 @@ impl QuillApp {
             .flex_col()
             .max_h(px(320.))
             .overflow_y_scroll();
-        if senders.is_empty() {
+        let fetch = match (session, chat_id) {
+            (Some(session), Some(chat_id)) => Some(session.message_senders_fetch(chat_id)),
+            _ => None,
+        };
+        if let Some(Fetch::Failed { .. }) = fetch {
+            // The request failed: say so, and offer to ask again.
+            list = list.child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .items_center()
+                    .gap_2()
+                    .py_4()
+                    .child(
+                        div()
+                            .text_sm()
+                            .text_color(muted)
+                            .child(tr(keys::Q_OPS_SEND_AS_COULD_NOT_LOAD)),
+                    )
+                    .child(
+                        Button::new("send-as-retry")
+                            .label(tr(keys::Q_CHAT_RETRY))
+                            .on_click(cx.listener(|this, _, _, cx| this.retry_send_as(cx))),
+                    ),
+            );
+        } else if senders.is_empty() && fetch.is_none_or(|fetch| !matches!(fetch, Fetch::Ready(_)))
+        {
+            // Not asked yet, or in flight: an answered empty list is not a
+            // wait.
             list = list.child(
                 div()
                     .flex()
@@ -245,7 +283,7 @@ impl QuillApp {
             session.chats_state.chat_message_sender.insert(chat.0, me);
             session.chats_state.send_as_options.insert(
                 chat.0,
-                vec![
+                Fetch::Ready(vec![
                     AvailableMessageSender {
                         sender: me,
                         needs_premium: false,
@@ -258,7 +296,7 @@ impl QuillApp {
                         sender: MessageSender::Chat { chat_id: 12 },
                         needs_premium: true,
                     },
-                ],
+                ]),
             );
         }
         self.chat_ui.send_as_open = true;

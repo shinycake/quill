@@ -318,10 +318,11 @@ impl Session {
         if let Some(RequestPurpose::Stickers(StickersPurpose::ManageStickerSet {
             set_id,
             installed,
-            ..
+            archived,
         })) = pending.map(|p| p.purpose)
         {
             self.finish_sticker_batch_item(set_id, true);
+            self.finish_set_change(set_id, SetChange::of(installed, archived), true);
             for sets in [
                 &mut self.stickers.stickers.trending,
                 &mut self.stickers.stickers.found_sets,

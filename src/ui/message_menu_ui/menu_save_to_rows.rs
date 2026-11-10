@@ -675,10 +675,8 @@ impl QuillApp {
                 )));
             }
         } else if let Some(session) = self.demo_session.as_mut() {
-            let request = session.request(
-                quill::state::RequestPurpose::ReportMessages,
-                Some(chat_id),
-            );
+            let request =
+                session.request(quill::state::RequestPurpose::ReportMessages, Some(chat_id));
             session.begin_message_report(chat_id, message_ids, request);
         }
         cx.notify();

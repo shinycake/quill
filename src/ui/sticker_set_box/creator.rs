@@ -308,12 +308,18 @@ impl QuillApp {
         if let Some(job) = create.video.clone() {
             return self.encode_created_video(create, job, window, cx);
         }
-        self.upload_created_sticker(create, cx);
-        true
+        self.upload_created_sticker(create, cx)
     }
 
-    /// Hand the finished file to TDLib and leave the box.
-    pub(super) fn upload_created_sticker(&mut self, create: CreateSticker, cx: &mut Context<Self>) {
+    /// Hand the finished file to TDLib and leave the box. When the request
+    /// cannot go out the box stays on its naming stage, with the user's
+    /// edited image and chosen emoji, so Done can be pressed again; returns
+    /// whether the box was left.
+    pub(super) fn upload_created_sticker(
+        &mut self,
+        create: CreateSticker,
+        cx: &mut Context<Self>,
+    ) -> bool {
         let emojis = joined_emojis(&create.emojis);
         if let Some(live) = self.live.as_mut() {
             let path = create.path.to_string_lossy().into_owned();
@@ -325,6 +331,8 @@ impl QuillApp {
                 self.set_note(StatusNote::error(
                     quill::sticker_set_box::UPLOAD_FAILED_NOTE,
                 ));
+                cx.notify();
+                return false;
             }
         } else {
             self.set_note(StatusNote::silent(tr(
@@ -335,6 +343,7 @@ impl QuillApp {
         self.sticker_box.encoding = None;
         create.uploaded();
         cx.notify();
+        true
     }
 
     /// "Add an Existing Sticker" / "Adapt from a Sticker": the chooser.
@@ -422,23 +431,47 @@ impl QuillApp {
             StickerFormat::Webp | StickerFormat::Unknown => {
                 self.sticker_box.pick = None;
                 let file_id = item.file_id;
-                self.sticker_box.pending_still = Some((pick, file_id));
-                let path = self.local_media_path(file_id);
-                let format = item.format;
-                self.run_off_ui_scoped_then(
-                    move || {
-                        path.and_then(|path| {
-                            super::super::editor_art::sticker_pixels(
-                                std::path::Path::new(&path),
-                                format,
-                            )
-                        })
-                    },
-                    move |this, pixels, cx| this.land_still_pick(pick, file_id, pixels, cx),
-                    cx,
-                );
+                // A sticker not downloaded yet is fetched, and decoded
+                // when it arrives (`sticker_box_window_upkeep`).
+                if self.local_media_path(file_id).is_none() {
+                    if let Some(live) = self.live.as_mut() {
+                        let _ = live.driver.download_file(file_id, 16);
+                    }
+                    self.sticker_box.pending_video = Some(super::state::PendingVideo {
+                        pick,
+                        file_id,
+                        file: super::state::PickedFile::Still(item.format),
+                        emoji: None,
+                        window: self.windows.scope,
+                    });
+                    cx.notify();
+                    return;
+                }
+                self.decode_still_pick(pick, file_id, item.format, cx);
             }
         }
+    }
+
+    /// Decode the downloaded still sticker `file_id` off the UI thread; the
+    /// editor opens on it when it is done (`land_still_pick`).
+    pub(super) fn decode_still_pick(
+        &mut self,
+        pick: PickExisting,
+        file_id: FileId,
+        format: StickerFormat,
+        cx: &mut Context<Self>,
+    ) {
+        self.sticker_box.pending_still = Some((pick, file_id));
+        let path = self.local_media_path(file_id);
+        self.run_off_ui_scoped_then(
+            move || {
+                path.and_then(|path| {
+                    super::super::editor_art::sticker_pixels(std::path::Path::new(&path), format)
+                })
+            },
+            move |this, pixels, cx| this.land_still_pick(pick, file_id, pixels, cx),
+            cx,
+        );
     }
 
     /// A picked still sticker is decoded: open the editor on it, unless the
@@ -536,6 +569,40 @@ impl QuillApp {
         if deleted {
             // tdesktop just closes the box once the set is gone.
             self.close_sticker_set_dialog(cx);
+            return true;
+        }
+        // The box's Add / Remove / Archive was answered: a done one closes
+        // the box (every window that shows the set) with its note, a
+        // refused one says so and leaves the box as it was.
+        let stage = live
+            .driver
+            .session
+            .stickers
+            .sticker_set_view
+            .as_ref()
+            .map(|view| view.change);
+        if let Some(stage @ (SetChangeStage::Done(_) | SetChangeStage::Failed(_))) = stage {
+            live.driver.session.settle_set_change();
+            let note = match stage {
+                SetChangeStage::Done(SetChange::Install) => {
+                    StatusNote::silent(tr(keys::Q_MEDIA_STICKER_SET_ADDED))
+                }
+                SetChangeStage::Done(SetChange::Remove) => {
+                    StatusNote::silent(tr(keys::Q_MEDIA_STICKER_SET_REMOVED))
+                }
+                SetChangeStage::Done(SetChange::Archive) => StatusNote::info(ARCHIVED_NOTE),
+                SetChangeStage::Failed(SetChange::Archive) => {
+                    StatusNote::error(tr(keys::Q_MEDIA_COULD_NOT_ARCHIVE_THE_STICKER))
+                }
+                SetChangeStage::Failed(_) | SetChangeStage::Idle | SetChangeStage::Working(_) => {
+                    StatusNote::error(tr(keys::Q_MEDIA_COULD_NOT_CHANGE_THE_STICKER))
+                }
+            };
+            self.set_note(note);
+            if matches!(stage, SetChangeStage::Done(_)) {
+                self.close_sticker_set_dialog(cx);
+            }
+            cx.notify();
             return true;
         }
         if let Ok(Some(_)) = live.driver.sync_sticker_set_view() {

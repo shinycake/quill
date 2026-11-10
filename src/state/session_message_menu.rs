@@ -139,6 +139,42 @@ pub struct StickerSetView {
     pub files_requested: bool,
     /// Edits of an owned set in flight and their outcome.
     pub edits: StickerSetEdits,
+    /// The box's Add / Remove / Archive of this set: asked, then answered
+    /// by TDLib (the box closes on `Done`, says so on `Failed`).
+    pub change: SetChangeStage,
+}
+
+/// What the set box asked TDLib to do with the viewed set.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SetChange {
+    Install,
+    Remove,
+    Archive,
+}
+
+impl SetChange {
+    /// The change a `changeStickerSet` with these flags is.
+    pub fn of(installed: bool, archived: bool) -> Self {
+        match (installed, archived) {
+            (true, _) => Self::Install,
+            (false, true) => Self::Archive,
+            (false, false) => Self::Remove,
+        }
+    }
+}
+
+/// How far the set box's change got. Every stage has a way out: the answer
+/// (`Done`, `Failed`), then the box takes it back to `Idle`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SetChangeStage {
+    #[default]
+    Idle,
+    /// The request went out; the box waits for its answer.
+    Working(SetChange),
+    /// TDLib applied it.
+    Done(SetChange),
+    /// TDLib refused it, or the request was lost.
+    Failed(SetChange),
 }
 
 impl StickerSetView {
@@ -149,6 +185,7 @@ impl StickerSetView {
             stage: StickerSetViewStage::Loading,
             files_requested: false,
             edits: StickerSetEdits::default(),
+            change: SetChangeStage::Idle,
         }
     }
 }

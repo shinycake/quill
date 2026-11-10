@@ -107,6 +107,9 @@ pub(crate) struct ChatUi {
     /// `progress_inline_mode` sends it when updates land, in whichever
     /// window this value is in.
     pub(super) inline_query_waiting: bool,
+    /// "Save as HTML" with "Ask where to save" on: the folder picker of
+    /// this chat's selection, while it is open.
+    pub(super) html_save: super::selection_html::HtmlSave,
     /// Phase S2: pending inline-bot warning for a `SwitchInline` press (or
     /// a typed trigger) in this secret chat (TGX `SecretChatContextBotAlert`);
     /// the stashed query is inserted on Confirm. It lives with the chat

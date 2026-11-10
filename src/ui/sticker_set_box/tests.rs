@@ -582,7 +582,7 @@ fn the_later_pick_wins_when_the_earlier_decode_lands_last(cx: &mut TestAppContex
 /// late decode opens no editor over it.
 #[gpui_kit::test]
 fn a_still_decoding_behind_a_later_animated_pick_opens_no_editor(cx: &mut TestAppContext) {
-    use crate::ui::sticker_set_box::state::PendingVideo;
+    use crate::ui::sticker_set_box::state::{PendingVideo, PickedFile};
     use quill::telegram::envelope::StickerFormat;
     let (app, _shell, mut vcx) = open_demo(cx);
     let vcx = &mut vcx;
@@ -607,6 +607,7 @@ fn a_still_decoding_behind_a_later_animated_pick_opens_no_editor(cx: &mut TestAp
         app.sticker_box.pending_video = Some(PendingVideo {
             pick,
             file_id: still.file_id,
+            file: PickedFile::Video,
             emoji: None,
             window: None,
         });
@@ -641,7 +642,7 @@ fn a_video_the_editor_cannot_take_closes_it_with_the_bad_video_toast(cx: &mut Te
 
 #[gpui_kit::test]
 fn a_chosen_video_still_downloading_opens_the_editor_when_it_arrives(cx: &mut TestAppContext) {
-    use crate::ui::sticker_set_box::state::{PendingVideo, PickExisting};
+    use crate::ui::sticker_set_box::state::{PendingVideo, PickExisting, PickedFile};
     use quill::sticker_set_box::SetKind;
     let (app, shell, mut vcx) = open_demo(cx);
     let vcx = &mut vcx;
@@ -664,6 +665,7 @@ fn a_chosen_video_still_downloading_opens_the_editor_when_it_arrives(cx: &mut Te
         app.sticker_box.pending_video = Some(PendingVideo {
             pick,
             file_id,
+            file: PickedFile::Video,
             emoji: Some("🎉".into()),
             window: None,
         });

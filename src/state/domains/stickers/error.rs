@@ -93,6 +93,14 @@ impl Session {
         {
             self.finish_sticker_batch_item(set_id, false);
         }
+        if let Some(RequestPurpose::Stickers(StickersPurpose::ManageStickerSet {
+            set_id,
+            installed,
+            archived,
+        })) = pending.map(|p| p.purpose)
+        {
+            self.finish_set_change(set_id, SetChange::of(installed, archived), false);
+        }
         self.fail_mask_request(pending.map(|p| p.purpose));
         self.fail_sticker_creator(err, pending);
         if pending.map(|p| p.purpose) == Some(RequestPurpose::ChangeEmojiSet) {

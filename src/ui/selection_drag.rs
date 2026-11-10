@@ -724,9 +724,7 @@ mod tests {
     }
 
     #[gpui_kit::test]
-    fn a_move_with_the_button_up_ends_a_press_that_never_saw_its_release(
-        cx: &mut TestAppContext,
-    ) {
+    fn a_move_with_the_button_up_ends_a_press_that_never_saw_its_release(cx: &mut TestAppContext) {
         let (app, mut vcx) = new_app(cx);
         let vcx = &mut vcx;
         let chat = open_chat(&app, vcx);

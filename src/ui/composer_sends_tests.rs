@@ -605,14 +605,14 @@ fn a_file_another_tray_holds_keeps_its_checks_when_one_tray_drops_it(cx: &mut Te
         app.update_pending_attachments(|tray| tray.push(shared.clone()));
         app.select_listed_chat(B, window, cx);
         app.update_pending_attachments(|tray| tray.push(shared.clone()));
-        app.composer_ui
-            .send_box
+        app.composer_sends
+            .reads
             .sound_checked
             .insert(shared.path.clone());
         app.clear_attachment(cx);
         assert!(
-            app.composer_ui
-                .send_box
+            app.composer_sends
+                .reads
                 .sound_checked
                 .contains(&shared.path),
             "A's tray still holds it"
@@ -620,8 +620,8 @@ fn a_file_another_tray_holds_keeps_its_checks_when_one_tray_drops_it(cx: &mut Te
         app.select_listed_chat(A, window, cx);
         app.clear_attachment(cx);
         assert!(
-            !app.composer_ui
-                .send_box
+            !app.composer_sends
+                .reads
                 .sound_checked
                 .contains(&shared.path)
         );
@@ -701,7 +701,7 @@ fn a_pending_check_for_another_chats_file_does_not_block_a_send_here(cx: &mut Te
         let in_a = photo("checking-a.mp4");
         app.update_pending_send(|send| send.attachments.push(in_a.clone()))
             .expect("an open chat");
-        let send_box = &mut app.composer_ui.send_box;
+        let send_box = &mut app.composer_sends.reads;
         send_box.sound_checking.insert(in_a.path.clone(), 1);
         send_box.thumbnailing.insert(in_a.path.clone(), 1);
         assert!(app.tray_videos_checking(), "A waits on its own file");
@@ -811,5 +811,45 @@ fn slow_mode_refuses_a_send_of_more_than_one_message_and_keeps_the_tray(cx: &mut
         app.update_pending_attachments(|tray| tray.truncate(10));
         app.submit_composer("caption".into(), window, cx);
         assert!(app.pending_attachments().is_empty(), "the album went");
+    });
+}
+
+/// A send whose files were still being prepared when another account came
+/// on screen fails: the error belongs to that account, so the account on
+/// screen is not told (docs/decisions/account-scoped-ui-state.md).
+#[gpui_kit::test]
+fn a_background_accounts_failed_preparation_does_not_toast_the_screen(cx: &mut TestAppContext) {
+    use crate::ui::send_prep::SendOrigin;
+    let (app, mut vcx) = new_app(cx);
+    app.update(&mut vcx, |app, cx| {
+        let screen = app.session().expect("demo session").account.clone();
+        let other = AccountKey(format!("{}-other", screen.0));
+        let finish = |app: &mut QuillApp, account: AccountKey, cx: &mut Context<QuillApp>| {
+            let slot = SendSlot {
+                account,
+                draft: quill::composer::DraftTopic::Chat.key(A.0),
+            };
+            let job = app.composer_sends.prep.begin(slot.clone()).expect("a job");
+            let origin = SendOrigin::new(slot, A, String::new(), &[]);
+            app.finish_media_prep(
+                job,
+                origin,
+                Err(quill::composer::PrepareError::Unreadable),
+                None,
+                cx,
+            );
+        };
+        finish(app, other, cx);
+        assert_ne!(
+            app.connection.note().kind(),
+            crate::ui::status_note::NoteKind::Error,
+            "the other account's failure is not the screen's"
+        );
+        finish(app, screen, cx);
+        assert_eq!(
+            app.connection.note().kind(),
+            crate::ui::status_note::NoteKind::Error,
+            "the screen's own failure still shows"
+        );
     });
 }

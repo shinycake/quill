@@ -51,7 +51,10 @@ fn pressing_the_button_opens_the_box_and_the_location_arrives(cx: &mut TestAppCo
             share.kind,
             RequestShareKind::Location { one_time: true }
         ));
-        assert!(matches!(share.locate, Some(Locate::Done(GeoOutcome::Found(_)))));
+        assert!(matches!(
+            share.locate,
+            Some(Locate::Done(GeoOutcome::Found(_)))
+        ));
     });
 }
 

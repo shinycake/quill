@@ -56,6 +56,14 @@ impl CreateSticker {
         }
     }
 
+    /// The encoded video of a failed upload: the box keeps the editor's
+    /// video, so only this file goes.
+    pub fn drop_encoded_file(&self) {
+        if is_editor_temp(&self.path) {
+            let _ = std::fs::remove_file(&self.path);
+        }
+    }
+
     /// The sticker was handed to TDLib, which reads the file itself; only
     /// the box's still goes.
     pub fn uploaded(self) {
@@ -73,10 +81,21 @@ impl CreateSticker {
 pub(crate) struct PendingVideo {
     pub pick: PickExisting,
     pub file_id: FileId,
+    /// What opens when the file is here.
+    pub file: PickedFile,
     pub emoji: Option<String>,
     /// The chat window the pick was made in (`None`: the main window):
     /// the editor opens there, in that window's composer state.
     pub window: Option<quill::ids::ChatId>,
+}
+
+/// What a chosen file becomes once it is downloaded.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PickedFile {
+    /// A video: the video editor opens on it.
+    Video,
+    /// A still sticker of this format: it is decoded for the photo editor.
+    Still(StickerFormat),
 }
 
 /// The "Add an Existing Sticker" / "Adapt from a Sticker" chooser.

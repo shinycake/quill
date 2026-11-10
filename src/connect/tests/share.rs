@@ -356,3 +356,54 @@ fn a_forward_goes_to_the_topic_its_draft_picked_and_not_to_the_open_one() {
     assert_eq!(topic_of(8).unwrap()["@type"], "messageTopicForum");
     assert!(topic_of(9).unwrap().is_null());
 }
+
+#[test]
+fn a_refused_sender_list_is_failed_and_asked_again_on_retry() {
+    use crate::state::fetch::Fetch;
+    let (dir, prepared) = prepared_tmp(&MemorySecretStore::new());
+    let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+    let recorder = Arc::new(RecordingSender::new());
+    let seq = AtomicU64::new(0);
+    let mut driver = ready_driver(&recorder, prepared, &sink, &seq);
+    ingest(
+        &mut driver,
+        r#"{"@type":"updateNewChat","chat":{"id":-100,"title":"Group","type":{"@type":"chatTypeSupergroup","supergroup_id":100,"is_channel":false},"unread_count":0,"message_sender_id":{"@type":"messageSenderUser","user_id":1}}}"#,
+        &seq,
+        &sink,
+    );
+    driver
+        .get_chat_available_message_senders(ChatId(-100))
+        .unwrap();
+    assert!(
+        driver
+            .session
+            .message_senders_fetch(ChatId(-100))
+            .is_loading()
+    );
+    let request = sent_request(&recorder, "getChatAvailableMessageSenders");
+    let extra = request["@extra"].as_str().unwrap().to_string();
+    ingest(
+        &mut driver,
+        &format!(r#"{{"@type":"error","@extra":"{extra}","code":500,"message":"Internal"}}"#),
+        &seq,
+        &sink,
+    );
+    // The picker is not left on its spinner: it has an error to show.
+    assert!(matches!(
+        driver.session.message_senders_fetch(ChatId(-100)),
+        Fetch::Failed { .. }
+    ));
+    // Retry asks again.
+    let before = recorder.snapshot().len();
+    driver
+        .get_chat_available_message_senders(ChatId(-100))
+        .unwrap();
+    assert_eq!(recorder.snapshot().len(), before + 1);
+    assert!(
+        driver
+            .session
+            .message_senders_fetch(ChatId(-100))
+            .is_loading()
+    );
+    let _ = std::fs::remove_dir_all(dir);
+}

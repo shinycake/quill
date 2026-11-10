@@ -44,6 +44,37 @@ impl Session {
         }
     }
 
+    /// The box's change of the viewed set went out.
+    pub fn begin_set_change(&mut self, set_id: i64, change: SetChange) {
+        if let Some(view) = self.stickers.sticker_set_view.as_mut()
+            && view.set_id == set_id
+        {
+            view.change = SetChangeStage::Working(change);
+        }
+    }
+
+    /// The change box asked for answered (`ok`) or failed. Only the answer
+    /// to the change it waits on counts.
+    pub(crate) fn finish_set_change(&mut self, set_id: i64, change: SetChange, success: bool) {
+        if let Some(view) = self.stickers.sticker_set_view.as_mut()
+            && view.set_id == set_id
+            && view.change == SetChangeStage::Working(change)
+        {
+            view.change = if success {
+                SetChangeStage::Done(change)
+            } else {
+                SetChangeStage::Failed(change)
+            };
+        }
+    }
+
+    /// The box took the outcome of its change: back to idle.
+    pub fn settle_set_change(&mut self) {
+        if let Some(view) = self.stickers.sticker_set_view.as_mut() {
+            view.change = SetChangeStage::Idle;
+        }
+    }
+
     pub fn accept_archived_sticker_sets(&mut self, sets: Vec<StickerSetInfo>) {
         let next = sets.last().map(|set| set.id).unwrap_or(0);
         self.stickers.stickers.archived_has_more =

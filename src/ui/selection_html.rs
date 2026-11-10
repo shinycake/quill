@@ -15,6 +15,16 @@ use quill::lang::{keys, tr, tr_with};
 use quill::rich_html::RichHtmlOutcome;
 use std::path::{Path, PathBuf};
 
+/// Where "Save as HTML" stands in a chat: idle, or waiting for the folder
+/// the user picks. The picker's task lives in the stage, so a chat change
+/// (which replaces the `ChatUi`) drops it with the selection it was for.
+#[derive(Default)]
+pub(super) enum HtmlSave {
+    #[default]
+    Idle,
+    Picking(Task<()>),
+}
+
 impl QuillApp {
     /// The message "Save as HTML" would save, while the selection allows
     /// it ([`quill::rich_html::selection_target`]).
@@ -51,6 +61,11 @@ impl QuillApp {
         let Some(message_id) = self.selection_html_target(chat_id) else {
             return;
         };
+        // One picker at a time: another click while it is open does not
+        // open a second one.
+        if matches!(self.chat_ui.html_save, HtmlSave::Picking(_)) {
+            return;
+        }
         if !quill::file_prefs::current().ask_download_path {
             self.clear_forward(window, cx);
             let base = quill::media_viewer::downloads_dir();
@@ -63,26 +78,36 @@ impl QuillApp {
             multiple: false,
             prompt: Some(tr(keys::DOWNLOAD_PATH_CHOOSE).into()),
         });
-        self.spawn_scoped_in(window, cx, async move |this, cx| {
+        let task = self.spawn_scoped_in(window, cx, async move |this, cx| {
             let picked = picker.await;
-            let _ = this.update_in(cx, |this, window, cx| match picked {
-                Ok(Ok(Some(dirs))) => {
-                    if let Some(base) = dirs.into_iter().next() {
-                        this.clear_forward(window, cx);
-                        this.start_rich_html(chat_id, message_id, Some(base), cx);
+            let _ = this.update_in(cx, |this, window, cx| {
+                // The picker is over, whatever it answered.
+                if let HtmlSave::Picking(done) = std::mem::take(&mut this.chat_ui.html_save) {
+                    done.detach();
+                }
+                match picked {
+                    Ok(Ok(Some(dirs))) => {
+                        if let Some(base) = dirs.into_iter().next() {
+                            // The pick was for this message; the selection
+                            // may be another by now, which stays.
+                            if this.selection_html_target(chat_id) == Some(message_id) {
+                                this.clear_forward(window, cx);
+                            }
+                            this.start_rich_html(chat_id, message_id, Some(base), cx);
+                        }
+                    }
+                    // Dismissed: nothing to say, and the selection stays.
+                    Ok(Ok(None)) => {}
+                    // The dialog could not open (no desktop portal on Linux,
+                    // say): the selection stays for another try.
+                    Ok(Err(_)) | Err(_) => {
+                        this.set_note(StatusNote::error(tr(keys::EXPORT_HTML_FAILED)));
+                        cx.notify();
                     }
                 }
-                // Dismissed: nothing to say, and the selection stays.
-                Ok(Ok(None)) => {}
-                // The dialog could not open (no desktop portal on Linux,
-                // say): the selection stays for another try.
-                Ok(Err(_)) | Err(_) => {
-                    this.set_note(StatusNote::error(tr(keys::EXPORT_HTML_FAILED)));
-                    cx.notify();
-                }
             });
-        })
-        .detach();
+        });
+        self.chat_ui.html_save = HtmlSave::Picking(task);
     }
 
     fn start_rich_html(

@@ -37,10 +37,17 @@ fn a_late_update_does_not_make_the_next_tap_drop_the_first_choice() {
         .ingest(copy_and_parse(&message, &seq, &dyn_sink).unwrap())
         .unwrap();
 
-    driver.send_poll_answer(ChatId(7), MessageId(108), 0).unwrap();
+    driver
+        .send_poll_answer(ChatId(7), MessageId(108), 0)
+        .unwrap();
     assert_eq!(last_answer(&recorder)["option_ids"], serde_json::json!([0]));
-    driver.send_poll_answer(ChatId(7), MessageId(108), 1).unwrap();
-    assert_eq!(last_answer(&recorder)["option_ids"], serde_json::json!([0, 1]));
+    driver
+        .send_poll_answer(ChatId(7), MessageId(108), 1)
+        .unwrap();
+    assert_eq!(
+        last_answer(&recorder)["option_ids"],
+        serde_json::json!([0, 1])
+    );
 
     // The server's update for the first answer lands while the second is
     // still in flight: it shows only the first choice.
@@ -67,7 +74,9 @@ fn a_late_update_does_not_make_the_next_tap_drop_the_first_choice() {
     };
     assert_eq!(marks(&driver), vec![true, false, false]);
 
-    driver.send_poll_answer(ChatId(7), MessageId(108), 2).unwrap();
+    driver
+        .send_poll_answer(ChatId(7), MessageId(108), 2)
+        .unwrap();
     assert_eq!(
         last_answer(&recorder)["option_ids"],
         serde_json::json!([0, 1, 2]),

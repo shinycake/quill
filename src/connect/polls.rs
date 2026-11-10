@@ -49,7 +49,11 @@ impl<S: JsonSender> ConnectDriver<S> {
         // Rapid taps on a multiple-answer poll: the marks on screen may be
         // an older answer's (an `updatePoll` landed in between), so build
         // on the newest answer still in flight, or the first choice goes.
-        if let Some(shown) = self.session.requests.poll_vote_in_flight(chat_id, message_id) {
+        if let Some(shown) = self
+            .session
+            .requests
+            .poll_vote_in_flight(chat_id, message_id)
+        {
             for (option, mark) in poll.options.iter_mut().zip(shown) {
                 option.is_chosen = *mark;
             }
