@@ -125,6 +125,7 @@ mod session_history_window;
 mod session_links_boosts;
 mod session_members;
 mod session_message_menu;
+mod session_outcomes;
 mod session_message_story;
 mod session_new;
 mod session_notifications;

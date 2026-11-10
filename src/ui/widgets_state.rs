@@ -330,6 +330,20 @@ pub(super) fn next_query_token() -> u64 {
         .wrapping_add(1)
 }
 
+/// Writes a widget's changed storage with `save`. The entry is clean only
+/// once the write took: a failed one (a full disk, a folder that is not
+/// writable) stays pending for the farewell, the next change's timer and
+/// the prune to write again.
+pub(super) fn write_pending(unsaved: &mut bool, save: impl FnOnce() -> std::io::Result<()>) {
+    if !*unsaved {
+        return;
+    }
+    match save() {
+        Ok(()) => *unsaved = false,
+        Err(err) => eprintln!("quill: could not save a widget's storage: {err}"),
+    }
+}
+
 #[cfg(test)]
 #[path = "widgets_state_tests.rs"]
 mod tests;

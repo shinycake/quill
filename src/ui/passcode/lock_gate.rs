@@ -116,6 +116,10 @@ impl QuillApp {
             // And its inline clips: a locked chat window runs no frame
             // upkeep, so a round video playing there kept its sound.
             app.players.inline_videos.leave_window(app.windows.scope);
+            // Its message widgets too: a locked window draws no history
+            // pass to say they left, so their runtimes would keep running
+            // and their public data being polled behind the lock screen.
+            app.widgets_left_window(app.windows.scope);
         });
         // A clip parked to play goes with the clips; a voice note or song
         // parked for its download plays on, as tdesktop's player does.

@@ -29,6 +29,8 @@ impl QuillApp {
         self.fetch_missing_reply_target();
         // What was open for a chat the view no longer shows goes.
         self.sync_chat_ui();
+        // A menu whose message or chat is gone closes with it.
+        self.close_menus_of_gone_targets();
         // The histories every window still reads stay whole.
         self.sync_history_holds();
         // The inline results button's round trip back to its chat.

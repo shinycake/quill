@@ -12,6 +12,7 @@ mod chat_list_more;
 mod chat_row;
 mod common;
 mod communities;
+mod screen_outcomes;
 mod composer_placeholder;
 mod composer_targets;
 mod connection_indicator;

@@ -104,6 +104,9 @@ impl QuillApp {
         }
         self.select_listed_chat(chat_id, window, cx);
         // A kit dialog keeps the keys until it closes.
+        if let Some(account) = self.current_account() {
+            self.compose_unsent_reply(&account, chat_id, window, cx);
+        }
         if self.open_chat_id() == Some(chat_id) && !self.kit_dialog_open() {
             self.focus_opened_chat(window, cx);
         }

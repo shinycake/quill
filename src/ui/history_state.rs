@@ -136,8 +136,9 @@ pub(crate) struct HistoryUi {
     /// Chats whose pinned bar was hidden, with the newest pinned message
     /// at the time: the bar returns when a newer message is pinned.
     pub(super) hidden_pinned: HashMap<AccountChat, MessageId>,
-    /// The open chat's pinned-messages list (bar's list button).
-    pub(super) pinned_list_open: bool,
+    /// The chat whose pinned-messages list is open (the bar's list
+    /// button); another chat's bar shows it closed.
+    pub(super) pinned_list_open: Option<AccountChat>,
     /// Middle-click autoscroll over the history (`autoscroll_ui`).
     pub(super) autoscroll: super::autoscroll_ui::AutoscrollUi,
     /// Smooth reveal of a bot's streaming reply (`bot_stream`).
@@ -258,7 +259,7 @@ impl HistoryUi {
             palette: Default::default(),
             pinned_cursor: HashMap::new(),
             hidden_pinned: HashMap::new(),
-            pinned_list_open: false,
+            pinned_list_open: None,
             autoscroll: Default::default(),
             stream_reveal: Default::default(),
             vanishing: Default::default(),

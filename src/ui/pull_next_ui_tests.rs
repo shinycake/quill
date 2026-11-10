@@ -267,3 +267,24 @@ fn a_narrow_chat_keeps_the_normal_layout(cx: &mut TestAppContext) {
         assert!(app.adaptive_wide_checkbox(cx).is_none());
     });
 }
+
+#[gpui_kit::test]
+fn a_jump_started_behind_the_lock_opens_nothing_and_ends(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx, 1100.);
+    let vcx = &mut vcx;
+    frames(vcx);
+    open_channel_with_a_next_one(&app, vcx);
+    let at = history_centre(&app, vcx);
+    pull(vcx, at, 12);
+    app.update(vcx, |app, cx| {
+        // As a release does, then Quill locks within the wait.
+        app.history.pull.machine.begin_jump();
+        app.set_locked(true, cx);
+        app.pull_jump_when_ready(ChatId(14), cx);
+    });
+    vcx.run_until_parked();
+    app.read_with(vcx, |app, _| {
+        assert!(!app.history.pull.machine_for_tests().jumping());
+        assert_eq!(app.open_chat_id(), Some(ChatId(13)), "nothing opened");
+    });
+}

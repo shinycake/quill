@@ -10,7 +10,9 @@ use super::app::QuillApp;
 use super::owned_image::OwnedImage;
 use super::status_note::StatusNote;
 use super::widget_runtime::{Launch, Runtime, RuntimeEvent, WIDGETS};
-use super::widgets_state::{Identity, Poll, PresenceChange, Showing, WidgetEntry, WidgetStorage};
+use super::widgets_state::{
+    Identity, Poll, PresenceChange, Showing, WidgetEntry, WidgetStorage, write_pending,
+};
 use gpui_kit::*;
 use quill::ids::ChatId;
 use quill::lang::{keys, tr_with};
@@ -153,11 +155,16 @@ impl QuillApp {
             let Some(entry) = self.widgets.entries.remove(&key) else {
                 continue;
             };
-            if entry.unsaved
-                && let Some(dir) = &dir
-                && let Err(err) = storage::save(dir, key, &entry.stored)
-            {
-                eprintln!("quill: could not save a widget's storage: {err}");
+            let mut entry = entry;
+            if let Some(dir) = &dir {
+                write_pending(&mut entry.unsaved, || {
+                    storage::save(dir, key, &entry.stored)
+                });
+            }
+            if entry.unsaved && dir.is_some() {
+                // Pruned with its storage unwritten, it would be lost: it
+                // stays, and the next prune or save writes it again.
+                self.widgets.entries.insert(key, entry);
             }
         }
     }
@@ -819,11 +826,9 @@ impl QuillApp {
     pub(super) fn save_widget_storage(&mut self) {
         let Some(dir) = self.widget_dir() else { return };
         for (key, entry) in &mut self.widgets.entries {
-            if std::mem::take(&mut entry.unsaved)
-                && let Err(err) = storage::save(&dir, *key, &entry.stored)
-            {
-                eprintln!("quill: could not save a widget's storage: {err}");
-            }
+            write_pending(&mut entry.unsaved, || {
+                storage::save(&dir, *key, &entry.stored)
+            });
         }
     }
 
@@ -899,3 +904,8 @@ impl QuillApp {
         card_width(content.width, max)
     }
 }
+
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+#[path = "widgets_lock_tests.rs"]
+mod lock_tests;

@@ -60,8 +60,6 @@ pub(crate) struct MessageUi {
     pub(super) collapsed_keyboards: std::collections::HashSet<(i64, i64)>,
     /// A bot request button's share dialog (`DialogKind::RequestShare`).
     pub(super) request_share: Option<super::request_share::RequestShare>,
-    /// The location lookup behind a bot's location request.
-    pub(super) request_locate: Option<Task<()>>,
     /// "About These Ads" box (`DialogKind::SponsoredAbout`) is open.
     pub(super) sponsored_about: Option<super::sponsored_about::SponsoredAbout>,
     /// Sponsored message ids the footer painted last frame, with the chat
@@ -105,7 +103,6 @@ impl MessageUi {
             dismissed_keyboards: std::collections::HashSet::new(),
             collapsed_keyboards: std::collections::HashSet::new(),
             request_share: None,
-            request_locate: None,
             sponsored_about: None,
             rendered_sponsored: std::cell::RefCell::new(Vec::new()),
             custom_emoji_card_seen: None,

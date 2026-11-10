@@ -1,6 +1,6 @@
 //! Where a widget is drawn, with two windows showing it at once.
 
-use super::{Presence, PresenceChange, Showing, next_query_token};
+use super::{Presence, PresenceChange, Showing, next_query_token, write_pending};
 use quill::ids::ChatId;
 
 const MAIN: Option<ChatId> = None;
@@ -73,4 +73,20 @@ fn query_tokens_are_unique_for_the_run() {
     let second = next_query_token();
     assert_ne!(first, second);
     assert!(second > first);
+}
+
+/// A widget's storage that could not be written stays pending, so the
+/// farewell, the next timer or the prune writes it again; only a write
+/// that took makes it clean (round 18 B #55).
+#[test]
+fn a_failed_storage_write_stays_pending_until_one_takes() {
+    let mut unsaved = true;
+    write_pending(&mut unsaved, || {
+        Err(std::io::Error::other("no space left on device"))
+    });
+    assert!(unsaved, "the failed write left it pending");
+    write_pending(&mut unsaved, || Ok(()));
+    assert!(!unsaved, "the write that took made it clean");
+    // A clean entry writes nothing.
+    write_pending(&mut unsaved, || panic!("nothing to write"));
 }

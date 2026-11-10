@@ -597,13 +597,22 @@ impl QuillApp {
                         viewport.set(Some(bounds));
                         let moved = drag_app.clone();
                         window.on_mouse_event(move |event: &MouseMoveEvent, phase, window, cx| {
-                            if phase.bubble() && event.pressed_button == Some(MouseButton::Left) {
-                                let _ = moved.update(cx, |this, cx| {
-                                    if this.message_ui.selection_drag.is_some() {
-                                        this.selection_drag_pointer(event.position, window, cx);
-                                    }
-                                });
+                            if !phase.bubble() {
+                                return;
                             }
+                            let held = event.pressed_button == Some(MouseButton::Left);
+                            let _ = moved.update(cx, |this, cx| {
+                                if this.message_ui.selection_drag.is_none() {
+                                    return;
+                                }
+                                if held {
+                                    this.selection_drag_pointer(event.position, window, cx);
+                                } else {
+                                    // The button is up and no release came:
+                                    // the press ended elsewhere.
+                                    this.selection_drag_lost(cx);
+                                }
+                            });
                         });
                         let released = drag_app.clone();
                         window.on_mouse_event(move |event: &MouseUpEvent, phase, window, cx| {

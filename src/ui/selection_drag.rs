@@ -188,6 +188,16 @@ impl QuillApp {
         (beyond != 0).then(|| autoscroll_step(beyond) as f32)
     }
 
+    /// The press ended without a release reaching the history (the button
+    /// came up outside the window, or the window lost focus): the drag is
+    /// dropped without applying its range.
+    pub(super) fn selection_drag_lost(&mut self, cx: &mut Context<Self>) {
+        if self.message_ui.selection_drag.take().is_some() {
+            self.message_ui.swipe_reply_start = None;
+            cx.notify();
+        }
+    }
+
     /// The button came up (`mouseActionFinish`): a drag applies its range;
     /// a plain click in selection mode toggles the pressed row.
     pub(super) fn selection_release(
@@ -364,7 +374,12 @@ impl QuillApp {
                     break;
                 };
                 let step = this.update_in(cx, |this, window, cx| {
-                    // `None` once the drag ended: the loop stops.
+                    // `None` once the drag ended: the loop stops. A window
+                    // that lost focus holding the press never sees the
+                    // release, so the drag ends there too.
+                    if this.message_ui.selection_drag.is_some() && !window.is_window_active() {
+                        this.selection_drag_lost(cx);
+                    }
                     this.message_ui
                         .selection_drag
                         .is_some()
@@ -706,5 +721,24 @@ mod tests {
         assert_eq!(step, Some(-16.));
         release(vcx, above);
         assert!(app.read_with(vcx, |app, _| app.message_ui.selection_drag.is_none()));
+    }
+
+    #[gpui_kit::test]
+    fn a_move_with_the_button_up_ends_a_press_that_never_saw_its_release(
+        cx: &mut TestAppContext,
+    ) {
+        let (app, mut vcx) = new_app(cx);
+        let vcx = &mut vcx;
+        let chat = open_chat(&app, vcx);
+        let rows = rows(&app, vcx);
+        assert!(rows.len() >= 3);
+        let (a, c) = (&rows[0], &rows[2]);
+        drag(vcx, blank_point(a), blank_point(c));
+        assert!(app.read_with(vcx, |app, _| app.selection_drag_in(chat).is_some()));
+        // The button came up outside the window: the next move reports it
+        // as up, with no release having reached the history.
+        vcx.simulate_mouse_move(blank_point(a), None, Modifiers::default());
+        assert!(app.read_with(vcx, |app, _| app.message_ui.selection_drag.is_none()));
+        assert!(selected(&app, vcx).is_empty(), "nothing was selected");
     }
 }

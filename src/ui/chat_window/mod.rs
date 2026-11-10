@@ -74,7 +74,7 @@ use gpui_kit::*;
 use quill::ids::ChatId;
 use quill::lang::{keys, tr};
 use quill::state::ChatSummary;
-pub(in crate::ui) use routing::ChatOpen;
+pub(in crate::ui) use routing::{ChatOpen, ChatOpenCarry};
 pub(in crate::ui) use scoped::ScopedApp;
 pub(in crate::ui) use slot::scope_probe;
 pub(in crate::ui) use view::ChatWindowView;

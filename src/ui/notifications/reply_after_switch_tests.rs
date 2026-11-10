@@ -48,5 +48,9 @@ fn a_reply_run_after_the_switch_takes_the_typed_text(cx: &mut TestAppContext) {
         );
         // With nothing sent (the demo has no client), the chat opens.
         assert_eq!(app.open_chat_id(), Some(CHAT));
+        // The typed words are not lost with the send: they are in the
+        // composer of the chat that opened.
+        assert_eq!(app.composer.read(cx).value().to_string(), "on my way");
+        assert!(app.delivery.unsent_replies.is_empty());
     });
 }

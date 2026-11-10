@@ -107,6 +107,11 @@ pub(crate) struct ChatUi {
     /// `progress_inline_mode` sends it when updates land, in whichever
     /// window this value is in.
     pub(super) inline_query_waiting: bool,
+    /// Phase S2: pending inline-bot warning for a `SwitchInline` press (or
+    /// a typed trigger) in this secret chat (TGX `SecretChatContextBotAlert`);
+    /// the stashed query is inserted on Confirm. It lives with the chat
+    /// that asked, so another chat never confirms it.
+    pub(super) pending_inline_bot_alert: Option<String>,
     /// The rich draft's "discard" or "Remove Formatting" box: its buttons
     /// act on this chat's draft.
     pub(super) rich_draft_box: super::rich_draft::RichDraftBox,

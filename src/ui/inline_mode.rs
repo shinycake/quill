@@ -107,8 +107,8 @@ impl QuillApp {
             // Trigger gone: close, and clear a typed-mode alert marker
             // (an empty stash is ours; a non-empty one belongs to a
             // `SwitchInline` button press).
-            if self.composer_ui.pending_inline_bot_alert.as_deref() == Some("") {
-                self.composer_ui.pending_inline_bot_alert = None;
+            if self.chat_ui.pending_inline_bot_alert.as_deref() == Some("") {
+                self.chat_ui.pending_inline_bot_alert = None;
             }
             self.chat_ui.inline_results_open = false;
             self.chat_ui.inline_query_armed = None;
@@ -119,8 +119,8 @@ impl QuillApp {
         // alert before any query is sent. The banner renders while the
         // stash is set; confirming re-syncs (the text is already there).
         if self.open_chat_is_secret() && !self.composer_ui.inline_bot_alert_shown {
-            if self.composer_ui.pending_inline_bot_alert.is_none() {
-                self.composer_ui.pending_inline_bot_alert = Some(String::new());
+            if self.chat_ui.pending_inline_bot_alert.is_none() {
+                self.chat_ui.pending_inline_bot_alert = Some(String::new());
             }
             self.chat_ui.inline_results_open = false;
             cx.notify();

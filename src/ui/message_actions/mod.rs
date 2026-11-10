@@ -112,7 +112,7 @@ fn confirm(
 fn confirm_hide_pinned(
     window: &mut Window,
     cx: &mut App,
-    app: WeakEntity<QuillApp>,
+    app: crate::ui::chat_window::ScopedApp,
     chat_id: ChatId,
     newest: MessageId,
 ) {
@@ -126,7 +126,7 @@ fn confirm_hide_pinned(
                 if let Some(key) = this.pinned_key(chat_id) {
                     this.history.hidden_pinned.insert(key, newest);
                 }
-                this.history.pinned_list_open = false;
+                this.set_pinned_list_open(chat_id, false);
                 cx.notify();
             });
         },
@@ -139,6 +139,10 @@ mod close_chat_preview;
 #[cfg(test)]
 #[cfg(feature = "demo-capture")]
 mod go_to_tests;
+mod menu_targets;
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+mod menu_targets_tests;
 mod message_menu_overlay;
 mod open_chat_preview;
 mod top_person_menu;

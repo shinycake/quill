@@ -222,7 +222,7 @@ impl QuillApp {
                         // Gated on the open chat still being one: a pending
                         // alert from a previous chat never renders elsewhere.
                         .when(
-                            self.composer_ui.pending_inline_bot_alert.is_some()
+                            self.chat_ui.pending_inline_bot_alert.is_some()
                                 && self.open_chat_is_secret(),
                             |this| this.child(self.inline_bot_alert_banner(cx)),
                         )
@@ -550,7 +550,7 @@ impl QuillApp {
             )
             .children(open.and_then(|chat_id| self.pinned_message_banner(chat_id, cx)))
             .children(
-                open.filter(|_| self.history.pinned_list_open)
+                open.filter(|chat| self.pinned_list_open_for(*chat))
                     .and_then(|chat_id| self.pinned_list_panel(chat_id, cx)),
             )
             .when_some(self.pending_bot_reply(cx), |this, reply| this.child(reply))

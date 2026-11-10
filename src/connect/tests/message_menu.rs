@@ -210,7 +210,7 @@ fn report_flow_walks_reason_details_and_done() {
     feed(&mut driver, &seq, &sink, GROUP_CHAT);
     feed(&mut driver, &seq, &sink, REACTED_MESSAGE);
 
-    driver
+    let first_id = driver
         .report_messages(ChatId(-100), &[MessageId(50)], "", "", None)
         .unwrap();
     let first = sent_request(&recorder, "reportChat");
@@ -224,7 +224,7 @@ fn report_flow_walks_reason_details_and_done() {
             .as_ref()
             .unwrap()
             .stage,
-        MessageReportStage::Checking
+        MessageReportStage::Checking(first_id)
     );
 
     answer(
@@ -252,7 +252,7 @@ fn report_flow_walks_reason_details_and_done() {
     assert_eq!(options.len(), 2);
 
     // Choosing "Other" echoes its id and asks for details.
-    driver
+    let second_id = driver
         .report_messages(
             ChatId(-100),
             &[MessageId(50)],
@@ -271,7 +271,7 @@ fn report_flow_walks_reason_details_and_done() {
             .as_ref()
             .unwrap()
             .stage,
-        MessageReportStage::Sending
+        MessageReportStage::Sending(second_id)
     );
     answer(
         &mut driver,
@@ -574,4 +574,60 @@ fn message_properties_carry_the_new_rights() {
     assert!(actions.can_add_offer);
     assert!(!actions.can_edit_suggested_post_info);
     assert!(!actions.can_be_edited);
+}
+
+#[test]
+fn a_late_report_answer_does_not_touch_a_newer_report() {
+    let (mut driver, recorder, sink, seq) = group_driver();
+    feed(&mut driver, &seq, &sink, GROUP_CHAT);
+    feed(&mut driver, &seq, &sink, REACTED_MESSAGE);
+
+    // Report A, cancel the box while it checks, report B at once.
+    let first = driver
+        .report_messages(ChatId(-100), &[MessageId(50)], "", "", None)
+        .unwrap();
+    let first_extra = sent_request(&recorder, "reportChat")["@extra"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    driver.session.clear_message_report();
+    let second = driver
+        .report_messages(ChatId(-100), &[MessageId(51)], "", "", None)
+        .unwrap();
+    assert_ne!(first, second);
+    let stage = |driver: &ConnectDriver<Recorder>| {
+        driver
+            .session
+            .messages
+            .message_report
+            .as_ref()
+            .map(|flow| (flow.message_ids.clone(), flow.stage.clone()))
+    };
+    let before = Some((vec![MessageId(51)], MessageReportStage::Checking(second)));
+    assert_eq!(stage(&driver), before);
+
+    // A's answer (an option list) arrives for B's chat: B's box stays.
+    let late = format!(
+        r#"{{"@type":"reportChatResultOptionRequired","@extra":"{first_extra}","title":"Why?","options":[{{"@type":"reportOption","id":"c3BhbQ==","text":"Spam"}}]}}"#
+    );
+    feed(&mut driver, &seq, &sink, &late);
+    assert_eq!(stage(&driver), before);
+
+    // A's error does not fail B either; B's own answer still lands.
+    driver
+        .session
+        .fail_message_report(first, "Reporting failed: late".into());
+    assert_eq!(stage(&driver), before);
+    answer(
+        &mut driver,
+        &recorder,
+        &seq,
+        &sink,
+        "reportChat",
+        r#"{"@type":"reportChatResultOk"}"#,
+    );
+    assert_eq!(
+        stage(&driver).map(|(_, stage)| stage),
+        Some(MessageReportStage::Reported)
+    );
 }

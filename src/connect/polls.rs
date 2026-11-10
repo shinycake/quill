@@ -37,7 +37,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(ConnectSendError::InvalidRequest);
         }
         // The row may live only in a forum topic or a comment thread.
-        let poll = self
+        let mut poll = self
             .session
             .loaded_message(chat_id, message_id)
             .filter(|message| !message.pending() && message.id.0 > 0)
@@ -46,6 +46,14 @@ impl<S: JsonSender> ConnectDriver<S> {
                 _ => None,
             })
             .ok_or(ConnectSendError::InvalidRequest)?;
+        // Rapid taps on a multiple-answer poll: the marks on screen may be
+        // an older answer's (an `updatePoll` landed in between), so build
+        // on the newest answer still in flight, or the first choice goes.
+        if let Some(shown) = self.session.requests.poll_vote_in_flight(chat_id, message_id) {
+            for (option, mark) in poll.options.iter_mut().zip(shown) {
+                option.is_chosen = *mark;
+            }
+        }
         if !poll.can_vote() {
             return Err(ConnectSendError::InvalidRequest);
         }
