@@ -311,7 +311,7 @@ impl Session {
                 {
                     self.groups
                         .chat_statistics
-                        .insert(chat_id.0, ChatStatisticsFetch::Loaded(Box::new(statistics)));
+                        .insert(chat_id.0, ChatStatisticsFetch::Loaded(std::sync::Arc::new(statistics)));
                 }
             }
             GroupsPayload::MessageStatistics { statistics } => {

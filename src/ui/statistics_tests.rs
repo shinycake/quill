@@ -241,3 +241,46 @@ fn a_recent_post_opens_its_statistics_and_back_returns(cx: &mut TestAppContext) 
     frames(vcx);
     bounds(vcx, &format!("stats-{CHANNEL}-growth-plot"));
 }
+
+/// A redraw copies the statistics it draws from: the copy shares the
+/// graphs' JSON, so their parsed charts (cached by buffer address) hit.
+#[gpui_kit::test]
+fn a_redraw_shares_the_loaded_statistics(cx: &mut TestAppContext) {
+    use quill::state::ChatStatisticsFetch;
+    let (app, mut vcx) = open_statistics(cx);
+    app.read_with(&mut vcx, |app, _| {
+        let held = &app.session().expect("session").groups.chat_statistics;
+        let (Some(ChatStatisticsFetch::Loaded(first)), Some(ChatStatisticsFetch::Loaded(second))) =
+            (held.get(&CHANNEL).cloned(), held.get(&CHANNEL).cloned())
+        else {
+            panic!("the channel's statistics are loaded");
+        };
+        assert!(std::sync::Arc::ptr_eq(&first, &second));
+    });
+}
+
+#[gpui_kit::test]
+fn a_graph_that_failed_to_load_shows_its_reason_and_retry(cx: &mut TestAppContext) {
+    use quill::state::{GraphFetch, GraphKey};
+    let (app, mut vcx) = open_statistics(cx);
+    let vcx = &mut vcx;
+    assert!(vcx.update(|window, _| window.try_find("stat-graph-retry-stats-13-mute").is_none()));
+    app.update(vcx, |app, cx| {
+        if let Some(session) = app.demo_session.as_mut() {
+            session.groups.stats.graphs.insert(
+                GraphKey {
+                    chat_id: CHANNEL,
+                    token: super::fixture::ASYNC_TOKEN.into(),
+                    x: 0,
+                },
+                GraphFetch::Failed("FLOOD_WAIT_5".into()),
+            );
+        }
+        cx.notify();
+    });
+    frames(vcx);
+    assert!(
+        vcx.update(|window, _| window.try_find("stat-graph-retry-stats-13-mute").is_some()),
+        "the failed chart stays on the page with a Retry"
+    );
+}

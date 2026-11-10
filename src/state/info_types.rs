@@ -296,7 +296,7 @@ pub enum ChatStatisticsFetch {
         is_dark: bool,
     },
     Loading,
-    Loaded(Box<ChatStatistics>),
+    Loaded(std::sync::Arc<ChatStatistics>),
     Failed(String),
 }
 
