@@ -204,7 +204,7 @@ pub(super) fn inline_keyboard_button(
         element.icon(gpui_kit::assets::IconName::LoaderCircle)
     })
     .loading(waiting);
-    let element = inline_keyboard_style(element, button.style, cx);
+    let element = inline_keyboard_style(element, button.style);
     if !button_is_pressable(&button.kind) {
         return element.disabled(true);
     }
@@ -235,29 +235,14 @@ fn callback_key(kind: &InlineKeyboardButtonType) -> Option<quill::state::Callbac
 }
 
 /// The look of an inline keyboard button for its `style`; also used by
-/// the rows Quill adds itself (a suggested post's decisions). The default
-/// look is tdesktop's: a soft fill of the text color with no border.
-pub(super) fn inline_keyboard_style(
-    element: Button,
-    style: InlineKeyboardButtonStyle,
-    cx: &App,
-) -> Button {
+/// the rows Quill adds itself (a suggested post's decisions).
+pub(super) fn inline_keyboard_style(element: Button, style: InlineKeyboardButtonStyle) -> Button {
     match style {
         InlineKeyboardButtonStyle::Primary => element.primary(),
         InlineKeyboardButtonStyle::Danger => element.danger(),
         InlineKeyboardButtonStyle::Success => element.success(),
         InlineKeyboardButtonStyle::Link => element.link(),
-        InlineKeyboardButtonStyle::Default => {
-            let ink = cx.theme().foreground;
-            element.custom(
-                ButtonCustomVariant::new(cx)
-                    .color(ink.opacity(0.07))
-                    .hover(ink.opacity(0.12))
-                    .active(ink.opacity(0.17))
-                    .foreground(ink)
-                    .shadow(false),
-            )
-        }
+        InlineKeyboardButtonStyle::Default => element,
     }
 }
 
