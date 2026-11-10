@@ -11,7 +11,8 @@ use std::sync::{Arc, Mutex};
 const BACKGROUND: [u8; 3] = [255, 255, 255];
 
 fn corpus_dir() -> std::path::PathBuf {
-    std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("third_party/widgets/sandbox/corpus/compat")
+    std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("third_party/widgets/sandbox/corpus/compat")
 }
 
 fn corpus(name: &str) -> String {
@@ -107,6 +108,7 @@ fn every_corpus_widget_boots_and_paints() {
     names.sort();
     assert!(names.len() >= 15, "corpus: {names:?}");
     for name in names {
+        eprintln!("booting {name}");
         let (width, height, _) = first_frame(&name);
         assert_eq!(width, 640, "{name}");
         assert!(height > 0, "{name}");

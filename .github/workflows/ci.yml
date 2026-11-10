@@ -331,10 +331,15 @@ jobs:
         with:
           toolchain: 1.99.1
       - uses: Swatinem/rust-cache@v2
-      - name: widget runtime tests
+      - name: widget runtime tests (painter)
         run: >-
           cargo test --features demo-capture --locked --bin quill --
-          widget_runtime:: message_widget:: widgets_state
+          widget_runtime:: widgets_state --skip smoke_tests
+      # One at a time with output, so a native abort names its widget.
+      - name: widget runtime tests (boot real widgets)
+        run: >-
+          cargo test --features demo-capture --locked --bin quill --
+          smoke_tests --test-threads=1 --nocapture
 
   # Launch smoke on Windows (docs/decisions/ci-launch-smoke.md): the real window
   # on a hosted runner without a GPU (WARP). Pushes only, not a required check.
