@@ -719,14 +719,7 @@ impl QuillApp {
                         cx,
                     );
                     self.history.rows_key = Some(key);
-                    // Channels end with their sponsored message (Telegram API
-                    // terms: clients must show it), but only while the
-                    // history is scrolled to the bottom.
-                    let scrolled_up = self.history.scroller.read(cx).is_scrolled_up();
-                    match self.sponsored_footer(scrolled_up, cx) {
-                        Some(footer) => history_with_sponsored(list, footer),
-                        None => list,
-                    }
+                    list
                 },
             ))
     }
@@ -779,20 +772,5 @@ fn history_load_failed(cx: &mut Context<QuillApp>) -> AnyElement {
                     this.retry_history_load(cx);
                 })),
         )
-        .into_any_element()
-}
-
-/// A channel's history with its sponsored message at the end.
-#[inline(never)]
-fn history_with_sponsored(list: AnyElement, footer: AnyElement) -> AnyElement {
-    div()
-        .id("history-with-sponsored")
-        .flex()
-        .flex_col()
-        .flex_1()
-        .min_h_0()
-        .min_w_0()
-        .child(list)
-        .child(footer)
         .into_any_element()
 }
