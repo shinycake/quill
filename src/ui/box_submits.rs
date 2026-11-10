@@ -10,5 +10,6 @@ impl QuillApp {
         self.settle_moderation_submits(cx);
         self.settle_username_dialog(cx);
         self.settle_create_community_dialog(cx);
+        self.settle_topic_editor(cx);
     }
 }
