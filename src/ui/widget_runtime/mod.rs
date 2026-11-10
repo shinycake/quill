@@ -64,6 +64,7 @@ enum Inbox {
         background: [u8; 3],
     },
     Data(String),
+    SafeArea(String),
     Width(f64),
     Respond {
         token: u64,
@@ -168,6 +169,10 @@ impl Runtime {
     /// New `chat_data` / `public_data` (`WidgetData` JSON).
     pub fn set_data(&self, data: String) {
         self.send(Inbox::Data(data));
+    }
+    /// The band the time covers (`ContentSafeArea` JSON).
+    pub fn set_safe_area(&self, area: String) {
+        self.send(Inbox::SafeArea(area));
     }
     pub fn set_width(&self, width: f64) {
         self.send(Inbox::Width(width));

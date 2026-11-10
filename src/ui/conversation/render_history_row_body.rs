@@ -118,16 +118,18 @@ impl QuillApp {
                 let sender_status =
                     self.sender_status_element(chrome.sender.as_ref(), message.id.0, cx);
                 let avatar = self.history_sender_avatar(chrome, message.sender, cx);
-                // A widget sits inside the bubble's padding, like a card.
+                // A widget fills its bubble edge to edge, inside the
+                // border, as wide as the bubble gets (Telegram Desktop
+                // `HtmlWidget::countCurrentSize`).
                 let room = crate::ui::history::bubble_width::BubbleRoom::new(
                     look.history,
                     avatar.is_some(),
                     look.plain,
                 );
-                let inner =
-                    crate::ui::history::bubble_width::content_for_outer(room.outer(), look.plain);
-                let widget =
-                    self.widget_bubble(message, f32::from(inner).min(room.media(false) as f32), cx);
+                let led = chrome.reply_header.is_none()
+                    && chrome.forward_header.is_none()
+                    && chrome.via_bot.is_none();
+                let widget = self.widget_bubble(message, room.widget(led) as f32, cx);
                 let row = session_history_row(
                     message,
                     files,

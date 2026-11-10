@@ -327,6 +327,13 @@ pub(crate) struct MessageChrome {
     pub max_width: Option<Pixels>,
 }
 
+/// The time pill's distance from the picture's right and bottom edges.
+pub(crate) const MEDIA_PILL_INSET: f32 = 10.;
+/// The time pill's padding beside the time (`px_1p5`).
+pub(crate) const MEDIA_PILL_PAD_X: f32 = 6.;
+/// The time pill's height: one `text_xs` line.
+pub(crate) const MEDIA_PILL_HEIGHT: f32 = 18.;
+
 /// The time on a picture: a dark pill in the bottom-right corner of the
 /// nearest positioned parent (the bubble, or a bubble-less media block).
 pub(crate) fn media_footer_pill(
@@ -335,13 +342,18 @@ pub(crate) fn media_footer_pill(
 ) -> AnyElement {
     let pill = |footer: AnyElement| {
         div()
-            .px_1p5()
+            .px(px(MEDIA_PILL_PAD_X))
             .rounded_full()
             .bg(gpui_kit::black().opacity(0.45))
             .text_color(gpui_kit::white())
             .child(footer)
     };
-    let pill_at = |footer| pill(footer).absolute().right(px(10.)).bottom(px(10.));
+    let pill_at = |footer| {
+        pill(footer)
+            .absolute()
+            .right(px(MEDIA_PILL_INSET))
+            .bottom(px(MEDIA_PILL_INSET))
+    };
     match rebuild {
         // Over an inline video the history's animation layer draws: it
         // draws the pill again, above the video.

@@ -150,12 +150,16 @@ pub(in crate::ui) fn single_media_frame(
     Some(frame)
 }
 
-/// Content whose picture leads the bubble: a photo, video or GIF, or a
-/// picture file shown as a photo.
+/// Content whose picture leads the bubble: a photo, video or GIF, a
+/// picture file shown as a photo, or a widget (which fills its bubble the
+/// same way, Telegram Desktop `HtmlWidget`).
 pub(in crate::ui) fn leads_with_media(content: &quill::telegram::envelope::MessageContent) -> bool {
     use quill::telegram::envelope::MessageContent;
     match content {
-        MessageContent::Photo(_) | MessageContent::Video(_) | MessageContent::Animation(_) => true,
+        MessageContent::Photo(_)
+        | MessageContent::Video(_)
+        | MessageContent::Animation(_)
+        | MessageContent::Widget(_) => true,
         MessageContent::Document(doc) => quill::media_viewer::shows_as_photo(doc),
         _ => false,
     }

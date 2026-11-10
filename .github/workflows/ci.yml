@@ -335,11 +335,24 @@ jobs:
         run: >-
           cargo test --features demo-capture --locked --bin quill --
           widget_runtime:: widgets_state --skip smoke_tests
-      # One at a time with output, so a native abort names its widget.
+      # One at a time under the debugger, so a native crash leaves its stack.
       - name: widget runtime tests (boot real widgets)
-        run: >-
-          cargo test --features demo-capture --locked --bin quill --
-          smoke_tests --test-threads=1 --nocapture
+        shell: pwsh
+        env:
+          CFLAGS: /Z7
+          CXXFLAGS: /Z7
+        run: |
+          $json = cargo test --features demo-capture --locked --bin quill --no-run --message-format=json
+          $exe = ($json | ForEach-Object { try { $_ | ConvertFrom-Json } catch { $null } } |
+            Where-Object { $_.executable -and $_.profile.test -and $_.target.name -eq 'quill' } |
+            Select-Object -Last 1).executable
+          $cdb = "${env:ProgramFiles(x86)}\Windows Kits\10\Debuggers\x64\cdb.exe"
+          if (Test-Path $cdb) {
+            & $cdb -g -G -lines -c ".symfix+ ; .reload ; .ecxr ; kn 80 ; q" $exe smoke_tests --test-threads=1 --nocapture
+          } else {
+            & $exe smoke_tests --test-threads=1 --nocapture
+          }
+          exit $LASTEXITCODE
 
   # Launch smoke on Windows (docs/decisions/ci-launch-smoke.md): the real window
   # on a hosted runner without a GPU (WARP). Pushes only, not a required check.
