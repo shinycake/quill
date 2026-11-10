@@ -4,6 +4,59 @@
 use crate::state::*;
 use crate::telegram::envelope::BankCardInfoData;
 
+/// How a [`PaymentNotice`] reads.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NoticeKind {
+    Info,
+    Error,
+}
+
+/// The outcome of a payment, a gift or a reaction whose box is gone (closed
+/// while the request was out), for the status bar. The poll drains the
+/// queue; Stars may have moved, so the user is always told.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PaymentNotice {
+    pub kind: NoticeKind,
+    pub text: String,
+}
+
+impl PaymentNotice {
+    pub fn new(kind: NoticeKind, text: impl Into<String>) -> Self {
+        Self {
+            kind,
+            text: text.into(),
+        }
+    }
+}
+
+/// The receipt dialog's stage.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub enum ReceiptStage {
+    #[default]
+    Closed,
+    /// `getPaymentReceipt` is out under this request.
+    Loading(RequestId),
+    Open(PaymentReceiptData),
+}
+
+impl ReceiptStage {
+    pub fn is_open(&self) -> bool {
+        matches!(self, Self::Open(_))
+    }
+
+    pub fn data(&self) -> Option<&PaymentReceiptData> {
+        match self {
+            Self::Open(data) => Some(data),
+            _ => None,
+        }
+    }
+
+    /// `request` is the receipt this dialog asked for.
+    pub(crate) fn waits_for(&self, request: Option<RequestId>) -> bool {
+        matches!((self, request), (Self::Loading(waiting), Some(id)) if *waiting == id)
+    }
+}
+
 /// A payment's verification step (`paymentResult.verification_url`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PaymentVerification {
@@ -26,10 +79,10 @@ pub struct PaymentsState {
     pub validated: Option<ValidatedOrderInfoData>,
     /// Slice P1: the chosen shipping option id (default: the first).
     pub shipping_id: Option<String>,
-    /// Slice P1: the fetched `paymentReceipt`, shown in the receipt dialog.
-    pub receipt: Option<PaymentReceiptData>,
-    /// Slice P1: receipt dialog visibility.
-    pub receipt_open: bool,
+    /// The receipt dialog: closed, waiting for the `getPaymentReceipt` it
+    /// asked, or showing the answer. Closing it forgets the request, so a
+    /// late answer cannot reopen it.
+    pub receipt: ReceiptStage,
     /// Slice P1: latest payment error / outcome note, shown in the
     /// checkout dialog (never a secret — order fields and credentials are
     /// never echoed here).
@@ -56,6 +109,8 @@ pub struct PaymentsState {
     /// "Media Unlocked" note after a paid-media purchase, drained into the
     /// status bar by the UI poll.
     pub unlocked_notice: Option<String>,
+    /// Outcomes nobody on screen would see, drained into the status bar.
+    pub notices: Vec<PaymentNotice>,
     /// Slice P1: a failed `getPaymentReceipt`, drained into the status
     /// note by `poll_live` — the checkout dialog (which renders
     /// `payment_note`) may be closed when the receipt fetch fails.
@@ -162,6 +217,14 @@ impl PaymentsState {
             .is_some_and(|request| &request.invoice == invoice)
     }
 
+    /// Queue an outcome for the status bar.
+    pub fn notify(&mut self, kind: NoticeKind, text: impl Into<String>) {
+        self.notices.push(PaymentNotice {
+            kind,
+            text: text.into(),
+        });
+    }
+
     /// The payment `request_id` answered: it leaves the in-flight list.
     pub(crate) fn take_paying(&mut self, request_id: Option<RequestId>) -> Option<PaymentInFlight> {
         let index = self
@@ -189,14 +252,14 @@ impl PaymentsState {
             form_loading: false,
             validated: None,
             shipping_id: None,
-            receipt: None,
-            receipt_open: false,
+            receipt: ReceiptStage::Closed,
             note: None,
             form_request: None,
             validate_request: None,
             paying: Vec::new(),
             form_paid: false,
             unlocked_notice: None,
+            notices: Vec::new(),
             receipt_error: None,
             verification_url: None,
             verification_started: false,

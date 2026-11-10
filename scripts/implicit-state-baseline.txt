@@ -59,7 +59,6 @@ ChecklistDraft::others_can_mark_tasks_as_done
 ChecklistSend::others_can_mark_tasks_as_done
 CheckoutView::sending
 Clip::busy
-CollectibleLookup::loading
 CommonGroupsPaging::loading_more
 ComposerUi::draft_restore_pending
 ConnectDriver::parameters_sent
@@ -93,7 +92,6 @@ GifPanel::search_loading
 GiftCodeLookup::loading
 GiftCodeLookup::loading+error
 GiftManageState::collections_loading
-GiftManageState::limits_asked
 GiftMarketState::auction_loading
 GiftMarketUi::pending_auction
 GiftPurchase::completed

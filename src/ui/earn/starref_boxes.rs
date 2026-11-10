@@ -512,7 +512,7 @@ impl QuillApp {
             let list = if join.choose_recipient {
                 recipient_list(
                     session,
-                    earn.recipients.as_deref().unwrap_or(&[]),
+                    earn.recipients.list().unwrap_or(&[]),
                     join.bot_user_id,
                     join.recipient,
                 )

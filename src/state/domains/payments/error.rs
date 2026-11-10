@@ -35,15 +35,23 @@ impl Session {
             // The payment that failed leaves the in-flight list; the note
             // is the checkout's only while it shows that invoice.
             Some(RequestPurpose::SendPaymentForm) => {
-                if let Some(failed) = self.payments.take_paying(extra)
-                    && self.payments.shows(&failed.invoice)
-                {
-                    self.payments.note = Some(format!("Payment failed: {}", error_reason(err)));
+                if let Some(failed) = self.payments.take_paying(extra) {
+                    let text = format!("Payment failed: {}", error_reason(err));
+                    if self.payments.shows(&failed.invoice) {
+                        self.payments.note = Some(text);
+                    } else {
+                        // The checkout was closed while it paid.
+                        self.payments.notify(NoticeKind::Error, text);
+                    }
                 }
             }
             Some(RequestPurpose::GetPaymentReceipt) => {
-                self.payments.receipt_error =
-                    Some(format!("Receipt failed: {}", error_reason(err)));
+                // A receipt the user already dismissed has nobody to tell.
+                if self.payments.receipt.waits_for(extra) {
+                    self.payments.receipt = ReceiptStage::Closed;
+                    self.payments.receipt_error =
+                        Some(format!("Receipt failed: {}", error_reason(err)));
+                }
             }
             Some(RequestPurpose::GetMarketplaceGift | RequestPurpose::SendMarketplaceGift) => {
                 if let Some(gift) = self.payments.marketplace_gift.as_mut() {
@@ -63,11 +71,13 @@ impl Session {
             // `COLLECTIBLE_NOT_FOUND`), a phone number just stays as it is.
             Some(RequestPurpose::GetCollectibleInfo) => {
                 if let Some(lookup) = self.payments.hub.collectible.as_mut() {
-                    lookup.loading = false;
-                    lookup.failed = Some(match err.class {
-                        ErrorClass::CollectibleNotFound => "COLLECTIBLE_NOT_FOUND".to_string(),
-                        _ => error_reason(err),
-                    });
+                    lookup.fail(
+                        extra,
+                        match err.class {
+                            ErrorClass::CollectibleNotFound => "COLLECTIBLE_NOT_FOUND".to_string(),
+                            _ => error_reason(err),
+                        },
+                    );
                 }
             }
             Some(RequestPurpose::GetGiftValueInfo) => self.apply_gift_value_error(err, pending),

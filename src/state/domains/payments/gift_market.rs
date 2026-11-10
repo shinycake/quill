@@ -1,7 +1,8 @@
 //! Reducer for the gift market (`crate::gift_market`): resale pages and
 //! purchases, auction states and bids, crafting candidates and results.
 use crate::gift_market::{
-    CraftGift, CraftResult, GiftMarketPayload, GiftMarketPurpose, bid_done_toast, error_note,
+    AuctionFollow, CraftGift, CraftResult, GiftMarketPayload, GiftMarketPurpose, bid_done_toast,
+    error_note,
 };
 use crate::marketplace::GiftPurchaseResult;
 use crate::state::*;
@@ -311,8 +312,20 @@ impl Session {
                 craft.crafting = false;
                 market.notes.push(note);
             }
-            GiftMarketPurpose::OpenAuction
-            | GiftMarketPurpose::CloseAuction
+            GiftMarketPurpose::OpenAuction => {
+                // Only the follow that asked fails; the box shows no error
+                // and does not ask again while it stays open.
+                if let AuctionFollow::Following {
+                    gift_id,
+                    request: asked,
+                } = market.follow
+                    && request != 0
+                    && asked == request
+                {
+                    market.follow = AuctionFollow::Failed(gift_id);
+                }
+            }
+            GiftMarketPurpose::CloseAuction
             | GiftMarketPurpose::AcquiredGifts { .. }
             | GiftMarketPurpose::UpgradePreview { .. } => {}
         }

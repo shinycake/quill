@@ -159,6 +159,7 @@ fn payment_receipt_opens_dialog() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
     let extra = session.request(RequestPurpose::GetPaymentReceipt, Some(ChatId(51)));
+    session.payments.receipt = ReceiptStage::Loading(extra);
     apply_json(
         &mut session,
         &seq,
@@ -168,11 +169,11 @@ fn payment_receipt_opens_dialog() {
             extra.0
         ),
     );
-    let receipt = session.payments.receipt.as_ref().expect("receipt");
+    let receipt = session.payments.receipt.data().expect("receipt");
     assert_eq!(receipt.product_title, "Time machine");
     assert_eq!(receipt.total_amount, 1999);
     assert_eq!(receipt.credentials_title, "Visa •• 4242");
-    assert!(session.payments.receipt_open);
+    assert!(session.payments.receipt.is_open());
 }
 
 #[test]

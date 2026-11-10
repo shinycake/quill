@@ -260,6 +260,18 @@ impl QuillApp {
             self.set_note(StatusNote::error(err));
             progressed = true;
         }
+        let notices = self
+            .live
+            .as_mut()
+            .map(|live| std::mem::take(&mut live.driver.session.payments.notices))
+            .unwrap_or_default();
+        for notice in notices {
+            self.set_note(match notice.kind {
+                quill::state::NoticeKind::Info => StatusNote::info(notice.text),
+                quill::state::NoticeKind::Error => StatusNote::error(notice.text),
+            });
+            progressed = true;
+        }
         if let Some(note) = self
             .live
             .as_mut()

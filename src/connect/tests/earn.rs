@@ -554,7 +554,7 @@ fn own_page_waits_for_recipients_and_keeps_postable_channels() {
     let join = earn.join_box.as_ref().unwrap();
     assert!(join.choose_recipient);
     assert_eq!(
-        earn.recipients.as_deref().unwrap(),
+        earn.recipients.list().unwrap(),
         &[
             EarnPeer::User(ME),
             EarnPeer::Chat(CHANNEL),

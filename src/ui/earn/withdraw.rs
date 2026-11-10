@@ -170,6 +170,7 @@ impl QuillApp {
                 .primary()
                 .flex_1()
                 .disabled(!enabled || locked)
+                .loading(session.payments.earn.is_checking_withdrawal())
                 .on_click(cx.listener(move |this, _, _, cx| this.earn_withdraw_stars(peer, cx)));
             let mut buttons = div().flex().gap_2().child(withdraw);
             if let Some(url) = ad_url {

@@ -26,8 +26,7 @@ impl Session {
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::GetCollectibleInfo)
                     && let Some(lookup) = self.payments.hub.collectible.as_mut()
                 {
-                    lookup.loading = false;
-                    lookup.info = Some(info);
+                    lookup.answer(extra, info);
                 }
             }
             PaymentsPayload::PaymentForm(form) => {
@@ -77,6 +76,10 @@ impl Session {
                     }
                     if result.success {
                         self.note_paid_media_unlocked(&paid);
+                        if !shown && self.payments.unlocked_notice.is_none() {
+                            // The checkout was closed while it paid.
+                            self.payments.notify(NoticeKind::Info, "Payment successful");
+                        }
                         if shown {
                             self.payments.form_paid = true;
                             self.payments.note = Some("✅ Payment successful".to_string());
@@ -95,6 +98,8 @@ impl Session {
                         }
                     } else if shown {
                         self.payments.note = Some("Payment failed".to_string());
+                    } else {
+                        self.payments.notify(NoticeKind::Error, "Payment failed");
                     }
                 }
             }
@@ -160,9 +165,10 @@ impl Session {
             }
             PaymentsPayload::PaymentReceipt(receipt) => {
                 // Slice P1: `getPaymentReceipt` answer (matched by `@extra`).
-                if pending.map(|p| p.purpose) == Some(RequestPurpose::GetPaymentReceipt) {
-                    self.payments.receipt = Some(receipt);
-                    self.payments.receipt_open = true;
+                if pending.map(|p| p.purpose) == Some(RequestPurpose::GetPaymentReceipt)
+                    && self.payments.receipt.waits_for(extra)
+                {
+                    self.payments.receipt = ReceiptStage::Open(receipt);
                 }
             }
             PaymentsPayload::StarSubscriptions(subs) => {

@@ -327,7 +327,10 @@ fn auction_link_follow_and_bids() {
     f.answer("placeGiftAuctionBid", json!({"@type": "ok"}));
     f.driver.follow_gift_auction(None).unwrap();
     assert_eq!(f.last("closeGiftAuction")["gift_id"], "800");
-    assert!(f.driver.session.payments.gift_market.followed.is_none());
+    assert_eq!(
+        f.driver.session.payments.gift_market.follow,
+        crate::gift_market::AuctionFollow::None
+    );
 }
 
 #[test]

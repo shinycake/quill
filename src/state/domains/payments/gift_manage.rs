@@ -17,6 +17,10 @@ impl Session {
             pending.map(|p| p.purpose)
         {
             self.payments.gifts_manage.limits.set(option, value);
+            self.payments
+                .gifts_manage
+                .limits_ask
+                .settle(pending.map(|p| p.id));
         }
     }
 
@@ -152,10 +156,19 @@ impl Session {
             PaymentsPurpose::SendStarGift => {
                 // Stars were spent whichever dialog asked.
                 hub.tx_loaded = false;
-                if !manage.send.waits_for(pending) {
+                let ours = manage.send.waits_for(pending);
+                if ours {
+                    manage.send.request = None;
+                }
+                // A box closed or rebuilt for another recipient while it was
+                // out has nobody to show it: Stars moved, so say so.
+                if !ours || !manage.send.open {
+                    // Closed while it was out: Stars moved, so say so.
+                    self.payments
+                        .notices
+                        .push(PaymentNotice::new(NoticeKind::Info, "Gift sent."));
                     return;
                 }
-                manage.send.request = None;
                 manage.send.error = None;
                 manage.send.selected = None;
                 manage.send.done = Some("Gift sent.".into());
@@ -308,7 +321,7 @@ impl Session {
         let reason = error_reason(err);
         let manage = &mut self.payments.gifts_manage;
         match purpose {
-            PaymentsPurpose::GetGiftOption(_) => {}
+            PaymentsPurpose::GetGiftOption(_) => manage.limits_ask.fail(pending.map(|p| p.id)),
             PaymentsPurpose::GetGiftCollections => manage.collections_loading = false,
             PaymentsPurpose::GetAvailableGifts if !manage.send.asked_gifts(pending) => {}
             PaymentsPurpose::GetPremiumGiftOptions if !manage.send.asked_premium(pending) => {}
@@ -332,13 +345,18 @@ impl Session {
             }
             PaymentsPurpose::GiftExportProbe => self.apply_gift_export_probe_error(err),
             PaymentsPurpose::SendStarGift => {
-                if !manage.send.waits_for(pending) {
-                    return;
+                let ours = manage.send.waits_for(pending);
+                if ours {
+                    manage.send.request = None;
                 }
-                manage.send.request = None;
-                manage.send.error = Some(format!(
-                    "Couldn't send the gift: {reason}. The gift may be sold out."
-                ));
+                let text = format!("Couldn't send the gift: {reason}. The gift may be sold out.");
+                if ours && manage.send.open {
+                    manage.send.error = Some(text);
+                } else {
+                    self.payments
+                        .notices
+                        .push(PaymentNotice::new(NoticeKind::Error, text));
+                }
             }
             _ => {
                 self.payments.hub.gift_mutating = false;

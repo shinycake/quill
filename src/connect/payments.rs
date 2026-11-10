@@ -39,9 +39,11 @@ impl<S: JsonSender> ConnectDriver<S> {
     ) -> Result<RequestId, ConnectSendError> {
         let extra = self.payment_extra(&invoice, RequestPurpose::GetPaymentForm)?;
         let json = get_payment_form(extra, &invoice);
+        let sent = self.send_json_request(extra, &json)?;
+        // The checkout waits on the form only once the request is out.
         self.session.payments.request = Some(PaymentRequest { invoice });
         self.session.payments.form_request = Some(extra);
-        self.send_json_request(extra, &json)
+        Ok(sent)
     }
 
     /// Slice P1: `validateOrderInfo` (schema 1.8.67, line 15268) — validate
@@ -53,12 +55,13 @@ impl<S: JsonSender> ConnectDriver<S> {
         allow_save: bool,
     ) -> Result<RequestId, ConnectSendError> {
         let extra = self.payment_extra(invoice, RequestPurpose::ValidateOrderInfo)?;
+        let json = validate_order_info_request(extra, invoice, order, allow_save);
+        let sent = self.send_json_request(extra, &json)?;
         self.session.payments.request = Some(PaymentRequest {
             invoice: invoice.clone(),
         });
         self.session.payments.validate_request = Some(extra);
-        let json = validate_order_info_request(extra, invoice, order, allow_save);
-        self.send_json_request(extra, &json)
+        Ok(sent)
     }
 
     /// Slice P1: `sendPaymentForm` (schema 1.8.67, line 15277) — submit the
@@ -75,9 +78,6 @@ impl<S: JsonSender> ConnectDriver<S> {
         tip_amount: i64,
     ) -> Result<RequestId, ConnectSendError> {
         let extra = self.payment_extra(invoice, RequestPurpose::SendPaymentForm)?;
-        self.session.payments.request = Some(PaymentRequest {
-            invoice: invoice.clone(),
-        });
         let json = send_payment_form_request(
             extra,
             invoice,
@@ -88,6 +88,9 @@ impl<S: JsonSender> ConnectDriver<S> {
             tip_amount,
         );
         let sent = self.send_json_request(extra, &json)?;
+        self.session.payments.request = Some(PaymentRequest {
+            invoice: invoice.clone(),
+        });
         self.session.payment_sent(extra);
         Ok(sent)
     }
@@ -108,7 +111,9 @@ impl<S: JsonSender> ConnectDriver<S> {
         // A receipt is no checkout: `payments.request` stays the open
         // checkout's invoice, which `shows` and `checkout_sending` read.
         let json = get_payment_receipt(extra, chat_id, message_id);
-        self.send_json_request(extra, &json)
+        let sent = self.send_json_request(extra, &json)?;
+        self.session.payments.receipt = crate::state::ReceiptStage::Loading(extra);
+        Ok(sent)
     }
 
     /// Slice payments: clear the saved order info (`deleteSavedOrderInfo`,
@@ -284,7 +289,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// its lookup is running (tdesktop `resolveCollectible`).
     pub fn request_collectible_info(
         &mut self,
-        lookup: crate::collectible_info::CollectibleLookup,
+        mut lookup: crate::collectible_info::CollectibleLookup,
     ) -> Result<Option<RequestId>, ConnectSendError> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
@@ -295,7 +300,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .hub
             .collectible
             .as_ref()
-            .is_some_and(|open| open.loading && open.entity == lookup.entity);
+            .is_some_and(|open| open.is_loading() && open.entity == lookup.entity);
         if running {
             return Ok(None);
         }
@@ -303,6 +308,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         let extra = self
             .session
             .request(RequestPurpose::GetCollectibleInfo, None);
+        lookup.stage = crate::collectible_info::LookupStage::Loading(extra);
         self.session.payments.hub.collectible = Some(lookup);
         let json = crate::telegram::requests::get_collectible_item_info(extra, kind, &entity);
         if let Err(err) = self.send_json_request(extra, &json) {

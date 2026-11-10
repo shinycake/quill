@@ -157,7 +157,7 @@ impl QuillApp {
                     keys::Q_MONEY_PAYMENT_RECEIPT,
                 )));
             let session = this.session();
-            let receipt = session.as_ref().and_then(|s| s.payments.receipt.as_ref());
+            let receipt = session.as_ref().and_then(|s| s.payments.receipt.data());
             let Some(receipt) = receipt else {
                 return dialog.on_close(on_close);
             };
