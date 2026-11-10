@@ -201,6 +201,9 @@ pub fn download_file(args: &Value) -> Result<ToolOutput, ToolError> {
     // The download may have taken minutes: once Quill locked, Agent access
     // went off, the chat's grant changed or this agent was revoked meanwhile,
     // the chat's file must not land at the agent's path (or be named to it).
+    if to.is_some() && super::locked_since_call_began() {
+        return Err(ToolError::new(crate::agent::access::LOCKED_MESSAGE));
+    }
     super::still_allowed()?;
     let path = match to {
         Some(to) => copy_new(&local, &to, &name).map_err(|e| {

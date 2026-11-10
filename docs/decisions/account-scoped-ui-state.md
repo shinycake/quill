@@ -3997,3 +3997,33 @@ and 10 are widget items another fixer owns).
   refusal assertion in `channel_auto_translate_is_parsed_gated_and_toggled`.
   None waits on time. No test for 6 and 11 (they need a photo file and a
   download answer the offline harness cannot produce).
+
+### Sweep fixes (s12-ui)
+
+- **Window targets.** The `/` menu and the quick-reply row read
+  `viewed_chat()` (the window's chat), not the main window's `open_chat`
+  (12-049). The music row's play button carries its message's chat
+  (11-p3-001).
+- **Confirms act on what was confirmed.** Manage Topics Delete opens the
+  `DeleteForumTopic` box (10-068). The bulk "Delete chats" box captures its
+  chats in `GroupConfirmDialog::targets` when it opens (09-050, 10-087).
+- **Failed pages wait.** `TopicHistory::older` (`OlderEnd`) keeps a failed
+  older thread or topic page from being asked again on every render (06-001,
+  06-002); a failed next inline page, story viewers page, similar-channels
+  list and folder-invite chat are asked once (10-121, 13-144 with a Retry
+  button, 13-044, 09-110). The installed-wallpapers list is a `Fetch` with a
+  Retry (07-035). Thread paging notifies only when a request went out (13-104).
+  Not done: a failed older page of a non-empty thread/topic has no Retry row;
+  jumping to the latest or reopening clears it.
+- **Ends in an error.** Statistics: a chat that cannot show them, or a send
+  that failed, lands in the Failed state the panel draws (13-021, 13-022). A
+  refused live-story join clears `watching` and shows the Join button (13-089).
+- **Smaller.** A language switch whose send fails clears `switching`
+  (02-133); `updateChatPendingJoinRequests` with null parses as zero
+  (06-050); the folder editor's Save waits for the folder to load (09-104,
+  09-X052); Report spam on an archived chat only reports (08-049); a story
+  text reply keeps the chat's draft (07-005); a second edit keeps the real
+  draft (08-127); Promote forgets a selection the new search page hides
+  (10-078); an export call that timed out drops its late answer (03-040); the
+  spell download ends its progress loop when the worker panics (05-002);
+  the agent's download re-checks access after the copy (01-013).
