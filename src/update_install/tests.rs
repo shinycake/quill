@@ -250,6 +250,10 @@ fn write_app(package: &Path, app: App, payload: &[u8]) {
 /// An installed package `opt/quill` (`opt/Quill.app`) and a staged one
 /// beside it, as `download_and_stage` leaves them.
 fn bundle_fixture(tag: &str, old_app: App, new_app: App) -> Fixture {
+    bundle_fixture_staged_as(tag, old_app, new_app, &staged_dir_name(1, 1))
+}
+
+fn bundle_fixture_staged_as(tag: &str, old_app: App, new_app: App, staged_name: &str) -> Fixture {
     let root = std::env::temp_dir().join(format!("quill-apply-{tag}-{}", std::process::id()));
     let _ = fs::remove_dir_all(&root);
     fs::create_dir_all(root.join("opt")).unwrap();
@@ -265,7 +269,7 @@ fn bundle_fixture(tag: &str, old_app: App, new_app: App) -> Fixture {
     // folder on macOS (created closed to other users, as staging does).
     let layout = Layout::of(&target).unwrap();
     ensure_private_dir(&layout.stage_root).unwrap();
-    let staged = layout.stage_root.join(".quill-update-1-999.0.0-1.new");
+    let staged = layout.stage_root.join(staged_name);
     write_app(&staged, new_app, b"new-td");
     let plan_path = layout.plans.join(".quill-update-1-999.0.0-1.json");
     let old_exe = fs::read(&target).unwrap();
@@ -277,6 +281,29 @@ fn bundle_fixture(tag: &str, old_app: App, new_app: App) -> Fixture {
         target,
         old_exe,
     }
+}
+
+#[test]
+fn the_staging_folder_name_has_no_extension() {
+    // macOS would take the unpacked package for an app bundle otherwise.
+    let name = staged_dir_name(4321, 1_794_268_905_000_000_000);
+    assert!(name.starts_with(swap::TEMP_PREFIX), "{name}");
+    assert!(!name.chars().skip(1).any(|c| c == '.'), "{name}");
+    assert_ne!(name, staged_dir_name(4321, 1_794_268_905_000_000_001));
+}
+
+#[test]
+fn a_package_staged_under_the_old_folder_name_still_installs() {
+    let fx = bundle_fixture_staged_as(
+        "bundle-old-name",
+        App::Old,
+        App::New,
+        ".quill-update-1-999.0.0-1.new",
+    );
+    let (claim, plan) = fx.take(exited_pid(), &[]);
+    apply_plan(claim, plan, fx.target.clone(), start_directly).unwrap();
+    assert!(probe_binary(&fx.target, "999.0.0").is_ok());
+    assert!(!fx.staged.exists() && fx.no_claim_left());
 }
 
 #[test]

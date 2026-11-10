@@ -488,12 +488,34 @@ impl From<Refusal> for std::io::Error {
 }
 
 /// Verification, then (macOS) the quarantine mark goes: only a bundle that
-/// passed every check loses it, so a refused one stays quarantined.
+/// passed every check loses it, so a refused one stays quarantined. Last,
+/// the system checks each of its code files once and saves the verdicts
+/// (`first_load::settle_package`), which it only does while the folder is
+/// not a bundle to it: see [`staged_dir_name`].
 fn accept_staged(layout: &Layout, staged: &Path, release: &ReleaseInfo) -> Result<(), Refusal> {
     verify_staged(layout, staged, release)?;
     #[cfg(target_os = "macos")]
-    macos::remove_quarantine(staged).map_err(|_| Refusal::Invalid)?;
+    {
+        macos::remove_quarantine(staged).map_err(|_| Refusal::Invalid)?;
+        if let Ok(files) = swap::list_files(staged) {
+            crate::first_load::settle_package(staged, files);
+        }
+    }
     Ok(())
+}
+
+const STAGED_SUFFIX: &str = "-new";
+/// How plans written before 2026-11-10 named their folder.
+const OLD_STAGED_SUFFIX: &str = ".new";
+
+/// The name of the folder a package is unpacked into and installed from.
+/// It has no dot after the first character. macOS takes a folder for an app
+/// bundle when its name has an extension and it holds `Contents/MacOS`, and
+/// a code file it first meets inside a notarized bundle is checked again on
+/// every cold start. Met in a plain folder, the file is checked once and the
+/// verdict is saved (docs/decisions/launch-first-load-check.md).
+fn staged_dir_name(pid: u32, nanos: u128) -> String {
+    format!("{}{pid}-{nanos}{STAGED_SUFFIX}", swap::TEMP_PREFIX)
 }
 
 #[derive(Serialize, Deserialize)]
@@ -582,17 +604,19 @@ pub fn download_and_stage(
         |_| "Could not create the update folder beside Quill. Check folder permissions.",
     )?;
     clear_interrupted_update(&target, &layout);
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
     let stamp = format!(
-        "{}{}-{}-{}",
+        "{}{}-{}-{nanos}",
         swap::TEMP_PREFIX,
         std::process::id(),
         release.version,
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_nanos()
     );
-    let staged = layout.stage_root.join(format!("{stamp}.new"));
+    let staged = layout
+        .stage_root
+        .join(staged_dir_name(std::process::id(), nanos));
     let archive = fetch::partial_path(&layout.stage_root, &asset.sha256);
     fetch::clear_other_partials(&layout.stage_root, &archive);
     let plan_path = layout.plans.join(format!("{stamp}.json"));
@@ -798,7 +822,7 @@ fn install_bundle(
         .to_string_lossy();
     if plan.staged.parent() != Some(layout.stage_root.as_path())
         || !name.starts_with(swap::TEMP_PREFIX)
-        || !name.ends_with(".new")
+        || !(name.ends_with(STAGED_SUFFIX) || name.ends_with(OLD_STAGED_SUFFIX))
         || !fs::symlink_metadata(&plan.staged)?.file_type().is_dir()
     {
         return Err(std::io::Error::other("Invalid update handoff"));

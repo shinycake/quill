@@ -57,8 +57,55 @@ by `launch-bench.py` is in the second group, and so was every release before tha
 Mac that builds all day the kernel forgets Quill's files within minutes, so there nearly
 every start paid it. It is not particular to Quill. Of the apps
 installed on the same Mac, the notarized ones updated in the last week are rescanned the
-same way (Zed's 177 MB executable takes 1.4 s); several older installs are not, and the
-log does not say what set them apart.
+same way (Zed's 177 MB executable takes 1.4 s); several older installs are not. The next
+section says what sets them apart.
+
+### Why Telegram and Ghostty are not rescanned
+Found the same evening, from the kernel's policy log (`process == "kernel" AND sender ==
+"AppleSystemPolicy"`, one `evaluation result:` line per decision), `syspolicyd`'s code and
+copies of the release in a cache folder.
+
+`syspolicyd` keeps one record per bundle: when it was last scanned and with which rules.
+The kernel has a file checked again when the file changed after that time (`changetime` in
+the log). For a notarized bundle whose scan was skipped the time is "never", so every file
+fails that test on its first mapping after the kernel forgot it. The check that follows
+is saved only when the file has a record of its own, which a file inside a bundle does
+not: it logs `Recording cache miss` for the bundle and nothing else.
+
+Three things give a bundle a real time:
+
+- The first launch of a download. Approving "downloaded from the Internet" stamps the
+  bundle with that moment (`Marked application as user approved`). A copy installed from
+  the DMG is quiet from its first start.
+- A background job, `com.apple.security.syspolicy.invalidate`. It scans every bundle that
+  has cache misses and saves the result. It runs only while the screen is asleep, about
+  three days after its last run, or one day after a restart (`dasd` logs each run). The
+  stored times of Zed and Tern are inside its last two runs, 2026-11-02 21:27 and
+  2026-11-06 16:48, to the second.
+- Not being notarized (the scan is not skipped).
+
+Telegram, Ghostty and Fork were last updated weeks ago and have been through the job. An
+update that Quill installs itself is never approved by anyone, and with a release most
+days the job never reaches the installed build before the next one replaces it.
+`gktool scan` does not help: it skips the scan the same way, for the bundle and for a file
+in it.
+
+A file that is not inside a bundle is treated differently. Its first check is saved
+(`Updating cached scan for … with scantime … and version …`), keyed by the file itself,
+and that record is found first when the file is later mapped from inside a bundle.
+`syspolicyd` takes a folder for a bundle only when its name has an extension and it holds
+`Contents/MacOS`, `Contents/Info.plist` or the like. The same notarized release, after a
+recycle, each row measured twice:
+
+| copy | `quill --version` | mapping `libtdjson.dylib` | scans |
+| --- | ---: | ---: | ---: |
+| copied as `Quill.app` | 888 to 909 ms | 338 to 348 ms | 12 of 12 files |
+| copied as `stagedir`, every code file mapped once, renamed to `Quill.app` | 64 ms | 5 to 6 ms | 0 |
+
+The order matters. A folder that was first seen under a bundle's name (`123.new`) stays a
+bundle to the system after it is renamed, and its files get no records of their own.
+Renaming a folder keeps the files' change times; renaming a file does not, and a record
+older than the file's change time is not used.
 
 ## What did not help
 - `spctl --assess` on a fresh copy before its first launch, and a quarantine attribute
@@ -102,6 +149,42 @@ purged). The window does not notice: one build launched with `settle` and with i
 instruction patched to return, file cache purged, ten launches each in turn, put the
 window on screen in a median 946 ms and 949 ms.
 
+## Updates are checked before they become a bundle
+The updater used to unpack a release into `.quill-update-<stamp>.new`, which the system
+takes for a bundle, and run the new executable there for its version probe. From then on
+the files could only be settled by the background job.
+
+- The staging folder is named `.quill-update-<pid>-<time>-new`: no dot after the first
+  character (`update_install::staged_dir_name`). A plan staged under the old name still
+  installs.
+- After the signature and version checks, `first_load::settle_package` maps every Mach-O
+  file of the package once. The system scans each (about 3 s in all, on the download
+  thread, before the update is offered) and saves the verdicts.
+- The swap renames the folder, as before, so the verdicts arrive with the files.
+
+Nothing is skipped here either: each file gets the same XProtect scan, with the current
+rules, once instead of at every cold start. A file that changes afterwards is scanned
+again, and so is every file when the rules change (once, and saved).
+
+Checked with the real updater: a local build of this branch, signed like the release and
+given an older version number, downloaded the notarized 5357 release from a local fixture
+(`QUILL_UPDATE_FIXTURE_URL`) and staged it. The log shows one `Updating cached scan` line
+for each of the 12 code files, 2 s in all. The staged folder was then exchanged with an
+installed `Quill.app` the way `swap_dir` does it (`renamex_np`, `RENAME_SWAP`):
+
+| cold start of the installed copy | `quill --version` | mapping `libtdjson.dylib` | cache misses |
+| --- | ---: | ---: | ---: |
+| first after the install | 619 ms | 6 ms | 0 |
+| second | 65 ms | 6 ms | 0 |
+| third | 67 ms | 6 ms | 0 |
+| the same release copied as `Quill.app` | 895 ms | 340 ms | 12 |
+
+The first start after an install still spends about 0.55 s on the system's evaluation of
+the new bundle as a whole (signature and notarization ticket, no scan). That happens once.
+
+The first release with this change is still unpacked by the old updater, so the gain
+starts with the release after it. Installing from the DMG was never affected.
+
 ## Measuring a local build against a release
 Two things made a local build look 30 to 50 ms slower than the release before the
 comparison above was done on one build:
@@ -109,20 +192,29 @@ comparison above was done on one build:
 - A plain `cargo build` targets macOS 11 and has no chained fixups; the release targets
   macOS 14. Build with `MACOSX_DEPLOYMENT_TARGET=14.0`, or compare two local builds.
 - A local build reports Cargo's version, which is older than every release. Signed with
-  the release's identity it could update itself, and in two runs the binary under test
-  was replaced by the latest release part of the way through. `launch-bench.py` now keeps
+  the release's identity it downloads the latest release, and the next start installs
+  it (`apply_on_start`): in two runs the binary under test was replaced part of the way
+  through. `launch-bench.py` now keeps
   each bundle in a read-only folder, where Quill does not update itself, and stops if a
   bundle's executable changes.
 
 ## What is left
-The executable's own check, 730 to 900 ms before `main`, is still there. Nothing in the
-process can run before it. What would shorten it:
+A build that reaches a Mac without either the approval prompt or the new updater still
+pays the executable's own check, 730 to 900 ms before `main`, until the background job
+has run: the first release after this change, and a copy installed by a tool that strips
+the quarantine mark. Nothing in the process can run before that check. What would shorten
+it:
 
-- A smaller executable. 19.5 MB of the 108 MB is the symbol table (about 130 ms), which
-  `crash_log` needs for function names; it could move to a file beside the executable.
-- An executable that is only a stub, with the app in a library `settle`d next to TDLib.
-  The same bytes are scanned, partly in parallel.
-- Apple caching the verdict. Worth a Feedback report.
+- A smaller executable. 19.5 MB of the 108 MB is the symbol table, which `crash_log`
+  needs for function names; it could move to a file beside the executable. Measured on
+  two copies of the release executable, one with local symbols stripped (85 MB against
+  102 MB), five first mappings each in turn: 957 to 1009 ms against 1076 to 1144 ms,
+  about 115 ms.
+- Apple saving the verdict for a file in a bundle as it does for a file outside one.
+  Worth a Feedback report.
+
+After an XProtect rules update (about weekly) each file is scanned once more on its next
+cold mapping, and the result is saved.
 
 Apart from the check: loading the call library on the early-connect worker costs the main
 thread about 30 ms of a launch with a purged file cache (`main` to the app object built:
@@ -131,5 +223,7 @@ could load after the first frame, at the price of holding the loader's lock then
 
 ## Rules
 - A new bundled library is loaded through `first_load::settle` first.
+- Nothing runs or maps code from an unpacked update while its folder has a name with an
+  extension, and nothing renames or rewrites its files after `settle_package`.
 - A launch number for a release is measured on the notarized bundle with `--recycle`,
   next to `--cold`.
