@@ -91,6 +91,7 @@ impl QuillApp {
         if self.gift_market.stack.is_empty() {
             self.forget_failed_previews();
         }
+        // box-host: every caller opens the box in its own window right after
         self.gift_market.push(next);
     }
 
