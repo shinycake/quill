@@ -125,6 +125,20 @@ fn join_request_updates_parse() {
         }
         other => panic!("unexpected {other:?}"),
     }
+    // Once nothing is pending TDLib sends null: the badge clears.
+    let json = r#"{"@type":"updateChatPendingJoinRequests","chat_id":-1001234567890,"pending_join_requests":null}"#;
+    let env = parse_envelope(json).unwrap();
+    match env.payload {
+        EnvelopePayload::Groups(GroupsPayload::UpdateChatPendingJoinRequests {
+            total_count,
+            user_ids,
+            ..
+        }) => {
+            assert_eq!(total_count, 0);
+            assert!(user_ids.is_empty());
+        }
+        other => panic!("unexpected {other:?}"),
+    }
 }
 
 /// Phase D3a: every constructor this slice relies on must exist verbatim
