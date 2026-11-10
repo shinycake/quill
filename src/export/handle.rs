@@ -22,6 +22,9 @@ pub(crate) struct ChannelTdlib {
     requests: mpsc::Sender<Value>,
     replies: mpsc::Receiver<Value>,
     cancelled: Arc<AtomicBool>,
+    /// Set when a call gave up waiting: the answer to it, if one still
+    /// comes, belongs to no call and the link drops it.
+    abandoned: Arc<AtomicBool>,
     leftovers: Option<Leftovers>,
     /// Dropped with the worker, which tells the link it ended.
     _alive: mpsc::Sender<()>,
@@ -32,6 +35,8 @@ impl ChannelTdlib {
     pub(crate) fn into_scripted(self) -> ScriptedWorker {
         ScriptedWorker {
             requests: self.requests,
+            replies: self.replies,
+            abandoned: self.abandoned,
             _alive: self._alive,
         }
     }
@@ -42,6 +47,8 @@ impl ChannelTdlib {
 #[cfg(test)]
 pub(crate) struct ScriptedWorker {
     requests: mpsc::Sender<Value>,
+    replies: mpsc::Receiver<Value>,
+    abandoned: Arc<AtomicBool>,
     _alive: mpsc::Sender<()>,
 }
 
@@ -49,6 +56,16 @@ pub(crate) struct ScriptedWorker {
 impl ScriptedWorker {
     pub(crate) fn send(&self, request: Value) -> Result<(), mpsc::SendError<Value>> {
         self.requests.send(request)
+    }
+
+    /// The worker's call timed out.
+    pub(crate) fn give_up(&self) {
+        self.abandoned.store(true, Ordering::Release);
+    }
+
+    /// An answer the link handed the worker, if one is waiting.
+    pub(crate) fn answer(&self) -> Option<Value> {
+        self.replies.try_recv().ok()
     }
 }
 
@@ -78,6 +95,7 @@ impl Tdlib for ChannelTdlib {
                 }
                 Err(mpsc::RecvTimeoutError::Disconnected) => return Err(ExportError::Cancelled),
                 Err(mpsc::RecvTimeoutError::Timeout) if started.elapsed() > timeout => {
+                    self.abandoned.store(true, Ordering::Release);
                     return Err(ExportError::Tdlib("the request timed out".into()));
                 }
                 Err(mpsc::RecvTimeoutError::Timeout) => {}
@@ -113,6 +131,8 @@ pub struct WorkerLink {
     /// The request the driver sent and awaits an answer for.
     pub pending: Option<RequestId>,
     cancelled: Arc<AtomicBool>,
+    /// The worker gave up on its last call (see `ChannelTdlib::abandoned`).
+    abandoned: Arc<AtomicBool>,
     /// Disconnected once the worker ended.
     ended: mpsc::Receiver<()>,
 }
@@ -123,11 +143,13 @@ impl WorkerLink {
         let (request_tx, requests) = mpsc::channel();
         let (replies, reply_rx) = mpsc::channel();
         let cancelled = Arc::new(AtomicBool::new(false));
+        let abandoned = Arc::new(AtomicBool::new(false));
         let (alive, ended) = mpsc::channel();
         let worker = ChannelTdlib {
             requests: request_tx,
             replies: reply_rx,
             cancelled: cancelled.clone(),
+            abandoned: abandoned.clone(),
             leftovers,
             _alive: alive,
         };
@@ -138,6 +160,7 @@ impl WorkerLink {
             replies,
             pending: None,
             cancelled,
+            abandoned,
             ended,
         };
         (link, worker)
@@ -174,6 +197,11 @@ impl WorkerLink {
     pub fn reply(&mut self, id: RequestId, value: Value) {
         if self.pending == Some(id) {
             self.pending = None;
+            // A call that timed out is not waiting: the answer must not
+            // reach the call that follows it.
+            if self.abandoned.swap(false, Ordering::AcqRel) {
+                return;
+            }
             let _ = self.replies.send(value);
         }
     }
@@ -293,5 +321,28 @@ impl ChatExport {
             title: String::new(),
         };
         (export, worker.into_scripted())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_answer_to_a_timed_out_call_does_not_reach_the_next_call() {
+        let (mut export, worker) = ChatExport::scripted();
+        export.link.pending = Some(RequestId(1));
+        worker.give_up();
+        export
+            .link
+            .reply(RequestId(1), serde_json::json!({"@type": "messages"}));
+        assert!(worker.answer().is_none(), "dropped, not queued");
+        assert!(export.link.pending.is_none());
+
+        export.link.pending = Some(RequestId(2));
+        export
+            .link
+            .reply(RequestId(2), serde_json::json!({"@type": "messages"}));
+        assert!(worker.answer().is_some(), "a live call still gets its answer");
     }
 }
