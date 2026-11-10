@@ -99,3 +99,21 @@ fn a_taken_link_shows_the_error_and_blocks_save(cx: &mut TestAppContext) {
     assert!(app.read_with(vcx, |app, _| app.group_type_box().is_none()));
     assert!(shell.read_with(vcx, |s, _| s.open_dialog == Some(DialogKind::GroupEditBox)));
 }
+
+#[gpui_kit::test]
+fn a_usernames_refusal_does_not_come_back_when_the_box_reopens(cx: &mut TestAppContext) {
+    use quill::state::UsernameToggleError;
+    let (app, _shell, mut vcx) = open_demo(cx, "ready-group-type-box");
+    let vcx = &mut vcx;
+    app.update(vcx, |app, cx| {
+        if let Some(session) = app.session_mut() {
+            session.groups.group_type.toggle_error =
+                Some((ChatId(PUBLIC_GROUP), UsernameToggleError::TooMany));
+        }
+        app.close_group_type_box(cx);
+    });
+    let left = app.read_with(vcx, |app, _| {
+        app.session().and_then(|s| s.groups.group_type.toggle_error)
+    });
+    assert_eq!(left, None, "closing the box drops the refusal");
+}
