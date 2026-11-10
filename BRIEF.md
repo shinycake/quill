@@ -59,7 +59,11 @@ You are on Linux. Install what the build needs (see `.claude/skills/quill-run/SK
 for the package list). `cargo test --no-default-features` and
 `cargo clippy --no-default-features --all-targets -- -D warnings` are the core checks;
 `bash /tmp/gate.sh` runs everything CI runs (fmt, every scripts/ check, core and UI clippy, core and UI tests) and
-prints `GATE OK` or `GATE FAIL`. Run it in the foreground. Builds are slow: build once, then iterate with
+prints `GATE OK` or `GATE FAIL`. It takes longer than one Bash call allows, so start it with
+`bash /tmp/gate.sh > /tmp/gate.out 2>&1; echo GATE-EXIT >> /tmp/gate.out` as a background command, then wait with a
+Monitor until-loop (`until grep -q GATE-EXIT /tmp/gate.out; do sleep 30; done; tail -30 /tmp/gate.out`).
+Never end your turn while anything is running or any entry is left: ending your turn ends your session for good.
+You have no time limit; finish every entry. A bundle is done only with `GATE OK` in /tmp/gate.out. Builds are slow: build once, then iterate with
 `cargo check` on the feature you are in.
 
 ## Commit and push in steps
