@@ -3,7 +3,8 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
-use gpui_kit::component::{ActiveTheme, StyledExt};
+use gpui_kit::component::StyledExt;
+use gpui_kit::component::ActiveTheme;
 use gpui_kit::*;
 use quill::lang::{keys, tr};
 use quill::telegram::envelope::BotInfo;
@@ -23,7 +24,23 @@ impl QuillApp {
     ) -> Option<AnyElement> {
         let chat = chat?;
         let session = self.session()?;
-        let text = bot_about_text(session.bot_info_for_chat(chat.id)?)?.to_string();
+        let info = session.bot_info_for_chat(chat.id)?;
+        let text = bot_about_text(info)?;
+        let body = crate::ui::message_text::rich_text_line(
+            text,
+            &info.description_entities,
+            (chat.id.0, 0),
+            false,
+            &self.message_ui.spoiler_revealed,
+            self.msg_font(),
+            &std::collections::HashMap::new(),
+            cx,
+        );
+        let bubble = super::chat_palette::with_palette(self.history.palette.get(), false, || {
+            super::chat_theme::bg_bubble_incoming()
+        });
+        // tdesktop draws it as an incoming message bubble in the middle of
+        // the empty history (`AboutView`).
         Some(
             div()
                 .id("bot-about")
@@ -35,20 +52,25 @@ impl QuillApp {
                 .p_6()
                 .child(
                     div()
-                        .max_w(px(430.))
+                        .max_w(px(ABOUT_MAX_WIDTH))
                         .flex()
                         .flex_col()
-                        .gap_2()
-                        .p_4()
-                        .rounded_lg()
-                        .bg(cx.theme().muted)
+                        .gap_1()
+                        .px_3()
+                        .py_2()
+                        .rounded(cx.theme().radius_2xl())
+                        .bg(bubble)
+                        .text_color(cx.theme().foreground)
                         .child(div().font_semibold().child(tr(keys::BOT_DESCRIPTION)))
-                        .child(div().text_sm().child(text)),
+                        .child(body),
                 )
                 .into_any_element(),
         )
     }
 }
+
+/// tdesktop `msgMaxWidth`.
+const ABOUT_MAX_WIDTH: f32 = 430.;
 
 #[cfg(test)]
 mod tests {

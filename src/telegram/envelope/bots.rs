@@ -27,6 +27,10 @@ pub struct BotCommand {
 pub struct BotInfo {
     pub short_description: String,
     pub description: String,
+    /// The links, mentions, hashtags and commands in the trimmed
+    /// `description`, found by TDLib when the full info arrives
+    /// (`crate::text::about`).
+    pub description_entities: Vec<crate::text::TextEntity>,
     pub commands: Vec<BotCommand>,
     /// Slice B2: `botInfo.menu_button` — `(text, url)`. Absent/null in the
     /// payload → `None` (bots without a menu button, or older payloads).
@@ -135,6 +139,7 @@ pub(crate) fn parse_bot_info(value: Option<&Value>) -> Option<BotInfo> {
             .and_then(Value::as_str)
             .unwrap_or("")
             .to_string(),
+        description_entities: Vec::new(),
         commands: value
             .get("commands")
             .and_then(Value::as_array)
