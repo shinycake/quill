@@ -79,3 +79,20 @@ Do not open a PR. Do not merge anything.
 
 A table of every id: fixed (commit) / duplicate of <id> / skipped (why). Then the guards added, the tests added,
 the last gate line, and anything you could not finish.
+
+## What reviews of earlier bundles caught (avoid these)
+
+An Opus reviewer reads every bundle before it merges. In the first bundles about one fix in four was partial:
+
+- A new Loading stage with no exit when the request fails (the box says "Loading" for good). Every new stage needs
+  its error arm wired to the request's error path, and the UI must draw it with Retry or Close.
+- Two fields kept in step (a `Fetch<()>` beside an `Option<Vec<_>>`, a `*_failed` set beside a stage enum). Put the
+  data inside the one enum.
+- Fixing one screen and leaving its twin: grep every reader of the field you changed (e.g. both the Appearance page
+  and the chat-look box draw the wallpaper list).
+- A snapshot or "validated" value recorded when a request is sent instead of when its matching answer arrives.
+- Marking something "asked" before the send succeeded.
+- A panic guard that ends a loop but still awaits a panicked task (catch_unwind inside the worker instead).
+- Behaviour that differs from Telegram Desktop because the register entry assumed it should: check tdesktop's
+  source behaviour first, and skip the entry (saying so) when tdesktop does the same.
+- An entry wrongly skipped as "already handled": prove it with a test or fix it.
