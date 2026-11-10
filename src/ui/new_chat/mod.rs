@@ -220,6 +220,17 @@ impl QuillApp {
         cx.notify();
     }
 
+    /// Cancel, Escape and the close button of the first step: nothing
+    /// while the create request is out, as it cannot be taken back (the
+    /// chat is made either way, so the flow stays to finish it).
+    pub(in crate::ui) fn cancel_new_chat(&mut self, cx: &mut Context<Self>) {
+        if self.new_chat_view().is_some_and(|view| view.busy) {
+            cx.notify();
+            return;
+        }
+        self.close_new_chat(cx);
+    }
+
     pub(in crate::ui) fn toggle_new_chat_user(&mut self, user_id: i64, cx: &mut Context<Self>) {
         if let Some(dialog) = self.new_chat_dialog_mut() {
             if let Some(position) = dialog.selected_users.iter().position(|id| *id == user_id) {
@@ -466,7 +477,7 @@ impl QuillApp {
                 self.set_new_chat_stage(NewChatStage::Subscribers { chat }, cx);
             }
             Some(NewChatStep::Subscribers(chat)) => self.finish_new_chat(chat, window, cx),
-            _ => self.close_new_chat(cx),
+            _ => self.cancel_new_chat(cx),
         }
     }
 

@@ -130,3 +130,33 @@ fn a_picked_photo_opens_the_crop_and_lands_on_the_new_group(cx: &mut TestAppCont
             .is_some_and(|dialog| dialog.photo.is_some())
     }));
 }
+
+#[gpui_kit::test]
+fn cancel_does_nothing_while_the_create_request_is_out(cx: &mut TestAppContext) {
+    use quill::new_chat::{NewChatBack, NewChatStage};
+    use quill::state::RequestPurpose;
+    let (app, _shell, mut vcx) = open_demo(cx, "ready-new-channel");
+    let vcx = &mut vcx;
+    app.update(vcx, |app, cx| {
+        let request = app
+            .demo_session
+            .as_mut()
+            .map(|session| session.request(RequestPurpose::SetChatTitle, None))
+            .expect("demo session");
+        if let Some(dialog) = app.admin.create_chat_dialog.as_mut() {
+            dialog.stage = NewChatStage::Creating {
+                request,
+                back: NewChatBack::Info,
+            };
+        }
+        assert!(app.new_chat_view().is_some_and(|view| view.busy));
+        app.cancel_new_chat(cx);
+        assert!(app.admin.create_chat_dialog.is_some(), "the request is out");
+        // The answer came (an error): Cancel works again.
+        if let Some(session) = app.demo_session.as_mut() {
+            session.requests.take(request);
+        }
+        app.cancel_new_chat(cx);
+        assert!(app.admin.create_chat_dialog.is_none());
+    });
+}
