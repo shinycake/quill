@@ -76,13 +76,20 @@ impl QuillApp {
                 self.set_note(StatusNote::error(tr(
                     keys::Q_PEOPLE_COULD_NOT_SEARCH_MEMBERS,
                 )));
-            } else if let Some(AdminDialogKind::Promote { searched, .. }) = self
+            } else if let Some(AdminDialogKind::Promote {
+                searched,
+                selected_user,
+                ..
+            }) = self
                 .admin
                 .admin_dialog
                 .as_mut()
                 .map(|dialog| &mut dialog.kind)
             {
                 query.trim().clone_into(searched);
+                // The new page may not show the ticked member: Promote would
+                // act on someone the user can no longer see.
+                *selected_user = None;
             }
         } else {
             self.set_note(StatusNote::info(tr(

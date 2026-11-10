@@ -82,6 +82,10 @@ pub(in crate::ui) struct LiveStoryUi {
     pub(in crate::ui) player: Option<VideoPlayer>,
     /// The live story the viewer joined: `(poster, story)`.
     pub(in crate::ui) watching: Option<(ChatId, i32)>,
+    /// The story whose join was refused: it is not joined again by the
+    /// viewer's upkeep, only by the "Join live" button; another story (or
+    /// none) clears it.
+    pub(super) refused_join: Option<(ChatId, i32)>,
     /// The call was seen tracked since the join (so its end is noticed).
     pub(super) seen_call: bool,
     /// Stars the next comment carries (0 = free; tdesktop `_starsToSend`).
@@ -137,6 +141,7 @@ impl LiveStoryUi {
             input,
             player: None,
             watching: None,
+            refused_join: None,
             seen_call: false,
             chosen_stars: 0,
             stars_box: None,
@@ -168,6 +173,7 @@ impl LiveStoryUi {
     /// Everything but the field and the picture goes back to the start.
     pub(super) fn reset(&mut self) {
         self.watching = None;
+        self.refused_join = None;
         self.seen_call = false;
         self.chosen_stars = 0;
         self.stars_box = None;

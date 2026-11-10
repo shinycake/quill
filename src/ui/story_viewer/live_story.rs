@@ -51,7 +51,13 @@ impl QuillApp {
         if watching.is_some() && watching != target {
             self.leave_live_story_view(cx);
         }
-        if target.is_some() && self.stories.live.watching.is_none() {
+        if self.stories.live.refused_join != target {
+            self.stories.live.refused_join = None;
+        }
+        if target.is_some()
+            && self.stories.live.watching.is_none()
+            && self.stories.live.refused_join.is_none()
+        {
             self.stories.live.watching = target;
             self.join_watched_live_story(cx);
         }
@@ -91,6 +97,10 @@ impl QuillApp {
             return;
         };
         if let Err(err) = live.driver.join_live_story(chat_id, story_id) {
+            // Not watching: the viewer shows its "Join live" button instead
+            // of an opening spinner nothing will end.
+            self.stories.live.watching = None;
+            self.stories.live.refused_join = Some((chat_id, story_id));
             self.set_note(crate::ui::calls::join_error_note(
                 err,
                 keys::Q_MEDIA_COULD_NOT_JOIN_THE_LIVE,

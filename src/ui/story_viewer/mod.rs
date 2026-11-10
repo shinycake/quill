@@ -98,9 +98,14 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         if let Some(live) = self.live.as_mut() {
+            let joined = live.driver.join_live_story(chat_id, story_id);
+            if joined.is_ok() {
+                self.stories.live.watching = Some((chat_id, story_id));
+                self.stories.live.refused_join = None;
+            }
             self.screen.connection.set_note_for(
                 &self.screen.windows,
-                match live.driver.join_live_story(chat_id, story_id) {
+                match joined {
                     Ok(_) => StatusNote::silent(tr(keys::Q_MEDIA_JOINING_LIVE_STORY)),
                     Err(err) => crate::ui::calls::join_error_note(
                         err,
