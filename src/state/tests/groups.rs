@@ -5,11 +5,15 @@ use super::*;
 #[test]
 fn custom_title_failure_surfaces_in_member_dialog() {
     // Slice G1 replay: a TDLib `error` for `setChatMemberTag` lands
-    // in `member_action_error` (the member-management dialog reads
-    // the member-list fetch states, not `admin_lists`) as well as
-    // `admin_lists` for the info panel.
+    // in `member_action_error`, which the member-management dialog and
+    // the Administrators page show; a loaded administrators list is not
+    // replaced by it (round 5, 083).
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
+    session
+        .groups
+        .admin_lists
+        .insert(13, AdminListFetch::Loaded(Vec::new()));
     let extra = session.request(
         RequestPurpose::Groups(GroupsPurpose::SetChatMemberTag { user_id: 42 }),
         Some(ChatId(13)),
@@ -31,7 +35,38 @@ fn custom_title_failure_surfaces_in_member_dialog() {
     assert!(message.contains("Could not set custom title"));
     assert!(matches!(
         session.groups.admin_lists.get(&13),
-        Some(AdminListFetch::Failed(_))
+        Some(AdminListFetch::Loaded(_))
+    ));
+}
+
+#[test]
+fn a_refused_member_status_change_keeps_the_loaded_administrators() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    session
+        .groups
+        .admin_lists
+        .insert(13, AdminListFetch::Loaded(Vec::new()));
+    let extra = session.request(
+        RequestPurpose::Groups(GroupsPurpose::SetChatMemberStatus {
+            user_id: 42,
+            kind: MemberStatusChange::Demote,
+        }),
+        Some(ChatId(13)),
+    );
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"error","@extra":"{}","code":400,"message":"CHAT_ADMIN_REQUIRED"}}"#,
+            extra.0
+        ),
+    );
+    assert!(session.groups.member_action_error.contains_key(&13));
+    assert!(matches!(
+        session.groups.admin_lists.get(&13),
+        Some(AdminListFetch::Loaded(_))
     ));
 }
 

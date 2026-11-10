@@ -186,3 +186,30 @@ fn delete_on_the_removed_list_makes_the_user_left_not_a_member() {
     assert_eq!(request["member_id"]["user_id"], 5);
     assert_eq!(request["status"]["@type"], "chatMemberStatusLeft");
 }
+
+/// Round 2, 167: a save while an earlier setChatPermissions is out is sent
+/// too, and if both are refused the box shows the permissions from before
+/// the first, not the ones the first showed.
+#[test]
+fn a_second_save_while_one_is_out_is_sent_and_rolls_back_to_the_original() {
+    let mut rig = Rig::new();
+    rig.owned_supergroup();
+    let original = current(&rig);
+    let first = toggle(original, Permission::SendText, false);
+    let second = toggle(first, Permission::Videos, false);
+    let a = rig.driver.set_chat_permissions(ChatId(13), &first).unwrap();
+    let b = rig
+        .driver
+        .set_chat_permissions(ChatId(13), &second)
+        .unwrap();
+    assert!(a.is_some() && b.is_some(), "the second is not dropped");
+    assert_eq!(rig.sent("setChatPermissions").len(), 2);
+    assert_eq!(current(&rig), second);
+    for extra in [a, b].into_iter().flatten() {
+        rig.ingest(&format!(
+            r#"{{"@type":"error","@extra":"{}","code":400,"message":"X"}}"#,
+            extra.0
+        ));
+    }
+    assert_eq!(current(&rig), original);
+}

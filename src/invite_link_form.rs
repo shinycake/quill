@@ -253,9 +253,14 @@ impl InviteLinkForm {
     }
 
     /// The "Require Monthly Fee" switch: channels with a private link only
-    /// (tdesktop `!isPublic && fillSubscription`, `fill` is null in groups).
+    /// (tdesktop `!isPublic && fillSubscription`, `fill` is null in groups),
+    /// on a new link or on an existing subscription link (where it is
+    /// locked). An ordinary link cannot become a subscription: switching
+    /// it on would save the link with its limits wiped and no fee.
     pub fn offers_subscription(&self) -> bool {
-        !self.facts.group && !self.facts.public
+        !self.facts.group
+            && !self.facts.public
+            && (self.link.is_none() || self.locked_stars.is_some())
     }
 
     /// tdesktop `requestApprovalLocked`: a public chat that lets anyone in.
@@ -293,7 +298,7 @@ impl InviteLinkForm {
 
     /// tdesktop `subscription` click.
     pub fn toggle_subscription(&mut self) -> SubscriptionToggle {
-        if self.locked_stars.is_some() {
+        if self.locked_stars.is_some() || (self.link.is_some() && !self.offers_subscription()) {
             return SubscriptionToggle::Locked;
         }
         self.subscription = !self.subscription;

@@ -216,6 +216,14 @@ impl QuillApp {
     }
 
     pub(in crate::ui) fn close_new_chat(&mut self, cx: &mut Context<Self>) {
+        // A create still out when the dialog goes does not open its chat
+        // over what the person is doing next.
+        if let Some(NewChatStage::Creating { request, .. }) =
+            self.new_chat_dialog().map(|dialog| dialog.stage.clone())
+            && let Some(live) = self.live.as_mut()
+        {
+            live.driver.abandon_new_chat(request);
+        }
         self.admin.create_chat_dialog = None;
         cx.notify();
     }
@@ -337,13 +345,16 @@ impl QuillApp {
             Ok(sent) if sent.is_empty() => {
                 self.set_new_chat_stage(NewChatStage::Subscribers { chat }, cx);
             }
-            Ok(sent) => self.set_new_chat_stage(
-                NewChatStage::Type {
-                    chat,
-                    saving: Some(sent),
-                },
-                cx,
-            ),
+            Ok(sent) => {
+                live.driver.watch_new_chat_type_save(&sent);
+                self.set_new_chat_stage(
+                    NewChatStage::Type {
+                        chat,
+                        saving: Some(sent),
+                    },
+                    cx,
+                );
+            }
             Err(err) => {
                 self.set_note(StatusNote::error(user_error_for(
                     keys::Q_NOTES_FAILED_SAVE_GROUP_INFO,
@@ -368,7 +379,7 @@ impl QuillApp {
         let dialog = self.new_chat_dialog()?;
         let NewChatStage::Type {
             chat,
-            saving: Some(_),
+            saving: Some(sent),
         } = &dialog.stage
         else {
             return None;
@@ -382,6 +393,13 @@ impl QuillApp {
             .info_edit_errors
             .get(&chat.0)
             .map(|error| error.reason.clone())
+            .or_else(|| {
+                session
+                    .groups
+                    .new_chats
+                    .type_save_failure(sent)
+                    .map(str::to_string)
+            })
     }
 
     /// The subscribers step's Add (tdesktop `inviteSelectedUsers`).

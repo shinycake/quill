@@ -266,3 +266,18 @@ fn the_dollar_rate_comes_from_the_app_config() {
     assert_eq!(stars_usd(2500, 1.3).as_deref(), Some("$32.50"));
     assert_eq!(stars_usd(0, 1.3), None);
 }
+
+#[test]
+fn an_ordinary_link_cannot_become_a_subscription() {
+    let mut form = InviteLinkForm::edit_link(channel(), &link(0, 25, None));
+    assert!(!form.offers_subscription());
+    assert_eq!(form.toggle_subscription(), SubscriptionToggle::Locked);
+    assert!(!form.subscription);
+    assert!(matches!(
+        form.request("", 0, NOW),
+        InviteLinkRequest::Edit {
+            member_limit: 25,
+            ..
+        }
+    ));
+}

@@ -5,7 +5,7 @@
 use super::*;
 use crate::new_chat::{CreateFailure, CreationOutcome, NewChatKind, NewChatRequest};
 use crate::profile_photo_sources::ChatPhotoInput;
-use crate::state::NewChatCreation;
+use crate::state::{CreationAsker, NewChatCreation, TypeSave};
 use crate::telegram::envelope::{ChatsPayload, EnvelopePayload, GroupsPayload};
 use crate::telegram::requests::{
     create_new_basic_group_chat, create_new_supergroup_chat, set_chat_photo,
@@ -14,7 +14,9 @@ use crate::telegram::requests::{
 impl<S: JsonSender> ConnectDriver<S> {
     /// `createNewBasicGroupChat` (schema line 13327) for a group,
     /// `createNewSupergroupChat` (line 13337) otherwise. `photo` is set
-    /// once the chat exists. `None` while another create is out.
+    /// once the chat exists. `None` while the open dialog's create is out
+    /// (one whose dialog was closed is `abandon_new_chat`, and does not
+    /// count).
     pub fn create_new_chat(
         &mut self,
         request: &NewChatRequest,
@@ -29,7 +31,21 @@ impl<S: JsonSender> ConnectDriver<S> {
                 is_channel: kind == NewChatKind::Channel,
             }),
         };
-        if self.session.requests.has_purpose(purpose) {
+        let busy = self
+            .session
+            .groups
+            .new_chats
+            .creations
+            .iter()
+            .any(|(id, creation)| {
+                creation.asker == CreationAsker::Dialog
+                    && self
+                        .session
+                        .requests
+                        .get(*id)
+                        .is_some_and(|pending| pending.purpose == purpose)
+            });
+        if busy {
             return Ok(None);
         }
         let extra = self.session.request(purpose, None);
@@ -56,9 +72,27 @@ impl<S: JsonSender> ConnectDriver<S> {
                 open_when_created: request.kind == NewChatKind::Group,
                 make_invite_link: request.kind.is_supergroup(),
                 outcome: None,
+                asker: CreationAsker::Dialog,
             },
         );
         Ok(Some(extra))
+    }
+
+    /// The type step's Save went out as `sent`: any of them failing, or
+    /// being lost, keeps the step from moving on.
+    pub fn watch_new_chat_type_save(&mut self, sent: &[RequestId]) {
+        let saves = &mut self.session.groups.new_chats.type_saves;
+        saves.clear();
+        saves.extend(sent.iter().map(|id| (*id, TypeSave::Sent)));
+    }
+
+    /// The dialog that asked for this create was closed: the chat still
+    /// comes (TDLib cannot cancel it) but nothing opens it on top of
+    /// whatever the person is doing now.
+    pub fn abandon_new_chat(&mut self, request: RequestId) {
+        if let Some(creation) = self.session.groups.new_chats.creations.get_mut(&request) {
+            creation.asker = CreationAsker::Closed;
+        }
     }
 
     /// Before `apply` takes the pending request: how one of our creates
@@ -100,7 +134,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             return;
         };
         let photo = creation.photo.take();
-        let open = creation.open_when_created;
+        let open = creation.open_when_created && creation.asker == CreationAsker::Dialog;
         let make_invite_link = creation.make_invite_link;
         if let Some(photo) = photo {
             let photo_request = self

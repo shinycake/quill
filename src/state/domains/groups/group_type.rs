@@ -200,8 +200,7 @@ impl Session {
         if generation != state.check_generation {
             return;
         }
-        let UsernameCheck::Checking { chat_id, username } = std::mem::take(&mut state.check)
-        else {
+        let UsernameCheck::Checking { chat_id, username } = std::mem::take(&mut state.check) else {
             return;
         };
         match result {

@@ -315,7 +315,11 @@ fn a_half_sent_revoke_is_recorded_and_settles() {
 fn a_check_that_could_not_be_sent_is_not_in_flight() {
     let mut rig = Rig::new();
     rig.recorder.refuse(Some("checkChatUsername"));
-    assert!(rig.driver.check_group_username(ChatId(13), "quillchat").is_err());
+    assert!(
+        rig.driver
+            .check_group_username(ChatId(13), "quillchat")
+            .is_err()
+    );
     assert_eq!(
         rig.driver.session.groups.group_type.check,
         crate::state::UsernameCheck::Idle

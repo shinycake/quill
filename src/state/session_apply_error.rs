@@ -12,6 +12,9 @@ impl Session {
     ) {
         self.settle_own_reaction(extra, true);
         self.fail_own_full_info(&err, pending);
+        if let Some(slot) = extra.and_then(|id| self.groups.new_chats.type_saves.get_mut(&id)) {
+            *slot = TypeSave::Failed(super::request_errors::error_reason(&err));
+        }
         if matches!(
             pending.map(|p| p.purpose),
             Some(

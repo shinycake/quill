@@ -318,6 +318,26 @@ fn a_chat_windows_membership_probe_continues_when_getme_answers() {
     assert_eq!(h.sent("getChatMember", ChatId(-1001)).len(), 1);
 }
 
+/// The shared-media gallery is part of a window's view: one opened in a
+/// chat window is that chat's, and the main window's stays closed.
+#[test]
+fn a_gallery_opened_in_a_chat_window_belongs_to_that_window() {
+    let mut h = Harness::two_chats();
+    h.driver.select_chat(ALICE).unwrap();
+    h.driver.open_chat_window(BOB).unwrap();
+    let opened = h
+        .driver
+        .with_window_chat(BOB, |driver| driver.open_shared_media());
+    assert!(matches!(opened, Ok(true)));
+    let seen = h.driver.with_window_chat(BOB, |driver| {
+        let gallery = &driver.session.media.shared_media;
+        (gallery.open, gallery.chat_id)
+    });
+    assert_eq!(seen, (true, Some(BOB)));
+    let main = &h.driver.session.media.shared_media;
+    assert!(!main.open && main.chat_id.is_none());
+}
+
 #[test]
 fn a_search_typed_in_a_chat_window_searches_its_chat_and_answers_there() {
     let mut h = Harness::two_chats();

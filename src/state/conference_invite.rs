@@ -24,6 +24,10 @@ pub struct ConferenceInvite {
     pub is_video: bool,
     /// Some of the people already in the call.
     pub others: Vec<i64>,
+    /// Unix time the ring ends: the invitation's date plus the call ring
+    /// timeout. A missed `updateMessageContent` or a lost connection does
+    /// not keep it ringing past this (`expire_conference_invite`).
+    pub rings_until: i64,
 }
 
 impl Session {
@@ -82,7 +86,37 @@ impl Session {
                 .copied()
                 .filter(|other| *other != user_id)
                 .collect(),
+            rings_until: i64::from(message.date).saturating_add(CONFERENCE_INVITE_RING_SECS),
         });
+    }
+
+    /// The ring ran out with no answer (the update that would have settled
+    /// it never came): the invitation goes, declined as a too-old one is.
+    /// Returns whether it did.
+    pub fn expire_conference_invite(&mut self, now_unix: i64) -> bool {
+        let Some(invite) = self
+            .calls
+            .conference_invite
+            .take_if(|invite| invite.rings_until < now_unix)
+        else {
+            return false;
+        };
+        self.calls
+            .conference_invite_declines
+            .push((invite.chat_id, invite.message_id));
+        true
+    }
+
+    /// Seconds until the ringing invitation ends, for the poll loop.
+    pub fn conference_invite_rings_for(&self, now_unix: i64) -> Option<i64> {
+        let invite = self.calls.conference_invite.as_ref()?;
+        Some(
+            invite
+                .rings_until
+                .saturating_sub(now_unix)
+                .max(0)
+                .saturating_add(1),
+        )
     }
 
     /// The invitation is for the conference already current: the one

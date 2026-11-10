@@ -36,9 +36,8 @@ impl<S: JsonSender> ConnectDriver<S> {
         let mut result = self.maybe_probe_channel_membership();
         let windows: Vec<ChatId> = self.session.window_chats.iter().copied().collect();
         for chat_id in windows {
-            let probe = self.with_window_chat(chat_id, |driver| {
-                driver.maybe_probe_channel_membership()
-            });
+            let probe =
+                self.with_window_chat(chat_id, |driver| driver.maybe_probe_channel_membership());
             result = result.and(probe);
         }
         result
