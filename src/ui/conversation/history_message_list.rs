@@ -359,7 +359,7 @@ impl QuillApp {
             _ => {}
         }
         let count = self.history.rows.len();
-        self.sync_sponsored_tail(id, count, cx);
+        self.sync_sponsored_spots(id, cx);
         let corner_buttons = self.jump_corner_buttons(
             chat.as_ref().map_or(0, |c| c.unread_mention_count),
             chat.as_ref().map_or(0, |c| c.unread_reaction_count),
@@ -765,12 +765,9 @@ impl QuillApp {
                 .into_any_element(),
             None => element,
         };
-        // A channel ends with its sponsored message, under the last row and
-        // outside the row's tracked bounds (#1427).
-        let sponsored = (self.history.sponsored_tail.is_some()
-            && ix + 1 == self.history.rows.len())
-        .then(|| self.sponsored_footer(cx))
-        .flatten();
+        // A channel's ads follow the message they were placed after, under
+        // its row and outside the row's tracked bounds (`sponsored_spots`).
+        let sponsored = self.sponsored_under_row(row, cx);
         let row = div()
             .relative()
             .flex()
@@ -800,24 +797,6 @@ impl QuillApp {
                 .child(footer)
                 .into_any_element(),
             None => row.into_any_element(),
-        }
-    }
-
-    /// The main history of a channel carries its sponsored message under
-    /// the last row; when what it shows changes, that row is measured
-    /// again so the list makes room for it.
-    fn sync_sponsored_tail(&mut self, id: &'static str, count: usize, cx: &mut Context<Self>) {
-        let tail = (id == "session-history")
-            .then(|| self.sponsored_tail_key())
-            .flatten();
-        if tail == self.history.sponsored_tail {
-            return;
-        }
-        self.history.sponsored_tail = tail;
-        if let Some(last) = count.checked_sub(1) {
-            self.history.scroller.update(cx, |state, cx| {
-                let _ = state.remeasure_items(last..last + 1, cx);
-            });
         }
     }
 }

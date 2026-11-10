@@ -22,6 +22,7 @@ HistoryUi.painted_ids | rebuilt by every paint of the history list
 HistoryUi.seen | carries its chat; read once at the next render
 HistoryUi.on_screen | rebuilt by every paint of the history list
 HistoryUi.reported_visible | carries its chat: a repeat check, a new chat never matches
+HistoryUi.sponsored.spots * | rebuilt from the open chat's placed ads after every history render (sync_sponsored_spots)
 HistoryUi.ends | compared with the history synced next; a new chat's ends differ
 HistoryUi.last_highlight | compared with the session's highlight, which is the open chat's
 HistoryUi.self_destruct_tick_chat | marks a running tick task, as slow_mode_tick_chat
