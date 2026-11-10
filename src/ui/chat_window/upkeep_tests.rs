@@ -103,6 +103,14 @@ fn a_topic_switch_in_a_forum_window_leaves_the_old_topics_text(cx: &mut TestAppC
 fn an_ai_answer_for_a_chat_window_lands_in_its_composer(cx: &mut TestAppContext) {
     let h = new_app(cx);
     let chat_window = h.open_in_new_window(OTHER, cx);
+    // The window's draft was asked about (Fix): the answer replaces it.
+    let composer = h.window_composer(OTHER, cx);
+    in_window(&h, chat_window, Some(OTHER), cx, |app, window, cx| {
+        composer.update(cx, |field, cx| field.set_value("fixd text", window, cx));
+        app.chat_ui.ai_ask = crate::ui::composer::AiAsk::Asked {
+            markup: "fixd text".into(),
+        };
+    });
     h.app.update(cx, |app, _| {
         if let Some(session) = app.session_mut() {
             session.messages.ai_composer_text = Some((OTHER, "fixed text".into()));
