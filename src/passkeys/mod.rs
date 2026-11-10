@@ -112,8 +112,10 @@ impl Passkey {
 /// [`PasskeysState::removing`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PasskeysPurpose {
-    /// `getLoginPasskeys`; the answer is `passkeys`.
-    List,
+    /// `getLoginPasskeys`; the answer is `passkeys`. Carries the
+    /// [`PasskeysState::generation`] it was asked at, so the answer of a
+    /// look older than a removal is not taken for the current list.
+    List(u32),
     /// `removeLoginPasskey`; the answer is `ok`.
     Remove,
     /// `getPasskeyParameters`; the answer is `text` with the WebAuthn
@@ -139,6 +141,8 @@ pub enum PasskeysPayload {
     List(Vec<Passkey>),
     /// `passkey` (the answer to `addLoginPasskey`).
     Added(Passkey),
+    /// A `passkey` without an id: the registration cannot be finished.
+    AddedUnreadable,
 }
 
 /// Parse `type_name`, or `None` for a type this module does not own.
@@ -151,7 +155,9 @@ pub fn parse_payload(type_name: &str, value: &Value) -> Option<PasskeysPayload> 
                 .map(|list| list.iter().filter_map(Passkey::parse).collect())
                 .unwrap_or_default(),
         )),
-        "passkey" => Passkey::parse(value).map(PasskeysPayload::Added),
+        "passkey" => Some(
+            Passkey::parse(value).map_or(PasskeysPayload::AddedUnreadable, PasskeysPayload::Added),
+        ),
         _ => None,
     }
 }
@@ -210,6 +216,28 @@ impl PendingRegistration {
     }
 }
 
+/// "Create Passkey" (tdesktop `Passkeys::initRegistration`): one stage at
+/// a time. A request stage carries the id of its request, and only that
+/// answer moves it on; the error, a dropped request and the box closing
+/// (`PasskeysState::cancel_register`) each leave it.
+#[derive(Debug, Clone, Default)]
+pub enum PasskeyAdd {
+    #[default]
+    Idle,
+    /// `getPasskeyParameters` is on its way.
+    FetchingOptions(RequestId),
+    /// Options ready for a ceremony the UI has not started yet; the UI
+    /// takes them.
+    Starting(PendingRegistration),
+    /// The ceremony runs or ended; tdesktop keeps the options for their
+    /// timeout and reuses them on the next try.
+    Cached(PendingRegistration),
+    /// `addLoginPasskey` is on its way.
+    Sending(RequestId),
+    /// A passkey was just added; the UI takes it and closes the box.
+    Added,
+}
+
 /// The account's passkeys as last fetched (tdesktop `Data::Passkeys`).
 #[derive(Debug, Clone, Default)]
 pub struct PasskeysState {
@@ -230,16 +258,10 @@ pub struct PasskeysState {
     pub display_allowed: bool,
     /// `passkeys_account_passkeys_max`; `None` until the app config said.
     pub max_passkeys: Option<usize>,
-    /// The options of the registration in progress (tdesktop keeps them
-    /// for their timeout and reuses them on the next try).
-    pub registration: Option<PendingRegistration>,
-    /// Options ready for a ceremony the UI has not started yet; the UI
-    /// takes them.
-    pub ceremony: Option<CreationOptions>,
-    /// `addLoginPasskey` is on its way.
-    pub adding: bool,
-    /// A passkey was just added; the UI takes it and closes the box.
-    pub added: bool,
+    /// Bumped by a removal: a list answer asked before it is out of date.
+    pub generation: u32,
+    /// "Create Passkey" from the options to the server's answer.
+    pub add: PasskeyAdd,
     /// Signing in with a passkey (`login`).
     pub login: login::LoginState,
 }
@@ -254,8 +276,13 @@ impl PasskeysState {
                 .is_none_or(|at| now.saturating_duration_since(at) > LIST_FRESH_FOR)
     }
 
-    /// The list answer arrived.
-    pub fn accept_list(&mut self, list: Vec<Passkey>) {
+    /// The list answer arrived. One asked before the last removal
+    /// (`generation`) is dropped: it still has the removed passkey, and the
+    /// list stays stale for the look that follows.
+    pub fn accept_list(&mut self, list: Vec<Passkey>, generation: u32) {
+        if generation != self.generation {
+            return;
+        }
         self.list = list;
         self.known = true;
         self.stale = false;
@@ -270,6 +297,7 @@ impl PasskeysState {
         self.known = false;
         self.stale = true;
         self.requested_at = None;
+        self.generation = self.generation.wrapping_add(1);
     }
 
     pub fn find(&self, passkey_id: &str) -> Option<&Passkey> {
@@ -332,24 +360,91 @@ impl PasskeysState {
     pub fn accept_added(&mut self, passkey: Passkey) {
         self.list.retain(|p| p.id != passkey.id);
         self.list.push(passkey);
-        self.registration = None;
-        self.adding = false;
-        self.added = true;
+        self.add = PasskeyAdd::Added;
         self.error = None;
     }
 
-    /// The creation options arrived: keep them and start the ceremony.
-    /// `false` when they cannot be read (tdesktop then does nothing).
-    pub fn accept_parameters(&mut self, json: &str, now: Instant) -> bool {
+    /// The creation options of request `id` arrived: keep them and start
+    /// the ceremony. `false` when they cannot be read (tdesktop then does
+    /// nothing). An answer to anything but the request the stage waits for
+    /// (the box was closed, a newer ask went out) is ignored.
+    pub fn accept_parameters(&mut self, id: Option<RequestId>, json: &str, now: Instant) -> bool {
+        if !matches!(&self.add, PasskeyAdd::FetchingOptions(waiting) if Some(*waiting) == id) {
+            return true;
+        }
         let Some(options) = CreationOptions::parse(json) else {
+            self.add = PasskeyAdd::Idle;
             return false;
         };
-        self.registration = Some(PendingRegistration {
-            options: options.clone(),
+        self.add = PasskeyAdd::Starting(PendingRegistration {
+            options,
             fetched_at: now,
         });
-        self.ceremony = Some(options);
         true
+    }
+
+    /// Whether "Create Passkey" has options, an options request or the
+    /// result on its way.
+    pub fn add_busy(&self) -> bool {
+        matches!(
+            self.add,
+            PasskeyAdd::FetchingOptions(_) | PasskeyAdd::Starting(_) | PasskeyAdd::Sending(_)
+        )
+    }
+
+    /// The UI starts the ceremony with the options that landed; they stay
+    /// cached for the next try.
+    pub fn take_starting(&mut self) -> Option<CreationOptions> {
+        match std::mem::take(&mut self.add) {
+            PasskeyAdd::Starting(pending) => {
+                let options = pending.options.clone();
+                self.add = PasskeyAdd::Cached(pending);
+                Some(options)
+            }
+            other => {
+                self.add = other;
+                None
+            }
+        }
+    }
+
+    /// The UI consumes "just added".
+    pub fn take_added(&mut self) -> bool {
+        if matches!(self.add, PasskeyAdd::Added) {
+            self.add = PasskeyAdd::Idle;
+            true
+        } else {
+            false
+        }
+    }
+
+    /// The box was closed (or the lock closed it): options still on their
+    /// way or waiting to start are dropped, so no ceremony starts for a
+    /// box nobody sees. Cached options stay for the next try, and a result
+    /// already sent stays sent.
+    pub fn cancel_register(&mut self) {
+        if matches!(
+            self.add,
+            PasskeyAdd::FetchingOptions(_) | PasskeyAdd::Starting(_) | PasskeyAdd::Added
+        ) {
+            self.add = PasskeyAdd::Idle;
+        }
+    }
+
+    /// The request `id` of the registration failed (error, unreadable
+    /// answer, or lost): the stage waiting for it ends and the options are
+    /// dropped (tdesktop does). `false` when `id` is not what the stage
+    /// waits for (the box was closed, a newer ask went out).
+    pub fn fail_register(&mut self, id: Option<RequestId>) -> bool {
+        match &self.add {
+            PasskeyAdd::FetchingOptions(waiting) | PasskeyAdd::Sending(waiting)
+                if Some(*waiting) == id =>
+            {
+                self.add = PasskeyAdd::Idle;
+                true
+            }
+            _ => false,
+        }
     }
 }
 

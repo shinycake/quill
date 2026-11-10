@@ -155,29 +155,66 @@ fn forget_folder_data(paths: &AccountPaths) {
 
 const RECENT_HASHTAGS: &str = "recent_hashtags.json";
 
-/// A client of `key` learned it is signed in as `user_id`. When the folder
-/// was last signed in as someone else, what they left is dropped first.
-/// Returns whether it was.
-pub fn claim(app_root: &Path, key: &AccountKey, user_id: i64) -> bool {
-    let paths = AccountPaths::for_root(app_root, key);
-    let file = paths.root.join(OWNER_FILE);
-    let previous = std::fs::read(&file)
+/// Who an account folder was last signed in as.
+enum Previous {
+    /// No readable `owner.json`: never written, deleted, or corrupt.
+    Unknown,
+    Known(i64),
+}
+
+fn read_owner(file: &Path) -> Previous {
+    std::fs::read(file)
         .ok()
         .and_then(|bytes| serde_json::from_slice::<Owner>(&bytes).ok())
-        .map(|owner| owner.user_id);
-    if previous == Some(user_id) {
-        return false;
-    }
-    let someone_else = previous.is_some();
+        .map_or(Previous::Unknown, |owner| Previous::Known(owner.user_id))
+}
+
+/// Whether something the last user could have left is on disk for `key`
+/// (what [`forget`] drops from the folder and the app root).
+fn has_leftovers(app_root: &Path, paths: &AccountPaths, account: &str) -> bool {
+    paths.root.join(RECENT_HASHTAGS).exists()
+        || paths.root.join(crate::connect::PAID_TRUST_FILE).exists()
+        || widget_dir(app_root, account).exists()
+        || webview_dir(app_root, account).exists()
+}
+
+/// What [`claim`] did.
+pub struct Claimed {
+    /// The folder was last signed in as someone else (or as someone who
+    /// cannot be told), and what they left was dropped first.
+    pub dropped: bool,
+    /// Why the new owner could not be saved; until it is, the next start
+    /// cannot tell whose the folder is.
+    pub owner_error: Option<std::io::Error>,
+}
+
+/// A client of `key` learned it is signed in as `user_id`. When the folder
+/// was last signed in as someone else, what they left is dropped first. An
+/// owner that cannot be read (no file, a corrupt one) with leftovers in the
+/// folder counts as someone else: nothing proves they are the same user.
+pub fn claim(app_root: &Path, key: &AccountKey, user_id: i64) -> Claimed {
+    let paths = AccountPaths::for_root(app_root, key);
+    let file = paths.root.join(OWNER_FILE);
+    let someone_else = match read_owner(&file) {
+        Previous::Known(previous) if previous == user_id => {
+            return Claimed {
+                dropped: false,
+                owner_error: None,
+            };
+        }
+        Previous::Known(_) => true,
+        Previous::Unknown => has_leftovers(app_root, &paths, key.0.as_str()),
+    };
     if someone_else {
         forget(app_root, key);
     }
-    if std::fs::create_dir_all(&paths.root).is_ok()
-        && let Err(err) = crate::settings::write_json_atomic(&file, &Owner { user_id })
-    {
-        eprintln!("quill: could not save {OWNER_FILE}: {err}");
+    let owner_error = std::fs::create_dir_all(&paths.root)
+        .and_then(|()| crate::settings::write_json_atomic(&file, &Owner { user_id }))
+        .err();
+    Claimed {
+        dropped: someone_else,
+        owner_error,
     }
-    someone_else
 }
 
 #[cfg(test)]

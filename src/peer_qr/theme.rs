@@ -413,6 +413,20 @@ impl ThemeGifts {
         }
     }
 
+    /// The driver would not send the request at all (not ready, no right
+    /// to save, the owner not known). Like a failed page, so the panel does
+    /// not ask again on every frame: a next page waits
+    /// [`GIFTS_RETRY_SECS`], and with no first page the empty list shows.
+    pub fn refuse(&mut self, now: i64) {
+        self.loading = false;
+        if self.loaded {
+            self.retry_at = Some(now.saturating_add(GIFTS_RETRY_SECS));
+        } else {
+            self.loaded = true;
+            self.complete = true;
+        }
+    }
+
     /// A page came back. The first page replaces the list; burned gifts
     /// and gifts already listed are skipped (tdesktop `AppendGifts`).
     pub fn accept(&mut self, gifts: Vec<ThemeGift>, next_offset: String, first: bool) {

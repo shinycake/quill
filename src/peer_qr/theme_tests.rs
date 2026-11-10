@@ -553,3 +553,20 @@ fn a_gifts_request_for_another_owner_never_reuses_a_serial() {
     assert!(!gifts.complete && !gifts.wants_more(10 + GIFTS_RETRY_SECS - 1));
     assert!(gifts.wants_more(10 + GIFTS_RETRY_SECS));
 }
+
+#[test]
+fn a_refused_gifts_request_settles_the_panel_instead_of_asking_every_frame() {
+    use crate::peer_qr::theme::{GIFTS_RETRY_SECS, ThemeOwner};
+    let owner = ThemeOwner::User(1);
+    let mut gifts = ThemeGifts::default();
+    gifts.start(owner, false, 0).unwrap();
+    gifts.accept(vec![gift(1, "r1")], "page2".into(), true);
+    assert!(gifts.wants_more(20));
+    gifts.refuse(20);
+    assert!(!gifts.wants_more(20 + GIFTS_RETRY_SECS - 1));
+    assert!(gifts.wants_more(20 + GIFTS_RETRY_SECS));
+    // No first page ever: the empty list, not a spinner for good.
+    let mut fresh = ThemeGifts::default();
+    fresh.refuse(20);
+    assert_eq!(gifts_layout(&fresh), GiftsLayout::Empty);
+}

@@ -124,7 +124,7 @@ fn a_running_export_shows_its_progress_and_hides(cx: &mut TestAppContext) {
         assert!(!export.progress().is_settled());
     });
     app.update_in(vcx, |app, _, cx| {
-        app.dialogs.account_export_progress_hidden = true;
+        app.set_account_export_view(quill::export::ExportView::Hidden);
         cx.notify();
     });
     vcx.run_until_parked();

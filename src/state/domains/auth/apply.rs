@@ -16,7 +16,7 @@ impl Session {
             AuthPayload::UpdateAuthorizationState(state) => self.set_auth(state),
             AuthPayload::UpdateTermsOfService { terms } => {
                 self.settings.notices.terms = Some(terms);
-                self.settings.notices.terms_error = None;
+                self.settings.notices.terms_accept = crate::state::fetch::Fetch::Idle;
             }
             AuthPayload::EmailCodeInfo { pattern, .. } => {
                 // Batch 6: only our own in-flight 2FA step takes the

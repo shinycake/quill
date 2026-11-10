@@ -37,7 +37,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// are known.
     pub fn review_unconfirmed_sessions(&mut self, confirmed: bool) -> Result<(), ConnectSendError> {
         if !self.chats_path_active()
-            || self.session.settings.notices.review_pending > 0
+            || self.session.settings.notices.review.busy()
             || self.session.settings.notices.unconfirmed_entries.is_empty()
         {
             return Err(ConnectSendError::InvalidRequest);
@@ -50,12 +50,13 @@ impl<S: JsonSender> ConnectDriver<S> {
             .iter()
             .map(|entry| entry.id)
             .collect();
-        self.session.settings.notices.review_confirmed = confirmed;
-        self.session.settings.notices.review_error = None;
-        self.session.settings.notices.review_pending = ids.len();
-        for id in ids {
+        self.session.begin_login_review(confirmed, ids.len());
+        for (at, id) in ids.iter().copied().enumerate() {
             let extra = self.session.request(
-                RequestPurpose::Settings(SettingsPurpose::ReviewUnconfirmedSession { confirmed }),
+                RequestPurpose::Settings(SettingsPurpose::ReviewUnconfirmedSession {
+                    confirmed,
+                    session_id: id,
+                }),
                 None,
             );
             let json = if confirmed {
@@ -65,8 +66,11 @@ impl<S: JsonSender> ConnectDriver<S> {
             };
             if let Err(err) = self.sender.send_json(&json) {
                 self.session.requests.take(extra);
-                self.session
-                    .finish_login_review(confirmed, Some("Could not review the new login.".into()));
+                // This one and the ones not sent yet will not be answered.
+                for id in ids.iter().skip(at).copied() {
+                    self.session
+                        .finish_login_review(id, Some("Could not review the new login.".into()));
+                }
                 return Err(err);
             }
         }
@@ -79,14 +83,19 @@ impl<S: JsonSender> ConnectDriver<S> {
         let Some(terms) = self.session.settings.notices.terms.clone() else {
             return Err(ConnectSendError::InvalidRequest);
         };
-        if !self.chats_path_active() || self.session.settings.notices.terms_in_flight {
+        if self.session.settings.notices.terms_accept.is_loading() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        // The box cannot be closed: a press that cannot go out says why.
+        let not_sent = "Could not send your answer. Please try again.";
+        if !self.chats_path_active() {
+            self.session.settings.notices.terms_accept.fail(not_sent);
             return Err(ConnectSendError::InvalidRequest);
         }
         let extra = self
             .session
             .request(RequestPurpose::AcceptTermsOfService, None);
-        self.session.settings.notices.terms_in_flight = true;
-        self.session.settings.notices.terms_error = None;
+        self.session.settings.notices.terms_accept.begin();
         match self
             .sender
             .send_json(&accept_terms_of_service(extra, &terms.id))
@@ -94,7 +103,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             Ok(()) => Ok(extra),
             Err(err) => {
                 self.session.requests.take(extra);
-                self.session.settings.notices.terms_in_flight = false;
+                self.session.settings.notices.terms_accept.fail(not_sent);
                 Err(err)
             }
         }

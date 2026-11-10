@@ -102,6 +102,7 @@ src/update_install/macos.rs::unpack | - | the updater unpacks a download
 src/ui/app_render/frame_upkeep.rs::frame_upkeep -> frame_profile_tick | runs-locked | the frame profiler's counters, a debug build feature
 src/ui/app_render/frame_upkeep.rs::frame_upkeep -> flush_notifications | runs-locked | notification delivery goes on under the lock with the sender hidden; a click only shows the window (`run_notification_action`, `switch_account` refuse), and a call pick answers the call, which stays usable
 src/ui/notifications/mod.rs::poll_live -> set_window_scope | runs-locked | puts the main window's state in place for the pass
+src/ui/notifications/mod.rs::poll_live -> looked_at | runs-locked | pure: the `app_active` value, false while locked; starts and shows nothing
 src/ui/notifications/mod.rs::poll_live -> polled_chrome | runs-locked | reads the status line to decide a redraw
 src/ui/notifications/mod.rs::poll_live -> sync_presence | runs-locked | online and idle presence; a locked Quill is idle
 src/ui/notifications/mod.rs::poll_live -> apply_pending_keybindings | runs-locked | loads the account's key bindings; binds, starts nothing

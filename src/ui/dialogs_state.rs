@@ -61,9 +61,6 @@ pub(crate) struct DialogUi {
     pub(super) chat_export_seen: Option<quill::export::Progress>,
     /// The "Export Telegram data" box (full account export).
     pub(super) account_export_dialog: Option<super::account_export_box::AccountExportDraft>,
-    /// The running account export's progress is not on screen; its result
-    /// shows as a note instead.
-    pub(super) account_export_progress_hidden: bool,
     /// Last account export progress drawn.
     pub(super) account_export_seen: Option<quill::export::account::AccountProgress>,
     pub(super) export_stop: Option<super::export_quit::ExitAfterStop>,
@@ -145,7 +142,6 @@ impl DialogUi {
             chat_export_progress_hidden: false,
             chat_export_seen: None,
             account_export_dialog: None,
-            account_export_progress_hidden: false,
             account_export_seen: None,
             export_stop: None,
             saved_tag_dialog: None,

@@ -4,6 +4,7 @@
 //! (`updateTermsOfService`) — and Batch 6: the two-step verification
 //! recovery/reset flow state. Pure state and text, no UI.
 use super::*;
+use crate::state::fetch::Fetch;
 use crate::telegram::envelope::{ResetPasswordOutcome, TermsOfService, UnconfirmedLogin};
 
 /// One unconfirmed login resolved from `getActiveSessions`
@@ -24,6 +25,54 @@ pub enum LoginReview {
     /// "No, it's not me!": "New Login Prevented" with the terminated
     /// attempts (`location (device)` lines).
     Prevented { places: Vec<String> },
+}
+
+/// The new-login review ("Yes, it's me" / "No, it's not me!"): one
+/// `confirmSession` / `terminateSession` per unconfirmed session. A session
+/// leaves the alert when its own request succeeds, so a retry after a
+/// partial failure sends only the ones still unreviewed.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum ReviewStage {
+    #[default]
+    Idle,
+    /// Requests are out; `done` are the sessions already reviewed, `error`
+    /// the first failure so far.
+    Reviewing {
+        confirmed: bool,
+        waiting: usize,
+        done: Vec<UnconfirmedEntry>,
+        error: Option<String>,
+    },
+    /// Every request answered and one failed: the alert stays with the
+    /// failure line until the next press (which starts `Reviewing` again).
+    Failed {
+        error: String,
+        done: Vec<UnconfirmedEntry>,
+    },
+}
+
+impl ReviewStage {
+    /// Requests are still in flight.
+    pub fn busy(&self) -> bool {
+        matches!(self, Self::Reviewing { .. })
+    }
+
+    /// The failure line the alert draws.
+    pub fn error(&self) -> Option<&str> {
+        match self {
+            Self::Reviewing { error, .. } => error.as_deref(),
+            Self::Failed { error, .. } => Some(error),
+            Self::Idle => None,
+        }
+    }
+
+    /// The sessions reviewed so far, kept when the press is retried.
+    pub fn done(&self) -> Vec<UnconfirmedEntry> {
+        match self {
+            Self::Reviewing { done, .. } | Self::Failed { done, .. } => done.clone(),
+            Self::Idle => Vec::new(),
+        }
+    }
 }
 
 /// A server popup (`updateServiceNotification`).
@@ -49,18 +98,17 @@ pub struct AccountNotices {
     pub unconfirmed_count: i32,
     /// Sessions behind the alert, resolved from `getActiveSessions`.
     pub unconfirmed_entries: Vec<UnconfirmedEntry>,
-    /// `confirmSession` / `terminateSession` requests still in flight.
-    pub review_pending: usize,
-    pub review_confirmed: bool,
-    pub review_error: Option<String>,
+    /// `confirmSession` / `terminateSession` requests of the review.
+    pub review: ReviewStage,
     /// The follow-up after a finished review; the UI takes it once.
     pub review_outcome: Option<LoginReview>,
     /// Popups in arrival order; the UI shows the front one.
     pub service: VecDeque<ServiceNotice>,
     /// Terms the user must accept, and the accept round-trip.
     pub terms: Option<TermsOfService>,
-    pub terms_in_flight: bool,
-    pub terms_error: Option<String>,
+    /// `acceptTermsOfService`: loading while it is out, failed with a line
+    /// the box draws when the send or the request failed.
+    pub terms_accept: Fetch<()>,
 }
 
 /// Where the two-step recovery/reset flow is, as the dialog needs it.
@@ -143,35 +191,65 @@ impl Session {
         self.settings.notices.service.pop_front();
     }
 
-    /// One `confirmSession` / `terminateSession` finished.
-    pub(crate) fn finish_login_review(&mut self, confirmed: bool, error: Option<String>) {
-        self.settings.notices.review_pending =
-            self.settings.notices.review_pending.saturating_sub(1);
-        if let Some(error) = error {
-            self.settings.notices.review_error = Some(error);
+    /// The review starts: one request per session still unreviewed.
+    pub(crate) fn begin_login_review(&mut self, confirmed: bool, waiting: usize) {
+        let done = self.settings.notices.review.done();
+        self.settings.notices.review = ReviewStage::Reviewing {
+            confirmed,
+            waiting,
+            done,
+            error: None,
+        };
+    }
+
+    /// The `confirmSession` / `terminateSession` for session `id` finished.
+    pub(crate) fn finish_login_review(&mut self, id: i64, error: Option<String>) {
+        let notices = &mut self.settings.notices;
+        let ReviewStage::Reviewing {
+            confirmed,
+            waiting,
+            done,
+            error: failed,
+        } = &mut notices.review
+        else {
+            return;
+        };
+        *waiting = waiting.saturating_sub(1);
+        match error {
+            Some(error) => {
+                failed.get_or_insert(error);
+            }
+            None => {
+                if let Some(at) = notices.unconfirmed_entries.iter().position(|e| e.id == id) {
+                    done.push(notices.unconfirmed_entries.remove(at));
+                }
+            }
         }
-        if self.settings.notices.review_pending > 0 {
+        if *waiting > 0 {
             return;
         }
-        if self.settings.notices.review_error.is_none() {
-            let places = if confirmed {
-                Vec::new()
-            } else {
-                self.settings
-                    .notices
-                    .unconfirmed_entries
-                    .iter()
-                    .map(|entry| unconfirmed_place(&entry.device, &entry.location))
-                    .collect()
-            };
-            self.settings.notices.review_outcome = Some(if confirmed {
-                LoginReview::Allowed
-            } else {
-                LoginReview::Prevented { places }
-            });
-            self.settings.notices.unconfirmed = None;
-            self.settings.notices.unconfirmed_count = 0;
-            self.settings.notices.unconfirmed_entries.clear();
+        let confirmed = *confirmed;
+        let done = std::mem::take(done);
+        match failed.take() {
+            Some(error) => notices.review = ReviewStage::Failed { error, done },
+            None => {
+                let places = if confirmed {
+                    Vec::new()
+                } else {
+                    done.iter()
+                        .map(|entry| unconfirmed_place(&entry.device, &entry.location))
+                        .collect()
+                };
+                notices.review_outcome = Some(if confirmed {
+                    LoginReview::Allowed
+                } else {
+                    LoginReview::Prevented { places }
+                });
+                notices.review = ReviewStage::Idle;
+                notices.unconfirmed = None;
+                notices.unconfirmed_count = 0;
+                notices.unconfirmed_entries.clear();
+            }
         }
         self.settings.sessions_stale = true;
     }

@@ -14,7 +14,7 @@ impl Session {
         if self.apply_quick_replies_error(err, pending.map(|p| p.purpose))
             || self.apply_business_error(err, pending.map(|p| p.purpose))
             || self.apply_business_extra_error(err, pending.map(|p| p.purpose))
-            || self.apply_passkeys_error(err, pending.map(|p| p.purpose))
+            || self.apply_passkeys_error(err, pending.map(|p| (p.id, p.purpose)))
             || self.apply_tone_upload_error(err, pending.map(|p| p.purpose))
         {
             return;
@@ -47,17 +47,19 @@ impl Session {
             // presence check sends it again.
             Some(RequestPurpose::SetOnline) => {}
             Some(RequestPurpose::Settings(SettingsPurpose::ReviewUnconfirmedSession {
-                confirmed,
+                session_id,
+                ..
             })) => {
                 self.finish_login_review(
-                    confirmed,
+                    session_id,
                     Some(sessions_error_line("review the new login", err)),
                 );
             }
             Some(RequestPurpose::AcceptTermsOfService) => {
-                self.settings.notices.terms_in_flight = false;
-                self.settings.notices.terms_error =
-                    Some(sessions_error_line("accept the terms of service", err));
+                self.settings
+                    .notices
+                    .terms_accept
+                    .fail(sessions_error_line("accept the terms of service", err));
             }
             Some(RequestPurpose::GetAutoDownloadSettingsPresets) => {
                 self.settings.auto_download_presets_loading = false;

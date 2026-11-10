@@ -183,8 +183,13 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         self.session.auth_state.last_auth_error = None;
         let extra = self.session.request(RequestPurpose::SetPhoneNumber, None);
-        self.sender
-            .send_json(&set_authentication_phone_number(extra, phone))?;
+        if let Err(err) = self
+            .sender
+            .send_json(&set_authentication_phone_number(extra, phone))
+        {
+            self.session.requests.take(extra);
+            return Err(err);
+        }
         Ok(extra)
     }
 

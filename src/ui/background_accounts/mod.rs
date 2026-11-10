@@ -464,7 +464,8 @@ impl QuillApp {
     /// notifications. Returns whether a budget left updates queued.
     fn poll_background(&mut self, cx: &mut Context<Self>) -> bool {
         let notify_from_all = self.background.notify_from_all;
-        let app_active = self.frame.window_active.get();
+        // The same lock-aware value the account on screen gets.
+        let app_active = self.looked_at(self.frame.window_active.get());
         let now = Instant::now();
         let mut backlog = false;
         let mut changed = false;

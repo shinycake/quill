@@ -4077,3 +4077,86 @@ and 10 are widget items another fixer owns).
   (`cancel_inline_opening_unless_chat`, an invite preview, a text or typed
   link), or when another account is on screen (10-119). No timer: a lookup
   that never answers is the deep-link flow's own concern.
+
+### Sweep fixes (s3-accounts)
+
+- **Passkeys are one stage per ask.** `PasskeysState` has `add: PasskeyAdd`
+  (`Idle`, `FetchingOptions(id)`, `Starting(options)`, `Cached(options)`,
+  `Sending(id)`, `Added`) instead of `registration`, `ceremony`, `adding` and
+  `added`. A request stage holds its request id and only that answer (or
+  error, or lost request) moves it on, so a box closed before
+  `getPasskeyParameters` answered (`cancel_register`, also run by the lock)
+  starts no ceremony (04-065), an `addLoginPasskey` answer without an id
+  (`PasskeysPayload::AddedUnreadable`) ends `Sending` (04-061), and an
+  `Added` left behind by the lock is dropped by the next Create instead of
+  closing its box (12-078). `PasskeysPurpose::List(generation)` carries the
+  generation a removal bumps, so a list asked before the removal cannot bring
+  the passkey back (04-062). `request_passkeys` records `requested_at` only
+  after a successful send and the answer, not the send, clears `stale`
+  (02-180). A refused `finish_register`/`finish_login` is a note (04-066).
+- **Owner of an account folder.** `claim` reads the owner as `Previous::{Unknown,
+  Known}`: an unreadable `owner.json` with leftovers in the folder counts as
+  someone else and forgets, and a failed owner write is returned
+  (`Claimed::owner_error`) and logged by the driver (01-005). Behaviour change:
+  a folder that predates `owner.json` and has leftovers is forgotten once, on
+  the next sign-in, before the owner is written.
+- **Exports settle and stay honest.** A worker that unwinds publishes
+  `Failed` through `SettleOnPanic` (a drop guard in the thread body), so the
+  Done button appears and a new export is not refused (03-042). `result.json`
+  is written as `result.json.part` and renamed only when the export finished,
+  for both the account and the chat export (03-043). The account export's
+  progress box is `AccountExport::view` (`Shown`/`Hidden`), kept with the
+  export in the session, not in the screen's `DialogUi`, so switching
+  accounts and back leaves a hidden export hidden (07-015).
+- **An unreadable `accounts.json`** keeps the `pending_deletes` it still holds
+  (recovered from the quarantined text) and saves them into the new registry
+  before any client opens (04-082).
+- **Reviews and notices.** The new-login review is `ReviewStage` (`Idle`,
+  `Reviewing { confirmed, waiting, done, error }`, `Failed { error, done }`);
+  each `confirmSession`/`terminateSession` carries its session id, an entry
+  leaves the alert when its own request succeeds, and a retry sends only the
+  rest (05-020). `acceptTermsOfService` is `terms_accept: Fetch<()>`, and a
+  send that cannot go out fails it with a line the locked box draws (09-024).
+  The terms prompt is `TermsPrompt { terms_id, stage }` (`Terms { age_ok,
+  age_error }`, `DeclineSorry`, `DeleteWarning`): another terms id, or none,
+  replaces it whole (09-023). A force-logout notice is not popped by any
+  close, and its Log out button dismisses it only once `request_logout` was
+  sent; otherwise it stays with a note (09-026, 09-025).
+- **Switching accounts** checks the root, the credentials and the write of the
+  active account before anything is torn down (`prepare_account_switch`), so a
+  refused switch keeps the chat, the boxes and the client. Without a client
+  (the screenshot demos) the screen is still replaced, as before (07-017).
+- **Sign-in forms keep what was typed until the step is done.** The phone is
+  `PhoneStep` (`Entering`, `CodeSentTo`, `Editing`, `Sending { phone, back }`):
+  the code step names the new number only once TDLib took it, a rejection
+  returns to `back` with the old number (13-046). Registration names, the
+  accepted terms and the email stay after a send and are emptied by
+  `sync_auth_forms` once auth leaves the step (08-042). The two-step and
+  recovery forms keep their fields when the driver refuses the request and
+  say so, and are emptied by `sync_twofa_forms` when the step finished
+  (12-076, 12-094).
+- **Lock and focus.** A lock-screen log out whose wipe reports an error stays
+  as `Deferred` (nothing opens the old database, "Restart Quill to finish
+  logging out") (08-037). `looked_at` is the one rule for `app_active`
+  (focus and not locked) for the account on screen and for the background
+  accounts (08-036). The QR box's clock and contact-link ask wait under the
+  lock (11-p8-007). A passcode job whose window closed lands in the main
+  window (11-p7-005, `passcode/job.rs`). A refused gifts request settles the
+  panel (`ThemeGifts::refuse`) instead of asking on every frame (11-p8-012).
+  A save that fails after its QR box closed is told through the status note
+  (04-012, 11-p8-008).
+- **Tests.** `passkeys::tests`, `connect::tests::passkeys` (stale refetch send,
+  generation, cancel, unreadable add, stale `Added`), `account_data_tests`
+  (unreadable owner), `export::tests` (`SettleOnPanic`), `account::tests`
+  (`result.json.part` after a cancel), `settings::accounts` (pending wipes),
+  `connect::tests::account_hygiene` (partial review retry, terms send),
+  `peer_qr::theme_tests` and `connect::tests::share_theme` (refused gifts),
+  `ui::peer_qr::tests` (late save failure), `ui::dialogs::account_notices_tests`,
+  `phone_step_tests`, and `a_passcode_job_answer_lands_when_its_window_closed`.
+  None waits on time. Not tested: 07-017 needs a live client with a failing
+  registry write, which the offline harness cannot make; 08-037, 08-036,
+  11-p8-007, 12-076 and 12-094 call the driver or the lock from the frame and
+  are only checked by the lock-surface and window-scope scripts and by eye.
+- **Not done.** `ThemeGifts` stays a struct with `loaded`/`loading`/`complete`
+  (baseline lines kept): the stage bools are read by the panel, the driver and
+  seven tests, and the fix for 11-p8-012 does not need the conversion.

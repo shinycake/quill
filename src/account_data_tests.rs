@@ -157,14 +157,40 @@ fn a_new_user_in_a_reused_slot_inherits_nothing() {
     let _serial = crate::locks::lock_or_recover(&SERIAL);
     let root = root();
     let key = AccountKey::new("account-933").unwrap();
-    assert!(!claim(&root, &key, 100), "first sign-in: nothing to drop");
+    assert!(
+        !claim(&root, &key, 100).dropped,
+        "first sign-in: nothing to drop"
+    );
     fill(&root, &key);
-    assert!(!claim(&root, &key, 100), "the same user again keeps it");
+    assert!(
+        !claim(&root, &key, 100).dropped,
+        "the same user again keeps it"
+    );
     assert_eq!(left_behind(&root, &key).len(), 10);
-    assert!(claim(&root, &key, 200), "another user");
+    assert!(claim(&root, &key, 200).dropped, "another user");
     crate::settings::flush_deferred_writes();
     assert_eq!(left_behind(&root, &key), Vec::<&str>::new());
-    assert!(!claim(&root, &key, 200));
+    assert!(!claim(&root, &key, 200).dropped);
+}
+
+/// No readable owner.json (never written, deleted, corrupt) with leftovers
+/// in the folder: the next user cannot be shown to be the same one.
+#[test]
+fn an_unreadable_owner_with_leftovers_counts_as_someone_else() {
+    let _serial = crate::locks::lock_or_recover(&SERIAL);
+    let root = root();
+    let key = AccountKey::new("account-937").unwrap();
+    assert!(!claim(&root, &key, 100).dropped);
+    fill(&root, &key);
+    let owner = AccountPaths::for_root(&root, &key).root.join(OWNER_FILE);
+    std::fs::write(&owner, b"{ not json").unwrap();
+    assert!(claim(&root, &key, 100).dropped, "corrupt owner");
+    crate::settings::flush_deferred_writes();
+    assert_eq!(left_behind(&root, &key), Vec::<&str>::new());
+    fill(&root, &key);
+    std::fs::remove_file(&owner).unwrap();
+    assert!(claim(&root, &key, 100).dropped, "deleted owner");
+    assert!(!claim(&root, &key, 100).dropped, "now known");
 }
 
 /// The macOS mini app store lives outside Quill's folder, so its id must
@@ -188,11 +214,13 @@ fn a_reused_slot_opens_other_mini_app_stores() {
         "one store per account"
     );
     forget(&root, &key);
+    // The next user is known before any mini app opens.
+    assert!(!claim(&root, &key, 300).dropped);
     let after_logout = id(42);
     assert_ne!(after_logout, first, "a log-out drops the store");
-    assert!(!claim(&root, &key, 300));
+    assert!(!claim(&root, &key, 300).dropped);
     assert_eq!(id(42), after_logout);
-    assert!(claim(&root, &key, 400), "another user");
+    assert!(claim(&root, &key, 400).dropped, "another user");
     assert_ne!(id(42), after_logout, "another user gets other stores");
     assert_ne!(
         webview_store_id(None, account, 42),

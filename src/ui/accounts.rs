@@ -140,21 +140,25 @@ impl QuillApp {
         if self.background.wiping {
             return;
         }
+        // Everything that can fail comes first, while nothing has been torn
+        // down: a refused switch leaves the account on screen, its chat and
+        // its boxes as they were. After this the switch only moves state.
+        let prepared = self.prepare_account_switch(key);
+        if let Err(message) = &prepared
+            && self.live.is_some()
+        {
+            self.fail_account_switch(message.clone(), window, cx);
+            return;
+        }
         // Boxes, viewers and the mini app act for the account on screen:
         // they end while `self.live` is still that account's client.
         self.end_account_surfaces(window, cx);
-        let Some(root) = safe_app_root() else {
-            self.fail_account_switch(tr(keys::Q_OPS_COULD_NOT_SWITCH_ACCOUNT_NO), window, cx);
+        // Without a client (a screenshot demo) there is nothing to keep, so
+        // the screen is replaced even when the switch is refused.
+        if let Err(message) = prepared {
+            self.fail_account_switch(message, window, cx);
             return;
-        };
-        let Some(_) = self.credentials.as_ref() else {
-            self.fail_account_switch(
-                tr(keys::Q_OPS_COULD_NOT_SWITCH_ACCOUNT_TELEGRAM),
-                window,
-                cx,
-            );
-            return;
-        };
+        }
         self.clear_device_qr();
         self.close_accounts(window, cx);
         // Quill's notification windows point at the account on screen.
@@ -163,17 +167,6 @@ impl QuillApp {
         // in the background, and an account already running there comes
         // forward as it is instead of restarting.
         self.retire_live_to_background(cx);
-        if let Err(e) = set_active_account(&root, key) {
-            self.fail_account_switch(
-                tr_with(
-                    keys::Q_OPS_COULD_NOT_SWITCH_ACCOUNT,
-                    &[("e", &e.to_string())],
-                ),
-                window,
-                cx,
-            );
-            return;
-        }
         quill::icon_badge::invalidate_icon_badge();
         self.disk_account_switched(key.clone(), cx);
         match self.take_background_live(key, cx) {
@@ -181,6 +174,24 @@ impl QuillApp {
             None => self.start_connection(cx),
         }
         cx.notify();
+    }
+
+    /// The checks and the write of a switch, before anything changes: the
+    /// app root, the credentials, and recording `key` as the active
+    /// account. The error is the line to show.
+    fn prepare_account_switch(&self, key: &AccountKey) -> Result<(), String> {
+        let root = safe_app_root()
+            .ok_or_else(|| tr(keys::Q_OPS_COULD_NOT_SWITCH_ACCOUNT_NO).to_string())?;
+        if self.credentials.is_none() {
+            return Err(tr(keys::Q_OPS_COULD_NOT_SWITCH_ACCOUNT_TELEGRAM).to_string());
+        }
+        set_active_account(&root, key).map_err(|e| {
+            tr_with(
+                keys::Q_OPS_COULD_NOT_SWITCH_ACCOUNT,
+                &[("e", &e.to_string())],
+            )
+            .to_string()
+        })
     }
 
     /// Slice parity:auth-multi-account: add a named account, then switch

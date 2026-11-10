@@ -460,3 +460,17 @@ fn a_failed_next_page_is_asked_for_again_a_little_later() {
     assert_eq!(gift_ids(&rig), vec![101, 102]);
     assert!(rig.driver.session.users_state.peer_qr.gifts.complete);
 }
+
+/// A refused request settles the panel: it stops asking on every frame and
+/// shows the empty list instead of a spinner.
+#[test]
+fn a_refused_gifts_request_does_not_keep_asking() {
+    let mut rig = Rig::new();
+    assert!(
+        rig.driver
+            .fetch_share_theme_gifts(QrPeer::User(ME + 1), false, NOW)
+            .is_err()
+    );
+    let gifts = &rig.driver.session.users_state.peer_qr.gifts;
+    assert!(gifts.loaded && gifts.complete && !gifts.wants_more(NOW));
+}

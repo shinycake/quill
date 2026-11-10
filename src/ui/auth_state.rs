@@ -35,9 +35,7 @@ pub(crate) struct AuthUi {
     /// alert ("New Login Prevented" box), until acknowledged.
     pub(super) login_prevented: Option<Vec<String>>,
     /// Batch 4: terms of service prompt state (decline flow, age check).
-    pub(super) terms_step: TermsStep,
-    pub(super) terms_age_ok: bool,
-    pub(super) terms_age_error: bool,
+    pub(super) terms_prompt: Option<TermsPrompt>,
     /// Slice A1: decoded QR-login bitmap cached by link, rebuilt only when
     /// the link changes. The link itself is never logged.
     pub(super) qr_login_cache: Option<(String, super::owned_image::OwnedImage)>,
@@ -139,9 +137,7 @@ impl AuthUi {
             recovery_code_input,
             recovery_mode: false,
             login_prevented: None,
-            terms_step: Default::default(),
-            terms_age_ok: false,
-            terms_age_error: false,
+            terms_prompt: None,
             qr_login_cache: None,
         }
     }
