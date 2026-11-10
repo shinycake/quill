@@ -169,13 +169,18 @@ impl<S: JsonSender> ConnectDriver<S> {
         // A save while an earlier one is out sends too (TDLib applies them
         // in order, the later one wins); its rollback restores the values
         // from before the first, not the ones the first showed.
-        let original = match self.session.requests.rollback_for_chat(purpose, chat_id) {
-            Some(RequestRollback::ChatPermissions {
-                previous,
-                previous_can_send,
-            }) => Some((*previous, *previous_can_send)),
-            _ => None,
-        };
+        let original = self
+            .session
+            .requests
+            .pending_extra_for(purpose, Some(chat_id))
+            .and_then(|id| self.session.requests.pending_mut(id))
+            .and_then(|pending| match &pending.rollback {
+                Some(RequestRollback::ChatPermissions {
+                    previous,
+                    previous_can_send,
+                }) => Some((*previous, *previous_can_send)),
+                _ => None,
+            });
         let extra = self.session.request(purpose, Some(chat_id));
         if let Err(err) = self.sender.send_json(&set_chat_permissions(
             extra,

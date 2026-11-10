@@ -842,19 +842,6 @@ impl RequestRegistry {
             .any(|p| p.purpose == purpose && p.chat_id == Some(chat_id))
     }
 
-    /// The rollback of an in-flight request for a purpose and chat, if one
-    /// carries it.
-    pub fn rollback_for_chat(
-        &self,
-        purpose: RequestPurpose,
-        chat_id: ChatId,
-    ) -> Option<&RequestRollback> {
-        self.pending
-            .values()
-            .filter(|p| p.purpose == purpose && p.chat_id == Some(chat_id))
-            .find_map(|p| p.rollback.as_ref())
-    }
-
     /// An in-flight request for a purpose and message (`request_for_message`).
     pub fn has_purpose_for_message(
         &self,
