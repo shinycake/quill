@@ -77,14 +77,10 @@ pub struct MessagesState {
     /// MED4: one-shot `getWebPageInstantView` answer for the IV reader.
     /// The UI drains it (opens the reader) and clears it.
     pub instant_view: Option<InstantViewPage>,
-    /// MED4: one-shot fallback URL when `getWebPageInstantView` errors
-    /// (TDLib 404s when the page has no Instant View). The UI drains it
-    /// into the browser — TGX behaves the same.
-    pub instant_view_fallback_url: Option<String>,
-    /// The fallback above answers a request an agent's step sent
-    /// (`instant_view_agent_requests`): the UI opens it as part of that
-    /// step (`guard::with_injecting`), so the browser stays closed.
-    pub instant_view_fallback_from_agent: bool,
+    /// MED4: links whose `getWebPageInstantView` errored (TDLib 404s when
+    /// the page has no Instant View), each for the window that asked. A
+    /// window drains its own into the browser (TGX does the same).
+    pub instant_view_fallbacks: Vec<InstantViewFallback>,
     /// `getWebPageInstantView` requests sent while the agent UI driver
     /// injected input (`guard::injecting`).
     pub instant_view_agent_requests: HashSet<RequestId>,
@@ -208,8 +204,7 @@ impl MessagesState {
             paid_media_star_max: crate::composer::PAID_MEDIA_MAX_STARS,
             message_text_length_max: 4096,
             instant_view: None,
-            instant_view_fallback_url: None,
-            instant_view_fallback_from_agent: false,
+            instant_view_fallbacks: Vec::new(),
             instant_view_agent_requests: HashSet::new(),
             instant_view_urls: HashMap::new(),
             composer_previews: Default::default(),

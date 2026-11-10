@@ -313,13 +313,14 @@ impl<S: JsonSender> ConnectDriver<S> {
         let path = crate::local_path::pick_send_path(&draft.path)
             .ok_or(ConnectSendError::InvalidRequest)?;
         let path = path.to_string_lossy().into_owned();
-        let thumbnail = crate::video::write_video_note_thumbnail(&draft.path).map(|thumb| {
-            VideoNoteThumbnailSend {
+        let thumbnail = draft
+            .thumbnail
+            .as_ref()
+            .map(|thumb| VideoNoteThumbnailSend {
                 path: thumb.path.to_string_lossy().into_owned(),
                 width: thumb.width,
                 height: thumb.height,
-            }
-        });
+            });
         let extra = self
             .session
             .request(RequestPurpose::SendMessage, Some(chat_id));

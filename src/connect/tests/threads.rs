@@ -370,6 +370,12 @@ fn failed_older_thread_page_is_not_asked_again() {
         requests_of(&recorder, "getMessageThreadHistory").len(),
         sent
     );
+    // The Retry strip is the way out: it asks for the older page again.
+    assert!(driver.retry_thread_older().unwrap().is_some());
+    assert_eq!(
+        requests_of(&recorder, "getMessageThreadHistory").len(),
+        sent + 1
+    );
     let _ = std::fs::remove_dir_all(&dir);
 }
 

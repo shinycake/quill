@@ -60,6 +60,15 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.open_thread(chat_id, message_id)
     }
 
+    /// The "Couldn't load older messages · Retry" strip of a thread that
+    /// has rows: the failed older page is asked for again.
+    pub fn retry_thread_older(&mut self) -> Result<Option<RequestId>, ConnectSendError> {
+        if let Some(thread) = self.session.threads.thread.as_mut() {
+            thread.history.older = OlderEnd::Open;
+        }
+        self.fetch_thread_history()
+    }
+
     /// The thread lives in another chat than the open one: close the open
     /// chat in TDLib and open the thread's (the discussion group of a
     /// channel post). Called by the UI after it has saved the composer

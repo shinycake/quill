@@ -42,6 +42,15 @@ pub struct StoryViewersState {
     pub error: Option<String>,
 }
 
+impl StoryViewersState {
+    /// Whether scrolling near the end should ask for the next page: one is
+    /// left, none is on its way, and the last one did not fail (a failed
+    /// page waits for the Retry button, not for the next scroll).
+    pub fn wants_next_page(&self) -> bool {
+        !self.loading && self.error.is_none() && !self.next_offset.is_empty()
+    }
+}
+
 /// Phase 9.5: honest `reportStory` UI states. The initial request carries
 /// an empty option id; TDLib answers `OptionRequired` (reason picker),
 /// then `TextRequired` (optional details), then `Ok`.
@@ -210,4 +219,31 @@ pub enum InfoPanelTarget {
     Community(i64),
     /// Revenue and affiliate pages (`crate::earn`).
     Earn(crate::earn::EarnPanel),
+}
+
+#[cfg(test)]
+mod viewers_page_tests {
+    use super::*;
+
+    fn viewers(loading: bool, error: Option<&str>, next: &str) -> StoryViewersState {
+        StoryViewersState {
+            chat_id: 1,
+            story_id: 2,
+            total_count: 10,
+            rows: Vec::new(),
+            next_offset: next.to_string(),
+            loading,
+            error: error.map(str::to_string),
+        }
+    }
+
+    /// A failed viewers page waits for Retry instead of being asked again
+    /// by the next scroll (sweep 13-144).
+    #[test]
+    fn a_failed_page_does_not_ask_again_on_scroll() {
+        assert!(viewers(false, None, "n").wants_next_page());
+        assert!(!viewers(true, None, "n").wants_next_page());
+        assert!(!viewers(false, Some("boom"), "n").wants_next_page());
+        assert!(!viewers(false, None, "").wants_next_page());
+    }
 }

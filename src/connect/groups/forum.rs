@@ -230,6 +230,22 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.fetch_topic_history()
     }
 
+    /// The same Retry for a topic that has rows: its failed older page is
+    /// asked for again.
+    pub fn retry_topic_older(&mut self) -> Result<Option<RequestId>, ConnectSendError> {
+        if let (Some(chat_id), Some(forum_topic_id)) =
+            (self.session.open_chat, self.session.open_topic)
+            && let Some(history) = self
+                .session
+                .threads
+                .topic_histories
+                .get_mut(&(chat_id.0, forum_topic_id))
+        {
+            history.older = crate::state::OlderEnd::Open;
+        }
+        self.fetch_topic_history()
+    }
+
     /// Slice G2: supergroup id for a non-channel supergroup chat —
     /// `None` for everything else (channels, basic groups, unknowns).
     fn forum_supergroup(&self, chat_id: ChatId) -> Option<i64> {

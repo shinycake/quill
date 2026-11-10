@@ -4013,11 +4013,14 @@ and 10 are widget items another fixer owns).
   list and folder-invite chat are asked once (10-121, 13-144 with a Retry
   button, 13-044, 09-110). The installed-wallpapers list is a `Fetch` with a
   Retry (07-035). Thread paging notifies only when a request went out (13-104).
-  Not done: a failed older page of a non-empty thread/topic has no Retry row;
-  jumping to the latest or reopening clears it.
+  A failed older page of a non-empty thread or topic draws a Retry strip
+  over its rows (`conversation/older_retry.rs`); jumping to the latest or
+  reopening clears it too.
 - **Ends in an error.** Statistics: a chat that cannot show them, or a send
   that failed, lands in the Failed state the panel draws (13-021, 13-022). A
-  refused live-story join clears `watching` and shows the Join button (13-089).
+  refused live-story join shows the Join button (13-089); the viewer's join
+  is one enum, `LiveJoin` (`Idle`, `Watching { target, seen_call }`,
+  `Refused(target)`), not `watching`, `seen_call` and `refused_join`.
 - **Smaller.** A language switch whose send fails clears `switching`
   (02-133); `updateChatPendingJoinRequests` with null parses as zero
   (06-050); the folder editor's Save waits for the folder to load (09-104,
@@ -4027,3 +4030,27 @@ and 10 are widget items another fixer owns).
   (10-078); an export call that timed out drops its late answer (03-040); the
   spell download ends its progress loop when the worker panics (05-002);
   the agent's download re-checks access after the copy (01-013).
+- **Off the UI thread.** A round video's thumbnail is made by
+  `VideoNoteCapture::finish` on its background task and rides in
+  `VideoNoteDraft::thumbnail`, so a story reply or chat send never waits for
+  ffmpeg (03-014). Dropping a folder on the "files in folder" zone walks it
+  in `run_off_ui_scoped_then` and applies the plan only if the composer's
+  send slot is unchanged (09-054). Add to Dictionary and Ignore drop the
+  word's underline by its text; the background check settles the rest, so
+  the spell backend is never asked on the UI thread (13-057;
+  `build_composer_menu` still asks it, behind the deferred menu).
+- **Paid chats.** `paid_messages_guard::set_paid` makes a full
+  `messageSendOptions` when a builder sent `"options": null` (media, album,
+  voice and video note, checklist, plain forward), so the agreed price
+  reaches TDLib (07-001).
+- **Pinned drag.** A window that deactivates ends a pinned drag unsaved, so
+  a lost mouse-up no longer keeps the 60 Hz redraw going (08-071). Esc does
+  not cancel it: tdesktop does not either.
+- **Instant View.** The page was already per window (2bae8b8); its
+  browser fallback now carries the asking window (`InstantViewFallback`) and
+  only that window's frame opens it; closing the window drops it (09-X047).
+- **Inline results Start.** `InlineReturn` is `Opening { parameter }` then
+  `Started { baseline }`, carries its account, and ends when the bot chat's
+  lookup fails (`cancel_inline_opening`, from the deep-link outcome and a
+  failed send) or another account is on screen (10-119). No timer: a lookup
+  that never answers is the deep-link flow's own concern.

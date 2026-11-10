@@ -150,6 +150,7 @@ impl QuillApp {
                     // The real in-app updater is a queued future slice; the
                     // honest UI is TDLib's own text saying so.
                     (true, _) => {
+                        self.cancel_inline_opening();
                         self.links.deep_link_dialog = Some(text);
                         self.screen
                             .windows
@@ -163,6 +164,7 @@ impl QuillApp {
                     // Unknown link: TDLib's info text is the confirmation
                     // copy written for exactly this case.
                     (false, None) => {
+                        self.cancel_inline_opening();
                         self.links.deep_link_dialog = Some(text);
                         self.screen
                             .windows
@@ -192,6 +194,7 @@ impl QuillApp {
                 self.hold_resolved_link(from_window, cx);
             }
             Some(DeepLinkState::ShowText(text)) => {
+                self.cancel_inline_opening();
                 self.links.deep_link_dialog = Some(text);
                 self.screen
                     .windows
@@ -202,6 +205,7 @@ impl QuillApp {
             // sticker sets, backgrounds): nothing an agent needs, all of it
             // the user's.
             Some(DeepLinkState::Ui(ui)) => {
+                self.cancel_inline_opening();
                 if from_agent {
                     guard::refuse_typed_link();
                 } else {

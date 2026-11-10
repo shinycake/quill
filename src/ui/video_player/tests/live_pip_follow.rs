@@ -256,13 +256,13 @@ fn story_player(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> Option<V
 fn the_story_viewer_survives_a_feed_swap(cx: &mut TestAppContext) {
     let (app, mut main) = open_live_story(cx);
     let main = &mut main;
-    let watching = app.read_with(main, |app, _| app.stories.live.watching);
+    let watching = app.read_with(main, |app, _| app.stories.live.watching());
     let first = story_player(&app, main).expect("the story plays");
     let (_old, sink) = swap_story_feed(&app, main);
     settle(main);
     app.read_with(main, |app, _| {
         assert!(app.stories.viewer.is_open(), "the viewer stays");
-        assert_eq!(app.stories.live.watching, watching, "still watched");
+        assert_eq!(app.stories.live.watching(), watching, "still watched");
     });
     assert!(main.debug_bounds("live-story-frame").is_some());
     let swapped = story_player(&app, main).expect("the story plays on");
@@ -274,7 +274,7 @@ fn the_story_viewer_survives_a_feed_swap(cx: &mut TestAppContext) {
 fn a_story_pip_follows_a_feed_swap_and_enlarges_with_it(cx: &mut TestAppContext) {
     let (app, mut main) = open_live_story(cx);
     let main = &mut main;
-    let watching = app.read_with(main, |app, _| app.stories.live.watching);
+    let watching = app.read_with(main, |app, _| app.stories.live.watching());
     let first = story_player(&app, main).expect("the story plays");
     app.update_in(main, |app, window, cx| app.open_story_pip(window, cx));
     settle(main);
@@ -292,7 +292,7 @@ fn a_story_pip_follows_a_feed_swap_and_enlarges_with_it(cx: &mut TestAppContext)
         "kept where the viewer takes it back from"
     );
     assert_eq!(
-        app.read_with(main, |app, _| app.stories.live.watching),
+        app.read_with(main, |app, _| app.stories.live.watching()),
         watching,
         "the story stays joined"
     );

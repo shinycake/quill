@@ -509,3 +509,29 @@ fn a_client_coming_on_screen_follows_the_choice_saved_now() {
         Some("fr")
     );
 }
+
+/// Refuses every request, as a closed client does.
+struct RefusingSender;
+
+impl JsonSender for Arc<RefusingSender> {
+    fn send_json(&self, _: &str) -> Result<(), ConnectSendError> {
+        Err(ConnectSendError::Native)
+    }
+}
+
+/// A switch whose request never left does not stay pending (sweep 02-133).
+#[test]
+fn a_switch_that_cannot_be_sent_does_not_stay_pending() {
+    let (dir, prepared) = prepared_tmp(&MemorySecretStore::new());
+    let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+    let session = crate::state::Session::new(crate::ids::AccountKey::primary(), sink);
+    let mut driver = ConnectDriver::new(
+        session,
+        Arc::new(RefusingSender),
+        test_credentials(),
+        prepared,
+    );
+    assert!(driver.switch_language(pack("pt-br", "pt")).is_err());
+    assert!(driver.session.settings.language.switching.is_none());
+    let _ = std::fs::remove_dir_all(&dir);
+}

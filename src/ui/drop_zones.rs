@@ -93,11 +93,36 @@ impl QuillApp {
         if !self.file_drop_enabled() {
             return;
         }
-        let folder_files = match (action, paths) {
-            (DropAction::FolderFiles, [folder]) => folder_files_for_sending(folder),
-            _ => Vec::new(),
-        };
-        match plan_drop(action, paths, &folder_files) {
+        // A folder on a slow share is walked off the UI thread; its plan
+        // applies where it was dropped, if the person is still there.
+        if let (DropAction::FolderFiles, [folder]) = (action, paths) {
+            let Some(slot) = self.send_slot() else {
+                return;
+            };
+            let folder = folder.clone();
+            let kept = paths.to_vec();
+            self.run_off_ui_scoped_then(
+                move || folder_files_for_sending(&folder),
+                move |this, folder_files, cx| {
+                    if this.send_slot().as_ref() == Some(&slot) && this.file_drop_enabled() {
+                        this.apply_zone_drop(action, &kept, &folder_files, cx);
+                    }
+                },
+                cx,
+            );
+            return;
+        }
+        self.apply_zone_drop(action, paths, &[], cx);
+    }
+
+    fn apply_zone_drop(
+        &mut self,
+        action: DropAction,
+        paths: &[PathBuf],
+        folder_files: &[PathBuf],
+        cx: &mut Context<Self>,
+    ) {
+        match plan_drop(action, paths, folder_files) {
             // The usual attach makes a lone GIF a GIF.
             DropPlan::Attach(_) if matches!(paths, [only] if is_gif_path(only)) => {
                 self.attach_dropped_files(paths, cx);

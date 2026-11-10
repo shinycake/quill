@@ -36,6 +36,8 @@ fn open(cx: &mut TestAppContext) -> (Entity<QuillApp>, VisualTestContext, Vec<i6
     });
     let app: Entity<QuillApp> = slot.borrow().clone().expect("app");
     let mut vcx = VisualTestContext::from_window(handle.into(), cx);
+    // A drag only runs in an active window: one that is not ends it.
+    vcx.update(|window, _| window.activate_window());
     frames(&mut vcx);
     let pinned = app.update(&mut vcx, |app, _| {
         let session = app.demo_session.as_mut().expect("a demo session");
@@ -125,6 +127,27 @@ fn another_folder_ends_a_pinned_drag_unsaved(cx: &mut TestAppContext) {
         "the main list's drag does not run over the archive"
     );
     app.update(&mut vcx, |app, cx| app.finish_pin_drag(cx));
+    assert_eq!(
+        pinned_order(&app, &mut vcx),
+        pinned,
+        "the order is unchanged"
+    );
+}
+
+#[gpui_kit::test]
+fn a_deactivated_window_ends_a_pinned_drag_unsaved(cx: &mut TestAppContext) {
+    let (app, mut vcx, pinned) = open(cx);
+    let first = *pinned.first().expect("a pinned chat");
+    drag(&app, &mut vcx, first, 10.0);
+    drag(&app, &mut vcx, first, 200.0);
+    assert!(app.read_with(&vcx, |app, _| app.chat_list.pin_reorder.is_some()));
+    // The release is lost to a menu or an alert: the window deactivates.
+    vcx.deactivate_window();
+    frames(&mut vcx);
+    assert!(
+        app.read_with(&vcx, |app, _| app.chat_list.pin_reorder.is_none()),
+        "no drag is left redrawing"
+    );
     assert_eq!(
         pinned_order(&app, &mut vcx),
         pinned,

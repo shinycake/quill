@@ -501,3 +501,8 @@ impl QuillApp {
         })
     }
 }
+
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+#[path = "group_confirm_tests.rs"]
+mod tests;

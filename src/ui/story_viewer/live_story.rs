@@ -8,7 +8,9 @@
 //! streams apart from the current call (`registerVideoStream`).
 #![deny(clippy::indexing_slicing)]
 
-use super::live_state::{LiveDelete, LiveStarsBox, SendAction, StarsBoxMode, send_action};
+use super::live_state::{
+    LiveDelete, LiveJoin, LiveStarsBox, SendAction, StarsBoxMode, send_action,
+};
 use super::*;
 use crate::ui::media_panel::PanelTab;
 use crate::ui::status_note::StatusNote;
@@ -47,18 +49,15 @@ impl QuillApp {
             None
         };
         let target = shown.or_else(|| self.live_pip_story());
-        let watching = self.stories.live.watching;
+        let watching = self.stories.live.watching();
         if watching.is_some() && watching != target {
             self.leave_live_story_view(cx);
         }
-        if self.stories.live.refused_join != target {
-            self.stories.live.refused_join = None;
-        }
-        if target.is_some()
-            && self.stories.live.watching.is_none()
-            && self.stories.live.refused_join.is_none()
+        self.stories.live.drop_stale_refusal(target);
+        if let Some(target) = target
+            && self.stories.live.join == LiveJoin::Idle
         {
-            self.stories.live.watching = target;
+            self.stories.live.start_watching(target);
             self.join_watched_live_story(cx);
         }
         self.check_story_ended_before_call(cx);
@@ -72,8 +71,8 @@ impl QuillApp {
         let Some((chat_id, story_id)) = self
             .stories
             .live
-            .watching
-            .filter(|_| !self.stories.live.seen_call)
+            .watching()
+            .filter(|_| !self.stories.live.seen_call())
         else {
             return;
         };
@@ -90,7 +89,7 @@ impl QuillApp {
     }
 
     pub(super) fn join_watched_live_story(&mut self, cx: &mut Context<Self>) {
-        let Some((chat_id, story_id)) = self.stories.live.watching else {
+        let Some((chat_id, story_id)) = self.stories.live.watching() else {
             return;
         };
         let Some(live) = self.live.as_mut() else {
@@ -99,8 +98,7 @@ impl QuillApp {
         if let Err(err) = live.driver.join_live_story(chat_id, story_id) {
             // Not watching: the viewer shows its "Join live" button instead
             // of an opening spinner nothing will end.
-            self.stories.live.watching = None;
-            self.stories.live.refused_join = Some((chat_id, story_id));
+            self.stories.live.refuse((chat_id, story_id));
             self.set_note(crate::ui::calls::join_error_note(
                 err,
                 keys::Q_MEDIA_COULD_NOT_JOIN_THE_LIVE,
@@ -111,7 +109,7 @@ impl QuillApp {
 
     /// tdesktop closes the viewer when the stream's call finishes or fails.
     fn check_live_story_ended(&mut self, cx: &mut Context<Self>) {
-        if self.stories.live.watching.is_none() {
+        if self.stories.live.watching().is_none() {
             return;
         }
         let Some(session) = self.session() else {
@@ -129,8 +127,8 @@ impl QuillApp {
             Some(call) if call.stream == StreamState::Ended => {
                 self.close_story_viewer(cx);
             }
-            Some(_) => self.stories.live.seen_call = true,
-            None if self.stories.live.seen_call => self.close_story_viewer(cx),
+            Some(_) => self.stories.live.mark_call_seen(),
+            None if self.stories.live.seen_call() => self.close_story_viewer(cx),
             None => {}
         }
     }
@@ -138,9 +136,10 @@ impl QuillApp {
     /// Leaves the live story (pending Stars are dropped) and frees its
     /// picture.
     pub(super) fn leave_live_story_view(&mut self, cx: &mut Context<Self>) {
-        if self.stories.live.watching.take().is_none() {
+        if self.stories.live.watching().is_none() {
             return;
         }
+        self.stories.live.join = LiveJoin::Idle;
         if let Some(live) = self.live.as_mut() {
             let _ = live.driver.leave_live_story();
         } else if let Some(session) = self.demo_session.as_mut() {
@@ -161,7 +160,7 @@ impl QuillApp {
     /// effects.
     pub(super) fn live_story_tick(&mut self, cx: &mut Context<Self>) {
         self.sync_live_story(cx);
-        if self.stories.live.watching.is_none() {
+        if self.stories.live.watching().is_none() {
             return;
         }
         if let Some(live) = self.live.as_mut() {
@@ -576,10 +575,10 @@ impl QuillApp {
 
     /// The live overlay's Retry: join the watched story's call again.
     pub(super) fn retry_live_story(&mut self, cx: &mut Context<Self>) {
-        if let Some((chat_id, story_id)) = self.stories.live.watching {
+        if let Some((chat_id, story_id)) = self.stories.live.watching() {
             // The failed slot is left and joined afresh: until the new
             // one shows, its absence is not the stream's end.
-            self.stories.live.seen_call = false;
+            self.stories.live.forget_call_seen();
             self.join_live_story_from_viewer(chat_id, story_id, cx);
         }
     }

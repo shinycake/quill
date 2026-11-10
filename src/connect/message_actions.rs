@@ -533,6 +533,35 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
     }
 
+    /// A failed `getWebPageInstantView` (TDLib 404: the page has no
+    /// Instant View) as the link the asking window opens in the browser, like
+    /// TGX. Taken before `apply` drops the pending request; `None` for any
+    /// other envelope and for a window that closed since asking.
+    pub(crate) fn take_instant_view_fallback(
+        &mut self,
+        envelope: &crate::telegram::envelope::Envelope,
+    ) -> Option<crate::state::InstantViewFallback> {
+        if !matches!(envelope.payload, crate::telegram::EnvelopePayload::Error(_)) {
+            return None;
+        }
+        let id = envelope.extra?;
+        let pending = self.session.requests.get(id)?;
+        if pending.purpose != RequestPurpose::GetWebPageInstantView {
+            return None;
+        }
+        let window = pending.window;
+        let messages = &mut self.session.messages;
+        let from_agent = messages.instant_view_agent_requests.remove(&id);
+        let url = messages.instant_view_urls.remove(&id)?;
+        window
+            .is_none_or(|chat| self.session.window_chats.contains(&chat))
+            .then_some(crate::state::InstantViewFallback {
+                window,
+                url,
+                from_agent,
+            })
+    }
+
     /// MED4: outcome of an Instant View open attempt (TGX
     /// `TdlibUi.fetchInstantView` + browser fallback).
     pub fn open_instant_view(&mut self, url: &str) -> InstantViewOutcome {

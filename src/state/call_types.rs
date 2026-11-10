@@ -739,6 +739,18 @@ impl CallSummary {
 /// Cap for the honest signaling queue (C1: no consumer yet).
 pub(crate) const MAX_QUEUED_SIGNALING_CHUNKS: usize = 32;
 
+/// A link whose `getWebPageInstantView` failed (TDLib 404: no Instant View
+/// for the page): the window that asked opens it in the browser.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InstantViewFallback {
+    /// The chat window that asked; `None` is the main window.
+    pub window: Option<ChatId>,
+    pub url: String,
+    /// The request came from an agent's step (`guard::with_injecting`): the
+    /// browser opens as part of that step.
+    pub from_agent: bool,
+}
+
 /// MED4: one-shot `getWebPageInstantView` answer — the URL plus the M2
 /// `pageBlock*` content the IV reader renders.
 #[derive(Debug, Clone)]

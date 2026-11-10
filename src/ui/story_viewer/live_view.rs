@@ -53,7 +53,7 @@ impl QuillApp {
         let shown = self.stories.viewer.current().map(StoryViewerItem::key);
         self.stories
             .live
-            .watching
+            .watching()
             .filter(|watched| shown == Some(*watched))
     }
 
@@ -222,7 +222,7 @@ impl QuillApp {
         item: &StoryViewerItem,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
-        if self.stories.live.watching != Some((item.chat_id, item.story_id)) {
+        if self.stories.live.watching() != Some((item.chat_id, item.story_id)) {
             return None;
         }
         let key = item.chat_id.0;

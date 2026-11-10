@@ -385,7 +385,7 @@ fn open_live_story_demo(
 fn a_live_story_pip_keeps_the_story_until_it_closes(cx: &mut TestAppContext) {
     let (app, mut main) = open_live_story(cx);
     let main = &mut main;
-    let watching = app.read_with(main, |app, _| app.stories.live.watching);
+    let watching = app.read_with(main, |app, _| app.stories.live.watching());
     assert!(watching.is_some(), "the demo watches its live story");
     assert!(main.debug_bounds("live-story-frame").is_some());
     app.update_in(main, |app, window, cx| app.open_story_pip(window, cx));
@@ -394,7 +394,8 @@ fn a_live_story_pip_keeps_the_story_until_it_closes(cx: &mut TestAppContext) {
     app.read_with(main, |app, _| {
         assert!(!app.stories.viewer.is_open(), "the viewer closed");
         assert_eq!(
-            app.stories.live.watching, watching,
+            app.stories.live.watching(),
+            watching,
             "the story stays joined"
         );
     });
@@ -408,7 +409,7 @@ fn a_live_story_pip_keeps_the_story_until_it_closes(cx: &mut TestAppContext) {
     settle(main);
     app.read_with(main, |app, _| {
         assert!(app.stories.viewer.is_open(), "the viewer is back");
-        assert_eq!(app.stories.live.watching, watching);
+        assert_eq!(app.stories.live.watching(), watching);
         assert!(app.group_call.live_pip.is_none(), "the PiP let go");
     });
     assert!(main.debug_bounds("live-story-frame").is_some());
@@ -424,7 +425,7 @@ fn a_live_story_pip_keeps_the_story_until_it_closes(cx: &mut TestAppContext) {
     settle(main);
     app.read_with(main, |app, _| {
         assert!(app.group_call.live_pip.is_none());
-        assert_eq!(app.stories.live.watching, None, "closing left the story");
+        assert_eq!(app.stories.live.watching(), None, "closing left the story");
     });
 }
 
@@ -432,7 +433,7 @@ fn a_live_story_pip_keeps_the_story_until_it_closes(cx: &mut TestAppContext) {
 fn a_live_story_pip_plays_beside_a_one_to_one_call(cx: &mut TestAppContext) {
     let (app, mut main) = open_live_story_demo(cx, "ready-live-story-in-call");
     let main = &mut main;
-    let watching = app.read_with(main, |app, _| app.stories.live.watching);
+    let watching = app.read_with(main, |app, _| app.stories.live.watching());
     assert!(watching.is_some());
     app.update_in(main, |app, window, cx| app.open_story_pip(window, cx));
     settle(main);
@@ -443,7 +444,7 @@ fn a_live_story_pip_plays_beside_a_one_to_one_call(cx: &mut TestAppContext) {
         assert!(calls.active_call.is_some(), "the call stays");
         assert!(calls.story_stream.is_some(), "the story stays joined");
         assert!(app.group_call.live_pip.is_some(), "the PiP stays open");
-        assert_eq!(app.stories.live.watching, watching);
+        assert_eq!(app.stories.live.watching(), watching);
     });
     assert!(pip.debug_bounds("live-pip-badge").is_some());
 }
@@ -452,7 +453,7 @@ fn a_live_story_pip_plays_beside_a_one_to_one_call(cx: &mut TestAppContext) {
 fn enlarging_a_story_that_is_gone_closes_the_live_pip(cx: &mut TestAppContext) {
     let (app, mut main) = open_live_story(cx);
     let main = &mut main;
-    let watching = app.read_with(main, |app, _| app.stories.live.watching);
+    let watching = app.read_with(main, |app, _| app.stories.live.watching());
     app.update_in(main, |app, window, cx| app.open_story_pip(window, cx));
     settle(main);
     let mut pip = live_pip_window(&app, main, cx);
@@ -470,6 +471,6 @@ fn enlarging_a_story_that_is_gone_closes_the_live_pip(cx: &mut TestAppContext) {
     app.read_with(main, |app, _| {
         assert!(app.group_call.live_pip.is_none(), "closed");
         assert!(!app.stories.viewer.is_open());
-        assert_eq!(app.stories.live.watching, None, "the story was left");
+        assert_eq!(app.stories.live.watching(), None, "the story was left");
     });
 }

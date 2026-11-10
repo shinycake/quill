@@ -423,3 +423,8 @@ impl QuillApp {
         panel.into_any_element()
     }
 }
+
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+#[path = "save_folder_editor_tests.rs"]
+mod tests;

@@ -333,7 +333,7 @@ fn an_ended_stream_closes_the_viewer(cx: &mut TestAppContext) {
     });
     frames(vcx);
     assert!(!app.read_with(vcx, |app, _| app.stories.viewer.is_open()));
-    assert!(app.read_with(vcx, |app, _| app.stories.live.watching.is_none()));
+    assert!(app.read_with(vcx, |app, _| app.stories.live.watching().is_none()));
     assert!(find(vcx, "live-story-frame").is_none());
 }
 
@@ -435,8 +435,8 @@ fn a_story_that_ends_before_its_call_closes_the_viewer(cx: &mut TestAppContext) 
     let (app, mut vcx) = open_live(cx, "ready-live-story");
     let vcx = &mut vcx;
     app.update(vcx, |app, cx| {
-        app.stories.live.seen_call = false;
-        let watched = app.stories.live.watching;
+        app.stories.live.forget_call_seen();
+        let watched = app.stories.live.watching();
         if let Some(session) = app.demo_session.as_mut() {
             session.calls.story_stream = None;
             if let Some((chat_id, story_id)) = watched
@@ -450,7 +450,7 @@ fn a_story_that_ends_before_its_call_closes_the_viewer(cx: &mut TestAppContext) 
     frames(vcx);
     app.read_with(vcx, |app, _| {
         assert!(!app.stories.viewer.is_open(), "closed as an ended stream");
-        assert!(app.stories.live.watching.is_none());
+        assert!(app.stories.live.watching().is_none());
     });
 }
 
@@ -610,7 +610,7 @@ fn an_account_switch_leaves_the_live_story(cx: &mut TestAppContext) {
     frames(vcx);
     app.read_with(vcx, |app, _| {
         assert!(!app.stories.viewer.is_open());
-        assert!(app.stories.live.watching.is_none());
+        assert!(app.stories.live.watching().is_none());
         let calls = &app.demo_session.as_ref().expect("the demo session").calls;
         assert!(calls.story_stream.is_none(), "the story slot is left");
         assert!(calls.active_call.is_some(), "the call is not the story's");
@@ -633,7 +633,7 @@ fn an_account_switch_closes_a_story_pip(cx: &mut TestAppContext) {
     frames(vcx);
     app.read_with(vcx, |app, _| {
         assert!(app.group_call.live_pip.is_none());
-        assert!(app.stories.live.watching.is_none());
+        assert!(app.stories.live.watching().is_none());
     });
 }
 
@@ -647,7 +647,7 @@ fn a_stream_in_pip_leaves_the_header_of_another_story_alone(cx: &mut TestAppCont
     app.update_in(vcx, |app, window, cx| app.demo_story_photo(window, cx));
     frames(vcx);
     app.read_with(vcx, |app, _| {
-        assert!(app.stories.live.watching.is_some(), "the PiP plays on");
+        assert!(app.stories.live.watching().is_some(), "the PiP plays on");
         assert_eq!(
             app.stories.viewer.current().map(|item| item.story_id),
             super::story_demo::STORIES.first().copied()
@@ -784,4 +784,29 @@ fn burst_sticker(file: FileId) -> StickerItem {
         requires_premium: false,
         premium_animation: None,
     }
+}
+
+/// A refused live join is one stage with the join itself: it stays for the
+/// story that was refused (the "Join live" button starts it again) and is
+/// gone once another story, or none, is shown (sweep 13-089).
+#[gpui_kit::test]
+fn a_refused_join_is_a_stage_that_another_story_clears(cx: &mut TestAppContext) {
+    use super::live_state::LiveJoin;
+    let (app, mut vcx) = open_live(cx, "ready-live-story");
+    let vcx = &mut vcx;
+    app.update(vcx, |app, _| {
+        let live = &mut app.stories.live;
+        live.refuse((ChatId(5), 7));
+        assert_eq!(live.refused(), Some((ChatId(5), 7)));
+        assert_eq!(live.watching(), None, "not watching what was refused");
+        live.drop_stale_refusal(Some((ChatId(5), 7)));
+        assert_eq!(live.refused(), Some((ChatId(5), 7)), "same story: stays");
+        live.drop_stale_refusal(Some((ChatId(5), 8)));
+        assert_eq!(live.join, LiveJoin::Idle, "another story clears it");
+        live.start_watching((ChatId(5), 8));
+        live.mark_call_seen();
+        assert!(live.seen_call());
+        live.refuse((ChatId(5), 8));
+        assert!(!live.seen_call(), "a refusal forgets the old call");
+    });
 }

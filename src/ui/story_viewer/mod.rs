@@ -100,8 +100,7 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut() {
             let joined = live.driver.join_live_story(chat_id, story_id);
             if joined.is_ok() {
-                self.stories.live.watching = Some((chat_id, story_id));
-                self.stories.live.refused_join = None;
+                self.stories.live.start_watching((chat_id, story_id));
             }
             self.screen.connection.set_note_for(
                 &self.screen.windows,
@@ -724,7 +723,7 @@ impl QuillApp {
     pub(super) fn close_story_viewer(&mut self, cx: &mut Context<Self>) {
         self.release_story_viewer(cx);
         // A live story playing on in Picture-in-Picture stays joined.
-        if self.stories.live.watching != self.live_pip_story() {
+        if self.stories.live.watching() != self.live_pip_story() {
             self.leave_live_story_view(cx);
         }
         self.clear_terminal_story_report();

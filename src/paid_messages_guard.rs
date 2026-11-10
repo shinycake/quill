@@ -79,10 +79,18 @@ pub struct PaidGuard {
     state: Mutex<State>,
 }
 
+/// Writes the agreed total into the request's `options`. Most media,
+/// album, voice/video-note, checklist and plain forward builders send
+/// `"options": null`; a full `messageSendOptions` object is made then.
 fn set_paid(request: &mut Value, total: i64) {
-    if let Some(options) = request.get_mut("options").filter(|o| o.is_object()) {
-        options["paid_message_star_count"] = total.into();
+    let Some(map) = request.as_object_mut() else {
+        return;
+    };
+    let options = map.entry("options").or_insert(Value::Null);
+    if !options.is_object() {
+        *options = serde_json::json!({"@type": "messageSendOptions"});
     }
+    options["paid_message_star_count"] = total.into();
 }
 
 /// The chat and the number of messages a sending request creates; `None`
@@ -188,6 +196,31 @@ mod tests {
             "options":{"@type":"messageSendOptions","paid_message_star_count":0},
             "input_message_contents": vec![json!({}); n]})
         .to_string()
+    }
+
+    /// Media, voice, checklist and plain forward builders send
+    /// `"options": null`; the price still reaches TDLib.
+    #[test]
+    fn null_options_get_the_agreed_total() {
+        let g = guard(25, Some(25));
+        for request in [
+            json!({"@type":"sendMessage","chat_id":7,"options":null,
+                "input_message_content":{"@type":"inputMessagePhoto"}}),
+            json!({"@type":"forwardMessages","chat_id":7,"message_ids":[1,2],"options":null}),
+            json!({"@type":"sendMessageAlbum","chat_id":7,"input_message_contents":[{},{}]}),
+        ] {
+            let sent = g.screen(&request.to_string()).expect("trusted passes");
+            let v: Value = serde_json::from_str(&sent).unwrap();
+            let want = if v["@type"] == "sendMessage" { 25 } else { 50 };
+            assert_eq!(v["options"]["@type"], "messageSendOptions");
+            assert_eq!(v["options"]["paid_message_star_count"], want);
+        }
+        let g = guard(25, None);
+        let photo = json!({"@type":"sendMessage","chat_id":7,"options":null}).to_string();
+        assert!(g.screen(&photo).is_none());
+        let held = g.take_held().expect("held");
+        let v: Value = serde_json::from_str(&held.with_price()).unwrap();
+        assert_eq!(v["options"]["paid_message_star_count"], 25);
     }
 
     #[test]

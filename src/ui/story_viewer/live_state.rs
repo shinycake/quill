@@ -62,6 +62,83 @@ pub(in crate::ui) struct LiveDelete {
     pub(super) ban: bool,
 }
 
+/// A live story: `(poster, story)`.
+pub(in crate::ui) type LiveTarget = (ChatId, i32);
+
+/// The viewer's stage with a live story's call. Every stage ends: the
+/// viewer moving on, leaving, closing or a switch of account resets it to
+/// `Idle`, and "Join live" starts the refused one again.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(in crate::ui) enum LiveJoin {
+    Idle,
+    /// Joined (or joining). `seen_call`: the call was seen tracked since
+    /// the join, so its end is noticed.
+    Watching {
+        target: LiveTarget,
+        seen_call: bool,
+    },
+    /// The join was refused: the viewer's upkeep does not join it again,
+    /// only the "Join live" button; another story (or none) clears it.
+    Refused(LiveTarget),
+}
+
+impl LiveStoryUi {
+    /// The live story the viewer joined.
+    pub(in crate::ui) fn watching(&self) -> Option<LiveTarget> {
+        match self.join {
+            LiveJoin::Watching { target, .. } => Some(target),
+            _ => None,
+        }
+    }
+
+    pub(super) fn refused(&self) -> Option<LiveTarget> {
+        match self.join {
+            LiveJoin::Refused(target) => Some(target),
+            _ => None,
+        }
+    }
+
+    pub(super) fn seen_call(&self) -> bool {
+        matches!(
+            self.join,
+            LiveJoin::Watching {
+                seen_call: true,
+                ..
+            }
+        )
+    }
+
+    pub(in crate::ui) fn start_watching(&mut self, target: LiveTarget) {
+        self.join = LiveJoin::Watching {
+            target,
+            seen_call: false,
+        };
+    }
+
+    pub(super) fn refuse(&mut self, target: LiveTarget) {
+        self.join = LiveJoin::Refused(target);
+    }
+
+    /// Another story (or none) than the refused one is shown.
+    pub(super) fn drop_stale_refusal(&mut self, shown: Option<LiveTarget>) {
+        if self.refused().is_some() && self.refused() != shown {
+            self.join = LiveJoin::Idle;
+        }
+    }
+
+    pub(super) fn mark_call_seen(&mut self) {
+        if let LiveJoin::Watching { seen_call, .. } = &mut self.join {
+            *seen_call = true;
+        }
+    }
+
+    pub(super) fn forget_call_seen(&mut self) {
+        if let LiveJoin::Watching { seen_call, .. } = &mut self.join {
+            *seen_call = false;
+        }
+    }
+}
+
 /// One Stars effect on screen.
 #[derive(Debug, Clone, PartialEq)]
 pub(in crate::ui) struct FlyingStars {
@@ -80,14 +157,8 @@ pub(in crate::ui) struct LiveStoryUi {
     /// The stream's live player, over the driver's feed (also the live
     /// PiP's, `calls::live_pip`).
     pub(in crate::ui) player: Option<VideoPlayer>,
-    /// The live story the viewer joined: `(poster, story)`.
-    pub(in crate::ui) watching: Option<(ChatId, i32)>,
-    /// The story whose join was refused: it is not joined again by the
-    /// viewer's upkeep, only by the "Join live" button; another story (or
-    /// none) clears it.
-    pub(super) refused_join: Option<(ChatId, i32)>,
-    /// The call was seen tracked since the join (so its end is noticed).
-    pub(super) seen_call: bool,
+    /// Where the viewer stands with a live story's call.
+    pub(in crate::ui) join: LiveJoin,
     /// Stars the next comment carries (0 = free; tdesktop `_starsToSend`).
     pub(super) chosen_stars: i64,
     pub(super) stars_box: Option<LiveStarsBox>,
@@ -140,9 +211,7 @@ impl LiveStoryUi {
         Self {
             input,
             player: None,
-            watching: None,
-            refused_join: None,
-            seen_call: false,
+            join: LiveJoin::Idle,
             chosen_stars: 0,
             stars_box: None,
             delete: None,
@@ -172,9 +241,7 @@ impl LiveStoryUi {
 
     /// Everything but the field and the picture goes back to the start.
     pub(super) fn reset(&mut self) {
-        self.watching = None;
-        self.refused_join = None;
-        self.seen_call = false;
+        self.join = LiveJoin::Idle;
         self.chosen_stars = 0;
         self.stars_box = None;
         self.delete = None;

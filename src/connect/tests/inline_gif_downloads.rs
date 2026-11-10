@@ -99,3 +99,56 @@ fn inline_results_download_their_images_right_away() {
     assert_eq!(results[1].preview_clip.map(|f| f.0), Some(21));
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// A "load more" page that failed is remembered by the offset it asked
+/// for, so the grid does not ask again on every poll; the next query
+/// starts clean (sweep 10-121).
+#[test]
+fn a_failed_next_inline_page_is_remembered_until_the_next_query() {
+    let store = MemorySecretStore::new();
+    let (dir, prepared) = prepared_tmp(&store);
+    let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+    let recorder = Arc::new(RecordingSender::new());
+    let session = Session::new(AccountKey::primary(), sink.clone());
+    let mut driver = ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
+    let seq = AtomicU64::new(0);
+    let ingest = |driver: &mut ConnectDriver<Arc<RecordingSender>>, json: &str| {
+        driver
+            .ingest(copy_and_parse(json, &seq, &sink).unwrap())
+            .unwrap();
+    };
+    ingest(
+        &mut driver,
+        r#"{"@type":"updateAuthorizationState","authorization_state":{"@type":"authorizationStateReady"}}"#,
+    );
+    let first = driver
+        .inline_query(77, ChatId(1), "cats", "")
+        .expect("query")
+        .expect("request id");
+    let results = json!({
+        "@type": "inlineQueryResults", "@extra": first.0.to_string(),
+        "inline_query_id": "5", "button": null, "next_offset": "n1",
+        "results": [animation("a", 10, 11, "thumbnailFormatJpeg")],
+    });
+    ingest(&mut driver, &results.to_string());
+    let more = driver
+        .inline_query(77, ChatId(1), "cats", "n1")
+        .expect("next page")
+        .expect("request id");
+    ingest(
+        &mut driver,
+        &json!({"@type": "error", "@extra": more.0.to_string(), "code": 500, "message": "boom"})
+            .to_string(),
+    );
+    assert_eq!(
+        driver.session.bots.inline_more_failed,
+        Some((ChatId(1), 77, "n1".to_string()))
+    );
+    // A new query replaces the slot and forgets the failed page.
+    driver
+        .inline_query(77, ChatId(1), "dogs", "")
+        .expect("query")
+        .expect("request id");
+    assert_eq!(driver.session.bots.inline_more_failed, None);
+    let _ = std::fs::remove_dir_all(&dir);
+}

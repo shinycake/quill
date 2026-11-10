@@ -107,7 +107,7 @@ impl QuillApp {
     /// The live story header's PiP button: the story's picture goes into
     /// a floating window and the viewer closes; the story stays joined.
     pub(crate) fn open_story_pip(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some((chat_id, story_id)) = self.stories.live.watching else {
+        let Some((chat_id, story_id)) = self.stories.live.watching() else {
             return;
         };
         let Some(player) = self.stories.live.player.clone() else {
@@ -252,7 +252,7 @@ impl QuillApp {
         let Some(link) = self.group_call.live_pip.as_ref() else {
             // A live story kept by a PiP that is gone, with no viewer on
             // it: leave it, as closing the viewer would have.
-            if self.stories.live.watching.is_some() && !self.stories.viewer.is_open() {
+            if self.stories.live.watching().is_some() && !self.stories.viewer.is_open() {
                 self.sync_live_story(cx);
             }
             return;
@@ -326,7 +326,7 @@ impl QuillApp {
                 })
             }
             LivePipSource::Story { chat_id, story_id } => {
-                self.stories.live.watching == Some((chat_id, story_id))
+                self.stories.live.watching() == Some((chat_id, story_id))
                     && !calls
                         .story_stream
                         .as_ref()

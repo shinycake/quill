@@ -183,7 +183,7 @@ pub enum MessagesPurpose {
     /// The URL rides `Session::instant_view_urls` keyed by `RequestId`
     /// (the purpose stays `Copy`). Success lands in
     /// `Session::instant_view`; the 404 error falls back to the browser
-    /// via `Session::instant_view_fallback_url` — a refusal is never
+    /// via `MessagesState::instant_view_fallbacks` — a refusal is never
     /// shown as success.
     GetWebPageInstantView,
     /// MED4b: `getLinkPreview` (TDLib 1.8.67, `schema/td_api.tl:14792`) —

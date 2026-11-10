@@ -515,6 +515,9 @@ pub struct VideoNoteDraft {
     pub duration_secs: i32,
     /// Square side in pixels (`inputVideoNote.length`).
     pub length: i32,
+    /// First-frame still, made by `VideoNoteCapture::finish` on its
+    /// background task so sending never waits for ffmpeg.
+    pub thumbnail: Option<VideoNoteThumbnail>,
 }
 
 /// Side of the live camera preview frames, in pixels (BGRA).
@@ -665,10 +668,12 @@ impl VideoNoteCapture {
                 crate::lang::tr(crate::lang::keys::Q_OPS_VIDEO_CLIP_NOT_SQUARE).to_string(),
             );
         }
+        let thumbnail = write_video_note_thumbnail(&self.path);
         Ok(VideoNoteDraft {
             path: std::mem::take(&mut self.path),
             duration_secs: probe.duration.clamp(1, ROUND_MAX_SECS),
             length: probe.width,
+            thumbnail,
         })
     }
 

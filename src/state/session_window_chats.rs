@@ -63,6 +63,9 @@ impl Session {
         if self.view_in_place() == Some(chat_id) {
             self.enter_view(None);
         }
+        self.messages
+            .instant_view_fallbacks
+            .retain(|fallback| fallback.window != Some(chat_id));
         let was_window = self.window_chats.views.remove(&chat_id).is_some();
         if was_window {
             self.release_chat_history(chat_id);

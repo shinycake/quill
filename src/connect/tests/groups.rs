@@ -603,6 +603,7 @@ fn driver_send_recorded_video_note_sends_input_message_video_note() {
                 path: std::path::PathBuf::from("/nonexistent.mp4"),
                 duration_secs: 5,
                 length: 280,
+                thumbnail: None,
             },
             None
         ),
@@ -623,6 +624,7 @@ fn driver_send_recorded_video_note_sends_input_message_video_note() {
                 path: std::path::PathBuf::from("/nonexistent.mp4"),
                 duration_secs: 5,
                 length: 280,
+                thumbnail: None,
             },
             None
         ),
@@ -637,6 +639,7 @@ fn driver_send_recorded_video_note_sends_input_message_video_note() {
         path: clip,
         duration_secs: 5,
         length: 280,
+        thumbnail: None,
     };
     let extra = driver
         .send_recorded_video_note(&draft, None)
@@ -682,6 +685,7 @@ fn driver_send_recorded_video_note_to_ignores_the_open_chat() {
         path: clip,
         duration_secs: 5,
         length: 280,
+        thumbnail: None,
     };
     // Recorded in chat 11, finished after chat 12 was opened.
     driver.session.open_chat = Some(ChatId(12));

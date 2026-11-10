@@ -6,8 +6,8 @@ use crate::diagnostics::{DiagnosticSink, MemorySink};
 use crate::ids::{AccountKey, ChatId, MessageId, RequestId};
 use crate::platform::MemorySecretStore;
 use crate::state::{
-    GraphFetch, InfoPanelTarget, MessageStatsFetch, RECENT_POSTS_FIRST, RequestPurpose, Session,
-    StatsPage,
+    ChatStatisticsFetch, GraphFetch, InfoPanelTarget, MessageStatsFetch, RECENT_POSTS_FIRST,
+    RequestPurpose, Session, StatsPage,
 };
 use crate::telegram::client::copy_and_parse;
 use crate::telegram::envelope::StatisticalGraph;
@@ -474,4 +474,34 @@ fn reopening_a_post_whose_statistics_are_out_asks_for_its_forwards_again() {
         .message_for(-100, a.0)
         .unwrap();
     assert_eq!(state.forwards.forwards.len(), 2);
+}
+
+/// A chat whose statistics TDLib will not give ends in an error the panel
+/// draws, never a spinner nothing will end (sweep 13-021, 13-022).
+#[test]
+fn unavailable_chat_statistics_end_in_an_error() {
+    let mut rig = Rig::new();
+    for json in [
+        r#"{"@type":"updateNewChat","chat":{"id":-100,"title":"News","type":{"@type":"chatTypeSupergroup","supergroup_id":100,"is_channel":true},"unread_count":0}}"#,
+        r#"{"@type":"updateSupergroupFullInfo","supergroup_id":100,"supergroup_full_info":{"description":"","member_count":3,"can_get_statistics":false}}"#,
+    ] {
+        rig.driver
+            .ingest(copy_and_parse(json, &rig.seq, &rig.sink).unwrap())
+            .unwrap();
+    }
+    let asked = rig.sent().len();
+    assert_eq!(
+        rig.driver.fetch_chat_statistics(ChatId(-100), false),
+        Ok(None)
+    );
+    assert!(matches!(
+        rig.driver.session.groups.chat_statistics.get(&-100),
+        Some(ChatStatisticsFetch::Failed(_))
+    ));
+    assert_eq!(rig.sent().len(), asked, "nothing was sent");
+    // A refresh from the error panel is not blocked by the held error.
+    assert_eq!(
+        rig.driver.refresh_chat_statistics(ChatId(-100), false),
+        Ok(None)
+    );
 }

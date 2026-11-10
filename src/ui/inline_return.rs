@@ -7,27 +7,41 @@
 
 use super::QuillApp;
 use gpui_kit::*;
-use quill::ids::ChatId;
+use quill::ids::{AccountKey, ChatId};
 use quill::inline_grid::switch_inline_query;
 use quill::telegram::envelope::ChatKind;
+
+/// Where a round trip stands. Every stage ends: the bot's switch-inline
+/// button takes it back, and a lookup that fails
+/// ([`QuillApp::cancel_inline_opening`]) or another account on screen
+/// drops it.
+#[derive(Debug)]
+enum InlineStage {
+    /// The bot's chat is being looked up; its start waits to be sent.
+    Opening { parameter: String },
+    /// The start went out. Newest message id in the bot's chat at that
+    /// point; only later messages can bring the user back.
+    Started { baseline: i64 },
+}
 
 /// Where the inline query came from and what is still waiting.
 #[derive(Debug)]
 pub(in crate::ui) struct InlineReturn {
+    account: AccountKey,
     origin: ChatId,
     bot_id: i64,
     username: String,
-    /// The start parameter, until the bot's chat is open and it was sent.
-    pending_start: Option<String>,
-    /// Newest message id in the bot's chat when the start went out; only
-    /// later messages can bring the user back.
-    baseline: i64,
+    stage: InlineStage,
 }
 
 impl InlineReturn {
     /// Whether the round trip waits to send `bot_id`'s start.
     pub(in crate::ui) fn waits_for_start(&self, bot_id: i64) -> bool {
-        self.bot_id == bot_id && self.pending_start.is_some()
+        self.bot_id == bot_id && matches!(self.stage, InlineStage::Opening { .. })
+    }
+
+    fn started(&self) -> bool {
+        matches!(self.stage, InlineStage::Started { .. })
     }
 }
 
@@ -36,6 +50,7 @@ impl QuillApp {
     /// private chat with, from whichever window began it: the window that
     /// opens the bot's chat sends the start and later comes back.
     pub(super) fn take_waiting_inline_return(&mut self, chat_id: ChatId) -> Option<InlineReturn> {
+        self.drop_foreign_inline_return();
         let bot_id = self
             .session()
             .and_then(|session| session.chats.get(&chat_id.0))
@@ -63,13 +78,46 @@ impl QuillApp {
         if self.is_private_chat_with(origin, bot_id) {
             return;
         }
+        let Some(account) = self.session().map(|session| session.account.clone()) else {
+            return;
+        };
         self.composer_ui.inline_return = Some(InlineReturn {
+            account,
             origin,
             bot_id,
             username: username.to_string(),
-            pending_start: Some(parameter.to_string()),
-            baseline: 0,
+            stage: InlineStage::Opening {
+                parameter: parameter.to_string(),
+            },
         });
+    }
+
+    /// The bot's chat could not be opened (the lookup failed, or the link
+    /// went elsewhere): the round trip waiting on it ends, so the start is
+    /// never sent into a chat opened later by another route.
+    pub(super) fn cancel_inline_opening(&mut self) {
+        if self
+            .composer_ui
+            .inline_return
+            .as_ref()
+            .is_some_and(|ret| !ret.started())
+        {
+            self.composer_ui.inline_return = None;
+        }
+    }
+
+    /// The round trip on screen's account, if it has one: a trip begun on
+    /// another account is dropped.
+    fn drop_foreign_inline_return(&mut self) {
+        let here = self.session().map(|session| session.account.clone());
+        if self
+            .composer_ui
+            .inline_return
+            .as_ref()
+            .is_some_and(|ret| here.as_ref() != Some(&ret.account))
+        {
+            self.composer_ui.inline_return = None;
+        }
     }
 
     fn is_private_chat_with(&self, chat_id: ChatId, bot_id: i64) -> bool {
@@ -84,11 +132,12 @@ impl QuillApp {
     /// (tdesktop `sendBotStartCommand` after `ShowAndStartBotMsgId`).
     /// Returns whether it did, so the caller skips its own start handling.
     pub(super) fn take_inline_start(&mut self, chat_id: ChatId, cx: &mut Context<Self>) -> bool {
+        self.drop_foreign_inline_return();
         let Some(bot_id) = self
             .composer_ui
             .inline_return
             .as_ref()
-            .filter(|ret| ret.pending_start.is_some())
+            .filter(|ret| !ret.started())
             .map(|ret| ret.bot_id)
         else {
             return false;
@@ -104,8 +153,11 @@ impl QuillApp {
         let Some(ret) = self.composer_ui.inline_return.as_mut() else {
             return false;
         };
-        let parameter = ret.pending_start.take().unwrap_or_default();
-        ret.baseline = baseline;
+        let InlineStage::Opening { parameter } =
+            std::mem::replace(&mut ret.stage, InlineStage::Started { baseline })
+        else {
+            return false;
+        };
         self.press_bot_start(chat_id, bot_id, parameter, cx);
         true
     }
@@ -113,19 +165,19 @@ impl QuillApp {
     /// Once per frame (needs the window for the composer): when the bot's
     /// answer carries a switch-inline button, go back and type the query.
     pub(super) fn flush_inline_return(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.drop_foreign_inline_return();
         let Some(ret) = self.composer_ui.inline_return.as_ref() else {
             return;
         };
-        if ret.pending_start.is_some() {
+        let InlineStage::Started { baseline } = ret.stage else {
             return;
-        }
+        };
         let Some(open) = self.open_chat_id() else {
             return;
         };
         if !self.is_private_chat_with(open, ret.bot_id) {
             return;
         }
-        let baseline = ret.baseline;
         let query = self
             .session()
             .and_then(|session| session.histories.get(&open.0))
@@ -153,9 +205,11 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
-        let waiting = self.composer_ui.inline_return.as_ref().is_some_and(|ret| {
-            ret.pending_start.is_none() && self.is_private_chat_with(chat_id, ret.bot_id)
-        });
+        let waiting = self
+            .composer_ui
+            .inline_return
+            .as_ref()
+            .is_some_and(|ret| ret.started() && self.is_private_chat_with(chat_id, ret.bot_id));
         if waiting {
             self.return_to_inline_query(query, window, cx);
         }
@@ -174,3 +228,8 @@ impl QuillApp {
         cx.notify();
     }
 }
+
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+#[path = "inline_return_tests.rs"]
+mod tests;
