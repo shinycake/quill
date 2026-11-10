@@ -38,6 +38,9 @@ pub struct ThreadsState {
     pub thread: Option<ThreadView>,
     /// A channel's direct messages, per user, for its admins.
     pub direct: DirectMessagesTopics,
+    /// Answers to the composer's new-thread requests in bot chats, until
+    /// the window that asked takes its own.
+    pub bot_thread_starts: Vec<BotThreadStarted>,
 }
 
 impl ThreadsState {
@@ -55,6 +58,7 @@ impl ThreadsState {
             forum_topics_failed: HashSet::new(),
             thread: None,
             direct: DirectMessagesTopics::default(),
+            bot_thread_starts: Vec::new(),
         }
     }
 }

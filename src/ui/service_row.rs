@@ -221,6 +221,9 @@ pub(super) fn service_message_row(
     if let Some(row) = super::history::sharing_request::sharing_request_row(message, session, cx) {
         return row;
     }
+    if let Some(row) = super::history::new_bot_thread::new_bot_thread_row(message, cx) {
+        return row;
+    }
     let row_id = message.id.0 as u64;
     let text = session
         .and_then(|session| session.service_text(message))

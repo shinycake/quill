@@ -33,6 +33,8 @@ impl QuillApp {
         self.sync_history_holds();
         // The inline results button's round trip back to its chat.
         self.flush_inline_return(window, cx);
+        // A Send in a bot's "All" view goes once its new thread is made.
+        self.advance_bot_thread(window, cx);
         // A topic or thread switch without a window at hand asked for the
         // new slot's draft to be restored into the composer.
         self.restore_draft_if_pending(window, cx);

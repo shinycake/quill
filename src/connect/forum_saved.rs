@@ -7,12 +7,12 @@ use crate::state::{RequestPurpose, SAVED_PAGE, SAVED_TOPICS_PAGE};
 use crate::telegram::envelope::ReactionType;
 use crate::telegram::requests::{TOPIC_ICON_COLORS, valid_topic_icon_color};
 use crate::telegram::requests::{
-    create_forum_topic_with_icon, delete_saved_messages_topic_history, edit_forum_topic_with_icon,
-    get_forum_topic, get_forum_topic_default_icons, get_forum_topic_link, get_saved_messages_tags,
-    get_saved_messages_topic_history, load_saved_messages_topics, read_all_forum_topic_mentions,
-    read_all_forum_topic_reactions, search_saved_messages, set_pinned_forum_topics,
-    set_saved_messages_tag_label, toggle_chat_view_as_topics, toggle_saved_messages_topic_pinned,
-    unpin_all_forum_topic_messages,
+    create_bot_thread, create_forum_topic_with_icon, delete_saved_messages_topic_history,
+    edit_forum_topic_with_icon, get_forum_topic, get_forum_topic_default_icons,
+    get_forum_topic_link, get_saved_messages_tags, get_saved_messages_topic_history,
+    load_saved_messages_topics, read_all_forum_topic_mentions, read_all_forum_topic_reactions,
+    search_saved_messages, set_pinned_forum_topics, set_saved_messages_tag_label,
+    toggle_chat_view_as_topics, toggle_saved_messages_topic_pinned, unpin_all_forum_topic_messages,
 };
 
 type Sent = Result<Option<RequestId>, ConnectSendError>;
@@ -190,6 +190,34 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         self.send_purpose(RequestPurpose::CreateForumTopic, Some(chat_id), |extra| {
             create_forum_topic_with_icon(extra, chat_id, name.trim(), color, custom_emoji_id)
+        })
+    }
+
+    /// A new thread in a bot chat that lets users create them, for a
+    /// message sent from its "All" view (tdesktop `reserveNewBotTopic`:
+    /// "New Chat" with a random icon color). One at a time per chat.
+    pub fn start_bot_thread(&mut self, chat_id: ChatId, name: &str) -> Sent {
+        if !self
+            .session
+            .bot_topics(chat_id)
+            .is_some_and(|bot| bot.allows_users_to_create_topics)
+        {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        if self
+            .session
+            .requests
+            .has_purpose_for_chat(RequestPurpose::StartBotThread, chat_id)
+        {
+            return Ok(None);
+        }
+        let color = {
+            use rand::RngExt as _;
+            let at = rand::rng().random_range(0..TOPIC_ICON_COLORS.len());
+            TOPIC_ICON_COLORS.get(at).copied().unwrap_or(0x6FB9F0)
+        };
+        self.send_purpose(RequestPurpose::StartBotThread, Some(chat_id), |extra| {
+            create_bot_thread(extra, chat_id, name, color)
         })
     }
 

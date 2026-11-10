@@ -3,6 +3,7 @@ use super::*;
 
 mod boost_level;
 mod boosts;
+mod bot_threads;
 mod bots;
 mod bubble_headers;
 mod calls;

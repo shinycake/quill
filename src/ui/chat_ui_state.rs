@@ -144,6 +144,8 @@ pub(crate) struct ChatUi {
     /// Text a chat open handed over without a window at hand, for this
     /// chat's composer (`QuillApp::apply_compose_after_open`).
     pub(super) compose_after_open: Option<String>,
+    /// A Send in a bot's "All" view waiting for its new thread.
+    pub(super) bot_thread: super::composer::bot_thread::BotThreadStart,
     /// Same-chat reply draft (tdesktop `FieldHeader::replyToMessage`).
     /// Private on purpose: a sender must take the reply through
     /// `QuillApp::reply_for_send` so a reply to a deleted message is dropped.

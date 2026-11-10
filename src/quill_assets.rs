@@ -180,7 +180,8 @@ gpui_kit::assets::icon_assets!(
         Laptop,
         AppWindow,
         // Inline keyboard buy buttons (`ui::message_payments::corner_icon`).
-        CreditCard
+        CreditCard,
+        MessageCirclePlus
     ]
 );
 

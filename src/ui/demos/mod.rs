@@ -5,6 +5,7 @@
 #![deny(clippy::indexing_slicing)]
 
 mod animated_emoji;
+mod bot_threads;
 mod bots_profile;
 mod chat_list;
 mod code_highlight;
