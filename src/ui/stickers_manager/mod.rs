@@ -239,6 +239,8 @@ impl QuillApp {
                     &self.screen.windows,
                     StatusNote::error(tr(keys::Q_MEDIA_COULDNT_UPDATE_STICKERS_TRY_AGAIN)),
                 );
+                // Said here: not again from the drain.
+                live.driver.session.stickers.manager.failure = None;
             }
             live.driver.set_sticker_manager_open(false);
         } else if let Some(session) = self.demo_session.as_mut() {

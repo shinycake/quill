@@ -40,7 +40,8 @@ fn locking_takes_every_widget_off_screen(cx: &mut TestAppContext) {
         );
         app.widgets.entries.insert(key, entry);
         assert!(app.widgets.entries[&key].presence.is_shown());
-        app.set_locked(true, cx);
+        app.account.passcode.enabled = true;
+        app.lock_by_passcode(cx);
         assert!(
             !app.widgets.entries[&key].presence.is_shown(),
             "the locked window shows no widget"

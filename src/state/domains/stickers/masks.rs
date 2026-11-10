@@ -131,6 +131,15 @@ impl Session {
         )) = purpose
         {
             self.stickers.masks.failed = true;
+            if matches!(
+                purpose,
+                Some(RequestPurpose::Stickers(
+                    StickersPurpose::ChangeMaskSet { .. }
+                        | StickersPurpose::ReorderInstalledMaskSets
+                ))
+            ) {
+                self.stickers.manager.note_commit_failure();
+            }
         }
     }
 }

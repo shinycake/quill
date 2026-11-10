@@ -20,9 +20,21 @@ use quill::telegram::envelope::ChatKind;
 enum InlineStage {
     /// The bot's chat is being looked up; its start waits to be sent.
     Opening { parameter: String },
-    /// The start went out. Newest message id in the bot's chat at that
-    /// point; only later messages can bring the user back.
-    Started { baseline: i64 },
+    /// The start went out; only messages after `baseline` can bring the
+    /// user back.
+    Started { baseline: Baseline },
+}
+
+/// Where "after the start" begins in the bot's chat.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Baseline {
+    /// The newest message the loaded history held when the start went out.
+    At(i64),
+    /// The history was not loaded then, so its newest id says nothing
+    /// (everything loaded later would count as the bot's answer): the start
+    /// is the user's own newest sent message, and only what follows it
+    /// counts.
+    OwnStart,
 }
 
 /// Where the inline query came from and what is still waiting.
@@ -164,11 +176,14 @@ impl QuillApp {
         if !self.is_private_chat_with(chat_id, bot_id) {
             return false;
         }
-        let baseline = self
+        let baseline = match self
             .session()
             .and_then(|session| session.histories.get(&chat_id.0))
             .and_then(|history| history.messages.keys().max().copied())
-            .unwrap_or(0);
+        {
+            Some(newest) => Baseline::At(newest),
+            None => Baseline::OwnStart,
+        };
         let Some(ret) = self.composer_ui.inline_return.as_mut() else {
             return false;
         };
@@ -197,18 +212,38 @@ impl QuillApp {
         if !self.is_private_chat_with(open, ret.bot_id) {
             return;
         }
-        let query = self
+        let Some(history) = self
             .session()
             .and_then(|session| session.histories.get(&open.0))
-            .and_then(|history| {
-                history
+        else {
+            return;
+        };
+        let after = match baseline {
+            Baseline::At(id) => id,
+            // The start is the newest message of the user's own that went
+            // out; until it shows (still sending, history not here yet)
+            // nothing can be told apart from older answers.
+            Baseline::OwnStart => {
+                let newest_own = history
                     .messages
                     .iter()
-                    .filter(|(id, message)| **id > baseline && !message.is_outgoing)
-                    .find_map(|(_, message)| {
-                        message.reply_markup.as_ref().and_then(switch_inline_query)
-                    })
-            });
+                    .filter(|(_, message)| message.is_outgoing)
+                    .max_by_key(|(id, _)| **id);
+                match newest_own {
+                    Some((id, message)) if !message.pending() => *id,
+                    _ => return,
+                }
+            }
+        };
+        let query = Some(history).and_then(|history| {
+            history
+                .messages
+                .iter()
+                .filter(|(id, message)| **id > after && !message.is_outgoing)
+                .find_map(|(_, message)| {
+                    message.reply_markup.as_ref().and_then(switch_inline_query)
+                })
+        });
         if let Some(query) = query {
             self.return_to_inline_query(&query, window, cx);
         }

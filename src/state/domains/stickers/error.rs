@@ -138,6 +138,17 @@ impl Session {
             )
         ) {
             self.stickers.stickers.failed = true;
+            // A step of the manager box's saved changes: the box is
+            // closed, so the failure is reported on its own.
+            if matches!(
+                pending.map(|p| p.purpose),
+                Some(
+                    RequestPurpose::Stickers(StickersPurpose::ManageStickerSet { .. })
+                        | RequestPurpose::ReorderInstalledStickerSets
+                )
+            ) {
+                self.stickers.manager.note_commit_failure();
+            }
         }
         if matches!(
             pending.map(|p| p.purpose),

@@ -95,6 +95,12 @@ pub(crate) struct ChatWindows {
     /// Who asks for what the code running now opens (`dialog_hosts`):
     /// the window in place, a window a flow carried, or nobody.
     pub(super) asker: dialog_hosts::Asker,
+    /// The window that asked for the thread the session is opening (the
+    /// session keeps one thread): only its frame takes the resolved
+    /// thread on, not whichever window draws first (`advance_thread`).
+    /// `Some(None)` is the main window; `None`: nobody asked, as for a
+    /// link, and the first frame takes it.
+    pub(super) thread_asker: Option<Option<ChatId>>,
     /// Which window shows each kit dialog (`dialog_hosts`).
     dialogs: dialog_hosts::DialogHosts,
     /// A write of the open windows is scheduled (`saved`).
@@ -187,6 +193,7 @@ impl ChatWindows {
             scope: None,
             last_press: None,
             asker: dialog_hosts::Asker::InPlace,
+            thread_asker: None,
             dialogs: dialog_hosts::DialogHosts::default(),
             save_pending: false,
             closed: Vec::new(),

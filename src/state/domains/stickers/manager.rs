@@ -28,6 +28,26 @@ pub struct StickersManager {
     pub covers_requested: HashSet<i64>,
     /// Saved changes not yet sent, oldest first.
     pub commits: VecDeque<ManagerCommit>,
+    /// A step of a saved change that did not go through (a refused
+    /// request, a client that could not send): the box is closed by then,
+    /// so the UI says so once.
+    pub failure: Option<CommitFailure>,
+}
+
+/// A saved change of the manager box that was lost on the way.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CommitFailure {
+    /// The change was for mask sets, not regular sticker sets.
+    pub masks: bool,
+}
+
+impl StickersManager {
+    /// A step of the oldest saved change failed while one is on its way.
+    pub fn note_commit_failure(&mut self) {
+        if let Some(front) = self.commits.front() {
+            self.failure = Some(CommitFailure { masks: front.masks });
+        }
+    }
 }
 
 /// What a commit does next.

@@ -110,3 +110,33 @@ fn an_answer_for_another_change_does_not_finish_the_one_waited_on() {
     );
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn a_refused_step_of_the_managers_saved_change_is_reported_once() {
+    use crate::state::CommitFailure;
+    let (dir, prepared) = prepared_tmp(&MemorySecretStore::new());
+    let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+    let recorder = Arc::new(RecordingSender::new());
+    let seq = AtomicU64::new(0);
+    let mut driver = ready_driver(&recorder, prepared, &sink, &seq);
+    // The box closed with a removal and a new order.
+    driver
+        .commit_sticker_manager(false, vec![5], Some(vec![1, 2, 3]))
+        .unwrap();
+    let removal = sent_request(&recorder, "changeStickerSet");
+    let extra: crate::ids::RequestId = removal["@extra"].as_str().unwrap().parse().unwrap();
+    assert_eq!(driver.session.stickers.manager.failure, None);
+    // The removal is refused: the change is not lost without a word.
+    answer(
+        &mut driver,
+        &seq,
+        &sink,
+        extra,
+        json!({"@type":"error","code":500,"message":"test"}),
+    );
+    assert_eq!(
+        driver.session.stickers.manager.failure,
+        Some(CommitFailure { masks: false })
+    );
+    let _ = std::fs::remove_dir_all(dir);
+}

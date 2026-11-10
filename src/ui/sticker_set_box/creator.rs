@@ -559,6 +559,26 @@ impl QuillApp {
                 .set_note_for(&self.screen.windows, StatusNote::info(note));
             changed = true;
         }
+        // A saved change of the manager box that was lost on the way (the
+        // box is closed by then).
+        if live
+            .driver
+            .session
+            .stickers
+            .manager
+            .failure
+            .take()
+            .is_some()
+        {
+            self.screen.connection.set_note_for(
+                &self.screen.windows,
+                StatusNote::error(tr(keys::Q_MEDIA_COULDNT_UPDATE_STICKERS_TRY_AGAIN)),
+            );
+            changed = true;
+        }
+        let Some(live) = self.live.as_mut() else {
+            return changed;
+        };
         let deleted = live
             .driver
             .session
