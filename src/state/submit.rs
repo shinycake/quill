@@ -10,6 +10,35 @@
 //! ([`RequestRegistry::failure`]) for that read.
 use super::requests::RequestRegistry;
 use crate::ids::RequestId;
+use std::collections::VecDeque;
+
+/// How many refused requests the registry remembers.
+const FAILURES_KEPT: usize = 64;
+
+/// The last requests TDLib refused, with the reason, newest last.
+#[derive(Debug, Default)]
+pub struct Failures(VecDeque<(u64, String)>);
+
+impl RequestRegistry {
+    /// Remember that request `id` was refused.
+    pub fn record_failure(&mut self, id: RequestId, reason: String) {
+        let kept = &mut self.failures.0;
+        if kept.len() >= FAILURES_KEPT {
+            kept.pop_front();
+        }
+        kept.push_back((id.0, reason));
+    }
+
+    /// Why request `id` was refused, while the registry still remembers.
+    pub fn failure(&self, id: RequestId) -> Option<&str> {
+        self.failures
+            .0
+            .iter()
+            .rev()
+            .find(|(key, _)| *key == id.0)
+            .map(|(_, reason)| reason.as_str())
+    }
+}
 
 /// The stage of one box's Save.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]

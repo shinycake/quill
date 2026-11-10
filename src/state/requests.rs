@@ -533,32 +533,11 @@ pub struct RequestRegistry {
     /// In-flight `DownloadFile` requests per file id, so the
     /// already-downloading check does not scan `pending`.
     downloads: HashMap<i32, u32>,
-    /// The last requests TDLib refused, with the reason, newest last:
-    /// a box that sent one reads its outcome here (`Submit`).
-    failures: std::collections::VecDeque<(u64, String)>,
+    /// The last requests TDLib refused (`Submit` reads them).
+    pub(super) failures: super::submit::Failures,
 }
 
-/// How many refused requests the registry remembers.
-const FAILURES_KEPT: usize = 64;
-
 impl RequestRegistry {
-    /// Remember that request `id` was refused.
-    pub fn record_failure(&mut self, id: RequestId, reason: String) {
-        if self.failures.len() >= FAILURES_KEPT {
-            self.failures.pop_front();
-        }
-        self.failures.push_back((id.0, reason));
-    }
-
-    /// Why request `id` was refused, while the registry still remembers.
-    pub fn failure(&self, id: RequestId) -> Option<&str> {
-        self.failures
-            .iter()
-            .rev()
-            .find(|(key, _)| *key == id.0)
-            .map(|(_, reason)| reason.as_str())
-    }
-
     /// Phase B1: whether a request with the given purpose is already in
     /// flight for this secret chat id. Used to avoid duplicate offline
     /// `getSecretChat` fetches while the state resolves.
