@@ -104,6 +104,18 @@ impl HdrViewer {
         matches!(self.slot, Slot::Hdr(_))
     }
 
+    /// The headroom the frame is drawn for on a display reporting
+    /// `headroom`: back in 8-bit (`edr_lost`) it aims at standard range,
+    /// whatever the display says. The draw and the headroom poll both read
+    /// it, so they agree on when it changed.
+    fn display_headroom(&self, headroom: super::Headroom) -> f32 {
+        if self.edr_lost {
+            super::Headroom::SDR.effective()
+        } else {
+            headroom.effective()
+        }
+    }
+
     /// Tests: the headroom the shown frame is tone-mapped into.
     #[cfg(test)]
     #[cfg(all(target_os = "macos", feature = "demo-capture"))]
@@ -174,11 +186,7 @@ impl QuillApp {
         };
         // Back in 8-bit, the frame is tone-mapped into standard range
         // instead of clipping its highlights.
-        let display = if hdr.edr_lost {
-            super::Headroom::SDR.effective()
-        } else {
-            headroom.effective()
-        };
+        let display = hdr.display_headroom(headroom);
         if hdr.headroom != display {
             let param = super::tone_map::shader_headroom(display, pixels.peak);
             pixels.frame.set_headroom(param);
@@ -263,9 +271,11 @@ impl QuillApp {
                         return false;
                     }
                     let left_edr = hdr.edr_on && !hdr.edr_lost && super::renderer_left_edr(window);
+                    // The same value the draw aims at, so a screen that lost
+                    // EDR (drawn at SDR) does not read as changed forever.
                     if left_edr
                         || app.screen.viewer.orientation.is_identity()
-                            && super::headroom(window).effective() != hdr.headroom
+                            && hdr.display_headroom(super::headroom(window)) != hdr.headroom
                     {
                         cx.notify();
                     }

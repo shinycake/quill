@@ -51,6 +51,9 @@ impl QuillApp {
         // main-only: the story tray, viewer and composer are the main
         // window's (`story_frame_upkeep`).
         self.story_frame_upkeep(cx);
+        // main-only: the Masks strip's gate is the session's, wanted by
+        // whichever window's editor is in Stickers mode.
+        self.sync_editor_masks();
         // main-only: the sign-in screen is the main window's.
         self.sync_signin(window, cx);
         // main-only: the chat list and its multi-select are the main

@@ -468,6 +468,8 @@ fn edit_message_media_wraps_each_replacement_kind() {
         file_name: "new.bin".into(),
         kind,
         spoiler,
+        cover: None,
+        video_extras: Default::default(),
     };
     let video = VideoSend {
         duration: 3,
@@ -511,6 +513,8 @@ fn edit_media_caption_position_and_spoiler_only_on_photo_video() {
         file_name: "x".into(),
         kind,
         spoiler: true,
+        cover: None,
+        video_extras: Default::default(),
     };
     let photo =
         edit_media_content(&rep(EditMediaKind::Photo), "/tmp/x", "c", true, None, false).unwrap();

@@ -368,6 +368,8 @@ fn driver_edit_snapshot_with_replacement_sends_edit_message_media() {
                 file_name: "replacement.png".into(),
                 kind: EditMediaKind::Photo,
                 spoiler: true,
+                cover: None,
+                video_extras: Default::default(),
             }),
             ..MediaEdit::default()
         },

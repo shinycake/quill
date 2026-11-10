@@ -84,6 +84,13 @@ pub struct EditMediaReplacement {
     pub file_name: String,
     pub kind: EditMediaKind,
     pub spoiler: bool,
+    /// A cover picked with "Edit Cover" for this replacement video. It goes
+    /// with the replacement: a different file or a cleared replacement
+    /// starts without it.
+    pub cover: Option<PathBuf>,
+    /// What the video editor did to this replacement video: the file it
+    /// started from, the edits and the cover frame (`start_timestamp`).
+    pub video_extras: AttachmentExtras,
 }
 
 impl EditMediaReplacement {
@@ -107,11 +114,10 @@ pub struct MediaEdit {
     /// The video already on the message, for "Edit Cover" without
     /// replacing the video (`edit_media_tools.rs`).
     pub video: Option<super::edit_media_tools::ExistingVideo>,
-    /// A cover picked with "Edit Cover", applied when the edit is saved.
+    /// A cover picked with "Edit Cover" for the video already on the
+    /// message, applied when the edit is saved. A staged replacement keeps
+    /// its own ([`EditMediaReplacement::cover`]).
     pub cover: Option<PathBuf>,
-    /// What the video editor did to the staged replacement video: the
-    /// file it started from, the edits and the cover frame (`start_timestamp`).
-    pub video_extras: AttachmentExtras,
     /// The photo or video on the message is under a spoiler; an edited
     /// image keeps it (tdesktop `MediaEditManager::_spoilered`).
     pub had_spoiler: bool,
@@ -230,6 +236,8 @@ impl ComposerEdit {
             file_name,
             kind,
             spoiler: false,
+            cover: None,
+            video_extras: AttachmentExtras::default(),
         })
     }
 
@@ -342,7 +350,6 @@ impl ComposerEdit {
                     _ => None,
                 },
                 cover: None,
-                video_extras: AttachmentExtras::default(),
                 had_spoiler: match content {
                     MessageContent::Photo(photo) => photo.has_spoiler,
                     MessageContent::Video(video) => video.has_spoiler,

@@ -221,6 +221,9 @@ impl Render for ChatWindowView {
         let (body, autoscroll, capture_blocked) = app.update(cx, |app, cx| {
             app.release_viewer_key_probe(window, cx);
             app.viewer_follow_window_fullscreen(window);
+            // The window's viewer may draw an HDR frame: this window goes
+            // to extended range for it, as the main window does.
+            app.sync_viewer_hdr(window);
             app.seed_history_width(f32::from(window.viewport_size().width));
             // The window's half of the frame upkeep, with its state in
             // place (a window whose view is gone runs none of it).

@@ -61,14 +61,18 @@ impl QuillApp {
                         &[("file_name", &replacement.file_name.to_string())],
                     )),
                 );
-                // A different file starts without the video editor's edits.
-                if edit
+                // The same file (the "as a document" box) keeps what was done
+                // to it; a different one starts without the video editor's
+                // edits and the cover.
+                let mut replacement = replacement;
+                if let Some(old) = edit
                     .media_edit
                     .replacement
                     .as_ref()
-                    .is_none_or(|old| old.path != replacement.path)
+                    .filter(|old| old.path == replacement.path)
                 {
-                    edit.media_edit.video_extras = Default::default();
+                    replacement.cover = old.cover.clone();
+                    replacement.video_extras = old.video_extras.clone();
                 }
                 edit.media_edit.replacement = Some(replacement);
             }

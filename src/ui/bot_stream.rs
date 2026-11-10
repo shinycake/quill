@@ -114,6 +114,34 @@ fn stream_rich(rich: &RichMessageContent) -> RichMessageContent {
     rich
 }
 
+/// The part of the rows key that moves with the draft: the clock while a
+/// text reveal runs (a fresh value every frame rebuilds the growing row),
+/// and otherwise a digest of the content, so a rich or empty draft changes
+/// the key when its content does and not on every frame.
+fn reveal_tick(
+    draft_id: i64,
+    content: &MessageContent,
+    reveal: &StreamReveal,
+    now_nanos: impl FnOnce() -> u128,
+) -> u128 {
+    use std::hash::{Hash, Hasher};
+    match content {
+        MessageContent::Text(text) if !text.text.is_empty() => {
+            let total = text.text.chars().count();
+            if reveal.draft_id != draft_id || (reveal.shown as usize) < total {
+                now_nanos()
+            } else {
+                0
+            }
+        }
+        other => {
+            let mut hasher = std::collections::hash_map::DefaultHasher::new();
+            format!("{other:?}").hash(&mut hasher);
+            u128::from(hasher.finish())
+        }
+    }
+}
+
 impl QuillApp {
     /// What the history rows key needs to know about a streaming reply:
     /// the draft and how much of it shows; while the reveal runs, a fresh
@@ -124,15 +152,16 @@ impl QuillApp {
             MessageContent::Text(text) => text.text.chars().count(),
             _ => 0,
         };
-        let reveal = self.history.stream_reveal.borrow();
-        let revealing = reveal.draft_id != draft.draft_id || (reveal.shown as usize) < total;
-        let tick = if revealing {
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map_or(0, |elapsed| elapsed.as_nanos())
-        } else {
-            0
-        };
+        let tick = reveal_tick(
+            draft.draft_id,
+            &draft.content,
+            &self.history.stream_reveal.borrow(),
+            || {
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map_or(0, |elapsed| elapsed.as_nanos())
+            },
+        );
         Some((draft.draft_id, total, tick))
     }
 
@@ -196,9 +225,9 @@ impl QuillApp {
 
 #[cfg(test)]
 mod tests {
-    use super::{StreamReveal, reveal_text, stream_rich};
+    use super::{StreamReveal, reveal_text, reveal_tick, stream_rich};
     use quill::rich::QuoteRichText;
-    use quill::telegram::envelope::{RichMessageContent, TextContent};
+    use quill::telegram::envelope::{MessageContent, RichMessageContent, TextContent};
     use quill::text::{TextEntity, TextEntityKind};
 
     #[test]
@@ -247,5 +276,44 @@ mod tests {
         assert!(shown.quote_texts.is_empty());
         assert!(shown.is_full);
         assert_eq!(rich.quote_texts.len(), 1);
+    }
+
+    fn text(body: &str) -> MessageContent {
+        MessageContent::Text(TextContent {
+            text: body.into(),
+            entities: Vec::new(),
+            link_preview: None,
+            animated: None,
+        })
+    }
+
+    fn revealed(draft_id: i64, shown: f64) -> StreamReveal {
+        StreamReveal {
+            draft_id,
+            shown,
+            last: None,
+        }
+    }
+
+    #[test]
+    fn a_draft_with_no_text_keeps_one_key_until_its_content_changes() {
+        let reveal = StreamReveal {
+            draft_id: 0,
+            shown: 0.0,
+            last: None,
+        };
+        let empty = text("");
+        let first = reveal_tick(7, &empty, &reveal, || 111);
+        assert_eq!(first, reveal_tick(7, &empty, &reveal, || 222));
+        assert_ne!(first, reveal_tick(7, &text("a"), &revealed(7, 0.0), || 333));
+    }
+
+    #[test]
+    fn a_running_reveal_changes_the_key_every_frame_and_a_finished_one_does_not() {
+        let body = text("hello");
+        assert_eq!(reveal_tick(7, &body, &revealed(7, 2.0), || 1), 1);
+        assert_eq!(reveal_tick(7, &body, &revealed(7, 2.0), || 2), 2);
+        assert_eq!(reveal_tick(7, &body, &revealed(7, 5.0), || 3), 0);
+        assert_eq!(reveal_tick(8, &body, &revealed(7, 5.0), || 4), 4);
     }
 }

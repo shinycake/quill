@@ -180,45 +180,94 @@ fn speck_coverage(px: f32, py: f32, cx: f32, cy: f32, w: f32, h: f32) -> f32 {
 }
 
 /// The media tile while media spoilers show (16 MB decoded, and as much
-/// in the atlas): built on first use, released once nothing painted it for
-/// `TILE_UNUSED` and no cached frame can still show it.
+/// in the atlas): built once off the UI thread on first use and released
+/// when the app trims idle images (`release_media_tile`), not by a short
+/// timer of its own, so scrolling away and back does not rebuild it.
 struct MediaTile {
     image: Arc<RenderImage>,
     painted: Instant,
     stamp: super::image_budget::PaintStamp,
 }
 
+/// Where the media tile stands. `Building` ends in `Ready` when the build
+/// answers; the app owns the build, so a closed window does not strand it.
+enum TileState {
+    Idle,
+    Building,
+    Ready(MediaTile),
+}
+
 thread_local! {
-    static TILE: std::cell::RefCell<Option<MediaTile>> = const { std::cell::RefCell::new(None) };
+    static TILE: std::cell::RefCell<TileState> = const { std::cell::RefCell::new(TileState::Idle) };
 }
 
 const TILE_UNUSED: std::time::Duration = std::time::Duration::from_secs(3);
 
-/// The media tile, built if needed; marks it painted now.
-fn image_tile() -> Arc<RenderImage> {
-    TILE.with(|tile| {
+/// The media tile when it is built, marked painted now. While it is not,
+/// the first ask starts the build at the window's next frame and the
+/// specks wait (the spoiler's cover is already drawn under them).
+fn image_tile(window: &mut Window) -> Option<Arc<RenderImage>> {
+    let start = TILE.with(|tile| {
         let mut tile = tile.borrow_mut();
-        let tile = tile.get_or_insert_with(|| MediaTile {
-            image: build_image_tile(),
-            painted: Instant::now(),
-            stamp: super::image_budget::paint_stamp(),
+        match &mut *tile {
+            TileState::Ready(ready) => {
+                ready.painted = Instant::now();
+                ready.stamp = super::image_budget::paint_stamp();
+                Err(Some(ready.image.clone()))
+            }
+            TileState::Building => Err(None),
+            TileState::Idle => {
+                *tile = TileState::Building;
+                Ok(())
+            }
+        }
+    });
+    match start {
+        Err(image) => image,
+        Ok(()) => {
+            window.on_next_frame(|_, cx| build_tile_in_background(cx));
+            None
+        }
+    }
+}
+
+/// Build the tile on the background executor and install it.
+fn build_tile_in_background(cx: &mut App) {
+    let task = cx.background_spawn(async move { build_image_tile() });
+    // window-scope: the tile is shared by every window; its arrival
+    // redraws them all.
+    // screen-scope: the tile belongs to no account.
+    cx.spawn(async move |cx| {
+        let image = task.await;
+        let _ = cx.update(|cx| {
+            TILE.with(|tile| {
+                *tile.borrow_mut() = TileState::Ready(MediaTile {
+                    image,
+                    painted: Instant::now(),
+                    stamp: super::image_budget::paint_stamp(),
+                });
+            });
+            cx.refresh_windows();
         });
-        tile.painted = Instant::now();
-        tile.stamp = super::image_budget::paint_stamp();
-        tile.image.clone()
     })
+    .detach();
 }
 
 /// Drop the media tile (and its atlas copy) once media spoilers have been
-/// off screen for a while. `window`: the window being drawn, if any.
+/// off screen for a while: the app's idle trim asks, not every frame.
+/// `window`: the window being drawn, if any.
 pub(super) fn release_media_tile(window: Option<&mut Window>, cx: &mut App) {
     let unused = TILE.with(|tile| {
         let mut tile = tile.borrow_mut();
-        let idle = tile.as_ref().is_some_and(|tile| {
-            tile.painted.elapsed() >= TILE_UNUSED
-                && !super::image_budget::may_still_show(tile.stamp)
-        });
-        if idle { tile.take() } else { None }
+        let idle = matches!(&*tile, TileState::Ready(tile) if tile.painted.elapsed() >= TILE_UNUSED
+                && !super::image_budget::may_still_show(tile.stamp));
+        if !idle {
+            return None;
+        }
+        match std::mem::replace(&mut *tile, TileState::Idle) {
+            TileState::Ready(tile) => Some(tile),
+            _ => None,
+        }
     });
     if let Some(tile) = unused {
         cx.drop_image(tile.image, window);
@@ -276,7 +325,9 @@ fn build_image_tile() -> Arc<RenderImage> {
 /// Paint the media spoiler's specks over `bounds` (tiles anchored at its
 /// top-left; the caller's clip trims the edges).
 pub(super) fn paint_media_specks(bounds: Bounds<Pixels>, window: &mut Window) {
-    let tile = image_tile();
+    let Some(tile) = image_tile(window) else {
+        return;
+    };
     let frame = ((loop_ms() / FRAME_MS) as usize).min(FRAMES - 1);
     let step = px(CANVAS);
     let mut y = bounds.top();

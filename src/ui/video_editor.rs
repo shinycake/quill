@@ -236,13 +236,12 @@ impl QuillApp {
         else {
             return;
         };
-        let source = edit
-            .media_edit
+        let source = replacement
             .video_extras
             .source
             .clone()
             .unwrap_or_else(|| replacement.path.clone());
-        let initial = edit.media_edit.video_extras.edits;
+        let initial = replacement.video_extras.edits;
         self.open_video_editor(EditorTarget::MessageEdit, source, initial, window, cx);
     }
 
@@ -607,7 +606,7 @@ impl QuillApp {
                 replacement.path = output;
                 extras.gif = false;
                 extras.sound_removed = false;
-                edit.media_edit.video_extras = extras;
+                replacement.video_extras = extras;
                 tr(keys::Q_AV_VIDEO_EDITS_SAVED)
             }
             Some(EditorTarget::Set { .. } | EditorTarget::Avatar) | None => return,

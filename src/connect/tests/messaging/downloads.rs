@@ -1,6 +1,8 @@
 //! Driver tests: automatic photo and chat-photo downloads.
 use super::*;
 use crate::disk_guard::{DiskState, FLOORS};
+use crate::ids::RequestId;
+use crate::state::DiskSearch;
 
 #[test]
 fn photo_history_auto_downloads_thumb_and_full_photo() {
