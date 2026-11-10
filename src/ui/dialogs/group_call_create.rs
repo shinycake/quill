@@ -344,11 +344,12 @@ impl QuillApp {
         if answer.is_some() || orphaned {
             session.calls.create_join_as = None;
         }
+
+        let failed = std::mem::take(&mut session.calls.failed_creates);
         if abandoned {
             self.group_call_boxes.start_dialog = None;
             cx.notify();
         }
-        let failed = std::mem::take(&mut session.calls.failed_creates);
         if let Some(answer) = answer {
             self.accept_create_join_as(answer, window, cx);
         }

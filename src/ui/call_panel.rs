@@ -392,9 +392,15 @@ impl QuillApp {
                 app.calls.window_opening = false;
                 match result {
                     Ok(handle) => app.calls.window = Some(handle.into()),
-                    Err(_) => app.set_note(StatusNote::error(tr(
-                        keys::Q_OPS_COULDNT_OPEN_THE_CALL_WINDOW,
-                    ))),
+                    Err(_) => {
+                        // Kept shut for this call, like a window the user
+                        // closed: the next sync does not try (and note) it
+                        // again; the call bar or a ring reopens it.
+                        app.call_screen.window_closed_by_user = Some(call_id);
+                        app.set_note(StatusNote::error(tr(
+                            keys::Q_OPS_COULDNT_OPEN_THE_CALL_WINDOW,
+                        )));
+                    }
                 }
                 cx.notify();
             });

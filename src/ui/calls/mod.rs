@@ -429,7 +429,7 @@ impl QuillApp {
             if let Some(session) = self.demo_session.as_mut()
                 && let Some(summary) = session.calls.summary.as_mut()
             {
-                summary.rating = crate::state::CallRating::Sent;
+                summary.rating = quill::state::CallRating::Sent;
             }
         }
         cx.notify();

@@ -243,9 +243,20 @@ impl QuillApp {
                         app.group_call.stream.window_is_stream = stream;
                         app.sync_group_call_large_tile();
                     }
-                    Err(_) => app.set_note(StatusNote::error(tr(
-                        keys::Q_AV_COULDNT_OPEN_THE_VIDEO_CHAT,
-                    ))),
+                    Err(_) => {
+                        // Kept shut for this call, like a window the user
+                        // closed; Join or the call bar asks for it again.
+                        let call = app
+                            .session()
+                            .and_then(|s| s.calls.active_group_call.as_ref())
+                            .map(|call| call.id);
+                        if call.is_some() {
+                            app.group_call_screen.window_closed_by_user = call;
+                        }
+                        app.set_note(StatusNote::error(tr(
+                            keys::Q_AV_COULDNT_OPEN_THE_VIDEO_CHAT,
+                        )));
+                    }
                 }
                 cx.notify();
             });
