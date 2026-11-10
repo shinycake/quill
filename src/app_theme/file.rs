@@ -338,6 +338,8 @@ fn read_zip(zip: &[u8]) -> Option<Vec<(String, Vec<u8>)>> {
     let count = u16_at(zip, eocd + 10)?;
     let mut at = u32_at(zip, eocd + 16)?;
     let mut out = Vec::new();
+    let mut seen_offsets = std::collections::HashSet::new();
+    let mut inflated_total = 0usize;
     for _ in 0..count {
         if u32_at(zip, at)? != 0x0201_4b50 {
             return None;
@@ -355,6 +357,15 @@ fn read_zip(zip: &[u8]) -> Option<Vec<(String, Vec<u8>)>> {
             continue;
         }
         if u32_at(zip, offset)? != 0x0403_4b50 {
+            return None;
+        }
+        // Two entries on one local header is how a small zip inflates the
+        // same stream many times over.
+        if !seen_offsets.insert(offset) {
+            return None;
+        }
+        inflated_total = inflated_total.checked_add(size)?;
+        if inflated_total > SCHEME_LIMIT + BACKGROUND_LIMIT {
             return None;
         }
         let local_name = u16_at(zip, offset + 26)?;

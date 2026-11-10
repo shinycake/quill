@@ -277,3 +277,26 @@ fn custom_themes_are_stored_by_name() {
     assert_eq!(store::clean_name("///"), "Custom theme");
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// Two central-directory entries on one local header would inflate the same
+/// stream twice; the archive is refused instead.
+#[test]
+fn a_zip_reusing_one_local_header_is_refused() {
+    let parts = vec![("colors.tdesktop-theme".to_string(), b"windowBg: #000000;".to_vec())];
+    let zip = crate::stat_chart::xlsx::zip(&parts);
+    assert!(ThemeFile::parse(&zip).is_ok());
+    let eocd = zip.len() - 22;
+    let word = |at: usize| u32::from_le_bytes([zip[at], zip[at + 1], zip[at + 2], zip[at + 3]]);
+    let cd_start = word(eocd + 16) as usize;
+    let name_len = u16::from_le_bytes([zip[cd_start + 28], zip[cd_start + 29]]) as usize;
+    let entry = zip[cd_start..cd_start + 46 + name_len].to_vec();
+    let mut bad = zip[..eocd].to_vec();
+    bad.extend_from_slice(&entry);
+    let mut tail = zip[eocd..].to_vec();
+    tail[10] = 2;
+    tail[8] = 2;
+    let cd_size = u32::from_le_bytes([tail[12], tail[13], tail[14], tail[15]]) + entry.len() as u32;
+    tail[12..16].copy_from_slice(&cd_size.to_le_bytes());
+    bad.extend_from_slice(&tail);
+    assert!(ThemeFile::parse(&bad).is_err());
+}

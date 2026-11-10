@@ -457,6 +457,7 @@ pub fn enable(
     let master = MasterKey::generate();
     let config = build_config(passcode, iterations, &master, None)?;
     let mut written: Vec<AccountKey> = Vec::new();
+    let mut originals: Vec<(AccountKey, DatabaseKey)> = Vec::new();
     let rollback = |written: &[AccountKey]| {
         for account in written {
             let _ = std::fs::remove_file(wrapped_key_path(root, account));
@@ -486,16 +487,28 @@ pub fn enable(
             return Err(err);
         }
         written.push(account.clone());
+        originals.push((account.clone(), key));
     }
     if let Err(err) = save_config(root, &config) {
         rollback(&written);
         return Err(err);
     }
-    for account in &written {
-        if let Err(err) = inner.delete(account) {
+    for (index, (account, _)) in originals.iter().enumerate() {
+        let Err(err) = inner.delete(account) else {
+            continue;
+        };
+        // Keys already removed from the OS store exist only as wrapped
+        // copies now: put them back before the wrapped files go. If any
+        // cannot be put back, the wrapped files stay and passcode is on.
+        let restored = originals
+            .iter()
+            .take(index)
+            .all(|(done, key)| inner.put(done, key).is_ok());
+        if restored {
             rollback(&written);
             return Err(err.into());
         }
+        break;
     }
     state.set(master);
     Ok(())

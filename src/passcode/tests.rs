@@ -536,3 +536,46 @@ fn a_laptop_wake_after_a_planned_sleep_locks_on_the_next_check() {
     assert!(autolock_due(effective, timeout_secs));
     assert_eq!(effective, 3_600_000);
 }
+
+/// An OS store whose delete fails for one account, after others succeeded.
+struct FailingDelete {
+    inner: MemorySecretStore,
+    fail: AccountKey,
+}
+
+impl SecretStore for FailingDelete {
+    fn get(&self, a: &AccountKey) -> Result<Option<DatabaseKey>, SecretStoreError> {
+        self.inner.get(a)
+    }
+    fn put(&self, a: &AccountKey, k: &DatabaseKey) -> Result<(), SecretStoreError> {
+        self.inner.put(a, k)
+    }
+    fn delete(&self, a: &AccountKey) -> Result<(), SecretStoreError> {
+        if *a == self.fail {
+            return Err(SecretStoreError::Locked);
+        }
+        self.inner.delete(a)
+    }
+}
+
+#[test]
+fn enable_failing_midway_keeps_every_database_key() {
+    let root = temp_root("enable-midway");
+    let a = acct("primary");
+    let b = acct("account-1");
+    let store = FailingDelete {
+        inner: MemorySecretStore::new(),
+        fail: b.clone(),
+    };
+    let key_a = DatabaseKey::generate();
+    let key_b = DatabaseKey::generate();
+    store.put(&a, &key_a).unwrap();
+    store.put(&b, &key_b).unwrap();
+    let state = Arc::new(UnlockState::new());
+    let result = enable(&root, &store, &[a.clone(), b.clone()], "pass", FAST, &state);
+    assert!(result.is_err());
+    assert!(!is_enabled(&root));
+    assert_eq!(store.get(&a).unwrap().unwrap().as_bytes(), key_a.as_bytes());
+    assert_eq!(store.get(&b).unwrap().unwrap().as_bytes(), key_b.as_bytes());
+    let _ = std::fs::remove_dir_all(root);
+}
