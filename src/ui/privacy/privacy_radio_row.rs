@@ -219,10 +219,7 @@ impl QuillApp {
             .settings
             .privacy
             .get(&key)
-            .and_then(|st| match st {
-                PrivacyKeyState::Ready(d) => Some(d.clone()),
-                _ => None,
-            })
+            .and_then(|st| st.detail().cloned())
             .unwrap_or_default();
         let (ids, chat_ids): (&[i64], &[i64]) = match kind {
             PrivacyExceptionKind::Always => (&detail.always, &detail.always_chats),
@@ -554,10 +551,10 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         let current = self.session().and_then(|s| {
-            s.settings.privacy.get(&key).and_then(|st| match st {
-                PrivacyKeyState::Ready(d) => Some(d.clone()),
-                _ => None,
-            })
+            s.settings
+                .privacy
+                .get(&key)
+                .and_then(|st| st.detail().cloned())
         });
         let Some(mut detail) = current else {
             return;

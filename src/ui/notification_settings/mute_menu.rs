@@ -54,8 +54,11 @@ impl QuillApp {
         mute_for: i32,
         cx: &mut Context<Self>,
     ) {
-        self.notify.mute_menu_open = false;
-        self.notify.mute_chat = None;
+        // A preset of this chat's own box closes it; muting a chat from a
+        // row, a swipe or a profile leaves another chat's box open.
+        if self.notify.mute_chat == Some(chat_id) {
+            self.close_mute_menu(cx);
+        }
         if let Some(live) = self.live.as_mut() {
             let result = live.driver.set_chat_mute_for(chat_id, mute_for);
             self.set_note(match result {

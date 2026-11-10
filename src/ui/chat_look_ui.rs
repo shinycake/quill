@@ -62,9 +62,20 @@ pub(super) struct ChatLookDialog {
     pub remove_wallpaper: bool,
     /// Also set the wallpaper for the other person (Premium only).
     pub both: bool,
-    /// Requests Apply has sent and is waiting on; the dialog stays open
-    /// until they are acknowledged, and shows the error if one fails.
-    pub awaiting: Option<LookWait>,
+    pub stage: LookStage,
+}
+
+/// Where Apply stands. The dialog stays open while requests are out and
+/// shows the error if one fails; a boosted chat that has too few boosts
+/// keeps the reason here, not in the session-wide wallpaper error that the
+/// wallpaper pages draw.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) enum LookStage {
+    Editing,
+    /// Apply was stopped by the boost level; the reason shows in the box.
+    Blocked(String),
+    /// Apply's requests are out.
+    Awaiting(LookWait),
 }
 
 /// Apply's in-flight requests: `sent` of them, counted from the session's
@@ -204,7 +215,7 @@ impl QuillApp {
             dimming_slider: Some(slider),
             remove_wallpaper: false,
             both: false,
-            awaiting: None,
+            stage: LookStage::Editing,
         });
         self.open_box(DialogKind::ChatLook);
         self.ensure_wallpapers_loaded(cx);
@@ -273,9 +284,19 @@ impl QuillApp {
         let premium = self.session().is_some_and(|s| s.my_is_premium());
         // Boosted chats set the wallpaper for everyone, never for self only.
         let only_for_self = !boosted && !(dialog.both && premium);
-        if dialog.awaiting.is_some() || (boosted && self.boosted_look_blocked(chat_id, &changes)) {
+        if matches!(dialog.stage, LookStage::Awaiting(_)) {
             cx.notify();
             return;
+        }
+        if boosted && let Some(reason) = self.boosted_look_blocked(chat_id, &changes) {
+            if let Some(d) = self.dialogs.chat_look_dialog.as_mut() {
+                d.stage = LookStage::Blocked(reason);
+            }
+            cx.notify();
+            return;
+        }
+        if let Some(d) = self.dialogs.chat_look_dialog.as_mut() {
+            d.stage = LookStage::Editing;
         }
         match self.live.as_mut() {
             Some(live) => {
@@ -317,7 +338,11 @@ impl QuillApp {
                     }
                 }
                 if let Some(d) = self.screen.dialogs.chat_look_dialog.as_mut() {
-                    d.awaiting = (sent > 0).then_some(LookWait { base, sent });
+                    d.stage = if sent > 0 {
+                        LookStage::Awaiting(LookWait { base, sent })
+                    } else {
+                        LookStage::Editing
+                    };
                 }
                 // Nothing in flight and no error: nothing to wait for.
                 if sent == 0 && live.driver.session.chats_state.background_error.is_none() {
@@ -372,7 +397,10 @@ impl QuillApp {
             .dialogs
             .chat_look_dialog
             .as_ref()
-            .and_then(|d| d.awaiting)
+            .and_then(|d| match d.stage {
+                LookStage::Awaiting(wait) => Some(wait),
+                _ => None,
+            })
         else {
             return false;
         };
@@ -391,7 +419,7 @@ impl QuillApp {
             }
             LookProgress::Failed(_) => {
                 if let Some(d) = self.dialogs.chat_look_dialog.as_mut() {
-                    d.awaiting = None;
+                    d.stage = LookStage::Editing;
                 }
                 cx.notify();
                 true
@@ -801,8 +829,12 @@ impl QuillApp {
                             })),
                         );
                     }
-                    if let Some(error) =
-                        session.and_then(|s| s.chats_state.background_error.clone())
+                    let gate = match &state.stage {
+                        LookStage::Blocked(reason) => Some(reason.clone()),
+                        _ => None,
+                    };
+                    if let Some(error) = gate
+                        .or_else(|| session.and_then(|s| s.chats_state.background_error.clone()))
                     {
                         wall = wall.child(
                             div()
@@ -815,7 +847,7 @@ impl QuillApp {
                                 )),
                         );
                     }
-                    let applying = state.awaiting.is_some();
+                    let applying = matches!(state.stage, LookStage::Awaiting(_));
                     let changed = {
                         let current_theme = this
                             .session()
@@ -870,8 +902,8 @@ crate::ui::shell::register_dialogs! {
 #[cfg(test)]
 mod tests {
     use super::{
-        ChatLookDialog, LookChange, LookProgress, LookTarget, LookWait, chat_look_allowed,
-        is_wallpaper_image, look_progress, plan_changes,
+        ChatLookDialog, LookChange, LookProgress, LookStage, LookTarget, LookWait,
+        chat_look_allowed, is_wallpaper_image, look_progress, plan_changes,
     };
     use std::path::Path;
 
@@ -885,7 +917,7 @@ mod tests {
             dimming_slider: None,
             remove_wallpaper: false,
             both: false,
-            awaiting: None,
+            stage: LookStage::Editing,
         }
     }
 

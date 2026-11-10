@@ -302,7 +302,11 @@ impl Session {
                 } else if pending.map(|p| p.purpose) == Some(RequestPurpose::GetLoginUrl) {
                     self.bots.last_login_url_info = Some(LoginUrlInfo::Open { url });
                 } else if pending.map(|p| p.purpose) == Some(RequestPurpose::GetBackgroundUrl) {
-                    self.chats_state.background_url = Some(url);
+                    if let Some(id) = pending.map(|p| p.id) {
+                        self.chats_state
+                            .background_answers
+                            .push(id, Ok(BackgroundOutcome::Link(url)));
+                    }
                 }
             }
             CommonPayload::FormattedText { text, entities }

@@ -186,6 +186,24 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// Slice S11: `setSupergroupCustomEmojiStickerSet` (schema 1.8.67,
     /// line 15159). Same gating as the regular group sticker set;
     /// `custom_emoji_sticker_set_id` 0 removes it per the schema.
+    /// The supergroup the viewer may set a custom emoji pack on right now:
+    /// `None` when the chat is not one, the rights or full info say no, or
+    /// a pack request for it is already out.
+    pub fn emoji_pack_target(&self, chat_id: ChatId) -> Option<i64> {
+        let supergroup_id = match self.session.chats.get(&chat_id.0)?.kind {
+            ChatKind::Supergroup { supergroup_id, .. } => supergroup_id,
+            _ => return None,
+        };
+        if !self.session.chat_can_set_sticker_set(chat_id) {
+            return None;
+        }
+        let purpose = RequestPurpose::SetSupergroupCustomEmojiStickerSet;
+        if self.session.requests.has_purpose_for_chat(purpose, chat_id) {
+            return None;
+        }
+        Some(supergroup_id)
+    }
+
     pub fn set_supergroup_custom_emoji_sticker_set(
         &mut self,
         chat_id: ChatId,
@@ -197,25 +215,13 @@ impl<S: JsonSender> ConnectDriver<S> {
         if custom_emoji_sticker_set_id < 0 {
             return Err(ConnectSendError::InvalidRequest);
         }
-        let Some(supergroup_id) =
-            self.session
-                .chats
-                .get(&chat_id.0)
-                .and_then(|chat| match chat.kind {
-                    ChatKind::Supergroup { supergroup_id, .. } => Some(supergroup_id),
-                    _ => None,
-                })
-        else {
+        let Some(supergroup_id) = self.emoji_pack_target(chat_id) else {
             return Ok(None);
         };
-        if !self.session.chat_can_set_sticker_set(chat_id) {
-            return Ok(None);
-        }
-        let purpose = RequestPurpose::SetSupergroupCustomEmojiStickerSet;
-        if self.session.requests.has_purpose_for_chat(purpose, chat_id) {
-            return Ok(None);
-        }
-        let extra = self.session.request(purpose, Some(chat_id));
+        let extra = self.session.request(
+            RequestPurpose::SetSupergroupCustomEmojiStickerSet,
+            Some(chat_id),
+        );
         if let Err(err) = self
             .sender
             .send_json(&set_supergroup_custom_emoji_sticker_set(

@@ -12,14 +12,13 @@ impl Session {
         _seq: u64,
     ) {
         match pending.map(|p| p.purpose) {
-            // A refused appearance change shows in the Appearance box.
+            // A refused appearance change shows in the Appearance box that
+            // sent it, by the request.
             Some(
                 RequestPurpose::SetChatAccentColor
                 | RequestPurpose::SetChatProfileAccentColor
                 | RequestPurpose::SetChatEmojiStatus,
-            ) => {
-                self.chats_state.appearance_error = Some(error_reason(err));
-            }
+            ) => self.file_appearance_answer(pending, Err(error_reason(err))),
             // Only the search the link preview waits for: an earlier
             // link's failure never shows under a later one.
             Some(RequestPurpose::SearchBackground) => {
@@ -37,15 +36,29 @@ impl Session {
                 self.chats_state.background_error = Some(reason.clone());
                 self.chats_state.installed_backgrounds.fail(reason);
             }
+            // The preview that asked reads its own answer, matched by the
+            // request; the page-level line stays for the pages.
             Some(
                 RequestPurpose::SetDefaultBackground
-                | RequestPurpose::DeleteDefaultBackground
-                | RequestPurpose::RemoveInstalledBackground
                 | RequestPurpose::SetDefaultBackgroundLocal
+                | RequestPurpose::GetBackgroundUrl,
+            ) => {
+                let reason = error_reason(err);
+                if let Some(id) = pending.map(|p| p.id) {
+                    self.chats_state
+                        .background_answers
+                        .push(id, Err(reason.clone()));
+                }
+                self.chats_state.background_error = Some(reason);
+            }
+            // A refused delete changed nothing locally: the wallpaper
+            // stays where the server kept it.
+            Some(
+                RequestPurpose::Chats(ChatsPurpose::DeleteDefaultBackground { .. })
+                | RequestPurpose::Chats(ChatsPurpose::RemoveInstalledBackground { .. })
                 | RequestPurpose::SetChatBackground
                 | RequestPurpose::DeleteChatBackground
-                | RequestPurpose::SetChatTheme
-                | RequestPurpose::GetBackgroundUrl,
+                | RequestPurpose::SetChatTheme,
             ) => {
                 self.chats_state.background_error = Some(error_reason(err));
             }

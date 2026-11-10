@@ -44,6 +44,8 @@ impl Session {
         self.apply_ai_compose_ok(pending);
         self.apply_hang_up_ok(pending);
         self.apply_communities_ok(pending);
+        self.apply_backgrounds_ok(pending);
+        self.settle_notification_save(pending, false);
         match pending.map(|p| p.purpose) {
             Some(
                 RequestPurpose::SetChatTheme

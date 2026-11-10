@@ -335,11 +335,10 @@ impl QuillApp {
         let count = self
             .session()
             .and_then(|s| s.settings.privacy.get(&key))
-            .map(|state| match state {
-                quill::privacy::PrivacyKeyState::Ready(detail) => {
-                    detail.always.len() + detail.always_chats.len()
-                }
-                _ => 0,
+            .map(|state| {
+                state
+                    .detail()
+                    .map_or(0, |detail| detail.always.len() + detail.always_chats.len())
             })
             .unwrap_or(0);
         let target = PrivacyEditorTarget::Rule(key);

@@ -1,6 +1,7 @@
 //! Unit tests for the session reducer, grouped by area.
 use super::*;
 
+mod background_removals;
 mod boost_level;
 mod boosts;
 mod bots;
@@ -42,6 +43,7 @@ mod masks;
 mod message_story;
 mod messages;
 mod messages_more;
+mod notification_saves;
 mod notifications;
 mod notify_os;
 mod payments;

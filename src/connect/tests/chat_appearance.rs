@@ -54,7 +54,14 @@ fn only_those_who_may_change_info_can_open_or_apply() {
         &mut driver,
         r#"{"@type":"updateSupergroup","supergroup":{"@type":"supergroup","id":120,"is_channel":true,"status":{"@type":"chatMemberStatusAdministrator","rights":{"@type":"chatAdministratorRights","can_change_info":true}}}}"#,
     );
-    assert_eq!(driver.apply_chat_appearance(ChatId(-20), plan).unwrap(), 3);
+    assert_eq!(
+        driver
+            .apply_chat_appearance(ChatId(-20), plan)
+            .unwrap()
+            .requests
+            .len(),
+        3
+    );
     let accent = sent_request(&recorder, "setChatAccentColor");
     assert_eq!(accent["chat_id"], -20);
     assert_eq!(accent["accent_color_id"], 9);
@@ -138,5 +145,18 @@ fn a_channel_theme_is_a_background_and_a_pack_needs_full_info() {
         emoji_pack: Some(900),
     };
     assert!(driver.apply_chat_appearance(ChatId(-30), plan).is_err());
+    // A refused pack stops the whole plan: the name colour is not sent
+    // either, so nothing is left half applied.
+    let with_name = ApplyPlan {
+        name: Some((9, 55)),
+        emoji_pack: Some(900),
+        ..plan
+    };
+    assert!(
+        driver
+            .apply_chat_appearance(ChatId(-30), with_name)
+            .is_err()
+    );
+    assert_eq!(count(&recorder, "setChatAccentColor"), 0);
     assert_eq!(count(&recorder, "setSupergroupCustomEmojiStickerSet"), 0);
 }

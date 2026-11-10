@@ -599,7 +599,10 @@ fn installed_backgrounds_and_default_updates_are_cached() {
         ),
     );
     assert_eq!(session.chats_state.default_backgrounds[&false].id, 5);
-    let extra = session.request(RequestPurpose::RemoveInstalledBackground, None);
+    let extra = session.request(
+        RequestPurpose::Chats(ChatsPurpose::RemoveInstalledBackground { background_id: 1 }),
+        None,
+    );
     apply_json(
         &mut session,
         &seq,
@@ -865,8 +868,13 @@ fn background_share_links_land_once_and_errors_surface() {
         ),
     );
     assert_eq!(
-        session.chats_state.background_url.as_deref(),
-        Some("https://t.me/bg/abc?mode=blur")
+        session.chats_state.background_answers.take_for(&[extra]),
+        vec![(
+            extra,
+            Ok(BackgroundOutcome::Link(
+                "https://t.me/bg/abc?mode=blur".into()
+            ))
+        )]
     );
     let extra = session.request(RequestPurpose::GetBackgroundUrl, None);
     apply_json(

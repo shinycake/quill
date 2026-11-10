@@ -269,3 +269,76 @@ impl Session {
         }
     }
 }
+
+impl Session {
+    /// A scope's notification settings went out: they show at once, so the
+    /// next edit of the scope starts from them and never reverts this one.
+    pub fn show_scope_save(
+        &mut self,
+        scope: NotificationSettingsScope,
+        request: RequestId,
+        settings: &ScopeNotificationSettings,
+    ) {
+        let settings_state = &mut self.settings;
+        let shown = settings_state
+            .scope_notification_settings
+            .get(&scope)
+            .cloned();
+        settings_state.scope_saves.begin(scope, request, || shown);
+        settings_state
+            .scope_notification_settings
+            .insert(scope, settings.clone());
+    }
+
+    /// The same for the reaction notification settings.
+    pub fn show_reaction_save(
+        &mut self,
+        request: RequestId,
+        settings: &ReactionNotificationSettings,
+    ) {
+        let shown = self.settings.reaction_notification_settings.clone();
+        self.settings.reaction_saves.begin((), request, || shown);
+        self.settings.reaction_notification_settings = Some(settings.clone());
+    }
+
+    /// A save of scope or reaction notification settings answered. When the
+    /// last one of a burst was refused the settings from before come back.
+    pub(crate) fn settle_notification_save(
+        &mut self,
+        pending: Option<&PendingRequest>,
+        refused: bool,
+    ) {
+        let Some(pending) = pending else { return };
+        match pending.purpose {
+            RequestPurpose::SetScopeNotificationSettings => {
+                let Some(scope) = pending.scope else { return };
+                if let Some(back) = self
+                    .settings
+                    .scope_saves
+                    .settle(&scope, pending.id, refused)
+                {
+                    match back {
+                        Some(previous) => {
+                            self.settings
+                                .scope_notification_settings
+                                .insert(scope, previous);
+                        }
+                        None => {
+                            self.settings.scope_notification_settings.remove(&scope);
+                        }
+                    }
+                }
+            }
+            RequestPurpose::SetReactionNotificationSettings => {
+                if let Some(back) = self
+                    .settings
+                    .reaction_saves
+                    .settle(&(), pending.id, refused)
+                {
+                    self.settings.reaction_notification_settings = back;
+                }
+            }
+            _ => {}
+        }
+    }
+}
