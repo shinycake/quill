@@ -12,5 +12,6 @@ impl QuillApp {
         self.settle_create_community_dialog(cx);
         self.settle_topic_editor(cx);
         self.settle_invite_link_box(cx);
+        self.settle_edit_profile_save(cx);
     }
 }
