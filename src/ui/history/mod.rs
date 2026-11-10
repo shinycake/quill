@@ -245,6 +245,10 @@ pub(super) fn album_history_row(
             sender.is_none(),
             !album_has_caption,
         )
+        .joined(
+            quill::chat_wide::has_right_layout(first.is_outgoing, look.wide),
+            look.joined_above,
+        )
     };
     for (index, message) in messages.iter().enumerate() {
         let Some(part) = layout.get(index) else {

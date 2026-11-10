@@ -84,6 +84,7 @@ unsafe extern "C" {
     fn qw_set_visible(widget: *mut Widget, visible: bool);
     fn qw_set_theme(widget: *mut Widget, theme: *const c_char, len: usize);
     fn qw_set_data(widget: *mut Widget, data: *const c_char, len: usize);
+    fn qw_set_safe_area(widget: *mut Widget, area: *const c_char, len: usize);
     fn qw_set_width(widget: *mut Widget, width: f64);
     fn qw_respond(widget: *mut Widget, token: u64, failure: i32, result: *const c_char, len: usize);
     fn qw_pointer(
@@ -122,18 +123,31 @@ const VALIDATOR_QBC: &[u8] = include_bytes!(
 );
 
 /// Hands the WidgetJS bundles to the C side, once per process.
+/// The bundle source as shipped. A test process started with `QUILL_WIDGET_CRLF_BUNDLES` gets it
+/// with CRLF line ends, as a Windows checkout without `.gitattributes` made it, so the bundles are
+/// refused (#1425).
+fn bundle_source(js: &'static [u8]) -> std::borrow::Cow<'static, [u8]> {
+    if cfg!(test) && std::env::var_os("QUILL_WIDGET_CRLF_BUNDLES").is_some() {
+        let crlf = String::from_utf8_lossy(js).replace('\n', "\r\n");
+        return std::borrow::Cow::Owned(crlf.into_bytes());
+    }
+    std::borrow::Cow::Borrowed(js)
+}
+
 fn resources_ready() -> bool {
     static READY: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *READY.get_or_init(|| {
+        let sandbox_js = bundle_source(SANDBOX_JS);
+        let validator_js = bundle_source(VALIDATOR_JS);
         // SAFETY: four valid slices that outlive the call; the C side copies them.
         unsafe {
             qw_resources_init(
-                SANDBOX_JS.as_ptr(),
-                SANDBOX_JS.len(),
+                sandbox_js.as_ptr(),
+                sandbox_js.len(),
                 SANDBOX_QBC.as_ptr(),
                 SANDBOX_QBC.len(),
-                VALIDATOR_JS.as_ptr(),
-                VALIDATOR_JS.len(),
+                validator_js.as_ptr(),
+                validator_js.len(),
                 VALIDATOR_QBC.as_ptr(),
                 VALIDATOR_QBC.len(),
             )
@@ -233,6 +247,9 @@ impl Native {
     }
     pub fn set_data(&mut self, data: &str) {
         self.with_text(data, qw_set_data);
+    }
+    pub fn set_safe_area(&mut self, area: &str) {
+        self.with_text(area, qw_set_safe_area);
     }
     pub fn set_width(&mut self, width: f64) {
         // SAFETY: a live widget.

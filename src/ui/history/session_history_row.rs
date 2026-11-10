@@ -1,6 +1,7 @@
 //! Methods moved out of `history.rs` to keep files under 1000 lines.
 
 use super::*;
+use crate::ui::widget_bubble::{time_over_widget, widget_width};
 use quill::lang::{keys, tr, tr_with};
 
 pub(in crate::ui) fn session_history_row(
@@ -32,7 +33,7 @@ pub(in crate::ui) fn session_history_row(
     // The row's clip playing inline (muted autoplay), if any.
     inline: Option<super::super::inline_video::InlineFrame>,
     // A widget message's card (`QuillApp::widget_bubble`).
-    widget: Option<AnyElement>,
+    widget: Option<crate::ui::widget_bubble::WidgetCard>,
     revealed: &std::collections::HashSet<(i64, u64, u64, bool)>,
     // Phase B4: whether the row's chat is a secret chat — selects the
     // "Self-destruct" vs "Auto-delete" service-row wording.
@@ -152,6 +153,7 @@ pub(in crate::ui) fn session_history_row(
     // padding under a header.
     let room = bubble_width::BubbleRoom::new(look.history, sender_avatar.is_some(), look.plain);
     let media_max = room.media(header.is_none());
+    let header_free = header.is_none();
     let chat_id = message.chat_id;
     let message_id = message.id;
     let mut actions_span = Pixels::default();
@@ -276,7 +278,9 @@ pub(in crate::ui) fn session_history_row(
     };
     // A picture, video or GIF with nothing else in its bubble stands on its
     // own, as in Telegram Desktop (`quill::media_bubble`).
+    // A widget keeps its bubble: the bubble's color is its page.
     let bubbleless = !look.plain
+        && !matches!(message.content, MessageContent::Widget(_))
         && leads_with_media(effective_content(
             &message.content,
             message.ephemeral.as_ref(),
@@ -344,6 +348,10 @@ pub(in crate::ui) fn session_history_row(
             media_led,
             sender.is_none() && !caption_above,
             !caption_below && !badges && !has_chips,
+        )
+        .joined(
+            quill::chat_wide::has_right_layout(message.is_outgoing, look.wide),
+            look.joined_above,
         )
     };
     let covered_content = effective_content(&message.content, message.ephemeral.as_ref());
@@ -565,7 +573,7 @@ pub(in crate::ui) fn session_history_row(
         // Slice G9: the join-from-community service row renders no extra
         // media either (the name ships in the centered row text).
         | MessageContent::ChatJoinFromCommunity { .. } => None,
-        MessageContent::Widget(_) => widget,
+        MessageContent::Widget(_) => widget.map(|card| card.build(corners)),
         MessageContent::Unsupported { .. } => Some(
             div().id(("unsupported-update-card", message.id.0 as u64))
                 .flex().flex_col().gap_2().p_3()
@@ -793,8 +801,10 @@ pub(in crate::ui) fn session_history_row(
     // Media with nothing under it shows its time on the picture.
     // Bubble-less media keeps it there even with reactions under it.
     let footer_overlay = media_led
-        && caption_below_el.is_none()
-        && (reserve_footer || (bubbleless && message.date > 0));
+        && match &message.content {
+            MessageContent::Widget(_) => time_over_widget(message, reply_bar_el.is_some()),
+            _ => caption_below_el.is_none() && (reserve_footer || (bubbleless && message.date > 0)),
+        };
     let caption_below_el = caption_below_el.map(|caption| {
         if media_led {
             div().px_2().py_1().child(caption).into_any_element()
@@ -874,7 +884,9 @@ pub(in crate::ui) fn session_history_row(
             )
         })
         .flatten()
-        .map(|width| media_content_width(width, info_width, media_max));
+        .map(|width| media_content_width(width, info_width, media_max))
+        // A widget is as wide as its card.
+        .or_else(|| widget_width(content, room, header_free).filter(|_| extra_media_present));
     let max_width = bubble_width::message_width_limit(cx, content, look.font, look.plain);
     let mut avatar_link = avatar_link(&sender_avatar, message, cx);
     let mut sender_status = sender_status;

@@ -150,12 +150,16 @@ pub(in crate::ui) fn single_media_frame(
     Some(frame)
 }
 
-/// Content whose picture leads the bubble: a photo, video or GIF, or a
-/// picture file shown as a photo.
+/// Content whose picture leads the bubble: a photo, video or GIF, a
+/// picture file shown as a photo, or a widget (which fills its bubble the
+/// same way, Telegram Desktop `HtmlWidget`).
 pub(in crate::ui) fn leads_with_media(content: &quill::telegram::envelope::MessageContent) -> bool {
     use quill::telegram::envelope::MessageContent;
     match content {
-        MessageContent::Photo(_) | MessageContent::Video(_) | MessageContent::Animation(_) => true,
+        MessageContent::Photo(_)
+        | MessageContent::Video(_)
+        | MessageContent::Animation(_)
+        | MessageContent::Widget(_) => true,
         MessageContent::Document(doc) => quill::media_viewer::shows_as_photo(doc),
         _ => false,
     }
@@ -323,6 +327,30 @@ impl MediaCorners {
         )
     }
 
+    /// Takes the bubble's own small corners (`synthetic::bubble_corners`):
+    /// the bottom corner on the avatar's side, and the top one there when
+    /// the bubble joins the one above. Only corners that sit on the bubble's
+    /// edge change, so the tile's outline follows the bubble's
+    /// (Telegram Desktop `Media::adjustedBubbleRounding`).
+    pub(in crate::ui) fn joined(self, right: bool, joined_above: bool) -> Self {
+        // Inside the bubble's 1 px border, as the large radius is.
+        let joined = px(crate::ui::synthetic::JOINED_RADIUS - 1.);
+        let cap = |own: Pixels, on: bool| {
+            if on && own > px(MEDIA_SMALL_RADIUS) {
+                joined
+            } else {
+                own
+            }
+        };
+        Self {
+            tl: cap(self.tl, !right && joined_above),
+            tr: cap(self.tr, right && joined_above),
+            br: cap(self.br, right),
+            bl: cap(self.bl, !right),
+            behind: self.behind,
+        }
+    }
+
     /// Corners for media drawn without a bubble (`media_bubble`): the
     /// bubble's radius everywhere, small only on the top corner that joins
     /// the sender's bubble above (Telegram Desktop `countMessageRounding`;
@@ -457,5 +485,28 @@ mod tests {
         assert_eq!(bubble_outer_width(px(360.), true, false), px(362.));
         assert_eq!(bubble_outer_width(px(360.), false, false), px(386.));
         assert_eq!(bubble_outer_width(px(360.), true, true), px(360.));
+    }
+
+    /// A media-led tile keeps the bubble's outline: the bubble's small corners
+    /// on the avatar side, the large radius elsewhere, and corners inside the
+    /// bubble untouched.
+    #[test]
+    fn a_led_tile_takes_the_bubbles_small_corners() {
+        let large = px(17.);
+        let joined = px(crate::ui::synthetic::JOINED_RADIUS - 1.);
+        let all = super::MediaCorners::edges(large, true, true, true, true, None);
+        let incoming = all.joined(false, true);
+        assert_eq!(
+            (incoming.tl, incoming.tr, incoming.br, incoming.bl),
+            (joined, large, large, joined)
+        );
+        let outgoing = all.joined(true, false);
+        assert_eq!(
+            (outgoing.tl, outgoing.tr, outgoing.br, outgoing.bl),
+            (large, large, joined, large)
+        );
+        let under_caption =
+            super::MediaCorners::edges(large, true, true, false, false, None).joined(false, false);
+        assert_eq!(under_caption.bl, px(super::MEDIA_SMALL_RADIUS));
     }
 }
