@@ -361,10 +361,7 @@ impl QuillApp {
         let Some(dialog) = self.screen.dialogs.chat_look_dialog.as_mut() else {
             return false;
         };
-        match dialog
-            .stage
-            .settle(&mut live.driver.session.acks)
-        {
+        match dialog.stage.settle(&mut live.driver.session.acks) {
             None => false,
             Some(true) => {
                 self.close_chat_look_dialog(cx);

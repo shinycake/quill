@@ -505,7 +505,9 @@ impl Session {
         }
         self.trim_live_windows(chat_id, topic_id);
         if let Some(target) = force_reply {
-            self.bots.pending_force_replies.insert(target.chat_id, target);
+            self.bots
+                .pending_force_replies
+                .insert(target.chat_id, target);
         }
         if let Some(notification) = notification {
             self.queue_notification_with_sound(notification, sound, photo);

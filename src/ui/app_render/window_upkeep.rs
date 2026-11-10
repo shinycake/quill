@@ -223,7 +223,11 @@ impl QuillApp {
     /// that window's frame. Rich answers are written back as editor markup,
     /// inline formatting included, so the rich send path rebuilds the whole
     /// message.
-    fn apply_ai_composer_answer(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    pub(in crate::ui) fn apply_ai_composer_answer(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let Some(session) = self.session_mut() else {
             return;
         };
@@ -258,7 +262,9 @@ impl QuillApp {
                 if !self.chat_ui.is_editing() && *markup == self.composer_markup(cx)
         );
         if !still_asked {
-            self.set_note(StatusNote::info(tr(keys::Q_CHAT_THE_DRAFT_CHANGED_THE_AI_ANSWER)));
+            self.set_note(StatusNote::info(tr(
+                keys::Q_CHAT_THE_DRAFT_CHANGED_THE_AI_ANSWER,
+            )));
             return;
         }
         if let Some((chat_id, text)) = ai_text

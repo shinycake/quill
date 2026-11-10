@@ -1,5 +1,5 @@
 //! Where the chat look dialog's Apply stands: one stage per change it
-//! sent, settled on that change's own answer (`ChatsState::chat_look_acks`),
+//! sent, settled on that change's own answer (`Session::acks`),
 //! so a failure leaves only the failed change to send again and an answer
 //! of another dialog is never counted.
 use super::LookChange;
@@ -123,8 +123,14 @@ mod tests {
     #[test]
     fn each_change_settles_on_its_own_answer() {
         let mut stage = LookStage::Sent(vec![
-            sent(LookChange::Theme("a".into()), SendStage::InFlight(RequestId(1))),
-            sent(LookChange::RemoveWallpaper, SendStage::InFlight(RequestId(2))),
+            sent(
+                LookChange::Theme("a".into()),
+                SendStage::InFlight(RequestId(1)),
+            ),
+            sent(
+                LookChange::RemoveWallpaper,
+                SendStage::InFlight(RequestId(2)),
+            ),
         ]);
         let mut acks = acks_for(&[(1, Answer::Done)]);
         assert_eq!(stage.settle(&mut acks), Some(false));
@@ -148,13 +154,16 @@ mod tests {
     #[test]
     fn a_failed_change_waits_for_its_retry_and_keeps_the_done_ones() {
         let mut stage = LookStage::Sent(vec![
-            sent(LookChange::Theme("a".into()), SendStage::InFlight(RequestId(1))),
-            sent(LookChange::RemoveWallpaper, SendStage::InFlight(RequestId(2))),
+            sent(
+                LookChange::Theme("a".into()),
+                SendStage::InFlight(RequestId(1)),
+            ),
+            sent(
+                LookChange::RemoveWallpaper,
+                SendStage::InFlight(RequestId(2)),
+            ),
         ]);
-        let mut acks = acks_for(&[
-            (1, Answer::Done),
-            (2, Answer::Failed("BAD".into())),
-        ]);
+        let mut acks = acks_for(&[(1, Answer::Done), (2, Answer::Failed("BAD".into()))]);
         assert_eq!(stage.settle(&mut acks), Some(false));
         assert!(!stage.applying());
         assert_eq!(stage.error(), Some("BAD"));

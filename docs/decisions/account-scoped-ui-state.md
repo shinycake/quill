@@ -4077,3 +4077,93 @@ and 10 are widget items another fixer owns).
   (`cancel_inline_opening_unless_chat`, an invite preview, a text or typed
   link), or when another account is on screen (10-119). No timer: a lookup
   that never answers is the deep-link flow's own concern.
+
+### Sweep fixes (s3-messages-2)
+
+- **One answer board for every request a surface waits on.**
+  `Session::acks` (`RequestAcks`, `src/state/acks.rs`) keeps the answer of
+  each request a surface registered with `expect`, settled by
+  `Session::apply` on the request's own `@extra` (an `ok`, a `message`, an
+  error: any answer), and kept only until the surface `take`s it or
+  `forget`s the request. The chat look dialog's `chat_look_oks` counter and
+  its use of the shared `background_error` are gone (08-094, 08-095,
+  08-096): Apply is a `LookStage` (`Editing`, `Blocked(why)`, `Sent(sends)`),
+  every change is `InFlight(id)`, `Done` or `Failed(why)` on its own answer,
+  a failure leaves only the failed change to send again (the done ones are
+  not planned twice), a boost-level refusal is `Blocked` in the dialog, and
+  closing the dialog forgets its requests. The three chat look purposes no
+  longer write `background_error`, so the Appearance pages' error is theirs
+  alone. `check-implicit-state.py` now also rejects acknowledgement
+  counters (`*_oks`, `*_acks`, `*_acked`).
+- **An edit leaves edit mode on its answer** (08-131). `EditMode` has a
+  stage (`Editing`, `Sending(request)`); the frame upkeep of each window
+  (`settle_edit_send`) takes the answer: `ok` restores the draft, an error
+  returns to `Editing` with the edited text in the field. A second Enter
+  while `Sending` sends nothing; leaving the edit or the chat forgets the
+  request. Each edit has an `EditId`, so a picker's answer (replace
+  attachment, attach) is dropped when its edit was cancelled or another one
+  started (08-129). Edit refuses, with a note, while an attachment tray
+  waits (08-128): tdesktop has no tray to lose (its files wait in a box of
+  their own), so refusing is the smallest safe choice.
+- **A rich send keeps its text until TDLib answers** (08-135, 10-116).
+  `ChatUi::sent_text` (`SentText::Sent { request, markup }`) restores the
+  text and the rich editor on an error when the field is still empty; an
+  inline pick that cannot be sent puts the typed `@bot query` back.
+- **Pending draft clears are per slot, not per window** (08-149, 08-150).
+  `ComposerUi::clear_draft_on_success` is gone; `ComposerSends` keeps one
+  `DraftClear` per account and draft slot (`set_draft_clear`,
+  `take_draft_clear`), consumed by the ack whichever window sent, replaced
+  by a newer send of the slot, dropped with the account. An ack names the
+  message's topic, so a clear of another topic of the same chat is the
+  fallback.
+- **The `/` menu runs the gates first** (08-132). `send_menu_command`
+  answers `MenuSend::{Sent, Refused, Unavailable}`; the typed token is
+  removed only for `Sent`. 08-133 is skipped: a command into a paid chat is
+  held by the sender's paid guard, and the confirmation box draws for a held
+  send (`paid_confirm_view`), as
+  `a_menu_command_into_a_paid_chat_waits_for_the_confirmation` shows.
+- **The AI answer replaces the draft it was asked about** (08-134):
+  `ChatUi::ai_ask` carries the markup asked about; the answer applies only
+  while the field still holds it and no edit started, else a note says the
+  draft changed.
+- **Chat change goes through one function** (08-104, 08-105): choosing the
+  open chat again keeps a recording; `enter_chat_ui` and the frame's
+  `sync_chat_ui` both call `end_leftovers_of_left_chat` (TTL picker,
+  forward selection, recording, profile modal). `sync_chat_ui` takes the
+  context for it.
+- **Inline-bot state belongs to its chat and window** (09-X001, 10-115,
+  10-140). The secret-chat alert stash moved to `ChatUi`. Each window copies
+  the session's bot resolution for its own username into
+  `ChatUi::inline_bot` and reads that (`inline_bot_for`); a window whose
+  answer was overtaken by another window's trigger asks again once the
+  other one settled, so its panel does not wait for good. The Start round
+  trip ends when the user leaves the bot's chat after the start (no timer).
+- **Keyboards and polls** (09-015, 09-016): a one-time keyboard is dismissed
+  only after its text went out (`send_command_text` answers whether it did)
+  and a Poll button's keyboard is dismissed when the poll is sent (the box
+  carries the keyboard to dismiss).
+- **Emoji sets** (09-077, 09-087, 09-X043): the box opens with an empty
+  search field; the set choice is one `SetStage` (`Idle`, `Switching`,
+  `Downloading`, `Failed`): a new choice replaces it, which drops the old
+  task and tells a download to stop, so a finished download never switches
+  away from the set chosen last; a pack that was just installed and does not
+  load is `Failed` on its row instead of downloading again; the saved
+  choice is written by the switch still in place. "Suggest Emoji" is
+  `AskedWord::{Idle, Waiting}` and ends with a note when the keyword lookup
+  gave up (`KeywordLookups::gave_up`).
+- **Join requests, join bar, add-bot** (08-059, 08-009, 08-061, 08-012): an
+  ask that cannot go out (`ConnectDriver::ask_join_requests`) leaves the list
+  `Failed`, which the box draws with Retry; `join_channel` says whether the
+  join went and the bar words its note only then; the Add all / Dismiss all
+  confirm acts only on the screen it was opened on (`ScreenEpoch`); the
+  add-bot box derives "loading" from the request in flight and shows a
+  failure with Retry. The Add all count in the box text is the one
+  `processChatJoinRequests` acts on (all pending), so a stale count changes
+  only the wording; a changed list from another device is not re-read there.
+- **Forced replies are per chat** (09-112): `pending_force_replies` holds
+  one target per chat and each window arms the one for its own chat on its
+  frame (`arm_force_reply_here`), so a chat window shows its bar and a target
+  for a chat nobody shows waits. 08-152 and 09-111 are skipped: the preview
+  timer is armed once per URL (`preview_timer_needed`) and a forward's
+  answer no longer touches a newer forward
+  (`a_forward_answer_keeps_a_newer_selection`).

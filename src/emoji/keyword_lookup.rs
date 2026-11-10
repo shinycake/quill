@@ -266,4 +266,21 @@ mod tests {
         assert!(lookups.answer(&format!("q{ANSWER_CAP}")).is_some());
         assert!(lookups.answers.len() <= ANSWER_CAP / 2 + 2);
     }
+
+    #[test]
+    fn a_query_gives_up_after_its_attempts_fail() {
+        let mut lookups = KeywordLookups::default();
+        lookups.sent(RequestId(1), "zz".into());
+        assert!(!lookups.gave_up("zz"), "still in flight");
+        lookups.failed(RequestId(1));
+        assert!(!lookups.gave_up("zz"), "one attempt left");
+        lookups.sent(RequestId(2), "zz".into());
+        assert!(!lookups.gave_up("zz"), "in flight again");
+        lookups.failed(RequestId(2));
+        assert!(lookups.gave_up("zz"));
+        assert!(!lookups.wants("zz"));
+        lookups.sent(RequestId(3), "ok".into());
+        lookups.answered(RequestId(3), Vec::new());
+        assert!(!lookups.gave_up("ok"), "an answered query did not fail");
+    }
 }

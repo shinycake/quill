@@ -33,9 +33,10 @@ impl QuillApp {
     /// The rich send `request` took `markup` out of the field. A newer
     /// send replaces an older one (its answer no longer restores anything).
     pub(super) fn remember_sent_text(&mut self, request: RequestId, markup: String) {
-        if let SentText::Sent { request: old, .. } =
-            std::mem::replace(&mut self.chat_ui.sent_text, SentText::Sent { request, markup })
-            && let Some(live) = self.live.as_mut()
+        if let SentText::Sent { request: old, .. } = std::mem::replace(
+            &mut self.chat_ui.sent_text,
+            SentText::Sent { request, markup },
+        ) && let Some(live) = self.live.as_mut()
         {
             live.driver.session.acks.forget(old);
         }
@@ -57,6 +58,16 @@ impl QuillApp {
         let Some(answer) = live.driver.session.acks.take(request) else {
             return;
         };
+        self.apply_sent_text_answer(&answer, window, cx);
+    }
+
+    /// TDLib answered the rich send `settle_sent_text` waits on.
+    pub(in crate::ui) fn apply_sent_text_answer(
+        &mut self,
+        answer: &quill::state::Answer,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let SentText::Sent { markup, .. } = std::mem::take(&mut self.chat_ui.sent_text) else {
             return;
         };

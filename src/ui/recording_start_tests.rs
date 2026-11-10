@@ -243,3 +243,49 @@ fn play_once_and_lock_end_with_the_recording_whoever_takes_it(cx: &mut TestAppCo
         assert!(!app.recording.locked);
     });
 }
+
+/// Sweep 08-104: choosing the open chat again keeps its bars, and a
+/// recording running in it goes on.
+#[gpui_kit::test]
+fn choosing_the_open_chat_again_keeps_the_recording(cx: &mut TestAppContext) {
+    let (app, mut vcx) = open_chat(cx);
+    let _opens = fake_microphone(&app, &mut vcx);
+    start(&app, CaptureFor::Message, &mut vcx);
+    vcx.run_until_parked();
+    app.read_with(&vcx, |app, _| assert!(app.recording_active()));
+    app.update_in(&mut vcx, |app, window, cx| {
+        app.select_listed_chat(CHAT, window, cx);
+    });
+    vcx.run_until_parked();
+    app.read_with(&vcx, |app, _| {
+        assert!(app.recording_active(), "the same chat leaves it running");
+        assert!(app.recording_here());
+    });
+}
+
+/// Sweep 08-105: a chat change that goes around `enter_chat_ui` (the chat
+/// replaced by the reducer, another device) ends what the old chat owed at
+/// the next frame like any other: a recording cannot go to the new chat.
+#[gpui_kit::test]
+fn a_chat_changed_elsewhere_cancels_the_recording(cx: &mut TestAppContext) {
+    let (app, mut vcx) = open_chat(cx);
+    let _opens = fake_microphone(&app, &mut vcx);
+    start(&app, CaptureFor::Message, &mut vcx);
+    vcx.run_until_parked();
+    app.read_with(&vcx, |app, _| assert!(app.recording_active()));
+    app.update(&mut vcx, |app, cx| {
+        let other = app
+            .session()
+            .and_then(|s| s.chats.keys().copied().find(|id| *id != CHAT.0))
+            .map(ChatId);
+        if let (Some(session), Some(other)) = (app.demo_session.as_mut(), other) {
+            session.open_chat(other);
+        }
+        cx.notify();
+    });
+    vcx.update(|window, cx| window.render_frame(cx));
+    vcx.run_until_parked();
+    app.read_with(&vcx, |app, _| {
+        assert!(!app.recording_active(), "the old chat's recording ended");
+    });
+}

@@ -62,10 +62,7 @@ mod tests {
         acks.expect(RequestId(2));
         assert_eq!(acks.take(RequestId(2)), None, "not answered yet");
         acks.settle(RequestId(2), Answer::Failed("X".into()));
-        assert_eq!(
-            acks.take(RequestId(2)),
-            Some(Answer::Failed("X".into()))
-        );
+        assert_eq!(acks.take(RequestId(2)), Some(Answer::Failed("X".into())));
         assert_eq!(acks.take(RequestId(2)), None, "taken once");
     }
 

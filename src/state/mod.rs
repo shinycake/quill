@@ -176,6 +176,7 @@ mod updates_sync;
 mod web_app_types;
 
 pub use account_notices::*;
+pub use acks::{Answer, RequestAcks};
 pub use call_types::*;
 pub use chat_activity::*;
 pub use chat_types::*;
@@ -184,7 +185,6 @@ pub use composer_targets::ComposerReplyFetch;
 pub use conference::*;
 pub use conference_add_people::*;
 pub use conference_invite::*;
-pub use acks::{Answer, RequestAcks};
 pub use domains::*;
 pub use history_calendar::*;
 pub use history_prune::*;

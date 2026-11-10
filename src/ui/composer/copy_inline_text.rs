@@ -347,17 +347,27 @@ impl QuillApp {
         let Some(live) = self.live.as_mut() else {
             return;
         };
-        match live.driver.session.acks.take(request) {
-            None => {}
-            Some(quill::state::Answer::Done) => {
-                self.finish_edit_restore_draft(window, cx);
-                cx.notify();
-            }
-            Some(quill::state::Answer::Failed(_)) => {
-                self.chat_ui.back_to_editing();
-                cx.notify();
-            }
+        if let Some(answer) = live.driver.session.acks.take(request) {
+            self.apply_edit_answer(&answer, window, cx);
         }
+    }
+
+    /// TDLib answered the edit that was sent: leave edit mode and bring the
+    /// draft back, or go on editing after an error.
+    pub(in crate::ui) fn apply_edit_answer(
+        &mut self,
+        answer: &quill::state::Answer,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.chat_ui.edit_sending().is_none() {
+            return;
+        }
+        match answer {
+            quill::state::Answer::Done => self.finish_edit_restore_draft(window, cx),
+            quill::state::Answer::Failed(_) => self.chat_ui.back_to_editing(),
+        }
+        cx.notify();
     }
 
     /// R8: the runtime `message_text_length_max` (TDLib's compiled default

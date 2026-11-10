@@ -78,7 +78,10 @@ impl QuillApp {
     }
 
     /// The bot of the `@bot query` trigger in the field, if any.
-    pub(super) fn inline_bot_of_trigger(&self, cx: &gpui_kit::gpui::App) -> Option<&InlineBotResolve> {
+    pub(super) fn inline_bot_of_trigger(
+        &self,
+        cx: &gpui_kit::gpui::App,
+    ) -> Option<&InlineBotResolve> {
         let text = self.composer.read(cx).value();
         let (username, _) = inline_query_trigger(&text)?;
         self.inline_bot_for(username)

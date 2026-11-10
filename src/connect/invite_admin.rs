@@ -72,6 +72,32 @@ impl<S: JsonSender> ConnectDriver<S> {
         sent
     }
 
+    /// Ask for the join-request list: `query` empty and `refresh` set re-sends
+    /// the whole list, anything else searches. A request that cannot go out
+    /// (not connected, no right to invite, a refused send) leaves the list
+    /// `Failed`, which the box draws with Retry; `None` never means "being
+    /// asked".
+    pub fn ask_join_requests(&mut self, chat_id: ChatId, query: &str, refresh: bool) {
+        let sent = if query.is_empty() && refresh {
+            self.refresh_chat_join_requests(chat_id)
+        } else {
+            self.search_chat_join_requests(chat_id, query)
+        };
+        let settled = matches!(
+            self.session.groups.join_requests.get(&chat_id.0),
+            Some(JoinRequestFetch::Loading | JoinRequestFetch::Loaded(_))
+        );
+        if !settled && !matches!(sent, Ok(Some(_))) {
+            self.session.groups.join_requests.insert(
+                chat_id.0,
+                JoinRequestFetch::Failed(
+                    crate::lang::tr(crate::lang::keys::Q_CHAT_COULD_NOT_LOAD_JOIN_REQUESTS)
+                        .to_string(),
+                ),
+            );
+        }
+    }
+
     /// Next page of the (possibly searched) join-request list, appended.
     pub fn load_more_chat_join_requests(
         &mut self,

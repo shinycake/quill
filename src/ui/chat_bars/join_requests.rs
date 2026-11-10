@@ -107,29 +107,10 @@ impl QuillApp {
         cx.notify();
     }
 
-    /// Ask for the list (`query` empty: the whole list, `refresh`: forget
-    /// the cached one). A send that cannot go out lands in `Failed`, which
-    /// the box draws with Retry, so the box never waits on an answer that
-    /// was not asked for.
+    /// Ask for the list: see `ConnectDriver::ask_join_requests`.
     fn ask_join_requests(&mut self, chat_id: ChatId, query: &str, refresh: bool) {
-        let Some(live) = self.live.as_mut() else {
-            return;
-        };
-        let sent = if query.is_empty() && refresh {
-            live.driver.refresh_chat_join_requests(chat_id)
-        } else {
-            live.driver.search_chat_join_requests(chat_id, query)
-        };
-        let groups = &mut live.driver.session.groups;
-        let settled = matches!(
-            groups.join_requests.get(&chat_id.0),
-            Some(JoinRequestFetch::Loading | JoinRequestFetch::Loaded(_))
-        );
-        if !settled && !matches!(sent, Ok(Some(_))) {
-            groups.join_requests.insert(
-                chat_id.0,
-                JoinRequestFetch::Failed(tr(keys::Q_CHAT_COULD_NOT_LOAD_JOIN_REQUESTS).to_string()),
-            );
+        if let Some(live) = self.live.as_mut() {
+            live.driver.ask_join_requests(chat_id, query, refresh);
         }
     }
 
