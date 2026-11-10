@@ -4029,8 +4029,6 @@ re-read at its spot first.
     `loading`; only that request's answer or error lands.
   - 03-058: the transfer in flight carries the recipient as confirmed
     (`GiftManageState::transferring`); the toast reads it, not the picker.
-  - 02-062: `open_send_gift_to` while a `sendGift` is out reopens for the
-    same person and refuses another.
   - 03-059: `start_gift_resale_buy` refuses while a buy is sending.
   - 03-060 / 09-123: closing the market boxes during the forge keeps the
     craft; its outcome opens the result box.
@@ -4049,7 +4047,8 @@ re-read at its spot first.
   - 01-051: opening the boost box clears the old chat's intent and slots.
   - 09-X012: closing a chat window no longer dismisses the queued account
     notices (not seen on screen).
-- **Skipped.** 02-160 (the Star reaction box is already on `OnScreen`, so
+- **Skipped.** 02-062 (a reopened dialog already drops the earlier send's
+  answer by request id; a test pins it), 02-160 (the Star reaction box is already on `OnScreen`, so
   per account), 04-057 (the commit is not confirmed back to the local
   list; needs a committing stage, not done), 12-001 (the tray card needs
   an owner that outlives the screen epoch), 01-085 (`KeyFilter` only
@@ -4064,6 +4063,6 @@ re-read at its spot first.
   in `a_transfer_goes_only_to_the_contact_the_confirmation_names`,
   `closing_the_boxes_during_the_forge_keeps_the_outcome`,
   `an_unreadable_registry_is_not_overwritten`, `hidden_chats_toggle`. No
-  test for 02-083, 02-062, 03-059, 10-001, 11-p7-001, 11-p6-003, 12-086,
+  test for 02-083, 03-059, 10-001, 11-p7-001, 11-p6-003, 12-086,
   01-051, 09-X012, 09-122, 13-064 (they need a fixture the offline harness
   lacks).

@@ -529,29 +529,13 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(ConnectSendError::InvalidRequest);
         }
         let recipient = recipient.ok_or(ConnectSendError::InvalidRequest)?;
-        // A `sendGift` is out: its answer belongs to this dialog. Reopening
-        // for the same person shows it again; another person waits.
-        let send = &mut self.session.payments.gifts_manage.send;
-        let resumes = send.sending() && send.recipient.as_ref() == Some(&recipient);
-        if send.sending() && !resumes {
-            return Err(ConnectSendError::InvalidRequest);
-        }
         let with_premium = !recipient.is_self && !recipient.is_channel;
-        *send = if resumes {
-            SendGiftState {
-                open: true,
-                ..std::mem::take(send)
-            }
-        } else {
-            SendGiftState {
-                open: true,
-                recipient: Some(recipient),
-                ..Default::default()
-            }
+        let send = &mut self.session.payments.gifts_manage.send;
+        *send = SendGiftState {
+            open: true,
+            recipient: Some(recipient),
+            ..Default::default()
         };
-        if resumes {
-            return Ok(());
-        }
         let extra = self.session.request(
             RequestPurpose::Payments(PaymentsPurpose::GetAvailableGifts),
             None,
