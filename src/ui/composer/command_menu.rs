@@ -34,7 +34,7 @@ impl QuillApp {
         // tdesktop turns command autocomplete off while a message is edited.
         let triggered =
             self.command_trigger(cx).is_some() && !inline_active && !self.chat_ui.is_editing();
-        let open_chat = self.session().and_then(|session| session.open_chat);
+        let open_chat = self.viewed_chat();
         if triggered {
             self.load_quick_replies_for_menu();
         }
@@ -99,7 +99,7 @@ impl QuillApp {
             return None;
         }
         let (_, prefix) = self.command_trigger(cx)?;
-        let chat_id = self.session()?.open_chat?;
+        let chat_id = self.viewed_chat()?;
         let items = self.session()?.command_menu_items(chat_id);
         if items.is_empty() {
             return None;
@@ -232,7 +232,7 @@ impl QuillApp {
             // The send leaves the chat draft alone (`clear_draft` is off for
             // a menu command); the kept text is saved at once.
             if self.composer.read(cx).value().is_empty() {
-                if let Some(chat_id) = self.open_chat_id() {
+                if let Some(chat_id) = self.viewed_chat() {
                     self.forget_local_draft(chat_id);
                 }
             } else {
