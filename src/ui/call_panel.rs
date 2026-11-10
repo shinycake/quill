@@ -18,14 +18,13 @@ use super::call_panel_backdrop::connecting_arc;
 use super::call_panel_button::{ButtonLook, call_button};
 use super::call_panel_devices::{self as devices, DeviceMenuTarget};
 use super::call_panel_notices as notices;
-use super::calls::call_video::{CallPicture, CallWindowRoot};
+use super::calls::call_video::CallPicture;
 use super::chat_row::chat_avatar;
 use super::frame_clock::follow_app;
 use super::nested_click::SwallowPress;
 use crate::ui::app_theme::call_chrome;
-use crate::ui::status_note::StatusNote;
 use gpui_kit::assets::IconName;
-use gpui_kit::component::{ActiveTheme, Icon, Root, Sizable};
+use gpui_kit::component::{ActiveTheme, Icon, Sizable};
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::calls::engine::TransportState;
@@ -312,7 +311,7 @@ impl QuillApp {
     /// The call the 1:1 window shows: the active call, its ended summary,
     /// or a ringing conference invite; with the call that rings in (if
     /// any), whether it has ended, and whether the other side was busy.
-    fn call_window_target(&self) -> (Option<i32>, Option<i32>, bool, bool) {
+    pub(in crate::ui) fn call_window_target(&self) -> (Option<i32>, Option<i32>, bool, bool) {
         match self.session() {
             Some(session) => match (
                 &session.calls.active_call,
@@ -333,78 +332,6 @@ impl QuillApp {
             },
             None => (None, None, false, false),
         }
-    }
-
-    fn open_call_window(&mut self, call_id: i32, cx: &mut Context<Self>) {
-        if self.calls.window_opening {
-            return;
-        }
-        self.calls.window_opening = true;
-        self.calls.raised_for = None;
-        let owner = cx.entity();
-        // screen-scope: the call window is the app's; its failure note goes to whichever account is on screen.
-        cx.defer(move |cx| {
-            let weak = owner.downgrade();
-            let render_owner = owner.clone();
-            let panel_view = owner.read(cx).calls.panel_view.clone();
-            let bounds = Bounds::centered(None, size(px(720.), px(540.)), cx);
-            let result = cx.open_window(
-                WindowOptions {
-                    window_bounds: Some(WindowBounds::Windowed(bounds)),
-                    window_min_size: Some(size(px(380.), px(520.))),
-                    titlebar: Some(TitlebarOptions {
-                        title: Some(tr(keys::PROFILE_ACTION_SHORT_CALL).into()),
-                        appears_transparent: true,
-                        traffic_light_position: Some(point(px(12.), px(12.))),
-                    }),
-                    focus: true,
-                    show: true,
-                    ..Default::default()
-                },
-                move |window, cx| {
-                    window.activate_window();
-                    let gone = weak.clone();
-                    window.on_window_should_close(cx, move |_, cx| {
-                        let _ = weak.update(cx, |app, cx| {
-                            app.calls.forget_window();
-                            // The window is reused for later calls: it
-                            // closes on the one it shows now.
-                            let (shown, ..) = app.call_window_target();
-                            app.call_screen.window_closed_by_user = shown.or(Some(call_id));
-                            cx.notify();
-                        });
-                        true
-                    });
-                    let from = window.window_handle();
-                    super::window_control::when_window_goes(window, cx, move |cx| {
-                        let _ = gone.update(cx, |app, cx| {
-                            if app.calls.window == Some(from) {
-                                app.calls.forget_window();
-                                cx.notify();
-                            }
-                        });
-                    });
-                    let view = cx.new(|cx| CallWindowRoot::new(&render_owner, &panel_view, cx));
-                    cx.new(|cx| Root::new(view, window, cx))
-                },
-            );
-            owner.update(cx, |app, cx| {
-                app.calls.window_opening = false;
-                match result {
-                    Ok(handle) => app.calls.window = Some(handle.into()),
-                    Err(_) => {
-                        // Kept shut for this call, like a window the user
-                        // closed: the next sync does not try (and note) it
-                        // again; the call bar or a ring reopens it.
-                        app.call_screen.window_closed_by_user = Some(call_id);
-                        app.set_note(StatusNote::error(tr(
-                            keys::Q_OPS_COULDNT_OPEN_THE_CALL_WINDOW,
-                        )));
-                    }
-                }
-                cx.notify();
-            });
-        });
     }
 
     /// tdesktop `Calls::TopBar`: while a call runs, a 38 pt bar over the

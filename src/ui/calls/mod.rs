@@ -915,6 +915,7 @@ crate::ui::shell::register_dialogs! {
 #[cfg(feature = "demo-capture")]
 mod add_people_demo;
 mod call_again;
+mod open_window;
 pub(super) mod call_video;
 #[cfg(feature = "demo-capture")]
 pub(super) mod call_video_demo;

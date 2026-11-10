@@ -132,7 +132,6 @@ Latest::wake_pending
 LayerFade::closing
 LinuxState::failed
 LiveInput::failed
-LiveStoryState::extras_requested
 LocalFileState::is_downloading_active
 LocalFileState::is_downloading_completed
 LoginState::config_requested

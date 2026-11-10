@@ -960,7 +960,6 @@
 "qll_ops_test_microphone" = "Test microphone";
 "qll_ops_text_copied_to_clipboard" = "Text copied to clipboard";
 "qll_ops_thanks_for_your_feedback" = "Thanks for your feedback";
-"qll_ops_thanks_for_your_feedback_2" = "Thanks for your feedback";
 "qll_ops_the_away_message_stays_off" = "The away message stays off until it has messages.";
 "qll_ops_the_call_ended_before_it" = "The call ended before it could be answered";
 "qll_ops_the_chosen_folder_is_missing" = "The chosen folder is missing, so the default one is used.";

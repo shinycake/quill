@@ -4077,3 +4077,54 @@ and 10 are widget items another fixer owns).
   (`cancel_inline_opening_unless_chat`, an invite preview, a text or typed
   link), or when another account is on screen (10-119). No timer: a lookup
   that never answers is the deep-link flow's own concern.
+
+### Sweep fixes (s3-calls)
+
+- **Call rating.** `CallSummary::rating` is `CallRating` (`Offered`,
+  `Sending(request)`, `Sent`, `Failed(line)`), replacing `rating_sent`. The
+  send moves it to `Sending`; only the matching `ok` reaches `Sent` (the card
+  says thanks) and the matching error reaches `Failed`, which draws the card
+  again with the error and its retry (02-015, 05-026, 08-081). A busy or swap
+  decline's `discardCall` error no longer lands on the active call's banner:
+  only the request that owns `HangUp` sets `calls.error` (05-035). Redial and
+  Call again check the engine and the network before they dismiss the end
+  summary (08-078). A dial carries its target in the continuation that waits
+  for microphone access (`with_capture_access` takes a closure), so a second
+  press cannot be answered by the first prompt (08-076).
+- **Group join.** `connect_group` leaves `GroupJoin::Created` for
+  `AnswerApplied` once the answer is applied and for `Connected` only after
+  the sound, mute, videos and camera steps worked; a failed step puts it back
+  to `AnswerApplied`, so the retry redoes the steps (01-080). A failed
+  `connect_group_call` spends the join answer (`join_payload` is cleared), so
+  group-call updates no longer retry it (02-101). A presentation that cannot
+  connect is ended on Telegram (02-099). A stream reply of "call left" shows a
+  failed join with its retry (02-111). Muting before your participant row
+  exists is sent for your account or your join-as (02-104).
+- **Live story extras.** The streamer, top donors and comment senders are three
+  `Fetch` fields on `LiveStoryState`, each asked while idle; a failure stays
+  failed until the next Join of the story (02-114).
+- **Call links.** A confirmed link is held as `CallLinkLeaving` (the whole
+  confirm, so a live stream stays one, and the call being left). It ends with a
+  failed hang-up, with another call taking the place, and in the call boxes'
+  farewell; the offered call reaches the UI through `call_link_offered` so a
+  stream opens in its window (01-066, 01-067).
+- **Create video chat.** A "join as" answer is dropped when no box waits for
+  its request, and a box whose request is no longer the session's closes
+  (01-074).
+- **Windows.** A call window that fails to open is remembered through
+  `window_closed_by_user` for that call, like a window the user closed, so the
+  sync does not retry and note it again; the call bar or a ring reopens it
+  (08-034, 10-047). Settings > Calls redraws only when its sessions fetch went
+  out (08-033).
+- **Capture.** A run of 50 frames the engine refuses ends the capture with a
+  `Failed` event (01-071). A lost WASAPI output device is reported through
+  `SystemAudioMix::fail` and the driver turns the audio share off (01-063). A
+  chosen screen share waits at most `ENGINE_WAIT` for the engine's frame
+  sender, then ends with an error (02-013). A macOS start that times out stops
+  its stream (01-064). A lost microphone withdraws the speaking mark (02-009).
+  A failed output reopen is retried three times, 5 s apart (01-094). An X11
+  push-to-talk thread that ends is a failed hook (`HookLife`) and releases a
+  held key (01-086).
+- **Skipped.** 02-103: tdesktop's `toggleScreenSharing(Off)` is fire and
+  forget, and Quill already shows "Could not stop screen sharing" on the
+  error; the native presentation is stopped either way.
