@@ -575,6 +575,7 @@ mod spellcheck_ui;
 mod spoiler_fx;
 mod sponsored;
 mod sponsored_about;
+mod sponsored_spots;
 #[cfg(test)]
 mod stack_budget_tests;
 mod stars_gift_ui;

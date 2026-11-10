@@ -45,9 +45,10 @@ fn sponsored_fetch_view_once_and_click() {
     driver
         .ingest(copy_and_parse(&response, &seq, &dyn_sink).unwrap())
         .unwrap();
+    assert!(driver.session.sponsored_message(chat, 9001).is_some());
     assert_eq!(
-        driver.session.open_sponsored_tail().map(|m| m.message_id),
-        Some(9001)
+        driver.session.open_sponsored_layout(),
+        Some(crate::state::SponsoredLayout::AppendAtEnd)
     );
     // Fresh list: no refetch.
     assert!(driver.fetch_sponsored_messages(chat).unwrap().is_none());

@@ -33,8 +33,8 @@ const SPONSORED_VIEWED_SLACK: Pixels = px(44.);
 /// `ReadySponsored` fixture: open the demo channel (id 13, now ungated) and
 /// inject a `sponsoredMessages` response through the same reducer the live
 /// `getChatSponsoredMessages` path uses — one Sponsored row, one Recommended.
-/// The demo channel then renders its normal history with the live-path
-/// sponsored footer (the first row) below it.
+/// The first ad then joins the end of the history as when the reader
+/// scrolls past the last post (`Session::place_sponsored_at_end`).
 pub(super) fn apply_ready_sponsored(
     session: &mut Session,
     sink: &Arc<MemorySink>,
@@ -57,12 +57,13 @@ pub(super) fn apply_ready_sponsored(
     let extra = session.request(RequestPurpose::GetChatSponsoredMessages, Some(ChatId(13)));
     let thumb = demo_file_json(61, &demo_thumb_png_path(), true);
     let json = format!(
-        r#"{{"@type":"sponsoredMessages","@extra":"{}","messages_between":3,"messages":[{{"@type":"sponsoredMessage","message_id":9001,"is_recommended":false,"can_be_reported":true,"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":"Sponsored demo ad — open the menu for About, Report and Hide.","entities":[]}}}},"sponsor":{{"@type":"advertisementSponsor","url":"https://example.com/promo","photo":{{"@type":"photo","has_stickers":false,"sizes":[]}},"info":"Example Ads"}},"title":"Summer sale","button_text":"Shop now","accent_color_id":0,"background_custom_emoji_id":"0","additional_info":"Ad by Example"}},{{"@type":"sponsoredMessage","message_id":9002,"is_recommended":true,"can_be_reported":false,"content":{{"@type":"messagePhoto","photo":{{"@type":"photo","has_stickers":false,"sizes":[{{"@type":"photoSize","type":"m","photo":{thumb},"width":240,"height":160,"progressive_sizes":[]}}]}},"caption":{{"@type":"formattedText","text":"Recommended demo photo row.","entities":[]}},"has_spoiler":false,"is_secret":false}},"sponsor":{{"@type":"advertisementSponsor","url":"https://example.com/pick","photo":{{"@type":"photo","has_stickers":false,"sizes":[]}},"info":"Curated"}},"title":"Editors' pick","button_text":"Learn more","accent_color_id":0,"background_custom_emoji_id":"0","additional_info":""}}]}}"#,
+        r#"{{"@type":"sponsoredMessages","@extra":"{}","messages_between":0,"messages":[{{"@type":"sponsoredMessage","message_id":9001,"is_recommended":false,"can_be_reported":true,"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":"Sponsored demo ad — open the menu for About, Report and Hide.","entities":[]}}}},"sponsor":{{"@type":"advertisementSponsor","url":"https://example.com/promo","photo":{{"@type":"photo","has_stickers":false,"sizes":[]}},"info":"Example Ads"}},"title":"Summer sale","button_text":"Shop now","accent_color_id":0,"background_custom_emoji_id":"0","additional_info":"Ad by Example"}},{{"@type":"sponsoredMessage","message_id":9002,"is_recommended":true,"can_be_reported":false,"content":{{"@type":"messagePhoto","photo":{{"@type":"photo","has_stickers":false,"sizes":[{{"@type":"photoSize","type":"m","photo":{thumb},"width":240,"height":160,"progressive_sizes":[]}}]}},"caption":{{"@type":"formattedText","text":"Recommended demo photo row.","entities":[]}},"has_spoiler":false,"is_secret":false}},"sponsor":{{"@type":"advertisementSponsor","url":"https://example.com/pick","photo":{{"@type":"photo","has_stickers":false,"sizes":[]}},"info":"Curated"}},"title":"Editors' pick","button_text":"Learn more","accent_color_id":0,"background_custom_emoji_id":"0","additional_info":""}}]}}"#,
         extra.0,
     );
     if let Some(owned) = copy_and_parse(&json, seq, &dyn_sink) {
         session.apply(owned);
     }
+    session.place_sponsored_at_end(std::time::Instant::now());
 }
 
 /// One `sponsoredMessage` row: Sponsored / Recommended label, title, content,
@@ -316,57 +317,34 @@ impl QuillApp {
         let _ = cx;
     }
 
-    /// What the channel's sponsored tail shows: the ad, the report picker
-    /// and the outcome banner, by identity. `None` when it shows nothing.
-    /// The history's last row carries the tail and is measured again when
-    /// this changes (`history_message_list`).
-    pub(super) fn sponsored_tail_key(&self) -> Option<u64> {
-        use std::hash::{Hash, Hasher};
+    /// One ad in the history (`sponsored_spots`), as tdesktop draws it
+    /// after the message it follows: the ad card (Ad label, "About this ad
+    /// / Report ad / Hide ads" menu, sponsor button) with the report picker
+    /// and outcome banner. It scrolls with the posts and never moves the
+    /// view (#1427). The ad id is recorded once the card is painted with
+    /// its button inside the history's viewport, so
+    /// `report_visible_sponsored` sends the TDLib view only then.
+    pub(super) fn sponsored_spot(
+        &self,
+        spot: &super::sponsored_spots::SponsoredSpot,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
         let session = self.session()?;
         let chat_id = session.open_chat?;
-        let ad = session.open_sponsored_tail().map(|ad| ad.message_id);
-        let report = session
-            .messages
-            .sponsored_report
-            .as_ref()
-            .filter(|flight| flight.chat_id == chat_id)
-            .map(|flight| (flight.message_id, flight.options.len()));
-        let outcome = session
-            .messages
-            .last_sponsored_report
-            .as_ref()
-            .filter(|outcome| outcome.chat_id == chat_id)
-            .map(|outcome| (outcome.message_id, std::mem::discriminant(&outcome.result)));
-        if ad.is_none() && report.is_none() && outcome.is_none() {
-            return None;
-        }
-        let mut hasher = std::collections::hash_map::DefaultHasher::new();
-        (chat_id.0, ad, report, outcome).hash(&mut hasher);
-        Some(hasher.finish())
-    }
-
-    /// The sponsored message tdesktop shows after the last message of a
-    /// channel, as part of the history: it scrolls with the messages, so
-    /// it shows once the reader reaches the bottom and never moves the
-    /// view (#1427). The ad card (Ad label, "About this ad / Report ad /
-    /// Hide ads" menu, sponsor button) plus the report picker and outcome
-    /// banner. The ad ids are recorded when the card is painted inside the
-    /// history's viewport, so `report_visible_sponsored` sends the TDLib
-    /// view only once the ad is actually on screen.
-    pub(super) fn sponsored_footer(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let session = self.session()?;
-        let chat_id = session.open_chat?;
-        let ad = session.open_sponsored_tail().cloned();
+        let ad = spot
+            .card
+            .then(|| session.sponsored_message(chat_id, spot.ad_id).cloned())
+            .flatten();
         let report = session
             .messages
             .sponsored_report
             .clone()
-            .filter(|flight| flight.chat_id == chat_id);
+            .filter(|flight| spot.report && flight.chat_id == chat_id);
         let outcome = session
             .messages
             .last_sponsored_report
             .clone()
-            .filter(|outcome| outcome.chat_id == chat_id);
+            .filter(|outcome| spot.outcome && outcome.chat_id == chat_id);
         if ad.is_none() && report.is_none() && outcome.is_none() {
             return None;
         }
@@ -374,9 +352,10 @@ impl QuillApp {
         let files = &session.media.files;
         let downloading = &session.media.downloads;
         let media_roots = self.media_display_roots();
+        let ad_id = spot.ad_id;
         let mut list = div()
-            .id("sponsored-footer")
-            .debug_selector(|| "sponsored-footer".to_string())
+            .id(("sponsored-spot", ad_id as u64))
+            .debug_selector(move || format!("sponsored-ad-{ad_id}"))
             .flex()
             .flex_col()
             .flex_none()
