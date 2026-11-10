@@ -383,7 +383,17 @@ impl QuillApp {
         if let Some(error) = state.error.clone() {
             panel = panel.child(div().text_sm().text_color(danger()).child(error));
         }
-        if state.loading || !state.next_offset.is_empty() {
+        if state.error.is_some() && !state.loading && !state.next_offset.is_empty() {
+            // A failed page waits for this button; scrolling does not re-ask.
+            panel = panel.child(
+                div().flex().justify_center().py_2().child(
+                    Button::new("story-viewers-retry")
+                        .label(tr(keys::Q_MONEY_RETRY))
+                        .small()
+                        .on_click(cx.listener(|this, _, _, cx| this.load_more_story_viewers(cx))),
+                ),
+            );
+        } else if state.loading || !state.next_offset.is_empty() {
             panel = panel.child(
                 div()
                     .id("story-viewers-loading-more")
