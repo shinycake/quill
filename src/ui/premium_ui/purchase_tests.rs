@@ -103,3 +103,28 @@ fn the_invoice_slug_is_used_when_no_bot_is_named(cx: &mut TestAppContext) {
     // No bot start is armed; the payment form opens instead.
     assert_eq!(hub_state(&app, vcx), (false, None));
 }
+
+/// The account leaves the screen before the Premium bot's chat opened: its
+/// session stays in the background, so the queued `/start` is dropped, or
+/// it would go out unasked on a later visit to the bot.
+#[gpui_kit::test]
+fn the_queued_start_does_not_outlive_the_screen(cx: &mut TestAppContext) {
+    use crate::ui::on_screen::Farewell;
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    open_premium(
+        &app,
+        vcx,
+        PremiumPurchase {
+            bot_username: "PremiumBot".into(),
+            invoice_slug: String::new(),
+        },
+    );
+    app.update_in(vcx, |app, window, cx| app.start_premium_payment(window, cx));
+    vcx.run_until_parked();
+    assert!(hub_state(&app, vcx).1.is_some());
+    app.update_in(vcx, |app, window, cx| {
+        crate::ui::payments_state::PaymentUi::farewell(app, window, cx)
+    });
+    assert_eq!(hub_state(&app, vcx).1, None);
+}

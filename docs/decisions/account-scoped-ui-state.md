@@ -4077,3 +4077,70 @@ and 10 are widget items another fixer owns).
   (`cancel_inline_opening_unless_chat`, an invite preview, a text or typed
   link), or when another account is on screen (10-119). No timer: a lookup
   that never answers is the deep-link flow's own concern.
+
+### Sweep fixes (s3-payments-2)
+
+Payments, gifts and Stars, second half. A failure or an answer lands only on
+the request that asked; a stage that waits has a way out.
+
+- **Errors matched to what asked.** The Stars history and the received gifts
+  list apply an error only when it is the newest request's (`tx_request`,
+  `gifts_request`; 04-036, with 05-114). Resale search, auction state and
+  craft candidates compare the failed request with `request_id`,
+  `auction_request` and `candidates_request` before touching the stage, so an
+  older failure no longer stops the newer search or clears the auction box
+  that was waiting (03-061, with 05-120). `PaymentsPurpose::GetGiftCollections`
+  carries its owner and the list applies only to the open owner (03-064).
+- **One enum per lookup.** `BankCardLookup` is `Loading { request }` /
+  `Ready` / `Failed`; the answer applies to the lookup that waits for it
+  (05-107). The wallet's `state_requested`, `rates_requested` and
+  `explorer_url_requested` are `Fetch<()>`: `begin()` before the send,
+  `cancel()` when it never left, `Failed` on an error (the next open asks
+  again), `Ready` from the answer (05-126, 07-011). The wallet transaction
+  lookup is `TxLookup` (`Idle` / `Loading { request }` / `Failed`): a late
+  answer for a card that was replaced is dropped (07-007). `BoostsListState`
+  holds one `BoostsPage` (Show more now shows progress and a double click
+  sends once, 05-233). Earn balances are a `BalanceFetch` per peer; a failure
+  stays until the profile is left, so the per-frame upkeep never re-asks
+  (09-056). The countries list is `Fetch<Vec<Country>>`: the per-frame
+  `fetch_countries` asks once, `retry_countries` is for a click, the giveaway
+  page draws the failure with Retry (10-009). The market's acquired gifts and
+  upgrade previews are `Fetch` per gift: "N items bought" shows the failure
+  with Retry (09-X062) and the preview is asked as the info box opens, never
+  from its render (09-128).
+- **Stages that kept a choice.** The gift transfer confirmation becomes
+  `TransferStage::Transferring` once `transferGift` is out: Cancel and Esc
+  wait, the answer still brings the toast and the chat, a failure returns to
+  the confirmation (10-002). `GiftMarketUi::auction_open` replaces
+  `pending_auction` and is dropped when the send box it came from closed
+  (10-005). A giveaway launch in flight survives reopening the form
+  (`GiveawayLaunch::for_next_form`, 10-004). The Direct Messages box has a
+  `DirectStage`: it stays open while Save is out, closes from the answer and
+  shows a refusal in itself (11-p6-002). The Star reaction box stays open
+  with the reason when Send is refused or cannot go out, and only closes
+  when the Stars were added (11-p7-003). Files chosen for forwarding stay in
+  the chooser until their chat is open (05-034, 13-036).
+- **Owner going away.** A join box parked for the recipients is dropped by the
+  earn Farewell and when the layer is left (09-X032). A "learn more" gift
+  value lookup is dropped when the gift box it was asked from is gone
+  (10-003). The Premium bot's queued `/start` is dropped by the payments
+  Farewell and when another link opens a chat (04-048).
+- **Failures that said nothing.** A failed collectible lookup other than a
+  username that is not a collectible one posts a status note (08-118; we
+  chose a note for the phone case too: the register asks for it and a dead
+  tap is worse). A listing purchase that cannot start posts a note, and a
+  second listing cannot replace a purchase on its way (09-127). The craft
+  "Select Gifts" list shows a failed search and Retry, not "none on sale"
+  (09-X065). The withdrawal amount is brought down to the available balance
+  and the option maximum when Withdraw is pressed (09-065). The receipt's
+  Total includes the shipping option and the tip (06-061). `ISK` is a
+  zero-decimal currency (06-062; ISO 4217 says 0, Telegram's currency table
+  could not be read here). The GPU-loss recovery waits for a new device for at
+  most 20 s on the executor clock, then gives up and quits (13-039).
+- **Already fixed on this branch.** 09-X023: `checkout_prefill_upkeep` fills
+  the checkout at the first frame after the form lands, in the window that
+  hosts the box (test `the_checkout_prefills_in_the_window_that_hosts_it`).
+  08-015: `send_boost_chat` already leaves `Working` when the send fails; the
+  list is now put back too (test). 12-014, 12-015: the fixed-time pollers are
+  gone; the downloads are a function of the hub state (`preview_downloads`,
+  tested), run at every main frame.

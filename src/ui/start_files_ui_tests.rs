@@ -103,3 +103,23 @@ fn a_chat_that_takes_files_opens_with_them_attached(cx: &mut TestAppContext) {
         assert_eq!(app.pending_attachments().len(), 1);
     });
 }
+
+#[gpui_kit::test]
+fn a_chat_that_does_not_open_keeps_the_files_in_the_chooser(cx: &mut TestAppContext) {
+    let (app, _shell, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    app.update_in(vcx, |app, window, cx| {
+        app.begin_start_files(vec![a_file()], cx);
+        // A chat the list cannot open (not in it).
+        app.choose_start_files_chat(ChatId(987_654_321), window, cx);
+        assert_eq!(app.start_files.choosing.len(), 1, "the files wait");
+        assert!(app.pending_attachments().is_empty());
+        // Picking a chat that opens afterwards still attaches them.
+    });
+    let chat = first_chat(&app, vcx);
+    app.update_in(vcx, |app, window, cx| {
+        app.choose_start_files_chat(chat, window, cx);
+        assert!(app.start_files.choosing.is_empty());
+        assert_eq!(app.pending_attachments().len(), 1);
+    });
+}

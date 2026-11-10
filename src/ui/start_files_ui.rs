@@ -131,15 +131,18 @@ impl QuillApp {
             cx.notify();
             return;
         }
-        let files = std::mem::take(&mut self.start_files.choosing);
-        self.start_files
-            .search
-            .update(cx, |input, cx| input.set_value("", window, cx));
         self.select_listed_chat(chat, window, cx);
         if self.open_chat_id() == Some(chat) {
+            // The files are taken only now that their chat is open.
+            let files = std::mem::take(&mut self.start_files.choosing);
+            self.start_files
+                .search
+                .update(cx, |input, cx| input.set_value("", window, cx));
             self.attach_dropped_files(&files, cx);
         } else {
-            self.set_note(StatusNote::silent(tr(keys::Q_MISC_OPEN_THE_CHAT_TO_ATTACH)));
+            // The chat did not open (filtered out, hidden by a folder): the
+            // chooser stays with its files, to pick again or cancel.
+            self.set_note(StatusNote::error(tr(keys::Q_MISC_OPEN_THE_CHAT_TO_ATTACH)));
         }
         cx.notify();
     }

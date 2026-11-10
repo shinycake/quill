@@ -27,6 +27,40 @@ use quill::lang::{keys, tr};
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
+/// How long attaching a new device may take. A platform that never answers
+/// the windowing request would leave the process alive with no window and
+/// nothing to quit it.
+const ATTACH_DEADLINE: std::time::Duration = std::time::Duration::from_secs(20);
+
+/// The first of two futures to finish; the first one wins a tie.
+async fn first_of<T>(
+    first: impl std::future::Future<Output = T>,
+    second: impl std::future::Future<Output = T>,
+) -> T {
+    use std::task::Poll;
+    let mut first = std::pin::pin!(first);
+    let mut second = std::pin::pin!(second);
+    std::future::poll_fn(|cx| {
+        if let Poll::Ready(value) = first.as_mut().poll(cx) {
+            return Poll::Ready(value);
+        }
+        second.as_mut().poll(cx)
+    })
+    .await
+}
+
+/// The windowing `request`, or an error once `deadline` has passed first.
+async fn attach_in_time(
+    request: impl std::future::Future<Output = gpui_kit::Result<()>>,
+    deadline: impl std::future::Future<Output = ()>,
+) -> gpui_kit::Result<()> {
+    first_of(request, async {
+        deadline.await;
+        Err(std::io::Error::other("the platform did not attach a new device in time").into())
+    })
+    .await
+}
+
 /// A window has closed.
 #[derive(Debug, Clone, Copy)]
 struct Closed {
@@ -163,7 +197,8 @@ fn watch_closed_windows(
                                 GraphicalEnvironment::detect(),
                             ))
                         });
-                        request.await
+                        let deadline = cx.background_executor().timer(ATTACH_DEADLINE);
+                        attach_in_time(request, deadline).await
                     } else {
                         Ok(())
                     };

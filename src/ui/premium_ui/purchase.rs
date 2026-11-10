@@ -76,6 +76,15 @@ impl QuillApp {
         }
     }
 
+    /// Forget the `/start` the subscribe button queued for the Premium
+    /// bot: the account left the screen (its session stays in the
+    /// background) before the bot's chat opened.
+    pub(in crate::ui) fn drop_premium_auto_start(&mut self) {
+        if let Some(hub) = self.hub_mut() {
+            hub.auto_start = None;
+        }
+    }
+
     /// The Premium bot's chat just opened from the subscribe button: send
     /// `/start <ref>` without asking (tdesktop `startAutoSubmit`). Returns
     /// whether it did, so the caller skips its own prefill.
@@ -99,6 +108,9 @@ impl QuillApp {
             .as_ref()
             .is_some_and(|(name, _)| name.eq_ignore_ascii_case(domain));
         if !matches_bot {
+            // Another link opened a chat: the Premium link's flow is over,
+            // and its `/start` must not wait for a later visit to the bot.
+            session.payments.hub.auto_start = None;
             return false;
         }
         let bot_id = match session.chats.get(&chat_id.0).map(|chat| &chat.kind) {
