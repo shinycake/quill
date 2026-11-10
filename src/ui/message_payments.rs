@@ -117,9 +117,16 @@ fn markup_keyboard(
             let number = fast_buttons
                 .then(|| quill::fast_buttons::badge_number(&row_lens, row_index, button_index))
                 .flatten();
-            line = line.child(match number {
-                Some(number) => fast_button_cell(message.id.0 as u64, number, element, cx),
-                None => element.flex_1().min_w_0().into_any_element(),
+            let corner = corner_icon(&button.kind);
+            line = line.child(match (number, corner) {
+                (None, None) => element.flex_auto().min_w_0().into_any_element(),
+                _ => button_cell(
+                    (message_id, row_index, button_index),
+                    element,
+                    number,
+                    corner.map(|icon| (icon, corner_icon_color(button.style, cx))),
+                    cx,
+                ),
             });
         }
         grid = grid.child(line);
@@ -127,32 +134,78 @@ fn markup_keyboard(
     any.then(|| grid.into_any_element())
 }
 
-/// A button with its fast-button digit in the top-left corner, like
-/// tdesktop's numbered reply keyboard.
-fn fast_button_cell(
-    message_id: u64,
-    number: u8,
+/// The type icon a button draws in its top-right corner (tdesktop
+/// `HistoryMessageMarkupButton::IconOfType`): links and logins, switch
+/// to inline mode, buy, web app and copy.
+fn corner_icon(kind: &InlineKeyboardButtonType) -> Option<gpui_kit::assets::IconName> {
+    use gpui_kit::assets::IconName;
+    match kind {
+        InlineKeyboardButtonType::Url { .. } | InlineKeyboardButtonType::LoginUrl { .. } => {
+            Some(IconName::ArrowUpRight)
+        }
+        InlineKeyboardButtonType::SwitchInline { .. } => Some(IconName::Forward),
+        InlineKeyboardButtonType::Buy => Some(IconName::CreditCard),
+        InlineKeyboardButtonType::WebApp { .. } => Some(IconName::AppWindow),
+        InlineKeyboardButtonType::CopyText { .. } => Some(IconName::Copy),
+        _ => None,
+    }
+}
+
+/// The corner icon's color: the label's own, a step back on the plain
+/// button (tdesktop `msgBotKbIconFg`).
+fn corner_icon_color(style: InlineKeyboardButtonStyle, cx: &App) -> Hsla {
+    let theme = cx.theme();
+    match style {
+        InlineKeyboardButtonStyle::Default | InlineKeyboardButtonStyle::Link => {
+            theme.muted_foreground
+        }
+        InlineKeyboardButtonStyle::Primary => theme.primary_foreground,
+        InlineKeyboardButtonStyle::Danger => theme.danger_foreground,
+        InlineKeyboardButtonStyle::Success => theme.success_foreground,
+    }
+}
+
+/// A button with its corner marks: the fast-button digit top-left, like
+/// tdesktop's numbered reply keyboard, and the type icon top-right. The
+/// marks draw over the button and never take its clicks.
+fn button_cell(
+    (message_id, row, column): (u64, usize, usize),
     button: Button,
-    cx: &mut Context<QuillApp>,
+    number: Option<u8>,
+    corner: Option<(gpui_kit::assets::IconName, Hsla)>,
+    cx: &App,
 ) -> AnyElement {
+    let has_corner = corner.is_some();
     div()
-        .id(("fast-button-cell", message_id * 10 + u64::from(number)))
+        .id(format!("inline-button-cell-{message_id}-{row}-{column}"))
         .relative()
-        .flex_1()
+        .flex_auto()
         .min_w_0()
         .flex()
-        .child(button.w_full().min_w_0())
-        .child(
+        // The label keeps clear of the corner icon when it is cut short.
+        .child(button.flex_auto().min_w_0().when(has_corner, |b| b.px_5()))
+        .children(number.map(|number| {
             div()
                 .absolute()
                 .top_0()
                 .left_2()
                 .text_xs()
                 .text_color(cx.theme().muted_foreground)
-                .child(number.to_string()),
-        )
+                .child(number.to_string())
+        }))
+        .children(corner.map(|(icon, color)| {
+            div()
+                .absolute()
+                .top(px(CORNER_ICON_PADDING))
+                .right(px(CORNER_ICON_PADDING))
+                .child(Icon::new(icon).size(px(CORNER_ICON_SIZE)).text_color(color))
+        }))
         .into_any_element()
 }
+
+/// tdesktop `msgBotKbIconPadding` and the 10px `inline_button_*` icons.
+const CORNER_ICON_PADDING: f32 = 4.;
+const CORNER_ICON_SIZE: f32 = 10.;
 
 /// Phase 3.2 (extended in B1): one inline keyboard button. `Url` opens in
 /// the OS browser (same gate as URLs in message text); `LoginUrl` resolves
