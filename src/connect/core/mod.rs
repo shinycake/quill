@@ -558,12 +558,17 @@ impl<S: JsonSender> ConnectDriver<S> {
         let edit_after_upgrade = self.capture_edit_after_upgrade(&owned);
         let new_chat_created = self.capture_new_chat(&owned);
         let paid_prices_change = Self::changes_paid_prices(&owned.envelope.payload);
+        let premium_change = Self::changes_viewer_premium(&owned.envelope.payload);
         let send_outcome = Self::send_outcome(&owned.envelope.payload);
         self.session.apply(owned);
         self.run_deferred_caption(send_outcome);
         if paid_prices_change {
             self.sync_paid_guard();
             self.resume_waiting_statistics();
+        }
+        if premium_change {
+            // The open chat's gate was given under the old Premium.
+            let _ = self.maybe_fetch_paid_messages_info();
         }
         if let Some((followups, ok)) = admin_followup {
             self.run_admin_followups(followups, ok);

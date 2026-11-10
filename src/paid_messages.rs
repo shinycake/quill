@@ -417,6 +417,27 @@ impl DirectMessagesChoice {
     }
 }
 
+/// One user's `canSendMessageToUser`: not asked (no entry), in flight, in,
+/// or failed. The time is the caller's clock in unix milliseconds.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum GateFetch {
+    /// In flight since `at`; the answer before it keeps gating meanwhile.
+    Asking {
+        at: u64,
+        before: Option<(CanSend, u64)>,
+    },
+    /// The latest answer. It was given while the viewer was (not) Premium:
+    /// after that changes, it is old.
+    Known {
+        answer: CanSend,
+        at: u64,
+        viewer_premium: bool,
+    },
+    /// The ask failed at `at`: the chat is ungated and the next open asks
+    /// again.
+    Failed { at: u64 },
+}
+
 /// Paid-message state of one account.
 #[derive(Debug, Clone, Default)]
 pub struct PaidMessages {
@@ -429,11 +450,8 @@ pub struct PaidMessages {
     /// `can_set_new_chat_privacy_settings`: the account may restrict new
     /// chats (Premium, or free by the server's rule).
     pub can_set_privacy: Option<bool>,
-    /// Latest `canSendMessageToUser` answer per user, with the time it
-    /// arrived.
-    gates: HashMap<i64, (CanSend, u64)>,
-    /// Users a `canSendMessageToUser` is in flight for.
-    asking: HashMap<i64, u64>,
+    /// Where each user's `canSendMessageToUser` stands.
+    gates: HashMap<i64, GateFetch>,
     pub trust: PaidTrust,
     /// Stars a user paid so far (`getPaidMessageRevenue`).
     pub revenue: HashMap<i64, i64>,
@@ -531,16 +549,42 @@ impl PaidMessages {
         self.can_enable.unwrap_or(false)
     }
 
-    pub fn gate_answer(&self, user_id: i64) -> Option<CanSend> {
-        self.gates.get(&user_id).map(|(answer, _)| *answer)
+    /// The answer that gates `user_id`'s chat for a viewer who is (not)
+    /// Premium: the answer given under the same Premium, or the one before
+    /// the ask in flight.
+    pub fn gate_answer(&self, user_id: i64, viewer_premium: bool) -> Option<CanSend> {
+        match self.gates.get(&user_id)? {
+            GateFetch::Known {
+                answer,
+                viewer_premium: given,
+                ..
+            } if *given == viewer_premium => Some(*answer),
+            GateFetch::Asking {
+                before: Some((answer, _)),
+                ..
+            } => Some(*answer),
+            _ => None,
+        }
     }
 
-    /// Stores an answer and ends the wait for it. A user who no longer
-    /// charges loses the trusted price (tdesktop `checkTrustedPayForMessage`;
-    /// a private chat has the user's id).
-    pub fn record_answer(&mut self, user_id: i64, answer: CanSend, now_ms: u64) {
-        self.gates.insert(user_id, (answer, now_ms));
-        self.asking.remove(&user_id);
+    /// Stores the answer of the ask in flight. A user who no longer charges
+    /// loses the trusted price (tdesktop `checkTrustedPayForMessage`; a
+    /// private chat has the user's id).
+    pub fn record_answer(
+        &mut self,
+        user_id: i64,
+        answer: CanSend,
+        now_ms: u64,
+        viewer_premium: bool,
+    ) {
+        self.gates.insert(
+            user_id,
+            GateFetch::Known {
+                answer,
+                at: now_ms,
+                viewer_premium,
+            },
+        );
         if !matches!(answer, CanSend::HasPaidMessages { stars } if stars > 0)
             && self.trust.forget(user_id)
         {
@@ -550,44 +594,47 @@ impl PaidMessages {
 
     /// Users that charge, with the price.
     pub fn charging_users(&self) -> impl Iterator<Item = (i64, i64)> + '_ {
-        self.gates
-            .iter()
-            .filter_map(|(user, (answer, _))| match answer {
-                CanSend::HasPaidMessages { stars } if *stars > 0 => Some((*user, *stars)),
-                _ => None,
-            })
+        self.gates.iter().filter_map(|(user, gate)| match gate {
+            GateFetch::Known {
+                answer: CanSend::HasPaidMessages { stars },
+                ..
+            } if *stars > 0 => Some((*user, *stars)),
+            _ => None,
+        })
     }
 
     /// Whether the chat with `user_id` should ask `canSendMessageToUser`
-    /// now: nothing known yet, or the answer is old, and no ask in flight.
-    pub fn should_ask(&self, user_id: i64, now_ms: u64) -> bool {
-        // An ask that never came back (an error clears nothing) is
-        // retried after the wait below.
-        if self
-            .asking
-            .get(&user_id)
-            .is_some_and(|at| now_ms.saturating_sub(*at) < ASK_TIMEOUT_MS)
-        {
-            return false;
-        }
+    /// now: nothing known yet, a failed ask, an answer that is old or was
+    /// given under another Premium, and no ask in flight.
+    pub fn should_ask(&self, user_id: i64, now_ms: u64, viewer_premium: bool) -> bool {
         match self.gates.get(&user_id) {
-            None => true,
-            Some((_, at)) => now_ms.saturating_sub(*at) >= GATE_REFRESH_MS,
+            None | Some(GateFetch::Failed { .. }) => true,
+            // An ask that never came back is asked again after the wait.
+            Some(GateFetch::Asking { at, .. }) => now_ms.saturating_sub(*at) >= ASK_TIMEOUT_MS,
+            Some(GateFetch::Known {
+                at,
+                viewer_premium: given,
+                ..
+            }) => *given != viewer_premium || now_ms.saturating_sub(*at) >= GATE_REFRESH_MS,
         }
     }
 
     pub fn mark_asking(&mut self, user_id: i64, now_ms: u64) {
-        self.asking.insert(user_id, now_ms);
+        let before = match self.gates.get(&user_id) {
+            Some(GateFetch::Known { answer, at, .. }) => Some((*answer, *at)),
+            Some(GateFetch::Asking { before, .. }) => *before,
+            _ => None,
+        };
+        self.gates
+            .insert(user_id, GateFetch::Asking { at: now_ms, before });
     }
 
-    /// The ask failed: forget it so a later open tries again.
-    pub fn ask_failed(&mut self, user_id: i64) {
-        self.asking.remove(&user_id);
-    }
-
-    /// After the viewer's Premium changes, old answers are wrong.
-    pub fn forget_answers(&mut self) {
-        self.gates.clear();
+    /// The ask failed (the send, or the error answer): the chat stays as it
+    /// was, and the next open asks again.
+    pub fn ask_failed(&mut self, user_id: i64, now_ms: u64) {
+        if matches!(self.gates.get(&user_id), Some(GateFetch::Asking { .. })) {
+            self.gates.insert(user_id, GateFetch::Failed { at: now_ms });
+        }
     }
 }
 
@@ -610,7 +657,10 @@ impl crate::state::Session {
             is_self: Some(user_id) == self.my_user_id,
             is_bot: self.is_bot_user(user_id),
             viewer_premium: self.my_is_premium(),
-            answer: self.payments.paid_messages.gate_answer(user_id),
+            answer: self
+                .payments
+                .paid_messages
+                .gate_answer(user_id, self.my_is_premium()),
         })
     }
 
@@ -627,7 +677,11 @@ impl crate::state::Session {
     pub fn paid_send_price(&self, chat_id: crate::ids::ChatId) -> i64 {
         match self.private_chat_user_id(chat_id) {
             Some(user) if self.is_bot_user(user) || Some(user) == self.my_user_id => 0,
-            Some(user) => match self.payments.paid_messages.gate_answer(user) {
+            Some(user) => match self
+                .payments
+                .paid_messages
+                .gate_answer(user, self.my_is_premium())
+            {
                 Some(CanSend::HasPaidMessages { stars }) if stars > 0 => stars,
                 _ => 0,
             },
@@ -786,10 +840,10 @@ mod tests {
     fn a_user_who_stops_charging_loses_the_trusted_price() {
         let mut state = PaidMessages::default();
         state.trust.trust(5, 10);
-        state.record_answer(5, CanSend::HasPaidMessages { stars: 10 }, 1);
+        state.record_answer(5, CanSend::HasPaidMessages { stars: 10 }, 1, false);
         assert!(state.trust.is_trusted(5, 10));
         assert!(!state.trust_dirty);
-        state.record_answer(5, CanSend::Ok, 2);
+        state.record_answer(5, CanSend::Ok, 2, false);
         assert!(!state.trust.is_trusted(5, 10));
         assert!(state.trust_dirty);
     }
@@ -904,18 +958,59 @@ mod tests {
     #[test]
     fn answers_refresh_after_five_minutes() {
         let mut state = PaidMessages::default();
-        assert!(state.should_ask(5, 0));
+        assert!(state.should_ask(5, 0, false));
         state.mark_asking(5, 0);
-        assert!(!state.should_ask(5, 1), "one ask at a time");
-        state.record_answer(5, CanSend::RestrictsNewChats, 1_000);
-        assert_eq!(state.gate_answer(5), Some(CanSend::RestrictsNewChats));
-        assert!(!state.should_ask(5, 2_000));
-        assert!(state.should_ask(5, 1_000 + GATE_REFRESH_MS));
+        assert!(!state.should_ask(5, 1, false), "one ask at a time");
+        state.record_answer(5, CanSend::RestrictsNewChats, 1_000, false);
+        assert_eq!(
+            state.gate_answer(5, false),
+            Some(CanSend::RestrictsNewChats)
+        );
+        assert!(!state.should_ask(5, 2_000, false));
+        assert!(state.should_ask(5, 1_000 + GATE_REFRESH_MS, false));
+    }
+
+    #[test]
+    fn an_ask_that_never_came_back_is_asked_again_after_the_wait() {
+        let mut state = PaidMessages::default();
+        state.mark_asking(5, 1_000);
+        assert!(!state.should_ask(5, 1_000 + ASK_TIMEOUT_MS - 1, false));
+        assert!(state.should_ask(5, 1_000 + ASK_TIMEOUT_MS, false));
+    }
+
+    #[test]
+    fn a_failed_ask_leaves_the_chat_as_it_was_and_the_next_open_asks_again() {
+        let mut state = PaidMessages::default();
         state.mark_asking(6, 0);
-        state.ask_failed(6);
-        assert!(state.should_ask(6, 1));
-        state.forget_answers();
-        assert_eq!(state.gate_answer(5), None);
+        state.ask_failed(6, 5);
+        assert_eq!(state.gate_answer(6, false), None);
+        assert!(
+            state.should_ask(6, 6, false),
+            "no wait of the old ask timeout after an error"
+        );
+        // A failed refresh keeps no stale answer to gate on either: the
+        // answer before it is dropped with the failure.
+        state.record_answer(7, CanSend::HasPaidMessages { stars: 5 }, 0, false);
+        state.mark_asking(7, 10);
+        assert_eq!(
+            state.gate_answer(7, false),
+            Some(CanSend::HasPaidMessages { stars: 5 }),
+            "the answer before the ask keeps gating while it is out"
+        );
+        state.ask_failed(7, 11);
+        assert!(state.should_ask(7, 12, false));
+    }
+
+    #[test]
+    fn an_answer_given_under_another_premium_is_old() {
+        let mut state = PaidMessages::default();
+        state.record_answer(5, CanSend::RestrictsNewChats, 1_000, false);
+        assert_eq!(state.gate_answer(5, true), None);
+        assert!(
+            state.should_ask(5, 1_001, true),
+            "the viewer bought Premium"
+        );
+        assert!(!state.should_ask(5, 1_001, false));
     }
 
     #[test]

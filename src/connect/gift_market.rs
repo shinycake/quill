@@ -372,10 +372,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         let gift_id = primary.gift.regular_gift_id;
         let title = primary.gift.title.clone();
         let market = &mut self.session.payments.gift_market;
-        // A craft or a purchase in flight keeps its box until it answers.
-        if market.craft.as_ref().is_some_and(|craft| craft.crafting)
-            || market.buy.as_ref().is_some_and(|buy| buy.sending)
-        {
+        // A purchase in flight keeps its box until it answers. A craft's
+        // answer belongs to the box that sent it (`craft_request`), so a new
+        // craft box does not take it.
+        if market.buy.as_ref().is_some_and(|buy| buy.sending) {
             return Err(ConnectSendError::InvalidRequest);
         }
         market.remember_title(gift_id, &title);

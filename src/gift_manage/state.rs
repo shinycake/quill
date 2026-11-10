@@ -167,5 +167,9 @@ impl GiftManageState {
         self.flow = None;
         self.deleting = None;
         self.note = None;
+        // A result nobody took belongs to the list that was closed.
+        self.deleted = false;
+        self.transferred = None;
+        self.export_url = None;
     }
 }

@@ -285,7 +285,7 @@ impl QuillApp {
                     );
                 }
             }
-            if session.payments.star_subscriptions_loading
+            if session.payments.star_subscriptions_loading()
                 && session.payments.star_subscriptions.is_none()
             {
                 body = body.child(
@@ -299,7 +299,7 @@ impl QuillApp {
                 body = body.child(div().text_sm().child(err.clone()));
             }
             if let Some(subs) = session.payments.star_subscriptions.as_ref() {
-                if subs.subscriptions.is_empty() && !session.payments.star_subscriptions_loading {
+                if subs.subscriptions.is_empty() && !session.payments.star_subscriptions_loading() {
                     body = body.child(
                         div()
                             .text_sm()
@@ -323,7 +323,7 @@ impl QuillApp {
                         cx,
                     ));
                 }
-                if !subs.next_offset.is_empty() && session.payments.star_subscriptions_loading {
+                if !subs.next_offset.is_empty() && session.payments.star_subscriptions_loading() {
                     body = body.child(loading_row("subs-loading", cx));
                 }
             }
@@ -392,7 +392,7 @@ impl QuillApp {
             || !load_due(
                 scrolled_near_end(&self.payments.subs_scroll),
                 !payments.star_subscriptions_offset.is_empty(),
-                payments.star_subscriptions_loading,
+                payments.star_subscriptions_loading(),
             )
             || !self.payments.subs_asked.allow(
                 payments

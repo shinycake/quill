@@ -134,7 +134,9 @@ pub struct PaymentsState {
     pub star_subscriptions: Option<StarSubscriptionsData>,
     /// Slice `parity:bots-payment-recurring`: `getStarSubscriptions` is in
     /// flight (dialog shows a spinner).
-    pub star_subscriptions_loading: bool,
+    /// The `getStarSubscriptions` page in flight: only its answer or error
+    /// lands (a stale refetch and an appended page never mix).
+    pub star_subscriptions_request: Option<RequestId>,
     /// Slice `parity:bots-payment-recurring`: latest subscriptions error,
     /// shown in the dialog (never a secret — ids are opaque TDLib strings).
     pub star_subscriptions_error: Option<String>,
@@ -197,6 +199,11 @@ pub struct PaymentInFlight {
 }
 
 impl PaymentsState {
+    /// A subscriptions page is in flight.
+    pub fn star_subscriptions_loading(&self) -> bool {
+        self.star_subscriptions_request.is_some()
+    }
+
     /// The checkout on screen is being paid: its invoice has a
     /// `sendPaymentForm` in flight.
     pub fn checkout_sending(&self) -> bool {
@@ -268,7 +275,7 @@ impl PaymentsState {
             poll_countries_max: None,
             poll_open_period_max: None,
             star_subscriptions: None,
-            star_subscriptions_loading: false,
+            star_subscriptions_request: None,
             star_subscriptions_error: None,
             star_subscriptions_offset: String::new(),
             star_subscriptions_stale: false,

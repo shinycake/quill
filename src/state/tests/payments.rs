@@ -193,7 +193,7 @@ fn star_subscriptions_apply_only_to_own_request() {
         RequestPurpose::Payments(PaymentsPurpose::GetStarSubscriptions { append: false }),
         None,
     );
-    session.payments.star_subscriptions_loading = true;
+    session.payments.star_subscriptions_request = Some(extra);
     apply_json(&mut session, &seq, &sink, &subs_json(&extra.0.to_string()));
     let subs = session
         .payments
@@ -203,7 +203,7 @@ fn star_subscriptions_apply_only_to_own_request() {
     assert_eq!(subs.subscriptions.len(), 1);
     assert_eq!(subs.subscriptions[0].id, "sub1");
     assert_eq!(subs.star_amount, 500);
-    assert!(!session.payments.star_subscriptions_loading);
+    assert!(!session.payments.star_subscriptions_loading());
 }
 
 #[test]
@@ -222,6 +222,7 @@ fn star_subscriptions_append_page_merges() {
         RequestPurpose::Payments(PaymentsPurpose::GetStarSubscriptions { append: false }),
         None,
     );
+    session.payments.star_subscriptions_request = Some(extra);
     apply_json(
         &mut session,
         &seq,
@@ -233,6 +234,7 @@ fn star_subscriptions_append_page_merges() {
         RequestPurpose::Payments(PaymentsPurpose::GetStarSubscriptions { append: true }),
         None,
     );
+    session.payments.star_subscriptions_request = Some(extra);
     apply_json(
         &mut session,
         &seq,
@@ -280,7 +282,7 @@ fn star_subscriptions_error_surfaces() {
         RequestPurpose::Payments(PaymentsPurpose::GetStarSubscriptions { append: false }),
         None,
     );
-    session.payments.star_subscriptions_loading = true;
+    session.payments.star_subscriptions_request = Some(extra);
     apply_json(
         &mut session,
         &seq,
@@ -290,7 +292,7 @@ fn star_subscriptions_error_surfaces() {
             extra.0
         ),
     );
-    assert!(!session.payments.star_subscriptions_loading);
+    assert!(!session.payments.star_subscriptions_loading());
     // `error_reason` never echoes the native TDLib message (it can
     // contain secrets) — the classified reason surfaces instead.
     let err = session

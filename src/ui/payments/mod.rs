@@ -71,6 +71,7 @@ impl QuillApp {
     /// Slice P1: close the receipt dialog.
     pub(super) fn close_payment_receipt(&mut self, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
+            // box-host: closing the receipt, nothing to host
             live.driver.session.payments.receipt = quill::state::ReceiptStage::Closed;
         }
         cx.notify();

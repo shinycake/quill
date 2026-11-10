@@ -180,10 +180,14 @@ impl Session {
                     && let RequestPurpose::Payments(PaymentsPurpose::GetStarSubscriptions {
                         append,
                     }) = p.purpose
+                    && self.payments.star_subscriptions_request == Some(p.id)
                 {
-                    self.payments.star_subscriptions_loading = false;
+                    self.payments.star_subscriptions_request = None;
                     self.payments.star_subscriptions_error = None;
-                    self.payments.star_subscriptions_stale = false;
+                    // Only a first page answers a refetch.
+                    if !append {
+                        self.payments.star_subscriptions_stale = false;
+                    }
                     self.payments.star_subscriptions_offset = subs.next_offset.clone();
                     if append && let Some(existing) = self.payments.star_subscriptions.as_mut() {
                         existing.star_amount = subs.star_amount;
@@ -278,10 +282,7 @@ impl Session {
             }
             PaymentsPayload::StarPackOptions(options) => {
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::GetStarGiftOptions) {
-                    let gift = &mut self.payments.stars_gift;
-                    gift.loading = false;
-                    gift.error = None;
-                    gift.options = options;
+                    self.payments.stars_gift.answer(extra, options);
                 } else if pending.map(|p| p.purpose) == Some(RequestPurpose::GetStarPackOptions) {
                     let packs = &mut self.payments.star_packs;
                     packs.loading = false;

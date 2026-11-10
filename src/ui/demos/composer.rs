@@ -377,6 +377,7 @@ fn apply_composer_bars(
         51,
         quill::paid_messages::CanSend::HasPaidMessages { stars: 25 },
         1,
+        false,
     );
 }
 

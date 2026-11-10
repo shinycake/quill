@@ -177,7 +177,10 @@ impl QuillApp {
             && next.total() <= budget
         {
             budget -= next.total();
-            let _ = live.driver.release_paid_send(false);
+            // A refused send stays held: stop, or this would not end.
+            if live.driver.release_paid_send(false).is_err() {
+                break;
+            }
         }
         cx.notify();
     }

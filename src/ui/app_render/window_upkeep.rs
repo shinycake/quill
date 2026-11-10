@@ -183,10 +183,13 @@ impl QuillApp {
         {
             self.gift_market_frame_upkeep(window, cx);
         }
-        // Gift transfer: Fragment's export page, the transferred toast.
+        // Gift transfer: Fragment's export page, the transferred and
+        // deleted toasts, in the window of the transfer box or else of the
+        // gifts box they started from (a delete opens no transfer box).
         if self
             .windows
-            .dialog_may_show_in(DialogKind::GiftTransfer, here)
+            .window_of_box_or(DialogKind::GiftTransfer, DialogKind::ReceivedGifts)
+            == here
         {
             self.gift_transfer_frame_upkeep(window, cx);
         }

@@ -45,7 +45,7 @@ MaskSets | close_mask_sets | `stickers.masks.open`
 Money | close_money | `ton_wallet.money.open`
 PaidSendConfirm | cancel_paid_confirm | `paid_messages.confirm` (screen) or the driver's held paid send
 PaymentForm | close_payment_dialog | `payments.dialog` (screen) over the session's form
-PaymentReceipt | close_payment_receipt | `payments.receipt_open`
+PaymentReceipt | close_payment_receipt | `payments.receipt` (`ReceiptStage::Open`)
 PremiumFeatures | close_premium | `payments.hub.premium_open`
 PremiumLimit | dismiss_premium_limit | `payments.hub.limit_box`
 ProxyList | - | the open flag is `proxy.list_box` (screen, dropped with it); the predicate reads the session only to draw it while the sign-in pane shows

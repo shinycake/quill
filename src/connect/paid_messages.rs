@@ -7,6 +7,7 @@ use crate::ids::{ChatId, RequestId};
 use crate::paid_messages::{PaidSave, PaidTarget, PaidTrust};
 use crate::paid_messages_guard::HeldSend;
 use crate::state::{RequestPurpose, unix_ms_now};
+use crate::telegram::envelope::CommonPayload;
 use crate::telegram::envelope::{EnvelopePayload, GroupsPayload, SettingsPayload};
 use crate::telegram::requests::{get_chat, get_supergroup};
 use crate::telegram::requests_paid_messages::{
@@ -27,6 +28,16 @@ impl<S: JsonSender> ConnectDriver<S> {
                     GroupsPayload::SupergroupFullInfo { .. }
                         | GroupsPayload::UpdateSupergroupFullInfo { .. }
                 )
+        ) || Self::changes_viewer_premium(payload)
+    }
+
+    /// The viewer's Premium may have changed (`updateOption is_premium`):
+    /// the answers cached under the old one are old.
+    pub(crate) fn changes_viewer_premium(payload: &EnvelopePayload) -> bool {
+        matches!(
+            payload,
+            EnvelopePayload::Common(CommonPayload::UpdateOption { name, .. })
+                if name == "is_premium"
         )
     }
 
@@ -83,13 +94,19 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// The user confirmed: sends the oldest held request with its total,
     /// remembering the price when asked to.
     pub fn release_paid_send(&mut self, remember: bool) -> Result<(), ConnectSendError> {
-        let Some(held) = self.sender.paid_guard().and_then(|guard| guard.take_held()) else {
+        let Some(held) = self.sender.paid_guard().and_then(|guard| guard.held()) else {
             return Ok(());
         };
         if remember {
             self.remember_paid_trust(ChatId(held.chat_id), held.per_message);
         }
-        self.sender.send_json(&held.with_price())
+        // The send leaves the guard only once it went out: a refused send
+        // keeps it held, so the box can pay again.
+        self.sender.send_json(&held.with_price())?;
+        if let Some(guard) = self.sender.paid_guard() {
+            guard.take_held();
+        }
+        Ok(())
     }
 
     /// The user cancelled: drops the oldest held request and its pending
@@ -124,7 +141,14 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         let is_contact = self.session.user(user_id).is_some_and(|u| u.is_contact);
         let now = unix_ms_now();
-        if is_contact || !self.session.payments.paid_messages.should_ask(user_id, now) {
+        let premium = self.session.my_is_premium();
+        if is_contact
+            || !self
+                .session
+                .payments
+                .paid_messages
+                .should_ask(user_id, now, premium)
+        {
             return Ok(());
         }
         let extra = self
@@ -139,7 +163,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .send_json(&can_send_message_to_user(extra, user_id))
         {
             self.session.requests.take(extra);
-            self.session.payments.paid_messages.ask_failed(user_id);
+            self.session.payments.paid_messages.ask_failed(user_id, now);
             return Err(err);
         }
         Ok(())

@@ -174,7 +174,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         if (self.session.payments.star_subscriptions.is_some()
             && !self.session.payments.star_subscriptions_stale)
-            || self.session.payments.star_subscriptions_loading
+            || self.session.payments.star_subscriptions_loading()
         {
             return Ok(None);
         }
@@ -189,7 +189,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(ConnectSendError::InvalidRequest);
         }
         if self.session.payments.star_subscriptions_offset.is_empty()
-            || self.session.payments.star_subscriptions_loading
+            || self.session.payments.star_subscriptions_loading()
         {
             return Ok(None);
         }
@@ -209,11 +209,16 @@ impl<S: JsonSender> ConnectDriver<S> {
             RequestPurpose::Payments(PaymentsPurpose::GetStarSubscriptions { append }),
             None,
         );
-        self.session.payments.star_subscriptions_loading = true;
-        self.session.payments.star_subscriptions_error = None;
         let json = get_star_subscriptions(extra, false, &offset);
+        let payments = &mut self.session.payments;
+        payments.star_subscriptions_request = Some(extra);
+        payments.star_subscriptions_error = None;
         if let Err(err) = self.send_json_request(extra, &json) {
-            self.session.payments.star_subscriptions_loading = false;
+            let payments = &mut self.session.payments;
+            payments.star_subscriptions_request = None;
+            // A page that never left shows its error; it is not asked again
+            // by itself.
+            payments.star_subscriptions_error = Some("Couldn't load the subscriptions".into());
             return Err(err);
         }
         Ok(extra)
@@ -226,11 +231,17 @@ impl<S: JsonSender> ConnectDriver<S> {
     pub fn refresh_star_subscriptions_if_stale(
         &mut self,
     ) -> Result<Option<RequestId>, ConnectSendError> {
-        if !self.session.payments.star_subscriptions_stale {
+        let payments = &self.session.payments;
+        // A page in flight settles first: the list stays stale until a first
+        // page answers (or fails), so a refetch never races an appended one.
+        if !payments.star_subscriptions_stale || payments.star_subscriptions_loading() {
             return Ok(None);
         }
-        self.session.payments.star_subscriptions_stale = false;
-        self.fetch_star_subscriptions_page(false).map(Some)
+        let sent = self.fetch_star_subscriptions_page(false);
+        if sent.is_err() {
+            self.session.payments.star_subscriptions_stale = false;
+        }
+        sent.map(Some)
     }
 
     /// Slice `parity:bots-payment-recurring`: `editStarSubscription`

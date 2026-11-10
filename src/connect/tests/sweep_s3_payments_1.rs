@@ -15,6 +15,7 @@ use std::sync::{Arc, Mutex};
 /// Records what it sends and refuses the TDLib types it is told to refuse.
 #[derive(Default)]
 pub(crate) struct FlakySender {
+    guard: crate::paid_messages_guard::PaidGuard,
     sent: Mutex<Vec<String>>,
     refuse: Mutex<HashSet<&'static str>>,
 }
@@ -46,7 +47,16 @@ impl FlakySender {
 }
 
 impl JsonSender for Arc<FlakySender> {
+    fn paid_guard(&self) -> Option<&crate::paid_messages_guard::PaidGuard> {
+        Some(&self.guard)
+    }
+
     fn send_json(&self, request: &str) -> Result<(), ConnectSendError> {
+        // A send into a paid chat waits for the user's confirmation.
+        let Some(request) = self.guard.screen(request) else {
+            return Ok(());
+        };
+        let request = request.as_str();
         let refused = self.refuse.lock().is_ok_and(|set| {
             set.iter()
                 .any(|name| request.contains(&format!(r#""@type":"{name}""#)))
@@ -607,4 +617,153 @@ fn reopening_the_gifts_box_keeps_the_lock_of_a_mutation_in_flight() {
     t.driver.session.payments.hub.gift_mutating = true;
     t.driver.open_received_gifts(owner).unwrap();
     assert!(t.driver.session.payments.hub.gift_mutating);
+}
+
+#[test]
+fn star_packs_of_an_earlier_contact_do_not_fill_the_new_one() {
+    let mut t = Flaky::new();
+    t.driver.open_stars_gift().unwrap();
+    t.driver.choose_stars_gift_user(41, "Ann").unwrap();
+    let first = t.sender.last("getStarGiftPaymentOptions").unwrap();
+    t.driver.session.payments.stars_gift.clear_target();
+    t.driver.choose_stars_gift_user(42, "Bob").unwrap();
+    let pack = json!({"@type": "starPaymentOption", "currency": "USD", "amount": 199,
+        "star_count": 100, "store_product_id": "", "is_additional": false});
+    let mut late = json!({"@type": "starPaymentOptions", "options": [pack]});
+    late["@extra"] = first["@extra"].clone();
+    t.feed(late);
+    let gift = &t.driver.session.payments.stars_gift;
+    assert!(gift.is_loading() && gift.options().is_empty());
+    assert_eq!(gift.target().map(|c| c.user_id), Some(42));
+    // After Back or close, the answer of the request that was out lands
+    // nowhere.
+    t.driver.close_stars_gift();
+    t.answer(
+        "getStarGiftPaymentOptions",
+        json!({"@type": "starPaymentOptions", "options": [pack]}),
+    );
+    assert!(t.driver.session.payments.stars_gift.target().is_none());
+    assert!(t.driver.session.payments.stars_gift.options().is_empty());
+}
+
+#[test]
+fn a_refused_stars_gift_request_shows_the_error_for_the_contact() {
+    let mut t = Flaky::new();
+    t.driver.open_stars_gift().unwrap();
+    t.sender.refuse(&["getStarGiftPaymentOptions"]);
+    assert!(t.driver.choose_stars_gift_user(42, "Bob").is_err());
+    let gift = &t.driver.session.payments.stars_gift;
+    assert!(gift.error().is_some() && !gift.is_loading());
+}
+
+#[test]
+fn a_refused_paid_send_stays_held_for_the_box_to_pay_again() {
+    use std::collections::HashMap;
+    let mut t = Flaky::new();
+    t.sender
+        .guard
+        .set_state(HashMap::from([(600, 25)]), HashMap::new());
+    let sticker = r#"{"@type":"sendMessage","@extra":"3","chat_id":600,"options":{"@type":"messageSendOptions","paid_message_star_count":0},"input_message_content":{"@type":"inputMessageSticker"}}"#;
+    t.driver.sender.send_json(sticker).unwrap();
+    assert!(t.driver.held_paid_send().is_some());
+    t.sender.refuse(&["sendMessage"]);
+    assert!(t.driver.release_paid_send(false).is_err());
+    assert!(
+        t.driver.held_paid_send().is_some(),
+        "the message is not lost"
+    );
+    t.sender.refuse(&[]);
+    t.driver.release_paid_send(false).unwrap();
+    assert!(t.driver.held_paid_send().is_none());
+    assert_eq!(t.sender.count("sendMessage"), 1);
+}
+
+mod paid_gate {
+    use super::super::paid_messages::{cleanup, extra_of, fixture, ingest, open_private, requests};
+
+    #[test]
+    fn a_failed_gate_ask_is_asked_again_at_the_next_open_not_after_the_wait() {
+        let mut f = fixture();
+        open_private(&mut f, 500, 501, false, false);
+        f.1.maybe_fetch_paid_messages_info().unwrap();
+        let ask = requests(&f, "canSendMessageToUser").remove(0);
+        ingest(
+            &mut f,
+            &format!(
+                r#"{{"@type":"error","code":429,"message":"Too Many Requests: retry after 3","@extra":"{}"}}"#,
+                extra_of(&ask)
+            ),
+        );
+        f.1.maybe_fetch_paid_messages_info().unwrap();
+        assert_eq!(requests(&f, "canSendMessageToUser").len(), 2);
+        cleanup(f);
+    }
+
+    #[test]
+    fn buying_premium_asks_the_open_chats_gate_again() {
+        let mut f = fixture();
+        open_private(&mut f, 510, 511, false, false);
+        f.1.maybe_fetch_paid_messages_info().unwrap();
+        let ask = requests(&f, "canSendMessageToUser").remove(0);
+        ingest(
+            &mut f,
+            &format!(
+                r#"{{"@type":"canSendMessageToUserResultUserHasPaidMessages","outgoing_paid_message_star_count":25,"@extra":"{}"}}"#,
+                extra_of(&ask)
+            ),
+        );
+        assert_eq!(requests(&f, "canSendMessageToUser").len(), 1);
+        ingest(
+            &mut f,
+            r#"{"@type":"updateOption","name":"is_premium","value":{"@type":"optionValueBoolean","value":true}}"#,
+        );
+        assert_eq!(
+            requests(&f, "canSendMessageToUser").len(),
+            2,
+            "the answer was given under the old Premium"
+        );
+        cleanup(f);
+    }
+}
+
+#[test]
+fn a_stale_subscriptions_refetch_waits_for_an_appended_page_and_is_kept_when_refused() {
+    let mut t = Flaky::new();
+    let subs = |next: &str| {
+        json!({"@type": "starSubscriptions", "star_count": 5, "subscriptions": [],
+            "required_star_count": 0, "next_offset": next})
+    };
+    t.driver.maybe_fetch_star_subscriptions().unwrap();
+    t.answer("getStarSubscriptions", subs("more"));
+    t.driver.fetch_more_star_subscriptions().unwrap();
+    t.driver.session.payments.star_subscriptions_stale = true;
+    // The appended page is out: no first-page request beside it.
+    assert!(
+        t.driver
+            .refresh_star_subscriptions_if_stale()
+            .unwrap()
+            .is_none()
+    );
+    assert_eq!(t.sender.count("getStarSubscriptions"), 2);
+    t.answer("getStarSubscriptions", subs(""));
+    // The appended page did not refresh the list: it is still stale, and
+    // the refetch the driver runs after the answer is on its way.
+    assert_eq!(t.sender.count("getStarSubscriptions"), 3);
+    assert_eq!(
+        t.sender.last("getStarSubscriptions").unwrap()["offset"],
+        "",
+        "a first page"
+    );
+    assert!(t.driver.session.payments.star_subscriptions_stale);
+    // The refetch is cleared by its own answer.
+    t.answer("getStarSubscriptions", subs(""));
+    assert!(!t.driver.session.payments.star_subscriptions_stale);
+    // A refetch that is refused shows its error and is not asked every frame.
+    t.driver.session.payments.star_subscriptions_stale = true;
+    t.sender.refuse(&["getStarSubscriptions"]);
+    assert!(t.driver.refresh_star_subscriptions_if_stale().is_err());
+    let payments = &t.driver.session.payments;
+    assert!(!payments.star_subscriptions_stale);
+    assert!(payments.star_subscriptions_error.is_some());
+    assert!(!payments.star_subscriptions_loading());
 }

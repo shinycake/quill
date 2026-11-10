@@ -952,6 +952,7 @@ fn a_chat_window_shows_the_placeholder_of_its_own_chat(cx: &mut TestAppContext) 
                 OTHER.0,
                 quill::paid_messages::CanSend::HasPaidMessages { stars: 25 },
                 1,
+                false,
             );
         }
     });

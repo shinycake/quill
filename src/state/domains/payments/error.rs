@@ -97,9 +97,10 @@ impl Session {
                 );
             }
             Some(RequestPurpose::GetStarGiftOptions) => {
-                let gift = &mut self.payments.stars_gift;
-                gift.loading = false;
-                gift.error = Some(format!("Couldn't load Star packs: {}", error_reason(err)));
+                self.payments.stars_gift.fail(
+                    extra,
+                    format!("Couldn't load Star packs: {}", error_reason(err)),
+                );
             }
             Some(RequestPurpose::GetStarPackOptions) => {
                 let packs = &mut self.payments.star_packs;
@@ -180,11 +181,16 @@ impl Session {
                 ));
             }
             Some(RequestPurpose::Payments(PaymentsPurpose::GetStarSubscriptions { .. })) => {
-                self.payments.star_subscriptions_loading = false;
-                self.payments.star_subscriptions_error = Some(format!(
-                    "Couldn't load subscriptions: {}",
-                    error_reason(err)
-                ));
+                // Only the page in flight fails the list; an error does not
+                // leave the list stale to be asked every frame.
+                if extra.is_some() && self.payments.star_subscriptions_request == extra {
+                    self.payments.star_subscriptions_request = None;
+                    self.payments.star_subscriptions_stale = false;
+                    self.payments.star_subscriptions_error = Some(format!(
+                        "Couldn't load subscriptions: {}",
+                        error_reason(err)
+                    ));
+                }
             }
             Some(RequestPurpose::EditStarSubscription | RequestPurpose::ReuseStarSubscription) => {
                 self.payments.star_subscriptions_mutating = false;

@@ -2,7 +2,7 @@
 //! gift recipient list.
 use super::*;
 use crate::ids::RequestId;
-use crate::stars_gift::{StarsGiftTarget, can_gift_stars};
+use crate::stars_gift::{GiftStage, PackLoad, StarsGiftTarget, can_gift_stars};
 use crate::state::RequestPurpose;
 use crate::telegram::requests::get_star_gift_payment_options;
 
@@ -54,18 +54,21 @@ impl<S: JsonSender> ConnectDriver<S> {
         let extra = self
             .session
             .request(RequestPurpose::GetStarGiftOptions, None);
-        let state = &mut self.session.payments.stars_gift;
-        state.clear_target();
-        state.target = Some(StarsGiftTarget {
+        let target = StarsGiftTarget {
             user_id,
             name: name.to_string(),
-        });
-        state.loading = true;
+        };
         let json = get_star_gift_payment_options(extra, user_id);
-        if let Err(err) = self.send_json_request(extra, &json) {
-            self.session.payments.stars_gift.loading = false;
-            return Err(err);
-        }
-        Ok(extra)
+        let sent = self.send_json_request(extra, &json);
+        // A request that never left shows the contact's error, not an empty
+        // pack list.
+        self.session.payments.stars_gift.stage = GiftStage::Packs {
+            target,
+            load: match &sent {
+                Ok(_) => PackLoad::Loading(extra),
+                Err(_) => PackLoad::Failed("Couldn't load Star packs".into()),
+            },
+        };
+        sent
     }
 }
