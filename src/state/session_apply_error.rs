@@ -10,6 +10,10 @@ impl Session {
         extra: Option<RequestId>,
         seq: u64,
     ) {
+        if let Some(pending) = pending {
+            self.requests
+                .record_failure(pending.id, error_reason(&err));
+        }
         self.settle_own_reaction(extra, true);
         self.fail_own_full_info(&err, pending);
         if matches!(
