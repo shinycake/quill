@@ -2,6 +2,7 @@
 //! one is not (round 12, area B, finding 6).
 
 use crate::ui::app::QuillApp;
+use crate::ui::inline_members_state::Paging;
 use crate::ui::screenshot_demo::ScreenshotDemo;
 use gpui_kit::component::Root;
 use gpui_kit::{AppContext, Entity, TestAppContext, px, size};
@@ -46,10 +47,10 @@ fn a_failed_page_is_asked_for_again_at_the_next_scroll(cx: &mut TestAppContext) 
     let app = demo(cx);
     let chat = open_group_panel(&app, cx);
     let failed_offset = |app: &Entity<QuillApp>, cx: &mut TestAppContext| {
-        app.read_with(cx, |app, _| app.inline_members.failed_offset)
+        app.read_with(cx, |app, _| app.inline_members.paging.blocked())
     };
     app.update(cx, |app, cx| {
-        app.inline_members.failed_offset = Some(20);
+        app.inline_members.paging = Paging::Asked { offset: 20 };
         if let Some(session) = app.session_mut() {
             session
                 .groups
@@ -65,7 +66,7 @@ fn a_failed_page_is_asked_for_again_at_the_next_scroll(cx: &mut TestAppContext) 
 
     // A page that came back empty stays where it stopped.
     app.update(cx, |app, cx| {
-        app.inline_members.failed_offset = Some(20);
+        app.inline_members.paging = Paging::Asked { offset: 20 };
         app.maybe_load_more_inline(true, cx);
     });
     assert_eq!(failed_offset(&app, cx), Some(20));
@@ -99,4 +100,30 @@ fn the_administrators_fallback_is_asked_once_until_retry(cx: &mut TestAppContext
         app.inline_members_stale(&[chat], cx);
     });
     assert!(!asked(&app, cx), "Retry may ask again");
+}
+
+/// A failed page of an earlier visit does not stay latched when the panel
+/// of the same group opens again, and closing the panel drops the block.
+#[gpui_kit::test]
+fn the_block_starts_over_each_time_the_panel_opens(cx: &mut TestAppContext) {
+    let app = demo(cx);
+    open_group_panel(&app, cx);
+    let target = app.read_with(cx, |app, _| {
+        app.session().and_then(|s| s.users_state.open_info_panel)
+    });
+    let target = target.expect("the open group panel");
+    app.update(cx, |app, _| {
+        app.inline_members.paging = Paging::Failed { offset: 40 };
+        app.inline_members.admins_asked = true;
+        app.inline_members.shown = 120;
+    });
+    app.update(cx, |app, cx| {
+        app.close_info_panel(cx);
+    });
+    app.read_with(cx, |app, _| {
+        assert_eq!(app.inline_members.paging, Paging::Idle);
+        assert!(!app.inline_members.admins_asked);
+        assert_eq!(app.inline_members.chat, None);
+    });
+    let _ = target;
 }

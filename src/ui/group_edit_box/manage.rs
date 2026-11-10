@@ -195,6 +195,7 @@ impl QuillApp {
                 None,
                 cx.listener(move |this, _, window, cx| {
                     this.ensure_event_log_search(window, cx);
+                    this.sync_event_log_search(chat_id, window, cx);
                     this.open_group_settings_view(chat_id, GroupSettingsView::RecentActions, cx);
                 }),
                 cx,

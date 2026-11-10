@@ -52,6 +52,23 @@ impl QuillApp {
         self.admin.event_log_search = Some(input);
     }
 
+    /// The search box shows `chat_id`'s stored query: a box left with
+    /// another chat's text does not filter this one's log.
+    pub(super) fn sync_event_log_search(
+        &mut self,
+        chat_id: ChatId,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let query = self
+            .session()
+            .and_then(|session| session.groups.event_log_queries.get(&chat_id.0).cloned())
+            .unwrap_or_default();
+        if let Some(input) = self.admin.event_log_search.clone() {
+            input.update(cx, |state, cx| state.set_value(&query, window, cx));
+        }
+    }
+
     /// The chat whose recent actions are open.
     fn event_log_open_chat(&self) -> Option<ChatId> {
         self.admin
