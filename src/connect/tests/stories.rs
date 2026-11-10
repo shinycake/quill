@@ -5,7 +5,7 @@ use crate::diagnostics::DiagnosticSink;
 use crate::diagnostics::MemorySink;
 use crate::ids::{AccountKey, ChatId, MessageId};
 use crate::platform::MemorySecretStore;
-use crate::state::{RequestPurpose, Session};
+use crate::state::Session;
 use crate::story_composer::StoryPrivacy;
 use crate::telegram::client::copy_and_parse;
 use serde_json::Value;
@@ -327,7 +327,6 @@ fn driver_activate_story_stealth_mode_sends_and_dedupes() {
 
     let extra = driver
         .activate_story_stealth_mode()
-        .unwrap()
         .expect("activateStoryStealthMode sends");
     let json = recorder
         .snapshot()
@@ -337,8 +336,10 @@ fn driver_activate_story_stealth_mode_sends_and_dedupes() {
     let v: Value = serde_json::from_str(&json).unwrap();
     assert_eq!(v["@type"], "activateStoryStealthMode");
     assert_eq!(v["@extra"], extra.0.to_string());
-    // A second activation while the first is in flight is a no-op.
-    assert_eq!(driver.activate_story_stealth_mode(), Ok(None));
+    // The box asks once per press; a box opened after a closed one asks
+    // for its own answer, so a second call sends too.
+    let second = driver.activate_story_stealth_mode().expect("sends");
+    assert_ne!(second, extra);
     driver
         .ingest(
             copy_and_parse(
@@ -352,15 +353,19 @@ fn driver_activate_story_stealth_mode_sends_and_dedupes() {
             .unwrap(),
         )
         .unwrap();
-    assert!(
-        !driver
+    // The refusal is kept with the request it answers, for the box that
+    // asked.
+    assert_eq!(
+        driver
             .session
-            .requests
-            .has_purpose(RequestPurpose::ActivateStoryStealthMode)
+            .stories
+            .stealth_refusal
+            .as_ref()
+            .map(|(request, _)| *request),
+        Some(extra)
     );
     let again = driver
         .activate_story_stealth_mode()
-        .unwrap()
         .expect("sends again after the error");
     assert_ne!(again, extra);
     let _ = std::fs::remove_dir_all(&dir);

@@ -40,6 +40,15 @@ impl Session {
                     };
                 }
             }
+            Some(RequestPurpose::ActivateStoryStealthMode) => {
+                // Flood wait, Premium lapsed: the box that asked shows why.
+                if let Some(request) = pending.map(|p| p.id) {
+                    self.stories.stealth_refusal = Some((
+                        request,
+                        format!("Could not enable Stealth Mode: {}", error_reason(err)),
+                    ));
+                }
+            }
             Some(RequestPurpose::GetStoryInteractions) => {
                 if let Some(pending) = pending {
                     self.fail_story_viewers(

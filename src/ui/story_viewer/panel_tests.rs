@@ -93,3 +93,88 @@ fn opening_one_panel_closes_the_others(cx: &mut TestAppContext) {
     app.update(vcx, |app, cx| app.toggle_story_viewers(cx));
     assert_eq!(open_panels(&app, vcx), (false, false, false, true));
 }
+
+/// Save on the close-friends editor leaves `Saving` with the answer to its
+/// own call, also when the list was never loaded: a failure puts the edit
+/// back to try again, a success closes the editor.
+#[gpui_kit::test]
+fn the_close_friends_save_leaves_saving_with_its_answer(cx: &mut TestAppContext) {
+    use crate::ui::stories_state::CloseFriendsStage;
+    use quill::ids::RequestId;
+    use quill::story_extras::CloseFriendsEdit;
+    use quill::story_page::{StoryPageOp, StoryPageOpState};
+    let (app, mut vcx) = open_app(cx, "ready-story-viewer");
+    let vcx = &mut vcx;
+    let set_op = |app: &mut crate::ui::app::QuillApp, state| {
+        if let Some(session) = app.demo_session.as_deref_mut() {
+            session.stories.close_friends = None;
+            session.stories.page_ops.begin(StoryPageOp {
+                label: "saving close friends".into(),
+                state,
+                request: RequestId(60),
+                chat_id: None,
+            });
+        }
+    };
+    app.update(vcx, |app, cx| {
+        let mut edit = CloseFriendsEdit::new(&[]);
+        edit.toggle(7);
+        app.stories.with_viewer_ui(|open| {
+            open.close_friends = CloseFriendsStage::Saving {
+                edit,
+                request: RequestId(60),
+            }
+        });
+        set_op(app, StoryPageOpState::Sending);
+        app.tick_close_friends(cx);
+        assert!(app.stories.viewer_ui().close_friends.is_saving());
+        set_op(app, StoryPageOpState::Failed("no".into()));
+        app.tick_close_friends(cx);
+        let stage = &app.stories.viewer_ui().close_friends;
+        assert!(!stage.is_saving(), "the failure ended Saving");
+        assert!(
+            stage.edit().is_some_and(|edit| edit.contains(7)),
+            "the edit is back, with its tick"
+        );
+        // Saved again: the answer closes the editor.
+        let edit = stage.edit().cloned().unwrap_or_default();
+        app.stories.with_viewer_ui(|open| {
+            open.close_friends = CloseFriendsStage::Saving {
+                edit,
+                request: RequestId(60),
+            }
+        });
+        set_op(app, StoryPageOpState::Succeeded);
+        app.tick_close_friends(cx);
+        assert!(!app.stories.viewer_ui().close_friends.is_open());
+    });
+}
+
+/// The copy of a story's file to Downloads runs in the background: a second
+/// press while it runs starts nothing, and the state goes with the story.
+#[gpui_kit::test]
+fn a_story_media_save_in_flight_is_not_started_twice_and_goes_with_its_story(
+    cx: &mut TestAppContext,
+) {
+    use crate::ui::stories_state::MediaSave;
+    let (app, mut vcx) = open_app(cx, "ready-story-viewer");
+    let vcx = &mut vcx;
+    app.update(vcx, |app, cx| {
+        app.stories.with_viewer_ui(|open| {
+            open.media_save = MediaSave::Saving;
+            open.notice = Some("Saving…".into());
+        });
+        app.save_story_media(cx);
+        assert_eq!(
+            app.stories.viewer_ui().notice.as_deref(),
+            Some("Saving…"),
+            "the second press changed nothing"
+        );
+        app.step_story_viewer(1, cx);
+    });
+    frames(vcx);
+    app.read_with(vcx, |app, _| {
+        assert_eq!(app.stories.viewer_ui().media_save, MediaSave::Idle);
+        assert_eq!(app.stories.viewer_ui().notice, None);
+    });
+}

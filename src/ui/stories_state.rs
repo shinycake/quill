@@ -50,16 +50,67 @@ pub(crate) struct StoryViewerUi {
     /// B14: the press-and-hold / Space pause, and the viewer's extra
     /// panels (close friends, share) with their last result line.
     pub(super) pause: quill::story_extras::StoryUserPause,
-    pub(super) close_friends_edit: Option<quill::story_extras::CloseFriendsEdit>,
-    pub(super) close_friends_saving: bool,
+    pub(super) close_friends: CloseFriendsStage,
     /// The story-page call sent from here (Hide, the profile toggle, the
     /// close-friends list): only its status line shows under the story.
     pub(super) page_op: Option<quill::ids::RequestId>,
     pub(super) share_open: bool,
+    /// The copy of the story's file to Downloads (`save_story_media`).
+    pub(super) media_save: MediaSave,
     pub(super) notice: Option<String>,
     /// The ⋯ menu is open: the story holds still under it, and its entries
     /// act on the story it was opened for (`MenuAct` carries it).
     pub(super) menu_open: bool,
+}
+
+/// The story's file being copied to Downloads, on a background thread. It
+/// ends with the copy's result; leaving the story drops it with the rest of
+/// what the viewer had open.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub(super) enum MediaSave {
+    #[default]
+    Idle,
+    Saving,
+}
+
+/// The close-friends editor: closed, being edited, or saved as `request`.
+/// `Saving` leaves with the answer to that request (the list landed, or the
+/// call failed and the edit is back to try again), never by comparing lists.
+#[derive(Default)]
+pub(super) enum CloseFriendsStage {
+    #[default]
+    Closed,
+    Editing(quill::story_extras::CloseFriendsEdit),
+    Saving {
+        edit: quill::story_extras::CloseFriendsEdit,
+        request: quill::ids::RequestId,
+    },
+}
+
+impl CloseFriendsStage {
+    pub(super) fn is_open(&self) -> bool {
+        !matches!(self, Self::Closed)
+    }
+
+    pub(super) fn is_saving(&self) -> bool {
+        matches!(self, Self::Saving { .. })
+    }
+
+    /// The edit shown, while the editor is open.
+    pub(super) fn edit(&self) -> Option<&quill::story_extras::CloseFriendsEdit> {
+        match self {
+            Self::Closed => None,
+            Self::Editing(edit) | Self::Saving { edit, .. } => Some(edit),
+        }
+    }
+
+    /// The edit the user can still change: not while it is being saved.
+    pub(super) fn edit_mut(&mut self) -> Option<&mut quill::story_extras::CloseFriendsEdit> {
+        match self {
+            Self::Editing(edit) => Some(edit),
+            _ => None,
+        }
+    }
 }
 
 /// A panel the viewer draws over its story. One is open at a time:
@@ -100,8 +151,8 @@ impl StoryViewerUi {
         if keep != ViewerPanel::Privacy {
             self.privacy_edit = None;
         }
-        if keep != ViewerPanel::CloseFriends && !self.close_friends_saving {
-            self.close_friends_edit = None;
+        if keep != ViewerPanel::CloseFriends {
+            self.close_friends = CloseFriendsStage::Closed;
         }
     }
 }
@@ -218,10 +269,9 @@ impl StoryUi {
         if self.viewer.is_open() {
             // The close-friends editor is about the list, not the story,
             // so it stays, and with it the call that loads or saves it.
-            let close_friends = open.close_friends_edit.is_some();
+            let close_friends = open.close_friends.is_open();
             self.open = Some(StoryViewerUi {
-                close_friends_edit: open.close_friends_edit,
-                close_friends_saving: open.close_friends_saving,
+                close_friends: open.close_friends,
                 page_op: open.page_op.filter(|_| close_friends),
                 ..StoryViewerUi::default()
             });

@@ -90,6 +90,9 @@ pub struct StoriesState {
     /// cooldown — the schema exposes no getter, so this only ever
     /// reflects updates TDLib has pushed.
     pub stealth: StoryStealthMode,
+    /// The latest `activateStoryStealthMode` the server refused, with the
+    /// request it answers: the Stealth Mode box that asked shows why.
+    pub stealth_refusal: Option<(RequestId, String)>,
     pub stealth_periods: crate::story_stealth::StealthPeriods,
     /// Phase 9.5: chat ids from the last `getChatsToPostStories` answer —
     /// the composer's "post as" picker (channels/supergroups where the
@@ -165,6 +168,7 @@ impl StoriesState {
             search: None,
             report: None,
             stealth: StoryStealthMode::default(),
+            stealth_refusal: None,
             stealth_periods: Default::default(),
             post_as_chats: Vec::new(),
             manage: StoryManageState::default(),

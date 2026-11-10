@@ -211,16 +211,9 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// Phase 9.5: `activateStoryStealthMode` — hides the current user's
     /// story views (Premium only; the server decides). The state arrives
     /// as `updateStoryStealthMode`. Deduped while in flight.
-    pub fn activate_story_stealth_mode(&mut self) -> Result<Option<RequestId>, ConnectSendError> {
+    pub fn activate_story_stealth_mode(&mut self) -> Result<RequestId, ConnectSendError> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
-        }
-        if self
-            .session
-            .requests
-            .has_purpose(RequestPurpose::ActivateStoryStealthMode)
-        {
-            return Ok(None);
         }
         let extra = self
             .session
@@ -229,7 +222,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .sender
             .send_json(&activate_story_stealth_mode_request(extra))
         {
-            Ok(()) => Ok(Some(extra)),
+            Ok(()) => Ok(extra),
             Err(err) => {
                 self.session.requests.take(extra);
                 Err(err)
