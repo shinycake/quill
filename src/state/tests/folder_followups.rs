@@ -76,7 +76,6 @@ fn a_limit_error_opens_the_limit_box_instead_of_an_error_line() {
     let seq = AtomicU64::new(0);
     // Joining shared folders past the limit.
     let extra = session.request(RequestPurpose::AddChatFolderByInviteLink, None);
-    session.chat_list.folder_invite_request = Some(extra);
     apply_json(
         &mut session,
         &seq,
@@ -86,11 +85,11 @@ fn a_limit_error_opens_the_limit_box_instead_of_an_error_line() {
             extra.0
         ),
     );
+    // The limit box is for the box that sent this request.
     assert_eq!(
         session.chat_list.folder_limit_hit.take(),
-        Some(FolderLimitKind::SharedFolders)
+        Some((FolderLimitKind::SharedFolders, Some(extra)))
     );
-    assert!(session.chat_list.folder_invite_error.is_none());
     // Too many folders when creating one.
     let extra = session.request(RequestPurpose::CreateChatFolder, None);
     apply_json(
@@ -104,7 +103,7 @@ fn a_limit_error_opens_the_limit_box_instead_of_an_error_line() {
     );
     assert_eq!(
         session.chat_list.folder_limit_hit.take(),
-        Some(FolderLimitKind::Folders)
+        Some((FolderLimitKind::Folders, Some(extra)))
     );
     // Too many included chats when saving.
     let extra = session.request_for_folder(RequestPurpose::EditChatFolder, 3);
@@ -119,11 +118,10 @@ fn a_limit_error_opens_the_limit_box_instead_of_an_error_line() {
     );
     assert_eq!(
         session.chat_list.folder_limit_hit.take(),
-        Some(FolderLimitKind::ChatsIncluded)
+        Some((FolderLimitKind::ChatsIncluded, Some(extra)))
     );
     // Any other failure is still an ordinary error.
     let extra = session.request(RequestPurpose::AddChatFolderByInviteLink, None);
-    session.chat_list.folder_invite_request = Some(extra);
     apply_json(
         &mut session,
         &seq,
@@ -134,5 +132,8 @@ fn a_limit_error_opens_the_limit_box_instead_of_an_error_line() {
         ),
     );
     assert!(session.chat_list.folder_limit_hit.is_none());
-    assert!(session.chat_list.folder_invite_error.is_some());
+    assert!(matches!(
+        session.chat_list.dialog_answers.take(extra),
+        Some(crate::state::DialogAnswer::Failed(_))
+    ));
 }

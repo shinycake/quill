@@ -7,7 +7,6 @@ ActiveGroupCall::loaded_all_participants
 ActiveGroupCall::loaded_all_participants+transport_error
 ActiveGroupCall::screen_share_pending
 AppearancePrefs::ignore_battery_saving
-ArchiveMute::reload_pending
 Assembly::started
 AudioEngine::failed
 AudioEngine::start_failed
@@ -42,10 +41,6 @@ CameraDraft::starting
 Ceremony::finished
 ChatAppearanceDialog::sent
 ChatListState::archive_settings_loading
-ChatListState::folder_invite_done
-ChatListState::folder_link_saved
-ChatListState::folder_link_saved+folder_share_error
-ChatSearchState::loading_more
 ChatSummary::my_rights_fetched
 ChatSwipeFacts::is_saved
 ChatUi::inline_query_waiting
@@ -81,8 +76,6 @@ EmojiStyleUi::started+file_error
 FastShareFacts::sent
 FieldResult::finished
 FirstRunPrefs::completed
-FolderShareDialog::busy
-FolderShareDialog::busy+error
 FooterMeta::pending
 FrameUi::window_state_save_pending
 GifPanel::failed
@@ -219,8 +212,6 @@ RtmpStart::failed
 SavedMessagesState::tags_loaded
 SavedMessagesState::topics_requested
 SavedTagSearch::loaded
-SearchTabsState::loading_more
-SearchTabsState::more_failed
 SearchTabsState::recommended_loaded
 SearchTabsState::recommended_loading
 SettingsSearch::pending_clear

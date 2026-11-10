@@ -62,7 +62,22 @@ impl<S: JsonSender> ConnectDriver<S> {
             let extra = self
                 .session
                 .request_for_folder(RequestPurpose::GetChatFolderInviteLinks, folder_id);
-            self.send_folder_request(extra, get_chat_folder_invite_links(extra, folder_id))?;
+            let share = self
+                .session
+                .chat_list
+                .folder_shares
+                .entry(folder_id)
+                .or_default();
+            share.links.begin();
+            if let Err(err) =
+                self.send_folder_request(extra, get_chat_folder_invite_links(extra, folder_id))
+            {
+                // The stage ends in the error the box draws, not a spinner.
+                if let Some(share) = self.session.chat_list.folder_shares.get_mut(&folder_id) {
+                    share.links.fail(err.stage_line());
+                }
+                return Err(err);
+            }
         }
         if !self
             .session
@@ -72,16 +87,28 @@ impl<S: JsonSender> ConnectDriver<S> {
             let extra = self
                 .session
                 .request_for_folder(RequestPurpose::GetChatsForFolderInviteLink, folder_id);
-            self.send_folder_request(
+            let share = self
+                .session
+                .chat_list
+                .folder_shares
+                .entry(folder_id)
+                .or_default();
+            share.chats.begin();
+            if let Err(err) = self.send_folder_request(
                 extra,
                 get_chats_for_chat_folder_invite_link(extra, folder_id),
-            )?;
+            ) {
+                if let Some(share) = self.session.chat_list.folder_shares.get_mut(&folder_id) {
+                    share.chats.fail(err.stage_line());
+                }
+                return Err(err);
+            }
         }
         Ok(())
     }
 
     /// `createChatFolderInviteLink`; the new link joins the cached list when
-    /// TDLib answers (`Session::folder_link_saved` flips).
+    /// TDLib answers, and the box takes the answer by the returned request id.
     pub fn create_folder_invite_link(
         &mut self,
         folder_id: i32,
@@ -140,16 +167,17 @@ impl<S: JsonSender> ConnectDriver<S> {
         if let Some(links) = self
             .session
             .chat_list
-            .folder_invite_links
+            .folder_shares
             .get_mut(&folder_id)
+            .and_then(|share| share.links.data_mut())
         {
             links.retain(|link| link.invite_link != invite_link);
         }
         Ok(sent)
     }
 
-    /// `checkChatFolderInviteLink` for an `addlist` link; the answer lands in
-    /// `Session::folder_invite_info`.
+    /// `checkChatFolderInviteLink` for an `addlist` link; the box takes the
+    /// answer by the returned request id (`DialogAnswers`).
     pub fn check_folder_invite_link(
         &mut self,
         invite_link: &str,
@@ -157,17 +185,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        self.session.chat_list.folder_invite_link = Some(invite_link.to_string());
-        self.session.chat_list.folder_invite_info = None;
-        self.session.chat_list.folder_invite_error = None;
-        self.session.chat_list.folder_invite_done = false;
         let extra = self
             .session
             .request(RequestPurpose::CheckChatFolderInviteLink, None);
-        let sent =
-            self.send_folder_request(extra, check_chat_folder_invite_link(extra, invite_link))?;
-        self.session.chat_list.folder_invite_request = Some(sent);
-        Ok(sent)
+        self.send_folder_request(extra, check_chat_folder_invite_link(extra, invite_link))
     }
 
     /// `getChat` for the chats of an `addlist` link that are not loaded,
@@ -206,16 +227,13 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        self.session.chat_list.folder_invite_error = None;
         let extra = self
             .session
             .request(RequestPurpose::AddChatFolderByInviteLink, None);
-        let sent = self.send_folder_request(
+        self.send_folder_request(
             extra,
             add_chat_folder_by_invite_link(extra, invite_link, chat_ids),
-        )?;
-        self.session.chat_list.folder_invite_request = Some(sent);
-        Ok(sent)
+        )
     }
 
     /// `getChatFolderNewChats` for a shared folder, at most once per
@@ -255,10 +273,6 @@ impl<S: JsonSender> ConnectDriver<S> {
         {
             return Ok(None);
         }
-        self.session
-            .chat_list
-            .folder_new_chats_asked
-            .insert(folder_id, std::time::Instant::now());
         let extra = self
             .session
             .request_for_folder(RequestPurpose::GetChatFolderNewChats, folder_id);
@@ -267,24 +281,31 @@ impl<S: JsonSender> ConnectDriver<S> {
     }
 
     /// `processChatFolderNewChats`: join the chosen new chats, or dismiss the
-    /// bar with an empty list. The bar goes away at once.
+    /// bar with an empty list. The bar goes away when the answer is `ok`;
+    /// a refusal keeps it (and says so). `Ok(None)`: one is already in flight.
     pub fn process_folder_new_chats(
         &mut self,
         folder_id: i32,
         chat_ids: &[i64],
-    ) -> Result<RequestId, ConnectSendError> {
+    ) -> Result<Option<RequestId>, ConnectSendError> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
+        }
+        if self
+            .session
+            .requests
+            .has_purpose_for_folder(RequestPurpose::ProcessChatFolderNewChats, folder_id)
+        {
+            return Ok(None);
         }
         let extra = self
             .session
             .request_for_folder(RequestPurpose::ProcessChatFolderNewChats, folder_id);
-        let sent = self.send_folder_request(
+        self.send_folder_request(
             extra,
             process_chat_folder_new_chats(extra, folder_id, chat_ids),
-        )?;
-        self.session.chat_list.folder_new_chats.remove(&folder_id);
-        Ok(sent)
+        )
+        .map(Some)
     }
 
     /// `readChatList` for one folder ("Mark as read" in the folder menu).

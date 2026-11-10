@@ -26,8 +26,14 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(ConnectSendError::InvalidRequest);
         }
         let in_main = self.session.open_chat == Some(chat_id);
-        if self.session.open_window_chat(chat_id) && !in_main {
-            self.send_open_chat(chat_id)?;
+        if self.session.open_window_chat(chat_id)
+            && !in_main
+            && let Err(err) = self.send_open_chat(chat_id)
+        {
+            // The window's chat never opened in TDLib: drop its view so a
+            // retry opens it again.
+            self.session.close_window_chat(chat_id);
+            return Err(err);
         }
         if in_main {
             return self.fetch_history_for(chat_id);

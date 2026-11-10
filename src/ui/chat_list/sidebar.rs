@@ -9,6 +9,7 @@
 //! (docs/decisions/main-thread-stack.md).
 
 use super::*;
+use crate::ui::chat_list_state::SidebarTab;
 use crate::ui::empty_state::EmptyState;
 use gpui_kit::assets::IconName;
 use quill::community_row::{GroupedEntry, ListedChat, group_main_list};
@@ -89,7 +90,7 @@ impl QuillApp {
             .gap_2()
             .child(self.sidebar_header(mode, cx))
             .when_some(
-                (!self.chat_list.contacts_tab_open && !self.chat_list.calls_tab_open)
+                (self.chat_list.tab == SidebarTab::Chats)
                     .then(|| chat_list_caption(mode, self.session()))
                     .flatten(),
                 |this, caption| {
@@ -118,16 +119,13 @@ impl QuillApp {
         // A pinned drag lives in the chat rows, which end it on release.
         // Contacts, Calls or search in their place: the release can never
         // reach them, so the drag ends now, unsaved (round 18 B #2).
-        if self.chat_list.contacts_tab_open
-            || self.chat_list.calls_tab_open
-            || self.search_is_open()
-        {
+        if self.chat_list.tab != SidebarTab::Chats || self.search_is_open() {
             self.chat_list.pin_reorder = None;
         }
-        if self.chat_list.contacts_tab_open {
+        if self.chat_list.tab == SidebarTab::Contacts {
             return list.child(self.contacts_panel(cx));
         }
-        if self.chat_list.calls_tab_open {
+        if self.chat_list.tab == SidebarTab::Calls {
             return list.child(
                 div()
                     .id("calls-scroll")

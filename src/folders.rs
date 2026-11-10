@@ -11,7 +11,7 @@
 
 use crate::state::ChatSummary;
 use crate::telegram::envelope::{ChatFolderSpec, ChatKind, ParsedUser};
-use std::collections::HashSet;
+use std::collections::{BTreeSet, HashSet};
 
 /// Editor model for the create/edit folder dialog (tdesktop-like): a name,
 /// include-type flags, always-included / never-included chat sets, and the
@@ -118,6 +118,95 @@ impl FolderEditor {
             include_bots: self.include_bots,
             include_groups: self.include_groups,
             include_channels: self.include_channels,
+        }
+    }
+
+    /// What Save sends when the folder changed after the editor opened
+    /// (`base` is the spec the form started from, `fresh` the folder now):
+    /// the fields the person touched go onto the fresh folder, and what
+    /// changed elsewhere (a pin, a chat added or removed) stays. Pinned
+    /// chats are not edited here, so they are the fresh ones.
+    pub fn merged_onto(&self, base: &ChatFolderSpec, fresh: &ChatFolderSpec) -> ChatFolderSpec {
+        let mine = self.to_spec();
+        fn pick<T: PartialEq + Clone>(mine: &T, base: &T, fresh: &T) -> T {
+            if mine != base {
+                mine.clone()
+            } else {
+                fresh.clone()
+            }
+        }
+        fn merge_ids(mine: &[i64], base: &[i64], fresh: &[i64]) -> BTreeSet<i64> {
+            let mut out: BTreeSet<i64> = fresh.iter().copied().collect();
+            out.extend(mine.iter().filter(|id| !base.contains(id)));
+            for id in base.iter().filter(|id| !mine.contains(id)) {
+                out.remove(id);
+            }
+            out
+        }
+        let mut included = merge_ids(
+            &mine.included_chat_ids,
+            &base.included_chat_ids,
+            &fresh.included_chat_ids,
+        );
+        let mut excluded = merge_ids(
+            &mine.excluded_chat_ids,
+            &base.excluded_chat_ids,
+            &fresh.excluded_chat_ids,
+        );
+        // A chat is in one list: the person's choice wins, else the
+        // newer one.
+        for id in included
+            .intersection(&excluded)
+            .copied()
+            .collect::<Vec<_>>()
+        {
+            if mine.included_chat_ids.contains(&id) && !base.included_chat_ids.contains(&id) {
+                excluded.remove(&id);
+            } else {
+                included.remove(&id);
+            }
+        }
+        // A pinned chat is not also in the always-included list.
+        included.retain(|id| !fresh.pinned_chat_ids.contains(id));
+        ChatFolderSpec {
+            name: pick(&mine.name, &base.name, &fresh.name),
+            icon_name: pick(&mine.icon_name, &base.icon_name, &fresh.icon_name),
+            color_id: pick(&mine.color_id, &base.color_id, &fresh.color_id),
+            pinned_chat_ids: fresh.pinned_chat_ids.clone(),
+            included_chat_ids: included.into_iter().collect(),
+            excluded_chat_ids: excluded.into_iter().collect(),
+            exclude_muted: pick(
+                &mine.exclude_muted,
+                &base.exclude_muted,
+                &fresh.exclude_muted,
+            ),
+            exclude_read: pick(&mine.exclude_read, &base.exclude_read, &fresh.exclude_read),
+            exclude_archived: pick(
+                &mine.exclude_archived,
+                &base.exclude_archived,
+                &fresh.exclude_archived,
+            ),
+            include_contacts: pick(
+                &mine.include_contacts,
+                &base.include_contacts,
+                &fresh.include_contacts,
+            ),
+            include_non_contacts: pick(
+                &mine.include_non_contacts,
+                &base.include_non_contacts,
+                &fresh.include_non_contacts,
+            ),
+            include_bots: pick(&mine.include_bots, &base.include_bots, &fresh.include_bots),
+            include_groups: pick(
+                &mine.include_groups,
+                &base.include_groups,
+                &fresh.include_groups,
+            ),
+            include_channels: pick(
+                &mine.include_channels,
+                &base.include_channels,
+                &fresh.include_channels,
+            ),
         }
     }
 
@@ -430,5 +519,45 @@ mod tests {
         };
         let edited = spec_without_chat(&spec, &chat, Some(&user));
         assert_eq!(edited.excluded_chat_ids, vec![12]);
+    }
+}
+
+#[cfg(test)]
+mod merge_tests {
+    use super::*;
+
+    fn spec(included: &[i64], pinned: &[i64]) -> ChatFolderSpec {
+        ChatFolderSpec {
+            name: "Work".into(),
+            included_chat_ids: included.to_vec(),
+            pinned_chat_ids: pinned.to_vec(),
+            ..ChatFolderSpec::default()
+        }
+    }
+
+    #[test]
+    fn a_save_keeps_what_changed_elsewhere_and_what_the_person_touched() {
+        let base = spec(&[1, 2], &[]);
+        let mut editor = FolderEditor::from_spec(&base);
+        // The person removes chat 2 and adds chat 5, and renames the folder.
+        editor.toggle_included(2);
+        editor.toggle_included(5);
+        editor.name = "Jobs".into();
+        // Meanwhile elsewhere: chat 1 was pinned (so it left the included
+        // list), chat 7 was added.
+        let fresh = spec(&[2, 7], &[1]);
+        let saved = editor.merged_onto(&base, &fresh);
+        assert_eq!(saved.name, "Jobs", "the rename is the person's");
+        assert_eq!(saved.pinned_chat_ids, vec![1], "the new pin stays");
+        assert_eq!(saved.included_chat_ids, vec![5, 7], "2 removed, 5 and 7 in");
+    }
+
+    #[test]
+    fn an_untouched_form_saves_the_fresh_folder() {
+        let base = spec(&[1], &[]);
+        let editor = FolderEditor::from_spec(&base);
+        let mut fresh = spec(&[1, 3], &[9]);
+        fresh.name = "Renamed elsewhere".into();
+        assert_eq!(editor.merged_onto(&base, &fresh), fresh);
     }
 }

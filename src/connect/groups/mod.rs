@@ -495,7 +495,13 @@ impl<S: JsonSender> ConnectDriver<S> {
         if self.session.requests.has_purpose_for_chat(purpose, chat_id) {
             return Ok(None);
         }
-        self.session.chat_list.chat_preview_fetch = None;
+        // Peeks are kept by chat; a handful stay, the rest of the old ones
+        // go.
+        let previews = &mut self.session.chat_list.chat_preview_fetch;
+        if previews.len() >= 8 {
+            previews.clear();
+        }
+        previews.entry(chat_id).or_default().begin();
         let extra = self.session.request(purpose, Some(chat_id));
         if let Err(err) = self.sender.send_json(&get_chat_history(
             extra,
@@ -506,6 +512,12 @@ impl<S: JsonSender> ConnectDriver<S> {
             false,
         )) {
             self.session.requests.take(extra);
+            self.session
+                .chat_list
+                .chat_preview_fetch
+                .entry(chat_id)
+                .or_default()
+                .fail_dropping_data(err.stage_line());
             return Err(err);
         }
         Ok(Some(extra))

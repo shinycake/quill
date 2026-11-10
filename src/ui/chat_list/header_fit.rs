@@ -7,6 +7,7 @@
 //! so it is recomputed on every render.
 
 use super::*;
+use crate::ui::chat_list_state::SidebarTab;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::tooltip::Tooltip;
 
@@ -83,12 +84,10 @@ impl QuillApp {
                 .child(tr(keys::RECENT_CHATS))
                 .into_any_element();
         }
-        let selected = if self.chat_list.contacts_tab_open {
-            1
-        } else if self.chat_list.calls_tab_open {
-            2
-        } else {
-            0
+        let selected = match self.chat_list.tab {
+            SidebarTab::Chats => 0,
+            SidebarTab::Contacts => 1,
+            SidebarTab::Calls => 2,
         };
         let weak = cx.weak_entity();
         let tab = |icon: IconName, label: &'static str| {

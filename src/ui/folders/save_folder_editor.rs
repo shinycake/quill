@@ -27,6 +27,44 @@ impl QuillApp {
             .as_ref()
             .map(|dialog| dialog.editor.to_spec());
         let Some(spec) = spec else { return };
+        // The folder changed since the form was filled (a pin, a chat added
+        // or removed, here or on another device): fetch it, and send the
+        // person's edits onto it, not the old copy over it.
+        if let Some(folder_id) = folder_id
+            && self.live.is_some()
+            && self
+                .session()
+                .is_some_and(|s| s.chat_list.fresh_spec(folder_id).is_none())
+        {
+            let sent = self
+                .live
+                .as_mut()
+                .map(|live| live.driver.fetch_chat_folder(folder_id));
+            if let Some(dialog) = self.folders.editor.as_mut() {
+                match sent {
+                    Some(Err(err)) => {
+                        dialog.error = Some(user_error_for(keys::Q_NOTES_FAILED_FOLDER, &err));
+                    }
+                    _ => {
+                        dialog.load = FolderLoad::Merging;
+                        dialog.error = None;
+                    }
+                }
+            }
+            cx.notify();
+            return;
+        }
+        self.send_folder_editor_spec(folder_id, spec, cx);
+    }
+
+    /// Check the limits and send the editor's folder (the form's own, or
+    /// the one merged onto the fresh folder).
+    pub(in crate::ui) fn send_folder_editor_spec(
+        &mut self,
+        folder_id: Option<i32>,
+        spec: quill::telegram::envelope::ChatFolderSpec,
+        cx: &mut Context<Self>,
+    ) {
         // tdesktop checks the chosen-chat limits before saving.
         let over = self.session().and_then(|s| {
             s.chat_list.folder_limits.chats_over(
@@ -41,25 +79,26 @@ impl QuillApp {
         }
         let result = match self.live.as_mut() {
             Some(live) => match folder_id {
-                Some(id) => live.driver.edit_chat_folder(id, &spec).map(|_| ()),
-                None => live.driver.create_chat_folder(&spec).map(|_| ()),
+                Some(id) => live.driver.edit_chat_folder(id, &spec).map(Some),
+                None => live.driver.create_chat_folder(&spec).map(Some),
             },
             None => {
                 // Screenshot demo: apply locally so the manage dialog shows
                 // the change without live Telegram.
                 self.apply_demo_folder_save(folder_id, spec);
-                Ok(())
+                Ok(None)
             }
         };
         match result {
-            Ok(()) => {
-                self.folders.editor = None;
-                self.set_note(if folder_id.is_some() {
-                    StatusNote::silent(tr(keys::Q_CHATLIST_FOLDER_UPDATED))
-                } else {
-                    StatusNote::silent(tr(keys::Q_CHATLIST_FOLDER_CREATED))
-                });
+            // The box waits for its own answer: it closes (and says so)
+            // when the folder is saved, and shows the error when it is not.
+            Ok(Some(request)) => {
+                if let Some(dialog) = self.folders.editor.as_mut() {
+                    dialog.load = FolderLoad::Saving(request);
+                    dialog.error = None;
+                }
             }
+            Ok(None) => self.folder_editor_saved(folder_id.is_some()),
             Err(err) => {
                 if let Some(dialog) = self.folders.editor.as_mut() {
                     dialog.error = Some(user_error_for(keys::Q_NOTES_FAILED_SAVE_FOLDER, &err));
@@ -67,6 +106,16 @@ impl QuillApp {
             }
         }
         cx.notify();
+    }
+
+    /// The folder is saved: the editor closes and the toast says so.
+    pub(in crate::ui) fn folder_editor_saved(&mut self, edited: bool) {
+        self.folders.editor = None;
+        self.set_note(if edited {
+            StatusNote::silent(tr(keys::Q_CHATLIST_FOLDER_UPDATED))
+        } else {
+            StatusNote::silent(tr(keys::Q_CHATLIST_FOLDER_CREATED))
+        });
     }
 
     pub(in crate::ui) fn open_folder_delete(&mut self, folder_id: i32, cx: &mut Context<Self>) {
@@ -226,6 +275,19 @@ impl QuillApp {
         cx.notify();
     }
 
+    /// The Add to folder box's Retry after a failed ask.
+    fn retry_folder_menu(&mut self, chat_id: ChatId, cx: &mut Context<Self>) {
+        if let Some(live) = self.live.as_mut()
+            && let Err(err) = live.driver.fetch_chat_lists_to_add_chat(chat_id)
+        {
+            self.set_note(StatusNote::error(user_error_for(
+                keys::Q_NOTES_FAILED_FOLDER_OPTIONS,
+                &err,
+            )));
+        }
+        cx.notify();
+    }
+
     pub(in crate::ui) fn close_folder_menu(&mut self, cx: &mut Context<Self>) {
         self.folders.menu_chat = None;
         cx.notify();
@@ -325,7 +387,30 @@ impl QuillApp {
                 .map(|f| f.name.clone())
                 .unwrap_or_else(|| tr_with(keys::Q_CHATLIST_FOLDER_2, &[("id", &id.to_string())]))
         };
-        let Some(lists) = session.chat_list.chat_lists_for_add.get(&chat_id.0) else {
+        let fetch = session.chat_list.chat_lists_for_add.get(&chat_id.0);
+        let Some(lists) = fetch.and_then(|fetch| fetch.data()) else {
+            // A failed ask ends in its error with a Retry, not in "Loading".
+            if let Some(error) = fetch.and_then(|fetch| fetch.error()) {
+                return panel
+                    .child(
+                        div()
+                            .id("folder-menu-error")
+                            .text_xs()
+                            .text_color(danger_dark())
+                            .child(error.to_string()),
+                    )
+                    .child(
+                        div().flex().child(
+                            Button::new("folder-menu-retry")
+                                .label(tr(keys::Q_MONEY_RETRY))
+                                .small()
+                                .on_click(cx.listener(move |this, _, _, cx| {
+                                    this.retry_folder_menu(chat_id, cx);
+                                })),
+                        ),
+                    )
+                    .into_any_element();
+            }
             return panel
                 .child(
                     div()

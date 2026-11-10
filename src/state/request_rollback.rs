@@ -93,6 +93,25 @@ pub enum RequestRollback {
         previous: Vec<bool>,
         shown: Vec<bool>,
     },
+    /// `reorderChatFolders`: the tab order before the drag and the one it
+    /// showed instead.
+    FolderOrder {
+        previous: crate::folder_order::FolderOrder,
+        shown: crate::folder_order::FolderOrder,
+    },
+    /// `removeRecentlyFoundChat`: the entry and where it stood.
+    RecentSearchRemoved { chat_id: i64, index: usize },
+    /// `removeTopChat`: the frequent contact and where it stood.
+    TopChatRemoved { chat_id: i64, index: usize },
+    /// `setOption(disable_top_chats)`: the flag before, the one it showed,
+    /// and the strip it cleared.
+    TopChatsDisabled {
+        previous: bool,
+        shown: bool,
+        top_chats: Vec<ChatId>,
+    },
+    /// `toggleChatFolderTags`: the flag before the flip.
+    FolderTags { previous: bool, shown: bool },
 }
 
 impl Session {
@@ -114,6 +133,34 @@ impl Session {
                             topic.notification_settings = previous;
                         }
                     });
+            }
+            RequestRollback::FolderOrder { previous, shown } => {
+                if self.chat_list.folder_order() == shown {
+                    self.chat_list.apply_folder_order(&previous);
+                }
+            }
+            RequestRollback::RecentSearchRemoved { chat_id, index } => {
+                self.search.search.restore_recent(ChatId(chat_id), index);
+            }
+            RequestRollback::TopChatRemoved { chat_id, index } => {
+                self.search.search.restore_top_chat(ChatId(chat_id), index);
+            }
+            RequestRollback::TopChatsDisabled {
+                previous,
+                shown,
+                top_chats,
+            } => {
+                if self.search.search.top_chats_disabled == shown {
+                    self.search.search.top_chats_disabled = previous;
+                    if self.search.search.top_chats.is_empty() {
+                        self.search.search.top_chats = top_chats;
+                    }
+                }
+            }
+            RequestRollback::FolderTags { previous, shown } => {
+                if self.chat_list.are_folder_tags_enabled == shown {
+                    self.chat_list.are_folder_tags_enabled = previous;
+                }
             }
             RequestRollback::PollVote {
                 chat_id,

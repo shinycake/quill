@@ -56,19 +56,14 @@ impl QuillApp {
                     .collect()
             })
             .unwrap_or_default();
-        let fetch = session.and_then(|session| {
-            session
-                .chat_list
-                .chat_preview_fetch
-                .as_ref()
-                .filter(|fetch| fetch.chat_id == chat_id)
-        });
+        let fetch = session.and_then(|session| session.chat_list.chat_preview_fetch.get(&chat_id));
         if lines.is_empty()
             && let Some(fetch) = fetch
         {
             lines = fetch
-                .messages
-                .iter()
+                .data()
+                .into_iter()
+                .flatten()
                 .map(|message| {
                     chat_preview_line(
                         &title,
@@ -81,7 +76,7 @@ impl QuillApp {
                 })
                 .collect();
         }
-        let failed = fetch.and_then(|fetch| fetch.failed.clone());
+        let failed = fetch.and_then(|fetch| fetch.error().map(str::to_owned));
         let in_flight = session.is_some_and(|session| {
             session
                 .requests

@@ -10,6 +10,7 @@ use super::chat_row::{
 };
 use super::notifications::notification_settings_json;
 use super::*;
+use crate::ui::chat_list_state::SidebarTab;
 use crate::ui::status_note::StatusNote;
 use crate::ui::user_error::user_error_for;
 use gpui_kit::component::button::*;
@@ -291,7 +292,7 @@ impl QuillApp {
         community_id: i64,
         cx: &mut Context<Self>,
     ) {
-        self.chat_list.contacts_tab_open = false;
+        self.chat_list.tab = SidebarTab::Chats;
         self.set_chat_list_view(ChatListFilter::Community(community_id), None);
         if let Some(live) = self.live.as_mut()
             && let Err(err) = live.driver.get_community_full_info(community_id)
@@ -432,8 +433,9 @@ impl QuillApp {
         let chats = self.selected_chat_pin_states();
         let pin_all = chats.iter().any(|(_, pinned)| !pinned);
         for (id, pinned) in chats {
-            if pinned != pin_all {
-                self.toggle_chat_pin(id, cx);
+            if pinned != pin_all && !self.try_toggle_chat_pin(id, cx) {
+                // The limit box is up: the rest would only ask it again.
+                break;
             }
         }
         self.chat_list.selected.clear();
@@ -546,14 +548,12 @@ impl QuillApp {
     }
 
     pub(super) fn open_chats_tab(&mut self, cx: &mut Context<Self>) {
-        self.chat_list.contacts_tab_open = false;
-        self.chat_list.calls_tab_open = false;
+        self.chat_list.tab = SidebarTab::Chats;
         cx.notify();
     }
 
     pub(super) fn open_contacts_tab(&mut self, cx: &mut Context<Self>) {
-        self.chat_list.contacts_tab_open = true;
-        self.chat_list.calls_tab_open = false;
+        self.chat_list.tab = SidebarTab::Contacts;
         // Slice A6: the sync toggle gates the `getContacts` refresh —
         // with sync off the tab shows the last loaded snapshot.
         let sync_on = self
@@ -579,8 +579,7 @@ impl QuillApp {
     /// server-side call history plus both call privacy settings. Demo
     /// mode injects synthetic data instead (screenshot proof).
     pub(super) fn open_calls_tab(&mut self, cx: &mut Context<Self>) {
-        self.chat_list.contacts_tab_open = false;
-        self.chat_list.calls_tab_open = true;
+        self.chat_list.tab = SidebarTab::Calls;
         if let Some(live) = self.live.as_mut() {
             if let Err(err) = live.driver.fetch_call_history() {
                 self.screen.connection.set_note_for(
@@ -607,7 +606,7 @@ impl QuillApp {
 
     pub(super) fn open_folder_tab(&mut self, folder: Option<i32>, cx: &mut Context<Self>) {
         self.set_chat_list_view(ChatListFilter::All, folder);
-        self.chat_list.contacts_tab_open = false;
+        self.chat_list.tab = SidebarTab::Chats;
         if let (Some(live), Some(folder_id)) = (self.live.as_mut(), folder)
             && let Err(err) = live.driver.load_folder_chats(folder_id)
         {

@@ -332,7 +332,7 @@ fn a_failed_page_keeps_the_cursor_for_a_retry() {
     fx.driver.load_more_search_results().unwrap();
     fx.answer("searchMessages", "error", r#""code":500,"message":"boom""#);
     let tabs = &fx.driver.session.search.search.tabs;
-    assert!(tabs.more_failed && !tabs.loading_more);
+    assert!(tabs.more_failed() && !tabs.loading_more());
     assert!(fx.driver.load_more_search_results().unwrap().is_some());
 }
 
@@ -468,4 +468,21 @@ fn a_paid_search_needs_a_plain_query_and_a_price() {
             .iter()
             .all(|request| request["star_count"] == 0)
     );
+}
+
+#[test]
+fn a_refused_load_more_waits_for_a_retry_instead_of_asking_every_frame() {
+    let store = MemorySecretStore::new();
+    let (dir, prepared) = prepared_tmp(&store);
+    let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+    let recorder = Arc::new(RecordingSender::new());
+    let session = Session::new(AccountKey::primary(), sink.clone());
+    // Not ready (shutting down, or just connecting): the ask is refused.
+    let mut driver = ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
+    driver.session.search.search.tabs.next_offset = "page2".into();
+    assert!(driver.load_more_search_results().is_err());
+    let tabs = &driver.session.search.search.tabs;
+    assert!(tabs.more_failed(), "the list stops asking and offers Retry");
+    assert!(recorder.snapshot().is_empty());
+    let _ = std::fs::remove_dir_all(&dir);
 }

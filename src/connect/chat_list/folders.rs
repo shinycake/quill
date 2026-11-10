@@ -138,7 +138,14 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session.requests.take(extra);
             return Err(err);
         }
+        let previous = self.session.chat_list.folder_order();
         self.session.chat_list.apply_folder_order(order);
+        if let Some(pending) = self.session.requests.pending_mut(extra) {
+            pending.rollback = Some(RequestRollback::FolderOrder {
+                previous,
+                shown: self.session.chat_list.folder_order(),
+            });
+        }
         Ok(extra)
     }
 
@@ -162,7 +169,14 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session.requests.take(extra);
             return Err(err);
         }
+        let previous = self.session.chat_list.are_folder_tags_enabled;
         self.session.chat_list.are_folder_tags_enabled = enabled;
+        if let Some(pending) = self.session.requests.pending_mut(extra) {
+            pending.rollback = Some(RequestRollback::FolderTags {
+                previous,
+                shown: enabled,
+            });
+        }
         Ok(extra)
     }
 
@@ -189,6 +203,11 @@ impl<S: JsonSender> ConnectDriver<S> {
             .request_for_folder(RequestPurpose::GetChatFolder, folder_id);
         if let Err(err) = self.sender.send_json(&get_chat_folder(extra, folder_id)) {
             self.session.requests.take(extra);
+            // The box waiting on this spec ends in the error with a Retry.
+            self.session
+                .chat_list
+                .folder_spec_errors
+                .insert(folder_id, err.stage_line());
             return Err(err);
         }
         self.session.chat_list.folder_spec_errors.remove(&folder_id);
@@ -250,11 +269,24 @@ impl<S: JsonSender> ConnectDriver<S> {
         let extra = self
             .session
             .request(RequestPurpose::GetChatListsToAddChat, Some(chat_id));
+        self.session
+            .chat_list
+            .chat_lists_for_add
+            .entry(chat_id.0)
+            .or_default()
+            .begin();
         if let Err(err) = self
             .sender
             .send_json(&get_chat_lists_to_add_chat(extra, chat_id))
         {
             self.session.requests.take(extra);
+            // The box ends in the error with a Retry, not in "Loading".
+            self.session
+                .chat_list
+                .chat_lists_for_add
+                .entry(chat_id.0)
+                .or_default()
+                .fail(err.stage_line());
             return Err(err);
         }
         Ok(Some(extra))

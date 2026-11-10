@@ -49,6 +49,8 @@ impl Session {
         extra: Option<RequestId>,
         seq: u64,
     ) {
+        // A box waiting on this request takes its end from here.
+        self.chat_list.dialog_answers.note(pending, &payload);
         match payload {
             // Each domain applies its own payloads
             // (`src/state/domains/<domain>/apply.rs`).

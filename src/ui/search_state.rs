@@ -52,5 +52,17 @@ impl SearchUi {
     }
 }
 
-/// Nothing to say: its state is the account's only app-side.
-impl super::on_screen::Farewell for SearchUi {}
+/// The "Jump to date" box and a date jump in the making live in the
+/// session, which outlives the screen: they close with it, so they do not
+/// come back after switching accounts and back.
+impl super::on_screen::Farewell for SearchUi {
+    fn farewell(
+        app: &mut super::app::QuillApp,
+        _window: &mut Window,
+        _cx: &mut Context<super::app::QuillApp>,
+    ) {
+        if let Some(session) = app.session_mut() {
+            session.clear_date_jump_ui(None);
+        }
+    }
+}

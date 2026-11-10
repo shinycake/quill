@@ -76,11 +76,13 @@ impl Session {
             && pending.purpose == RequestPurpose::GetChatPreview
             && let Some(chat_id) = pending.chat_id
         {
-            self.chat_list.chat_preview_fetch = Some(PreviewHistoryFetch {
-                chat_id,
-                messages: messages.to_vec(),
-                failed: None,
-            });
+            // By chat: a late answer for another chat's peek never
+            // replaces the one on screen.
+            self.chat_list
+                .chat_preview_fetch
+                .entry(chat_id)
+                .or_default()
+                .succeed(messages.to_vec());
             return;
         }
         if let Some(pending) = pending

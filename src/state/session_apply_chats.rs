@@ -662,6 +662,11 @@ impl Session {
         if pending.map(|p| p.purpose) == Some(RequestPurpose::GetChatFolderNewChats)
             && let Some(folder_id) = pending.and_then(|p| p.folder_id)
         {
+            // Asked now that it answered: a request that never left is
+            // asked again, one that answered waits out the update period.
+            self.chat_list
+                .folder_new_chats_asked
+                .insert(folder_id, std::time::Instant::now());
             let ids: Vec<i64> = chat_ids.iter().map(|id| id.0).collect();
             if ids.is_empty() {
                 self.chat_list.folder_new_chats.remove(&folder_id);
@@ -674,8 +679,11 @@ impl Session {
             && let Some(folder_id) = pending.and_then(|p| p.folder_id)
         {
             self.chat_list
-                .folder_link_chats
-                .insert(folder_id, chat_ids.iter().map(|id| id.0).collect());
+                .folder_shares
+                .entry(folder_id)
+                .or_default()
+                .chats
+                .succeed(chat_ids.iter().map(|id| id.0).collect());
         }
         // B10: profile panel lists (groups in common, similar channels,
         // personal channel candidates).

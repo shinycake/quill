@@ -209,3 +209,50 @@ fn removing_one_recent_search_sends_remove_recently_found_chat() {
     assert_eq!(sent[0]["chat_id"], 7);
     assert_eq!(fx.driver.remove_recent_search(ChatId(7)).unwrap(), None);
 }
+
+fn error_for(fx: &mut Fixture, type_name: &str) {
+    let sent = fx.requests(type_name);
+    let extra = sent.last().expect("sent")["@extra"]
+        .as_str()
+        .expect("extra")
+        .to_string();
+    fx.feed(&format!(
+        r#"{{"@type":"error","@extra":"{extra}","code":500,"message":"FLOOD"}}"#
+    ));
+}
+
+#[test]
+fn a_refused_removal_of_a_recent_or_frequent_chat_puts_it_back() {
+    let mut fx = Fixture::new();
+    fx.driver.session.search.search.open = true;
+    fx.driver.session.search.search.recents = true;
+    fx.driver.session.search.search.chat_ids = vec![ChatId(7), ChatId(8)];
+    fx.driver.session.search.search.top_chats = vec![ChatId(11), ChatId(12)];
+    fx.driver.remove_recent_search(ChatId(7)).unwrap();
+    fx.driver.remove_top_chat(ChatId(11)).unwrap();
+    error_for(&mut fx, "removeRecentlyFoundChat");
+    error_for(&mut fx, "removeTopChat");
+    assert_eq!(
+        fx.driver.session.search.search.chat_ids,
+        vec![ChatId(7), ChatId(8)]
+    );
+    assert_eq!(
+        fx.driver.session.search.search.top_chats,
+        vec![ChatId(11), ChatId(12)]
+    );
+}
+
+#[test]
+fn a_refused_frequent_contacts_switch_goes_back_with_its_strip() {
+    let mut fx = Fixture::new();
+    fx.driver.session.search.search.top_chats = vec![ChatId(11), ChatId(12)];
+    fx.driver.set_top_chats_disabled(true).unwrap();
+    assert!(fx.driver.session.search.search.top_chats_disabled);
+    assert!(fx.driver.session.search.search.top_chats.is_empty());
+    error_for(&mut fx, "setOption");
+    assert!(!fx.driver.session.search.search.top_chats_disabled);
+    assert_eq!(
+        fx.driver.session.search.search.top_chats,
+        vec![ChatId(11), ChatId(12)]
+    );
+}

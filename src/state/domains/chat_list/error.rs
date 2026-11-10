@@ -30,31 +30,57 @@ impl Session {
             .zip(err.limit_hint)
             .map(|(op, hint)| limit_kind_for_error(op, hint));
         if let Some(kind) = limit_kind {
-            self.chat_list.folder_limit_hit = Some(kind);
+            // The box that sent the request gets the limit box in its own
+            // window; its own answer (`DialogAnswers`) ends its wait.
+            self.chat_list.folder_limit_hit = Some((kind, pending.map(|p| p.id)));
         }
-        // Share Folder / recommended folders / "Add folder" by link: the
-        // dialog shows the reason instead of spinning.
+        // Share Folder: a failed fetch ends its stage in the error the box
+        // draws with a Retry, and recommended folders say so in the toast.
+        // (The box's own requests answer through `DialogAnswers`.)
+        match pending.map(|p| (p.purpose, p.folder_id)) {
+            Some((RequestPurpose::GetChatFolderInviteLinks, Some(folder_id))) => {
+                self.chat_list
+                    .folder_shares
+                    .entry(folder_id)
+                    .or_default()
+                    .links
+                    .fail(error_reason(err));
+            }
+            Some((RequestPurpose::GetChatsForFolderInviteLink, Some(folder_id))) => {
+                self.chat_list
+                    .folder_shares
+                    .entry(folder_id)
+                    .or_default()
+                    .chats
+                    .fail(error_reason(err));
+            }
+            Some((RequestPurpose::DeleteChatFolderInviteLink, Some(folder_id))) => {
+                // The link left the list at send time: what the box holds is
+                // wrong now, so it shows the error with a Retry that asks
+                // the list again.
+                self.chat_list
+                    .folder_shares
+                    .entry(folder_id)
+                    .or_default()
+                    .links
+                    .fail_dropping_data(error_reason(err));
+            }
+            Some((RequestPurpose::GetRecommendedChatFolders, _)) => {
+                self.chats_state.chat_action_error = Some(error_reason(err));
+            }
+            _ => {}
+        }
+        // The Add to folder box ends in the error with a Retry.
+        if pending.map(|p| p.purpose) == Some(RequestPurpose::GetChatListsToAddChat)
+            && let Some(chat_id) = pending.and_then(|p| p.chat_id)
+        {
+            self.chat_list
+                .chat_lists_for_add
+                .entry(chat_id.0)
+                .or_default()
+                .fail(error_reason(err));
+        }
         match pending.map(|p| p.purpose) {
-            Some(RequestPurpose::CreateChatFolderInviteLink) if limit_kind.is_some() => {}
-            Some(RequestPurpose::AddChatFolderByInviteLink) if limit_kind.is_some() => {}
-            Some(
-                RequestPurpose::GetChatFolderInviteLinks
-                | RequestPurpose::GetChatsForFolderInviteLink
-                | RequestPurpose::CreateChatFolderInviteLink
-                | RequestPurpose::EditChatFolderInviteLink
-                | RequestPurpose::DeleteChatFolderInviteLink
-                | RequestPurpose::GetRecommendedChatFolders,
-            ) => {
-                self.chat_list.folder_share_error = Some(error_reason(err));
-            }
-            Some(
-                RequestPurpose::CheckChatFolderInviteLink
-                | RequestPurpose::AddChatFolderByInviteLink,
-            ) => {
-                if self.chat_list.take_folder_invite_answer(pending) {
-                    self.chat_list.folder_invite_error = Some(error_reason(err));
-                }
-            }
             // Slice CL1: refused chat-list actions surface in the
             // status note (the UI drains `chat_action_error`) —
             // the optimistic state was already rolled back above.
@@ -107,6 +133,23 @@ impl Session {
                     }
                 }
             }
+            // The bar stays: the offer is still open and can be tried again.
+            Some(RequestPurpose::ProcessChatFolderNewChats) => {
+                self.chats_state.chat_action_error = Some(format!(
+                    "{} (error {})",
+                    crate::lang::tr(crate::lang::keys::Q_NOTES_FAILED_PROCESS_NEW_CHATS),
+                    err.code
+                ));
+            }
+            // Asked, so the poll waits out the update period instead of
+            // asking again on every tick.
+            Some(RequestPurpose::GetChatFolderNewChats) => {
+                if let Some(folder_id) = pending.and_then(|p| p.folder_id) {
+                    self.chat_list
+                        .folder_new_chats_asked
+                        .insert(folder_id, std::time::Instant::now());
+                }
+            }
             Some(RequestPurpose::HidePromotion) => {
                 self.chats_state.chat_action_error = Some(format!(
                     "{} (error {})",
@@ -143,6 +186,7 @@ impl Session {
             }
             Some(RequestPurpose::GetArchiveChatListSettings) => {
                 self.chat_list.archive_settings_loading = false;
+                self.chat_list.archive_mute.note_reload_failed();
                 self.chats_state.chat_action_error = Some(format!(
                     "could not load archive settings (error {})",
                     err.code
@@ -190,11 +234,11 @@ impl Session {
         if pending.map(|p| p.purpose) == Some(RequestPurpose::GetChatPreview)
             && let Some(chat_id) = pending.and_then(|p| p.chat_id)
         {
-            self.chat_list.chat_preview_fetch = Some(PreviewHistoryFetch {
-                chat_id,
-                messages: Vec::new(),
-                failed: Some(call_request_error_line(err, "Could not load preview")),
-            });
+            self.chat_list
+                .chat_preview_fetch
+                .entry(chat_id)
+                .or_default()
+                .fail_dropping_data(call_request_error_line(err, "Could not load preview"));
         }
     }
 }

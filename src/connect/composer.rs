@@ -357,7 +357,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         let extra = self
             .session
             .request(RequestPurpose::OpenChat, Some(chat_id));
-        self.sender.send_json(&open_chat(extra, chat_id))?;
+        if let Err(err) = self.sender.send_json(&open_chat(extra, chat_id)) {
+            self.session.requests.take(extra);
+            return Err(err);
+        }
         Ok(extra)
     }
 

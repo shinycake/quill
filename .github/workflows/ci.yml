@@ -54,6 +54,9 @@ jobs:
       # Issue #1401: app-wide handlers need the kit's state in every window.
       - name: window root
         run: python3 scripts/check-window-root.py
+      # A request a box waits on has a box that takes its answer by request id.
+      - name: dialog answers
+        run: python3 scripts/check-dialog-answers.py
       - name: hotspots
         if: github.event_name == 'pull_request'
         run: bash scripts/check-hotspots.sh ${{ github.event.pull_request.base.sha }}

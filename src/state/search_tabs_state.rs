@@ -57,6 +57,17 @@ impl PublicPostLimits {
     }
 }
 
+/// Where the next page of the open message list stands.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SearchPaging {
+    /// Nothing in flight; the next page can be asked.
+    #[default]
+    Idle,
+    Loading,
+    /// The page failed, or the ask was refused (the client is not ready).
+    Failed,
+}
+
 /// Tab-specific state of [`SearchState`].
 #[derive(Debug, Clone, Default)]
 pub struct SearchTabsState {
@@ -66,9 +77,9 @@ pub struct SearchTabsState {
     pub recommended_loaded: bool,
     /// `next_offset` of the newest page of the open query; empty = no more.
     pub next_offset: String,
-    pub loading_more: bool,
-    /// The last page failed; "Load more" says so and tries again.
-    pub more_failed: bool,
+    /// The next page: asked once, and a refused or failed one waits for
+    /// the user's retry instead of being asked on every frame.
+    pub paging: SearchPaging,
     pub limits: Option<PublicPostLimits>,
 }
 
@@ -76,22 +87,31 @@ impl SearchTabsState {
     /// A new query or filter starts a new list.
     pub(crate) fn reset_paging(&mut self) {
         self.next_offset.clear();
-        self.loading_more = false;
-        self.more_failed = false;
+        self.paging = SearchPaging::Idle;
     }
 
     pub fn has_more(&self) -> bool {
         !self.next_offset.is_empty()
     }
 
+    /// A page is in flight.
+    pub fn loading_more(&self) -> bool {
+        self.paging == SearchPaging::Loading
+    }
+
+    /// The last page failed or was refused; "Load more" says so and tries
+    /// again.
+    pub fn more_failed(&self) -> bool {
+        self.paging == SearchPaging::Failed
+    }
+
     /// The offset of the page to ask for, once; `None` while one is in
     /// flight or the list has ended.
     pub(crate) fn begin_more(&mut self) -> Option<String> {
-        if self.loading_more || !self.has_more() {
+        if self.loading_more() || !self.has_more() {
             return None;
         }
-        self.loading_more = true;
-        self.more_failed = false;
+        self.paging = SearchPaging::Loading;
         Some(self.next_offset.clone())
     }
 }
@@ -106,8 +126,7 @@ impl SearchState {
     /// A further page: append the hits not already listed (TDLib may repeat
     /// the boundary message) and move the cursor.
     pub(crate) fn append_page(&mut self, hits: Vec<SearchMessageHit>, next_offset: String) {
-        self.tabs.loading_more = false;
-        self.tabs.more_failed = false;
+        self.tabs.paging = SearchPaging::Idle;
         for hit in hits {
             let seen = self
                 .messages
@@ -122,8 +141,7 @@ impl SearchState {
 
     /// The next page failed; the cursor stays so a retry asks again.
     pub(crate) fn fail_page(&mut self) {
-        self.tabs.loading_more = false;
-        self.tabs.more_failed = true;
+        self.tabs.paging = SearchPaging::Failed;
     }
 
     /// `getRecommendedChats` answer.
@@ -230,9 +248,9 @@ mod tests {
         search.set_first_page_offset("p2".into());
         assert!(search.tabs.begin_more().is_some());
         search.fail_page();
-        assert!(search.tabs.more_failed);
+        assert!(search.tabs.more_failed());
         assert_eq!(search.tabs.begin_more().as_deref(), Some("p2"));
-        assert!(!search.tabs.more_failed);
+        assert!(!search.tabs.more_failed());
     }
 
     #[test]

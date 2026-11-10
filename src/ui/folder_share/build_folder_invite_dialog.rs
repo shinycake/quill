@@ -1,6 +1,7 @@
 //! Methods moved out of `folder_share.rs` to keep files under 1000 lines.
 
 use super::*;
+use crate::ui::dialogs::InviteStage;
 use quill::lang::{keys, tr, tr_with, trn};
 
 impl QuillApp {
@@ -24,9 +25,14 @@ impl QuillApp {
                     .on_close(on_close.clone());
             };
             let muted = cx.theme().muted_foreground;
-            let session = this.session();
-            let info = session.and_then(|s| s.chat_list.folder_invite_info.clone());
-            let error = session.and_then(|s| s.chat_list.folder_invite_error.clone());
+            // The stage says it all: a failed check is the line with Close,
+            // a failed add is the line over the folder it tried to add.
+            let info = state.info().cloned();
+            let error = match &state.stage {
+                InviteStage::Failed(line) => Some(line.clone()),
+                InviteStage::Ready { error, .. } => error.clone(),
+                InviteStage::Checking(_) | InviteStage::Adding { .. } => None,
+            };
             let close_btn = |label: &'static str, cx: &mut Context<QuillApp>| {
                 Button::new("folder-invite-close")
                     .label(label)
@@ -188,7 +194,7 @@ impl QuillApp {
                 );
             }
             let selected = state.selected.len();
-            let adding = state.adding;
+            let adding = matches!(state.stage, InviteStage::Adding { .. });
             let action_label = if exists {
                 trn(keys::FILTERS_BY_LINK_AND_JOIN_BUTTON, selected)
             } else {

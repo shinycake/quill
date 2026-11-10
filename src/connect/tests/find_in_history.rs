@@ -203,7 +203,7 @@ fn from_member_search_filters_by_sender_and_pages_with_total() {
     let more = fx.last_request("searchChatMessages");
     assert_eq!(more["from_message_id"], 40i64 << 20);
     assert_eq!(more["sender_id"]["user_id"], 5);
-    assert!(fx.driver.session.search.chat_search.loading_more);
+    assert!(fx.driver.session.search.chat_search.loading_more());
     fx.feed(&format!(
         r#"{{"@type":"foundChatMessages","@extra":"{}","total_count":120,"next_from_message_id":{},"messages":[{}]}}"#,
         extra_of(&more),
@@ -212,7 +212,7 @@ fn from_member_search_filters_by_sender_and_pages_with_total() {
     ));
     let state = &fx.driver.session.search.chat_search;
     assert_eq!(state.hits.len(), 3);
-    assert!(!state.loading_more);
+    assert!(!state.loading_more());
     // Appending must not steal the selection or restart the jump.
     assert_eq!(state.position_label(), "2 of 120");
     assert_eq!(fx.count("searchChatMessages"), 2);
@@ -416,4 +416,47 @@ fn global_search_filters_reach_search_messages() {
     // Closing the search drops the filters.
     fx.driver.close_search();
     assert!(fx.driver.session.search.search.filters.is_default());
+}
+
+#[test]
+fn a_failed_older_page_waits_for_a_retry_and_keeps_the_results() {
+    let mut fx = Fixture::new();
+    assert!(fx.driver.open_chat_search().unwrap());
+    fx.driver
+        .set_chat_search_sender(Some(MessageSender::User { user_id: 5 }))
+        .unwrap();
+    let search = fx.last_request("searchChatMessages");
+    fx.feed(&format!(
+        r#"{{"@type":"foundChatMessages","@extra":"{}","total_count":120,"next_from_message_id":{},"messages":[{},{}]}}"#,
+        extra_of(&search),
+        40i64 << 20,
+        text_message(50 << 20, 5, "newest from five"),
+        text_message(40 << 20, 5, "older from five"),
+    ));
+
+    fx.driver.load_more_chat_search().unwrap();
+    let more = fx.last_request("searchChatMessages");
+    fx.feed(&format!(
+        r#"{{"@type":"error","@extra":"{}","code":500,"message":"Timeout"}}"#,
+        extra_of(&more),
+    ));
+    let state = &fx.driver.session.search.chat_search;
+    assert!(state.more_failed(), "the strip offers Retry");
+    assert_eq!(state.hits.len(), 2, "the results stay");
+    assert!(!state.can_load_more(), "nothing asks again by itself");
+
+    // Retry asks the same page.
+    let before = fx.count("searchChatMessages");
+    fx.driver.load_more_chat_search().unwrap();
+    assert_eq!(fx.count("searchChatMessages"), before + 1);
+    let retry = fx.last_request("searchChatMessages");
+    assert_eq!(retry["from_message_id"], 40i64 << 20);
+    fx.feed(&format!(
+        r#"{{"@type":"foundChatMessages","@extra":"{}","total_count":120,"next_from_message_id":0,"messages":[{}]}}"#,
+        extra_of(&retry),
+        text_message(30 << 20, 5, "third from five"),
+    ));
+    let state = &fx.driver.session.search.chat_search;
+    assert_eq!(state.hits.len(), 3);
+    assert!(!state.more_failed() && !state.loading_more());
 }
