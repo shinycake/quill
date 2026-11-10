@@ -118,7 +118,16 @@ impl QuillApp {
         action: GroupConfirmAction,
         cx: &mut Context<Self>,
     ) {
-        self.admin.group_confirm_dialog = Some(GroupConfirmDialog { chat_id, action });
+        let targets = if action == GroupConfirmAction::RemoveSelectedChats {
+            self.selected_chat_ids()
+        } else {
+            Vec::new()
+        };
+        self.admin.group_confirm_dialog = Some(GroupConfirmDialog {
+            chat_id,
+            action,
+            targets,
+        });
         self.open_box(DialogKind::GroupConfirm);
         cx.notify();
     }
@@ -170,12 +179,13 @@ impl QuillApp {
             self.admin.group_confirm_dialog = Some(GroupConfirmDialog {
                 chat_id: dialog.chat_id,
                 action: GroupConfirmAction::BroadcastUpgrade,
+                targets: Vec::new(),
             });
             cx.notify();
             return;
         }
         // The chats still in the list, read before the live borrow.
-        let selected_chats = self.selected_chat_ids();
+        let selected_chats = dialog.targets.clone();
         // A basic group must be left before its history goes.
         let is_basic_group = self
             .session()

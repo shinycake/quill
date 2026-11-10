@@ -84,4 +84,7 @@ pub enum GroupConfirmAction {
 pub struct GroupConfirmDialog {
     pub(crate) chat_id: ChatId,
     pub(crate) action: GroupConfirmAction,
+    /// The chats a bulk action acts on, captured when the box opened (the
+    /// selection can change while it is up); empty for every other action.
+    pub(crate) targets: Vec<ChatId>,
 }
