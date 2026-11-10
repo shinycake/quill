@@ -94,27 +94,44 @@ impl QuillApp {
         invite_link: &str,
         cx: &mut Context<Self>,
     ) {
-        let Some(dialog) = self
+        let Some(open) = self
+            .admin
+            .group_settings_dialog
+            .as_ref()
+            .filter(|d| d.chat_id == chat_id)
+            .map(|d| d.details_link.as_deref() == Some(invite_link))
+        else {
+            return;
+        };
+        // The details open once the members request is out: a refused or
+        // failed send leaves them closed instead of loading for good.
+        let shown = if open {
+            if let Some(live) = self.live.as_mut() {
+                live.driver.close_chat_invite_link_members(chat_id);
+            }
+            None
+        } else {
+            let sent = match self.live.as_mut() {
+                Some(live) => live
+                    .driver
+                    .open_chat_invite_link_members(chat_id, invite_link)
+                    .is_ok_and(|sent| sent.is_some()),
+                None => true,
+            };
+            if !sent {
+                self.set_note(StatusNote::error(tr(
+                    keys::Q_OPS_COULD_NOT_LOAD_INVITE_LINK_MEMBERS,
+                )));
+            }
+            sent.then(|| invite_link.to_owned())
+        };
+        if let Some(dialog) = self
             .admin
             .group_settings_dialog
             .as_mut()
             .filter(|d| d.chat_id == chat_id)
-        else {
-            return;
-        };
-        let open = dialog.details_link.as_deref() == Some(invite_link);
-        if open {
-            dialog.details_link = None;
-            if let Some(live) = self.live.as_mut() {
-                live.driver.close_chat_invite_link_members(chat_id);
-            }
-        } else {
-            dialog.details_link = Some(invite_link.to_owned());
-            if let Some(live) = self.live.as_mut() {
-                let _ = live
-                    .driver
-                    .open_chat_invite_link_members(chat_id, invite_link);
-            }
+        {
+            dialog.details_link = shown;
         }
         cx.notify();
     }
@@ -160,7 +177,9 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let app = cx.entity().downgrade();
+        // The alert acts for the account it was opened for, and only while
+        // the Group Settings box still shows this chat.
+        let app = self.screen_app(cx);
         window.open_alert_dialog(cx, move |alert, _, _| {
             let app = app.clone();
             alert
@@ -171,6 +190,9 @@ impl QuillApp {
                 .show_cancel(true)
                 .on_ok(move |_, _, cx| {
                     let _ = app.update(cx, |this, cx| {
+                        if this.invite_settings_of(chat_id).is_none() {
+                            return;
+                        }
                         this.screen.connection.set_note_for(
                             &this.screen.windows,
                             match this.live.as_mut() {

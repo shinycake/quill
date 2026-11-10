@@ -109,6 +109,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     pub fn delete_all_revoked_admin_links(
         &mut self,
         chat_id: ChatId,
+        admin: i64,
     ) -> Result<Option<RequestId>, ConnectSendError> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
@@ -122,6 +123,11 @@ impl<S: JsonSender> ConnectDriver<S> {
         else {
             return Ok(None);
         };
+        // The box asked about one admin's links: the page open now must
+        // still be that admin's.
+        if creator != admin {
+            return Ok(None);
+        }
         if !self.session.chat_can_invite_users(chat_id) || !self.session.chat_is_owner(chat_id) {
             return Ok(None);
         }
