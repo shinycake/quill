@@ -46,6 +46,7 @@ pub(in crate::ui) fn session_history_row(
     // Settings → Appearance: font size + bubble/plain style.
     look: BubbleLook,
     corner: CornerActions,
+    reveal: Option<crate::ui::text_reveal::TextReveal>, // `bot_stream`
     cx: &mut Context<QuillApp>,
 ) -> AnyElement {
     // Stickers, dice, round video messages and emoji-only messages (the ones
@@ -689,6 +690,7 @@ pub(in crate::ui) fn session_history_row(
             session.is_none_or(|s| s.settings.media_prefs.big_emoji),
             reserve_footer.then(|| footer_meta.reserve(footer_reserve(message.is_outgoing))),
             room,
+            reveal,
             cx,
         )),
         // Slice bots-games: the game card is the message's primary

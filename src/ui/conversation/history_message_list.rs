@@ -160,7 +160,7 @@ impl QuillApp {
             // Deleted messages dissolve in place before they go.
             self.merge_vanishing(&mut messages);
             let (mut rows, seed) = self.build_rows(messages, Default::default(), None, &row_build);
-            if let Some(row) = self.streaming_bot_row(&seed, &row_build, cx) {
+            if let Some(row) = self.streaming_bot_row(&seed, &row_build) {
                 rows.push(row);
             }
             // kit Phase 3: sync the scroller state with the new row list.

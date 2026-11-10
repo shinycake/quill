@@ -169,6 +169,7 @@ pub(super) fn sponsored_message_row(
             false,
             None,
             room,
+            None,
             cx,
         )),
         MessageContent::Photo(photo) => Some(
