@@ -34,11 +34,17 @@ impl QuillApp {
             } else {
                 MemberListFilter::Search
             };
-            session
-                .groups
-                .supergroup_members
-                .get(&(chat_id.0, filter))
-                .cloned()
+            // Only the page asked with this query: an older search's
+            // rows never show under the new text.
+            (session.groups.member_query((chat_id.0, filter)) == searched)
+                .then(|| {
+                    session
+                        .groups
+                        .supergroup_members
+                        .get(&(chat_id.0, filter))
+                        .cloned()
+                })
+                .flatten()
         });
         let mut panel = div()
             .id("admin-promote-dialog")
