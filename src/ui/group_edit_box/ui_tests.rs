@@ -315,3 +315,71 @@ fn the_history_box_hands_its_choice_to_save(cx: &mut TestAppContext) {
     assert_eq!(edit, Some((None, Some(true))));
     assert!(shell.read_with(vcx, |s, _| s.open_dialog == Some(DialogKind::GroupEditBox)));
 }
+
+fn open_box(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> ChatId {
+    app.read_with(vcx, |app, _| {
+        app.group_edit_box().map(|edit| edit.chat_id).expect("box")
+    })
+}
+
+#[gpui_kit::test]
+fn a_refused_save_keeps_the_box_open_with_the_reason(cx: &mut TestAppContext) {
+    use super::SaveStage;
+    let (app, _shell, mut vcx) = open_demo(cx, "ready-group-edit-box");
+    let vcx = &mut vcx;
+    app.update(vcx, |app, _| {
+        if let Some(edit) = app.admin.group_edit_box.as_mut() {
+            edit.saving = SaveStage::Refused("no right".into());
+        }
+    });
+    assert!(
+        app.read_with(vcx, |app, _| app.group_edit_box().is_some()),
+        "a send the driver refused is not a save that went through"
+    );
+}
+
+#[gpui_kit::test]
+fn a_request_without_a_field_that_failed_keeps_the_box_open(cx: &mut TestAppContext) {
+    use super::SaveStage;
+    use quill::state::RequestPurpose;
+    let (app, _shell, mut vcx) = open_demo(cx, "ready-group-edit-box");
+    let vcx = &mut vcx;
+    let chat = open_box(&app, vcx);
+    app.update(vcx, |app, _| {
+        let id = app
+            .demo_session
+            .as_mut()
+            .map(|session| session.request(RequestPurpose::LeaveChat, Some(chat)))
+            .expect("session");
+        if let Some(edit) = app.admin.group_edit_box.as_mut() {
+            edit.saving = SaveStage::Saving(vec![id]);
+        }
+        assert!(app.group_edit_box().is_some(), "still out");
+        if let Some(session) = app.demo_session.as_mut() {
+            session.requests.take(id);
+            session.requests.record_failure(id, "CHAT_ADMIN_REQUIRED".into());
+        }
+        assert!(
+            app.group_edit_box().is_some(),
+            "answered with an error: the box stays"
+        );
+        if let Some(session) = app.demo_session.as_mut() {
+            session.requests.take(id);
+        }
+    });
+    // Answered without an error: the box counts as saved.
+    app.update(vcx, |app, _| {
+        let id = app
+            .demo_session
+            .as_mut()
+            .map(|session| session.request(RequestPurpose::LeaveChat, Some(chat)))
+            .expect("session");
+        if let Some(edit) = app.admin.group_edit_box.as_mut() {
+            edit.saving = SaveStage::Saving(vec![id]);
+        }
+        if let Some(session) = app.demo_session.as_mut() {
+            session.requests.take(id);
+        }
+        assert!(app.group_edit_box().is_none());
+    });
+}

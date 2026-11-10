@@ -27,7 +27,7 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use quill::ids::ChatId;
 use quill::lang::{keys, tr, tr_with};
-use quill::state::Submit;
+use quill::state::{Submit, SubmitView};
 use quill::permissions_box::{
     PermissionsSent,
     BOOSTS_STOPS, MEDIA, Permission, PermissionsSave, SLOW_MODE_STOPS, bottom_rows,
@@ -144,6 +144,35 @@ impl QuillApp {
             }
         }
         cx.notify();
+    }
+
+    /// The permissions box leaves its Sending stage on TDLib's answer: it
+    /// closes with its note, or stays with the reason.
+    pub(in crate::ui) fn settle_permissions_dialog(&mut self, cx: &mut Context<Self>) {
+        let requests = self.session().map(|session| &session.requests);
+        let Some(view) = self
+            .admin
+            .permissions_dialog
+            .as_ref()
+            .map(|dialog| dialog.submit.view(requests))
+        else {
+            return;
+        };
+        match view {
+            SubmitView::Done => {
+                self.admin.permissions_dialog = None;
+                self.set_note(StatusNote::silent(tr(keys::Q_PEOPLE_PERMISSIONS_UPDATED)));
+                cx.notify();
+            }
+            SubmitView::Failed(reason) => {
+                if let Some(dialog) = self.admin.permissions_dialog.as_mut()
+                    && dialog.submit.keep_failure(reason)
+                {
+                    cx.notify();
+                }
+            }
+            SubmitView::Editing | SubmitView::Sending => {}
+        }
     }
 
     /// "Exceptions" and "Removed users": the member list on that tab,

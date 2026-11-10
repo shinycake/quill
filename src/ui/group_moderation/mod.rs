@@ -385,27 +385,6 @@ impl QuillApp {
             .restrict_dialog
             .as_ref()
             .map(|dialog| dialog.submit.view(requests));
-        let permissions = self
-            .admin
-            .permissions_dialog
-            .as_ref()
-            .map(|dialog| dialog.submit.view(self.session().map(|s| &s.requests)));
-        match permissions {
-            Some(SubmitView::Done) => {
-                self.admin.permissions_dialog = None;
-                self.set_note(StatusNote::silent(tr(keys::Q_PEOPLE_PERMISSIONS_UPDATED)));
-                cx.notify();
-            }
-            Some(SubmitView::Failed(reason)) => {
-                if let Some(dialog) = self.admin.permissions_dialog.as_mut()
-                    && dialog.submit != quill::state::Submit::Failed(reason.clone())
-                {
-                    dialog.submit = quill::state::Submit::Failed(reason);
-                    cx.notify();
-                }
-            }
-            _ => {}
-        }
         match admin {
             Some(SubmitView::Done) => {
                 let key = match self.admin.admin_dialog.take().map(|dialog| dialog.kind) {
