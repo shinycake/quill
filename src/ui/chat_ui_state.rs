@@ -88,11 +88,9 @@ pub(crate) struct ChatUi {
     pub(super) send_as_open: bool,
     /// The copy menu of a phone number, card number or date.
     pub(super) link_popup: Option<super::entity_links::LinkPopup>,
-    /// Phase 3.3: `/` command menu state. Open while the composer text
-    /// ends with a `/`-led token and the open bot chat has commands;
-    /// `command_menu_selected` is the highlighted row (Up/Down/Enter).
-    pub(super) command_menu_open: bool,
-    pub(super) command_menu_selected: usize,
+    /// The bot command list above the composer: closed, opened by a typed
+    /// `/` token, or opened by the bot's Menu button.
+    pub(super) command_menu: super::composer::CommandMenu,
     /// Bots slice: `@botname query` inline-mode results dropdown above
     /// the composer. `inline_results_selected` is the highlighted row
     /// (Up/Down/Enter). `inline_query_armed` is the `(username, query)` a

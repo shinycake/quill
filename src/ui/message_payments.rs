@@ -22,9 +22,10 @@ use quill::telegram::envelope::{
 pub(super) fn inline_keyboard(
     message: &HistoryMessage,
     fast_buttons: bool,
+    session: Option<&quill::state::Session>,
     cx: &mut Context<QuillApp>,
 ) -> Option<AnyElement> {
-    let markup = markup_keyboard(message, fast_buttons, cx);
+    let markup = markup_keyboard(message, fast_buttons, session, cx);
     // A suggested post's Decline / Accept / Suggest Changes rows come after
     // the message's own rows (tdesktop `HistoryMessageReplyMarkup`
     // appends them).
@@ -51,6 +52,7 @@ pub(super) fn inline_keyboard(
 fn markup_keyboard(
     message: &HistoryMessage,
     fast_buttons: bool,
+    session: Option<&quill::state::Session>,
     cx: &mut Context<QuillApp>,
 ) -> Option<AnyElement> {
     // M2: an ephemeral payload carries its own `reply_markup`, shown
@@ -91,6 +93,11 @@ fn markup_keyboard(
             .flex()
             .gap_1();
         for (button_index, button) in row.iter().enumerate() {
+            let waiting = callback_key(&button.kind).is_some_and(|key| {
+                session.is_some_and(|session| {
+                    session.callback_button_waiting(message.chat_id, message.id, &key)
+                })
+            });
             let element = inline_keyboard_button(
                 message.chat_id,
                 message.id,
@@ -98,6 +105,7 @@ fn markup_keyboard(
                 button_index,
                 button,
                 game_short_name,
+                waiting,
                 cx,
             );
             let number = fast_buttons
@@ -150,7 +158,10 @@ fn fast_button_cell(
 /// short name (schema:7743); `User` opens the private chat with the user;
 /// `SwitchInline` inserts the query into the current chat's composer;
 /// `CopyText` copies to the clipboard. `Buy` stays disabled — payments are
-/// a later slice; unknown types never crash.
+/// a later slice; unknown types never crash. `waiting`: a callback press
+/// of this button waits for the bot, so it spins and takes no presses
+/// (tdesktop draws the pressed button loading until the answer).
+#[allow(clippy::too_many_arguments)]
 pub(super) fn inline_keyboard_button(
     chat_id: ChatId,
     message_id: MessageId,
@@ -158,6 +169,7 @@ pub(super) fn inline_keyboard_button(
     button_index: usize,
     button: &InlineKeyboardButton,
     game_short_name: Option<&str>,
+    waiting: bool,
     cx: &mut Context<QuillApp>,
 ) -> Button {
     let label = if button.text.is_empty() {
@@ -175,7 +187,8 @@ pub(super) fn inline_keyboard_button(
         message_id.0
     ))
     .label(label)
-    .tooltip(button_tooltip(button));
+    .tooltip(button_tooltip(button))
+    .loading(waiting);
     let element = inline_keyboard_style(element, button.style);
     if !button_is_pressable(&button.kind) {
         return element.disabled(true);
@@ -192,6 +205,18 @@ pub(super) fn inline_keyboard_button(
             cx,
         );
     }))
+}
+
+/// The press key of a button whose press asks the bot (`getCallbackQueryAnswer`).
+fn callback_key(kind: &InlineKeyboardButtonType) -> Option<quill::state::CallbackButtonKey> {
+    match kind {
+        InlineKeyboardButtonType::Callback { data }
+        | InlineKeyboardButtonType::CallbackWithPassword { data } => {
+            Some(quill::state::CallbackButtonKey::Data(data.clone()))
+        }
+        InlineKeyboardButtonType::CallbackGame => Some(quill::state::CallbackButtonKey::Game),
+        _ => None,
+    }
 }
 
 /// The look of an inline keyboard button for its `style`; also used by

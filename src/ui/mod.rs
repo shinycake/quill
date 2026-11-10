@@ -227,6 +227,7 @@ mod auth_registration;
 mod auth_ui;
 mod boost_box_ui;
 mod boosts_overview;
+mod bot_alert;
 mod bot_create_dialog;
 mod bot_edit_dialog;
 mod bot_pending;

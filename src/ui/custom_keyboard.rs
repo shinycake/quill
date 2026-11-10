@@ -57,6 +57,48 @@ impl QuillApp {
         )
     }
 
+    /// The composer's bot button: the keyboard toggle while the open chat
+    /// has a reply keyboard, else tdesktop's `/` button
+    /// (`_botCommandStart`), shown in an empty field of a chat whose bots
+    /// have commands. Unlike the Menu button, it writes `/` into the field,
+    /// which opens the typed command list.
+    pub(super) fn composer_bot_button(&self, cx: &mut Context<Self>) -> Option<Button> {
+        if let Some(toggle) = self.keyboard_toggle_button(cx) {
+            return Some(toggle);
+        }
+        let session = self.session()?;
+        let chat_id = session.open_chat?;
+        let has_commands = session
+            .command_menu_items(chat_id)
+            .iter()
+            .any(|item| item.quick_reply.is_none());
+        if !has_commands
+            || self.chat_ui.is_editing()
+            || self.open_chat_force_reply().is_some()
+            || !self.pending_attachments().is_empty()
+            || !self.composer.read(cx).value().is_empty()
+        {
+            return None;
+        }
+        let label = tr(keys::BOT_COMMANDS_START);
+        Some(
+            Button::new("composer-bot-command-start")
+                .icon(gpui_kit::assets::IconName::SquareSlash)
+                .ghost()
+                .tooltip(label)
+                .accessibility_label(label)
+                .on_click(cx.listener(|this, _, window, cx| {
+                    this.close_command_menu(cx);
+                    this.composer.update(cx, |input, cx| {
+                        input.set_value("/", window, cx);
+                        input.focus(window, cx);
+                        input.set_selected_range(1..1, cx);
+                    });
+                    this.sync_command_menu(cx);
+                })),
+        )
+    }
+
     /// B1: the custom keyboard panel rendered above the composer, or
     /// `None` when the open chat has no active `replyMarkupShowKeyboard`.
     /// `resize_keyboard` renders compact; `is_persistent` has no visual

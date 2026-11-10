@@ -265,7 +265,7 @@ pub(in crate::ui) fn session_history_row(
                 target.message_id == message.id && quill::fast_buttons::is_enabled(target.bot_id)
             })
     });
-    let keyboard = inline_keyboard(message, fast_buttons, cx);
+    let keyboard = inline_keyboard(message, fast_buttons, session, cx);
     let has_caption = match &message.content {
         MessageContent::Photo(photo) => !photo.caption.is_empty(),
         MessageContent::Document(doc) => !doc.caption.is_empty(),

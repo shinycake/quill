@@ -393,8 +393,9 @@ impl QuillApp {
                                 .when_some(self.scheduled_messages_button(cx), |row, button| {
                                     row.child(button)
                                 })
-                                // Show / hide the bot's reply keyboard.
-                                .when_some(self.keyboard_toggle_button(cx), |row, button| {
+                                // Show / hide the bot's reply keyboard, or
+                                // tdesktop's `/` button.
+                                .when_some(self.composer_bot_button(cx), |row, button| {
                                     row.child(button)
                                 })
                                 .when_some(self.suggest_post_toggle(cx), |row, button| {

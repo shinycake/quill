@@ -140,7 +140,7 @@ impl QuillApp {
             // tdesktop: `_replyTo` keeps Up for scrolling.
             || self.chat_ui.has_reply()
             || !self.pending_attachments().is_empty()
-            || self.chat_ui.command_menu_open
+            || self.chat_ui.command_menu.is_open()
             || !self.mention_menu_items(cx).is_empty()
         {
             return false;
