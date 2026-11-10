@@ -4077,3 +4077,83 @@ and 10 are widget items another fixer owns).
   (`cancel_inline_opening_unless_chat`, an invite preview, a text or typed
   link), or when another account is on screen (10-119). No timer: a lookup
   that never answers is the deep-link flow's own concern.
+
+### Sweep fixes (s3-messages-1)
+
+- **The sticker panel has a stage per list and one for the set.**
+  `StickerPanel::failed`, `loading_sets`, `loading_set`, `set_request`,
+  `failed_set_id` and `loaded_set_id` are gone. `StickerPanel::lists` holds one
+  `Fetch<()>` per tab (installed, recent, favorites, trending, archived,
+  search): begun when the request goes out, ended by its answer in
+  `apply_stickers_payload` or its error in `apply_stickers_error`, so one
+  tab's failure no longer shows on another and a started request no longer
+  clears an earlier failure (02-225). A failed change (favorite add or remove,
+  clear recent, reorder, set install or removal) is a `creator_note` toast, not
+  a list failure (05-137). `StickerPanel::set` is `StickerSetStage` (`Idle`,
+  `Loading { set_id, request }`, `Ready`, `Failed`): an answer or error applies
+  only to the request the panel waits for, choosing another set asks for it at
+  once instead of waiting for the first answer, and a failed set is asked again
+  when the panel opens again (05-266). `refresh_stale_panels` clears each stale
+  flag only after its refetch went out, so a locked window or a refused send
+  keeps the rest (02-223). The category strip is `Fetch<Vec<EmojiCategory>>`
+  (`Failed` on an error answer, cleared when the panel opens again, never asked
+  again from a render) (02-220). A refused manager step drops only itself and
+  tells the user; the saved commits behind it stay queued (02-221).
+- **Status choices stop with their panel.** `PickerUi`'s farewell closes the
+  panel through `set_media_panel_mode`, which tells the session to stop
+  resolving status choices (03-033; 02-052 is the same bug: the chat look
+  box's `chat_status_open` is already closed by `DialogUi`'s farewell).
+- **Lookups that may pass are asked again.** `MessageEffects::lookups` holds
+  each effect as `Loading`, `Gone` or `Waiting { until }`: only 400 and 404 are
+  terminal, every other error and a refused send wait 5 s, doubling to 5 min,
+  and an ask whose request is gone is asked again (03-091, 03-092).
+  `ReplyTarget::Retry { until }` does the same for `getRepliedMessage`: the
+  strip keeps "Loading…" instead of "Deleted message" (05-258).
+- **AI answers are matched to their ask.** `Session::note_ai_ask` records
+  (chat, draft slot, text) by request id when the composer action goes out;
+  the answer joins `AiComposer::answers` with its ask, and the window applies it
+  only while its composer shows that chat, slot and text, else a note says
+  the draft changed (02-146, 05-106). A newer ask on a slot replaces an older
+  one; an error drops its ask.
+- **Notes queue.** `Notes` (state/domains/messages/notes.rs) replaces the seven
+  `Option<String>` one-shot slots; the drains show every note, oldest first
+  (05-103).
+- **Answers match what asked.** The Report flow keeps the request in
+  `Checking { request }` and `Sending { request }`; an answer or error of a
+  closed flow's request changes nothing (05-236). `MenuActions` keeps
+  `getMessageProperties` answers by (chat, message), so a gallery row's ask no
+  longer overwrites the menu's; a failed ask hides the gated rows (05-104). A
+  failed `getSharingProtection` opens the "Send Request?" box instead of
+  turning protection off (05-105; tdesktop's source was not at hand, so this is
+  the safe choice, and `noforwards-requests.md` says so). A START parameter
+  leaves `bot_start_params` when TDLib answers the start message, so a refusal
+  keeps it (08-026).
+- **Forced replies per chat.** `ForceReplies` keeps one target per chat and
+  `per_window_upkeep` drains the ones for the window's chat; a target no window
+  shows is dropped (05-215).
+- **Failed sends are not forgotten.** A draft save that cannot be sent is kept
+  as the pending draft for the next flush, typing or chat leave (02-026). A
+  caption chosen for a pending upload keeps the caption it replaced, puts it
+  back with a note when the edit cannot be sent, and goes with its message
+  when that leaves the history (02-145). The bot editor drops its half-started
+  state when the second load cannot be sent (02-164). A pasted image goes into
+  a folder of the private work root (`quill-send-photos`, swept, removed at
+  exit), made new with mode 0600 (02-004). The same quick-reply change or send
+  is not sent twice while the first is on its way (02-190). `stop_poll` uses
+  `loaded_message` like the other poll calls (02-195). `resendMessages` goes
+  through the paid guard (07-002). `createForumTopic` also lets the chat list
+  row ask for its topics again (05-169). A failed game button press is noted
+  (05-036).
+- **Boxes close on the answer.** The Add-bot and Share-game boxes stay in
+  `BoxSend::Sending { request }` and close on the answer (`SendWatch`, settled
+  in `ingest`); an administrator's start payload goes after the promotion's
+  answer; an error leaves the box open with the reason (08-011). The Create Bot
+  dialog cannot be closed while "Creating…", so the answer always reports
+  (08-021). The Send To switch is `SendToMenu` (`Unread`, `Reading`, `Known`,
+  `Applying { want, queued }`): the shell is read once off the UI thread and a
+  click during a write waits, so the last click decides (04-087).
+- **Tests.** `connect/tests/sweep_s3_messages_1.rs` (a sender that refuses
+  sends), `ai_tools`, `message_menu`, `quick_replies`, `private_sharing`,
+  `deferred_caption`, the effect and reply-target units, `paid_messages_guard`,
+  `notes`, `send_watch` and `send_to_menu_section`. None waits on time: waits
+  are compared against explicit instants.

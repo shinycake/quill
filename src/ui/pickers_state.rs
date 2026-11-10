@@ -108,11 +108,7 @@ impl PickerUi {
 /// which tells the session to stop (the replaced `OnScreen` would reset the
 /// mode without it).
 impl super::on_screen::Farewell for PickerUi {
-    fn farewell(
-        app: &mut QuillApp,
-        _: &mut gpui_kit::Window,
-        _: &mut gpui_kit::Context<QuillApp>,
-    ) {
+    fn farewell(app: &mut QuillApp, _: &mut gpui_kit::Window, _: &mut gpui_kit::Context<QuillApp>) {
         app.set_media_panel_mode(super::media_panel::PanelMode::Closed);
     }
 }

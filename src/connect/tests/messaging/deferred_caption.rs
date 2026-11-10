@@ -222,3 +222,33 @@ fn up_skips_forwarded_messages_and_goes_on_to_older_ones() {
     assert_eq!(edit.message_id, MessageId(50));
     let _ = std::fs::remove_dir_all(&s.dir);
 }
+
+#[test]
+fn a_deferred_caption_keeps_the_caption_it_replaced_and_goes_with_its_message() {
+    let mut s = photo_in_flight(SendOptions::default());
+    let edit = s.driver.session.last_editable_message(ChatId(7)).unwrap();
+    s.driver.edit_pending_caption(&edit, "second").unwrap();
+    s.driver.edit_pending_caption(&edit, "third").unwrap();
+    // The caption from before the first choice is what a failed edit
+    // puts back.
+    let held = &s.driver.session.messages.deferred_captions;
+    assert_eq!(held.len(), 1);
+    assert_eq!(
+        (held[0].text.as_str(), held[0].previous.as_str()),
+        ("third", "first")
+    );
+
+    // The message leaves the history with no send outcome (the chat was
+    // deleted): its caption has nothing to wait for.
+    s.driver
+        .session
+        .histories
+        .get_mut(&7)
+        .map(|history| history.messages.remove(&PENDING));
+    let unrelated = photo_json("0", 62, "other", false).replace(r#","@extra":"0""#, "");
+    s.ingest(&format!(
+        r#"{{"@type":"updateNewMessage","message":{unrelated}}}"#
+    ));
+    assert!(s.driver.session.messages.deferred_captions.is_empty());
+    let _ = std::fs::remove_dir_all(&s.dir);
+}

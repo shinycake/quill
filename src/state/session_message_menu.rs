@@ -14,14 +14,18 @@ use crate::text::TextEntityKind;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MessageReportStage {
     /// The first `reportChat` is in flight, as `request`.
-    Checking { request: RequestId },
+    Checking {
+        request: RequestId,
+    },
     PickOption {
         title: String,
         options: Vec<ReportOption>,
     },
     /// A follow-up (reason chosen or details sent) is in flight, as
     /// `request`.
-    Sending { request: RequestId },
+    Sending {
+        request: RequestId,
+    },
     TextRequired {
         option_id: String,
         is_optional: bool,

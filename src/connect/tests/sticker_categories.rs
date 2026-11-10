@@ -16,7 +16,13 @@ fn category_source(
     driver: &ConnectDriver<Arc<RecordingSender>>,
     index: usize,
 ) -> EmojiCategorySource {
-    driver.session.stickers.emoji.sticker_categories.data().unwrap()[index]
+    driver
+        .session
+        .stickers
+        .emoji
+        .sticker_categories
+        .data()
+        .unwrap()[index]
         .source
         .clone()
 }
@@ -43,7 +49,13 @@ fn category_strip_loads_once_and_each_category_searches_its_own_way() {
     driver
         .ingest(copy_and_parse(&answer.to_string(), &seq, &sink).unwrap())
         .unwrap();
-    let categories = driver.session.stickers.emoji.sticker_categories.data().unwrap();
+    let categories = driver
+        .session
+        .stickers
+        .emoji
+        .sticker_categories
+        .data()
+        .unwrap();
     assert_eq!(categories.len(), 2);
     assert_eq!(categories[0].source, EmojiCategorySource::Premium);
     assert_eq!(

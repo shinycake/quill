@@ -1,10 +1,10 @@
 //! The messages domain: history, sending, editing, reactions, polls, translation and message menus.
 mod ai_asks;
 mod ai_compose;
-mod menu_actions;
-mod notes;
 mod apply;
 mod error;
+mod menu_actions;
+mod notes;
 mod purpose;
 mod state;
 

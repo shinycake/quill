@@ -39,14 +39,26 @@ fn sticker_gif_denials_surface_for_requests_and_async_failures_without_raw_text(
                     .to_string(),
             );
             assert_eq!(
-                session.messages.send_permission_error.take_all().into_iter().next().as_deref(),
+                session
+                    .messages
+                    .send_permission_error
+                    .take_all()
+                    .into_iter()
+                    .next()
+                    .as_deref(),
                 Some(notice)
             );
             assert!(session.requests.get(extra).is_none());
         }
         apply_json(&mut session,&seq,&sink,&json!({"@type":"updateMessageSendFailed","old_message_id":-1,"message":{"id":88,"chat_id":1,"is_outgoing":true,"sending_state":{"@type":"messageSendingStateFailed","can_retry":false},"content":{"@type":"messageText","text":{"@type":"formattedText","text":"send failed","entities":[]}}},"error":{"code":403,"message":message}}).to_string());
         assert_eq!(
-            session.messages.send_permission_error.take_all().into_iter().next().as_deref(),
+            session
+                .messages
+                .send_permission_error
+                .take_all()
+                .into_iter()
+                .next()
+                .as_deref(),
             Some(notice)
         );
         let row = &session.histories[&1].messages[&88];

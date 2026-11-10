@@ -3,9 +3,9 @@ mod apply;
 mod commands;
 mod error;
 mod force_reply;
-mod send_watch;
 mod owned;
 mod purpose;
+mod send_watch;
 mod state;
 mod widgets;
 

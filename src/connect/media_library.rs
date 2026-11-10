@@ -173,7 +173,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        self.session.messages.menu_actions.forget(chat_id, message_id);
+        self.session
+            .messages
+            .menu_actions
+            .forget(chat_id, message_id);
         self.ask_message_menu_actions(chat_id, message_id)
     }
 

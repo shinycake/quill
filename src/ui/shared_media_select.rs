@@ -40,17 +40,16 @@ impl QuillApp {
     fn shared_media_actions(&self, message_id: MessageId) -> Option<MessageActions> {
         let session = self.session()?;
         let chat = session.media.shared_media.chat_id?;
-        session
-            .messages
-            .menu_actions
-            .get(chat, message_id)
+        session.messages.menu_actions.get(chat, message_id)
     }
 
     /// Ask what a hovered row allows, so its menu and a tick know before
     /// they are used. The answer lands in the session a moment later.
     fn shared_media_hover(&mut self, message_id: MessageId, hovered: bool, cx: &mut Context<Self>) {
         // The row just left was answered by now: its tick learns the answer.
-        let known = self.session().map(|session| session.messages.menu_actions.clone());
+        let known = self
+            .session()
+            .map(|session| session.messages.menu_actions.clone());
         if let (Some(known), Some(state)) = (known, self.shared_media_gallery_mut()) {
             let mut changed = false;
             if let Some(chat) = state.chat_id {

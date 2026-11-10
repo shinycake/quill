@@ -62,7 +62,10 @@ fn fix_text_with_ai_applies_fixed_text() {
     assert_eq!(answers.len(), 1);
     assert_eq!(answers[0].ask.chat_id, ChatId(7));
     assert_eq!(answers[0].ask.source, "teh draft");
-    assert_eq!(answers[0].body, crate::state::AiBody::Text("the draft".into()));
+    assert_eq!(
+        answers[0].body,
+        crate::state::AiBody::Text("the draft".into())
+    );
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -240,11 +243,19 @@ fn ai_flood_premium_error_surfaces_premium_line() {
     let err = driver
         .session
         .messages
-        .ai_error.take_all().into_iter().next()
+        .ai_error
+        .take_all()
+        .into_iter()
+        .next()
         .expect("AI error stored");
     assert!(err.contains("Premium"), "premium line surfaced, got: {err}");
     // Never applied as a success.
-    assert!(driver.session.take_ai_answers_for(Some(ChatId(7))).is_empty());
+    assert!(
+        driver
+            .session
+            .take_ai_answers_for(Some(ChatId(7)))
+            .is_empty()
+    );
     let _ = std::fs::remove_dir_all(&dir);
 }
 

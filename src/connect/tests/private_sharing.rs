@@ -177,7 +177,10 @@ fn a_failed_check_asks_before_sending_a_request() {
     // Who protects the chat is unknown, so nothing goes out until the user
     // confirms the "Send Request?" box.
     assert_eq!(sent(&f).len(), count);
-    assert_eq!(f.1.session.groups.private_sharing.request_box_chat(), Some(CHAT));
+    assert_eq!(
+        f.1.session.groups.private_sharing.request_box_chat(),
+        Some(CHAT)
+    );
     f.1.apply_resolved_enable_sharing().unwrap();
     assert_eq!(sent(&f).len(), count);
     cleanup(f);

@@ -744,7 +744,10 @@ fn scheduling_edit_error_keeps_the_entry_and_surfaces() {
         ),
     );
     assert_eq!(session.messages.scheduled_messages.len(), 1);
-    let err = session.messages.resend_error.take_all()
+    let err = session
+        .messages
+        .resend_error
+        .take_all()
         .pop()
         .expect("error surfaced");
     assert!(err.contains("Could not send the message now"), "{err}");
@@ -775,4 +778,42 @@ fn has_scheduled_messages_tracks_chat_and_update() {
         r#"{"@type":"updateChatHasScheduledMessages","chat_id":15,"has_scheduled_messages":true}"#,
     );
     assert!(session.chat_has_scheduled_messages(ChatId(15)));
+}
+
+#[test]
+fn force_replies_of_two_chats_in_one_batch_both_wait_for_their_windows() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(1);
+    for (chat, id) in [(21, 401), (22, 402), (21, 403)] {
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"updateNewMessage","message":{{"id":{id},"chat_id":{chat},"is_outgoing":false,"reply_markup":{{"@type":"replyMarkupForceReply","input_field_placeholder":""}},"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":"x","entities":[]}}}}}}}}"#
+            ),
+        );
+    }
+    // One per chat: the newer message of chat 21 replaced its older one,
+    // and chat 22's was not overwritten.
+    let waiting = session.bots.pending_force_reply.targets().to_vec();
+    assert_eq!(
+        waiting,
+        [
+            ForceReplyTarget {
+                chat_id: ChatId(22),
+                message_id: MessageId(402)
+            },
+            ForceReplyTarget {
+                chat_id: ChatId(21),
+                message_id: MessageId(403)
+            },
+        ]
+    );
+    // A window takes its own chat's target; no window shows chat 22, so
+    // it goes with the next window's take rather than arming anything.
+    session.open_chat(ChatId(21));
+    let mine = session.take_force_replies_for(Some(ChatId(21)));
+    assert_eq!(mine.len(), 2, "the open chat's, and the one nobody shows");
+    assert!(session.bots.pending_force_reply.is_empty());
 }

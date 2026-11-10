@@ -66,10 +66,7 @@ impl QuillApp {
             is_outgoing,
         }) = actions.delete
         {
-            let known = session
-                .messages
-                .menu_actions
-                .get(chat_id, message_id);
+            let known = session.messages.menu_actions.get(chat_id, message_id);
             let allowed = known.map_or(
                 is_outgoing || session.chat_can_edit_information(chat_id),
                 |a| a.can_be_deleted(),

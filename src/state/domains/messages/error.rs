@@ -88,7 +88,9 @@ impl Session {
                 ));
             }
             Some(RequestPurpose::ReportSupergroupSpam) => {
-                self.messages.message_action_note.push(format!("could not report the spam: {}", error_reason(err)));
+                self.messages
+                    .message_action_note
+                    .push(format!("could not report the spam: {}", error_reason(err)));
             }
             Some(RequestPurpose::Messages(MessagesPurpose::DeleteMessageReactionsFromSender {
                 ..
@@ -137,16 +139,22 @@ impl Session {
                 });
             }
             Some(RequestPurpose::DeletePollOption) => {
-                self.messages.message_action_note.push(call_request_error_line(err, "Could not delete the item"));
+                self.messages
+                    .message_action_note
+                    .push(call_request_error_line(err, "Could not delete the item"));
             }
             Some(RequestPurpose::MarkChecklistTasks) => {
-                self.messages.message_action_note.push(call_request_error_line(
-                    err,
-                    "Could not update the checklist",
-                ));
+                self.messages
+                    .message_action_note
+                    .push(call_request_error_line(
+                        err,
+                        "Could not update the checklist",
+                    ));
             }
             Some(RequestPurpose::AddChecklistTasks) => {
-                self.messages.message_action_note.push(call_request_error_line(err, "Could not add the tasks"));
+                self.messages
+                    .message_action_note
+                    .push(call_request_error_line(err, "Could not add the tasks"));
             }
             // B4: a failed `getPollVoters` first page lands in the
             // fetch state so the dialog shows an honest error; a
@@ -192,10 +200,14 @@ impl Session {
                 } else {
                     "Could not reschedule the message"
                 };
-                self.messages.resend_error.push(call_request_error_line(err, action));
+                self.messages
+                    .resend_error
+                    .push(call_request_error_line(err, action));
             }
             Some(RequestPurpose::ResendMessages) => {
-                self.messages.resend_error.push(call_request_error_line(err, "Could not retry the send"));
+                self.messages
+                    .resend_error
+                    .push(call_request_error_line(err, "Could not retry the send"));
             }
             // M1 fix-up: a failed "Share link" surfaces in the
             // status note instead of silently doing nothing.
@@ -203,17 +215,21 @@ impl Session {
                 RequestPurpose::GetMessageLink
                 | RequestPurpose::Messages(MessagesPurpose::GetMessageLinkProperties { .. }),
             ) => {
-                self.messages.message_link_error.push(call_request_error_line(err, "Could not get message link"));
+                self.messages
+                    .message_link_error
+                    .push(call_request_error_line(err, "Could not get message link"));
             }
             // MED2 fix-up: a refused `recognizeSpeech` surfaces in
             // the status note instead of vanishing into `_ => {}` —
             // the row says "transcription requested" and the user
             // deserves an answer either way.
             Some(RequestPurpose::RecognizeSpeech) => {
-                self.messages.recognize_speech_error.push(call_request_error_line(
-                    err,
-                    "Could not transcribe this message",
-                ));
+                self.messages
+                    .recognize_speech_error
+                    .push(call_request_error_line(
+                        err,
+                        "Could not transcribe this message",
+                    ));
             }
             // Slice msg-richtext-ai-tools: a failed AI request surfaces
             // in the status note instead of vanishing into `_ => {}` —

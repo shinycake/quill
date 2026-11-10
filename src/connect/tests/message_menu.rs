@@ -224,7 +224,9 @@ fn report_flow_walks_reason_details_and_done() {
             .as_ref()
             .unwrap()
             .stage,
-        MessageReportStage::Checking { request: first_request }
+        MessageReportStage::Checking {
+            request: first_request
+        }
     );
 
     answer(
@@ -271,7 +273,9 @@ fn report_flow_walks_reason_details_and_done() {
             .as_ref()
             .unwrap()
             .stage,
-        MessageReportStage::Sending { request: second_request }
+        MessageReportStage::Sending {
+            request: second_request
+        }
     );
     answer(
         &mut driver,
@@ -611,7 +615,13 @@ fn a_report_answer_of_a_closed_flow_does_not_reach_the_next_flow_of_the_chat() {
     );
     assert_eq!(recorder.snapshot().len(), answered);
     assert_eq!(
-        driver.session.messages.message_report.as_ref().unwrap().stage,
+        driver
+            .session
+            .messages
+            .message_report
+            .as_ref()
+            .unwrap()
+            .stage,
         MessageReportStage::Checking { request: new }
     );
 }

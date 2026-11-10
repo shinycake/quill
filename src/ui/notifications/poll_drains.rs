@@ -106,7 +106,13 @@ impl QuillApp {
         for err in self
             .live
             .as_mut()
-            .map(|live| live.driver.session.messages.recognize_speech_error.take_all())
+            .map(|live| {
+                live.driver
+                    .session
+                    .messages
+                    .recognize_speech_error
+                    .take_all()
+            })
             .unwrap_or_default()
         {
             self.set_note(StatusNote::error(err));
@@ -276,7 +282,13 @@ impl QuillApp {
         for notice in self
             .live
             .as_mut()
-            .map(|live| live.driver.session.messages.send_permission_error.take_all())
+            .map(|live| {
+                live.driver
+                    .session
+                    .messages
+                    .send_permission_error
+                    .take_all()
+            })
             .unwrap_or_default()
         {
             self.set_note(StatusNote::error(notice));

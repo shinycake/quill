@@ -38,7 +38,16 @@ fn sticker_tabs_requests_failures_and_confirmed_mutations() {
             .unwrap(),
         )
         .unwrap();
-    assert!(driver.session.stickers.stickers.lists.recent.error().is_some());
+    assert!(
+        driver
+            .session
+            .stickers
+            .stickers
+            .lists
+            .recent
+            .error()
+            .is_some()
+    );
     assert!(
         driver
             .select_sticker_tab(StickerTab::Recent)
@@ -259,7 +268,16 @@ fn sticker_search_and_set_management_use_latest_confirmed_state() {
         )
         .unwrap();
     // A failed change is a note; the favorites list itself did not fail.
-    assert!(driver.session.stickers.stickers.lists.favorites.error().is_none());
+    assert!(
+        driver
+            .session
+            .stickers
+            .stickers
+            .lists
+            .favorites
+            .error()
+            .is_none()
+    );
     assert!(driver.session.stickers.creator_note.is_some());
     assert!(driver.session.stickers.stickers.found_sets[0].is_installed);
     driver.close_sticker_panel();
@@ -285,7 +303,16 @@ fn sticker_search_and_set_management_use_latest_confirmed_state() {
     );
     assert!(!driver.session.stickers.stickers.found_sets[0].is_installed);
     driver.search_sticker_picker("").unwrap();
-    assert!(driver.session.stickers.stickers.lists.search.error().is_none());
+    assert!(
+        driver
+            .session
+            .stickers
+            .stickers
+            .lists
+            .search
+            .error()
+            .is_none()
+    );
     assert!(driver.session.stickers.stickers.found_sets.is_empty());
     assert!(
         !driver

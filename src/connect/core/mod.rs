@@ -296,7 +296,13 @@ impl<S: JsonSender> ConnectDriver<S> {
                                 | RequestPurpose::FixRichMessageWithAi
                         )
                     })
-                    .map(|pending| (pending.id, rich.clone(), ai_rich_draft_note(pending.purpose))),
+                    .map(|pending| {
+                        (
+                            pending.id,
+                            rich.clone(),
+                            ai_rich_draft_note(pending.purpose),
+                        )
+                    }),
                 _ => None,
             };
         // M1 fix-up: capture the `getMessageProperties` answer for the
@@ -818,7 +824,10 @@ impl<S: JsonSender> ConnectDriver<S> {
             if can_get_link {
                 let _ = self.send_message_link_request(chat_id, message_id);
             } else {
-                self.session.messages.message_link_error.push("message link not available for this message".into());
+                self.session
+                    .messages
+                    .message_link_error
+                    .push("message link not available for this message".into());
             }
         }
         if let Some((chat_id, message_id, actions)) = audience_gate {

@@ -113,7 +113,9 @@ impl Session {
             .map(|answer| answer.ask.chat_id)
             .filter(|chat| open_chat == Some(*chat) || !self.chat_is_shown(*chat))
             .collect();
-        self.messages.ai.take(|answer| ours.contains(&answer.ask.chat_id))
+        self.messages
+            .ai
+            .take(|answer| ours.contains(&answer.ask.chat_id))
     }
 
     pub fn ai_answers_waiting(&self) -> bool {

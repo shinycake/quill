@@ -150,8 +150,10 @@ impl<S: JsonSender> ConnectDriver<S> {
                 // and go out with the next answer.
                 Err(err) => {
                     self.session.stickers.creator_note = Some(
-                        crate::lang::tr(crate::lang::keys::Q_MEDIA_COULDNT_UPDATE_STICKERS_TRY_AGAIN)
-                            .to_string(),
+                        crate::lang::tr(
+                            crate::lang::keys::Q_MEDIA_COULDNT_UPDATE_STICKERS_TRY_AGAIN,
+                        )
+                        .to_string(),
                     );
                     Err(err)
                 }

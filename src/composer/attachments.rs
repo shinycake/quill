@@ -335,24 +335,32 @@ impl ComposerAttachment {
     }
 }
 
-/// Parity slice (platform-paste-image): persist clipboard image bytes as a
-/// temp file and pick it as a photo attachment. The temp file lives until the
-/// OS reclaims it; the send path is canonicalized at pick time like any
+/// Parity slice (platform-paste-image): persist clipboard image bytes in a
+/// folder of the app's private work root (`quill-send-photos`, which the
+/// startup sweep empties of stale entries and which is removed at exit) and
+/// pick the file as a photo attachment. The file is made new, readable by
+/// its owner only; the send path is canonicalized at pick time like any
 /// user-picked file. Returns `None` when the bytes can't be persisted.
 pub fn clipboard_image_attachment(bytes: &[u8], extension: &str) -> Option<ComposerAttachment> {
-    let stamp = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_nanos())
-        .unwrap_or(0);
-    // A process-wide counter keeps two pastes in the same clock tick apart.
+    use std::io::Write as _;
+    // A process-wide counter keeps two pastes apart.
     static PASTE_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     let seq = PASTE_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    let path = std::env::temp_dir().join(format!(
-        "quill-paste-{stamp}-{seq}-{}.{}",
-        std::process::id(),
-        extension
-    ));
-    std::fs::write(&path, bytes).ok()?;
+    let folder = crate::scratch::temp_work_dir("quill-send-photos")
+        .join(format!("paste-{}-{seq}", std::process::id()));
+    crate::local_path::secure_create_dir(&folder).ok()?;
+    crate::scratch::remove_at_exit(folder.clone());
+    let path = folder.join(format!("quill-paste-{seq}.{extension}"));
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt as _;
+        options.mode(0o600);
+    }
+    let mut file = options.open(&path).ok()?;
+    file.write_all(bytes).ok()?;
+    drop(file);
     ComposerAttachment::pick(&path, AttachmentKind::Photo)
 }
 
@@ -474,11 +482,23 @@ mod tests {
         assert!(att.path.extension().and_then(|e| e.to_str()) == Some("png"));
         assert!(att.path.is_file());
         assert_eq!(fs::read(&att.path).expect("read back"), bytes);
+        // In the swept work folder, readable by its owner only.
+        assert!(
+            att.path.to_string_lossy().contains("quill-send-photos"),
+            "{:?}",
+            att.path
+        );
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt as _;
+            let mode = fs::metadata(&att.path).expect("meta").permissions().mode();
+            assert_eq!(mode & 0o077, 0, "no access for group or others");
+        }
         fs::remove_file(&att.path).ok();
     }
 
     /// Parity slice (platform-paste-image): distinct pastes get distinct temp
-    /// files (timestamp + sequence + pid in the name), even in the same clock tick.
+    /// files (a folder of their own: sequence + pid), even in the same clock tick.
     #[test]
     fn clipboard_image_attachment_names_are_unique() {
         let bytes: &[u8] = &[0x89, b'P', b'N', b'G'];

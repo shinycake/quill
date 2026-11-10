@@ -276,7 +276,12 @@ impl Session {
 
     /// The answer of `request`; one for a set that is no longer the asked
     /// one (the user chose another meanwhile) changes nothing.
-    pub fn accept_sticker_set(&mut self, request: Option<RequestId>, id: i64, stickers: Vec<StickerItem>) {
+    pub fn accept_sticker_set(
+        &mut self,
+        request: Option<RequestId>,
+        id: i64,
+        stickers: Vec<StickerItem>,
+    ) {
         let panel = &mut self.stickers.stickers;
         if let StickerSetStage::Loading {
             set_id,

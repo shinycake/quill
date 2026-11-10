@@ -32,6 +32,13 @@ impl Notes {
     }
 }
 
+impl super::MessagesState {
+    /// A one-line outcome of a message action ("message sent").
+    pub(crate) fn note_action(&mut self, note: &str) {
+        self.message_action_note.push(note.to_string());
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

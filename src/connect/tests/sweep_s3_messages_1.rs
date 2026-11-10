@@ -8,7 +8,7 @@ use crate::ids::{AccountKey, ChatId, MessageId, RequestId};
 use crate::platform::MemorySecretStore;
 use crate::state::Session;
 use crate::telegram::client::copy_and_parse;
-use serde_json::{Value, json};
+use serde_json::Value;
 use std::sync::atomic::{AtomicBool, AtomicIsize, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
@@ -138,7 +138,9 @@ fn a_draft_save_that_fails_to_send_is_kept_for_the_next_flush() {
     };
     assert!(rig.driver.commit_debounced_draft(token).is_err());
     assert!(
-        rig.driver.session.draft_is_dirty(ChatId(7), DraftTopic::Chat),
+        rig.driver
+            .session
+            .draft_is_dirty(ChatId(7), DraftTopic::Chat),
         "the slot stays dirty while nothing was saved"
     );
     // The draft was not forgotten: the next flush sends it.
@@ -147,7 +149,11 @@ fn a_draft_save_that_fails_to_send_is_kept_for_the_next_flush() {
     let drafts = rig.sent("setChatDraftMessage");
     assert_eq!(drafts.len(), 1);
     assert!(drafts[0].to_string().contains("hello"));
-    assert!(!rig.driver.session.draft_is_dirty(ChatId(7), DraftTopic::Chat));
+    assert!(
+        !rig.driver
+            .session
+            .draft_is_dirty(ChatId(7), DraftTopic::Chat)
+    );
 }
 
 #[test]
@@ -184,7 +190,12 @@ fn stopping_a_poll_finds_it_in_a_topic_history() {
     let mut topic = crate::state::TopicHistory::default();
     topic.messages.insert(106, message);
     driver.session.threads.topic_histories.insert((7, 3), topic);
-    assert!(driver.stop_poll(ChatId(7), MessageId(106)).unwrap().is_some());
+    assert!(
+        driver
+            .stop_poll(ChatId(7), MessageId(106))
+            .unwrap()
+            .is_some()
+    );
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -373,7 +384,12 @@ fn a_start_parameter_goes_only_when_telegram_took_the_start() {
         .unwrap();
     rig.error(refused, 429);
     assert_eq!(
-        rig.driver.session.bots.bot_start_params.get(&31).map(String::as_str),
+        rig.driver
+            .session
+            .bots
+            .bot_start_params
+            .get(&31)
+            .map(String::as_str),
         Some("ref"),
         "a refusal keeps the parameter for the next press"
     );
@@ -421,5 +437,8 @@ fn a_failed_game_button_press_is_noted() {
     );
     rig.error(request, 502);
     let answer = rig.driver.session.bots.last_callback_answer.as_ref();
-    assert_eq!(answer.map(|a| a.answer.text.as_str()), Some("bot did not answer"));
+    assert_eq!(
+        answer.map(|a| a.answer.text.as_str()),
+        Some("bot did not answer")
+    );
 }

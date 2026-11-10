@@ -75,7 +75,9 @@ impl Session {
                 }
             }
             Some(RequestPurpose::GetForumTopicLink) => {
-                self.messages.message_link_error.push(call_request_error_line(err, "Could not get the topic link"));
+                self.messages
+                    .message_link_error
+                    .push(call_request_error_line(err, "Could not get the topic link"));
             }
             Some(
                 RequestPurpose::ToggleChatViewAsTopics

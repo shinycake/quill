@@ -187,7 +187,11 @@ impl<S: JsonSender> ConnectDriver<S> {
         state
             .sending
             .retain(|request, _| requests.get(*request).is_some());
-        if state.sending.values().any(|key| *key == (chat_id, shortcut_id)) {
+        if state
+            .sending
+            .values()
+            .any(|key| *key == (chat_id, shortcut_id))
+        {
             return Ok(());
         }
         state.next_sending_id = state.next_sending_id.wrapping_add(1).max(1);

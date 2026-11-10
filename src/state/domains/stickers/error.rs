@@ -14,21 +14,23 @@ impl Session {
         match pending.map(|p| p.purpose) {
             Some(RequestPurpose::EmojiAnimations) => self.stickers.animations.failed(),
             Some(RequestPurpose::GetStickerCategories) => {
-                self.stickers.emoji.sticker_categories.fail(call_request_error_line(
-                    err,
-                    "Could not load sticker categories. Retry the action",
-                ));
+                self.stickers
+                    .emoji
+                    .sticker_categories
+                    .fail(call_request_error_line(
+                        err,
+                        "Could not load sticker categories. Retry the action",
+                    ));
             }
             Some(RequestPurpose::SearchEmojis) => {
                 if let Some(pending) = pending {
                     self.stickers.emoji.keyword_lookups.failed(pending.id);
                 }
             }
-            Some(RequestPurpose::Stickers(StickersPurpose::GetMessageEffect { effect_id })) => {
-                self.stickers
-                    .effects
-                    .fail(effect_id, err.code, std::time::Instant::now())
-            }
+            Some(RequestPurpose::Stickers(StickersPurpose::GetMessageEffect { effect_id })) => self
+                .stickers
+                .effects
+                .fail(effect_id, err.code, std::time::Instant::now()),
             Some(RequestPurpose::Stickers(StickersPurpose::ViewStickerSet { set_id })) => {
                 self.fail_sticker_set_view(set_id)
             }
@@ -135,8 +137,9 @@ impl Session {
             // A list that failed to load says so on its tab; a change that
             // failed leaves the lists as they are and reports a note.
             if let Some(pending) = pending {
-                let line = crate::lang::tr(crate::lang::keys::Q_MEDIA_COULDNT_UPDATE_STICKERS_TRY_AGAIN)
-                    .to_string();
+                let line =
+                    crate::lang::tr(crate::lang::keys::Q_MEDIA_COULDNT_UPDATE_STICKERS_TRY_AGAIN)
+                        .to_string();
                 match self.stickers.stickers.lists.for_purpose(pending.purpose) {
                     Some(list) => list.fail(line),
                     None => self.stickers.creator_note = Some(line),
