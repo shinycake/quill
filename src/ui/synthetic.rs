@@ -187,7 +187,7 @@ impl BubbleLook {
 
 /// Radius of a corner that joins a neighbouring bubble or carries the
 /// bubble's tail (tdesktop `bubbleRadiusSmall`).
-const JOINED_RADIUS: f32 = 5.0;
+pub(in crate::ui) const JOINED_RADIUS: f32 = 5.0;
 
 impl BubbleLook {
     /// Pre-login synthetic placeholder: today's fixed look.

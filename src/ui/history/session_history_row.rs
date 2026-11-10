@@ -349,6 +349,10 @@ pub(in crate::ui) fn session_history_row(
             sender.is_none() && !caption_above,
             !caption_below && !badges && !has_chips,
         )
+        .joined(
+            quill::chat_wide::has_right_layout(message.is_outgoing, look.wide),
+            look.joined_above,
+        )
     };
     let covered_content = effective_content(&message.content, message.ephemeral.as_ref());
     // A revealed spoiler is plain media from here on: it shows, opens and
