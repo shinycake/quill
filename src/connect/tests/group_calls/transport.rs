@@ -603,6 +603,20 @@ fn group_call_self_mute_reaches_the_microphone_and_telegram() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// Muting right after joining, before the participant list holds your row,
+/// still tells Telegram (by your account).
+#[test]
+fn a_mute_before_your_row_arrives_is_still_sent() {
+    let (dir, mut driver, recorder, _handle, sink, seq) = ready_group_call_driver();
+    ingest_call_json(&mut driver, &seq, &sink, JOINED_GROUP_CALL);
+    driver.session.my_user_id = Some(7);
+    driver.set_group_call_self_mute(true).expect("mute");
+    let sent = sent_request(&recorder, "toggleGroupCallParticipantIsMuted");
+    assert_eq!(sent["participant_id"]["user_id"], 7);
+    assert_eq!(sent["is_muted"], true);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 const JOINED_GROUP_CALL: &str = r#"{"@type":"updateGroupCall","group_call":{"@type":"groupCall","id":555,"unique_id":"999","title":"Design voice","invite_link":"","paid_message_star_count":0,"scheduled_start_date":0,"enabled_start_notification":false,"is_active":true,"is_video_chat":true,"is_live_story":false,"is_rtmp_stream":false,"is_joined":true,"need_rejoin":false,"is_owned":false,"can_be_managed":true,"participant_count":0,"has_hidden_listeners":false,"loaded_all_participants":false,"message_sender_id":null,"recent_speakers":[],"is_my_video_enabled":false,"is_my_video_paused":false,"can_enable_video":true,"mute_new_participants":false,"can_toggle_mute_new_participants":true,"can_send_messages":true,"are_messages_allowed":true,"can_toggle_are_messages_allowed":false,"can_delete_messages":false,"record_duration":0,"is_video_recorded":false,"duration":0}}"#;
 
 fn is_muted_self(driver: &ConnectDriver<Arc<RecordingSender>>) -> bool {

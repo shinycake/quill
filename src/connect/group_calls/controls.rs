@@ -148,7 +148,14 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !muted && call.is_force_muted() {
             return Err(SelfMuteError::NotAllowed);
         }
-        let me = me_row.map(|p| p.participant_id);
+        // Right after joining the list may not hold your row yet: you are
+        // then who you join as, or your account.
+        let me = me_row.map(|p| p.participant_id).or_else(|| {
+            call.join_as.or(self
+                .session
+                .my_user_id
+                .map(|user_id| MessageSender::User { user_id }))
+        });
         // Before the transport is up the engine only stores the state for
         // the connect; with it up the call is real and may fail.
         let making = self

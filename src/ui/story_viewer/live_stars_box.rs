@@ -140,7 +140,7 @@ impl QuillApp {
                     .stories
                     .live
                     .as_ref()
-                    .and_then(|l| l.donors.as_ref())
+                    .and_then(|l| l.donors.data())
                 && !donors.top_donors.is_empty()
             {
                 body = body.child(

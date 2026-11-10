@@ -52,10 +52,10 @@ fn live(session: &Session) -> &LiveStoryState {
 fn begin_is_idempotent_and_other_calls_are_ignored() {
     let mut session = session();
     if let Some(l) = session.live_story_mut(42) {
-        l.extras_requested = true;
+        l.streamer.begin();
     }
     session.begin_live_story(7, 6, 42);
-    assert!(live(&session).extras_requested);
+    assert!(live(&session).streamer.is_loading());
     assert!(session.live_story_mut(43).is_none());
     session.apply_live_story_payload(
         LiveStoryPayload::UpdateTopDonors {

@@ -2,6 +2,7 @@
 //! comments are sent as, the pending Star reaction and the comments
 //! toggle. The call itself is the story stream (`calls.story_stream`);
 //! its comments are that call's messages.
+use crate::state::fetch::Fetch;
 use crate::live_story::{CommentsTracker, PendingLiveReaction, normalize_levels, retain_comments};
 use crate::state::*;
 use crate::telegram::envelope::{
@@ -70,13 +71,11 @@ pub struct LiveStoryState {
     pub chat_id: i64,
     pub story_id: i32,
     pub group_call_id: i32,
-    /// The streamer, top donors and comment senders were asked for.
-    pub extras_requested: bool,
     /// `getLiveStoryStreamer` (not for RTMP streams): whose video to play.
-    pub streamer: Option<ParsedGroupCallParticipant>,
-    pub donors: Option<LiveStoryDonors>,
-    /// Who comments may be sent as; `None` until loaded.
-    pub message_senders: Option<Vec<AvailableMessageSender>>,
+    pub streamer: Fetch<ParsedGroupCallParticipant>,
+    pub donors: Fetch<LiveStoryDonors>,
+    /// Who comments may be sent as.
+    pub message_senders: Fetch<Vec<AvailableMessageSender>>,
     /// Stars tapped and not committed yet.
     pub pending_reaction: Option<PendingLiveReaction>,
     /// Stars committed and not yet in a donors update: the total on the
@@ -97,10 +96,9 @@ impl LiveStoryState {
             chat_id,
             story_id,
             group_call_id,
-            extras_requested: false,
-            streamer: None,
-            donors: None,
-            message_senders: None,
+            streamer: Fetch::Idle,
+            donors: Fetch::Idle,
+            message_senders: Fetch::Idle,
             pending_reaction: None,
             committed_stars: 0,
             effects: Vec::new(),
@@ -110,11 +108,24 @@ impl LiveStoryState {
         }
     }
 
+    /// A Join pressed again: what failed to load is asked for once more.
+    pub(crate) fn retry_extras(&mut self) {
+        if matches!(self.streamer, Fetch::Failed { .. }) {
+            self.streamer = Fetch::Idle;
+        }
+        if matches!(self.donors, Fetch::Failed { .. }) {
+            self.donors = Fetch::Idle;
+        }
+        if matches!(self.message_senders, Fetch::Failed { .. }) {
+            self.message_senders = Fetch::Idle;
+        }
+    }
+
     /// Stars on the Stars button: everyone's total plus your pending and
     /// just committed ones (tdesktop `starsLocalState().total`).
     pub fn stars_total(&self) -> i64 {
         self.donors
-            .as_ref()
+            .data()
             .map_or(0, |donors| donors.total_star_count)
             .saturating_add(self.unconfirmed_stars())
     }
@@ -135,7 +146,7 @@ impl LiveStoryState {
 
     /// New donors from TDLib: they count everything committed so far.
     pub(crate) fn set_donors(&mut self, donors: LiveStoryDonors) {
-        self.donors = Some(donors);
+        self.donors.succeed(donors);
         self.committed_stars = 0;
     }
 
@@ -152,7 +163,7 @@ impl LiveStoryState {
     /// Your Stars: committed plus pending.
     pub fn my_stars(&self) -> i64 {
         self.donors
-            .as_ref()
+            .data()
             .and_then(|donors| donors.top_donors.iter().find(|d| d.is_me))
             .map_or(0, |mine| mine.star_count)
             .saturating_add(self.unconfirmed_stars())
@@ -289,7 +300,7 @@ impl Session {
                 if let Some(LiveStoryPurpose::GetStreamer { group_call_id }) = asked
                     && let Some(live) = self.live_story_mut(group_call_id)
                 {
-                    live.streamer = Some(participant);
+                    live.streamer.succeed(participant);
                 }
             }
         }
@@ -302,7 +313,7 @@ impl Session {
         senders: Vec<AvailableMessageSender>,
     ) {
         if let Some(live) = self.live_story_mut(group_call_id) {
-            live.message_senders = Some(senders);
+            live.message_senders.succeed(senders);
         }
     }
 
@@ -398,11 +409,18 @@ impl Session {
         };
         let reason = error_reason(err);
         match purpose {
-            // Nothing to show: the viewer keeps its defaults.
-            LiveStoryPurpose::GetBursts
-            | LiveStoryPurpose::GetStreamer { .. }
-            | LiveStoryPurpose::GetTopDonors { .. }
-            | LiveStoryPurpose::GetMessageSenders { .. } => {}
+            // The viewer keeps its defaults; the failure waits for the
+            // next Join (`retry_extras`), and the streamer's, which leaves
+            // no picture, is said.
+            LiveStoryPurpose::GetStreamer { .. } => {
+                live.streamer.fail(reason.to_string());
+                live.note = Some(format!("Could not load the stream: {reason}"));
+            }
+            LiveStoryPurpose::GetTopDonors { .. } => live.donors.fail(reason.to_string()),
+            LiveStoryPurpose::GetMessageSenders { .. } => {
+                live.message_senders.fail(reason.to_string());
+            }
+            LiveStoryPurpose::GetBursts => {}
             LiveStoryPurpose::AddPendingReaction { stars, .. } => {
                 if let Some(pending) = live.pending_reaction.as_mut() {
                     pending.stars = pending.stars.saturating_sub(stars);
