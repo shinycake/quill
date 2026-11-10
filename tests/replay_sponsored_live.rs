@@ -43,6 +43,7 @@ fn sponsored_tail_hides_after_report_and_hide() {
     // Reporting the shown ad removes it; the next one needs its photo first.
     assert!(session.begin_sponsored_report(chat_id, 9001).is_some());
     let extra = session.request(RequestPurpose::ReportChatSponsoredMessage, Some(chat_id));
+    session.note_sponsored_report_request(extra);
     apply_all_seq(
         &mut session,
         &sink,
