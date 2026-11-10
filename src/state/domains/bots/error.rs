@@ -66,6 +66,15 @@ impl Session {
                             if slot.chat_id == chat_id
                                 && slot.bot_user_id == bot_user_id
                     );
+                if !first_page
+                    && let Some(slot) = &self.bots.inline_query
+                    && slot.chat_id == chat_id
+                    && slot.bot_user_id == bot_user_id
+                    && let InlineQueryFetch::Loaded { next_offset, .. } = &slot.fetch
+                {
+                    self.bots.inline_more_failed =
+                        Some((chat_id, bot_user_id, next_offset.clone()));
+                }
                 if failed_first_page && let Some(slot) = self.bots.inline_query.as_mut() {
                     slot.fetch = InlineQueryFetch::Failed(call_request_error_line(
                         err,
