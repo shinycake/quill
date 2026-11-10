@@ -41,7 +41,7 @@ fn ended_without_rating(call_id: i32) -> CallSummary {
         busy: false,
         need_debug_information: false,
         need_log: false,
-        rating_sent: false,
+        rating: crate::state::CallRating::Offered,
         debug_information_sent: false,
         debug_information_error: None,
         log_sent: false,

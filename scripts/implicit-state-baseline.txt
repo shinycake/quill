@@ -36,7 +36,6 @@ CallSummary::busy
 CallSummary::busy+debug_information_error
 CallSummary::debug_information_sent
 CallSummary::log_sent
-CallSummary::rating_sent
 CallUi::window_opening
 CameraDraft::starting
 Ceremony::finished

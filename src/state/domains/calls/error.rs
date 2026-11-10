@@ -67,11 +67,21 @@ impl Session {
                         call.state = hang_up.resume;
                     }
                     self.calls.second_call.back_to_prompt();
+                    self.calls.error =
+                        Some(call_request_error_line(err, "Could not hang up the call"));
                 }
-                self.calls.error = Some(call_request_error_line(err, "Could not hang up the call"));
             }
+            // The card comes back with the error; an answer for a rating
+            // that is no longer the one in flight is dropped.
             Some(RequestPurpose::SendCallRating) => {
-                self.calls.error = Some(call_request_error_line(err, "Could not send the rating"));
+                if let Some(summary) = self.calls.summary.as_mut()
+                    && extra.is_some_and(|extra| summary.rating == CallRating::Sending(extra))
+                {
+                    summary.rating = CallRating::Failed(call_request_error_line(
+                        err,
+                        "Could not send the rating",
+                    ));
+                }
             }
             Some(RequestPurpose::SendCallDebugInformation) => {
                 if let Some(summary) = self.calls.summary.as_mut() {

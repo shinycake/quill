@@ -79,9 +79,6 @@ pub(crate) struct CallBoxes {
     /// The Calls tab's scroll region, read to load older calls on scroll.
     pub(super) history_scroll: ScrollHandle,
     pub(super) history_asked: super::scroll_load::Asked,
-    /// A call waiting on microphone (and camera) permission before its
-    /// `createCall`: `(user_id, is_video)`.
-    pub(super) dialing: Option<(i64, bool)>,
     /// Settings > Calls: the microphone test and its level meter
     /// (`ui::call_audio_ui`).
     pub(super) mic_test: super::call_audio_ui::MicTestRun,
@@ -106,7 +103,6 @@ impl CallBoxes {
             confirm: None,
             history_scroll: ScrollHandle::new(),
             history_asked: Default::default(),
-            dialing: None,
             mic_test: Default::default(),
             mic_test_starts: 0,
             open_mic_test: super::call_audio_ui::open_default_mic_test(),

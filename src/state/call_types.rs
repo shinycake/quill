@@ -65,6 +65,23 @@ pub struct ActiveCall {
     pub signal_bars: Option<u8>,
 }
 
+/// The rating card of an ended call. The card is drawn while it is
+/// `Offered` or `Failed`; `Sending` leaves on the answer to that request.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CallRating {
+    Offered,
+    Sending(RequestId),
+    Sent,
+    Failed(String),
+}
+
+impl CallRating {
+    /// The card still asks for a rating (nothing is in flight or done).
+    pub fn is_open(&self) -> bool {
+        matches!(self, Self::Offered | Self::Failed(_))
+    }
+}
+
 /// Phase C1: summary of the most recently ended call, driving the
 /// call-end screen and the optional 1–5 rating card
 /// (`callStateDiscarded.need_rating`, schema 1.8.67, line 7081).
@@ -89,7 +106,9 @@ pub struct CallSummary {
     /// end screen can say so honestly.
     pub need_debug_information: bool,
     pub need_log: bool,
-    pub rating_sent: bool,
+    /// The rating card's stage; one value so the card comes back when
+    /// the send fails.
+    pub rating: CallRating,
     pub debug_information_sent: bool,
     pub debug_information_error: Option<String>,
     /// Phase C2i: `sendCallLog` upload state (`need_log` from
@@ -724,7 +743,7 @@ impl CallSummary {
             need_rating,
             need_debug_information,
             need_log,
-            rating_sent: false,
+            rating: CallRating::Offered,
             debug_information_sent: false,
             debug_information_error: None,
             log_sent: false,

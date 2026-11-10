@@ -415,17 +415,21 @@ impl QuillApp {
             .collect();
         let stars = detail.stars;
         if let Some(live) = self.live.as_mut() {
-            let result = live.driver.send_call_rating(stars, &comment, &problems);
-            self.set_note(match result {
-                Ok(_) => StatusNote::silent(tr(keys::Q_OPS_THANKS_FOR_YOUR_FEEDBACK_2)),
-                Err(_) => StatusNote::error(tr(keys::Q_OPS_COULD_NOT_SEND_THE_RATING)),
-            });
+            // The card says thanks once TDLib answers ok; a failure
+            // brings the card back with its error.
+            if live
+                .driver
+                .send_call_rating(stars, &comment, &problems)
+                .is_err()
+            {
+                self.set_note(StatusNote::error(tr(keys::Q_OPS_COULD_NOT_SEND_THE_RATING)));
+            }
         } else if self.demo_session.is_some() {
             self.set_note(StatusNote::silent(tr(keys::Q_OPS_DEMO_CALL_RATING_NO_LIVE)));
             if let Some(session) = self.demo_session.as_mut()
                 && let Some(summary) = session.calls.summary.as_mut()
             {
-                summary.rating_sent = true;
+                summary.rating = crate::state::CallRating::Sent;
             }
         }
         cx.notify();

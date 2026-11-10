@@ -10,7 +10,7 @@ use gpui_kit::component::radio::{Radio, RadioGroup};
 use gpui_kit::component::*;
 use gpui_kit::*;
 use quill::lang::{keys, tr, tr_with};
-use quill::state::{ActiveCall, CallSummary};
+use quill::state::{ActiveCall, CallRating, CallSummary};
 use quill::telegram::envelope::CallState;
 impl QuillApp {
     /// Phase C1: call overlay — incoming / outgoing / active / ended
@@ -28,7 +28,7 @@ impl QuillApp {
             .calls
             .summary
             .as_ref()
-            .is_some_and(|summary| summary.need_rating && !summary.rating_sent)
+            .is_some_and(|summary| summary.need_rating && summary.rating.is_open())
             && session.calls.active_call.is_none();
         let failed = session.calls.error.is_some() && session.calls.active_call.is_none();
         if !rating && !failed {
@@ -669,7 +669,10 @@ impl QuillApp {
                     .child(error.clone()),
             );
         }
-        if summary.need_rating && !summary.rating_sent {
+        if summary.need_rating && summary.rating.is_open() {
+            if let CallRating::Failed(error) = &summary.rating {
+                card = card.child(div().text_xs().text_color(danger_soft()).child(error.clone()));
+            }
             card = card.child(
                 div()
                     .text_sm()
@@ -708,7 +711,7 @@ impl QuillApp {
                 }
             }
         } else {
-            if summary.rating_sent {
+            if summary.rating == CallRating::Sent {
                 card = card.child(
                     div()
                         .text_xs()

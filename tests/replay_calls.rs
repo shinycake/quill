@@ -103,7 +103,7 @@ fn replay_call_signaling_lifecycle() {
     assert_eq!(summary.call_id, 77);
     assert_eq!(summary.end_line, "Call ended");
     assert!(summary.need_rating);
-    assert!(!summary.rating_sent);
+    assert!(summary.rating.is_open());
     assert!(!summary.need_debug_information);
     assert!(!summary.need_log);
 
