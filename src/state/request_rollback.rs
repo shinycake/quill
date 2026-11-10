@@ -49,7 +49,26 @@ pub enum RequestRollback {
         previous: Option<bool>,
     },
     /// B7: `toggleChatHasProtectedContent`: the previous flag.
-    ProtectedContent { chat_id: i64, previous: bool },
+    /// `previous_disabled_at` is the "you disabled sharing" record the
+    /// request replaced (private chats only).
+    ProtectedContent {
+        chat_id: i64,
+        previous: bool,
+        previous_disabled_at: Option<i64>,
+    },
+    /// `deleteBusinessChatLink`: the row dropped at once and where it was.
+    ChatLinkDelete {
+        index: usize,
+        row: crate::business_chat_links::ChatLink,
+    },
+    /// Pause, resume or remove of the business bot (`previous` is the bar
+    /// before, `shown` the one drawn instead; `None` = no bar). Restored
+    /// only while the bar still shows `shown`.
+    BusinessBotBar {
+        chat_id: i64,
+        previous: Option<crate::business_bot_bar::BusinessBotManageBar>,
+        shown: Option<crate::business_bot_bar::BusinessBotManageBar>,
+    },
     /// B7: `setChatAvailableReactions`: the previous setting.
     AvailableReactions {
         chat_id: i64,
@@ -127,6 +146,23 @@ impl Session {
                     &previous,
                     Some(&shown),
                 );
+            }
+            RequestRollback::BusinessBotBar {
+                chat_id,
+                previous,
+                shown,
+            } => {
+                if self.chats_state.business_bot_bars.get(&chat_id) == shown.as_ref() {
+                    self.set_business_bot_bar(chat_id, previous);
+                }
+            }
+            RequestRollback::ChatLinkDelete { index, row } => {
+                let links = &mut self.settings.business_extra.chat_links;
+                if let Some(list) = links.data_mut()
+                    && !list.iter().any(|l| l.link == row.link)
+                {
+                    list.insert(index.min(list.len()), row);
+                }
             }
             _ => {}
         }

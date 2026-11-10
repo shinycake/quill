@@ -100,6 +100,7 @@ impl QuillApp {
         {
             self.business_info_upkeep(window, cx);
         }
+        self.business_closed_error_upkeep();
         // Phase 4.6: push the playback clock into the seek sliders so the
         // thumb follows elapsed time (the tick has no `&mut Window`).
         self.sync_seek_slider(window, cx);

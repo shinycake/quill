@@ -4,6 +4,7 @@
 use crate::business_bots::ConnectedBot;
 use crate::business_chat_links::{ChatLink, LINKS_MAX};
 use crate::business_start_page::{MESSAGE_MAX, TITLE_MAX};
+use crate::state::fetch::Fetch;
 use crate::state::*;
 
 /// Which lookup request answered.
@@ -23,6 +24,19 @@ pub enum ChatLinkOp {
     Create,
     Edit,
     Delete,
+}
+
+/// The save of the link box, from the send to TDLib's answer. The box stays
+/// open on its draft until it says `Saved`; a refusal goes back to `Idle`
+/// with the error line, so the draft can be fixed and sent again.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum ChatLinkSave {
+    #[default]
+    Idle,
+    /// A create or edit is out; only its own answer ends it.
+    Saving(RequestId),
+    /// The answer arrived; the box goes back to the list and resets this.
+    Saved,
 }
 
 /// The bot lookup of the chatbots screen for one typed username.
@@ -45,15 +59,13 @@ impl BotLookup {
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct BusinessExtraState {
-    /// `getBusinessChatLinks`, newest first; `None` until loaded.
-    pub chat_links: Option<Vec<ChatLink>>,
-    pub chat_links_requested: bool,
-    /// Creates and edits in flight.
-    pub chat_links_saving: u32,
-    /// `getBusinessConnectedBot`: `None` until it answers, `Some(None)`
-    /// when no bot is connected.
-    pub connected_bot: Option<Option<ConnectedBot>>,
-    pub connected_bot_requested: bool,
+    /// `getBusinessChatLinks`, newest first. A failed load keeps the row
+    /// list it replaced and draws a Retry.
+    pub chat_links: Fetch<Vec<ChatLink>>,
+    pub chat_link_save: ChatLinkSave,
+    /// `getBusinessConnectedBot`: ready with `None` when no bot is
+    /// connected.
+    pub connected_bot: Fetch<Option<ConnectedBot>>,
     pub lookup: BotLookup,
     /// TDLib options; tdesktop's defaults until reported.
     pub title_max: Option<usize>,
@@ -92,15 +104,22 @@ impl Session {
     }
 
     pub(crate) fn apply_chat_links(&mut self, links: Vec<ChatLink>) {
-        self.settings.business_extra.chat_links = Some(links);
+        self.settings.business_extra.chat_links.succeed(links);
     }
 
     /// A created or edited link: an edit replaces its row, a new link goes
     /// first (tdesktop `prependRow`).
-    pub(crate) fn apply_chat_link(&mut self, link: ChatLink) {
+    pub(crate) fn apply_chat_link(&mut self, link: ChatLink, extra: Option<RequestId>) {
         let state = &mut self.settings.business_extra;
-        state.chat_links_saving = state.chat_links_saving.saturating_sub(1);
-        let list = state.chat_links.get_or_insert_with(Vec::new);
+        if let Some(id) = extra
+            && state.chat_link_save == ChatLinkSave::Saving(id)
+        {
+            state.chat_link_save = ChatLinkSave::Saved;
+        }
+        state.chat_links.insert_data_if_missing(Vec::new);
+        let Some(list) = state.chat_links.data_mut() else {
+            return;
+        };
         match list.iter_mut().find(|l| l.link == link.link) {
             Some(row) => *row = link,
             None => list.insert(0, link),
@@ -108,7 +127,7 @@ impl Session {
     }
 
     pub(crate) fn apply_connected_bot(&mut self, bot: Option<ConnectedBot>) {
-        self.settings.business_extra.connected_bot = Some(bot);
+        self.settings.business_extra.connected_bot.succeed(bot);
     }
 
     /// `ok` of a chat link delete, a bot save or the ads switch: the lists
@@ -116,11 +135,12 @@ impl Session {
     pub(crate) fn apply_business_extra_ok(&mut self, pending: Option<&PendingRequest>) {
         let state = &mut self.settings.business_extra;
         match pending.map(|p| p.purpose) {
-            Some(RequestPurpose::Settings(SettingsPurpose::MutateChatLink {
-                op: ChatLinkOp::Delete,
-            })) => state.chat_links_requested = false,
+            // The row went at once and the answer confirms it: the list
+            // shown is the list TDLib holds.
             Some(RequestPurpose::Settings(SettingsPurpose::SaveConnectedBot)) => {
-                state.connected_bot_requested = false;
+                // The bot was written ahead of the answer, which carries no
+                // data: ask TDLib what is connected on the next visit.
+                state.connected_bot = Fetch::Idle;
             }
             _ => {}
         }
@@ -185,6 +205,7 @@ impl Session {
         &mut self,
         err: &TdError,
         purpose: Option<RequestPurpose>,
+        extra_id: Option<RequestId>,
     ) -> bool {
         let Some(RequestPurpose::Settings(purpose)) = purpose else {
             return false;
@@ -193,30 +214,33 @@ impl Session {
         let extra = &mut self.settings.business_extra;
         let error = match purpose {
             SettingsPurpose::GetChatLinks => {
-                extra.chat_links_requested = false;
-                format!("Couldn't load the links: {reason}")
+                let error = format!("Couldn't load the links: {reason}");
+                extra.chat_links.fail(error.clone());
+                error
             }
             SettingsPurpose::MutateChatLink { op } => {
-                if op != ChatLinkOp::Delete {
-                    extra.chat_links_saving = extra.chat_links_saving.saturating_sub(1);
+                if op != ChatLinkOp::Delete
+                    && extra_id.is_some_and(|id| extra.chat_link_save == ChatLinkSave::Saving(id))
+                {
+                    extra.chat_link_save = ChatLinkSave::Idle;
                 }
                 format!("Couldn't save the link: {reason}")
             }
             // No connected bot answers "Not Found".
             SettingsPurpose::GetConnectedBot if err.code == 404 => {
-                extra.connected_bot = Some(None);
+                extra.connected_bot.succeed(None);
                 return true;
             }
             SettingsPurpose::GetConnectedBot => {
-                extra.connected_bot_requested = false;
-                format!("Couldn't load the chatbot: {reason}")
+                let error = format!("Couldn't load the chatbot: {reason}");
+                extra.connected_bot.fail(error.clone());
+                error
             }
             SettingsPurpose::SaveConnectedBot => {
                 // The save wrote its bot ahead of the answer: forget it, so
                 // the next visit asks TDLib what is connected instead of
                 // showing the refused bot as saved.
-                extra.connected_bot = None;
-                extra.connected_bot_requested = false;
+                extra.connected_bot = Fetch::Idle;
                 format!("Couldn't save the chatbot: {reason}")
             }
             SettingsPurpose::LookupBusinessBot { generation, part } => {

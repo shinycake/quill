@@ -3,7 +3,7 @@
 use super::*;
 use crate::business_bot_bar as bar;
 use crate::ids::{ChatId, RequestId};
-use crate::state::RequestPurpose;
+use crate::state::{RequestPurpose, RequestRollback};
 
 impl<S: JsonSender> ConnectDriver<S> {
     /// `toggleBusinessConnectedBotChatIsPaused`. The bar flips locally at
@@ -28,8 +28,9 @@ impl<S: JsonSender> ConnectDriver<S> {
             extra,
             &bar::toggle_paused_request(&extra.as_extra(), chat_id.0, paused),
         )?;
-        self.session
-            .set_business_bot_bar(chat_id.0, Some(current.with_paused(paused)));
+        let shown = Some(current.with_paused(paused));
+        self.session.set_business_bot_bar(chat_id.0, shown.clone());
+        self.arm_bar_rollback(extra, chat_id, Some(current), shown);
         Ok(Some(extra))
     }
 
@@ -42,9 +43,9 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        if self.session.business_bot_bar(chat_id).is_none() {
+        let Some(current) = self.session.business_bot_bar(chat_id).cloned() else {
             return Ok(None);
-        }
+        };
         let purpose = RequestPurpose::RemoveBusinessBotFromChat;
         if self.session.requests.has_purpose_for_chat(purpose, chat_id) {
             return Ok(None);
@@ -55,6 +56,24 @@ impl<S: JsonSender> ConnectDriver<S> {
             &bar::remove_from_chat_request(&extra.as_extra(), chat_id.0),
         )?;
         self.session.set_business_bot_bar(chat_id.0, None);
+        self.arm_bar_rollback(extra, chat_id, Some(current), None);
         Ok(Some(extra))
+    }
+
+    /// A refused request puts the bar back (`RequestRollback::BusinessBotBar`).
+    fn arm_bar_rollback(
+        &mut self,
+        extra: RequestId,
+        chat_id: ChatId,
+        previous: Option<bar::BusinessBotManageBar>,
+        shown: Option<bar::BusinessBotManageBar>,
+    ) {
+        if let Some(pending) = self.session.requests.pending_mut(extra) {
+            pending.rollback = Some(RequestRollback::BusinessBotBar {
+                chat_id: chat_id.0,
+                previous,
+                shown,
+            });
+        }
     }
 }

@@ -670,7 +670,7 @@ fn a_link_opens_in_its_editor(cx: &mut TestAppContext) {
             .unwrap()
             .settings
             .business_extra
-            .chat_links = Some(vec![link.clone()]);
+            .chat_links = quill::state::fetch::Fetch::Ready(vec![link.clone()]);
     });
     open(&app, vcx);
     go(&app, vcx, View::ChatLinks);
@@ -694,9 +694,7 @@ fn a_link_opens_in_its_editor(cx: &mut TestAppContext) {
     });
     assert_eq!(text, "**Hi** there");
     assert_eq!(name, "Promo");
-    act(&app, vcx, |app, window, cx| {
-        app.save_business_link(window, cx)
-    });
+    act(&app, vcx, |app, _, cx| app.save_business_link(cx));
     assert_eq!(error(&app, vcx).as_deref(), Some(QuillApp::DEMO_LINE));
 }
 

@@ -292,6 +292,32 @@ fn a_window_chat_runs_the_open_chat_follow_ups_without_moving_the_main_view() {
     assert_eq!(h.driver.session.open_topic, Some(5));
 }
 
+/// A channel in a chat window waits for `getMe` to learn its own
+/// membership; the answer continues the probe for that window's chat, not
+/// only the main window's.
+#[test]
+fn a_chat_windows_membership_probe_continues_when_getme_answers() {
+    let mut h = Harness::two_chats();
+    h.ingest(
+        r#"{"@type":"updateNewChat","chat":{"id":-1001,"title":"News","type":{"@type":"chatTypeSupergroup","supergroup_id":1,"is_channel":true},"unread_count":0}}"#,
+    );
+    h.driver.select_chat(ALICE).unwrap();
+    h.driver.open_chat_window(ChatId(-1001)).unwrap();
+    assert!(h.sent("getChatMember", ChatId(-1001)).is_empty());
+    let extra = h
+        .recorder
+        .snapshot()
+        .iter()
+        .filter_map(|j| serde_json::from_str::<Value>(j).ok())
+        .find(|v| v["@type"] == "getMe")
+        .and_then(|v| v["@extra"].as_str().map(str::to_string))
+        .expect("getMe asked");
+    h.ingest(&format!(
+        r#"{{"@type":"user","@extra":"{extra}","id":99,"first_name":"Me","type":{{"@type":"userTypeRegular"}}}}"#
+    ));
+    assert_eq!(h.sent("getChatMember", ChatId(-1001)).len(), 1);
+}
+
 #[test]
 fn a_search_typed_in_a_chat_window_searches_its_chat_and_answers_there() {
     let mut h = Harness::two_chats();

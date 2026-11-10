@@ -134,8 +134,15 @@ impl Session {
                 toggle,
                 previous,
             }) => self.restore_group_toggle(supergroup_id, toggle, previous),
-            Some(RequestRollback::ProtectedContent { chat_id, previous }) => {
+            Some(RequestRollback::ProtectedContent {
+                chat_id,
+                previous,
+                previous_disabled_at,
+            }) => {
                 self.set_chat_protected(chat_id, previous);
+                self.groups
+                    .private_sharing
+                    .restore_disabled(ChatId(chat_id), previous_disabled_at);
             }
             Some(RequestRollback::AvailableReactions { chat_id, previous }) => match previous {
                 Some(setting) => {
@@ -188,7 +195,9 @@ impl Session {
             }
             Some(
                 rollback @ (RequestRollback::ForumTopicMute { .. }
-                | RequestRollback::PollVote { .. }),
+                | RequestRollback::PollVote { .. }
+                | RequestRollback::BusinessBotBar { .. }
+                | RequestRollback::ChatLinkDelete { .. }),
             ) => self.restore_optimistic(rollback),
             None => {}
         }

@@ -13,6 +13,7 @@ use gpui_kit::component::*;
 use gpui_kit::*;
 use quill::business_chat_links::{ChatLink, plain_links};
 use quill::lang::{keys, tr};
+use quill::state::ChatLinkSave;
 
 const ABOUT: &str = "Give your customers short links that start a chat with you – and suggest \
 the first message from them to you.";
@@ -28,7 +29,53 @@ fn copied() -> &'static str {
 impl QuillApp {
     fn business_chat_links(&self) -> Option<Vec<ChatLink>> {
         self.session()
-            .and_then(|s| s.settings.business_extra.chat_links.clone())
+            .and_then(|s| s.settings.business_extra.chat_links.data().cloned())
+    }
+
+    /// Why the links did not load, while their request is failed.
+    fn business_chat_links_error(&self) -> Option<String> {
+        self.session().and_then(|s| {
+            s.settings
+                .business_extra
+                .chat_links
+                .error()
+                .map(str::to_string)
+        })
+    }
+
+    /// Whether a create or edit is waiting for TDLib's answer.
+    pub(super) fn business_link_saving(&self) -> bool {
+        self.session().is_some_and(|s| {
+            matches!(
+                s.settings.business_extra.chat_link_save,
+                ChatLinkSave::Saving(_)
+            )
+        })
+    }
+
+    /// The link box's follow-up to its save, in the frame upkeep: once TDLib
+    /// accepts the link the box goes back to the list with "Chat link
+    /// saved."; a refusal leaves the box and its draft open under the
+    /// error line.
+    pub(super) fn business_link_save_upkeep(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.business_view() != Some(View::LinkEdit) {
+            return;
+        }
+        let saved = self
+            .session()
+            .is_some_and(|s| s.settings.business_extra.chat_link_save == ChatLinkSave::Saved);
+        if !saved {
+            return;
+        }
+        if let Some(live) = self.live.as_mut() {
+            live.driver.reset_chat_link_save();
+        }
+        self.business_go(View::ChatLinks, window, cx);
+        self.business_note(tr(keys::CHAT_LINK_SAVED), cx);
     }
 
     fn business_links_max(&self) -> usize {
@@ -74,6 +121,9 @@ impl QuillApp {
             text.update(cx, |input, cx| input.set_value(markup, window, cx));
             name.update(cx, |input, cx| input.set_value(title, window, cx));
         }
+        if let Some(live) = self.live.as_mut() {
+            live.driver.reset_chat_link_save();
+        }
         self.business_go(View::LinkEdit, window, cx);
         if let Some(d) = self.business_mut() {
             d.link_edit = Some(LinkEditDraft {
@@ -84,9 +134,12 @@ impl QuillApp {
         }
     }
 
-    /// Save of the link box: create or edit, then back to the list
-    /// ("Chat link saved." once TDLib answers).
-    pub(super) fn save_business_link(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    /// Save of the link box: create or edit. The box stays until TDLib
+    /// answers (`business_link_save_upkeep`).
+    pub(super) fn save_business_link(&mut self, cx: &mut Context<Self>) {
+        if self.business_link_saving() {
+            return;
+        }
         let Some((link, markup, title)) = self
             .dialogs
             .business_dialog
@@ -114,8 +167,10 @@ impl QuillApp {
             self.business_error(tr(keys::Q_OPS_COULD_NOT_SEND_THE_LINK), cx);
             return;
         }
-        self.business_go(View::ChatLinks, window, cx);
-        self.business_note(tr(keys::CHAT_LINK_SAVED), cx);
+        if let Some(d) = self.business_mut() {
+            d.local_error = None;
+        }
+        cx.notify();
     }
 
     fn delete_business_link(&mut self, link: &str, cx: &mut Context<Self>) {
@@ -306,7 +361,29 @@ impl QuillApp {
                     ),
             );
         }
+        if let Some(error) = self.business_chat_links_error() {
+            body = body.child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .items_start()
+                    .gap_2()
+                    .child(div().text_sm().text_color(muted).child(error))
+                    .child(
+                        Button::new("business-links-retry")
+                            .label(tr(keys::Q_CHAT_RETRY))
+                            .small()
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                if let Some(live) = this.live.as_mut() {
+                                    let _ = live.driver.retry_chat_links();
+                                }
+                                cx.notify();
+                            })),
+                    ),
+            );
+        }
         match links {
+            None if self.business_chat_links_error().is_some() => {}
             None => {
                 body = body.child(
                     div()

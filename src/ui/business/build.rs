@@ -235,11 +235,14 @@ impl QuillApp {
                     cx.listener(move |this, _, window, cx| this.save_business_day(day, window, cx)),
                 ),
             ),
-            View::LinkEdit => footer.child(back(tr(keys::CANCEL))).child(
-                primary("business-link-save", tr(keys::SETTINGS_SAVE)).on_click(
-                    cx.listener(|this, _, window, cx| this.save_business_link(window, cx)),
-                ),
-            ),
+            View::LinkEdit => {
+                let saving = self.business_link_saving();
+                footer.child(back(tr(keys::CANCEL))).child(
+                    primary("business-link-save", tr(keys::SETTINGS_SAVE))
+                        .loading(saving)
+                        .on_click(cx.listener(|this, _, _, cx| this.save_business_link(cx))),
+                )
+            }
             // The screens save when they are left; the time zone list,
             // sticker panel, links and QR code have nothing to save.
             _ => footer.child(back(tr(keys::Q_OPS_BACK))),

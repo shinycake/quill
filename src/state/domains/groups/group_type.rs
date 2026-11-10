@@ -27,6 +27,23 @@ pub struct UsernameVerdict {
     pub result: UsernameCheckResult,
 }
 
+/// The newest link check of the Type box: one stage at a time. Set only
+/// once the request went out, so `Checking` always has an answer coming
+/// (the verdict or the failure).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum UsernameCheck {
+    #[default]
+    Idle,
+    /// The chat and text of the check in flight.
+    Checking { chat_id: ChatId, username: String },
+    /// The newest answer.
+    Verdict(UsernameVerdict),
+    /// The chat and text whose newest check failed (FLOOD_WAIT, a server
+    /// error): the box says so instead of "Checking..." with nothing in
+    /// flight, and Save asks again.
+    Failed { chat_id: ChatId, username: String },
+}
+
 /// The owned public chats of the limit box.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub enum PublicChatsFetch {
@@ -70,14 +87,7 @@ pub struct EditAfterUpgrade {
 pub struct GroupTypeState {
     /// Counts checks; an answer for an older one is dropped.
     pub check_generation: u64,
-    /// The chat and text of the check in flight.
-    pub check_pending: Option<(ChatId, String)>,
-    /// The newest answer.
-    pub check: Option<UsernameVerdict>,
-    /// The chat and text whose newest check failed (FLOOD_WAIT, a server
-    /// error): the box says so instead of "Checking..." with nothing in
-    /// flight, and Save asks again.
-    pub check_failed: Option<(ChatId, String)>,
+    pub check: UsernameCheck,
     /// `checkCreatedPublicChatsLimit`: `Some(true)` at the limit.
     pub public_limit_reached: Option<bool>,
     /// Chats `checkChatUsername` said can't be public
@@ -102,11 +112,11 @@ fn group_type_purpose(pending: Option<&PendingRequest>) -> Option<GroupTypePurpo
 impl Session {
     /// The newest check of exactly `username` in `chat_id` failed.
     pub fn group_username_check_failed(&self, chat_id: ChatId, username: &str) -> bool {
-        self.groups
-            .group_type
-            .check_failed
-            .as_ref()
-            .is_some_and(|(chat, text)| *chat == chat_id && text == username)
+        matches!(
+            &self.groups.group_type.check,
+            UsernameCheck::Failed { chat_id: chat, username: text }
+                if *chat == chat_id && text == username
+        )
     }
 
     /// The verdict for exactly `username` in `chat_id`, if one came.
@@ -115,12 +125,12 @@ impl Session {
         chat_id: ChatId,
         username: &str,
     ) -> Option<UsernameCheckResult> {
-        self.groups
-            .group_type
-            .check
-            .as_ref()
-            .filter(|v| v.chat_id == chat_id && v.username == username)
-            .map(|v| v.result)
+        match &self.groups.group_type.check {
+            UsernameCheck::Verdict(v) if v.chat_id == chat_id && v.username == username => {
+                Some(v.result)
+            }
+            _ => None,
+        }
     }
 
     /// What the Type box opens with: the chat as TDLib last reported it
@@ -190,7 +200,8 @@ impl Session {
         if generation != state.check_generation {
             return;
         }
-        let Some((chat_id, username)) = state.check_pending.take() else {
+        let UsernameCheck::Checking { chat_id, username } = std::mem::take(&mut state.check)
+        else {
             return;
         };
         match result {
@@ -203,7 +214,7 @@ impl Session {
             }
             _ => {}
         }
-        self.groups.group_type.check = Some(UsernameVerdict {
+        self.groups.group_type.check = UsernameCheck::Verdict(UsernameVerdict {
             chat_id,
             username,
             result,
@@ -251,7 +262,11 @@ impl Session {
                 if generation == self.groups.group_type.check_generation =>
             {
                 let state = &mut self.groups.group_type;
-                state.check_failed = state.check_pending.take();
+                if let UsernameCheck::Checking { chat_id, username } =
+                    std::mem::take(&mut state.check)
+                {
+                    state.check = UsernameCheck::Failed { chat_id, username };
+                }
             }
             Some(GroupTypePurpose::CheckPublicChatsLimit) => {
                 self.groups.group_type.public_limit_reached =
