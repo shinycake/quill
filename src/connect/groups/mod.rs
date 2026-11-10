@@ -313,6 +313,15 @@ impl<S: JsonSender> ConnectDriver<S> {
         chat_id: ChatId,
         is_dark: bool,
     ) -> Result<Option<RequestId>, ConnectSendError> {
+        self.send_chat_statistics(chat_id, is_dark, false)
+    }
+
+    fn send_chat_statistics(
+        &mut self,
+        chat_id: ChatId,
+        is_dark: bool,
+        refresh: bool,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
@@ -328,14 +337,22 @@ impl<S: JsonSender> ConnectDriver<S> {
                     .get(&supergroup_id),
                 _ => None,
             })
-            .is_some_and(|info| info.can_get_statistics);
-        if !can_get {
+            .map(|info| info.can_get_statistics);
+        if can_get != Some(true) {
+            if can_get.is_none() {
+                return Ok(None);
+            }
+            // The panel draws this instead of a spinner nothing will end.
+            self.session.groups.chat_statistics.insert(
+                chat_id.0,
+                ChatStatisticsFetch::Failed("Statistics are not available for this chat.".into()),
+            );
             return Ok(None);
         }
-        if matches!(
-            self.session.groups.chat_statistics.get(&chat_id.0),
-            Some(ChatStatisticsFetch::Loading | ChatStatisticsFetch::Loaded(_))
-        ) || self
+        let held = self.session.groups.chat_statistics.get(&chat_id.0);
+        if matches!(held, Some(ChatStatisticsFetch::Loading))
+            || (!refresh && matches!(held, Some(ChatStatisticsFetch::Loaded(_))))
+            || self
             .session
             .requests
             .has_purpose_for_chat(RequestPurpose::GetChatStatistics, chat_id)
@@ -354,7 +371,10 @@ impl<S: JsonSender> ConnectDriver<S> {
             .send_json(&get_chat_statistics(extra, chat_id.0, is_dark))
         {
             self.session.requests.take(extra);
-            self.session.groups.chat_statistics.remove(&chat_id.0);
+            self.session.groups.chat_statistics.insert(
+                chat_id.0,
+                ChatStatisticsFetch::Failed("Could not send the statistics request.".into()),
+            );
             return Err(err);
         }
         Ok(Some(extra))
@@ -367,8 +387,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         chat_id: ChatId,
         is_dark: bool,
     ) -> Result<Option<RequestId>, ConnectSendError> {
-        self.session.groups.chat_statistics.remove(&chat_id.0);
-        self.fetch_chat_statistics(chat_id, is_dark)
+        self.send_chat_statistics(chat_id, is_dark, true)
     }
 
     /// Slice G1: `toggleSupergroupIsBroadcastGroup` (schema 1.8.67, line
