@@ -5,12 +5,16 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::*;
+use crate::ui::shell::QuillShell;
 use quill::state::fetch::Fetch;
 
 /// What to do with a waiting ban once its member chats answered.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum BanStep {
     Wait,
+    /// The ask is not in flight any more and left no answer (the account
+    /// was reset under it): the wait ends with a note, nothing is banned.
+    Cancel,
     BanNow,
     Warn(Vec<i64>),
 }
@@ -19,7 +23,8 @@ pub(crate) enum BanStep {
 /// a failed ask bans without the warning.
 pub(crate) fn ban_step(fetch: &Fetch<quill::telegram::envelope::CommunityMemberChats>) -> BanStep {
     match fetch {
-        Fetch::Idle | Fetch::Loading { .. } => BanStep::Wait,
+        Fetch::Loading { .. } => BanStep::Wait,
+        Fetch::Idle => BanStep::Cancel,
         Fetch::Failed { .. } => BanStep::BanNow,
         Fetch::Ready(chats) if chats.owned_chat_ids.is_empty() => BanStep::BanNow,
         Fetch::Ready(chats) => BanStep::Warn(chats.owned_chat_ids.clone()),
@@ -78,6 +83,11 @@ impl QuillApp {
         };
         match step {
             BanStep::Wait => false,
+            BanStep::Cancel => {
+                self.admin.community.flow.ban_wait = None;
+                self.set_note(StatusNote::error(tr(keys::Q_COMMUNITY_BAN_UNAVAILABLE)));
+                true
+            }
             BanStep::BanNow => {
                 self.admin.community.flow.ban_wait = None;
                 self.send_community_ban(pending.community_id, pending.member, cx);
@@ -85,6 +95,12 @@ impl QuillApp {
             }
             BanStep::Warn(owned_chat_ids) => {
                 self.admin.community.flow.ban_wait = None;
+                // The person moved on (closed the box the Ban came from,
+                // opened another, locked the app) while the ask was out:
+                // the warning does not open over what they are doing now.
+                if QuillShell::open_dialog_name(self) != pending.over {
+                    return true;
+                }
                 self.show_community_box(
                     CommunityBox::BanWarning {
                         community_id: pending.community_id,
@@ -118,10 +134,9 @@ impl QuillApp {
         member: CommunityMember,
         cx: &mut Context<Self>,
     ) {
-        if let Some(live) = self.live.as_mut()
-            && let Err(err) = live.driver.ban_community_member(community_id, member)
-        {
-            self.set_note(StatusNote::error(user_error(&err)));
+        if let Some(live) = self.live.as_mut() {
+            let sent = live.driver.ban_community_member(community_id, member);
+            self.community_step_went(Some(community_id), sent);
         }
         cx.notify();
     }

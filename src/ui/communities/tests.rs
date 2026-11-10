@@ -18,7 +18,11 @@ fn member_chats(owned: &[i64]) -> CommunityMemberChats {
 
 #[test]
 fn a_ban_waits_for_the_member_chats_then_warns_only_about_owned_ones() {
-    assert_eq!(ban_step(&Fetch::Idle), BanStep::Wait);
+    assert_eq!(
+        ban_step(&Fetch::Idle),
+        BanStep::Cancel,
+        "no ask in flight and no answer: the wait ends"
+    );
     assert_eq!(ban_step(&Fetch::Loading { stale: None }), BanStep::Wait);
     assert_eq!(ban_step(&Fetch::Ready(member_chats(&[]))), BanStep::BanNow);
     assert_eq!(

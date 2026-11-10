@@ -844,3 +844,138 @@ fn leaving_the_sticker_pick_closes_the_sticker_panel(cx: &mut TestAppContext) {
     });
     assert!(!open, "the pick's panel closed with it");
 }
+
+fn status_note(app: &Entity<QuillApp>, cx: &mut VisualTestContext) -> String {
+    app.read_with(cx, |app, _| app.connection.note().text().to_string())
+}
+
+#[gpui_kit::test]
+fn closing_from_a_sub_screen_saves_its_parent_and_tells_what_it_could_not_send(
+    cx: &mut TestAppContext,
+) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    seed(&app, vcx, true);
+    open(&app, vcx);
+    go(&app, vcx, View::Greeting);
+    act(&app, vcx, |app, _, cx| {
+        if let Some(draft) = app.business_mut().and_then(|d| d.greeting.as_mut()) {
+            draft.enabled = true;
+        }
+        cx.notify();
+    });
+    act(&app, vcx, |app, window, cx| {
+        app.open_business_picker(Recipients::Greeting, true, window, cx)
+    });
+    assert_eq!(view(&app, vcx), View::Picker);
+    // Esc / Close from the picker: the greeting it hangs from is saved
+    // (demo mode refuses the send, and says so in the status line).
+    vcx.update(|window, cx| {
+        app.update(cx, |app, cx| app.close_business_saving(false, window, cx));
+    });
+    frames(vcx);
+    assert!(app.read_with(vcx, |app, _| app.dialogs.business_dialog.is_none()));
+    assert_eq!(status_note(&app, vcx), QuillApp::DEMO_LINE);
+}
+
+#[gpui_kit::test]
+fn a_save_refused_after_the_box_closed_goes_to_the_status_line(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    seed(&app, vcx, true);
+    open(&app, vcx);
+    act(&app, vcx, |app, window, cx| {
+        app.close_business_saving(false, window, cx);
+    });
+    assert!(app.read_with(vcx, |app, _| app.dialogs.business_dialog.is_none()));
+    app.update(vcx, |app, _| {
+        if let Some(session) = app.demo_session.as_mut() {
+            session.settings.business.error = Some("Couldn't save the greeting".into());
+        }
+        app.business_closed_error_upkeep();
+    });
+    assert_eq!(status_note(&app, vcx), "Couldn't save the greeting");
+    // Said once.
+    let left = app.read_with(vcx, |app, _| {
+        app.demo_session
+            .as_ref()
+            .and_then(|s| s.settings.business.error.clone())
+    });
+    assert_eq!(left, None);
+}
+
+#[gpui_kit::test]
+fn a_refused_link_save_keeps_the_box_and_its_draft(cx: &mut TestAppContext) {
+    use quill::state::ChatLinkSave;
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    seed(&app, vcx, true);
+    open(&app, vcx);
+    go(&app, vcx, View::ChatLinks);
+    act(&app, vcx, |app, window, cx| {
+        app.open_business_link_edit(None, window, cx)
+    });
+    assert_eq!(view(&app, vcx), View::LinkEdit);
+    // TDLib answered: the box goes back to the list with its note.
+    app.update(vcx, |app, _| {
+        if let Some(session) = app.demo_session.as_mut() {
+            session.settings.business_extra.chat_link_save = ChatLinkSave::Saved;
+        }
+    });
+    act(&app, vcx, |app, window, cx| {
+        app.business_link_save_upkeep(window, cx)
+    });
+    assert_eq!(view(&app, vcx), View::ChatLinks);
+    assert_eq!(
+        note(&app, vcx).as_deref(),
+        Some(quill::lang::tr(quill::lang::keys::CHAT_LINK_SAVED))
+    );
+    // Idle (a refusal) leaves the edit box where it is.
+    act(&app, vcx, |app, window, cx| {
+        app.open_business_link_edit(None, window, cx)
+    });
+    act(&app, vcx, |app, window, cx| {
+        app.business_link_save_upkeep(window, cx)
+    });
+    assert_eq!(view(&app, vcx), View::LinkEdit);
+}
+
+#[gpui_kit::test]
+fn a_failed_links_load_shows_its_error_with_a_retry(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    seed(&app, vcx, true);
+    open(&app, vcx);
+    app.update(vcx, |app, _| {
+        if let Some(session) = app.demo_session.as_mut() {
+            session
+                .settings
+                .business_extra
+                .chat_links
+                .fail("Couldn't load the links: offline");
+        }
+    });
+    go(&app, vcx, View::ChatLinks);
+    frames(vcx);
+    let drawn = app.read_with(vcx, |app, _| app.business_chat_links_error());
+    assert_eq!(drawn.as_deref(), Some("Couldn't load the links: offline"));
+}
+
+#[gpui_kit::test]
+fn a_failed_chatbot_load_shows_its_error_with_a_retry(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    seed(&app, vcx, true);
+    open(&app, vcx);
+    app.update(vcx, |app, _| {
+        if let Some(session) = app.demo_session.as_mut() {
+            session
+                .settings
+                .business_extra
+                .connected_bot
+                .fail("Couldn't load the chatbot: offline");
+        }
+    });
+    let shown = app.read_with(vcx, |app, _| app.business_bot_error());
+    assert_eq!(shown.as_deref(), Some("Couldn't load the chatbot: offline"));
+}

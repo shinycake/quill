@@ -4,6 +4,7 @@
 //! Earlier events load when the list is scrolled to its top.
 #![deny(clippy::indexing_slicing)]
 
+use super::admin_state::EventLogSearch;
 use super::app::QuillApp;
 use super::dialogs::group_admin_settings::GroupSettingsView;
 use super::event_log_rows::{LogEntry, render_entry};
@@ -49,7 +50,48 @@ impl QuillApp {
             }
         })
         .detach();
-        self.admin.event_log_search = Some(input);
+        self.admin.event_log_search = Some(EventLogSearch { input, shows: None });
+    }
+
+    /// Fill the search box with `chat_id`'s stored query (an empty one for a
+    /// chat never searched): what the box shows is always that of the log
+    /// it sits over.
+    pub(super) fn show_event_log_query(
+        &mut self,
+        chat_id: ChatId,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let query = self
+            .session()
+            .and_then(|session| session.groups.event_log_queries.get(&chat_id.0).cloned())
+            .unwrap_or_default();
+        if let Some(search) = self.admin.event_log_search.as_mut() {
+            search.shows = Some(chat_id);
+            let input = search.input.clone();
+            input.update(cx, |state, cx| state.set_value(&query, window, cx));
+        }
+    }
+
+    /// Frame upkeep of the window hosting Group Settings: the search box
+    /// follows the chat whose recent actions are open, however the page was
+    /// reached.
+    pub(in crate::ui) fn event_log_search_upkeep(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(chat_id) = self.event_log_open_chat() else {
+            return;
+        };
+        if self
+            .admin
+            .event_log_search
+            .as_ref()
+            .is_some_and(|search| search.shows != Some(chat_id))
+        {
+            self.show_event_log_query(chat_id, window, cx);
+        }
     }
 
     /// The chat whose recent actions are open.
@@ -91,7 +133,7 @@ impl QuillApp {
             .admin
             .event_log_search
             .as_ref()
-            .map(|input| input.read(cx).value().trim().to_string())
+            .map(|search| search.input.read(cx).value().trim().to_string())
             .unwrap_or_default();
         let current = self
             .session()
@@ -299,7 +341,12 @@ impl QuillApp {
                 .child(div().text_sm().font_semibold().child(title))
                 .child(filter_button),
         );
-        if let Some(input) = self.admin.event_log_search.clone() {
+        if let Some(input) = self
+            .admin
+            .event_log_search
+            .as_ref()
+            .map(|s| s.input.clone())
+        {
             header = header.child(
                 Textarea::new(&input)
                     .aria_label(tr(keys::Q_PEOPLE_SEARCH_RECENT_ACTIONS))
@@ -417,7 +464,8 @@ impl QuillApp {
     }
 
     /// Forget the rows the list was built for.
-    fn event_log_reset_list(&self) {
+    pub(super) fn event_log_reset_list(&self) {
+        self.admin.event_log_autoload.set(None);
         let mut shown = self.admin.event_log_ids.borrow_mut();
         if !shown.is_empty() {
             shown.clear();
@@ -461,10 +509,12 @@ impl QuillApp {
         // Only once the list has been laid out: before that every offset is 0.
         let laid_out = state.viewport_bounds().size.height > px(0.);
         let at_top = laid_out && state.scroll_px_offset_for_scrollbar().y > px(-TOP_SLACK);
-        if page.has_more && at_top && self.admin.event_log_autoload.get() != page.events.len() {
+        let asked = Some((chat_id, page.events.len()));
+        if page.has_more && at_top && self.admin.event_log_autoload.get() != asked {
             // Short lists never scroll, so the next page is asked for here,
-            // once for each length the list reaches.
-            self.admin.event_log_autoload.set(page.events.len());
+            // once for each length the list reaches in a chat (the mark is
+            // cleared when the list starts over).
+            self.admin.event_log_autoload.set(asked);
             self.defer_screen(cx, move |this, cx| this.load_more_event_log(chat_id, cx));
         }
         let rows = Rc::clone(&entries);

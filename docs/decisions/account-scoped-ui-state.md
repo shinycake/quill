@@ -4077,3 +4077,80 @@ and 10 are widget items another fixer owns).
   (`cancel_inline_opening_unless_chat`, an invite preview, a text or typed
   link), or when another account is on screen (10-119). No timer: a lookup
   that never answers is the deep-link flow's own concern.
+
+### Sweep fixes (s3-groups--1)
+
+Groups, channels and business, first half. Optimistic edits roll back
+through `RequestRollback` (restored only while the screen still shows what
+the edit drew); a fetch that cannot be sent ends in `Failed`, not in nothing
+(which a page draws as a spinner); a stage is one enum.
+
+- **Business bot bar** (01-052, 02-088). Pause, resume and remove record
+  `RequestRollback::BusinessBotBar { previous, shown }`; the refusal puts
+  the bar back unless an update changed it since.
+- **Business links and bot** (02-031, 05-129, 08-005, 08-008).
+  `chat_links` and `connected_bot` are `Fetch<..>` (the two `*_requested`
+  bools are gone from the baseline). A failed load is drawn with Retry and
+  is never asked again from a render; `ensure_*` asks once when the screen
+  opens, `retry_*` asks again. A refused delete re-inserts its row
+  (`RequestRollback::ChatLinkDelete`). `ensure_user_full_info` (the ask a
+  start-page intro makes from render) skips users whose last ask failed
+  (`user_full_info_failed`); `fetch_user_full_info` stays the explicit retry.
+- **Link box save** (08-003). `ChatLinkSave { Idle, Saving(request), Saved }`
+  replaces the `chat_links_saving` counter; the box stays on its draft until
+  its own answer, goes back to the list with "Chat link saved." on success
+  (frame upkeep), and a refusal returns the stage to `Idle` under the error
+  line. Opening the box or the Business dialog resets a stale stage.
+- **Closing Business** (08-001, 08-002, 08-029). Closing from a sub-screen
+  (a day, the picker, the sticker panel) saves the screen it hangs from;
+  the line a leave would show on the next screen (a refused send, "stays
+  off") goes to the status line when the box closes; a save TDLib refuses
+  after the box closed is shown once in the status line
+  (`business_closed_error_upkeep`).
+- **Protected content** (02-073). The rollback also restores the "you
+  disabled sharing" record it replaced.
+- **Type box** (02-120, 12-016, 05-088, 02-121, 05-086). The link check is
+  one `UsernameCheck` enum set only after the send went out. A revoke
+  records its `PublicLinkRevoke` after the first request, so a failed second
+  send still settles it (note and a fresh list). Edits queued behind a
+  basic-group upgrade report an error when there is no upgraded chat to
+  send them to. The new-channel type step watches its Save's requests
+  (`NewChatState::type_saves`): any refusal, a lost request included, keeps
+  the step with TDLib's reason instead of moving on.
+- **New chat** (04-006). A create's dialog is `CreationAsker::Dialog` or
+  `Closed` (`abandon_new_chat`, from `close_new_chat`): a closed one does
+  not block the next Create and does not open its group over what the
+  person is doing.
+- **Membership probe** (02-118). The probe after `getMe` runs for every chat
+  window's chat under its own view, as it did for the main window's.
+- **Permissions** (02-167). A save while `setChatPermissions` is out is
+  sent; its rollback restores the values from before the first.
+- **Admins page** (05-083). A refused status or title change goes to
+  `member_action_error` only (drawn above the list with Close); the loaded
+  list is kept.
+- **Conference invite** (05-044). The invite carries `rings_until` (its date
+  plus the ring timeout); `request_tick` ends a ring that outlived it and
+  declines the invitation, and `next_deadline` wakes the poll loop for it.
+- **Ordinary link** (03-066). "Require Monthly Fee" is offered on a new link
+  and on an existing subscription link (locked), not on an ordinary link.
+  tdesktop's source is not in this session; the register entry says it offers
+  the switch for new links only, which is what is implemented.
+- **Group settings pages** (10-042). The invite links, join requests and
+  administrators fetches store `Failed` when their send fails, drawn with
+  the page's Retry.
+- **Recent actions** (09-094, 09-093). The search box shows the stored query
+  of the chat whose log is open (`EventLogSearch { input, shows }`, refilled
+  by frame upkeep); the "load older" mark is per chat and cleared when the
+  list starts over or the page opens.
+- **Communities** (08-121, 08-122, 08-123). A waiting ban ends with a note
+  when its ask left no answer (`BanStep::Cancel`) and opens its warning
+  only over the box that was open when Ban was pressed. A send answering
+  `Ok(None)` (Ban, Remove, Add, Create) is told in a note
+  (`community_step_went`). The chooser and the picker draw a failed list
+  with Retry instead of an empty one.
+- **Drop on a forum** (08-067). The chooser keeps the dropped payload until
+  the chat opened; a refused or failed open leaves it with a note.
+- **Already per window, proven by tests** (02-119, 02-184). `open_topic` and
+  the shared-media gallery are part of `SessionView`, swapped with the
+  window in place (`with_window_chat`), so a chat window's topic and gallery
+  are its own; tests for both.

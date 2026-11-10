@@ -97,7 +97,7 @@ impl QuillApp {
     }
 
     /// Why the connected bot did not load, while its request is failed.
-    fn business_bot_error(&self) -> Option<String> {
+    pub(super) fn business_bot_error(&self) -> Option<String> {
         self.session().and_then(|s| {
             s.settings
                 .business_extra

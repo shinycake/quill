@@ -142,9 +142,11 @@ impl QuillApp {
             photo,
         ) {
             // The box waits for the answer: it closes on `Created` and
-            // stays on a refusal, as tdesktop's does.
-            Ok(_) => {}
-            Err(err) => self.set_note(StatusNote::error(user_error(&err))),
+            // stays on a refusal, as tdesktop's does. A send that did not
+            // go (the chat left the model) stays too, with its note.
+            sent => {
+                self.community_step_went(None, sent);
+            }
         }
         cx.notify();
     }

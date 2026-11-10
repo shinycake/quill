@@ -33,7 +33,7 @@ impl QuillApp {
     }
 
     /// Why the links did not load, while their request is failed.
-    fn business_chat_links_error(&self) -> Option<String> {
+    pub(super) fn business_chat_links_error(&self) -> Option<String> {
         self.session().and_then(|s| {
             s.settings
                 .business_extra

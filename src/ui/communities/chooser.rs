@@ -15,6 +15,16 @@ use gpui_kit::component::*;
 use quill::new_chat::{NewChatKind, NewChatStep};
 use quill::state::{ProfileChatsFetch, ProfileChatsKind};
 
+/// How the chooser's lists stand: still loading, or why one failed (its
+/// chats are then missing from the list, which says so with a Retry
+/// instead of "No chats found").
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum CandidateStatus {
+    Ready,
+    Loading,
+    Failed(String),
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Candidate {
     pub(crate) chat_id: i64,
@@ -56,20 +66,28 @@ impl QuillApp {
     /// The chats the box offers, by title, filtered by `query`: the
     /// suitable chats, then the owned bots (`getOwnedBots`) that are in
     /// no community. A bot's chat is its user id.
-    pub(crate) fn community_candidates(&self, query: &str) -> (Vec<Candidate>, bool) {
+    pub(crate) fn community_candidates(&self, query: &str) -> (Vec<Candidate>, CandidateStatus) {
         let Some(session) = self.session() else {
-            return (Vec::new(), false);
+            return (Vec::new(), CandidateStatus::Ready);
         };
         let query = query.trim().to_lowercase();
-        let (suitable, loading) = match session
+        let (suitable, mut status) = match session
             .users_state
             .profile_chat_lists
             .get(&(ProfileChatsKind::SuitableCommunityChats, 0))
         {
-            Some(ProfileChatsFetch::Loaded(ids)) => (ids.clone(), false),
-            Some(ProfileChatsFetch::Loading) => (Vec::new(), true),
-            Some(ProfileChatsFetch::Failed(_)) | None => (Vec::new(), false),
+            Some(ProfileChatsFetch::Loaded(ids)) => (ids.clone(), CandidateStatus::Ready),
+            Some(ProfileChatsFetch::Loading) => (Vec::new(), CandidateStatus::Loading),
+            Some(ProfileChatsFetch::Failed(error)) => {
+                (Vec::new(), CandidateStatus::Failed(error.clone()))
+            }
+            None => (Vec::new(), CandidateStatus::Ready),
         };
+        if status == CandidateStatus::Ready
+            && let Some(error) = session.communities.owned_bots.error()
+        {
+            status = CandidateStatus::Failed(error.to_string());
+        }
         let mut chats: Vec<Candidate> = suitable
             .into_iter()
             .filter_map(|chat_id| {
@@ -99,7 +117,20 @@ impl QuillApp {
         bots.sort_by_key(|c| c.title.to_lowercase());
         chats.extend(bots);
         chats.retain(|c| query.is_empty() || c.title.to_lowercase().contains(&query));
-        (chats, loading)
+        (chats, status)
+    }
+
+    /// The chooser's Retry: both lists asked again.
+    fn retry_community_candidates(&mut self, cx: &mut Context<Self>) {
+        if let Some(live) = self.live.as_mut()
+            && let Err(err) = live
+                .driver
+                .fetch_suitable_community_chats()
+                .and_then(|_| live.driver.fetch_owned_bots())
+        {
+            self.set_note(StatusNote::error(user_error(&err)));
+        }
+        cx.notify();
     }
 
     /// "Create a New Chat" → New Group / New Channel; the new chat then
@@ -164,7 +195,7 @@ impl QuillApp {
             let community_id = *community_id;
             let search = search.clone();
             let query = search.read(cx).value().to_string();
-            let (candidates, loading) = this.community_candidates(&query);
+            let (candidates, status) = this.community_candidates(&query);
             let muted = cx.theme().muted_foreground;
             let mut list = div()
                 .id("community-choose-list")
@@ -206,8 +237,26 @@ impl QuillApp {
                         .child(div().min_w_0().truncate().child(candidate.title.clone())),
                 );
             }
-            if candidates.is_empty() {
-                list = list.child(if loading {
+            if let CandidateStatus::Failed(error) = &status {
+                list = list.child(
+                    div()
+                        .py_2()
+                        .flex()
+                        .flex_col()
+                        .items_start()
+                        .gap_2()
+                        .child(div().text_sm().text_color(muted).child(error.clone()))
+                        .child(
+                            Button::new("community-choose-retry")
+                                .label(tr(keys::Q_CHAT_RETRY))
+                                .small()
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.retry_community_candidates(cx);
+                                })),
+                        ),
+                );
+            } else if candidates.is_empty() {
+                list = list.child(if status == CandidateStatus::Loading {
                     div()
                         .py_4()
                         .flex()

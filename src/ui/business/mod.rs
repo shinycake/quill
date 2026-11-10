@@ -187,9 +187,8 @@ impl QuillApp {
             return;
         }
         let Some(line) = self
-            .live
-            .as_mut()
-            .and_then(|live| live.driver.session.settings.business.error.take())
+            .session_mut()
+            .and_then(|session| session.settings.business.error.take())
         else {
             return;
         };
