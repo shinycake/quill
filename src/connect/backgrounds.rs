@@ -47,6 +47,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session.chats_state.installed_backgrounds.cancel();
             return Err(err);
         }
+        self.session.chats_state.installed_backgrounds.begin();
         Ok(Some(extra))
     }
 

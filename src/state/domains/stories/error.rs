@@ -141,6 +141,11 @@ impl Session {
                 if purpose == RequestPurpose::SetCloseFriends {
                     self.stories.close_friends_pending = None;
                 }
+                if purpose == RequestPurpose::GetCloseFriends
+                    && let Some(pending) = pending
+                {
+                    self.stories.close_friends.fail_load(pending.id);
+                }
                 // The profile gallery's Stories tab loads from this request
                 // too: it fails instead of loading forever.
                 if purpose == RequestPurpose::GetChatPostedToChatPageStories

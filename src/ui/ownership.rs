@@ -156,18 +156,25 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some((chat_id, input)) = self
-            .admin
-            .ownership_dialog
-            .as_ref()
-            .map(|d| (d.chat_id, d.password_input.clone()))
-        else {
+        let Some((chat_id, input, leave_after)) = self.admin.ownership_dialog.as_ref().map(|d| {
+            (
+                d.chat_id,
+                d.password_input.clone(),
+                matches!(
+                    d.stage,
+                    OwnershipStage::Confirm {
+                        leave_after: true,
+                        ..
+                    }
+                ),
+            )
+        }) else {
             return;
         };
         let password = input.read(cx).value().to_string();
         let sent = self.live.as_mut().map(|live| {
             live.driver
-                .transfer_chat_ownership(chat_id, user_id, &password)
+                .transfer_chat_ownership(chat_id, user_id, &password, leave_after)
         });
         input.update(cx, |input, cx| input.set_value("", window, cx));
         drop(password);
@@ -202,13 +209,14 @@ impl QuillApp {
         else {
             return false;
         };
-        let leave_after = matches!(
-            self.admin.ownership_dialog.as_ref().map(|d| d.stage),
-            Some(OwnershipStage::Confirm {
-                leave_after: true,
-                ..
-            })
-        );
+        // The dialog answers only for its own chat: another chat's box,
+        // opened after this transfer was sent, is left as it is.
+        let for_this_dialog = self
+            .admin
+            .ownership_dialog
+            .as_ref()
+            .is_some_and(|d| d.chat_id.0 == done.chat_id);
+        let leave_after = done.leave_after;
         let name = self.contact_display_name(done.user_id);
         let is_channel = self.group_flavor(ChatId(done.chat_id)) == Some(GroupFlavor::Channel);
         self.set_note(StatusNote::silent(tr_with(
@@ -219,7 +227,9 @@ impl QuillApp {
             },
             &[("name", &name.to_string())],
         )));
-        self.admin.ownership_dialog = None;
+        if for_this_dialog {
+            self.admin.ownership_dialog = None;
+        }
         if leave_after {
             self.leave_channel(ChatId(done.chat_id), cx);
         }

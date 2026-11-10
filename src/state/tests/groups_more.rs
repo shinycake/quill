@@ -343,7 +343,7 @@ fn adding_members_marks_the_member_list_stale() {
 #[test]
 fn an_ownership_transfer_marks_the_member_list_stale() {
     let (mut session, _sink) = session();
-    session.begin_ownership_transfer(13, 888);
+    session.begin_ownership_transfer(13, 888, false);
     session.finish_ownership_transfer(888, Some(13));
     assert_eq!(session.groups.member_list_stale, vec![13]);
 }

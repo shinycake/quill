@@ -121,7 +121,10 @@ impl QuillApp {
     pub(super) fn close_giveaway_form(&mut self, cx: &mut Context<Self>) {
         let boosted = self.giveaway.form.take().map(|f| f.draft.boosted_chat_id);
         if let Some(live) = self.live.as_mut() {
-            let launched = live.driver.session.payments.giveaway.launch == GiveawayLaunch::Launched;
+            let launched = matches!(
+                live.driver.session.payments.giveaway.launch,
+                GiveawayLaunch::Launched | GiveawayLaunch::Paid { .. }
+            );
             if !matches!(
                 live.driver.session.payments.giveaway.launch,
                 GiveawayLaunch::Launching { .. }
@@ -440,7 +443,7 @@ impl QuillApp {
             .unwrap_or_else(|| tr(keys::Q_MONEY_THIS_CHAT).into());
         let boosts = draft.boost_count(&options.stars);
 
-        if giveaway.launch == GiveawayLaunch::Launched {
+        if giveaway.launch.is_done_for(draft.boosted_chat_id) {
             return div()
                 .id("giveaway-launched")
                 .flex()
@@ -536,13 +539,18 @@ impl QuillApp {
             };
             let draft = this.settled_draft();
             let prepaid = draft.as_ref().is_some_and(|d| d.prepaid.is_some());
+            let settled_chat = draft.as_ref().map(|d| d.boosted_chat_id);
             let confirming = form.confirming;
             let launch = this
                 .session()
                 .map(|s| s.payments.giveaway.launch.clone())
                 .unwrap_or_default();
             let launching = matches!(launch, GiveawayLaunch::Launching { .. });
-            let launched = launch == GiveawayLaunch::Launched;
+            let launched = settled_chat.is_some_and(|chat| launch.is_done_for(chat));
+            let paying = settled_chat.is_some_and(|chat| {
+                this.session()
+                    .is_some_and(|s| s.payments.giveaway_paying(chat))
+            });
             let body = this.giveaway_form_body(form, cx);
             let close = |label: &'static str| {
                 Button::new("giveaway-close")
@@ -589,8 +597,8 @@ impl QuillApp {
                 footer.child(close(tr(keys::CLOSE))).child(
                     Button::new("giveaway-start")
                         .label(tr(keys::GIVEAWAY_START))
-                        .loading(launching)
-                        .disabled(launching)
+                        .loading(launching || paying)
+                        .disabled(launching || paying)
                         .on_click(cx.listener(move |this, _, window, cx| {
                             // A prepaid giveaway asks once more; a new one
                             // opens the checkout, which is the confirmation.

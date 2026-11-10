@@ -60,10 +60,10 @@ impl<S: JsonSender> ConnectDriver<S> {
             user_id,
             name: name.to_string(),
         });
-        state.loading = true;
+        state.asked = Some(extra);
         let json = get_star_gift_payment_options(extra, user_id);
         if let Err(err) = self.send_json_request(extra, &json) {
-            self.session.payments.stars_gift.loading = false;
+            self.session.payments.stars_gift.asked = None;
             return Err(err);
         }
         Ok(extra)

@@ -410,7 +410,7 @@ impl QuillApp {
             .auction_state(gift_id)
             .and_then(|state| state.my())
             .and_then(|my| name_of(my.owner));
-        let to = name_of(self.auction_recipient());
+        let to = name_of(self.auction_recipient(gift_id));
         let text = change_recipient_text(from.as_deref(), to.as_deref());
         BoxView::new(tr(keys::AUCTION_CHANGE_TITLE), div().text_sm().child(text)).footer(
             div()
@@ -579,7 +579,21 @@ impl QuillApp {
                     })
                 })
             }
-            MessageSender::Chat { .. } => None,
+            // A bid placed for a channel is raised for that channel, never
+            // for the user.
+            MessageSender::Chat { chat_id } => {
+                let session = self.session()?;
+                session
+                    .gift_recipient(quill::ids::ChatId(chat_id))
+                    .or_else(|| {
+                        Some(quill::gift_manage::GiftRecipient {
+                            sender,
+                            name: session.sender_label(sender),
+                            is_self: false,
+                            is_channel: true,
+                        })
+                    })
+            }
         });
         self.gift_market.recipient = recipient;
         self.market_push(MarketBox::AuctionBid { gift_id }, cx);

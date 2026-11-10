@@ -50,8 +50,7 @@ pub(crate) struct StoryViewerUi {
     /// B14: the press-and-hold / Space pause, and the viewer's extra
     /// panels (close friends, share) with their last result line.
     pub(super) pause: quill::story_extras::StoryUserPause,
-    pub(super) close_friends_edit: Option<quill::story_extras::CloseFriendsEdit>,
-    pub(super) close_friends_saving: bool,
+    pub(super) close_friends: quill::story_extras::CloseFriendsStage,
     /// The story-page call sent from here (Hide, the profile toggle, the
     /// close-friends list): only its status line shows under the story.
     pub(super) page_op: Option<quill::ids::RequestId>,
@@ -174,10 +173,9 @@ impl StoryUi {
         if self.viewer.is_open() {
             // The close-friends editor is about the list, not the story,
             // so it stays, and with it the call that loads or saves it.
-            let close_friends = open.close_friends_edit.is_some();
+            let close_friends = open.close_friends.is_open();
             self.open = Some(StoryViewerUi {
-                close_friends_edit: open.close_friends_edit,
-                close_friends_saving: open.close_friends_saving,
+                close_friends: open.close_friends,
                 page_op: open.page_op.filter(|_| close_friends),
                 ..StoryViewerUi::default()
             });

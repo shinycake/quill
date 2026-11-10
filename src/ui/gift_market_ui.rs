@@ -84,9 +84,20 @@ impl QuillApp {
         }
     }
 
+    /// Opens `next` above the current box. The first box of a visit forgets
+    /// the gifts whose variants failed last time, so they are asked again
+    /// even when an error arrived after the last box closed.
+    pub(super) fn open_market_box(&mut self, next: MarketBox) {
+        if self.gift_market.stack.is_empty() {
+            self.forget_failed_previews();
+        }
+        // box-host: every caller opens the box in its own window right after
+        self.gift_market.push(next);
+    }
+
     /// Opens `next` above the current box.
     pub(super) fn market_push(&mut self, next: MarketBox, cx: &mut Context<Self>) {
-        self.gift_market.push(next);
+        self.open_market_box(next);
         self.open_box(crate::ui::shell::DialogKind::GiftMarket);
         cx.notify();
     }
@@ -152,16 +163,42 @@ impl QuillApp {
             self.gift_market.pending_auction = false;
             // "Hide My Name" is one bid's choice, never the next auction's.
             self.gift_market.hide_name = false;
+            self.forget_failed_previews();
         }
         self.after_craft_pop();
     }
 
-    /// Who an auction bid goes to: the chosen recipient, or the user.
-    pub(super) fn auction_recipient(&self) -> Option<MessageSender> {
+    /// The market box closed: a gift whose variants failed to load is asked
+    /// again when a box opens next, never from a render.
+    pub(super) fn forget_failed_previews(&mut self) {
+        if let Some(market) = self.gift_market_mut() {
+            market.failed_previews.clear();
+        }
+    }
+
+    /// Who an auction bid goes to: the chosen recipient; else the owner of
+    /// the bid the user already has on this auction (a raise keeps its
+    /// owner, so opening a channel's bid must not turn it into a new bid
+    /// to oneself); else the user. tdesktop's source was not reachable, so
+    /// this is the smallest safe choice.
+    pub(super) fn auction_recipient(&self, gift_id: i64) -> Option<MessageSender> {
         self.gift_market
             .recipient
             .as_ref()
             .map(|recipient| recipient.sender)
+            .or_else(|| {
+                let state = self
+                    .session()?
+                    .payments
+                    .gift_market
+                    .auctions
+                    .get(&gift_id)?;
+                if state.my_stars() > 0 {
+                    state.my().and_then(|my| my.owner)
+                } else {
+                    None
+                }
+            })
             .or_else(|| {
                 let me = self.session()?.my_user_id?;
                 Some(MessageSender::User { user_id: me })
@@ -200,7 +237,7 @@ impl QuillApp {
 
     /// The box an auction opens with (tdesktop `ChooseAndShowAuctionBox`).
     pub(super) fn show_auction_box(&mut self, gift_id: i64, cx: &mut Context<Self>) {
-        let recipient = self.auction_recipient();
+        let recipient = self.auction_recipient(gift_id);
         let Some(state) = self
             .session()
             .and_then(|s| s.payments.gift_market.auctions.get(&gift_id))
@@ -216,7 +253,7 @@ impl QuillApp {
             AuctionBoxChoice::Info => MarketBox::AuctionInfo { gift_id },
             AuctionBoxChoice::About => MarketBox::AuctionAbout { gift_id },
         };
-        self.gift_market.push(next);
+        self.open_market_box(next);
         self.open_box(crate::ui::shell::DialogKind::GiftMarket);
         cx.notify();
     }

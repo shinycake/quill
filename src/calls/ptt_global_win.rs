@@ -26,6 +26,10 @@ struct Context {
 /// Only one hook is live at a time (the controller drops the old one first).
 static CONTEXT: Mutex<Option<Context>> = Mutex::new(None);
 
+/// A key event arrived while `CONTEXT` was locked and was skipped; the next
+/// event the hook can handle ends a hold whose release it may have been.
+static SKIPPED: AtomicBool = AtomicBool::new(false);
+
 /// A running hook; dropping it ends the hook thread.
 #[derive(Debug)]
 pub struct Handle {
@@ -59,13 +63,22 @@ unsafe extern "system" fn on_key(code: i32, wparam: WPARAM, lparam: LPARAM) -> L
                 WM_KEYUP | WM_SYSKEYUP => Some(false),
                 _ => None,
             };
-            if let (Some(pressed), Some(mut guard)) =
-                (pressed, crate::locks::try_lock_or_recover(&CONTEXT))
-                && let Some(ctx) = guard.as_mut()
+            let Some(pressed) = pressed else { return };
+            let Some(mut guard) = crate::locks::try_lock_or_recover(&CONTEXT) else {
+                SKIPPED.store(true, Ordering::SeqCst);
+                return;
+            };
+            if let Some(ctx) = guard.as_mut()
                 && ctx.active.load(Ordering::SeqCst)
-                && let Some(edge) = ctx.filter.feed(info.vkCode, pressed)
             {
-                (ctx.sink)(edge);
+                if SKIPPED.swap(false, Ordering::SeqCst)
+                    && let Some(edge) = ctx.filter.resync()
+                {
+                    (ctx.sink)(edge);
+                }
+                if let Some(edge) = ctx.filter.feed(info.vkCode, pressed) {
+                    (ctx.sink)(edge);
+                }
             }
         });
     }

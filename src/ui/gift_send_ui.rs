@@ -58,13 +58,20 @@ impl QuillApp {
         ) {
             return;
         }
+        let sending = self.gift_send_out();
         let opened = chat.and_then(|chat| {
             self.live
                 .as_mut()
                 .map(|live| live.driver.open_send_gift(chat))
         });
         if matches!(opened, Some(Ok(()))) {
-            self.reset_send_gift_inputs(window, cx);
+            // Reopening for the send that is out keeps what was typed.
+            if !sending {
+                self.reset_send_gift_inputs(window, cx);
+            }
+            self.open_box(DialogKind::SendGift);
+        } else if sending && chat.is_some() {
+            self.set_note(StatusNote::silent(tr(keys::Q_MONEY_GIFT_IS_BEING_SENT)));
         } else {
             self.set_note(StatusNote::silent(tr(keys::Q_MONEY_OPEN_A_CHAT_WITH_A)));
         }
@@ -79,6 +86,7 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        let sending = self.gift_send_out();
         let opened = match self.live.as_mut() {
             Some(live) => live.driver.open_send_gift_to_user(user_id).is_ok(),
             None => self.demo_session.as_mut().is_some_and(|session| {
@@ -94,11 +102,22 @@ impl QuillApp {
             }),
         };
         if opened {
-            self.reset_send_gift_inputs(window, cx);
+            if !sending {
+                self.reset_send_gift_inputs(window, cx);
+            }
+            self.open_box(DialogKind::SendGift);
+        } else if sending {
+            self.set_note(StatusNote::silent(tr(keys::Q_MONEY_GIFT_IS_BEING_SENT)));
         } else {
             self.set_note(StatusNote::error(tr(keys::Q_MONEY_COULDNT_OPEN_THE_GIFTS)));
         }
         cx.notify();
+    }
+
+    /// A `sendGift` of the open dialog is out.
+    fn gift_send_out(&self) -> bool {
+        self.session()
+            .is_some_and(|s| s.payments.gifts_manage.send.sending())
     }
 
     fn reset_send_gift_inputs(&mut self, window: &mut Window, cx: &mut Context<Self>) {

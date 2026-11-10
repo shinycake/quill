@@ -457,6 +457,7 @@ pub fn enable(
     let master = MasterKey::generate();
     let config = build_config(passcode, iterations, &master, None)?;
     let mut written: Vec<AccountKey> = Vec::new();
+    let mut originals: Vec<(AccountKey, DatabaseKey)> = Vec::new();
     let rollback = |written: &[AccountKey]| {
         for account in written {
             let _ = std::fs::remove_file(wrapped_key_path(root, account));
@@ -486,16 +487,41 @@ pub fn enable(
             return Err(err);
         }
         written.push(account.clone());
+        originals.push((account.clone(), key));
     }
     if let Err(err) = save_config(root, &config) {
         rollback(&written);
         return Err(err);
     }
-    for account in &written {
-        if let Err(err) = inner.delete(account) {
+    for (index, (account, _)) in originals.iter().enumerate() {
+        let Err(err) = inner.delete(account) else {
+            continue;
+        };
+        // Keys already removed from the OS store exist only as wrapped
+        // copies now: put them back before the wrapped files go. Every put
+        // is tried, so one failure does not strand the rest.
+        let put_back: Vec<bool> = originals
+            .iter()
+            .take(index)
+            .map(|(done, key)| inner.put(done, key).is_ok())
+            .collect();
+        if put_back.iter().all(|ok| *ok) {
             rollback(&written);
             return Err(err.into());
         }
+        // Some key cannot be put back, so the wrapped files stay and the
+        // passcode is on. Keys whose put-back worked are plain in the OS
+        // store again: they leave it a second time (each has a wrapped
+        // copy), and so does every key after the failure.
+        for ((done, _), restored) in originals.iter().zip(&put_back) {
+            if *restored {
+                let _ = inner.delete(done);
+            }
+        }
+        for (rest, _) in originals.iter().skip(index + 1) {
+            let _ = inner.delete(rest);
+        }
+        break;
     }
     state.set(master);
     Ok(())

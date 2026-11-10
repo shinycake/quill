@@ -270,16 +270,19 @@ impl QuillApp {
         hidden: bool,
         cx: &mut Context<Self>,
     ) {
+        let account = self
+            .session()
+            .map_or_else(quill::ids::AccountKey::primary, |s| s.account.clone());
         if let Some(live) = self.live.as_mut()
             && live
                 .driver
                 .toggle_chat_is_translatable(chat_id, !hidden)
                 .is_ok()
         {
-            self.set_translate_prefs(cx, |p| p.set_bar_hidden(chat_id.0, false));
+            self.set_translate_prefs(cx, |p| p.set_bar_hidden(&account, chat_id.0, false));
             return;
         }
-        self.set_translate_prefs(cx, |p| p.set_bar_hidden(chat_id.0, hidden));
+        self.set_translate_prefs(cx, |p| p.set_bar_hidden(&account, chat_id.0, hidden));
     }
 
     /// Bar menu → Hide.
