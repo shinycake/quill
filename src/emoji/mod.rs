@@ -117,9 +117,9 @@ pub struct EmojiPanel {
     /// Slice S10: `getEmojiCategories` rows for the picker.
     pub categories: Vec<EmojiCategory>,
     /// `getEmojiCategories` for the sticker panel (`GetStickerCategories`).
-    pub sticker_categories: Vec<EmojiCategory>,
-    /// The sticker categories were asked for.
-    pub sticker_categories_asked: bool,
+    /// One value: not asked, in flight, answered, or failed (the strip
+    /// stays hidden and the next panel open asks again).
+    pub sticker_categories: crate::state::fetch::Fetch<Vec<EmojiCategory>>,
 }
 
 /// B11: input-language codes for `getKeywordEmojis`: the script of what
@@ -417,7 +417,7 @@ impl Session {
             self.stickers.emoji.categories = categories;
         } else if purpose == Some(RequestPurpose::GetStickerCategories) {
             self.remember_files(&files);
-            self.stickers.emoji.sticker_categories = categories;
+            self.stickers.emoji.sticker_categories.succeed(categories);
         }
     }
 

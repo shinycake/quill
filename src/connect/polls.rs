@@ -283,9 +283,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         let can_stop = self
             .session
-            .histories
-            .get(&chat_id.0)
-            .and_then(|history| history.messages.get(&message_id.0))
+            .loaded_message(chat_id, message_id)
             .filter(|message| !message.pending() && message.id.0 > 0)
             .and_then(|message| match &message.content {
                 // F4: defense in depth — the UI menu already gates on

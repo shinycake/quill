@@ -649,10 +649,11 @@ fn unsent_self_destructing_and_unsaveable_messages_never_qualify() {
         can_be_saved: false,
         ..Default::default()
     };
-    session.messages.message_menu_actions = Some((chat, MessageId(5), actions));
+    session.messages.menu_actions.set(chat, MessageId(5), actions);
     assert_eq!(target(&session, 5), None);
-    session.messages.message_menu_actions = Some((chat, MessageId(9), actions));
-    assert_eq!(target(&session, 5), Some(MessageId(5)));
+    // Another message's answer does not undo it.
+    session.messages.menu_actions.set(chat, MessageId(9), actions);
+    assert_eq!(target(&session, 5), None);
 }
 
 fn worker_with(message: Value) -> FakeTdlib {

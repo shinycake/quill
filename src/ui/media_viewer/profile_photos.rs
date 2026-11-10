@@ -68,9 +68,8 @@ impl QuillApp {
         {
             let known = session
                 .messages
-                .message_menu_actions
-                .filter(|(c, m, _)| *c == chat_id && *m == message_id)
-                .map(|(_, _, actions)| actions);
+                .menu_actions
+                .get(chat_id, message_id);
             let allowed = known.map_or(
                 is_outgoing || session.chat_can_edit_information(chat_id),
                 |a| a.can_be_deleted(),

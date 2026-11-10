@@ -1,5 +1,6 @@
 //! Sticker and GIF panel state types.
 use super::*;
+use crate::state::fetch::Fetch;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum StickerTab {
@@ -38,6 +39,94 @@ impl StickerSearch {
     }
 }
 
+/// The selected set's stickers. A failed set is not asked again until
+/// another set is selected or the panel opens again, or the per-update pass
+/// would resend it at round-trip speed. An answer applies only to the
+/// request that asked.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum StickerSetStage {
+    #[default]
+    Idle,
+    Loading {
+        set_id: i64,
+        request: RequestId,
+    },
+    Ready {
+        set_id: i64,
+    },
+    Failed {
+        set_id: i64,
+    },
+}
+
+impl StickerSetStage {
+    /// The set this stage is about.
+    pub fn set_id(&self) -> Option<i64> {
+        match *self {
+            Self::Idle => None,
+            Self::Loading { set_id, .. } | Self::Ready { set_id } | Self::Failed { set_id } => {
+                Some(set_id)
+            }
+        }
+    }
+
+    /// The set whose stickers are in the panel's `stickers`.
+    pub fn loaded_id(&self) -> Option<i64> {
+        match *self {
+            Self::Ready { set_id } => Some(set_id),
+            _ => None,
+        }
+    }
+
+    pub fn is_loading(&self) -> bool {
+        matches!(self, Self::Loading { .. })
+    }
+
+    pub fn is_failed(&self) -> bool {
+        matches!(self, Self::Failed { .. })
+    }
+}
+
+/// One fetch per list tab of the sticker panel.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct StickerLists {
+    pub installed: Fetch<()>,
+    pub recent: Fetch<()>,
+    pub favorites: Fetch<()>,
+    pub trending: Fetch<()>,
+    pub archived: Fetch<()>,
+    pub search: Fetch<()>,
+}
+
+impl StickerLists {
+    pub fn of(&self, tab: StickerTab) -> &Fetch<()> {
+        match tab {
+            StickerTab::Installed => &self.installed,
+            StickerTab::Recent => &self.recent,
+            StickerTab::Favorites => &self.favorites,
+            StickerTab::Trending => &self.trending,
+            StickerTab::Archived => &self.archived,
+            StickerTab::Search => &self.search,
+        }
+    }
+
+    /// The list a request loads; `None` for the requests that change
+    /// something (those report a note when they fail).
+    pub fn for_purpose(&mut self, purpose: RequestPurpose) -> Option<&mut Fetch<()>> {
+        match purpose {
+            RequestPurpose::GetInstalledStickerSets => Some(&mut self.installed),
+            RequestPurpose::GetRecentStickers => Some(&mut self.recent),
+            RequestPurpose::GetFavoriteStickers => Some(&mut self.favorites),
+            RequestPurpose::GetTrendingStickerSets => Some(&mut self.trending),
+            RequestPurpose::GetArchivedStickerSets => Some(&mut self.archived),
+            RequestPurpose::SearchStickers | RequestPurpose::SearchStickerSets => {
+                Some(&mut self.search)
+            }
+            _ => None,
+        }
+    }
+}
+
 /// Composer sticker panel (Unigram `StickerDrawerViewModel` installed regular sets).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct StickerPanel {
@@ -50,17 +139,12 @@ pub struct StickerPanel {
     pub archived_has_more: bool,
     pub selected_set_id: Option<i64>,
     pub stickers: Vec<StickerItem>,
-    pub loaded_set_id: Option<i64>,
-    pub loading_sets: bool,
+    /// The selected set's `getStickerSet`: asked, answered or failed.
+    pub set: StickerSetStage,
     pub installed_loaded: bool,
-    pub loading_set: bool,
-    pub failed: bool,
-    /// The `getStickerSet` in flight and the set it asks for.
-    pub set_request: Option<(RequestId, i64)>,
-    /// A set whose `getStickerSet` failed: not asked again until another
-    /// set is selected, or the per-update pass would resend it at
-    /// round-trip speed.
-    pub failed_set_id: Option<i64>,
+    /// Each list tab's own fetch: a failure of one list shows on that tab
+    /// only, and a failed mutation is a note, not a list failure.
+    pub lists: StickerLists,
     pub batch_total: usize,
     pub batch_completed: usize,
     pub batch_failed: usize,
@@ -209,7 +293,7 @@ impl StickerPanel {
 
     pub fn selected_needs_load(&self) -> Option<i64> {
         let id = self.selected_set_id?;
-        if self.loading_set || self.loaded_set_id == Some(id) || self.failed_set_id == Some(id) {
+        if self.set.set_id() == Some(id) {
             None
         } else {
             Some(id)

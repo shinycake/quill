@@ -43,7 +43,10 @@ Parity id: `premium-noforwards-requests`.
   `_by_other_user` read the user's `noforwards_my_enabled` and
   `noforwards_peer_enabled`. Enable Sharing therefore asks `getMessageProperties`
   for the chat's last message and decides from the answer. If nothing is there to
-  ask about, or the check fails, it sends the toggle and lets TDLib decide. The
+  ask about, it sends the toggle and lets TDLib decide. If the check fails, who
+  protects the chat is unknown and the toggle could send the other person a
+  request nobody confirmed, so the "Send Request?" box asks first (tdesktop's
+  source was not at hand to compare; this is the safe choice). The
   message menu note uses the menu's own `messageProperties`, and in a private chat
   it waits for that answer instead of guessing.
 - Enabling sharing in a private chat is no longer applied optimistically. It may

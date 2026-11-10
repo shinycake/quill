@@ -224,7 +224,10 @@ fn the_slash_menu_skips_bots_and_empty_shortcuts_but_not_saved_messages() {
 fn choosing_a_shortcut_sends_it_to_the_chat() {
     let (mut driver, recorder, _sink, _seq) = driver_parts();
     driver.send_quick_reply(ChatId(31), 2).unwrap();
+    // A double tap while the first is on its way sends nothing more.
     driver.send_quick_reply(ChatId(31), 2).unwrap();
+    // Another chat is its own send.
+    driver.send_quick_reply(ChatId(32), 2).unwrap();
     let sent: Vec<serde_json::Value> = recorder
         .snapshot()
         .iter()
@@ -234,7 +237,26 @@ fn choosing_a_shortcut_sends_it_to_the_chat() {
     assert_eq!(sent.len(), 2);
     assert_eq!(sent[0]["chat_id"], 31);
     assert_eq!(sent[0]["shortcut_id"], 2);
+    assert_eq!(sent[1]["chat_id"], 32);
     assert_ne!(sent[0]["sending_id"], sent[1]["sending_id"]);
+}
+
+#[test]
+fn a_double_click_on_add_creates_the_message_once() {
+    let (mut driver, recorder, _sink, _seq) = driver_parts();
+    driver.add_quick_reply_text("hours", "Hi").unwrap();
+    driver.add_quick_reply_text("hours", "Hi").unwrap();
+    let adds = |recorder: &Recorder| {
+        recorder
+            .snapshot()
+            .iter()
+            .filter(|json| json.contains("addQuickReplyShortcutMessage"))
+            .count()
+    };
+    assert_eq!(adds(&recorder), 1);
+    // Another text is another change.
+    driver.add_quick_reply_text("hours", "Bye").unwrap();
+    assert_eq!(adds(&recorder), 2);
 }
 
 #[test]

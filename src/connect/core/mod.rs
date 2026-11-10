@@ -253,13 +253,13 @@ impl<S: JsonSender> ConnectDriver<S> {
                 .then(|| (link.clone(), *is_public)),
             _ => None,
         };
+        self.settle_watched_send(&owned);
         // Slice msg-richtext-ai-tools: capture AI text answers
         // (`fixTextWithAi` → `fixedText`, `composeTextWithAi` →
         // `formattedText`) before `apply` takes the pending request. The
-        // chat id rides `PendingRequest::chat_id` (the purposes are unit
-        // variants); the UI drains `Session::ai_composer_text` into the
-        // composer draft.
-        let ai_text_answer: Option<(ChatId, String)> = match &owned.envelope.payload {
+        // request id picks the ask it answers (`Session::note_ai_ask`); the
+        // UI drains the waiting answers into the composer draft.
+        let ai_text_answer: Option<(RequestId, String)> = match &owned.envelope.payload {
             EnvelopePayload::Messages(MessagesPayload::AiCompose(
                 AiComposePayload::FixedText { text, .. },
             ))
@@ -273,7 +273,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                         RequestPurpose::FixTextWithAi | RequestPurpose::ComposeTextWithAi
                     )
                 })
-                .and_then(|pending| pending.chat_id.map(|chat_id| (chat_id, text.clone()))),
+                .map(|pending| (pending.id, text.clone())),
             _ => None,
         };
         // Slice msg-richtext-ai-tools: capture AI rich-message answers
@@ -282,7 +282,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         // the pending request. Same drain contract as the text answers.
         // The UI serializes the blocks back to editor markup; the note
         // records which method answered.
-        let ai_rich_answer: Option<(ChatId, RichMessageContent, &'static str)> =
+        let ai_rich_answer: Option<(RequestId, RichMessageContent, &'static str)> =
             match &owned.envelope.payload {
                 EnvelopePayload::Messages(MessagesPayload::RichMessage { rich }) => owned
                     .envelope
@@ -296,10 +296,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                                 | RequestPurpose::FixRichMessageWithAi
                         )
                     })
-                    .and_then(|pending| {
-                        let note = ai_rich_draft_note(pending.purpose);
-                        pending.chat_id.map(|chat_id| (chat_id, rich.clone(), note))
-                    }),
+                    .map(|pending| (pending.id, rich.clone(), ai_rich_draft_note(pending.purpose))),
                 _ => None,
             };
         // M1 fix-up: capture the `getMessageProperties` answer for the
@@ -777,13 +774,15 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session.messages.message_link_public = is_public;
         }
         // Slice msg-richtext-ai-tools: stash AI answers for the composer
-        // drain. A late answer for a chat the user has since left is
-        // dropped by the UI (chat-id check), never applied blindly.
-        if let Some((chat_id, text)) = ai_text_answer {
-            self.session.messages.ai_composer_text = Some((chat_id, text));
+        // drain. A late answer for a draft that has changed is dropped by
+        // the UI, never applied blindly.
+        if let Some((request, text)) = ai_text_answer {
+            self.session
+                .accept_ai_answer(request, crate::state::AiBody::Text(text));
         }
-        if let Some((chat_id, rich, note)) = ai_rich_answer {
-            self.session.messages.ai_composer_blocks = Some((chat_id, rich, note));
+        if let Some((request, rich, note)) = ai_rich_answer {
+            self.session
+                .accept_ai_answer(request, crate::state::AiBody::Blocks(rich, note));
         }
         // A5: stash the `checkChatUsername` verdict for the
         // edit-profile dialog.
@@ -819,8 +818,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             if can_get_link {
                 let _ = self.send_message_link_request(chat_id, message_id);
             } else {
-                self.session.messages.message_link_error =
-                    Some("message link not available for this message".into());
+                self.session.messages.message_link_error.push("message link not available for this message".into());
             }
         }
         if let Some((chat_id, message_id, actions)) = audience_gate {
@@ -919,7 +917,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                         .requests
                         .take_purpose(RequestPurpose::GetStickerSet),
                 );
-                self.session.stickers.stickers.loading_set = false;
+                self.session.stickers.stickers.set = crate::state::StickerSetStage::Idle;
                 self.fetch_archived_stickers(false)?;
             }
         }

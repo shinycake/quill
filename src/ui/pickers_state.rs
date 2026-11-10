@@ -103,5 +103,16 @@ impl PickerUi {
     }
 }
 
-/// Nothing to say: its state is the account's only app-side.
-impl super::on_screen::Farewell for PickerUi {}
+/// The status selector's choices are resolved while the session's
+/// `status_open` is set: leaving closes the panel through its one writer,
+/// which tells the session to stop (the replaced `OnScreen` would reset the
+/// mode without it).
+impl super::on_screen::Farewell for PickerUi {
+    fn farewell(
+        app: &mut QuillApp,
+        _: &mut gpui_kit::Window,
+        _: &mut gpui_kit::Context<QuillApp>,
+    ) {
+        app.set_media_panel_mode(super::media_panel::PanelMode::Closed);
+    }
+}

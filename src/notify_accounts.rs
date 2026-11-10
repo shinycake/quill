@@ -235,7 +235,7 @@ pub fn drain_on_screen(session: &mut Session) -> NotifyDrain {
 /// account that is not on screen.
 pub fn drain_background(session: &mut Session, notify_from_all: bool) -> NotifyDrain {
     let drain = drain_on_screen(session);
-    session.bots.pending_force_reply = None;
+    session.bots.pending_force_reply.clear();
     if !account_may_notify(notify_from_all, false) {
         return NotifyDrain {
             clears: drain.clears,

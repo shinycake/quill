@@ -13,14 +13,15 @@ use crate::text::TextEntityKind;
 /// the last step answers `Ok`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MessageReportStage {
-    /// The first `reportChat` is in flight.
-    Checking,
+    /// The first `reportChat` is in flight, as `request`.
+    Checking { request: RequestId },
     PickOption {
         title: String,
         options: Vec<ReportOption>,
     },
-    /// A follow-up (reason chosen or details sent) is in flight.
-    Sending,
+    /// A follow-up (reason chosen or details sent) is in flight, as
+    /// `request`.
+    Sending { request: RequestId },
     TextRequired {
         option_id: String,
         is_optional: bool,
@@ -42,6 +43,18 @@ pub struct MessageReportFlow {
     /// Title the previous step's `OptionRequired` carried, for the Back
     /// button to restore.
     pub previous: Vec<(String, Vec<ReportOption>)>,
+}
+
+impl MessageReportFlow {
+    /// The request whose answer the flow waits for.
+    pub fn waiting_for(&self) -> Option<RequestId> {
+        match self.stage {
+            MessageReportStage::Checking { request } | MessageReportStage::Sending { request } => {
+                Some(request)
+            }
+            _ => None,
+        }
+    }
 }
 
 /// The poll option a right-click opened the menu on, and what TDLib allows
@@ -243,11 +256,16 @@ impl Session {
     }
 
     /// Start reporting `message_ids` of `chat_id`.
-    pub fn begin_message_report(&mut self, chat_id: ChatId, message_ids: Vec<MessageId>) {
+    pub fn begin_message_report(
+        &mut self,
+        chat_id: ChatId,
+        message_ids: Vec<MessageId>,
+        request: RequestId,
+    ) {
         self.messages.message_report = Some(MessageReportFlow {
             chat_id,
             message_ids,
-            stage: MessageReportStage::Checking,
+            stage: MessageReportStage::Checking { request },
             trail: Vec::new(),
             previous: Vec::new(),
         });
@@ -258,13 +276,17 @@ impl Session {
     }
 
     /// The follow-up `reportChat` (reason chosen or details sent) went out.
-    pub fn message_report_sending(&mut self, chosen: Option<(String, String, Vec<ReportOption>)>) {
+    pub fn message_report_sending(
+        &mut self,
+        chosen: Option<(String, String, Vec<ReportOption>)>,
+        request: RequestId,
+    ) {
         if let Some(flow) = self.messages.message_report.as_mut() {
             if let Some((text, title, options)) = chosen {
                 flow.trail.push(text);
                 flow.previous.push((title, options));
             }
-            flow.stage = MessageReportStage::Sending;
+            flow.stage = MessageReportStage::Sending { request };
         }
     }
 
@@ -281,16 +303,14 @@ impl Session {
         true
     }
 
-    /// Apply a `ReportChatResult` for the flow. Stale answers (another
-    /// chat) are dropped.
+    /// Apply a `ReportChatResult` for the flow. An answer applies only to
+    /// the request the flow waits for: one for a flow that was closed (and
+    /// another opened in the same chat) is dropped.
     pub fn accept_message_report(&mut self, pending: &PendingRequest, outcome: ReportChatOutcome) {
-        let Some(chat_id) = pending.chat_id else {
-            return;
-        };
         let Some(flow) = self.messages.message_report.as_mut() else {
             return;
         };
-        if flow.chat_id != chat_id {
+        if flow.waiting_for() != Some(pending.id) {
             return;
         }
         flow.stage = match outcome {
@@ -315,10 +335,11 @@ impl Session {
         };
     }
 
-    /// A raw TDLib error (or a send failure) ends the flow.
-    pub fn fail_message_report(&mut self, chat_id: ChatId, message: String) {
+    /// A raw TDLib error (or a send failure) of `request` ends the flow it
+    /// belongs to; an error of a closed flow's request changes nothing.
+    pub fn fail_message_report(&mut self, request: RequestId, message: String) {
         if let Some(flow) = self.messages.message_report.as_mut()
-            && flow.chat_id == chat_id
+            && flow.waiting_for() == Some(request)
         {
             flow.stage = MessageReportStage::Failed(message);
         }

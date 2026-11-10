@@ -228,6 +228,7 @@ mod auth_ui;
 mod boost_box_ui;
 mod boosts_overview;
 mod bot_create_dialog;
+mod bots_box_send;
 mod bot_edit_dialog;
 mod bot_pending;
 mod bot_permissions;

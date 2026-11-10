@@ -38,14 +38,14 @@ fn sticker_tabs_requests_failures_and_confirmed_mutations() {
             .unwrap(),
         )
         .unwrap();
-    assert!(driver.session.stickers.stickers.failed);
+    assert!(driver.session.stickers.stickers.lists.recent.error().is_some());
     assert!(
         driver
             .select_sticker_tab(StickerTab::Recent)
             .unwrap()
             .is_some()
     );
-    assert!(!driver.session.stickers.stickers.failed);
+    assert!(driver.session.stickers.stickers.lists.recent.is_loading());
 
     driver.select_sticker_tab(StickerTab::Favorites).unwrap();
     let add = driver
@@ -258,7 +258,9 @@ fn sticker_search_and_set_management_use_latest_confirmed_state() {
             .unwrap(),
         )
         .unwrap();
-    assert!(driver.session.stickers.stickers.failed);
+    // A failed change is a note; the favorites list itself did not fail.
+    assert!(driver.session.stickers.stickers.lists.favorites.error().is_none());
+    assert!(driver.session.stickers.creator_note.is_some());
     assert!(driver.session.stickers.stickers.found_sets[0].is_installed);
     driver.close_sticker_panel();
     let remove = driver
@@ -283,7 +285,7 @@ fn sticker_search_and_set_management_use_latest_confirmed_state() {
     );
     assert!(!driver.session.stickers.stickers.found_sets[0].is_installed);
     driver.search_sticker_picker("").unwrap();
-    assert!(!driver.session.stickers.stickers.failed);
+    assert!(driver.session.stickers.stickers.lists.search.error().is_none());
     assert!(driver.session.stickers.stickers.found_sets.is_empty());
     assert!(
         !driver
@@ -334,7 +336,7 @@ fn sticker_reordering_preserves_order_on_failure_and_refetches_on_success() {
         )
         .unwrap();
     assert_eq!(driver.session.stickers.stickers.sets, current);
-    assert!(driver.session.stickers.stickers.failed);
+    assert!(driver.session.stickers.creator_note.is_some());
     let move_first = driver.reorder_sticker_set(33, 11).unwrap().unwrap();
     assert_eq!(
         sent_request(&recorder, "reorderInstalledStickerSets")["sticker_set_ids"],
@@ -642,6 +644,7 @@ fn premium_sticker_send_uses_full_type_and_current_account_entitlement() {
     let mut driver = ready_driver(&recorder, prepared, &sink, &seq);
     driver.ingest(copy_and_parse(&json!({"@type":"updateNewChat","chat":{"id":7,"title":"Test","type":{"@type":"chatTypePrivate","user_id":7}}}).to_string(),&seq,&sink).unwrap()).unwrap();
     let fetch = driver.session.request(RequestPurpose::GetStickerSet, None);
+    driver.session.mark_sticker_set_loading(77, fetch);
     let sticker = |id, premium| json!({"@type":"sticker","id":id,"set_id":"77","emoji":"😀","format":{"@type":"stickerFormatWebp"},"full_type":{"@type":"stickerFullTypeRegular","premium_animation":premium},"sticker":{"@type":"file","id":id,"local":{"@type":"localFile","can_be_downloaded":false},"remote":{"@type":"remoteFile"}}});
     driver.ingest(copy_and_parse(&json!({"@type":"stickerSet","@extra":fetch.as_extra(),"id":"77","stickers":[sticker(9,json!({"@type":"file","id":90})),sticker(10,json!(null))]}).to_string(),&seq,&sink).unwrap()).unwrap();
     assert!(driver.session.sticker_requires_premium(FileId(9)));

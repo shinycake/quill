@@ -105,7 +105,16 @@ fn an_ai_answer_for_a_chat_window_lands_in_its_composer(cx: &mut TestAppContext)
     let chat_window = h.open_in_new_window(OTHER, cx);
     h.app.update(cx, |app, _| {
         if let Some(session) = app.session_mut() {
-            session.messages.ai_composer_text = Some((OTHER, "fixed text".into()));
+            session.note_ai_ask(
+                quill::ids::RequestId(900),
+                OTHER,
+                quill::composer::DraftTopic::Chat,
+                String::new(),
+            );
+            session.accept_ai_answer(
+                quill::ids::RequestId(900),
+                quill::state::AiBody::Text("fixed text".into()),
+            );
         }
     });
     // The main window's frame leaves another window's answer alone.

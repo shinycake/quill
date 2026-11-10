@@ -65,10 +65,10 @@ impl Session {
                 self.calls.recent_calls_request = None;
             }
             Some(RequestPurpose::DeleteChatMessagesBySender) => {
-                self.messages.message_action_note = Some("messages deleted".into());
+                self.messages.message_action_note.push("messages deleted".into());
             }
             Some(RequestPurpose::ReportSupergroupSpam) => {
-                self.messages.message_action_note = Some("spam reported".into());
+                self.messages.message_action_note.push("spam reported".into());
             }
             // Forum extras and Saved Messages sublists (batch B16).
             Some(RequestPurpose::Threads(ThreadsPurpose::DeleteSavedMessagesTopicHistory {
@@ -94,7 +94,7 @@ impl Session {
                 message_id,
                 sender,
             })) => {
-                self.messages.message_action_note = Some("reaction deleted".into());
+                self.messages.message_action_note.push("reaction deleted".into());
                 if let Some(chat_id) = pending.and_then(|p| p.chat_id) {
                     self.drop_reactor_from_audience(chat_id, MessageId(message_id), sender);
                 }
@@ -337,7 +337,7 @@ impl Session {
             self.stickers.stickers.archived_next_offset = 0;
             if self.stickers.stickers.tab == StickerTab::Archived {
                 self.stickers.stickers.selected_set_id = None;
-                self.stickers.stickers.loaded_set_id = None;
+                self.stickers.stickers.set = StickerSetStage::Idle;
                 self.stickers.stickers.stickers.clear();
             }
         }

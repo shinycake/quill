@@ -86,6 +86,12 @@ impl QuillApp {
     /// its choices.
     pub(in crate::ui) fn set_media_panel_mode(&mut self, mode: PanelMode) {
         let old = std::mem::replace(&mut self.pickers.media_panel.panel_mode, mode);
+        // Opening the panel again retries a failed category strip.
+        if old == PanelMode::Closed
+            && let Some(session) = self.session_mut()
+        {
+            session.stickers.emoji.sticker_categories.clear_error();
+        }
         if old.selector() && std::mem::discriminant(&old) != std::mem::discriminant(&mode) {
             self.pickers.media_panel.key = None;
         }

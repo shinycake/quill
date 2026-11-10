@@ -145,8 +145,14 @@ impl<S: JsonSender> ConnectDriver<S> {
                 // Nothing went out (the same change was already pending):
                 // go on with the next step.
                 Ok(None) => continue,
+                // Only the step that did not go out is lost (`next_step` took
+                // it off its commit); the saved changes behind it stay queued
+                // and go out with the next answer.
                 Err(err) => {
-                    self.session.stickers.manager.commits.clear();
+                    self.session.stickers.creator_note = Some(
+                        crate::lang::tr(crate::lang::keys::Q_MEDIA_COULDNT_UPDATE_STICKERS_TRY_AGAIN)
+                            .to_string(),
+                    );
                     Err(err)
                 }
             };

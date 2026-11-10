@@ -195,12 +195,17 @@ fn a_muted_chat_on_a_background_account_stays_quiet() {
 fn a_force_reply_never_reaches_the_screen_from_the_background() {
     let mut account = Background::new("force-reply");
     account.ready_with_chat(7, false);
-    account.driver.session.bots.pending_force_reply = Some(crate::state::ForceReplyTarget {
-        chat_id: ChatId(7),
-        message_id: crate::ids::MessageId(11),
-    });
+    account
+        .driver
+        .session
+        .bots
+        .pending_force_reply
+        .push(crate::state::ForceReplyTarget {
+            chat_id: ChatId(7),
+            message_id: crate::ids::MessageId(11),
+        });
     let _ = drain_background(&mut account.driver.session, true);
-    assert!(account.driver.session.bots.pending_force_reply.is_none());
+    assert!(account.driver.session.bots.pending_force_reply.is_empty());
 }
 
 #[test]
@@ -209,10 +214,15 @@ fn the_account_on_screen_hands_out_its_notification_and_keeps_its_force_reply() 
     account.ready_with_chat(7, false);
     account.driver.session.app_active = false;
     account.incoming(7, 11, "hi");
-    account.driver.session.bots.pending_force_reply = Some(crate::state::ForceReplyTarget {
-        chat_id: ChatId(7),
-        message_id: crate::ids::MessageId(11),
-    });
+    account
+        .driver
+        .session
+        .bots
+        .pending_force_reply
+        .push(crate::state::ForceReplyTarget {
+            chat_id: ChatId(7),
+            message_id: crate::ids::MessageId(11),
+        });
     let drain = drain_on_screen(&mut account.driver.session);
     assert_eq!(drain.notifications.len(), 1);
     assert_eq!(
@@ -223,7 +233,7 @@ fn the_account_on_screen_hands_out_its_notification_and_keeps_its_force_reply() 
     let settings = &account.driver.session.settings;
     assert!(settings.pending_notifications.is_empty());
     assert!(!settings.pending_attention);
-    assert!(account.driver.session.bots.pending_force_reply.is_some());
+    assert!(!account.driver.session.bots.pending_force_reply.is_empty());
 }
 
 #[test]

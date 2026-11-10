@@ -162,10 +162,11 @@ fn closing_the_request_box_sends_nothing() {
 }
 
 #[test]
-fn a_failed_check_lets_tdlib_decide() {
+fn a_failed_check_asks_before_sending_a_request() {
     let mut f = protected_chat();
     f.1.enable_private_sharing(CHAT).unwrap().unwrap();
     let ask = last_request(&f);
+    let count = sent(&f).len();
     ingest(
         &mut f,
         &format!(
@@ -173,9 +174,12 @@ fn a_failed_check_lets_tdlib_decide() {
             ask["@extra"]
         ),
     );
-    let toggle = last_request(&f);
-    assert_eq!(toggle["@type"], "toggleChatHasProtectedContent");
-    assert_eq!(toggle["has_protected_content"], false);
+    // Who protects the chat is unknown, so nothing goes out until the user
+    // confirms the "Send Request?" box.
+    assert_eq!(sent(&f).len(), count);
+    assert_eq!(f.1.session.groups.private_sharing.request_box_chat(), Some(CHAT));
+    f.1.apply_resolved_enable_sharing().unwrap();
+    assert_eq!(sent(&f).len(), count);
     cleanup(f);
 }
 

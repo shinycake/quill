@@ -726,9 +726,9 @@ impl QuillApp {
                     && session.requests.has_purpose(RequestPurpose::SearchStickers)
         });
         // Only states worth reading: loading, failure, and empty views.
-        let status: Option<String> = if loading_tab || panel.loading_set {
+        let status: Option<String> = if loading_tab || panel.set.is_loading() {
             Some(tr(keys::Q_MEDIA_LOADING_STICKERS).into())
-        } else if panel.failed {
+        } else if panel.lists.of(panel.tab).error().is_some() || panel.set.is_failed() {
             Some(tr(keys::Q_MEDIA_COULDNT_UPDATE_STICKERS_TRY_AGAIN).into())
         } else {
             match panel.tab {

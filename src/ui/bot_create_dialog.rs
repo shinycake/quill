@@ -224,6 +224,18 @@ impl QuillApp {
     }
 
     fn close_bot_create(&mut self, cx: &mut Context<Self>) {
+        // While "Creating..." the dialog stays: closing it would drop the
+        // answer, and the bot is created on the server all the same (no
+        // toast, no chat, no share for a keyboard-button request, and the
+        // username reads taken on a retry).
+        if self
+            .dialogs
+            .bot_create_dialog
+            .as_ref()
+            .is_some_and(|dialog| dialog.submitted)
+        {
+            return;
+        }
         if self.dialogs.bot_create_dialog.take().is_some()
             && let Some(live) = self.live.as_mut()
         {
@@ -318,7 +330,10 @@ impl QuillApp {
                 .map(|u| u.first_name.clone())
                 .unwrap_or_default();
             // The shell closes the kit dialog with its flag, in whichever
-            // window hosts it.
+            // window hosts it. The answer is in: the dialog may go.
+            if let Some(dialog) = self.dialogs.bot_create_dialog.as_mut() {
+                dialog.submitted = false;
+            }
             self.close_bot_create(cx);
             // tdesktop reports the new bot to the requesting bot.
             if let (Some(share), Some(live)) = (share, self.live.as_mut()) {
@@ -485,6 +500,7 @@ impl QuillApp {
                     Button::new("bot-create-cancel")
                         .label(tr(keys::CANCEL))
                         .ghost()
+                        .disabled(submitted)
                         .on_click(cx.listener(|this, _, window, cx| {
                             this.close_bot_create(cx);
                             this.close_kit_dialog_if_done(DialogKind::BotCreate, window, cx);

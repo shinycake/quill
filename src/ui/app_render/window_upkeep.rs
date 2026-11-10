@@ -51,6 +51,11 @@ impl QuillApp {
         // Words with emoji: picked again when the text, caret or answers move.
         self.sync_emoji_words(cx);
         self.apply_ai_composer_answer(window, cx);
+        // A force-reply message of this window's chat puts its composer into
+        // reply mode.
+        self.drain_force_replies_here(window, cx);
+        // The Add-bot and Share-game boxes close on their request's answer.
+        self.pump_box_send(window, cx);
         // The AI compose box and the apply-in-place shortcut opened over
         // this window's composer: their answers and toasts.
         self.ai_compose_window_upkeep(window, cx);
@@ -212,44 +217,61 @@ impl QuillApp {
         progressed
     }
 
+    /// The bots' force-reply messages for the chat this window shows arm
+    /// its composer (`ui/force_reply.rs`); one for a chat no window shows
+    /// is dropped, and one for another window's chat waits for that
+    /// window's frame.
+    fn drain_force_replies_here(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(session) = self.session_mut() else {
+            return;
+        };
+        let open_chat = session.open_chat;
+        for target in session.take_force_replies_for(open_chat) {
+            if open_chat == Some(target.chat_id) {
+                self.drain_force_reply(target, window, cx);
+            }
+        }
+    }
+
     /// An AI answer for the composer of the chat this window shows
-    /// replaces the draft (`msg-richtext-ai-tools`). An answer for a chat
-    /// no window shows is dropped; one for another window's chat waits for
-    /// that window's frame. Rich answers are written back as editor markup,
-    /// inline formatting included, so the rich send path rebuilds the whole
-    /// message.
+    /// replaces the draft (`msg-richtext-ai-tools`), when the composer
+    /// still shows the draft it was asked about: the same chat and slot and
+    /// the same text. One for a chat no window shows is dropped; one for
+    /// another window's chat waits for that window's frame. Rich answers
+    /// are written back as editor markup, inline formatting included, so
+    /// the rich send path rebuilds the whole message.
     fn apply_ai_composer_answer(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(session) = self.session_mut() else {
             return;
         };
         let open_chat = session.open_chat;
-        let ours = |chat: ChatId, session: &quill::state::Session| {
-            open_chat == Some(chat) || !session.chat_is_shown(chat)
-        };
-        let ai_text = match session.messages.ai_composer_text.as_ref() {
-            Some((chat, _)) if ours(*chat, session) => session.messages.ai_composer_text.take(),
-            _ => None,
-        };
-        let ai_blocks = match session.messages.ai_composer_blocks.as_ref() {
-            Some((chat, _, _)) if ours(*chat, session) => {
-                session.messages.ai_composer_blocks.take()
-            }
-            _ => None,
-        };
-        if let Some((chat_id, text)) = ai_text
-            && open_chat == Some(chat_id)
-        {
-            self.set_composer_markup(&text, window, cx);
-            self.set_note(StatusNote::silent(tr(keys::Q_REST_AI_UPDATED_THE_DRAFT)));
+        if !session.ai_answers_waiting() {
+            return;
         }
-        if let Some((chat_id, rich, note)) = ai_blocks
-            && open_chat == Some(chat_id)
-        {
-            let text = quill::rich::RichDraft::from_message(&rich.blocks)
-                .map(|draft| draft.markup())
-                .unwrap_or_default();
-            self.set_composer_markup(&text, window, cx);
-            self.set_note(StatusNote::info(note));
+        let answers = session.take_ai_answers_for(open_chat);
+        for answer in answers {
+            let same_slot = open_chat == Some(answer.ask.chat_id)
+                && self.open_draft_topic(answer.ask.chat_id) == answer.ask.topic;
+            if !same_slot {
+                continue;
+            }
+            if self.composer_markup(cx) != answer.ask.source {
+                self.set_note(StatusNote::info(tr(keys::Q_CHAT_AI_DRAFT_CHANGED)));
+                continue;
+            }
+            match answer.body {
+                quill::state::AiBody::Text(text) => {
+                    self.set_composer_markup(&text, window, cx);
+                    self.set_note(StatusNote::silent(tr(keys::Q_REST_AI_UPDATED_THE_DRAFT)));
+                }
+                quill::state::AiBody::Blocks(rich, note) => {
+                    let text = quill::rich::RichDraft::from_message(&rich.blocks)
+                        .map(|draft| draft.markup())
+                        .unwrap_or_default();
+                    self.set_composer_markup(&text, window, cx);
+                    self.set_note(StatusNote::info(note));
+                }
+            }
         }
     }
 }

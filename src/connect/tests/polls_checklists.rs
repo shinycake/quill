@@ -74,7 +74,7 @@ fn add_poll_option_error_surfaces_a_note() {
         ),
     );
     assert_eq!(
-        driver.session.messages.message_action_note.as_deref(),
+        driver.session.messages.message_action_note.last(),
         Some("Could not add the option. Please try again.")
     );
     let _ = std::fs::remove_dir_all(&dir);
@@ -311,7 +311,7 @@ fn checklist_mutation_errors_surface_a_note() {
         ),
     );
     assert_eq!(
-        driver.session.messages.message_action_note.as_deref(),
+        driver.session.messages.message_action_note.last(),
         Some("Could not update the checklist (error 400)")
     );
     let _ = std::fs::remove_dir_all(&dir);

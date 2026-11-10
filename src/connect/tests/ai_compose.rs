@@ -320,7 +320,7 @@ fn fixed_text_for_the_box_lands_with_its_diff() {
             },
         ]
     );
-    assert!(h.driver.session.messages.ai_composer_text.is_none());
+    assert!(h.driver.session.take_ai_answers_for(None).is_empty());
 }
 
 #[test]
@@ -342,7 +342,7 @@ fn formatted_text_for_the_box_never_touches_the_draft() {
     assert_eq!(result.text, "Hello");
     assert_eq!(result.entities.len(), 1);
     assert!(result.diff.is_none());
-    assert!(h.driver.session.messages.ai_composer_text.is_none());
+    assert!(h.driver.session.take_ai_answers_for(None).is_empty());
     assert!(h.ai().apply_in_place.is_none());
 }
 
@@ -367,7 +367,7 @@ fn box_errors_map_to_box_error_kinds() {
         assert_eq!(answer.token, 41);
         assert_eq!(answer.outcome, Err(expected), "{message}");
     }
-    assert!(h.driver.session.messages.ai_error.is_none());
+    assert!(h.driver.session.messages.ai_error.is_empty());
 }
 
 #[test]

@@ -433,11 +433,11 @@ fn b1_force_reply_arms_pending_target() {
         r#"{"@type":"updateNewMessage","message":{"id":306,"chat_id":21,"is_outgoing":false,"reply_markup":{"@type":"replyMarkupForceReply","input_field_placeholder":""},"content":{"@type":"messageText","text":{"@type":"formattedText","text":"x","entities":[]}}}}"#,
     );
     assert_eq!(
-        session.bots.pending_force_reply,
-        Some(ForceReplyTarget {
+        session.bots.pending_force_reply.targets(),
+        [ForceReplyTarget {
             chat_id: ChatId(21),
             message_id: MessageId(306),
-        })
+        }]
     );
     // Outgoing force-reply does not arm (bots demand replies; we don't).
     apply_json(
@@ -447,11 +447,11 @@ fn b1_force_reply_arms_pending_target() {
         r#"{"@type":"updateNewMessage","message":{"id":307,"chat_id":21,"is_outgoing":true,"reply_markup":{"@type":"replyMarkupForceReply","input_field_placeholder":""},"content":{"@type":"messageText","text":{"@type":"formattedText","text":"y","entities":[]}}}}"#,
     );
     assert_eq!(
-        session.bots.pending_force_reply,
-        Some(ForceReplyTarget {
+        session.bots.pending_force_reply.targets(),
+        [ForceReplyTarget {
             chat_id: ChatId(21),
             message_id: MessageId(306),
-        })
+        }]
     );
     // A plain incoming message leaves the armed target alone.
     apply_json(
@@ -461,11 +461,11 @@ fn b1_force_reply_arms_pending_target() {
         r#"{"@type":"updateNewMessage","message":{"id":308,"chat_id":21,"is_outgoing":false,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"z","entities":[]}}}}"#,
     );
     assert_eq!(
-        session.bots.pending_force_reply,
-        Some(ForceReplyTarget {
+        session.bots.pending_force_reply.targets(),
+        [ForceReplyTarget {
             chat_id: ChatId(21),
             message_id: MessageId(306),
-        })
+        }]
     );
 }
 
@@ -744,7 +744,9 @@ fn scheduling_edit_error_keeps_the_entry_and_surfaces() {
         ),
     );
     assert_eq!(session.messages.scheduled_messages.len(), 1);
-    let err = session.messages.resend_error.expect("error surfaced");
+    let err = session.messages.resend_error.take_all()
+        .pop()
+        .expect("error surfaced");
     assert!(err.contains("Could not send the message now"), "{err}");
 }
 

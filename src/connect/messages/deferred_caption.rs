@@ -66,13 +66,27 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         let caption = text.trim();
         self.check_caption_length(caption)?;
+        let shown = self
+            .session
+            .histories
+            .get(&edit.chat_id.0)
+            .and_then(|history| history.messages.get(&edit.message_id.0))
+            .and_then(|message| ComposerEdit::editable_text(&message.content))
+            .map(|(_, text)| text)
+            .unwrap_or_default();
         let deferred = &mut self.session.messages.deferred_captions;
+        // A second choice keeps the caption from before the first.
+        let previous = deferred
+            .iter()
+            .find(|d| d.chat_id == edit.chat_id && d.message_id == edit.message_id)
+            .map_or(shown, |d| d.previous.clone());
         deferred.retain(|d| d.chat_id != edit.chat_id || d.message_id != edit.message_id);
         deferred.push(DeferredCaption {
             chat_id: edit.chat_id,
             message_id: edit.message_id,
             text: caption.to_string(),
             caption_above: edit.caption_above,
+            previous,
         });
         if let Some(message) = self
             .session
@@ -88,6 +102,23 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// After the reducer handled a send outcome: send the caption chosen
     /// while the message was still pending, or drop it when the send failed.
     pub(crate) fn run_deferred_caption(&mut self, outcome: Option<SendOutcome>) {
+        // A caption whose message left the history without a send outcome
+        // (the chat was deleted, the account state reset) has nothing to
+        // wait for.
+        // (The reducer already replaced the row of the message this outcome
+        // is about, so that entry stays for the code below.)
+        let ended = outcome.map(|outcome| match outcome {
+            SendOutcome::Succeeded { chat_id, old, .. } | SendOutcome::Failed { chat_id, old } => {
+                (chat_id, old)
+            }
+        });
+        let histories = &self.session.histories;
+        self.session.messages.deferred_captions.retain(|d| {
+            ended == Some((d.chat_id, d.message_id))
+                || histories
+                    .get(&d.chat_id.0)
+                    .is_some_and(|history| history.messages.contains_key(&d.message_id.0))
+        });
         let Some(outcome) = outcome else {
             return;
         };
@@ -124,8 +155,23 @@ impl<S: JsonSender> ConnectDriver<S> {
         let sent_text = ComposerEdit::editable_text(&message.content).map(|(_, text)| text);
         // The row shows the new caption while the edit is on its way.
         set_caption(&mut message.content, &deferred.text);
-        if sent_text.as_deref() != Some(deferred.text.as_str()) {
-            let _ = self.edit_snapshot(&edit, &deferred.text);
+        if sent_text.as_deref() != Some(deferred.text.as_str())
+            && self.edit_snapshot(&edit, &deferred.text).is_err()
+        {
+            // The server never got the caption: the row shows the one it
+            // has, and the user is told.
+            if let Some(message) = self
+                .session
+                .histories
+                .get_mut(&chat_id.0)
+                .and_then(|history| history.messages.get_mut(&new.0))
+            {
+                set_caption(&mut message.content, &deferred.previous);
+            }
+            self.session
+                .messages
+                .message_action_note
+                .push("could not change the caption".into());
         }
     }
 }

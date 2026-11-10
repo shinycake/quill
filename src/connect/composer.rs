@@ -116,7 +116,24 @@ impl<S: JsonSender> ConnectDriver<S> {
             DraftSaveStep::Write => {
                 self.pending_draft = None;
                 self.draft_clock = DraftSaveClock::idle();
-                self.send_draft(chat_id, topic, stored.as_ref(), reply_to.as_ref(), terms)?;
+                let sent =
+                    self.send_draft(chat_id, topic, stored.as_ref(), reply_to.as_ref(), terms);
+                if let Err(err) = sent {
+                    // The slot stays dirty, so the draft waits for the next
+                    // flush instead of being forgotten.
+                    self.draft_save_token = self.draft_save_token.saturating_add(1);
+                    self.keep_failed_draft(
+                        err,
+                        PendingDraft {
+                            token: self.draft_save_token,
+                            chat_id,
+                            topic,
+                            content: stored.unwrap_or(DraftContent::Text(String::new())),
+                            reply_to,
+                        },
+                    );
+                    return Err(err);
+                }
                 Ok(DraftSaveOutcome::Sent)
             }
         }
@@ -138,8 +155,9 @@ impl<S: JsonSender> ConnectDriver<S> {
         let terms = self.draft_suggestion(pending.chat_id, pending.topic);
         let content = pending
             .content
+            .clone()
             .to_store(pending.reply_to.is_some() || terms.is_some());
-        let reply_to = content.as_ref().and(pending.reply_to);
+        let reply_to = content.as_ref().and(pending.reply_to.clone());
         if self.draft_matches(
             pending.chat_id,
             pending.topic,
@@ -155,14 +173,29 @@ impl<S: JsonSender> ConnectDriver<S> {
                 .store_composer_draft(pending.chat_id, pending.topic, existing);
             return Ok(None);
         }
-        self.send_draft(
+        match self.send_draft(
             pending.chat_id,
             pending.topic,
             content.as_ref(),
             reply_to.as_ref(),
             terms,
-        )
-        .map(Some)
+        ) {
+            Ok(request) => Ok(Some(request)),
+            Err(err) => {
+                self.keep_failed_draft(err, pending);
+                Err(err)
+            }
+        }
+    }
+
+    /// A draft save that did not go out: its slot is still dirty (drafts
+    /// saved from other devices are ignored meanwhile), so the save waits
+    /// for the next flush, typing or chat leave. A request TDLib can never
+    /// take is not kept.
+    fn keep_failed_draft(&mut self, err: ConnectSendError, pending: PendingDraft) {
+        if err != ConnectSendError::InvalidRequest && self.pending_draft.is_none() {
+            self.pending_draft = Some(pending);
+        }
     }
 
     /// Successful send into `topic` of `chat_id`: drop that slot's draft

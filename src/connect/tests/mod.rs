@@ -133,6 +133,7 @@ mod sponsored;
 mod stars_gift;
 mod stats;
 mod sticker_categories;
+mod sweep_s3_messages_1;
 mod sticker_creator;
 mod sticker_manager;
 mod sticker_tabs;

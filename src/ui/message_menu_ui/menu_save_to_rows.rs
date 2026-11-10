@@ -386,8 +386,9 @@ impl QuillApp {
         // message allows it (`messageProperties.can_delete_reactions`).
         let can_delete_reactions = session
             .messages
-            .message_menu_actions
-            .is_some_and(|(c, m, a)| c == chat_id && m == message_id && a.can_delete_reactions);
+            .menu_actions
+            .get(chat_id, message_id)
+            .is_some_and(|a| a.can_delete_reactions);
         let items = &self.frame.menu.items;
         let person = |ix: u64,
                       sender: MessageSender,
@@ -672,7 +673,7 @@ impl QuillApp {
                 )));
             }
         } else if let Some(session) = self.demo_session.as_mut() {
-            session.begin_message_report(chat_id, message_ids);
+            session.begin_message_report(chat_id, message_ids, quill::ids::RequestId(0));
         }
         cx.notify();
     }
@@ -824,7 +825,7 @@ impl QuillApp {
             let mut body = div().flex().flex_col().gap_2().w(px(360.));
             let mut footer = div().flex().justify_end().gap_2();
             match &flow.stage {
-                MessageReportStage::Checking | MessageReportStage::Sending => {
+                MessageReportStage::Checking { .. } | MessageReportStage::Sending { .. } => {
                     body = body.child(
                         div()
                             .text_sm()

@@ -23,7 +23,7 @@ impl Session {
             )
         ) && let Some(notice) = err.send_permission_notice()
         {
-            self.messages.send_permission_error = Some(notice.into());
+            self.messages.send_permission_error.push(notice.into());
         }
         // Q1: a rate-limited user action says so (tdesktop's
         // `lng_flood_error`); background lookups were already retried by
@@ -31,7 +31,7 @@ impl Session {
         if let Some(notice) = err.flood_notice()
             && pending.is_some_and(|p| is_user_action(p.purpose))
         {
-            self.messages.flood_notice = Some(notice);
+            self.messages.flood_notice.push(notice);
         }
         // Slice G1: roll back optimistic mutations the server
         // rejected — the pre-request value rides on

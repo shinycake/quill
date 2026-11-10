@@ -230,7 +230,7 @@ fn a_kept_tail_keeps_the_replied_messages_of_rows_paged_out() {
     // is gone.
     session.accept_replied_message(ChatId(7), MessageId(10), live(7, 3));
     session.accept_replied_message(ChatId(7), MessageId(190), live(7, 4));
-    session.reject_replied_message(ChatId(7), MessageId(50));
+    session.reject_replied_message(ChatId(7), MessageId(50), 400, std::time::Instant::now());
     switch(&mut session, 8);
     assert_eq!(len(&session, 7), CLOSED_TAIL_KEEP);
     // Coming back scrolled up pages rows 10 and 50 in again: their strips

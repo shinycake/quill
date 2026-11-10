@@ -233,12 +233,12 @@ impl Session {
                 error,
             } => {
                 if let Some(notice) = error.send_permission_notice() {
-                    self.messages.send_permission_error = Some(notice.into());
+                    self.messages.send_permission_error.push(notice.into());
                 } else if let Some(notice) = error.flood_notice() {
                     // Q1: the failed row keeps its retry affordance
                     // (`can_retry` comes from TDLib, which marks rate
                     // limits retryable); the text stays in the history.
-                    self.messages.flood_notice = Some(notice);
+                    self.messages.flood_notice.push(notice);
                 }
                 let chat_id = message.chat_id;
                 let topic_id = message.topic_id;
@@ -498,6 +498,13 @@ impl Session {
                     }
                 } else if pending.map(|p| p.purpose) == Some(RequestPurpose::SendMessage) {
                     self.upsert_message(message, true);
+                } else if pending.map(|p| p.purpose) == Some(RequestPurpose::SendBotStartMessage) {
+                    // TDLib took the start: only now does the START
+                    // parameter go (a refusal keeps it for the next press).
+                    if let Some(chat_id) = pending.and_then(|p| p.chat_id) {
+                        self.bots.bot_start_params.remove(&chat_id.0);
+                    }
+                    self.upsert_message(message, false);
                 } else if let Some(RequestPurpose::Bots(BotsPurpose::SharePhoneWithMiniApp {
                     bot_user_id,
                 })) = pending.map(|p| p.purpose)
@@ -585,7 +592,7 @@ impl Session {
                     chat_id,
                     message_id,
                 })) => {
-                    self.messages.message_menu_actions = Some((chat_id, message_id, actions));
+                    self.messages.menu_actions.set(chat_id, message_id, actions);
                 }
                 Some(RequestPurpose::Messages(MessagesPurpose::GetSharingProtection {
                     chat_id,

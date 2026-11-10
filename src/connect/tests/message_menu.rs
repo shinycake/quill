@@ -95,9 +95,9 @@ fn menu_properties_chain_the_viewer_and_reactor_lookups() {
     let actions = driver
         .session
         .messages
-        .message_menu_actions
-        .expect("properties")
-        .2;
+        .menu_actions
+        .get(ChatId(-100), MessageId(50))
+        .expect("properties");
     assert!(actions.can_report_chat && actions.can_get_viewers);
 
     answer(
@@ -210,7 +210,7 @@ fn report_flow_walks_reason_details_and_done() {
     feed(&mut driver, &seq, &sink, GROUP_CHAT);
     feed(&mut driver, &seq, &sink, REACTED_MESSAGE);
 
-    driver
+    let first_request = driver
         .report_messages(ChatId(-100), &[MessageId(50)], "", "", None)
         .unwrap();
     let first = sent_request(&recorder, "reportChat");
@@ -224,7 +224,7 @@ fn report_flow_walks_reason_details_and_done() {
             .as_ref()
             .unwrap()
             .stage,
-        MessageReportStage::Checking
+        MessageReportStage::Checking { request: first_request }
     );
 
     answer(
@@ -252,7 +252,7 @@ fn report_flow_walks_reason_details_and_done() {
     assert_eq!(options.len(), 2);
 
     // Choosing "Other" echoes its id and asks for details.
-    driver
+    let second_request = driver
         .report_messages(
             ChatId(-100),
             &[MessageId(50)],
@@ -271,7 +271,7 @@ fn report_flow_walks_reason_details_and_done() {
             .as_ref()
             .unwrap()
             .stage,
-        MessageReportStage::Sending
+        MessageReportStage::Sending { request: second_request }
     );
     answer(
         &mut driver,
@@ -405,7 +405,7 @@ fn admin_moderation_sends_each_checked_action() {
         r#"{"@type":"ok"}"#,
     );
     assert_eq!(
-        driver.session.messages.message_action_note.as_deref(),
+        driver.session.messages.message_action_note.last(),
         Some("messages deleted")
     );
     answer(
@@ -421,7 +421,7 @@ fn admin_moderation_sends_each_checked_action() {
             .session
             .messages
             .message_action_note
-            .as_deref()
+            .last()
             .is_some_and(|note| note.starts_with("could not report the spam"))
     );
 }
@@ -564,14 +564,54 @@ fn message_properties_carry_the_new_rights() {
             extra.0
         ),
     );
-    let (_, _, actions) = driver
+    let actions = driver
         .session
         .messages
-        .message_menu_actions
+        .menu_actions
+        .get(ChatId(7), MessageId(5))
         .expect("properties");
     assert!(actions.can_set_fact_check);
     assert!(actions.can_be_replied_in_another_chat);
     assert!(actions.can_add_offer);
     assert!(!actions.can_edit_suggested_post_info);
     assert!(!actions.can_be_edited);
+}
+
+#[test]
+fn a_report_answer_of_a_closed_flow_does_not_reach_the_next_flow_of_the_chat() {
+    let (mut driver, recorder, sink, seq) = group_driver();
+    feed(&mut driver, &seq, &sink, GROUP_CHAT);
+    feed(&mut driver, &seq, &sink, REACTED_MESSAGE);
+    let old = driver
+        .report_messages(ChatId(-100), &[MessageId(50)], "", "", None)
+        .unwrap();
+    // The flow is closed (Esc) and another opens on the same chat.
+    driver.session.clear_message_report();
+    let new = driver
+        .report_messages(ChatId(-100), &[MessageId(51)], "", "", None)
+        .unwrap();
+    assert_ne!(old, new);
+    // The old request answers Ok, then another old one fails: neither
+    // touches the new flow.
+    let answered = recorder.snapshot().len();
+    feed(
+        &mut driver,
+        &seq,
+        &sink,
+        &format!(r#"{{"@type":"reportChatResultOk","@extra":"{}"}}"#, old.0),
+    );
+    feed(
+        &mut driver,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"error","code":500,"message":"x","@extra":"{}"}}"#,
+            old.0
+        ),
+    );
+    assert_eq!(recorder.snapshot().len(), answered);
+    assert_eq!(
+        driver.session.messages.message_report.as_ref().unwrap().stage,
+        MessageReportStage::Checking { request: new }
+    );
 }

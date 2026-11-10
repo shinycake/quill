@@ -129,6 +129,7 @@
 "qll_chat_add_to_group" = "Add to Group";
 "qll_chat_added_to_favorites" = "Added to favorites";
 "qll_chat_ai_creating_from_the_prompt" = "AI creating from the prompt…";
+"qll_chat_ai_draft_changed" = "The draft changed, so the AI answer was not applied";
 "qll_chat_ai_fixing_the_blocks" = "AI fixing the blocks…";
 "qll_chat_ai_fixing_the_text" = "AI fixing the text…";
 "qll_chat_ai_rewriting" = "AI rewriting…";

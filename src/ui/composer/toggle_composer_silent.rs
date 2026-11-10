@@ -498,13 +498,21 @@ impl QuillApp {
         } else if let Some(live) = self.live.as_mut()
             && let Some(chat_id) = live.driver.session.open_chat
         {
-            self.screen.connection.set_note_for(
-                &self.screen.windows,
-                match send(live, chat_id, &text) {
-                    Ok(_) => StatusNote::silent(working_note),
-                    Err(_) => StatusNote::info(tr(keys::Q_CHAT_AI_TOOLS_UNAVAILABLE_HERE)),
-                },
-            );
+            let topic = live.driver.session.open_draft_topic(chat_id);
+            let note = match send(live, chat_id, &text) {
+                Ok(request) => {
+                    // The answer applies only while the composer still
+                    // shows this text.
+                    live.driver
+                        .session
+                        .note_ai_ask(request, chat_id, topic, text.clone());
+                    StatusNote::silent(working_note)
+                }
+                Err(_) => StatusNote::info(tr(keys::Q_CHAT_AI_TOOLS_UNAVAILABLE_HERE)),
+            };
+            self.screen
+                .connection
+                .set_note_for(&self.screen.windows, note);
         } else {
             self.set_note(StatusNote::info(tr(keys::Q_CHAT_AI_TOOLS_UNAVAILABLE_HERE)));
         }

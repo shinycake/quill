@@ -81,7 +81,9 @@ pub struct BotsState {
     /// force-reply markup (`replyMarkupForceReply`, or `force_reply` on an
     /// inline / show-keyboard markup) arrives. The UI drains it on the
     /// next render: composer gets the reply-to and focus.
-    pub pending_force_reply: Option<ForceReplyTarget>,
+    pub pending_force_reply: ForceReplies,
+    /// The box requests waiting for their answer (Add bot, Share game).
+    pub sends: SendWatch,
     /// Bot reply keyboards as TDLib reports them, and recent inline bots.
     pub reply_keyboards: ReplyKeyboardState,
     /// Bots slice: the single active `getInlineQueryResults` fetch (the
@@ -119,7 +121,8 @@ impl BotsState {
             web_apps: WebApps::default(),
             last_login_url_info: None,
             login_url_request: None,
-            pending_force_reply: None,
+            pending_force_reply: ForceReplies::default(),
+            sends: SendWatch::default(),
             reply_keyboards: ReplyKeyboardState::default(),
             inline_query: None,
             inline_bot_resolve: None,

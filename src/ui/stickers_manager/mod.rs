@@ -109,7 +109,7 @@ impl QuillApp {
                     panel.trending.clone(),
                     panel.archived.clone(),
                     loading,
-                    panel.failed,
+                    panel.lists.of(panel.tab).error().is_some(),
                 )
             }
             Kind::Masks => {

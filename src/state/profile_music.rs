@@ -111,7 +111,7 @@ impl Session {
                 self.local_remove_profile_audio(FileId(file_id));
                 self.media.profile_audio_ids.remove(&file_id);
                 self.mark_my_playlist_stale();
-                self.messages.message_action_note = Some(format!(
+                self.messages.message_action_note.push(format!(
                     "could not save to your profile: {}",
                     error_reason(err)
                 ));
@@ -122,7 +122,7 @@ impl Session {
             )) => {
                 self.media.profile_audio_ids.remove(&file_id);
                 self.mark_my_playlist_stale();
-                self.messages.message_action_note = Some(format!(
+                self.messages.message_action_note.push(format!(
                     "could not change your playlist: {}",
                     error_reason(err)
                 ));
