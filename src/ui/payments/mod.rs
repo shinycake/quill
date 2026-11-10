@@ -42,7 +42,19 @@ impl QuillApp {
     /// keeps its own invoice and form (`PaymentsState::paying`), so its
     /// answer still lands on the payment that was made.
     pub(super) fn close_payment_dialog(&mut self, cx: &mut Context<Self>) {
+        // A giveaway that was paid is paid: its form closes with the
+        // checkout, so Start cannot pay for it a second time.
+        let paid_giveaway = self.session().is_some_and(|s| {
+            s.payments.form_paid
+                && s.payments
+                    .request
+                    .as_ref()
+                    .is_some_and(|r| r.invoice.is_giveaway())
+        });
         self.payments.dialog = None;
+        if paid_giveaway && self.giveaway.form.is_some() {
+            self.close_giveaway_form(cx);
+        }
         if let Some(live) = self.live.as_mut() {
             live.driver.session.close_checkout();
         }
