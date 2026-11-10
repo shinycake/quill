@@ -29,7 +29,7 @@ impl StreamReveal {
     /// on the backlog within about a third of a second (but never slower
     /// than 80 characters a second).
     fn advance(&mut self, draft_id: i64, target: usize) -> usize {
-        let now = Instant::now();
+        let now = now();
         if self.draft_id != draft_id {
             *self = Self {
                 draft_id,
@@ -48,6 +48,26 @@ impl StreamReveal {
         self.shown = (self.shown + speed * elapsed).min(target);
         self.shown as usize
     }
+}
+
+/// The reveal's clock: the frame's time, or a recording's pinned one.
+pub(super) fn now() -> Instant {
+    #[cfg(feature = "demo-capture")]
+    if let Some(pinned) = PINNED.with(std::cell::Cell::get) {
+        return pinned;
+    }
+    Instant::now()
+}
+
+#[cfg(feature = "demo-capture")]
+thread_local! {
+    static PINNED: std::cell::Cell<Option<Instant>> = const { std::cell::Cell::new(None) };
+}
+
+/// Pin the reveal's clock for a frame-by-frame recording (`None` frees it).
+#[cfg(feature = "demo-capture")]
+pub(super) fn pin_clock(at: Option<Instant>) {
+    PINNED.with(|pinned| pinned.set(at));
 }
 
 /// `text` cut to its first `chars` characters, entities clipped to match.

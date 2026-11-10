@@ -233,6 +233,7 @@ mod bot_edit_dialog;
 mod bot_pending;
 mod bot_permissions;
 mod bot_stream;
+mod bot_stream_demo;
 mod bot_verify_dialog;
 mod bot_verify_icon;
 mod bots;
