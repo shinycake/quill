@@ -343,6 +343,9 @@ mod tests {
         export
             .link
             .reply(RequestId(2), serde_json::json!({"@type": "messages"}));
-        assert!(worker.answer().is_some(), "a live call still gets its answer");
+        assert!(
+            worker.answer().is_some(),
+            "a live call still gets its answer"
+        );
     }
 }

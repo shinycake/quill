@@ -353,9 +353,9 @@ impl<S: JsonSender> ConnectDriver<S> {
         if matches!(held, Some(ChatStatisticsFetch::Loading))
             || (!refresh && matches!(held, Some(ChatStatisticsFetch::Loaded(_))))
             || self
-            .session
-            .requests
-            .has_purpose_for_chat(RequestPurpose::GetChatStatistics, chat_id)
+                .session
+                .requests
+                .has_purpose_for_chat(RequestPurpose::GetChatStatistics, chat_id)
         {
             return Ok(None);
         }

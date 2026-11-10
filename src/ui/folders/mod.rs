@@ -44,7 +44,11 @@ impl QuillApp {
                 None => tr(keys::FILTERS_NEW),
             };
             let body = this.folder_editor_panel(cx);
-            let loading = this.folders.editor.as_ref().is_some_and(|d| d.fetch_pending);
+            let loading = this
+                .folders
+                .editor
+                .as_ref()
+                .is_some_and(|d| d.fetch_pending);
             let footer = div()
                 .flex()
                 .justify_end()

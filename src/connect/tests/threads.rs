@@ -366,7 +366,10 @@ fn failed_older_thread_page_is_not_asked_again() {
     );
     let sent = requests_of(&recorder, "getMessageThreadHistory").len();
     assert_eq!(driver.fetch_thread_history().unwrap(), None);
-    assert_eq!(requests_of(&recorder, "getMessageThreadHistory").len(), sent);
+    assert_eq!(
+        requests_of(&recorder, "getMessageThreadHistory").len(),
+        sent
+    );
     let _ = std::fs::remove_dir_all(&dir);
 }
 
