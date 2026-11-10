@@ -94,11 +94,14 @@ impl Session {
     /// `addProxy` / `editProxy` answer.
     pub(crate) fn apply_added_proxy(&mut self, pending: Option<&PendingRequest>) {
         if pending.map(|p| p.purpose) == Some(RequestPurpose::MutateProxy) {
-            self.proxy_mutation_succeeded();
+            self.proxy_mutation_succeeded(pending);
         }
     }
 
-    fn proxy_mutation_succeeded(&mut self) {
+    fn proxy_mutation_succeeded(&mut self, pending: Option<&PendingRequest>) {
+        if let Some(pending) = pending {
+            self.settings.proxy.system_step.answered(pending.id, false);
+        }
         self.settings.proxy.mutating = false;
         self.settings.proxy.stale = true;
         self.settings.proxy.error = None;
@@ -139,7 +142,7 @@ impl Session {
     /// `ok` for the proxy purposes.
     pub(crate) fn apply_proxy_ok(&mut self, pending: Option<&PendingRequest>) {
         match pending.map(|p| p.purpose) {
-            Some(RequestPurpose::MutateProxy) => self.proxy_mutation_succeeded(),
+            Some(RequestPurpose::MutateProxy) => self.proxy_mutation_succeeded(pending),
             Some(RequestPurpose::Settings(SettingsPurpose::SetPreferIpv6 { on })) => {
                 self.settings.proxy.prefer_ipv6 = on
             }
@@ -162,7 +165,13 @@ impl Session {
             }
             RequestPurpose::MutateProxy => {
                 self.settings.proxy.mutating = false;
-                self.settings.proxy.error = Some(sessions_error_line("change the proxy", err));
+                // TDLib refusing the system step is not the user's error:
+                // the box does not show it, and the tick reads it here.
+                let system =
+                    pending.is_some_and(|p| self.settings.proxy.system_step.answered(p.id, true));
+                if !system {
+                    self.settings.proxy.error = Some(sessions_error_line("change the proxy", err));
+                }
             }
             // A failed ping is the answer: the proxy is not available.
             RequestPurpose::Settings(SettingsPurpose::PingProxy { .. }) => {

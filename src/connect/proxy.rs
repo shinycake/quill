@@ -3,7 +3,7 @@
 //! the gate is "not shutting down", not "auth Ready".
 use super::*;
 use crate::ids::RequestId;
-use crate::proxy::{PingStatus, ProxyDraft, ProxyEntry, RotationAction};
+use crate::proxy::{PingStatus, ProxyDraft, ProxyEntry, RotationAction, SystemStepState};
 use crate::proxy_sync::{ProxySyncStep, plan_proxy_sync};
 use crate::settings::save_proxy_prefs;
 use crate::state::SettingsPurpose;
@@ -79,12 +79,21 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         let extra = self.session.request(RequestPurpose::MutateProxy, None);
         self.session.settings.proxy.mutating = true;
-        self.session.settings.proxy.error = None;
+        let proxy = &mut self.session.settings.proxy;
+        match self.proxy_by {
+            ProxyBy::User => {
+                proxy.error = None;
+                proxy.system_step = SystemStepState::Idle;
+            }
+            // The box's error line is the user's: this step leaves it be.
+            ProxyBy::SystemStep => proxy.system_step = SystemStepState::InFlight(extra),
+        }
         match self.sender.send_json(&build(extra)) {
             Ok(()) => Ok(extra),
             Err(err) => {
                 self.session.requests.take(extra);
                 self.session.settings.proxy.mutating = false;
+                self.session.settings.proxy.system_step = SystemStepState::Idle;
                 Err(err)
             }
         }
@@ -304,15 +313,19 @@ impl<S: JsonSender> ConnectDriver<S> {
             detected,
             &proxy.system,
         );
-        // The last step finished (nothing is mutating): an error means
-        // TDLib refused it. The user never asked for it, so the proxy box
-        // doesn't show that error, and the step waits `RETRY` before it is
-        // sent again.
+        // The last step finished (nothing is mutating). Its own answer,
+        // matched by request id, says whether TDLib refused it; the box's
+        // error line is the user's and is neither read nor cleared here.
+        // A refused step waits `RETRY` before it is sent again.
         if let Some(sent) = self.system_proxy_sent.as_mut()
             && !sent.settled
         {
             sent.settled = true;
-            sent.refused = self.session.settings.proxy.error.take().is_some();
+            sent.refused = matches!(
+                (sent.request, self.session.settings.proxy.system_step),
+                (Some(sent_as), SystemStepState::Answered { request, refused: true })
+                    if request == sent_as
+            );
         }
         let Some(step) = step else {
             self.system_proxy_sent = None;
@@ -326,23 +339,26 @@ impl<S: JsonSender> ConnectDriver<S> {
         {
             return false;
         }
-        self.session.settings.proxy.error = None;
-        self.system_proxy_sent = Some(crate::system_proxy::SentStep {
-            step: step.clone(),
-            at: now,
-            refused: false,
-            settled: false,
-        });
-        match step {
-            SystemProxyStep::Add(draft) => {
-                self.add_proxy(&draft, true, SYSTEM_PROXY_COMMENT).is_ok()
+        self.proxy_by = ProxyBy::SystemStep;
+        let sent = match step.clone() {
+            SystemProxyStep::Add(draft) => self.add_proxy(&draft, true, SYSTEM_PROXY_COMMENT),
+            SystemProxyStep::Edit { id, proxy } => {
+                self.edit_proxy(id, &proxy, true, SYSTEM_PROXY_COMMENT)
             }
-            SystemProxyStep::Edit { id, proxy } => self
-                .edit_proxy(id, &proxy, true, SYSTEM_PROXY_COMMENT)
-                .is_ok(),
-            SystemProxyStep::Enable { id } => self.enable_proxy(id).is_ok(),
-            SystemProxyStep::Remove { id } => self.remove_proxy(id).is_ok(),
-        }
+            SystemProxyStep::Enable { id } => self.enable_proxy(id),
+            SystemProxyStep::Remove { id } => self.remove_proxy(id),
+        };
+        self.proxy_by = ProxyBy::User;
+        // A step that never left is as good as a refused one: it waits
+        // `RETRY` instead of going out again on every tick.
+        self.system_proxy_sent = Some(crate::system_proxy::SentStep {
+            step,
+            at: now,
+            request: sent.as_ref().ok().copied(),
+            refused: sent.is_err(),
+            settled: sent.is_err(),
+        });
+        sent.is_ok()
     }
 
     /// Pick a proxy mode in the proxy box. "Disable proxy" and "Use system

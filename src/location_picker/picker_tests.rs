@@ -26,7 +26,7 @@ const SIZE: MapSize = MapSize {
 };
 
 fn fresh() -> LocationPicker {
-    LocationPicker::open(ChatId(7), None, point(31., 35.))
+    LocationPicker::open(ChatId(7), None, point(31., 35.), 0)
 }
 
 #[test]
@@ -45,7 +45,7 @@ fn without_a_fix_it_starts_at_the_country_and_waits() {
 #[test]
 fn a_previous_fix_starts_there_with_venues_and_address() {
     let here = point(40.7, -74.);
-    let mut picker = LocationPicker::open(ChatId(7), Some(here), point(31., 35.));
+    let mut picker = LocationPicker::open(ChatId(7), Some(here), point(31., 35.), 0);
     assert_eq!(picker.view().zoom(), START_ZOOM);
     assert!(picker.can_search());
     let (generation, at, query) = picker.venue_query_to_send().expect("venues");
@@ -173,6 +173,26 @@ fn search_debounces_and_restores_the_nearby_list() {
     assert_eq!(picker.venue_query_to_send(), None);
     picker.search_changed(Some("pizza".into()));
     assert!(!picker.search_debounce_pending());
+}
+
+/// Sweep 03-085: closing the search after a failed lookup asks again
+/// instead of leaving the list on the spinner with nothing pending.
+#[test]
+fn closing_the_search_after_a_failed_lookup_asks_again() {
+    let mut picker = fresh();
+    picker.geolocated(GeoOutcome::Found(point(48.85, 2.35)), true);
+    let (first, ..) = picker.venue_query_to_send().expect("nearby");
+    picker.venue_query_sent(first);
+    picker.venues_failed(first);
+    picker.search_changed(Some("p".into()));
+    assert_eq!(picker.venues(), &VenueList::Loading);
+    picker.search_changed(None);
+    assert_eq!(picker.venues(), &VenueList::Loading);
+    let (again, _, query) = picker.venue_query_to_send().expect("asked again");
+    assert_ne!(again, first);
+    assert_eq!(query, "");
+    picker.venues_answered(again, vec![venue("Near")]);
+    assert_eq!(picker.venues(), &VenueList::Found(vec![venue("Near")]));
 }
 
 #[test]

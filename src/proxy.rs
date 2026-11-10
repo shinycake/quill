@@ -595,6 +595,35 @@ pub enum RotationAction {
     Switch(i32),
 }
 
+/// Where the "Use system proxy settings" step sent last stands. Its answer
+/// is matched by request id, so it is never read off [`ProxyState::error`],
+/// which belongs to what the user did in the proxy box.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum SystemStepState {
+    #[default]
+    Idle,
+    /// Sent as this request, not answered.
+    InFlight(crate::ids::RequestId),
+    /// Answered; `refused` when TDLib answered with an error.
+    Answered {
+        request: crate::ids::RequestId,
+        refused: bool,
+    },
+}
+
+impl SystemStepState {
+    /// The answer for `request`, when it is the step in flight. Returns
+    /// whether it was.
+    pub fn answered(&mut self, request: crate::ids::RequestId, refused: bool) -> bool {
+        if *self == SystemStepState::InFlight(request) {
+            *self = SystemStepState::Answered { request, refused };
+            true
+        } else {
+            false
+        }
+    }
+}
+
 /// Everything the proxy UI and driver cache (`Session::proxy`).
 #[derive(Debug, Clone, Default)]
 pub struct ProxyState {
@@ -611,6 +640,8 @@ pub struct ProxyState {
     /// A mutation is in flight.
     pub mutating: bool,
     pub error: Option<String>,
+    /// The system proxy step's own outcome (not `error`).
+    pub system_step: SystemStepState,
     /// Per-proxy-id ping results.
     pub pings: HashMap<i32, PingStatus>,
     /// Option `prefer_ipv6` (tdesktop "Try connecting through IPv6").

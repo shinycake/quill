@@ -27,7 +27,10 @@ impl QuillApp {
         let Some(conversation) = self.open_conversation() else {
             return false;
         };
-        let Some(style_name) = prefs::current().bound_style_name else {
+        let Some(account) = self.current_account() else {
+            return false;
+        };
+        let Some(style_name) = prefs::current().bound_style(&account).map(str::to_string) else {
             self.push_ai_toast(text_toast(tr(keys::AI_COMPOSE_APPLY_UNBOUND)), window, cx);
             return true;
         };
@@ -58,6 +61,8 @@ impl QuillApp {
         }
         self.ai_compose.apply_in_place = Some(ApplyInPlace {
             token,
+            account,
+            field: self.composer.read(cx).value().to_string(),
             conversation,
             window: self.windows.scope,
             selection,
@@ -101,7 +106,7 @@ impl QuillApp {
         let (text, entities) = match answer.outcome {
             Ok(result) => result,
             Err(AiBoxError::StyleInvalid(_)) => {
-                prefs::update(|prefs| prefs.bound_style_name = None);
+                prefs::update(|prefs| prefs.bind_style(&asked.account, None));
                 self.push_ai_toast(text_toast(tr(keys::AI_COMPOSE_TONE_INVALID)), window, cx);
                 return;
             }
@@ -128,8 +133,14 @@ impl QuillApp {
         if self.open_conversation().as_ref() != Some(&asked.conversation) {
             return;
         }
-        let replacement = ComposerDoc::from_entities(text, entities);
         let field = self.composer.read(cx).value();
+        if field.as_ref() != asked.field.as_str() {
+            // Typed on while the answer was coming: the recorded range
+            // covers other text now.
+            self.ai_compose_error_toast(&AiBoxError::Other(String::new()), window, cx);
+            return;
+        }
+        let replacement = ComposerDoc::from_entities(text, entities);
         let range = match &asked.selection {
             Some(range) => {
                 let start = floor_boundary(&field, range.start);

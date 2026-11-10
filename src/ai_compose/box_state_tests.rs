@@ -113,7 +113,10 @@ fn empty_answer_fails_with_the_generic_error() {
         ai.accept(send.token, result("")),
         Some(AiBoxError::Other(String::new()))
     );
-    assert_eq!(ai.card(), &CardState::Failed);
+    assert_eq!(
+        ai.card(),
+        &CardState::Failed(AiBoxError::Other(String::new()))
+    );
     assert_eq!(ai.result_title(), ResultTitle::Original);
 }
 
@@ -127,12 +130,26 @@ fn flood_premium_turns_the_footer_into_increase_limit() {
     assert!(ai.premium_flooded());
     assert_eq!(ai.footer(), FooterAction::IncreaseLimit);
     let again = ai.set_mode(AiComposeMode::Fix);
+    assert!(!ai.premium_flooded(), "the next request leaves the flood");
     ai.accept(token(&again), result("fixed"));
     assert_eq!(
         ai.footer(),
-        FooterAction::IncreaseLimit,
-        "stays for the box"
+        FooterAction::Apply {
+            style: false,
+            enabled: true
+        },
+        "a good result after buying Premium can be applied"
     );
+}
+
+#[test]
+fn clicking_the_active_tab_asks_again_after_a_failure() {
+    let (mut ai, send) = opened();
+    ai.fail(send.token, AiBoxError::TooLong);
+    let again = ai.set_mode(AiComposeMode::Translate).map(|send| send.token);
+    assert!(again.is_some_and(|t| t != send.token));
+    assert!(ai.loading());
+    assert_eq!(ai.set_mode(AiComposeMode::Translate), None);
 }
 
 #[test]
@@ -142,7 +159,10 @@ fn other_errors_fail_the_card_and_come_back_for_the_toast() {
         ai.fail(send.token, AiBoxError::Other("SOME_ERROR".into())),
         Some(AiBoxError::Other("SOME_ERROR".into()))
     );
-    assert_eq!(ai.card(), &CardState::Failed);
+    assert_eq!(
+        ai.card(),
+        &CardState::Failed(AiBoxError::Other("SOME_ERROR".into()))
+    );
     assert!(!ai.premium_flooded());
 }
 

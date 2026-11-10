@@ -49,7 +49,9 @@ pub const RETRY: std::time::Duration = std::time::Duration::from_secs(300);
 pub struct SentStep {
     pub step: SystemProxyStep,
     pub at: std::time::Instant,
-    /// TDLib's answer came back as an error.
+    /// The request it went out as; `None` when the send failed.
+    pub request: Option<crate::ids::RequestId>,
+    /// TDLib's answer came back as an error (or the send never left).
     pub refused: bool,
     /// The answer came back.
     pub settled: bool,

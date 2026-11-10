@@ -290,6 +290,38 @@ fn detected(server: &str) -> crate::system_proxy::Detected {
     crate::system_proxy::Detected::Proxy(draft)
 }
 
+/// Sweep 03-013: a background account does not run the system-proxy step
+/// itself; it mirrors the list of the account on screen, system entry
+/// included, so it follows the OS proxy too.
+#[test]
+fn a_background_account_follows_the_system_proxy_through_the_mirror() {
+    let mut screen = Rig::new();
+    screen.load_list(&[]);
+    assert!(screen.driver.system_proxy_tick(&detected("sys.lan")));
+    screen.answer("addProxy", system_entry(5, "sys.lan", true));
+    let mut list = proxies_json(&[]);
+    list["proxies"]
+        .as_array_mut()
+        .unwrap()
+        .push(system_entry(5, "sys.lan", true));
+    screen.answer("getProxies", list);
+    let target = screen
+        .driver
+        .session
+        .settings
+        .proxy
+        .all_entries()
+        .unwrap_or_default();
+
+    let mut background = Rig::new();
+    background.load_list(&[]);
+    assert!(background.driver.sync_proxies_to(&target, false));
+    let add = sent_request(&background.recorder, "addProxy");
+    assert_eq!(add["comment"], crate::system_proxy::SYSTEM_PROXY_COMMENT);
+    assert_eq!(add["proxy"]["server"], "sys.lan");
+    assert_eq!(add["enable"], true);
+}
+
 #[test]
 fn the_system_proxy_is_added_hidden_and_followed() {
     let mut rig = Rig::new();
@@ -371,6 +403,39 @@ fn a_refused_system_proxy_waits_and_stays_out_of_the_box() {
     // A new OS setting is tried at once.
     assert!(rig.driver.system_proxy_tick(&detected("good.lan")));
     assert_eq!(rig.count("addProxy"), 2);
+}
+
+/// Sweep 02-187 / 06-033: the system step's outcome is its own answer. A
+/// failure of the user's own proxy mutation is not swallowed as the
+/// step's refusal, and a step's refusal never shows in the box.
+#[test]
+fn the_users_failed_proxy_change_is_not_taken_for_the_system_steps() {
+    let mut rig = Rig::new();
+    rig.load_list(&[]);
+    assert!(rig.driver.system_proxy_tick(&detected("sys.lan")));
+    rig.answer("addProxy", system_entry(5, "sys.lan", true));
+    let mut list = proxies_json(&[]);
+    list["proxies"]
+        .as_array_mut()
+        .unwrap()
+        .push(system_entry(5, "sys.lan", true));
+    rig.answer("getProxies", list);
+    // The user adds a proxy the server refuses.
+    let mut draft = crate::proxy::ProxyDraft::empty(crate::calls::proxy::ProxyKind::Socks5);
+    draft.server = "mine.lan".into();
+    draft.port = 1080;
+    rig.driver.add_proxy(&draft, false, "").unwrap();
+    rig.answer(
+        "addProxy",
+        json!({"@type": "error", "code": 400, "message": "Wrong server name"}),
+    );
+    assert!(rig.driver.session.settings.proxy.error.is_some());
+    let _ = rig.driver.system_proxy_tick(&detected("sys.lan"));
+    assert!(
+        rig.driver.session.settings.proxy.error.is_some(),
+        "the user's error stays for the box"
+    );
+    assert_eq!(rig.count("addProxy"), 2, "the step was not resent");
 }
 
 #[test]

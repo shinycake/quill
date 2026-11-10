@@ -48,12 +48,47 @@ pub enum WriteAccessResult {
     Denied,
 }
 
+/// The outcome of one contact-card send for a mini app's phone request.
+/// It names the `sendMessage` request it answers: only the flow that sent
+/// that request takes it, so a late answer never finishes a later one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PhoneShare {
+    Sent(crate::ids::RequestId),
+    Refused(crate::ids::RequestId),
+}
+
+impl PhoneShare {
+    pub fn request(self) -> crate::ids::RequestId {
+        match self {
+            Self::Sent(request) | Self::Refused(request) => request,
+        }
+    }
+
+    pub fn is_sent(self) -> bool {
+        matches!(self, Self::Sent(_))
+    }
+}
+
 /// `sendWebAppCustomRequest` answers, keyed by the app's `req_id`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CustomRequestReply {
     pub req_id: String,
     /// The JSON result, or an error word for the app.
     pub result: Result<String, String>,
+}
+
+impl WebApps {
+    /// Replace the unconsumed open answer. An `Opened` answer it pushes out
+    /// was never shown, but TDLib started that app: its launch is queued
+    /// for `closeWebApp`, so the bot keeps no live session.
+    pub fn replace_open_result(&mut self, result: Option<WebAppOpenResult>) {
+        if let Some(WebAppOpenResult::Opened { launch_id, .. }) =
+            std::mem::replace(&mut self.open_result, result)
+            && launch_id != 0
+        {
+            self.dropped_launches.push(launch_id);
+        }
+    }
 }
 
 /// Everything mini-app related on the session.
@@ -94,6 +129,6 @@ pub struct WebApps {
     /// One-shot: `sendWebAppData` outcome (`Ok` or a failure message).
     pub data_sent: Option<Result<(), String>>,
     /// One-shot: the contact card sent for `web_app_request_phone` was
-    /// taken by TDLib (`true`) or refused (`false`), `(bot_user_id, sent)`.
-    pub phone_share: Option<(i64, bool)>,
+    /// taken by TDLib or refused, with the request it answers.
+    pub phone_share: Option<PhoneShare>,
 }

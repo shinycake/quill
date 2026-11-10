@@ -49,15 +49,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             completed: false,
             note: None,
         });
-        if self.session.payments.gift_text_length_max.is_none()
-            && !self
-                .session
-                .requests
-                .has_purpose(RequestPurpose::GetGiftTextLimit)
-        {
-            let extra = self.session.request(RequestPurpose::GetGiftTextLimit, None);
-            let _ = self.send_json_request(extra, &serde_json::json!({"@type":"getOption","@extra":extra.as_extra(),"name":"gift_text_length_max"}).to_string());
-        }
+        self.ask_gift_text_limit();
         let extra = self
             .session
             .request(RequestPurpose::GetMarketplaceGift, Some(chat_id));
@@ -72,6 +64,20 @@ impl<S: JsonSender> ConnectDriver<S> {
             gift.note = Some("Could not load the gift. Retry.".into());
         }
         result
+    }
+
+    /// `getOption gift_text_length_max` unless it is known or on its way.
+    fn ask_gift_text_limit(&mut self) {
+        if self.session.payments.gift_text_length_max.is_some()
+            || self
+                .session
+                .requests
+                .has_purpose(RequestPurpose::GetGiftTextLimit)
+        {
+            return;
+        }
+        let extra = self.session.request(RequestPurpose::GetGiftTextLimit, None);
+        let _ = self.send_json_request(extra, &serde_json::json!({"@type":"getOption","@extra":extra.as_extra(),"name":"gift_text_length_max"}).to_string());
     }
 
     /// The supplied price must equal the server quote shown at confirmation.
@@ -92,6 +98,18 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         let max = self.session.payments.gift_text_length_max;
         if !comment.is_empty() && max.is_none_or(|limit| comment.chars().count() > limit) {
+            // Say why the Buy button did nothing, and ask for the limit
+            // again when it never arrived (the first lookup failed).
+            if max.is_none() {
+                self.ask_gift_text_limit();
+            }
+            if let Some(gift) = self.session.payments.marketplace_gift.as_mut() {
+                gift.note = Some(if max.is_none() {
+                    "Could not check the comment length. Retry.".into()
+                } else {
+                    "The comment is too long.".into()
+                });
+            }
             return Err(ConnectSendError::InvalidRequest);
         }
         let gift = self

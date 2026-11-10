@@ -237,7 +237,7 @@ pub fn detect_deep_link_arg(args: &[String]) -> Option<String> {
 impl<S: JsonSender> ConnectDriver<S> {
     /// `parity:platform-deep-links`: `getDeepLinkInfo` for a launch link.
     /// Generation-guarded like `resolve_inline_bot`; a flow already in
-    /// progress wins (one launch link at a time). The flow is the running
+    /// progress wins (one launch link at a time), a finished one is replaced. The flow is the running
     /// handler's: an agent's step while the UI driver injects, else the
     /// user's.
     pub fn request_deep_link_info(
@@ -257,9 +257,21 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        if self.session.chats_state.deep_link.is_some() {
+        // A flow in flight, or an invite waiting for its answer, wins. A
+        // finished flow nobody consumed (its surface is not drawn: locked,
+        // window closed) gives way to the new link instead of blocking
+        // every later one.
+        if matches!(
+            self.session.chats_state.deep_link,
+            Some(
+                DeepLinkState::ResolvingInfo { .. }
+                    | DeepLinkState::ResolvingChat { .. }
+                    | DeepLinkState::InvitePreview { .. }
+            )
+        ) {
             return Ok(None);
         }
+        self.session.chats_state.deep_link = None;
         self.session.chats_state.deep_link_from_agent = from_agent;
         // Like tdesktop's `openLocalUrl`, route the link by its shape
         // locally. `getDeepLinkInfo` only knows server-side deep links

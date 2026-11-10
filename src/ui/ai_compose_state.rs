@@ -8,7 +8,7 @@ use super::app::QuillApp;
 use gpui_kit::component::input::{InputEvent, TextareaState};
 use gpui_kit::*;
 use quill::ai_compose::{AiComposeBox, StyleExample, StyleExamples, TextCompositionStyle};
-use quill::ids::{ChatId, ConversationKey, OfAccount};
+use quill::ids::{AccountKey, ChatId, ConversationKey, OfAccount};
 use quill::lang::{keys, tr};
 use std::collections::HashSet;
 use std::ops::Range;
@@ -118,6 +118,12 @@ impl AiStylePreview {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ApplyInPlace {
     pub(super) token: u64,
+    /// The account whose style the shortcut used: a style-gone answer
+    /// clears that account's binding and no other.
+    pub(super) account: AccountKey,
+    /// The composer's whole text at the press. The answer rewrites a
+    /// range of it, so it lands only while the composer still holds it.
+    pub(super) field: String,
     /// The conversation whose composer asked: its chat and topic, thread
     /// or Saved sublist. The answer lands only while the view shows it, so
     /// a rewrite asked in one forum topic never replaces the next topic's

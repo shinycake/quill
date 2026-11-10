@@ -89,12 +89,19 @@ impl<S: JsonSender> ConnectDriver<S> {
                 }
             });
             let grams = &mut self.session.payments.hub.grams;
+            if result.is_err() {
+                // Never left: not asked. Try again on the next tick (the
+                // names still wait) instead of keeping the placeholder for
+                // the session.
+                grams.peers_dirty = true;
+                break;
+            }
             if purpose == GramsPurpose::PeerUser {
                 grams.asked_users.insert(id);
             } else {
                 grams.asked_chats.insert(id);
             }
-            sent |= result.is_ok();
+            sent = true;
         }
         sent
     }
