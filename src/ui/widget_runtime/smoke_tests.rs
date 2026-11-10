@@ -5,7 +5,7 @@ use super::backend::Resources;
 use super::ffi::{Native, Shared};
 use super::thread::{Canvas, paint_frame};
 use serde_json::{Value, json};
-use std::sync::mpsc::channel;
+use std::sync::mpsc::{Receiver, channel};
 use std::sync::{Arc, Mutex};
 
 const BACKGROUND: [u8; 3] = [255, 255, 255];
@@ -27,21 +27,7 @@ fn first_frame(name: &str) -> (u32, u32, Vec<u8>) {
 
 /// Boots `html` and paints its first whole frame.
 fn boot(name: &str, html: &str) -> (u32, u32, Vec<u8>) {
-    let (tx, rx) = channel::<String>();
-    let resources = Arc::new(Mutex::new(Resources::default()));
-    let shared = Shared {
-        events: Box::new(move |json| {
-            let _ = tx.send(json);
-        }),
-        resources: resources.clone(),
-    };
-    let options = json!({
-        "width": 320, "dpr": 2, "maxHeight": 600, "visible": true, "locale": "en",
-        "theme": {"colorScheme": "light", "params": {"bg_color": "#ffffff", "text_color": "#000000",
-                  "button_color": "#3390ec", "button_text_color": "#ffffff", "hint_color": "#707579"}},
-        "context": {"isCopy": false, "canQuery": false, "backgroundQuery": false, "chatType": "private"},
-    });
-    let mut native = Native::create(html, &options.to_string(), shared).unwrap();
+    let (mut native, rx, resources) = start(html);
     loop {
         let event: Value = serde_json::from_str(&rx.recv().unwrap()).unwrap();
         if event["type"] == "change" {
@@ -56,6 +42,70 @@ fn boot(name: &str, html: &str) -> (u32, u32, Vec<u8>) {
     let pixmap = canvas.pixmap.take().unwrap();
     assert_eq!(pixmap.width() as f32, frame.width * 2.0);
     (pixmap.width(), pixmap.height(), pixmap.data().to_vec())
+}
+
+/// Creates the widget; its events arrive on the receiver.
+fn start(html: &str) -> (Native, Receiver<String>, Arc<Mutex<Resources>>) {
+    let (tx, rx) = channel::<String>();
+    let resources = Arc::new(Mutex::new(Resources::default()));
+    let shared = Shared {
+        events: Box::new(move |json| {
+            let _ = tx.send(json);
+        }),
+        resources: resources.clone(),
+    };
+    let options = json!({
+        "width": 320, "dpr": 2, "maxHeight": 600, "visible": true, "locale": "en",
+        "theme": {"colorScheme": "light", "params": {"bg_color": "#ffffff", "text_color": "#000000",
+                  "button_color": "#3390ec", "button_text_color": "#ffffff", "hint_color": "#707579"}},
+        "context": {"isCopy": false, "canQuery": false, "backgroundQuery": false, "chatType": "private"},
+    });
+    let native = Native::create(html, &options.to_string(), shared).unwrap();
+    (native, rx, resources)
+}
+
+/// Run by `a_refused_bundle_stops_the_widget` in a process of its own, where the bundles carry CRLF
+/// line ends (#1425): the widget has to stop with a reason, not take the app down.
+#[test]
+#[ignore = "run in its own process by a_refused_bundle_stops_the_widget"]
+fn refused_bundle_child() {
+    let (_native, rx, _resources) = start(&corpus("tabs.html"));
+    loop {
+        let event: Value = serde_json::from_str(&rx.recv().unwrap()).unwrap();
+        if event["type"] == "change" && !event["dead"].is_null() {
+            assert!(
+                event["dead"].to_string().contains("failed to load"),
+                "{}",
+                event["dead"]
+            );
+            break;
+        }
+    }
+}
+
+/// Bundles the runtime refuses used to abort the whole process from the widget host thread (#1425).
+#[test]
+fn a_refused_bundle_stops_the_widget() {
+    let exe = std::env::current_exe().unwrap();
+    let status = std::process::Command::new(exe)
+        .args([
+            "--ignored",
+            "--exact",
+            "ui::widget_runtime::smoke_tests::refused_bundle_child",
+        ])
+        .env("QUILL_WIDGET_CRLF_BUNDLES", "1")
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&status.stdout);
+    assert!(
+        status.status.success(),
+        "the child test ended with {}: {stdout}",
+        status.status
+    );
+    assert!(
+        stdout.contains("1 passed"),
+        "the child test did not run: {stdout}"
+    );
 }
 
 /// Pixels that are not the bubble.

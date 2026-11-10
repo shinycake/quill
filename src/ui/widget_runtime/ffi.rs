@@ -123,18 +123,31 @@ const VALIDATOR_QBC: &[u8] = include_bytes!(
 );
 
 /// Hands the WidgetJS bundles to the C side, once per process.
+/// The bundle source as shipped. A test process started with `QUILL_WIDGET_CRLF_BUNDLES` gets it
+/// with CRLF line ends, as a Windows checkout without `.gitattributes` made it, so the bundles are
+/// refused (#1425).
+fn bundle_source(js: &'static [u8]) -> std::borrow::Cow<'static, [u8]> {
+    if cfg!(test) && std::env::var_os("QUILL_WIDGET_CRLF_BUNDLES").is_some() {
+        let crlf = String::from_utf8_lossy(js).replace('\n', "\r\n");
+        return std::borrow::Cow::Owned(crlf.into_bytes());
+    }
+    std::borrow::Cow::Borrowed(js)
+}
+
 fn resources_ready() -> bool {
     static READY: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *READY.get_or_init(|| {
+        let sandbox_js = bundle_source(SANDBOX_JS);
+        let validator_js = bundle_source(VALIDATOR_JS);
         // SAFETY: four valid slices that outlive the call; the C side copies them.
         unsafe {
             qw_resources_init(
-                SANDBOX_JS.as_ptr(),
-                SANDBOX_JS.len(),
+                sandbox_js.as_ptr(),
+                sandbox_js.len(),
                 SANDBOX_QBC.as_ptr(),
                 SANDBOX_QBC.len(),
-                VALIDATOR_JS.as_ptr(),
-                VALIDATOR_JS.len(),
+                validator_js.as_ptr(),
+                validator_js.len(),
                 VALIDATOR_QBC.as_ptr(),
                 VALIDATOR_QBC.len(),
             )
