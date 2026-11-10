@@ -171,6 +171,12 @@ thread_local! {
     static INLINE_SOURCES: RefCell<Sources> = RefCell::new(Sources::default());
 }
 
+/// One render where a panic is a wallpaper that cannot be drawn (`None`),
+/// on the worker and on the inline fallback alike.
+fn render_guarded(render: impl FnOnce() -> Option<Rendered>) -> Option<Rendered> {
+    quill::thread_guard::ffi_boundary(None, render)
+}
+
 fn worker() {
     let shared = shared();
     let mut sources = Sources::default();
@@ -193,7 +199,11 @@ fn worker() {
                 }
             }
         };
-        let result = sources.render(&job.wallpaper, job.width, job.height);
+        // A render that panics (a malformed photo or pattern) is a wallpaper
+        // that cannot be drawn: the job still finishes, and the worker
+        // goes on with the next one. A dead worker would leave every
+        // wallpaper pending, asking for a frame forever.
+        let result = render_guarded(|| sources.render(&job.wallpaper, job.width, job.height));
         shared
             .board
             .lock_or_recover()
@@ -514,7 +524,9 @@ fn lookup(
         }
         let shared = shared();
         if !shared.threaded {
-            let rendered = INLINE_SOURCES.with(|s| s.borrow_mut().render(wallpaper, width, height));
+            let rendered = render_guarded(|| {
+                INLINE_SOURCES.with(|s| s.borrow_mut().render(wallpaper, width, height))
+            });
             let composite = rendered.and_then(|r| to_composite(r, width, height));
             cache.insert(key, composite.clone(), window);
             return ready(&mut cache, composite, true);
@@ -642,7 +654,7 @@ pub(super) fn wallpaper_layer(
 
 #[cfg(test)]
 mod tests {
-    use super::{Board, Cache, Composite, Job, Shown, image_key};
+    use super::{Board, Cache, Composite, Job, Shown, image_key, render_guarded};
     use crate::ui::image_budget::begin_frame;
     use crate::ui::wallpaper::Wallpaper;
     use gpui_kit::{RenderImage, WindowId};
@@ -839,5 +851,33 @@ mod tests {
         // Thumbnails share a slot and never replace each other.
         board.request(job(4, 9, 0), false);
         assert!(board.done.contains_key(&2));
+    }
+
+    /// A render that panics finishes its job as a wallpaper that cannot be
+    /// drawn: the answer is there, so nothing waits (and asks for a frame)
+    /// for it, and the worker is still alive for the next job.
+    #[test]
+    fn a_panicking_render_finishes_the_job_as_undrawable() {
+        let now = Instant::now();
+        let mut board = Board::default();
+        board.request(
+            Job {
+                key: 7,
+                slot: 1,
+                wallpaper: Wallpaper::Solid(0x112233),
+                width: 4,
+                height: 4,
+                not_before: now,
+            },
+            true,
+        );
+        let Ok(job) = board.next(now) else {
+            panic!("the job is due");
+        };
+        let result = render_guarded(|| panic!("a malformed pattern"));
+        assert!(result.is_none());
+        board.finish(job.slot, job.key, result);
+        assert!(matches!(board.done.get(&7), Some((1, None))));
+        assert!(board.running.is_none());
     }
 }

@@ -634,6 +634,21 @@ impl QuillApp {
         revoke: bool,
         cx: &mut Context<Self>,
     ) {
+        self.delete_messages(chat_id, ids, revoke);
+        self.share.forward = super::forward_stage::ForwardStage::None;
+        cx.notify();
+    }
+
+    /// Delete `ids` of `chat_id` and nothing else: the selection and the
+    /// forward draft stay as they are. `true` when the request went out (or
+    /// the demo applied it), or when every message was gone already; `false`
+    /// when the send was refused, with the note saying so.
+    pub(super) fn delete_messages(
+        &mut self,
+        chat_id: ChatId,
+        ids: &[MessageId],
+        revoke: bool,
+    ) -> bool {
         // The box may have sat open while some of them went away.
         let ids: Vec<MessageId> = ids
             .iter()
@@ -644,10 +659,12 @@ impl QuillApp {
             })
             .collect();
         let ids = ids.as_slice();
+        let mut went_out = true;
         if !ids.is_empty() {
             self.begin_vanish(chat_id, ids);
             if let Some(live) = self.live.as_mut() {
                 if live.driver.delete_selected(chat_id, ids, revoke).is_err() {
+                    went_out = false;
                     self.set_note(StatusNote::error(tr(
                         keys::Q_CHAT_COULD_NOT_DELETE_MESSAGES,
                     )));
@@ -658,8 +675,7 @@ impl QuillApp {
                 }
             }
         }
-        self.share.forward = super::forward_stage::ForwardStage::None;
-        cx.notify();
+        went_out
     }
 
     /// Telegram Desktop's delete box for one message: "Do you want to delete

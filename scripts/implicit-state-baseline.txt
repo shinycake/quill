@@ -40,7 +40,6 @@ CallSummary::rating_sent
 CallUi::window_opening
 CameraDraft::starting
 Ceremony::finished
-ChatAppearanceDialog::sent
 ChatListState::archive_settings_loading
 ChatListState::folder_invite_done
 ChatListState::folder_link_saved

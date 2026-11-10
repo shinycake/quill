@@ -342,17 +342,28 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut App,
     ) -> NativeMenu {
-        deferred_input_menu(window, cx, move |cx| Self::build_composer_menu(&owner, cx))
+        // The window the click is in, noted now: the menu is built a
+        // moment later, outside any window's scope, and would read the
+        // main window's composer, text and spelling instead.
+        let scope = owner
+            .upgrade()
+            .and_then(|app| app.read(cx).window_scope_of(window));
+        deferred_input_menu(window, cx, move |cx| {
+            let Some(app) = owner.upgrade() else {
+                return edit_menu_items(NativeMenu::new(), false, false);
+            };
+            app.update(cx, |this, cx| {
+                this.in_window_scope(scope, cx, |this, cx| Self::build_composer_menu(this, cx))
+            })
+            .unwrap_or_else(|| edit_menu_items(NativeMenu::new(), false, false))
+        })
     }
 
     /// The menu itself; reads the composer, so only call it outside the
-    /// composer's own update (see [`deferred_input_menu`]).
-    fn build_composer_menu(owner: &WeakEntity<Self>, cx: &App) -> NativeMenu {
+    /// composer's own update (see [`deferred_input_menu`]), in the scope of
+    /// the window it is for.
+    fn build_composer_menu(app: &Self, cx: &App) -> NativeMenu {
         let menu = NativeMenu::new();
-        let Some(app) = owner.upgrade() else {
-            return edit_menu_items(menu, false, false);
-        };
-        let app = app.read(cx);
         let input = app.composer.read(cx);
         let selection = input.selected_range();
         let caret = selection.start;
@@ -496,7 +507,7 @@ impl QuillApp {
 pub(super) fn deferred_input_menu(
     window: &mut Window,
     cx: &mut App,
-    build: impl FnOnce(&App) -> NativeMenu + 'static,
+    build: impl FnOnce(&mut App) -> NativeMenu + 'static,
 ) -> NativeMenu {
     let position = window.mouse_position();
     window.defer(cx, move |window, cx| {

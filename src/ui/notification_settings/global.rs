@@ -42,7 +42,20 @@ impl QuillApp {
     /// Session mirror immediately.
     /// tdesktop "Desktop notifications" (`desktopNotify`), also flipped from
     /// the tray menu's "Disable/Enable notifications".
+    ///
+    /// It is the app's setting, as in tdesktop: every connected account's
+    /// session takes it (the ones in the background keep notifying
+    /// otherwise), and each account's prefs file keeps it.
     pub(crate) fn set_desktop_notifications(&mut self, on: bool, cx: &mut Context<Self>) {
+        for live in self
+            .background
+            .clients
+            .iter_mut()
+            .filter_map(|client| client.live.as_mut())
+        {
+            live.driver.session.settings.desktop_notifications = on;
+            live.driver.save_desktop_notifications();
+        }
         if let Some(live) = self.live.as_mut() {
             live.driver.session.settings.desktop_notifications = on;
             live.driver.save_desktop_notifications();

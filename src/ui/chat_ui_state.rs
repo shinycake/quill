@@ -139,6 +139,9 @@ pub(crate) struct ChatUi {
     /// B15: the checklist composer / "Add Tasks" box. A new checklist goes
     /// to the chat shown, so the box goes with the chat.
     pub(super) checklist_dialog: Option<super::ChecklistDialog>,
+    /// The attach menu's contact chooser. Here so that a chat change closes
+    /// it: the contact goes to the chat this value was made for.
+    pub(super) contact_dialog: Option<super::ShareContentDialog>,
     /// The info card under the open forum topic's strip.
     pub(super) topic_info_open: bool,
     /// The info card under the open reply thread's root bar.
@@ -178,6 +181,11 @@ impl ChatUi {
     /// Which value this is (see [`ChatVisit`]).
     pub(super) fn visit(&self) -> ChatVisit {
         self.visit
+    }
+
+    /// The chat this value was made for (what a box opened over it acts on).
+    pub(super) fn made_for(&self) -> Option<ChatId> {
+        self.chat
     }
 
     /// The chat this value was made for.

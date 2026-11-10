@@ -197,7 +197,7 @@ impl QuillApp {
 
     /// The recent packs the box shows: the kept ones, and the ones removed
     /// here back in their places (dimmed, with Restore).
-    fn shown_recent_languages(&self) -> Vec<LanguageChoice> {
+    pub(super) fn shown_recent_languages(&self) -> Vec<LanguageChoice> {
         let mut shown = self.language.recent.clone();
         if let Some(open) = self.language.open.as_ref() {
             let mut removed: Vec<&(usize, LanguageChoice)> = open.removed.iter().collect();
@@ -398,7 +398,12 @@ impl QuillApp {
 
     /// Delete a recent pack at once (the list on disk loses it), or put
     /// back one deleted here.
-    fn remove_recent_language(&mut self, id: &str, restore: bool, cx: &mut Context<Self>) {
+    pub(super) fn remove_recent_language(
+        &mut self,
+        id: &str,
+        restore: bool,
+        cx: &mut Context<Self>,
+    ) {
         let Some(open) = self.language.open.as_mut() else {
             return;
         };
