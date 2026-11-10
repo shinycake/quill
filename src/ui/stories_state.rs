@@ -62,6 +62,50 @@ pub(crate) struct StoryViewerUi {
     pub(super) menu_open: bool,
 }
 
+/// A panel the viewer draws over its story. One is open at a time:
+/// opening one closes the rest (`StoryViewerUi::close_other_panels`), so they
+/// never stack and push the story out of its frame, or fight over the one
+/// search field they share.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum ViewerPanel {
+    Viewers,
+    Stats,
+    Report,
+    Share,
+    Cover,
+    Privacy,
+    CloseFriends,
+}
+
+impl StoryViewerUi {
+    /// `keep` is being opened: every other panel closes. A call a closed
+    /// panel already sent (`cover_request`, `privacy_request`, a saving
+    /// close-friends list) stays tracked, so its answer still settles.
+    pub(super) fn close_other_panels(&mut self, keep: ViewerPanel) {
+        if keep != ViewerPanel::Viewers {
+            self.viewers_open = false;
+        }
+        if keep != ViewerPanel::Stats {
+            self.stats_open = false;
+        }
+        if keep != ViewerPanel::Report {
+            self.report_open = false;
+        }
+        if keep != ViewerPanel::Share {
+            self.share_open = false;
+        }
+        if keep != ViewerPanel::Cover {
+            self.cover = None;
+        }
+        if keep != ViewerPanel::Privacy {
+            self.privacy_edit = None;
+        }
+        if keep != ViewerPanel::CloseFriends && !self.close_friends_saving {
+            self.close_friends_edit = None;
+        }
+    }
+}
+
 pub(crate) struct StoryUi {
     /// Stories strip tiles and sideways scroll (`quill::stories_strip`).
     pub(super) strip: super::stories_strip_ui::StoryStripState,

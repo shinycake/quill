@@ -4,6 +4,7 @@
 use super::app::QuillApp;
 use super::*;
 use crate::ui::status_note::StatusNote;
+use crate::ui::stories_state::ViewerPanel;
 use crate::ui::story_page::{AlbumDelete, AlbumView, PageWait};
 use crate::ui::user_error::{user_error_doing, user_error_for};
 use gpui_kit::component::button::*;
@@ -605,9 +606,8 @@ impl QuillApp {
             selected_user_ids,
         });
         if let Some(open) = self.stories.viewer_ui_mut() {
+            open.close_other_panels(ViewerPanel::Privacy);
             open.privacy_edit = value;
-        }
-        if let Some(open) = self.stories.viewer_ui_mut() {
             open.privacy_request = None;
         }
         self.stories

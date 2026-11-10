@@ -79,8 +79,7 @@ impl QuillApp {
                 this.close_live_stars_box(cx);
             });
         app.update(cx, |this, cx| {
-            let (Some(session), Some(boxed)) =
-                (this.session(), this.stories.live.stars_box.as_ref())
+            let (Some(session), Some(boxed)) = (this.session(), this.stories.live.stars.boxed())
             else {
                 return dialog.on_close(on_close);
             };
@@ -372,7 +371,7 @@ crate::ui::shell::register_dialogs! {
     /// The live story's Stars box.
     LiveStoryStars => DialogSpec::new(
         3852,
-        |app| app.stories.live.stars_box.is_some(),
+        |app| app.stories.live.stars.boxed().is_some(),
         QuillApp::build_live_stars_dialog,
     )
     .close(|app, _, cx| app.close_live_stars_box(cx)),

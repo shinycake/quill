@@ -12,6 +12,7 @@
 
 use super::app::QuillApp;
 use super::message_media::file_is_downloading;
+use super::stories_state::ViewerPanel;
 use super::story_video_state::{StoryKey, StoryVideo};
 use super::video_player::{PlayState, Purpose, VideoPlayer, video_frame};
 use gpui_kit::component::button::*;
@@ -417,9 +418,9 @@ impl QuillApp {
     pub(super) fn toggle_story_share(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.stories
             .with_viewer_ui(|open| open.share_open = !open.share_open);
-        self.stories
-            .with_viewer_ui(|open| open.close_friends_edit = None);
         if self.stories.viewer_ui().share_open {
+            self.stories
+                .with_viewer_ui(|open| open.close_other_panels(ViewerPanel::Share));
             self.stories
                 .more_search
                 .update(cx, |input, cx| input.set_value("", window, cx));
@@ -470,7 +471,8 @@ impl QuillApp {
             .with_viewer_ui(|open| open.close_friends_edit = Some(CloseFriendsEdit::new(&current)));
         self.stories
             .with_viewer_ui(|open| open.close_friends_saving = false);
-        self.stories.with_viewer_ui(|open| open.share_open = false);
+        self.stories
+            .with_viewer_ui(|open| open.close_other_panels(ViewerPanel::CloseFriends));
         self.stories
             .more_search
             .update(cx, |input, cx| input.set_value("", window, cx));

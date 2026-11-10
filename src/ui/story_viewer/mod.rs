@@ -10,6 +10,7 @@ use super::pressable::PressableDiv;
 use super::search_ui::chat_search_jump_note;
 use super::*;
 use crate::ui::status_note::StatusNote;
+use crate::ui::stories_state::ViewerPanel;
 use gpui_kit::component::button::*;
 use gpui_kit::component::input::Textarea;
 use gpui_kit::component::*;
@@ -363,26 +364,50 @@ impl QuillApp {
         if text.trim().is_empty() {
             return;
         }
-        if let Some(live) = self.live.as_mut() {
-            self.screen.connection.set_note_for(
-                &self.screen.windows,
-                match live
-                    .driver
-                    .send_story_reply(item.chat_id, item.story_id, &text)
-                {
-                    Ok(_) => StatusNote::silent(tr(keys::Q_MEDIA_STORY_REPLY_SENT)),
-                    Err(_) => StatusNote::error(tr(keys::Q_MEDIA_COULD_NOT_SEND_STORY_REPLY)),
-                },
-            );
-            self.stories
-                .reply_input
-                .update(cx, |input, cx| input.set_value("", window, cx));
-        } else if self.demo_session.is_some() {
-            self.set_note(StatusNote::silent(tr(
-                keys::Q_MEDIA_DEMO_STORY_REPLIES_RUN_WITH,
-            )));
+        // Slow mode holds the text back as it does a sticker or a voice
+        // note; the reply stays typed.
+        if self.slow_mode_blocked(item.chat_id, cx) {
+            return;
         }
-        self.end_story_reply(cx);
+        let sent = self.live.as_mut().map(|live| {
+            live.driver
+                .send_story_reply(item.chat_id, item.story_id, &text)
+                .is_ok()
+        });
+        self.finish_story_reply_text(sent, window, cx);
+    }
+
+    /// The text reply's send was answered (`None`: no connection, a demo).
+    /// The text is cleared and the row closed only once the reply went out:
+    /// a refused send (the story is gone, no chat path) keeps what the user
+    /// typed, to try again — as `finish_story_reply_media` does for media.
+    pub(super) fn finish_story_reply_text(
+        &mut self,
+        sent: Option<bool>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        match sent {
+            Some(true) => {
+                self.set_note(StatusNote::silent(tr(keys::Q_MEDIA_STORY_REPLY_SENT)));
+                self.stories
+                    .reply_input
+                    .update(cx, |input, cx| input.set_value("", window, cx));
+                self.end_story_reply(cx);
+            }
+            Some(false) => {
+                self.set_note(StatusNote::error(tr(
+                    keys::Q_MEDIA_COULD_NOT_SEND_STORY_REPLY,
+                )));
+            }
+            None => {
+                if self.demo_session.is_some() {
+                    self.set_note(StatusNote::silent(tr(
+                        keys::Q_MEDIA_DEMO_STORY_REPLIES_RUN_WITH,
+                    )));
+                }
+            }
+        }
         cx.notify();
     }
 
@@ -425,10 +450,9 @@ impl QuillApp {
         if let Some(open) = self.stories.viewer_ui_mut() {
             open.viewers_open = !open.viewers_open;
         }
-        if let Some(open) = self.stories.viewer_ui_mut() {
-            open.report_open = false;
-        }
         if self.stories.viewer_ui().viewers_open {
+            self.stories
+                .with_viewer_ui(|open| open.close_other_panels(ViewerPanel::Viewers));
             // Phase 9.5 review: reset rows before the fresh page-1
             // fetch — `begin_story_viewers` keeps rows for the same
             // story, so reopening would otherwise duplicate them.
@@ -517,10 +541,9 @@ impl QuillApp {
         if let Some(open) = self.stories.viewer_ui_mut() {
             open.report_open = !open.report_open;
         }
-        if let Some(open) = self.stories.viewer_ui_mut() {
-            open.viewers_open = false;
-        }
         if self.stories.viewer_ui().report_open {
+            self.stories
+                .with_viewer_ui(|open| open.close_other_panels(ViewerPanel::Report));
             self.send_story_report_step(&item, "", "", cx);
         } else {
             self.clear_terminal_story_report();

@@ -89,6 +89,7 @@ impl QuillApp {
             serial,
         });
         if let Some(open) = self.stories.viewer_ui_mut() {
+            open.close_other_panels(ViewerPanel::Cover);
             open.cover = value;
         }
         cx.notify();

@@ -49,3 +49,47 @@ fn a_report_flow_is_matched_by_poster_and_story() {
     assert!(flow.is_for(105, 3));
     assert!(!flow.is_for(52, 3), "the same story id from another poster");
 }
+
+/// Opening a panel closes the others: statistics, share, the privacy
+/// editor and the viewers list never stack under the story.
+#[gpui_kit::test]
+fn opening_one_panel_closes_the_others(cx: &mut TestAppContext) {
+    let (app, mut vcx) = open_app(cx, "ready-story-viewer");
+    let vcx = &mut vcx;
+    let open_panels = |app: &gpui_kit::Entity<crate::ui::app::QuillApp>,
+                       vcx: &mut gpui_kit::VisualTestContext| {
+        app.read_with(vcx, |app, _| {
+            let ui = app.stories.viewer_ui();
+            (
+                ui.stats_open,
+                ui.share_open,
+                ui.privacy_edit.is_some(),
+                ui.viewers_open,
+            )
+        })
+    };
+    app.update(vcx, |app, cx| app.toggle_story_stats(cx));
+    assert_eq!(open_panels(&app, vcx), (true, false, false, false));
+    app.update_in(vcx, |app, window, cx| app.toggle_story_share(window, cx));
+    assert_eq!(
+        open_panels(&app, vcx),
+        (false, true, false, false),
+        "Share replaced the statistics"
+    );
+    app.update_in(vcx, |app, window, cx| {
+        app.toggle_story_privacy_edit(window, cx)
+    });
+    assert_eq!(
+        open_panels(&app, vcx),
+        (false, false, true, false),
+        "the privacy editor replaced Share"
+    );
+    app.update(vcx, |app, cx| app.toggle_story_stats(cx));
+    assert_eq!(
+        open_panels(&app, vcx),
+        (true, false, false, false),
+        "Statistics replaced the privacy editor"
+    );
+    app.update(vcx, |app, cx| app.toggle_story_viewers(cx));
+    assert_eq!(open_panels(&app, vcx), (false, false, false, true));
+}

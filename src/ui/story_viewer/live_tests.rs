@@ -7,7 +7,7 @@
 //! controller). Nothing reaches Telegram: the app
 //! has no connection and joins nothing.
 use super::live_state::{
-    EFFECT_DURATION, FlyingStars, SendAction, StarsBoxMode, effect_progress, pin_label,
+    EFFECT_DURATION, FlyingStars, SendAction, StarsBoxMode, StarsFlow, effect_progress, pin_label,
     pinned_comments, send_action,
 };
 use super::live_story::live_item;
@@ -247,11 +247,7 @@ fn the_stars_box_sets_the_next_comment_price(cx: &mut TestAppContext) {
     let vcx = &mut vcx;
     click(vcx, "live-story-edit-stars");
     let mode = app.read_with(vcx, |app, _| {
-        app.stories
-            .live
-            .stars_box
-            .as_ref()
-            .map(|b| (b.mode, b.stars))
+        app.stories.live.stars.boxed().map(|b| (b.mode, b.stars))
     });
     assert_eq!(mode, Some((StarsBoxMode::Comment, 10)));
     app.update_in(vcx, |app, window, cx| app.submit_live_stars_box(window, cx));
@@ -260,7 +256,7 @@ fn the_stars_box_sets_the_next_comment_price(cx: &mut TestAppContext) {
         app.read_with(vcx, |app, _| app.stories.live.chosen_stars),
         10
     );
-    assert!(app.read_with(vcx, |app, _| app.stories.live.stars_box.is_none()));
+    assert!(app.read_with(vcx, |app, _| app.stories.live.stars.boxed().is_none()));
     // Remove Stars from the send button's menu.
     let send = find(vcx, "live-story-send").expect("the send button");
     vcx.simulate_mouse_down(send.center(), MouseButton::Right, Modifiers::default());
@@ -417,16 +413,56 @@ fn stars_past_the_balance_open_the_stars_top_up(cx: &mut TestAppContext) {
         assert!(app.connection.status_note().contains("Needed"));
     });
     // Back from the top-up, the box opens on the same amount.
-    let chosen = app.read_with(vcx, |app, _| {
-        app.stories.live.stars_before_top_up.map(|(_, stars)| stars)
+    let chosen = app.read_with(vcx, |app, _| match app.stories.live.stars {
+        StarsFlow::TopUp { stars, .. } => Some(stars),
+        _ => None,
     });
     assert!(chosen.is_some_and(|stars| stars > 3));
     app.update(vcx, |app, cx| {
         app.open_live_stars_box(StarsBoxMode::Reaction, 0, false, cx);
     });
     app.read_with(vcx, |app, _| {
-        assert_eq!(app.stories.live.stars_box.as_ref().map(|b| b.stars), chosen);
-        assert!(app.stories.live.stars_before_top_up.is_none());
+        assert_eq!(app.stories.live.stars.boxed().map(|b| b.stars), chosen);
+        assert!(!matches!(app.stories.live.stars, StarsFlow::TopUp { .. }));
+    });
+}
+
+/// A comment that waited for Stars is still waiting after the box sent the
+/// viewer to top up: the box reopened on the same amount sends it.
+#[gpui_kit::test]
+fn a_waiting_comment_survives_the_top_up(cx: &mut TestAppContext) {
+    let (app, mut vcx) = open_live(cx, "ready-live-story");
+    let vcx = &mut vcx;
+    app.update(vcx, |app, cx| {
+        if let Some(session) = app.demo_session.as_mut() {
+            session.payments.hub.balance =
+                Some(quill::premium_hub::StarAmount { stars: 3, nanos: 0 });
+        }
+        app.open_live_stars_box(StarsBoxMode::Comment, 20, true, cx);
+    });
+    frames(vcx);
+    app.update_in(vcx, |app, window, cx| app.submit_live_stars_box(window, cx));
+    frames(vcx);
+    app.read_with(vcx, |app, _| {
+        assert!(
+            matches!(
+                app.stories.live.stars,
+                StarsFlow::TopUp {
+                    then_send: true,
+                    ..
+                }
+            ),
+            "the top-up still carries the waiting comment"
+        );
+    });
+    app.update(vcx, |app, cx| {
+        app.open_live_stars_box(StarsBoxMode::Comment, 0, false, cx);
+    });
+    app.read_with(vcx, |app, _| {
+        assert!(
+            app.stories.live.stars.boxed().is_some_and(|b| b.then_send),
+            "the reopened box sends the comment that waited"
+        );
     });
 }
 

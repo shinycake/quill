@@ -12,6 +12,7 @@ use super::chat_theme::{accent, bg_canvas, border, danger, text_menu, text_muted
 use super::scroll_load::{load_due, loading_row, scrolled_near_end, watch_scroll};
 use super::statistics::format_stat_count;
 use super::statistics_graph::stat_graph_block;
+use super::stories_state::ViewerPanel;
 use crate::ui::status_note::StatusNote;
 use gpui_kit::component::button::*;
 use gpui_kit::component::*;
@@ -37,12 +38,8 @@ impl QuillApp {
             open.stats_open = !open.stats_open;
         }
         if self.stories.viewer_ui().stats_open {
-            if let Some(open) = self.stories.viewer_ui_mut() {
-                open.viewers_open = false;
-            }
-            if let Some(open) = self.stories.viewer_ui_mut() {
-                open.report_open = false;
-            }
+            self.stories
+                .with_viewer_ui(|open| open.close_other_panels(ViewerPanel::Stats));
             self.fetch_story_stats(&item.chat_id, item.story_id, cx);
         }
         cx.notify();
