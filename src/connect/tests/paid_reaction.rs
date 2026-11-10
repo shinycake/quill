@@ -132,7 +132,7 @@ fn undo_removes_the_pending_stars_and_nothing_commits() {
 }
 
 #[test]
-fn a_refused_commit_keeps_the_stars_and_the_next_tap_counts_them() {
+fn a_refused_commit_releases_the_stars_and_is_never_retried() {
     let (mut driver, recorder, sink, seq) = driver_parts();
     driver
         .add_paid_reaction(ChatId(-100), MessageId(7), 4, None, 0)
@@ -149,16 +149,21 @@ fn a_refused_commit_keeps_the_stars_and_the_next_tap_counts_them() {
         .to_string(),
     );
     let paid = &driver.session.payments.paid;
-    assert_eq!(paid.pending_stars(-100, 7), 4);
-    assert!(paid.toast().is_some());
-    driver
-        .add_paid_reaction(ChatId(-100), MessageId(7), 1, None, ACCUMULATE_MS + 10)
-        .unwrap();
-    assert_eq!(driver.session.payments.paid.pending_stars(-100, 7), 5);
+    assert_eq!(paid.pending_stars(-100, 7), 0);
+    assert_eq!(paid.total_pending(), 0);
+    assert!(paid.note.is_some());
+    // A permanent error (low balance) never loops: no window commits again.
+    for window in 2..6 {
+        driver.paid_reaction_tick(ACCUMULATE_MS * window);
+    }
+    assert_eq!(
+        sent_count(&recorder, "commitPendingPaidMessageReactions"),
+        1
+    );
 }
 
 #[test]
-fn a_refused_undo_leaves_the_stars_waiting() {
+fn a_refused_undo_releases_the_stars_and_does_not_commit() {
     let (mut driver, recorder, sink, seq) = driver_parts();
     driver
         .add_paid_reaction(ChatId(-100), MessageId(7), 2, None, 0)
@@ -177,7 +182,14 @@ fn a_refused_undo_leaves_the_stars_waiting() {
         })
         .to_string(),
     );
-    assert_eq!(driver.session.payments.paid.pending_stars(-100, 7), 2);
+    assert_eq!(driver.session.payments.paid.pending_stars(-100, 7), 0);
+    for window in 2..6 {
+        driver.paid_reaction_tick(ACCUMULATE_MS * window);
+    }
+    assert_eq!(
+        sent_count(&recorder, "commitPendingPaidMessageReactions"),
+        0
+    );
 }
 
 #[test]

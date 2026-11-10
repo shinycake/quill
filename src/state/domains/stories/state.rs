@@ -18,7 +18,9 @@ pub enum CloseFriendsList {
     },
     Ready(Vec<i64>),
     /// The load failed; `stale` is the last list, if any.
-    Failed { stale: Option<Vec<i64>> },
+    Failed {
+        stale: Option<Vec<i64>>,
+    },
 }
 
 impl CloseFriendsList {
