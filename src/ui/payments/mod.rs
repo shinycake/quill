@@ -16,7 +16,7 @@ use gpui_kit::component::*;
 use gpui_kit::*;
 use quill::ids::{ChatId, MessageId};
 use quill::lang::{keys, tr, tr_with};
-use quill::state::{LoginUrlRequest, Session};
+use quill::state::{LoginUrlRequest, OrderInfoStage, Session};
 use quill::telegram::envelope::{
     LoginUrlInfo, PaymentFormData, PaymentFormTypeData, StarSubscriptionData,
     StarSubscriptionPricing, StarSubscriptionTypeData, format_payment_price, price_parts_total,
@@ -76,6 +76,17 @@ impl QuillApp {
             .window_of_box(crate::ui::shell::DialogKind::PaymentForm);
         self.as_asked_by(asker, |this| this.open_link(&step.url, cx));
         if step.closes_checkout {
+            // The payment is in the provider's hands: the giveaway form
+            // has done its job, so Start cannot buy the giveaway again.
+            let for_this_form = step.giveaway_chat_id.is_some_and(|chat| {
+                self.giveaway
+                    .form
+                    .as_ref()
+                    .is_some_and(|form| form.draft.boosted_chat_id == chat)
+            });
+            if for_this_form {
+                self.close_giveaway_form(cx);
+            }
             self.close_payment_dialog(cx);
         }
     }
@@ -255,7 +266,7 @@ impl QuillApp {
                     })),
             );
         }
-        if let Some(validated) = &session.payments.validated
+        if let Some(validated) = session.payments.order_info.validated()
             && !validated.shipping_options.is_empty()
         {
             // Phase 6: kit RadioGroup (was: buttons with a ◉/○ prefix).
@@ -349,7 +360,7 @@ impl QuillApp {
         }
         let can_pay = {
             let terms_ok = invoice.terms_url.is_empty() || dialog.terms_accepted;
-            let order_ok = !needs_order || session.payments.validated.is_some();
+            let order_ok = !needs_order || session.payments.order_info.validated().is_some();
             let creds_ok = match &dialog.credential_choice {
                 PaymentCredentialChoice::Saved(_) => true,
                 PaymentCredentialChoice::NewCard => {
@@ -438,11 +449,6 @@ impl QuillApp {
             live.driver
                 .validate_payment_order_info(&request.invoice, &order, allow_save)
         });
-        if matches!(sent, Some(Ok(_)))
-            && let Some(dialog) = self.payments.dialog.as_mut()
-        {
-            dialog.validated_order = Some(order);
-        }
         if !matches!(sent, Some(Ok(_))) {
             self.set_note(StatusNote::error(tr(
                 keys::Q_MONEY_COULD_NOT_VALIDATE_ORDER_INFO,
@@ -460,13 +466,13 @@ impl QuillApp {
             (
                 session.payments.form.clone(),
                 session.payments.request.clone(),
-                session.payments.validated.clone(),
+                session.payments.order_info.clone(),
                 session.payments.shipping_id.clone(),
                 session.payments.form_paid,
             )
         });
         let dialog = self.payments.dialog.as_ref();
-        let (Some((Some(form), Some(request), validated, shipping_id, false)), Some(dialog)) =
+        let (Some((Some(form), Some(request), order_info, shipping_id, false)), Some(dialog)) =
             (snapshot, dialog)
         else {
             self.set_note(StatusNote::silent(tr(
@@ -486,8 +492,13 @@ impl QuillApp {
             || invoice.need_phone_number
             || invoice.need_email_address
             || invoice.need_shipping_address;
-        let edited = needs_order && dialog.validated_order.as_ref() != Some(&dialog.order(cx));
-        if needs_order && (validated.is_none() || edited) {
+        // Only the answer to the fields now typed counts: an edit after
+        // Continue (or a Continue still out) is validated again.
+        let validated = match &order_info {
+            OrderInfoStage::Validated { order, info } if *order == dialog.order(cx) => Some(info),
+            _ => None,
+        };
+        if needs_order && validated.is_none() {
             self.set_note(StatusNote::silent(tr(
                 keys::Q_MONEY_VALIDATE_THE_ORDER_INFO_FIRST,
             )));
@@ -503,7 +514,6 @@ impl QuillApp {
             (PaymentCredentialChoice::NewCard, None) => return,
         };
         let order_info_id = validated
-            .as_ref()
             .map(|validated| validated.order_info_id.as_str())
             .unwrap_or("");
         let shipping_option_id = shipping_id.as_deref().unwrap_or("");

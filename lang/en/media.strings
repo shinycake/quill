@@ -273,6 +273,7 @@
 "qll_media_could_not_install_sticker_set" = "Couldn't install sticker set";
 "qll_media_could_not_join_the_live" = "could not join the live story";
 "qll_media_could_not_load_animated_emoji" = "Couldn't load animated emoji suggestion";
+"qll_media_could_not_load_close_friends" = "Could not load close friends";
 "qll_media_could_not_load_emoji_packs" = "Couldn't load emoji packs";
 "qll_media_could_not_load_members" = "Couldn't load members";
 "qll_media_could_not_load_more_emoji" = "Couldn't load more emoji packs";

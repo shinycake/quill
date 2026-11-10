@@ -65,7 +65,23 @@ pub enum GiveawayLaunch {
         request: u64,
     },
     Launched,
+    /// A new giveaway for `chat_id` was paid for. Its form is done: Start
+    /// must not buy the same giveaway again.
+    Paid {
+        chat_id: i64,
+    },
     Failed(String),
+}
+
+impl GiveawayLaunch {
+    /// The giveaway of `chat_id` is created or paid for.
+    pub fn is_done_for(&self, chat_id: i64) -> bool {
+        match self {
+            Self::Launched => true,
+            Self::Paid { chat_id: paid } => *paid == chat_id,
+            _ => false,
+        }
+    }
 }
 
 impl GiveawayState {

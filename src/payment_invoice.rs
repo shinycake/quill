@@ -93,6 +93,17 @@ pub enum InputInvoice {
 impl InputInvoice {
     /// The invoice of a new Premium or Stars giveaway: once it is paid, the
     /// giveaway form it came from has done its job.
+    /// The chat a new giveaway invoice boosts.
+    pub fn giveaway_chat_id(&self) -> Option<i64> {
+        match self {
+            Self::Telegram(
+                TelegramPaymentPurpose::PremiumGiveaway { parameters, .. }
+                | TelegramPaymentPurpose::StarGiveaway { parameters, .. },
+            ) => parameters.get("boosted_chat_id").and_then(Value::as_i64),
+            _ => None,
+        }
+    }
+
     pub fn is_giveaway(&self) -> bool {
         matches!(
             self,

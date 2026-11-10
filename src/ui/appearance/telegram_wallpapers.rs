@@ -27,7 +27,7 @@ impl QuillApp {
     ) -> AnyElement {
         let dark = cx.theme().is_dark();
         let session = self.session();
-        let list = session.and_then(|s| s.chats_state.installed_backgrounds.clone());
+        let list = session.and_then(|s| s.chats_state.installed_backgrounds.data().cloned());
         let in_use = session
             .and_then(|s| s.chats_state.default_backgrounds.get(&dark))
             .map(|b| b.id)
@@ -195,7 +195,7 @@ impl QuillApp {
             }
             None => {
                 if let Some(session) = self.demo_session.as_mut()
-                    && let Some(list) = session.chats_state.installed_backgrounds.as_mut()
+                    && let Some(list) = session.chats_state.installed_backgrounds.data_mut()
                 {
                     list.retain(|b| b.id != background_id);
                 }
@@ -208,7 +208,7 @@ impl QuillApp {
     /// asked once more by the next `ensure_wallpapers_loaded`.
     pub(in crate::ui) fn retry_failed_wallpapers(&mut self) {
         if let Some(live) = self.live.as_mut() {
-            let fetch = &mut live.driver.session.chats_state.installed_backgrounds_fetch;
+            let fetch = &mut live.driver.session.chats_state.installed_backgrounds;
             if fetch.error().is_some() {
                 *fetch = quill::state::fetch::Fetch::Idle;
             }
@@ -224,7 +224,7 @@ impl QuillApp {
                 .driver
                 .session
                 .chats_state
-                .installed_backgrounds_fetch
+                .installed_backgrounds
                 .is_idle()
             {
                 let _ = live.driver.fetch_installed_backgrounds(dark);

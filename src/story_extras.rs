@@ -113,6 +113,8 @@ pub enum CloseFriendsStage {
     #[default]
     Closed,
     Loading,
+    /// `getCloseFriends` failed: the panel says so and offers a retry.
+    Failed,
     Editing(CloseFriendsEdit),
     Saving(CloseFriendsEdit),
 }
@@ -125,18 +127,25 @@ impl CloseFriendsStage {
     pub fn edit(&self) -> Option<&CloseFriendsEdit> {
         match self {
             Self::Editing(edit) | Self::Saving(edit) => Some(edit),
-            Self::Closed | Self::Loading => None,
+            Self::Closed | Self::Loading | Self::Failed => None,
         }
     }
 
     pub fn edit_mut(&mut self) -> Option<&mut CloseFriendsEdit> {
         match self {
             Self::Editing(edit) => Some(edit),
-            Self::Closed | Self::Loading | Self::Saving(_) => None,
+            Self::Closed | Self::Loading | Self::Failed | Self::Saving(_) => None,
         }
     }
 
     /// The list arrived: a loading editor starts from it.
+    /// The list's request failed: only a stage still waiting for it ends.
+    pub fn load_failed(&mut self) {
+        if matches!(self, Self::Loading) {
+            *self = Self::Failed;
+        }
+    }
+
     pub fn loaded(&mut self, list: &[i64]) {
         if matches!(self, Self::Loading) {
             *self = Self::Editing(CloseFriendsEdit::new(list));
@@ -258,6 +267,19 @@ mod tests {
         // A later answer never rebases an edit in progress.
         stage.loaded(&[]);
         assert_eq!(stage.edit().map(CloseFriendsEdit::count), Some(3));
+    }
+
+    #[test]
+    fn a_failed_list_request_ends_the_wait_and_only_the_wait() {
+        let mut stage = CloseFriendsStage::Loading;
+        stage.load_failed();
+        assert_eq!(stage, CloseFriendsStage::Failed);
+        assert!(stage.is_open(), "the panel stays to offer a retry");
+        assert!(stage.edit().is_none() && stage.edit_mut().is_none());
+        // An edit in progress is not thrown away by a late failure.
+        let mut editing = CloseFriendsStage::Editing(CloseFriendsEdit::new(&[1]));
+        editing.load_failed();
+        assert!(matches!(editing, CloseFriendsStage::Editing(_)));
     }
 
     #[test]

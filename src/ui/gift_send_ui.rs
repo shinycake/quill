@@ -65,6 +65,7 @@ impl QuillApp {
         });
         if matches!(opened, Some(Ok(()))) {
             self.reset_send_gift_inputs(window, cx);
+            self.open_box(DialogKind::SendGift);
         } else {
             self.set_note(StatusNote::silent(tr(keys::Q_MONEY_OPEN_A_CHAT_WITH_A)));
         }
@@ -95,6 +96,7 @@ impl QuillApp {
         };
         if opened {
             self.reset_send_gift_inputs(window, cx);
+            self.open_box(DialogKind::SendGift);
         } else {
             self.set_note(StatusNote::error(tr(keys::Q_MONEY_COULDNT_OPEN_THE_GIFTS)));
         }

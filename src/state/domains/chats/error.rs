@@ -33,10 +33,9 @@ impl Session {
                 }
             }
             Some(RequestPurpose::GetInstalledBackgrounds) => {
-                self.chats_state.installed_backgrounds_fetch = crate::state::fetch::Fetch::Failed {
-                    error: error_reason(err),
-                    stale: None,
-                };
+                self.chats_state
+                    .installed_backgrounds
+                    .fail(error_reason(err));
                 self.chats_state.background_error = Some(error_reason(err));
             }
             Some(

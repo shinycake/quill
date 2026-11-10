@@ -8,6 +8,7 @@ use crate::ids::ChatId;
 use crate::marketplace::GiftPrice;
 use crate::platform::MemorySecretStore;
 use crate::telegram::client::copy_and_parse;
+use crate::telegram::envelope::MessageSender;
 use serde_json::{Value, json};
 use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
@@ -271,11 +272,27 @@ fn auction_link_follow_and_bids() {
     // Below the minimum bid nothing is sent.
     assert!(
         f.driver
-            .bid_gift_auction(800, 50, FRIEND_CHAT.0, "", false)
+            .bid_gift_auction(
+                800,
+                50,
+                MessageSender::User {
+                    user_id: FRIEND_CHAT.0
+                },
+                "",
+                false
+            )
             .is_err()
     );
     f.driver
-        .bid_gift_auction(800, 600, FRIEND_CHAT.0, "for you", false)
+        .bid_gift_auction(
+            800,
+            600,
+            MessageSender::User {
+                user_id: FRIEND_CHAT.0,
+            },
+            "for you",
+            false,
+        )
         .unwrap();
     let place = f.last("placeGiftAuctionBid");
     assert_eq!(place["gift_id"], "800");
@@ -285,7 +302,15 @@ fn auction_link_follow_and_bids() {
     // One bid at a time.
     assert!(
         f.driver
-            .bid_gift_auction(800, 700, FRIEND_CHAT.0, "", false)
+            .bid_gift_auction(
+                800,
+                700,
+                MessageSender::User {
+                    user_id: FRIEND_CHAT.0
+                },
+                "",
+                false
+            )
             .is_err()
     );
     f.answer("placeGiftAuctionBid", json!({"@type": "ok"}));
@@ -304,7 +329,15 @@ fn auction_link_follow_and_bids() {
         600
     );
     f.driver
-        .bid_gift_auction(800, 900, FRIEND_CHAT.0, "", false)
+        .bid_gift_auction(
+            800,
+            900,
+            MessageSender::User {
+                user_id: FRIEND_CHAT.0,
+            },
+            "",
+            false,
+        )
         .unwrap();
     let raise = f.last("increaseGiftAuctionBid");
     assert_eq!(
@@ -319,7 +352,15 @@ fn auction_link_follow_and_bids() {
     assert!(f.driver.session.payments.gift_market.bidding.is_none());
     // A bid for someone else is a new bid, not a raise of the friend's.
     f.driver
-        .bid_gift_auction(800, 900, FRIEND_CHAT.0 + 1, "", false)
+        .bid_gift_auction(
+            800,
+            900,
+            MessageSender::User {
+                user_id: FRIEND_CHAT.0 + 1,
+            },
+            "",
+            false,
+        )
         .unwrap();
     let other = f.last("placeGiftAuctionBid");
     assert_eq!(other["user_id"], FRIEND_CHAT.0 + 1);
@@ -489,4 +530,63 @@ fn a_failed_upgrade_preview_is_not_asked_again() {
     );
     assert!(f.driver.fetch_gift_upgrade_preview(801).is_err());
     assert!(f.driver.fetch_gift_upgrade_preview(802).is_ok());
+}
+
+/// Opening a resale list while a buy's `sendResoldGift` is out keeps that
+/// buy: its answer still lands in it.
+#[test]
+fn opening_the_resale_list_keeps_a_buy_that_is_out() {
+    let mut f = Fixture::new();
+    f.driver.open_gift_resale(500, "Plush Pepe").unwrap();
+    f.answer("searchGiftsForResale", resale_page(&[1, 2]));
+    f.driver
+        .start_gift_resale_buy(
+            "PlushPepe-1",
+            f.driver.session.gift_recipient(FRIEND_CHAT),
+            false,
+        )
+        .unwrap();
+    f.driver
+        .buy_gift_resale(GiftPrice::Stars(1500), "", false)
+        .unwrap();
+    f.driver.open_gift_resale(500, "Plush Pepe").unwrap();
+    let buy = f.driver.session.payments.gift_market.buy.clone();
+    assert!(buy.is_some_and(|buy| buy.sending), "the buy is still out");
+    f.answer(
+        "sendResoldGift",
+        json!({"@type": "giftResaleResultOk", "received_gift_id": "rx"}),
+    );
+    assert!(f.driver.session.payments.gift_market.buy.is_none());
+    assert_eq!(
+        f.driver.session.take_gift_market_toasts().len(),
+        1,
+        "its answer landed"
+    );
+}
+
+/// A bid owned by a channel can be raised (`increaseGiftAuctionBid` needs
+/// no owner); a new bid still needs a user to receive the gift.
+#[test]
+fn a_channel_owned_bid_can_be_raised_but_a_channel_cannot_get_a_new_one() {
+    let mut f = Fixture::new();
+    let channel = MessageSender::Chat { chat_id: -100_200 };
+    f.driver.fetch_gift_auction("pepe").unwrap();
+    f.answer("getGiftAuctionState", auction_state(Value::Null));
+    assert!(
+        f.driver
+            .bid_gift_auction(800, 600, channel, "", false)
+            .is_err(),
+        "a first bid goes to a user"
+    );
+    assert!(f.sent("placeGiftAuctionBid").is_empty());
+    f.ingest(
+        &json!({"@type": "updateGiftAuctionState", "state": auction_state(json!({
+            "star_count": 600, "bid_date": 2, "next_bid_star_count": 601,
+            "owner_id": {"@type": "messageSenderChat", "chat_id": -100_200}, "was_returned": false}))})
+        .to_string(),
+    );
+    f.driver
+        .bid_gift_auction(800, 900, channel, "", false)
+        .unwrap();
+    assert_eq!(f.last("increaseGiftAuctionBid")["star_count"], 900);
 }

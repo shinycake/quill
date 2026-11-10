@@ -373,7 +373,10 @@ fn read_zip(zip: &[u8]) -> Option<Vec<(String, Vec<u8>)>> {
         let start = offset + 30 + local_name + local_extra;
         let raw = zip.get(start..start.checked_add(compressed)?)?;
         let data = match method {
-            0 => raw.to_vec(),
+            // A stored entry holds exactly its declared size, the number the
+            // running total counts; any other length is a forged header.
+            0 if compressed == size => raw.to_vec(),
+            0 => return None,
             8 => {
                 let mut inflated = Vec::with_capacity(size);
                 flate2::read::DeflateDecoder::new(raw)

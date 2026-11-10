@@ -156,18 +156,25 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some((chat_id, input)) = self
-            .admin
-            .ownership_dialog
-            .as_ref()
-            .map(|d| (d.chat_id, d.password_input.clone()))
-        else {
+        let Some((chat_id, input, leave_after)) = self.admin.ownership_dialog.as_ref().map(|d| {
+            (
+                d.chat_id,
+                d.password_input.clone(),
+                matches!(
+                    d.stage,
+                    OwnershipStage::Confirm {
+                        leave_after: true,
+                        ..
+                    }
+                ),
+            )
+        }) else {
             return;
         };
         let password = input.read(cx).value().to_string();
         let sent = self.live.as_mut().map(|live| {
             live.driver
-                .transfer_chat_ownership(chat_id, user_id, &password)
+                .transfer_chat_ownership(chat_id, user_id, &password, leave_after)
         });
         input.update(cx, |input, cx| input.set_value("", window, cx));
         drop(password);
@@ -209,14 +216,7 @@ impl QuillApp {
             .ownership_dialog
             .as_ref()
             .is_some_and(|d| d.chat_id.0 == done.chat_id);
-        let leave_after = for_this_dialog
-            && matches!(
-                self.admin.ownership_dialog.as_ref().map(|d| d.stage),
-                Some(OwnershipStage::Confirm {
-                    leave_after: true,
-                    ..
-                })
-            );
+        let leave_after = done.leave_after;
         let name = self.contact_display_name(done.user_id);
         let is_channel = self.group_flavor(ChatId(done.chat_id)) == Some(GroupFlavor::Channel);
         self.set_note(StatusNote::silent(tr_with(

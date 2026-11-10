@@ -553,13 +553,17 @@ impl QuillApp {
             .viewer_story_page_op()
             .is_some_and(|op| matches!(op.state, quill::story_page::StoryPageOpState::Failed(_)));
         let Some(loaded) = loaded else {
+            // No list yet: a failed request ends the wait with a retry.
+            if failed && let Some(open) = self.stories.viewer_ui_mut() {
+                open.close_friends.load_failed();
+            }
             return;
         };
         let Some(open) = self.stories.viewer_ui_mut() else {
             return;
         };
         match &mut open.close_friends {
-            CloseFriendsStage::Closed => {}
+            CloseFriendsStage::Closed | CloseFriendsStage::Failed => {}
             CloseFriendsStage::Loading => open.close_friends.loaded(&loaded),
             CloseFriendsStage::Saving(edit) => {
                 if CloseFriendsEdit::new(&loaded).ids() == edit.ids() {
@@ -696,10 +700,44 @@ impl QuillApp {
     fn close_friends_panel(&self, cx: &mut Context<Self>) -> AnyElement {
         let stage = &self.stories.viewer_ui().close_friends;
         let Some(edit) = stage.edit() else {
+            let failed = matches!(stage, CloseFriendsStage::Failed);
+            let mut buttons = div().flex().gap_2();
+            if failed {
+                buttons = buttons.child(
+                    Button::new("story-close-friends-retry")
+                        .label(tr(keys::Q_PEOPLE_RETRY))
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            this.open_close_friends_editor(window, cx);
+                        })),
+                );
+            }
             return div()
-                .text_sm()
-                .text_color(chrome::secondary())
-                .child(tr(keys::Q_MEDIA_LOADING))
+                .flex()
+                .flex_col()
+                .gap_1()
+                .child(
+                    div()
+                        .text_sm()
+                        .text_color(chrome::secondary())
+                        .child(if failed {
+                            tr(keys::Q_MEDIA_COULD_NOT_LOAD_CLOSE_FRIENDS)
+                        } else {
+                            tr(keys::Q_MEDIA_LOADING)
+                        }),
+                )
+                .child(
+                    buttons.child(
+                        Button::new("story-close-friends-load-cancel")
+                            .label(tr(keys::CANCEL))
+                            .custom(chrome::ghost(cx))
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.stories.with_viewer_ui(|open| {
+                                    open.close_friends = CloseFriendsStage::Closed
+                                });
+                                this.refresh_story_pause(cx);
+                            })),
+                    ),
+                )
                 .into_any_element();
         };
         let query = self.stories.more_search.read(cx).value().to_string();

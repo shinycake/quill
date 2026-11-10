@@ -33,9 +33,6 @@ pub struct PaymentDialog {
     pub(crate) password_prompt: bool,
     pub(crate) terms_accepted: bool,
     pub(crate) allow_save_order: bool,
-    /// The order the last Continue validated: Pay refuses once the fields
-    /// no longer match it, so an edit after Continue is validated again.
-    pub(crate) validated_order: Option<quill::telegram::envelope::OrderInfoData>,
     /// Slice P1 fix-up: the dialog opens on Buy press before the form
     /// arrives — the saved order info prefills once, when the form lands.
     pub(crate) prefilled: bool,
@@ -82,7 +79,6 @@ impl PaymentDialog {
             password_prompt: false,
             terms_accepted: false,
             allow_save_order: true,
-            validated_order: None,
             prefilled: false,
             // ponytail: no `validated` flag — the session's
             // `payment_validated: Option<ValidatedOrderInfoData>` is the

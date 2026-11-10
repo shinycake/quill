@@ -4019,7 +4019,7 @@ re-read at its spot first.
   - 02-082 / 13-045: `PhoneLookups { Idle, Asked }` on the sign-in screen;
     the lookups are asked on arrival, never again from `sync_signin` after
     an empty or failed answer.
-  - 13-064: `installed_backgrounds_fetch: Fetch<()>`; a render asks only
+  - 13-064: see the third pass; a render asks only
     from `Idle`, Appearance and the look box reopen a failed one.
   - 09-X061: `gift_market.failed_previews`; a failed preview is not asked
     again by the auction info box's render.
@@ -4066,9 +4066,44 @@ re-read at its spot first.
     chord with the push-to-talk key would cut the microphone).
   - passcode `enable`: when a put-back fails, the accounts after the stuck
     one still leave the OS store (the passcode is on).
-- **Skipped.** 02-062 (a reopened dialog already drops the earlier send's
-  answer by request id; a test pins it), 02-160 (the Star reaction box is
-  already on `OnScreen`, so per account).
+- **Fixed, third pass** (a reviewer re-read the branch; these supersede the
+  earlier lines for the same ids).
+  - 11-p7-001: `OrderInfoStage { Unvalidated, Validating{request, order},
+    Validated{order, info} }` in the session replaces `validated`,
+    `validate_request` and the dialog's `validated_order`. Continue moves
+    it to `Validating` and drops the shipping choice, so Pay has no order
+    id until the answer to that same request arrives; the answer promotes
+    the order that was sent. An error, a new form and a closed checkout
+    leave it `Unvalidated`. Pay compares the typed fields with the
+    validated order.
+  - 01-044: a stored (method 0) entry must hold exactly its declared size,
+    the number the running total counts.
+  - 10-001: a paid giveaway invoice moves the form to
+    `GiveawayLaunch::Paid { chat_id }` when its payment succeeds, whether
+    or not its checkout is still open; the 3-D Secure step names the chat
+    (`PaymentVerification::giveaway_chat_id`) and closes that form with the
+    checkout. Start is refused, and shows its spinner, while that giveaway's
+    `sendPaymentForm` is out or after it was paid.
+  - 09-X012: `dialogs_window_closed` frees an `AccountNotice` like a box
+    with no close of its own (it shows in the last-press window) instead of
+    handing it to the main window's close.
+  - 03-059: `open_gift_resale` keeps a buy whose `sendResoldGift` is out.
+  - 02-062 (fixed now, not skipped): `open_send_gift_to` keeps the stage of
+    a `sendGift` in flight. The same recipient reopens on that send (Send
+    stays off, its answer shows); another recipient waits for the answer.
+  - 11-p6-003: `OwnershipTransfer::leave_after` rides with the transfer
+    that was sent; the answer reads it, not whichever dialog is open.
+  - 13-140: `CloseFriendsStage::Failed`; Loading and Failed both show Cancel,
+    Failed adds Retry.
+  - 09-X061: `failed_previews` is cleared when the market box closes, so
+    the next open asks again.
+  - 13-064: one `installed_backgrounds: Fetch<Vec<Background>>` replaces the
+    list and its `Fetch<()>`.
+  - 09-122: `bid_gift_auction` takes the recipient; a raise
+    (`increaseGiftAuctionBid`) keeps the bid's owner and needs no user, so
+    a channel-owned bid can be raised. A new bid still goes to a user only.
+- **Skipped.** 02-160 (the Star reaction box is already on `OnScreen`, so
+  per account).
 - **Tests.** `enable_failing_midway_keeps_every_database_key`,
   `enable_with_an_unrestorable_key_still_clears_the_accounts_after_it`,
   `a_refused_commit_returns_the_stars_to_waiting_and_adds_up_with_a_new_tap`,
@@ -4083,6 +4118,18 @@ re-read at its spot first.
   in `a_transfer_goes_only_to_the_contact_the_confirmation_names`,
   `closing_the_boxes_during_the_forge_keeps_the_outcome`,
   `an_unreadable_registry_is_not_overwritten`, `hidden_chats_toggle`. No
-  test for 02-083, 03-059, 10-001, 11-p7-001, 11-p6-003, 12-086,
-  01-051, 09-X012, 09-122, 13-064 (they need a fixture the offline harness
-  lacks).
+  test for 02-083, 12-086, 01-051 (they need a fixture the offline
+  harness lacks). Third pass:
+  `an_earlier_order_id_never_outlives_a_new_continue`,
+  `a_rejected_continue_leaves_the_order_unvalidated`,
+  `a_stored_entry_larger_than_its_declared_size_is_refused`,
+  `a_paid_giveaway_finishes_its_form_even_with_the_checkout_closed`,
+  `a_giveaway_verification_step_names_its_chat`,
+  `an_account_notice_is_freed_by_its_windows_close_not_dismissed`,
+  `opening_the_resale_list_keeps_a_buy_that_is_out`,
+  `reopening_the_send_dialog_keeps_the_send_that_is_out`,
+  `leave_after_travels_with_the_transfer`,
+  `a_failed_list_request_ends_the_wait_and_only_the_wait`,
+  `a_channel_owned_bid_can_be_raised_but_a_channel_cannot_get_a_new_one`.
+  No test for 09-X061 and 13-064 (the render-side clear and a type
+  change; the existing background and preview tests cover the reducers).

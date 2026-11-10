@@ -41,8 +41,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session.requests.take(extra);
             return Err(err);
         }
-        self.session.chats_state.installed_backgrounds_fetch =
-            crate::state::fetch::Fetch::Loading { stale: None };
+        self.session.chats_state.installed_backgrounds.begin();
         Ok(Some(extra))
     }
 
@@ -118,7 +117,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session.requests.take(extra);
             return Err(err);
         }
-        if let Some(list) = self.session.chats_state.installed_backgrounds.as_mut() {
+        if let Some(list) = self.session.chats_state.installed_backgrounds.data_mut() {
             list.retain(|b| b.id != background_id);
         }
         Ok(extra)
@@ -306,7 +305,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     pub fn download_background_files(&mut self) {
         let chats = &self.session.chats_state;
         let wanted = gallery_files(
-            chats.installed_backgrounds.iter().flatten(),
+            chats.installed_backgrounds.data().into_iter().flatten(),
             chats.default_backgrounds.values(),
         );
         self.fetch_background_files(wanted.into_iter().cloned().collect());

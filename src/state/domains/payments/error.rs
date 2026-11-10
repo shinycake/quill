@@ -26,8 +26,13 @@ impl Session {
                 }
             }
             Some(RequestPurpose::ValidateOrderInfo) => {
-                if extra.is_some() && self.payments.validate_request == extra {
-                    self.payments.validate_request = None;
+                if extra.is_some()
+                    && matches!(
+                        &self.payments.order_info,
+                        OrderInfoStage::Validating { request, .. } if Some(*request) == extra
+                    )
+                {
+                    self.payments.order_info = OrderInfoStage::Unvalidated;
                     self.payments.form_loading = false;
                     self.payments.note = Some(format!("Payment failed: {}", error_reason(err)));
                 }

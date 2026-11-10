@@ -284,6 +284,13 @@ impl ChatWindows {
             .collect();
         for (kind, owner) in mine {
             self.dialogs.hosts.remove(&kind);
+            // The account notices are a queue about the account, not about
+            // the window: they are freed like a box with no close of its own
+            // (the next window to show one takes it) and never closed
+            // unseen by the main window's sync.
+            if kind == DialogKind::AccountNotice {
+                continue;
+            }
             if matches!(owner, Host::Shown(_)) && !self.dialogs.left.contains(&kind) {
                 self.dialogs.left.push(kind);
             }

@@ -42,8 +42,7 @@ impl Session {
                     self.payments.form = Some(form);
                     self.payments.form_loading = false;
                     self.payments.form_paid = false;
-                    self.payments.validated = None;
-                    self.payments.validate_request = None;
+                    self.payments.order_info = OrderInfoStage::Unvalidated;
                     self.payments.shipping_id = None;
                     self.payments.note = None;
                 }
@@ -55,12 +54,16 @@ impl Session {
                 // is not this one's.
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::ValidateOrderInfo)
                     && extra.is_some()
-                    && self.payments.validate_request == extra
+                    && let OrderInfoStage::Validating { request, order } = &self.payments.order_info
+                    && Some(*request) == extra
                 {
-                    self.payments.validate_request = None;
+                    let order = order.clone();
                     self.payments.shipping_id =
                         validated.shipping_options.first().map(|o| o.id.clone());
-                    self.payments.validated = Some(validated);
+                    self.payments.order_info = OrderInfoStage::Validated {
+                        order,
+                        info: validated,
+                    };
                     self.payments.note = None;
                 }
             }
@@ -77,6 +80,9 @@ impl Session {
                     }
                     if result.success {
                         self.note_paid_media_unlocked(&paid);
+                        if let Some(chat_id) = paid.invoice.giveaway_chat_id() {
+                            self.payments.giveaway.launch = GiveawayLaunch::Paid { chat_id };
+                        }
                         if shown {
                             self.payments.form_paid = true;
                             self.payments.note = Some("✅ Payment successful".to_string());
@@ -89,6 +95,7 @@ impl Session {
                         self.payments.verification_url = Some(PaymentVerification {
                             url: result.verification_url,
                             closes_checkout: shown,
+                            giveaway_chat_id: paid.invoice.giveaway_chat_id(),
                         });
                         if shown {
                             self.payments.verification_started = true;

@@ -34,12 +34,10 @@ impl BackgroundSearch {
 }
 
 pub struct ChatsState {
-    /// `getInstalledBackgrounds` answer for the current theme; `None` until
-    /// fetched.
-    pub installed_backgrounds: Option<Vec<Background>>,
-    /// Where that request is: a render asks only from `Idle`, so a failed
-    /// answer is not asked again until Appearance or the look box reopens.
-    pub installed_backgrounds_fetch: crate::state::fetch::Fetch<()>,
+    /// `getInstalledBackgrounds` for the current theme and its answer, in
+    /// one value: a render asks only from `Idle`, so a failed answer is not
+    /// asked again until Appearance or the look box reopens.
+    pub installed_backgrounds: crate::state::fetch::Fetch<Vec<Background>>,
     /// The account's default wallpaper per theme (`false` light, `true`
     /// dark), from `updateDefaultBackground` and `setDefaultBackground`.
     pub default_backgrounds: HashMap<bool, Background>,
@@ -135,8 +133,7 @@ pub struct ChatsState {
 impl ChatsState {
     pub(crate) fn new() -> Self {
         Self {
-            installed_backgrounds: None,
-            installed_backgrounds_fetch: crate::state::fetch::Fetch::Idle,
+            installed_backgrounds: crate::state::fetch::Fetch::Idle,
             default_backgrounds: HashMap::new(),
             background_set_for_dark: false,
             chat_backgrounds: HashMap::new(),

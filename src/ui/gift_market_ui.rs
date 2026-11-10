@@ -152,8 +152,17 @@ impl QuillApp {
             self.gift_market.pending_auction = false;
             // "Hide My Name" is one bid's choice, never the next auction's.
             self.gift_market.hide_name = false;
+            self.forget_failed_previews();
         }
         self.after_craft_pop();
+    }
+
+    /// The market box closed: a gift whose variants failed to load is asked
+    /// again when a box opens next, never from a render.
+    pub(super) fn forget_failed_previews(&mut self) {
+        if let Some(market) = self.gift_market_mut() {
+            market.failed_previews.clear();
+        }
     }
 
     /// Who an auction bid goes to: the chosen recipient, or the user.
