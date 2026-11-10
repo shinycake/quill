@@ -106,25 +106,32 @@ impl Session {
                 packs.loading = false;
                 packs.error = Some(format!("Couldn't load Star packs: {}", error_reason(err)));
             }
-            Some(RequestPurpose::Payments(PaymentsPurpose::AddPendingPaidReaction {
-                message_id,
-                stars,
-            })) => {
-                if let Some(chat) = pending.and_then(|p| p.chat_id) {
-                    self.payments.paid.rollback(chat.0, message_id, stars);
+            Some(RequestPurpose::Payments(PaymentsPurpose::AddPendingPaidReaction { .. })) => {
+                if let Some(id) = extra {
+                    self.payments.paid.rollback(id);
                 }
-                self.payments.paid.note =
-                    Some(format!("Couldn't send Stars: {}", error_reason(err)));
+                self.payments.notify(
+                    NoticeKind::Error,
+                    format!("Couldn't send Stars: {}", error_reason(err)),
+                );
             }
             Some(RequestPurpose::Payments(PaymentsPurpose::CommitPaidReaction { .. })) => {
-                self.payments.paid.note =
-                    Some(format!("Stars were not sent: {}", error_reason(err)));
+                // TDLib refused the commit: the entry is done, and the
+                // user is told (the toast is gone with it).
+                if extra.is_some_and(|id| self.payments.paid.commit_settled(id)) {
+                    self.payments.notify(
+                        NoticeKind::Error,
+                        format!("Stars were not sent: {}", error_reason(err)),
+                    );
+                }
             }
             Some(RequestPurpose::Payments(PaymentsPurpose::RemovePendingPaidReaction {
                 ..
             })) => {
-                self.payments.paid.note =
-                    Some(format!("Couldn't undo the Stars: {}", error_reason(err)));
+                self.payments.notify(
+                    NoticeKind::Error,
+                    format!("Couldn't undo the Stars: {}", error_reason(err)),
+                );
             }
             Some(RequestPurpose::GetGiftTextLimit) => {
                 self.payments.gift_text_length_max = None;
@@ -142,9 +149,15 @@ impl Session {
                 self.users_state.wearable_gifts_loaded = true;
             }
             Some(RequestPurpose::Payments(PaymentsPurpose::GetReceivedGifts { .. })) => {
-                self.payments.hub.gifts_loading = false;
-                self.payments.hub.gifts_error =
-                    Some(format!("Couldn't load gifts: {}", error_reason(err)));
+                // Only the newest page's error counts (an older page's is
+                // not the list on screen's).
+                if pending.is_some_and(|p| p.id.0 == self.payments.hub.gifts_request) {
+                    self.payments.hub.gifts_loading = false;
+                    // A failed refetch is not asked again every frame.
+                    self.payments.hub.gifts_stale = false;
+                    self.payments.hub.gifts_error =
+                        Some(format!("Couldn't load gifts: {}", error_reason(err)));
+                }
             }
             Some(
                 RequestPurpose::Payments(PaymentsPurpose::ToggleGiftSaved { .. })

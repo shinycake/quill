@@ -71,6 +71,8 @@ fn a_tap_is_held_then_committed_after_the_window() {
     let commit = sent_request(&recorder, "commitPendingPaidMessageReactions");
     assert_eq!(commit["message_id"], 7);
     assert!(!driver.session.payments.paid.has_pending());
+    // The Stars stay reserved until TDLib answers the commit.
+    assert_eq!(driver.session.payments.paid.total_pending(), 1);
     // Only once.
     assert!(!driver.paid_reaction_tick(u64::MAX));
 }
@@ -168,10 +170,9 @@ fn a_refused_tap_is_rolled_back() {
         driver
             .session
             .payments
-            .paid
-            .note
-            .as_deref()
-            .is_some_and(|note| note.contains("Couldn't send Stars"))
+            .notices
+            .iter()
+            .any(|notice| notice.text.contains("Couldn't send Stars"))
     );
 }
 

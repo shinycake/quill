@@ -22,8 +22,6 @@ Backdrops::loading
 BackendStatus::failed
 BankCardLookup::loading
 BarFacts::bot_start_pending
-BoostsListState::loading
-BoostsListState::loading+error
 BotCreateDialog::submitted
 BotEditTexts::load_failed
 BotEditTexts::load_failed+error

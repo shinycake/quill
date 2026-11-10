@@ -88,7 +88,11 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.session.payments.hub.tx_request = extra.0;
         let json = get_star_transactions(extra, my_user_id, filter, &offset, TX_PAGE);
         if let Err(err) = self.send_json_request(extra, &json) {
-            self.session.payments.hub.tx_loading = false;
+            // A first page that never left ends in the error line, not in an
+            // empty list with nothing drawn.
+            let hub = &mut self.session.payments.hub;
+            hub.tx_loading = false;
+            hub.tx_error = Some("Couldn't load the Stars history".into());
             return Err(err);
         }
         Ok(extra)
@@ -113,7 +117,8 @@ impl<S: JsonSender> ConnectDriver<S> {
         hub.gifts_error = None;
         hub.gift_selected = None;
         hub.gift_convert_confirm = None;
-        hub.gift_mutating = false;
+        // `gift_mutating` is not reset: a toggle or sale still out keeps its
+        // lock until its own answer (another request would pay twice).
         hub.gifts_stale = false;
         self.begin_gift_manage(owner);
         self.fetch_received_gifts_page(false)
@@ -156,7 +161,9 @@ impl<S: JsonSender> ConnectDriver<S> {
         let collection = self.session.payments.gifts_manage.active_collection;
         let json = get_received_gifts_in(extra, owner, collection, &offset, GIFT_PAGE);
         if let Err(err) = self.send_json_request(extra, &json) {
-            self.session.payments.hub.gifts_loading = false;
+            let hub = &mut self.session.payments.hub;
+            hub.gifts_loading = false;
+            hub.gifts_error = Some("Couldn't load gifts".into());
             return Err(err);
         }
         Ok(extra)
@@ -167,12 +174,18 @@ impl<S: JsonSender> ConnectDriver<S> {
     pub fn refresh_received_gifts_if_stale(
         &mut self,
     ) -> Result<Option<RequestId>, ConnectSendError> {
-        if !self.session.payments.hub.gifts_stale || self.session.payments.hub.gifts_owner.is_none()
-        {
+        let hub = &self.session.payments.hub;
+        // A page already out settles first (its answer is not the refetch);
+        // the list stays stale until a first page answers or fails.
+        if !hub.gifts_stale || hub.gifts_owner.is_none() || hub.gifts_loading {
             return Ok(None);
         }
-        self.session.payments.hub.gifts_stale = false;
-        self.fetch_received_gifts_page(false).map(Some)
+        let sent = self.fetch_received_gifts_page(false);
+        if sent.is_err() {
+            // Not asked again every frame: the error line says so.
+            self.session.payments.hub.gifts_stale = false;
+        }
+        sent.map(Some)
     }
 
     /// `toggleGiftIsSaved` — own gifts only. One mutation at a time.

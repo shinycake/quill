@@ -99,6 +99,18 @@ impl Session {
         }
     }
 
+    /// TDLib answered a Star reaction's commit: the reaction is done.
+    pub(crate) fn apply_paid_reaction_ok(&mut self, pending: Option<&PendingRequest>) {
+        if let Some(pending) = pending
+            && matches!(
+                pending.purpose,
+                RequestPurpose::Payments(PaymentsPurpose::CommitPaidReaction { .. })
+            )
+        {
+            self.payments.paid.commit_settled(pending.id);
+        }
+    }
+
     /// An `ok` for one of the gift management requests.
     pub(crate) fn apply_gift_manage_ok(&mut self, pending: Option<&PendingRequest>) {
         let Some(RequestPurpose::Payments(purpose)) = pending.map(|p| p.purpose) else {

@@ -4,7 +4,7 @@
 use super::*;
 use crate::ids::{ChatId, MessageId, RequestId};
 use crate::paid_reaction::PaidSender;
-use crate::state::{PaymentsPurpose, RequestPurpose};
+use crate::state::{NoticeKind, PaymentsPurpose, RequestPurpose};
 use crate::telegram::requests::{
     add_pending_paid_message_reaction, commit_pending_paid_message_reactions,
     get_chat_available_paid_message_reaction_senders, get_star_payment_options,
@@ -45,7 +45,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.session
             .payments
             .paid
-            .add(chat_id.0, message_id.0, stars, sender, now_ms);
+            .add(chat_id.0, message_id.0, stars, sender, now_ms, Some(extra));
         Ok(())
     }
 
@@ -69,22 +69,33 @@ impl<S: JsonSender> ConnectDriver<S> {
     }
 
     /// Commits every Star reaction whose Undo window is over. Returns
-    /// whether anything was sent (the toast needs a redraw).
+    /// whether anything was due (the toast needs a redraw). A reaction stays
+    /// until TDLib answers its commit; one whose commit cannot be sent
+    /// starts its Undo window again, and the user is told once.
     pub fn paid_reaction_tick(&mut self, now_ms: u64) -> bool {
-        let due = self.session.payments.paid.take_due(now_ms);
+        let due = self.session.payments.paid.due(now_ms);
         let any = !due.is_empty();
-        for pending in due {
-            let chat_id = ChatId(pending.chat_id);
-            let message_id = MessageId(pending.message_id);
+        for (chat, message) in due {
+            let (chat_id, message_id) = (ChatId(chat), MessageId(message));
             let extra = self.session.request(
                 RequestPurpose::Payments(PaymentsPurpose::CommitPaidReaction {
-                    message_id: pending.message_id,
+                    message_id: message,
                 }),
                 Some(chat_id),
             );
             let json = commit_pending_paid_message_reactions(extra, chat_id, message_id);
-            if self.send_json_request(extra, &json).is_err() {
-                self.session.payments.paid.note = Some("Stars were not sent".to_string());
+            if self.send_json_request(extra, &json).is_ok() {
+                self.session.payments.paid.committing(chat, message, extra);
+            } else if self
+                .session
+                .payments
+                .paid
+                .commit_unsent(chat, message, now_ms)
+            {
+                self.session.payments.notify(
+                    NoticeKind::Error,
+                    "Stars were not sent. Trying again; Undo takes them back.",
+                );
             }
         }
         any

@@ -391,7 +391,7 @@ fn boosts_page_with_the_server_offset_and_switch_tabs() {
             .chat_boost_lists
             .get(&13)
             .unwrap()
-            .loading
+            .loading()
     );
 }
 
