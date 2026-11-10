@@ -435,7 +435,12 @@ mod tests {
     }
 
     impl ExternalFrameSender for Refusing {
-        fn send(&self, _: ExternalDevice, _: &[u8], _: ExternalFrameMeta) -> Result<(), EngineError> {
+        fn send(
+            &self,
+            _: ExternalDevice,
+            _: &[u8],
+            _: ExternalFrameMeta,
+        ) -> Result<(), EngineError> {
             if self.seen.fetch_add(1, Ordering::Relaxed) + 1 >= self.limit {
                 self.stop.store(true, Ordering::Release);
             }
@@ -462,7 +467,10 @@ mod tests {
         run(&sink, &sender, &stop, &AtomicBool::new(true), &stats);
         let events = sink.take_events();
         assert_eq!(events.len(), 1, "one event for the whole run");
-        assert!(matches!(&events[0], CaptureEvent::Failed(CaptureError::Device(_))));
+        assert!(matches!(
+            &events[0],
+            CaptureEvent::Failed(CaptureError::Device(_))
+        ));
         assert_eq!(stats.failed(), 120);
     }
 

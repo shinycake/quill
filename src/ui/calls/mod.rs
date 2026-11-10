@@ -915,7 +915,6 @@ crate::ui::shell::register_dialogs! {
 #[cfg(feature = "demo-capture")]
 mod add_people_demo;
 mod call_again;
-mod open_window;
 pub(super) mod call_video;
 #[cfg(feature = "demo-capture")]
 pub(super) mod call_video_demo;
@@ -929,6 +928,7 @@ mod camera_note_tests;
 mod clock_notify_tests;
 pub(super) mod demo_feed;
 mod dial;
+mod open_window;
 pub(in crate::ui) use dial::join_error_note;
 #[cfg(feature = "demo-capture")]
 mod history_demo;

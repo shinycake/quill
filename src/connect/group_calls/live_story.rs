@@ -36,7 +36,11 @@ impl<S: JsonSender> ConnectDriver<S> {
 
     /// A request did not go out: its stage goes back, so the next ingest
     /// asks again.
-    fn live_story_unsent(&mut self, group_call_id: i32, back: impl FnOnce(&mut crate::state::LiveStoryState)) {
+    fn live_story_unsent(
+        &mut self,
+        group_call_id: i32,
+        back: impl FnOnce(&mut crate::state::LiveStoryState),
+    ) {
         if let Some(live) = self.session.live_story_mut(group_call_id) {
             back(live);
         }
@@ -94,8 +98,8 @@ impl<S: JsonSender> ConnectDriver<S> {
             if let Some(live) = self.session.live_story_mut(group_call_id) {
                 live.donors.begin();
             }
-            let sent =
-                self.live_story_request(LiveStoryPurpose::GetTopDonors { group_call_id }, |extra| {
+            let sent = self
+                .live_story_request(LiveStoryPurpose::GetTopDonors { group_call_id }, |extra| {
                     get_live_story_top_donors(extra, group_call_id)
                 });
             if let Err(err) = sent {

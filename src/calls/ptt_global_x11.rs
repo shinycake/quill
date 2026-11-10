@@ -10,8 +10,8 @@
 //! be exercised without a Wayland desktop.
 
 use super::{KeyFilter, LinuxSession, Sink, StartError, linux_session, x11_keysym};
-use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 use x11rb::connection::{Connection, RequestConnection};
 use x11rb::protocol::record::{self, ConnectionExt as _};
 use x11rb::protocol::xproto::ConnectionExt as _;

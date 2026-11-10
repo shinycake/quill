@@ -671,7 +671,12 @@ impl QuillApp {
         }
         if summary.need_rating && summary.rating.is_open() {
             if let CallRating::Failed(error) = &summary.rating {
-                card = card.child(div().text_xs().text_color(danger_soft()).child(error.clone()));
+                card = card.child(
+                    div()
+                        .text_xs()
+                        .text_color(danger_soft())
+                        .child(error.clone()),
+                );
             }
             card = card.child(
                 div()

@@ -414,7 +414,10 @@ fn a_lost_output_device_turns_the_audio_share_off_and_keeps_the_screen() {
     assert!(!driver.call_screen().sharing_audio(), "audio is off");
     assert!(!driver.call_screen().with_audio(), "no retry every pump");
     assert!(driver.call_screen().error.is_some());
-    assert!(driver.call_screen().target().is_some(), "the screen goes on");
+    assert!(
+        driver.call_screen().target().is_some(),
+        "the screen goes on"
+    );
     assert!(mic_mix(&controls).is_none(), "the microphone mixes nothing");
     let _ = std::fs::remove_dir_all(&dir);
 }

@@ -217,7 +217,9 @@ fn a_lost_microphone_withdraws_the_speaking_mark() {
         level: Mutex::new(Some(1.3)),
         lost: Default::default(),
     });
-    driver.call_audio.inject(Box::new(SharedLosable(tap.clone())));
+    driver
+        .call_audio
+        .inject(Box::new(SharedLosable(tap.clone())));
     driver.session.calls.active_group_call = Some(joined_unmuted_call(4242));
     driver.pump_call_audio(std::time::Instant::now()).unwrap();
     assert_eq!(driver.group_call_self_level(), (1.3, true));

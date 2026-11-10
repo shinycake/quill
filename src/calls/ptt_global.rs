@@ -464,8 +464,8 @@ pub fn status_note(state: &HookState, limit: Option<&str>) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        Controller, HookLife, HookState, KeyEdge, KeyFilter, LinuxSession, StartError, function_key,
-        linux_session, mac_keycode, status_note, windows_vk, x11_keysym,
+        Controller, HookLife, HookState, KeyEdge, KeyFilter, LinuxSession, StartError,
+        function_key, linux_session, mac_keycode, status_note, windows_vk, x11_keysym,
     };
 
     #[test]

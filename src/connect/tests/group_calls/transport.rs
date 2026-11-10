@@ -495,7 +495,12 @@ fn a_presentation_that_cannot_connect_is_ended_on_telegram() {
     );
     let end = sent_request(&recorder, "endGroupCallScreenSharing");
     assert_eq!(end["group_call_id"], 555);
-    let call = driver.session.calls.active_group_call.as_ref().expect("call");
+    let call = driver
+        .session
+        .calls
+        .active_group_call
+        .as_ref()
+        .expect("call");
     assert!(!call.screen_sharing && !call.screen_share_pending);
     assert!(call.screen_share_error.is_some());
     let _ = std::fs::remove_dir_all(&dir);

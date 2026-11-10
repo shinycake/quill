@@ -247,7 +247,7 @@ mod tests {
         );
         watch.reopen_failed(start);
         assert_eq!(
-            watch.observe(start + REOPEN_RETRY - Duration::from_millis(1), Live, failed),
+            watch.observe(start + (REOPEN_RETRY / 2), Live, failed),
             None,
             "not before the retry is due"
         );

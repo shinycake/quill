@@ -2,8 +2,8 @@
 //! comments are sent as, the pending Star reaction and the comments
 //! toggle. The call itself is the story stream (`calls.story_stream`);
 //! its comments are that call's messages.
-use crate::state::fetch::Fetch;
 use crate::live_story::{CommentsTracker, PendingLiveReaction, normalize_levels, retain_comments};
+use crate::state::fetch::Fetch;
 use crate::state::*;
 use crate::telegram::envelope::{
     AvailableMessageSender, GroupCallMessageLevel, LiveStoryDonors, LiveStoryPayload,

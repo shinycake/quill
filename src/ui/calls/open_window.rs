@@ -55,7 +55,9 @@ impl QuillApp {
                             }
                         });
                     });
-                    let view = cx.new(|cx| super::call_video::CallWindowRoot::new(&render_owner, &panel_view, cx));
+                    let view = cx.new(|cx| {
+                        super::call_video::CallWindowRoot::new(&render_owner, &panel_view, cx)
+                    });
                     cx.new(|cx| Root::new(view, window, cx))
                 },
             );

@@ -156,7 +156,8 @@ impl<S: JsonSender> ConnectDriver<S> {
     }
 
     fn offer_confirmed_link(&mut self, link: CallLinkConfirm) -> Result<(), ConnectSendError> {
-        let step = self.offer_call_link(ChatId(link.chat_id), &link.invite_hash, link.live_stream)?;
+        let step =
+            self.offer_call_link(ChatId(link.chat_id), &link.invite_hash, link.live_stream)?;
         if let CallLinkStep::Offer { group_call_id } = step {
             self.session.calls.call_link_offered = Some(OfferedCallLink {
                 group_call_id,

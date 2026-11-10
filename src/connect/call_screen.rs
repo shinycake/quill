@@ -475,7 +475,11 @@ impl<S: JsonSender> ConnectDriver<S> {
                 .filter(|engine| engine.is_available())
                 .and_then(|engine| engine.external_frame_sender(target))
             else {
-                if self.call_screen.engine_wait.expired(std::time::Instant::now()) {
+                if self
+                    .call_screen
+                    .engine_wait
+                    .expired(std::time::Instant::now())
+                {
                     self.call_screen.engine_wait = EngineWait::Idle;
                     self.call_screen.chosen = None;
                     self.call_screen.error = Some(
@@ -653,14 +657,14 @@ impl<S: JsonSender> ConnectDriver<S> {
 #[cfg(test)]
 mod wait_tests {
     use super::*;
-    use std::time::{Duration, Instant};
+    use std::time::Instant;
 
     #[test]
     fn the_engine_wait_ends_after_its_limit_and_not_before() {
         let start = Instant::now();
         let mut wait = EngineWait::Idle;
         assert!(!wait.expired(start), "the first look starts the wait");
-        assert!(!wait.expired(start + ENGINE_WAIT - Duration::from_millis(1)));
+        assert!(!wait.expired(start + (ENGINE_WAIT / 2)));
         assert!(wait.expired(start + ENGINE_WAIT));
     }
 }

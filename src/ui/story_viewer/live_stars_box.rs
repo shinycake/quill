@@ -136,11 +136,7 @@ impl QuillApp {
                 )
                 .child(div().text_sm().text_center().child(about));
             if mode != StarsBoxMode::Comment
-                && let Some(donors) = session
-                    .stories
-                    .live
-                    .as_ref()
-                    .and_then(|l| l.donors.data())
+                && let Some(donors) = session.stories.live.as_ref().and_then(|l| l.donors.data())
                 && !donors.top_donors.is_empty()
             {
                 body = body.child(
