@@ -25,3 +25,24 @@ impl Session {
         self.chats_state.report_chat_outcome = None;
     }
 }
+
+impl RequestRegistry {
+    /// The chosen marks the newest `setPollAnswer` still in flight for this
+    /// poll row put on screen. An `updatePoll` for an older answer can put
+    /// older marks back while it flies, so the next tap builds on these.
+    pub fn poll_vote_in_flight(&self, chat_id: ChatId, message_id: MessageId) -> Option<&[bool]> {
+        self.pending
+            .values()
+            .filter_map(|p| match &p.rollback {
+                Some(RequestRollback::PollVote {
+                    chat_id: chat,
+                    message_id: message,
+                    shown,
+                    ..
+                }) if *chat == chat_id.0 && *message == message_id.0 => Some((p.id.0, shown)),
+                _ => None,
+            })
+            .max_by_key(|(id, _)| *id)
+            .map(|(_, shown)| shown.as_slice())
+    }
+}
