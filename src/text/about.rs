@@ -155,6 +155,26 @@ mod tests {
     }
 
     #[test]
+    fn only_a_bot_description_links_its_commands() {
+        let text = "Try /start or see https://x.com";
+        let body = answer(
+            text,
+            &[
+                ("/start", "textEntityTypeBotCommand"),
+                ("https://x.com", "textEntityTypeUrl"),
+            ],
+        );
+        assert_eq!(
+            covered(text, &kept_entities(text, &body, true)),
+            ["/start", "https://x.com"]
+        );
+        assert_eq!(
+            covered(text, &entities_from_response(text, &body)),
+            ["https://x.com"]
+        );
+    }
+
+    #[test]
     fn a_failed_answer_gives_nothing() {
         assert!(
             entities_from_response("x", r#"{"@type":"error","code":400,"message":"x"}"#).is_empty()
