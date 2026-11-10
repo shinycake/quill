@@ -82,6 +82,9 @@ pub(crate) struct TextReveal {
     /// revealed edge, the time footer just past it), when it is narrower
     /// than the text.
     pub(crate) width: Option<Pixels>,
+    /// The width the text wraps at in the bubble: while the block is
+    /// drawn narrower, the text keeps that layout.
+    pub(crate) wrap: Pixels,
 }
 
 /// The cut and where the paragraphs report their lines.
@@ -104,11 +107,8 @@ pub(crate) fn scope<R>(paint: Option<RevealPaint>, f: impl FnOnce() -> R) -> R {
 }
 
 /// The text block `build` makes, drawn through `reveal` when it appears.
-/// `wrap` is the width the text wraps at in the bubble: while the block
-/// is drawn narrower, the text keeps that layout.
 pub(crate) fn revealing(
     reveal: Option<TextReveal>,
-    wrap: Pixels,
     build: impl FnOnce() -> AnyElement,
 ) -> AnyElement {
     match reveal {
@@ -118,7 +118,7 @@ pub(crate) fn revealing(
             block(
                 child,
                 reveal.height,
-                reveal.width.map(|width| (width, wrap)),
+                reveal.width.map(|width| (width, reveal.wrap)),
                 sink,
             )
         }

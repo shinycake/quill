@@ -46,8 +46,7 @@ pub(in crate::ui) fn session_history_row(
     // Settings → Appearance: font size + bubble/plain style.
     look: BubbleLook,
     corner: CornerActions,
-    // A streamed bot reply appearing line by line (`bot_stream`).
-    reveal: Option<crate::ui::text_reveal::TextReveal>,
+    reveal: Option<crate::ui::text_reveal::TextReveal>, // `bot_stream`
     cx: &mut Context<QuillApp>,
 ) -> AnyElement {
     // Stickers, dice, round video messages and emoji-only messages (the ones
@@ -673,37 +672,27 @@ pub(in crate::ui) fn session_history_row(
         session,
         cx,
     );
-    // The width the text wraps at in the bubble, kept while a streamed
-    // reply's bubble is drawn narrower.
-    let wrap = reveal.as_ref().map_or(px(0.), |_| {
-        bubble_width::content_for_outer(
-            bubble_width::message_width_limit(cx, &message.content, look.font, look.plain)
-                .map_or(room.outer(), |width| f32::from(width) as i32),
-            look.plain,
-        )
-    });
     let text_body = match effective_content(&message.content, message.ephemeral.as_ref()) {
         MessageContent::Text(_) if emoji_block.is_some() => None,
-        MessageContent::Text(text) => Some(crate::ui::text_reveal::revealing(reveal, wrap, || {
-            message_text_block(
-                (message.chat_id.0, message.id.0 as u64),
-                text,
-                files,
-                downloading,
-                media_roots,
-                session
-                    .as_ref()
-                    .map(|s| &s.stickers.emoji.custom_emoji_stickers),
-                &animated_emoji,
-                revealed,
-                // Settings → Appearance: message font size.
-                look.font,
-                session.is_none_or(|s| s.settings.media_prefs.big_emoji),
-                reserve_footer.then(|| footer_meta.reserve(footer_reserve(message.is_outgoing))),
-                room,
-                cx,
-            )
-        })),
+        MessageContent::Text(text) => Some(message_text_block(
+            (message.chat_id.0, message.id.0 as u64),
+            text,
+            files,
+            downloading,
+            media_roots,
+            session
+                .as_ref()
+                .map(|s| &s.stickers.emoji.custom_emoji_stickers),
+            &animated_emoji,
+            revealed,
+            // Settings → Appearance: message font size.
+            look.font,
+            session.is_none_or(|s| s.settings.media_prefs.big_emoji),
+            reserve_footer.then(|| footer_meta.reserve(footer_reserve(message.is_outgoing))),
+            room,
+            reveal,
+            cx,
+        )),
         // Slice bots-games: the game card is the message's primary
         // content (thumbnail/title/text/description + Play/Scores).
         MessageContent::Game(game) => Some(game_card(

@@ -130,7 +130,7 @@ impl QuillApp {
                     && chrome.forward_header.is_none()
                     && chrome.via_bot.is_none();
                 let widget = self.widget_bubble(message, room.widget(led) as f32, cx);
-                let reveal = self.stream_text_reveal(message, cx);
+                let reveal = self.stream_text_reveal(message, room, &look, cx);
                 let row = session_history_row(
                     message,
                     files,

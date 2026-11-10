@@ -280,9 +280,12 @@ impl QuillApp {
 
     /// How much of `message` shows this frame, when it is the streamed
     /// reply appearing; `None` draws it whole.
+    /// `room` and `look` are the row's: the text wraps as in its bubble.
     pub(super) fn stream_text_reveal(
         &self,
         message: &HistoryMessage,
+        room: super::history::bubble_width::BubbleRoom,
+        look: &super::synthetic::BubbleLook,
         cx: &mut Context<Self>,
     ) -> Option<TextReveal> {
         if message.is_outgoing || !super::surface_reveal::animate(cx) {
@@ -337,6 +340,16 @@ impl QuillApp {
             paint,
             height: px(frame.height),
             width: frame.width.map(px),
+            wrap: super::history::bubble_width::content_for_outer(
+                super::history::bubble_width::message_width_limit(
+                    cx,
+                    &message.content,
+                    look.font,
+                    look.plain,
+                )
+                .map_or(room.outer(), |width| f32::from(width) as i32),
+                look.plain,
+            ),
         })
     }
 }
