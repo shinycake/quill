@@ -404,14 +404,14 @@ fn driver_manage_story_gated_on_cached_flags() {
     assert!(v["content"].is_null());
     assert!(v["areas"].is_null());
     assert_eq!(v["caption"]["text"], "new");
-    assert!(driver.session.stories.manage.pending);
+    assert!(driver.session.stories.manage.is_pending());
 
     let extra = driver.edit_story_cover(ChatId(7), 6, 2.5).unwrap();
     let v: Value = serde_json::from_str(recorder.snapshot().last().unwrap()).unwrap();
     assert_eq!(v["@type"], "editStoryCover");
     assert_eq!(v["@extra"], extra.0.to_string());
     assert_eq!(v["cover_frame_timestamp"], 2.5);
-    assert!(driver.session.stories.manage.pending);
+    assert!(driver.session.stories.manage.is_pending());
 
     let extra = driver
         .set_story_privacy_settings(ChatId(7), 6, StoryPrivacy::Contacts.settings_json(&[]))
@@ -423,7 +423,7 @@ fn driver_manage_story_gated_on_cached_flags() {
         v["privacy_settings"]["@type"],
         "storyPrivacySettingsContacts"
     );
-    assert!(driver.session.stories.manage.pending);
+    assert!(driver.session.stories.manage.is_pending());
 
     let _ = std::fs::remove_dir_all(&dir);
 }

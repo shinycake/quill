@@ -244,25 +244,15 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// `schema/td_api.tl:13702`) for the given chat — the user's own
     /// story chat or an eligible channel / supergroup from
     /// `getChatsToPostStories`. The composer calls this before every
-    /// post; the answer lands in `Session::story_post.eligibility`.
+    /// post; the answer lands in `Session::story_post.check`.
     /// Deduped per chat while a check is in flight.
-    pub fn check_can_post_story(
-        &mut self,
-        chat_id: ChatId,
-    ) -> Result<Option<RequestId>, ConnectSendError> {
+    pub fn check_can_post_story(&mut self, chat_id: ChatId) -> Result<RequestId, ConnectSendError> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
         if self.session.my_user_id.is_none() {
             return Err(ConnectSendError::InvalidRequest);
         };
-        if self
-            .session
-            .requests
-            .has_purpose_for_chat(RequestPurpose::CheckCanPostStory, chat_id)
-        {
-            return Ok(None);
-        }
         let extra = self
             .session
             .request(RequestPurpose::CheckCanPostStory, Some(chat_id));
@@ -270,7 +260,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .sender
             .send_json(&can_post_story_request(extra, chat_id))
         {
-            Ok(()) => Ok(Some(extra)),
+            Ok(()) => Ok(extra),
             Err(err) => {
                 self.session.requests.take(extra);
                 Err(err)

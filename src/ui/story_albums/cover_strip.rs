@@ -485,6 +485,12 @@ impl QuillApp {
             .into_any_element()
     }
 
+    /// The story the open cover picker is for.
+    pub(in crate::ui) fn open_cover_story(&self) -> Option<(i64, i32)> {
+        let cover = self.stories.viewer_ui().cover.as_ref()?;
+        Some((cover.chat_id, cover.story_id))
+    }
+
     /// Phase 9.5: send `editStoryCover` (`td_api.tl:13738`) for the chosen
     /// frame. The driver gates on `can_be_edited`; the tick closes the
     /// picker on success.

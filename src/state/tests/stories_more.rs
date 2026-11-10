@@ -193,11 +193,14 @@ fn story_post_outcome_transitions() {
             extra.0
         ),
     );
+    let check = extra;
     let eligibility = session
         .stories
         .post
-        .eligibility
-        .clone()
+        .check
+        .answer_to(check)
+        .cloned()
+        .and_then(Result::ok)
         .expect("eligibility stored");
     assert!(!eligibility.can_post());
     assert!(eligibility.user_message().contains("2h 30m"));
@@ -209,7 +212,17 @@ fn story_post_outcome_transitions() {
         &sink,
         r#"{"@type":"canPostStoryResultOk","story_count":1}"#,
     );
-    assert!(!session.stories.post.eligibility.clone().unwrap().can_post());
+    assert!(
+        !session
+            .stories
+            .post
+            .check
+            .answer_to(check)
+            .cloned()
+            .and_then(Result::ok)
+            .expect("the stray result left the answer alone")
+            .can_post()
+    );
 
     // `postStory` answer → Posting with the temporary story id.
     let extra = session.request(RequestPurpose::PostStory, None);
@@ -222,9 +235,13 @@ fn story_post_outcome_transitions() {
             extra.0
         ),
     );
+    let posted = extra;
     assert_eq!(
         session.stories.post.outcome,
-        StoryPostOutcome::Posting { story_id: 8 }
+        StoryPostOutcome::Posting {
+            request: posted,
+            story_id: 8
+        }
     );
 
     // `updateStoryPostSucceeded` with a matching old_story_id →
@@ -235,7 +252,10 @@ fn story_post_outcome_transitions() {
         &sink,
         r#"{"@type":"updateStoryPostSucceeded","story":{"@type":"story","id":9,"poster_chat_id":777,"date":1,"content":{"@type":"storyContentUnsupported"},"caption":{"@type":"formattedText","text":"","entities":[]}},"old_story_id":8}"#,
     );
-    assert_eq!(session.stories.post.outcome, StoryPostOutcome::Succeeded);
+    assert_eq!(
+        session.stories.post.outcome,
+        StoryPostOutcome::Succeeded { request: posted }
+    );
     assert!(session.stories.stories.contains_key(&(777, 9)));
 
     // Failed path: new pending post, then `updateStoryPostFailed`.
@@ -257,7 +277,7 @@ fn story_post_outcome_transitions() {
     );
     assert!(matches!(
         session.stories.post.outcome,
-        StoryPostOutcome::Failed(_)
+        StoryPostOutcome::Failed { request, .. } if request == extra
     ));
 
     // A raw `error` answer on `postStory` → Failed; on `canPostStory`
@@ -274,7 +294,7 @@ fn story_post_outcome_transitions() {
     );
     assert!(matches!(
         session.stories.post.outcome,
-        StoryPostOutcome::Failed(_)
+        StoryPostOutcome::Failed { request, .. } if request == extra
     ));
     let extra = session.request(RequestPurpose::CheckCanPostStory, None);
     apply_json(
@@ -286,7 +306,10 @@ fn story_post_outcome_transitions() {
             extra.0
         ),
     );
-    assert!(session.stories.post.check_error.is_some());
+    assert!(matches!(
+        session.stories.post.check.answer_to(extra),
+        Some(Err(_))
+    ));
 }
 
 #[test]
@@ -306,7 +329,7 @@ fn story_manage_state_transitions() {
         &sink,
         &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra.0),
     );
-    assert!(!session.stories.manage.pending);
+    assert!(!session.stories.manage.is_pending());
     assert_eq!(session.stories.manage.error, None);
 
     let extra = session.request(RequestPurpose::EditStoryCover, None);
@@ -320,7 +343,7 @@ fn story_manage_state_transitions() {
             extra.0
         ),
     );
-    assert!(!session.stories.manage.pending);
+    assert!(!session.stories.manage.is_pending());
     let error = session.stories.manage.error.clone().expect("manage error");
     assert!(error.contains("Story update failed"), "{error}");
 
@@ -351,7 +374,7 @@ fn story_manage_state_transitions() {
     let error = session
         .stories
         .post
-        .check_error
+        .post_as_error
         .clone()
         .expect("post-as error");
     assert!(error.contains("Could not load"), "{error}");
@@ -381,7 +404,10 @@ fn story_post_second_answer_without_pending_is_absorbed() {
     );
     assert_eq!(
         session.stories.post.outcome,
-        StoryPostOutcome::Posting { story_id: 8 }
+        StoryPostOutcome::Posting {
+            request: extra,
+            story_id: 8
+        }
     );
     assert!(!session.requests.has_purpose(RequestPurpose::PostStory));
 
@@ -395,7 +421,10 @@ fn story_post_second_answer_without_pending_is_absorbed() {
     );
     assert_eq!(
         session.stories.post.outcome,
-        StoryPostOutcome::Posting { story_id: 8 }
+        StoryPostOutcome::Posting {
+            request: extra,
+            story_id: 8
+        }
     );
     assert!(!session.requests.has_purpose(RequestPurpose::PostStory));
     assert!(session.stories.stories.contains_key(&(777, 8)));
@@ -730,7 +759,7 @@ fn a_story_edit_answer_settles_only_its_own_call_and_story() {
             second.0
         ),
     );
-    assert!(!session.stories.manage.pending);
+    assert!(!session.stories.manage.is_pending());
     assert!(session.stories.manage.error_for(11, 6).is_some());
     assert_eq!(
         session.stories.manage.error_for(11, 7),

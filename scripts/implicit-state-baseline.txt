@@ -258,14 +258,8 @@ StickerPanel::loading_sets
 StickerPanel::suggest_waiting_for_sets
 StickerSetView::files_requested
 StorageScroll::pending
-StoryComposer::check_sent
-StoryComposer::check_sent+local_error
-StoryComposer::post_sent
-StoryComposer::save_sent
 StoryInsightsState::forwards_loading
 StoryInsightsState::forwards_loading+forwards_error
-StoryManageState::pending
-StoryManageState::pending+error
 StorySearchState::loading
 StorySearchState::loading+error
 StoryViewerUi::close_friends_saving

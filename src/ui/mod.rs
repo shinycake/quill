@@ -591,6 +591,7 @@ mod stories_pull_ui_tests;
 mod stories_strip_ui;
 mod story_albums;
 mod story_composer;
+mod story_composer_stage;
 mod story_insights_ui;
 mod story_more;
 mod story_ring;

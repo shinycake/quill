@@ -30,8 +30,11 @@ impl Session {
                 // Phase 9.3: a `postStory` answer is the pending story —
                 // its id is the temporary id the succeeded/failed updates
                 // correlate against.
-                if pending.is_some_and(|p| p.purpose == RequestPurpose::PostStory) {
-                    self.stories.post.outcome = StoryPostOutcome::Posting { story_id: story.id };
+                if let Some(posted) = pending.filter(|p| p.purpose == RequestPurpose::PostStory) {
+                    self.stories.post.outcome = StoryPostOutcome::Posting {
+                        request: posted.id,
+                        story_id: story.id,
+                    };
                 }
                 self.stories
                     .story_retry
@@ -63,9 +66,13 @@ impl Session {
                 // Phase 9.3: `canPostStory` answer — honored only for the
                 // composer's own check (purpose-gated, so a stray result
                 // never flips the UI).
-                if pending.is_some_and(|p| p.purpose == RequestPurpose::CheckCanPostStory) {
-                    self.stories.post.eligibility = Some(result);
-                    self.stories.post.check_error = None;
+                if let Some(asked) =
+                    pending.filter(|p| p.purpose == RequestPurpose::CheckCanPostStory)
+                {
+                    self.stories.post.check = StoryCheck::Answered {
+                        request: asked.id,
+                        result: Ok(result),
+                    };
                 }
             }
             StoriesPayload::UpdateStoryDeleted {
@@ -98,11 +105,10 @@ impl Session {
                 let poster_chat_id = story.poster_chat_id;
                 // Phase 9.3: our own pending post went live — the composer
                 // shows "Posted".
-                if matches!(
-                    self.stories.post.outcome,
-                    StoryPostOutcome::Posting { story_id } if story_id == old_story_id
-                ) {
-                    self.stories.post.outcome = StoryPostOutcome::Succeeded;
+                if let StoryPostOutcome::Posting { request, story_id } = self.stories.post.outcome
+                    && story_id == old_story_id
+                {
+                    self.stories.post.outcome = StoryPostOutcome::Succeeded { request };
                 }
                 self.stories
                     .stories
@@ -116,14 +122,13 @@ impl Session {
                 // `sendStory` blocker was retracted — the constructor is
                 // `postStory`, schema `td_api.tl:13715`) and the composer
                 // shows it.
-                if matches!(
-                    self.stories.post.outcome,
-                    StoryPostOutcome::Posting { story_id } if story_id == story.id
-                ) {
-                    self.stories.post.outcome = StoryPostOutcome::Failed(format!(
-                        "Posting failed: {}",
-                        error_reason(&error)
-                    ));
+                if let StoryPostOutcome::Posting { request, story_id } = self.stories.post.outcome
+                    && story_id == story.id
+                {
+                    self.stories.post.outcome = StoryPostOutcome::Failed {
+                        request,
+                        message: format!("Posting failed: {}", error_reason(&error)),
+                    };
                 }
                 self.stories
                     .stories

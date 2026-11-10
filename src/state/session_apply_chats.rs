@@ -689,6 +689,7 @@ impl Session {
         // search branch below consumes `chat_ids`.
         if pending.map(|p| p.purpose) == Some(RequestPurpose::GetChatsToPostStories) {
             self.stories.post_as_chats = chat_ids.iter().map(|id| id.0).collect();
+            self.stories.post.post_as_error = None;
         }
         // Parity slice: `getChatNotificationSettingsExceptions`
         // answer — the scope is correlated via `pending.scope`
