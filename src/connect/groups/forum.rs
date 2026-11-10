@@ -170,6 +170,12 @@ impl<S: JsonSender> ConnectDriver<S> {
         if self
             .session
             .topic_history_load_failed(chat_id, forum_topic_id)
+            || self
+                .session
+                .threads
+                .topic_histories
+                .get(&key)
+                .is_some_and(|h| h.older == crate::state::OlderEnd::Failed)
         {
             return Ok(None);
         }

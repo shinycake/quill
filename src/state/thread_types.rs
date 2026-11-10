@@ -269,6 +269,7 @@ impl ThreadView {
         self.history.reader = ReaderPosition::Tail;
         self.history.has_newer = false;
         self.history.newer_failed = false;
+        self.history.older = OlderEnd::Open;
         self.reload_needed = true;
         self.history.window_epoch = self.history.window_epoch.wrapping_add(1);
     }

@@ -104,6 +104,7 @@ impl TopicHistory {
         self.reader = ReaderPosition::Tail;
         self.has_newer = false;
         self.newer_failed = false;
+        self.older = OlderEnd::Open;
         self.window_epoch = self.window_epoch.wrapping_add(1);
     }
 
@@ -206,6 +207,7 @@ impl Session {
                 entry.loaded_complete = true;
             }
             entry.next_from_message_id = next_from_message_id;
+            entry.older = OlderEnd::Open;
             WindowEnd::Newest
         };
         let trimmed = entry.trim_after_page(far_end, &[]) > 0;
@@ -236,7 +238,12 @@ impl Session {
             return;
         }
         match pending.purpose {
-            RequestPurpose::GetTopicHistory => self.mark_topic_load_failed(pending),
+            RequestPurpose::GetTopicHistory => {
+                if let Some(history) = history {
+                    history.older = OlderEnd::Failed;
+                }
+                self.mark_topic_load_failed(pending);
+            }
             _ => {
                 if let Some(history) = history {
                     history.newer_failed = true;

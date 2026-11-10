@@ -1,7 +1,7 @@
 //! Connect driver: channel comments and group reply threads.
 use super::*;
 use crate::ids::{ChatId, MessageId, RequestId};
-use crate::state::{RequestPurpose, ThreadStatus, ThreadsPurpose};
+use crate::state::{OlderEnd, RequestPurpose, ThreadStatus, ThreadsPurpose};
 use crate::telegram::requests::{
     get_message_thread, get_message_thread_history, route_into_thread,
 };
@@ -145,7 +145,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         let Some(thread) = self.session.threads.thread.as_ref() else {
             return Ok(None);
         };
-        if thread.thread_id == 0 || thread.history.loaded_complete {
+        if thread.thread_id == 0
+            || thread.history.loaded_complete
+            || thread.history.older == OlderEnd::Failed
+        {
             return Ok(None);
         }
         let (origin_chat, origin_message) = (thread.origin_chat_id, thread.origin_message_id);

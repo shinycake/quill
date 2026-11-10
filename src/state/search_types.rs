@@ -459,6 +459,16 @@ pub enum ChatSearchJumpNeed {
     LoadAround,
 }
 
+/// How the older end of a thread or topic window stands after its last page
+/// request. A failed end waits for a jump to the latest or a reopen instead of
+/// asking again on every render.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum OlderEnd {
+    #[default]
+    Open,
+    Failed,
+}
+
 /// Phase 5.1: per-topic history for a forum supergroup, fetched with
 /// `searchChatMessages` (`topic_id = messageTopicForum`, empty query).
 /// `next_from_message_id` pages older messages the same way `foundChatMessages`
@@ -483,6 +493,8 @@ pub struct TopicHistory {
     pub has_newer: bool,
     /// The last newer page failed; auto-paging stops until a jump.
     pub newer_failed: bool,
+    /// The last older page failed; auto-paging stops until a jump.
+    pub older: OlderEnd,
     /// The newest server id known to lie past the window's newest end
     /// (trimmed away or held out while `has_newer`).
     pub latest_seen: i64,
@@ -505,6 +517,7 @@ impl Default for TopicHistory {
             reader: ReaderPosition::Tail,
             has_newer: false,
             newer_failed: false,
+            older: OlderEnd::Open,
             latest_seen: 0,
             window_epoch: 0,
             stale_pages: HashSet::new(),
