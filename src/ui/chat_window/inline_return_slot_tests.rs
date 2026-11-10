@@ -31,7 +31,10 @@ fn a_link_ending_elsewhere_ends_a_chat_windows_round_trip(cx: &mut TestAppContex
             app.begin_inline_return(BOT, "somebot", "param");
         });
     });
-    assert!(waiting_in_window(&h, OTHER, cx), "the window waits for the bot");
+    assert!(
+        waiting_in_window(&h, OTHER, cx),
+        "the window waits for the bot"
+    );
     // The bot's own chat keeps it waiting.
     h.app.update(cx, |app, _| {
         app.cancel_inline_opening_unless_chat(ChatId(BOT));
