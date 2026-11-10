@@ -7,6 +7,13 @@
 //! [`settle`] asks for the same check before `dlopen` and outside that lock,
 //! so the load that follows is quick. Nothing is skipped: the system runs the
 //! check it would have run, on the thread that was going to wait for it.
+//!
+//! The system saves the verdict for a file it checked on its own. For a file
+//! it first met inside a notarized app bundle it saves nothing, and checks
+//! the file again on every cold start until a system job that runs every few
+//! days has scanned the bundle. [`settle_package`] has every code file of an
+//! unpacked update checked before the folder becomes a bundle, so the update
+//! starts with its verdicts saved.
 //! Measurements: docs/decisions/launch-first-load-check.md.
 #![deny(clippy::indexing_slicing)]
 
@@ -20,6 +27,22 @@ pub fn settle(library: &Path) {
     macos::settle_tree(library, &mut Vec::new());
     #[cfg(not(target_os = "macos"))]
     let _ = library;
+}
+
+/// Have the system check every code file of the unpacked package at `root`
+/// and save its verdicts. `files` are paths relative to `root`. Call it
+/// while `root` is not an app bundle to the system: a folder whose name has
+/// no extension, that nothing was run or loaded from under a bundle's name.
+/// The verdicts stay with the files when the folder is renamed into place.
+/// Does nothing off macOS.
+pub fn settle_package<P: AsRef<Path>>(root: &Path, files: impl IntoIterator<Item = P>) {
+    #[cfg(target_os = "macos")]
+    macos::settle_package(root, files);
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = root;
+        for _ in files {}
+    }
 }
 
 #[cfg(target_os = "macos")]
@@ -62,6 +85,30 @@ mod macos {
             }
         }
         request_check(&file);
+    }
+
+    /// Every Mach-O file among `files` under `root`, checked once.
+    pub(super) fn settle_package<P: AsRef<Path>>(root: &Path, files: impl IntoIterator<Item = P>) {
+        for file in files {
+            let Ok(file) = File::open(root.join(file)) else {
+                continue;
+            };
+            let mut magic = [0u8; 4];
+            if (&file).read_exact(&mut magic).is_ok() && is_code(magic) {
+                request_check(&file);
+            }
+        }
+    }
+
+    /// The first four bytes of a Mach-O file, thin or universal.
+    pub(super) fn is_code(magic: [u8; 4]) -> bool {
+        matches!(
+            magic,
+            [0xcf, 0xfa, 0xed, 0xfe]
+                | [0xce, 0xfa, 0xed, 0xfe]
+                | [0xca, 0xfe, 0xba, 0xbe]
+                | [0xca, 0xfe, 0xba, 0xbf]
+        )
     }
 
     /// The file names of the libraries a thin 64-bit Mach-O links to, from
@@ -154,6 +201,47 @@ mod macos {
         fn a_file_that_is_not_a_library_links_to_nothing() {
             assert!(linked_names(b"not a Mach-O file").is_empty());
             assert!(linked_names(&[]).is_empty());
+        }
+
+        #[test]
+        fn code_files_are_told_from_the_rest_by_their_first_bytes() {
+            let exe = std::env::current_exe().expect("test executable");
+            let mut magic = [0u8; 4];
+            File::open(exe)
+                .expect("open")
+                .read_exact(&mut magic)
+                .expect("read");
+            assert!(is_code(magic), "{magic:02x?}");
+            assert!(is_code([0xca, 0xfe, 0xba, 0xbe]));
+            assert!(!is_code(*b"<?xm"));
+            assert!(!is_code(*b"PK\x03\x04"));
+        }
+
+        #[test]
+        fn settling_a_package_skips_what_is_missing_or_not_code() {
+            let folder = std::env::temp_dir()
+                .join(format!("quill-first-load-package-{}", std::process::id()));
+            std::fs::create_dir_all(folder.join("Contents/Resources")).expect("folder");
+            std::fs::write(folder.join("Contents/Info.plist"), b"<?xml").expect("write");
+            std::fs::write(folder.join("Contents/Resources/empty"), b"").expect("write");
+            let exe = std::env::current_exe().expect("test executable");
+            std::fs::copy(&exe, folder.join("Contents/code")).expect("copy");
+            settle_package(
+                &folder,
+                [
+                    "Contents/Info.plist",
+                    "Contents/Resources/empty",
+                    "Contents/code",
+                    "Contents/missing",
+                ],
+            );
+            assert_eq!(
+                std::fs::read(folder.join("Contents/code"))
+                    .expect("read")
+                    .len() as u64,
+                std::fs::metadata(&exe).expect("metadata").len()
+            );
+            let _ = std::fs::remove_dir_all(&folder);
         }
 
         #[test]
