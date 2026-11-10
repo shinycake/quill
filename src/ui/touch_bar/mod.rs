@@ -254,6 +254,12 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // A touch that was already queued when the lock engaged (the bar is
+        // emptied by the next throttled sync) must not open a chat or send a
+        // sticker behind the lock screen.
+        if self.refused_while_locked() {
+            return;
+        }
         match command {
             Command::OpenChat(chat_id) => self.select_listed_chat(chat_id, window, cx),
             Command::OpenSavedMessages => self.open_saved_messages(window, cx),

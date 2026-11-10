@@ -166,6 +166,18 @@ impl ToastQueue {
         }
     }
 
+    /// The pointer cannot be over the toast any more (the lock layer draws
+    /// none, or its window went): a hover that never ends would pause it for
+    /// good and queue every later toast behind it.
+    pub(crate) fn pointer_gone(&mut self, now: Instant) {
+        self.hovered = false;
+        if let Some(showing) = self.showing.as_mut()
+            && showing.running_since.is_none()
+        {
+            showing.running_since = Some(now);
+        }
+    }
+
     /// The note on screen.
     pub(crate) fn visible(&self) -> Option<&StatusNote> {
         self.showing.as_ref().map(|showing| &showing.toast.note)
@@ -322,6 +334,28 @@ mod tests {
         assert_eq!(queue.waiting(), 8);
         queue.dismiss(t0);
         assert_eq!(text(&queue), Some("error 22"));
+    }
+
+    #[test]
+    fn a_hover_that_never_ends_stops_pausing_once_the_pointer_is_gone() {
+        let t0 = Instant::now();
+        let mut queue = ToastQueue::default();
+        queue.push(StatusNote::error("one"), t0);
+        queue.push(StatusNote::info("two"), t0);
+        queue.set_hovered(true, secs(t0, 1));
+        assert_eq!(queue.deadline(secs(t0, 2)), None, "paused by the hover");
+        // The lock layer takes the toast away: nobody reports hover end.
+        queue.pointer_gone(secs(t0, 2));
+        assert!(
+            queue.deadline(secs(t0, 2)).is_some(),
+            "the timer runs again"
+        );
+        queue.tick(secs(t0, 120));
+        assert_eq!(text(&queue), Some("two"));
+        assert!(
+            queue.deadline(secs(t0, 120)).is_some(),
+            "the next toast does not start paused"
+        );
     }
 
     #[test]

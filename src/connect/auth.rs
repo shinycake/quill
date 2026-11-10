@@ -113,8 +113,10 @@ impl<S: JsonSender> ConnectDriver<S> {
     }
 
     /// Fetch the sign-in country list once (works before authorization).
+    /// Asks only while nothing was asked; a failed list is asked again by
+    /// [`Self::retry_countries`], never by a frame.
     pub fn fetch_countries(&mut self) -> Result<Option<RequestId>, ConnectSendError> {
-        if self.session.auth_state.countries.is_some()
+        if !self.session.auth_state.countries.is_idle()
             || self
                 .session
                 .requests
@@ -123,11 +125,25 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Ok(None);
         }
         let extra = self.session.request(RequestPurpose::GetCountries, None);
+        self.session.auth_state.countries = crate::state::fetch::Fetch::Loading { stale: None };
         if let Err(err) = self.sender.send_json(&get_countries(extra)) {
             self.session.requests.take(extra);
+            self.session.auth_state.countries = crate::state::fetch::Fetch::Failed {
+                error: format!("{err:?}"),
+                stale: None,
+            };
             return Err(err);
         }
         Ok(Some(extra))
+    }
+
+    /// Ask for the country list again after it failed (a box opening, or
+    /// its Retry); a list that is loading or loaded is left alone.
+    pub fn retry_countries(&mut self) -> Result<Option<RequestId>, ConnectSendError> {
+        if self.session.auth_state.countries.error().is_some() {
+            self.session.auth_state.countries = crate::state::fetch::Fetch::Idle;
+        }
+        self.fetch_countries()
     }
 
     /// Fetch the IP-based default country once.

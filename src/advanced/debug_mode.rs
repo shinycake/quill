@@ -135,6 +135,41 @@ pub fn stop_tdlib_log(
     api.secure_native_logging()
 }
 
+/// Where the debug mode stands after a switch. The in-memory flag and the
+/// saved flag both follow [`DebugLog::flag`], and the flag is set only
+/// after TDLib answered, so the three (flag, file, TDLib's stream) cannot
+/// disagree about what happened.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DebugLog {
+    Off,
+    On,
+    /// TDLib refused the change. Turning on: Quill's own log runs but
+    /// TDLib's stream stayed closed. Turning off: TDLib's stream may still
+    /// be writing, so the mode stays on until it can be closed.
+    TdlibRefused {
+        turning_on: bool,
+        error: String,
+    },
+}
+
+impl DebugLog {
+    /// Whether Quill's debug logs run in this state.
+    pub fn flag(&self) -> bool {
+        !matches!(self, Self::Off)
+    }
+}
+
+/// The state after switching from `on_now`. `tdlib(turn_on)` opens or closes
+/// TDLib's native log stream.
+pub fn switch(on_now: bool, tdlib: impl FnOnce(bool) -> Result<(), String>) -> DebugLog {
+    let turning_on = !on_now;
+    match tdlib(turning_on) {
+        Ok(()) if turning_on => DebugLog::On,
+        Ok(()) => DebugLog::Off,
+        Err(error) => DebugLog::TdlibRefused { turning_on, error },
+    }
+}
+
 /// `DEBUG_LOG`: one line in Quill's debug log while the mode is on.
 pub fn debug_log(message: &str) {
     if !enabled() {
@@ -197,6 +232,26 @@ pub fn confirm_text(currently_on: bool) -> &'static str {
 
 #[cfg(test)]
 mod tests {
+    use super::{DebugLog, switch};
+
+    #[test]
+    fn the_mode_follows_what_tdlib_answered() {
+        assert_eq!(switch(false, |_| Ok(())), DebugLog::On);
+        assert_eq!(switch(true, |_| Ok(())), DebugLog::Off);
+        let refused = switch(true, |_| Err("no".into()));
+        assert!(refused.flag(), "a stream that could not be closed stays on");
+        let refused = switch(false, |on| {
+            assert!(on);
+            Err("no".into())
+        });
+        assert!(matches!(
+            refused,
+            DebugLog::TdlibRefused {
+                turning_on: true,
+                ..
+            }
+        ));
+    }
     use super::*;
 
     fn temp_dir(tag: &str) -> PathBuf {

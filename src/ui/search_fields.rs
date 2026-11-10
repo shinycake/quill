@@ -52,7 +52,7 @@ impl QuillApp {
             let marked = state.update(cx, |input, cx| input.marked_text_range(window, cx));
             if *secondary && !*shift && marked.is_none() && !self.share.forward.reply_chooser_open()
             {
-                self.submit_share_from_search(cx);
+                self.submit_share_from_search(window, cx);
             } else if should_send_on_enter(
                 quill::composer::enter_event_from_kit(*shift, *secondary, marked),
                 // Not a chat composer: the send-key setting does not apply.
@@ -106,7 +106,7 @@ impl QuillApp {
             let marked = state.update(cx, |input, cx| input.marked_text_range(window, cx));
             if *secondary && !*shift && marked.is_none() && !self.share.forward.reply_chooser_open()
             {
-                self.submit_share_from_search(cx);
+                self.submit_share_from_search(window, cx);
             } else if should_send_on_enter(
                 quill::composer::enter_event_from_kit(*shift, *secondary, marked),
                 // Not a chat composer: the send-key setting does not apply.

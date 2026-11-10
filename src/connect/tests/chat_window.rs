@@ -468,3 +468,18 @@ fn a_chat_windows_waiting_draft_survives_typing_and_sends_elsewhere() {
     assert!(h.driver.flush_pending_draft().unwrap().is_some());
     assert_eq!(h.sent("setChatDraftMessage", BOB).len(), 2);
 }
+
+#[test]
+fn a_failed_close_still_leaves_the_chat_the_main_window_cleared() {
+    let mut h = Harness::two_chats();
+    h.driver.select_chat(BOB).unwrap();
+    // The request cannot be sent (an agent drives the window), but the
+    // main window has cleared its chat: the session must not keep treating
+    // it as shown.
+    crate::agent::ui_driver::guard::set_injecting(true);
+    let closed = h.driver.deselect_chat();
+    crate::agent::ui_driver::guard::set_injecting(false);
+    assert!(closed.is_err(), "the failure is still reported");
+    assert_eq!(h.driver.session.open_chat, None);
+    assert!(!h.driver.session.chat_is_shown(BOB));
+}

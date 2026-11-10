@@ -414,6 +414,7 @@ impl QuillApp {
             ScheduleTarget::Share => {
                 self.submit_share(
                     quill::share_box::ShareSend::Scheduled(scheduling, repeat),
+                    window,
                     cx,
                 );
             }

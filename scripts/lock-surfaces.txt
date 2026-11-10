@@ -21,6 +21,7 @@ src/media_tools.rs::spawn_capture | via:start_video_capture |the round video rec
 src/ui/deep_links.rs::pump_deep_link | refuses | a launch or OS link waits for the unlock, as tdesktop's start links (`checkStartUrls`)
 src/ui/deep_links.rs::run_resolved_deep_link | refuses | the chat or box a link resolved to opens after the unlock
 src/ui/web_app_ui/spawn_mini_app_window.rs::spawn_mini_app_window | refuses | a mini app whose URL lands while locked would show, usable, over the lock; TDLib closes the launch
+src/ui/touch_bar/mod.rs::run_touch_bar_command | refuses | a touch queued before the lock engaged (the bar empties on the next throttled sync) is dropped, so it opens no chat and sends no sticker behind the lock screen
 src/ui/accounts.rs::switch_account | refuses | nothing behind the lock changes account; tdesktop empties the tray and Dock account items while locked
 src/ui/os_open.rs::open_link | refuses | nothing opens in the browser or mail client while locked: the open waits for the unlock (`wait_for_unlock`)
 src/ui/os_open.rs::open_web_link | refuses | as open_link: a 3-D Secure page, a withdrawal or a bot's URL opens after the unlock

@@ -121,10 +121,7 @@ fn countries_and_default_code_are_fetched_once_and_stored() {
         &sink,
         json!({"@type":"text","@extra":code.as_extra(),"text":"gb"}),
     );
-    assert_eq!(
-        driver.session.auth_state.countries.as_ref().unwrap().len(),
-        2
-    );
+    assert_eq!(driver.session.auth_state.countries.data().unwrap().len(), 2);
     assert_eq!(
         driver.session.auth_state.guessed_country_iso.as_deref(),
         Some("GB")

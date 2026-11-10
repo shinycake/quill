@@ -692,11 +692,12 @@ impl QuillApp {
             ViewEvent::ReplySent(text) => {
                 // Sent only while the notification's account is on screen;
                 // otherwise Reply switches to it and focuses the composer.
-                if let Some(key) = self.notify_key(id)
-                    && !self.send_inline_reply(&key.0, key.1, &text, cx)
-                    && self.session().is_none_or(|s| s.account != key.0)
-                {
-                    self.push_notification_click(&key, NotificationAction::Reply, cx);
+                if let Some(key) = self.notify_key(id) {
+                    let outcome = self.send_inline_reply(&key.0, key.1, &text, cx);
+                    let on_screen = self.session().is_some_and(|s| s.account == key.0);
+                    if outcome.opens_chat(on_screen) {
+                        self.push_notification_click(&key, NotificationAction::Reply, cx);
+                    }
                 }
                 self.unlink_notification(id, cx);
                 self.notify_start_all_hiding(now);

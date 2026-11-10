@@ -54,6 +54,24 @@ fn sine_in_out(t: f32) -> f32 {
     -((PI * t).cos() - 1.0) / 2.0
 }
 
+/// The order to save when a drag ends: `now` is the pinned list as it is
+/// now (the session's, which another device may have changed since the drag
+/// began) and `dragged` the order the user made. Chats in both lists follow
+/// `dragged`, in the slots `now` gives them; chats pinned meanwhile stay
+/// where `now` has them, and chats unpinned meanwhile are dropped.
+pub fn merge_order(dragged: &[i64], now: &[i64]) -> Vec<i64> {
+    let mut in_dragged_order = dragged.iter().filter(|id| now.contains(id));
+    now.iter()
+        .map(|id| {
+            if dragged.contains(id) {
+                in_dragged_order.next().copied().unwrap_or(*id)
+            } else {
+                *id
+            }
+        })
+        .collect()
+}
+
 #[derive(Debug, Clone)]
 pub struct PinReorder {
     ids: Vec<i64>,
@@ -227,6 +245,15 @@ mod tests {
 
     fn rows(ids: &[i64]) -> (Vec<i64>, HashMap<i64, f32>) {
         (ids.to_vec(), ids.iter().map(|id| (*id, 60.0)).collect())
+    }
+
+    #[test]
+    fn a_release_keeps_what_another_device_pinned_or_unpinned() {
+        // Dragged 3 above 1 and 2; meanwhile 2 was unpinned and 9 pinned.
+        assert_eq!(merge_order(&[3, 1, 2], &[9, 1, 3]), [9, 3, 1]);
+        assert_eq!(merge_order(&[3, 1], &[9, 1, 3]), [9, 3, 1]);
+        assert_eq!(merge_order(&[1, 2], &[1, 2]), [1, 2]);
+        assert_eq!(merge_order(&[1, 2, 3], &[2, 3]), [2, 3]);
     }
 
     #[test]

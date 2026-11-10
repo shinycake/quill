@@ -159,7 +159,7 @@ fn menu_routes_to_hard_surfaces_refuse_while_injecting(cx: &mut TestAppContext) 
 
 /// "All other chats" on: the driver reaches most of the window.
 fn grant_everything() {
-    quill::agent::grants::update(&quill::ids::AccountKey::primary(), |g| {
+    let _ = quill::agent::grants::update(&quill::ids::AccountKey::primary(), |g| {
         g.all_chats = Some(Scope::Read);
     });
 }

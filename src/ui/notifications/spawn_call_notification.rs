@@ -155,6 +155,21 @@ impl QuillApp {
             .unwrap_or_else(AccountKey::primary)
     }
 
+    /// Whether `account`'s notifications show no sender or text right now:
+    /// Quill is locked, or that account turned "Show sender name" off.
+    pub(in crate::ui) fn notifications_hidden_now(&self, account: &AccountKey) -> bool {
+        let session = match self.session() {
+            Some(session) if session.account == *account => Some(session),
+            _ => self
+                .background
+                .client(account)
+                .and_then(|client| client.live.as_ref())
+                .map(|live| &live.driver.session),
+        };
+        self.account.passcode.is_locked()
+            || session.is_some_and(|s| !s.settings.notify_view.shows_name())
+    }
+
     /// Linux: `CloseNotification` for the chat's toast on a worker thread,
     /// when a worker already connected the D-Bus notifier: this runs on the
     /// UI thread, which never connects (round 18 B #6). Nothing elsewhere.

@@ -3,7 +3,7 @@
 
 use super::super::target::{chat_schema, require};
 use super::super::{Ctx, ToolError, ToolOutput};
-use super::common::{self, TEXT_LIMIT, change, change_steps, formatted};
+use super::common::{self, TEXT_LIMIT, change, change_built, change_steps, formatted};
 use crate::agent::grants::Scope;
 use serde_json::{Value, json};
 
@@ -267,7 +267,6 @@ pub fn set_chat_folder(args: &Value) -> Result<ToolOutput, ToolError> {
     let ctx = Ctx::active()?;
     let target = require(&ctx, args, Scope::ReadWrite)?;
     let (id, name) = folder_id(&ctx, args.get("folder"))?;
-    let mut folder = ctx.call(json!({"@type": "getChatFolder", "chat_folder_id": id}))?;
     let chat_id = target.chat_id;
     let edit = |folder: &mut Value, key: &str, keep: bool| {
         if let Some(list) = folder.get_mut(key).and_then(Value::as_array_mut) {
@@ -277,20 +276,12 @@ pub fn set_chat_folder(args: &Value) -> Result<ToolOutput, ToolError> {
             }
         }
     };
-    if remove {
-        edit(&mut folder, "pinned_chat_ids", false);
-        edit(&mut folder, "included_chat_ids", false);
-        edit(&mut folder, "excluded_chat_ids", true);
-    } else {
-        edit(&mut folder, "excluded_chat_ids", false);
-        edit(&mut folder, "included_chat_ids", true);
-    }
     let summary = if remove {
         format!("Removed from folder \"{name}\"")
     } else {
         format!("Added to folder \"{name}\"")
     };
-    change(
+    change_built(
         &ctx,
         &target,
         if remove {
@@ -299,7 +290,18 @@ pub fn set_chat_folder(args: &Value) -> Result<ToolOutput, ToolError> {
             "set_chat_folder"
         },
         &format!("\"{name}\""),
-        json!({"@type": "editChatFolder", "chat_folder_id": id, "folder": folder}),
+        || {
+            let mut folder = ctx.call(json!({"@type": "getChatFolder", "chat_folder_id": id}))?;
+            if remove {
+                edit(&mut folder, "pinned_chat_ids", false);
+                edit(&mut folder, "included_chat_ids", false);
+                edit(&mut folder, "excluded_chat_ids", true);
+            } else {
+                edit(&mut folder, "excluded_chat_ids", false);
+                edit(&mut folder, "included_chat_ids", true);
+            }
+            Ok(json!({"@type": "editChatFolder", "chat_folder_id": id, "folder": folder}))
+        },
     )
     .map_err(|error| {
         if error.0.contains("CHATLIST_INCLUDE_INVALID")

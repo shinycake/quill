@@ -235,6 +235,7 @@ impl Drop for Presence {
     fn drop(&mut self) {
         crate::locks::lock_or_recover(&CONNECTED).retain(|c| c.id != self.0);
         crate::locks::lock_or_recover(&REVOKED).retain(|id| *id != self.0);
+        super::prompts::withdraw_connection(self.0);
         crate::wake::AGENT.poke();
     }
 }
@@ -255,6 +256,13 @@ pub fn connect(agent: &str) -> Presence {
 /// The agents connected now, oldest first.
 pub fn connected() -> Vec<Connected> {
     crate::locks::lock_or_recover(&CONNECTED).clone()
+}
+
+/// Whether connection `id` is still connected.
+pub fn is_connected(id: u64) -> bool {
+    crate::locks::lock_or_recover(&CONNECTED)
+        .iter()
+        .any(|c| c.id == id)
 }
 
 /// Connection `id` called `tool`.

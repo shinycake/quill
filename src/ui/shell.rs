@@ -458,6 +458,22 @@ impl QuillShell {
                 }
             }
         });
+        // An ask is waiting for the answer that sets its flag. With no
+        // request in flight and the flag still clear, that answer is not
+        // coming (it failed, was cancelled, or opened nothing): the ask
+        // ends here, so a later open of the kind is not pinned to it.
+        app.update(cx, |app, _| {
+            if app
+                .session()
+                .is_none_or(|session| session.requests.is_empty())
+            {
+                for kind in app.windows.asked_dialogs() {
+                    if !Self::flag_open(app, kind) {
+                        app.windows.dialog_ask_expired(kind);
+                    }
+                }
+            }
+        });
         // The open box that wins by priority among those this window may
         // show (`ChatWindows::dialog_may_show_in`): its own per-window
         // flags, and the session-wide boxes that asked for it.

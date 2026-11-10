@@ -351,7 +351,7 @@ impl QuillApp {
         }
         let account = self.agent_settings_account();
         let title = self.agent_chat_title(chat_id);
-        grants::update(&account, |g| {
+        self.update_grants(&account, |g| {
             g.chats.entry(chat_id).or_insert(ChatGrant {
                 scope: Some(Scope::Read),
                 title,
@@ -373,7 +373,7 @@ impl QuillApp {
             return;
         }
         let title = self.agent_chat_title(chat_id);
-        grants::update(&account, |g| {
+        self.update_grants(&account, |g| {
             g.chats.insert(chat_id, ChatGrant { scope, title });
         });
         cx.notify();

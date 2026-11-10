@@ -43,7 +43,7 @@ fn window(account: &str) -> crate::settings::SavedChatWindow {
 /// Everything one account left behind, for `key`.
 fn fill(root: &Path, key: &AccountKey) {
     let account = key.0.as_str();
-    grants::update(key, |grants| grants.all_chats = Some(Scope::ReadWrite));
+    let _ = grants::update(key, |grants| grants.all_chats = Some(Scope::ReadWrite));
     activity::record(action(key));
     crate::web_app::trust::mark_trusted(account, 77);
     crate::notify_volume::update(account, |volumes| volumes.set_chat(ChatId(5), 40));

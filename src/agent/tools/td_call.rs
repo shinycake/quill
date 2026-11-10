@@ -200,7 +200,7 @@ fn send_count(request: &Value) -> u32 {
 /// carries final message ids; `common::send` logs it.
 fn send(ctx: &Ctx, target: &Target, method: &str, request: Value) -> Result<Value, ToolError> {
     let count = send_count(&request);
-    let mut sent = common::send(ctx, target, "td_call", method, request, count)?;
+    let mut sent = common::send(ctx, target, "td_call", method, request, count)?.messages;
     if sent.len() == 1 && method != "sendMessageAlbum" && method != "forwardMessages" {
         Ok(sent.remove(0))
     } else {

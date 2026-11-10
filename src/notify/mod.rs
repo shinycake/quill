@@ -123,6 +123,18 @@ impl OsNotification {
         !locked && self.chat_id != APP_NOTICE_CHAT
     }
 
+    /// This notification as a locked app shows it: no sender, no text
+    /// ([`QueuedNotification::for_locked_display`], for one already built).
+    /// The chat id stays so a click still lands on the chat after unlocking.
+    pub fn hidden(&self) -> OsNotification {
+        OsNotification {
+            chat_id: self.chat_id,
+            message_id: self.message_id,
+            title: APP_TITLE.to_string(),
+            body: GENERIC_BODY.to_string(),
+        }
+    }
+
     /// The notification as it is drawn: title and body lose what message
     /// text drops before shaping (`display_text`), on every backend.
     pub fn shown(mut self) -> Self {

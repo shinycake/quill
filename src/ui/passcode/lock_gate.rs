@@ -51,6 +51,12 @@ impl QuillApp {
         if !locked {
             quill::wake::LINKS.poke();
         }
+        if locked {
+            // The lock layer draws no toast, so none can report its hover end.
+            self.connection
+                .toasts
+                .pointer_gone(std::time::Instant::now());
+        }
         super::lock_layer::publish(locked, cx);
         // The demo apps share the process with the tests: only a real
         // lock pauses the agent socket.

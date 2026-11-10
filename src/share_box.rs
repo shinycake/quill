@@ -60,6 +60,11 @@ impl ShareSelection {
         &self.chats
     }
 
+    /// Leave only the chats in `keep` ticked, in their order.
+    pub fn keep_only(&mut self, keep: &[ChatId]) {
+        self.chats.retain(|chat| keep.contains(chat));
+    }
+
     pub fn len(&self) -> usize {
         self.chats.len()
     }

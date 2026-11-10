@@ -54,9 +54,9 @@ impl QuillApp {
     }
 
     /// Ctrl/Cmd+Enter in the share box search: send to the ticked chats.
-    pub(super) fn submit_share_from_search(&mut self, cx: &mut Context<Self>) {
+    pub(super) fn submit_share_from_search(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if !self.share.selection.is_empty() {
-            self.submit_share(ShareSend::Normal, cx);
+            self.submit_share(ShareSend::Normal, window, cx);
         }
     }
 
@@ -85,7 +85,12 @@ impl QuillApp {
 
     /// Send the draft to every ticked chat: the comment first (a plain
     /// message), then the forwards with the chosen sound / schedule.
-    pub(super) fn submit_share(&mut self, mode: ShareSend, cx: &mut Context<Self>) {
+    pub(super) fn submit_share(
+        &mut self,
+        mode: ShareSend,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let Some(draft) = self.forward_draft() else {
             return;
         };
@@ -112,7 +117,10 @@ impl QuillApp {
                     .unwrap_or_else(|| format!("chat {}", dest.0))
             })
             .collect();
-        let mut failed = 0;
+        // The destinations the forward did not reach, and whether each had
+        // its comment sent: a retry from the box takes only these.
+        let mut failed_dests: Vec<ChatId> = Vec::new();
+        let mut comment_lost = false;
         if let Some(live) = self.live.as_mut() {
             let view_generation = live.driver.session.view_generation;
             for dest in &dests {
@@ -120,7 +128,8 @@ impl QuillApp {
                     let snap = ComposerSnapshot::capture(*dest, view_generation, comment.clone())
                         .with_send_options(options);
                     if live.driver.send_snapshot(&snap).is_err() {
-                        failed += 1;
+                        failed_dests.push(*dest);
+                        comment_lost = true;
                         continue;
                     }
                 }
@@ -129,9 +138,10 @@ impl QuillApp {
                     .forward_messages_with_options(*dest, &draft, &options)
                     .is_err()
                 {
-                    failed += 1;
+                    failed_dests.push(*dest);
                 }
             }
+            let failed = failed_dests.len();
             self.set_note(if failed == 0 {
                 StatusNote::info(share_done_label(draft.count(), &titles))
             } else {
@@ -140,7 +150,16 @@ impl QuillApp {
                     &[("failed", &failed.to_string())],
                 ))
             });
-        } else if self.demo_session.is_some() {
+        } else if self.demo_session.is_none() {
+            // No client to send through (the connection closed, a remote
+            // log-out, between accounts): nothing was queued, so the box and
+            // the ticked chats stay for a retry.
+            failed_dests = dests.clone();
+            self.set_note(StatusNote::error(tr_with(
+                keys::Q_OPS_COULD_NOT_FORWARD_TO_CHAT,
+                &[("failed", &dests.len().to_string())],
+            )));
+        } else {
             for dest in &dests {
                 self.apply_demo_forward(*dest, &draft);
             }
@@ -152,9 +171,19 @@ impl QuillApp {
                 self.present_forward_result(result, cx);
             }
         }
-        if failed < dests.len() {
+        if failed_dests.is_empty() {
             self.share.forward = ForwardStage::None;
             self.share.selection.clear();
+        } else {
+            // Only the chats that failed stay ticked. Chats whose comment
+            // went out must not get it again: it stays only when a comment
+            // is what failed.
+            self.share.selection.keep_only(&failed_dests);
+            if !comment_lost && !comment.is_empty() {
+                self.share
+                    .comment_input
+                    .update(cx, |input, cx| input.set_value("", window, cx));
+            }
         }
         cx.notify();
     }

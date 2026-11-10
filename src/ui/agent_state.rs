@@ -11,6 +11,7 @@ use quill::agent::activity;
 use quill::agent::grants::{self, AccountGrants, ChatGrant, Scope};
 use quill::agent::prompts::{self, Ask, Prompt};
 use quill::ids::AccountKey;
+use quill::lang::{keys, tr_with};
 use std::time::Duration;
 
 /// "All other chats" waiting for the user to say yes.
@@ -270,7 +271,7 @@ impl QuillApp {
             });
             self.open_box(crate::ui::shell::DialogKind::AgentConsent);
         } else {
-            grants::update(&account, |g| apply_scope(g, target, scope));
+            self.update_grants(&account, |g| apply_scope(g, target, scope));
         }
         cx.notify();
     }
@@ -281,7 +282,7 @@ impl QuillApp {
             return;
         }
         if let Some(consent) = self.agent_ui.consent.take() {
-            grants::update(&consent.account, |g| g.all_chats = Some(consent.scope));
+            self.update_grants(&consent.account, |g| g.all_chats = Some(consent.scope));
         }
         note_prompt_answered();
         cx.notify();
@@ -295,16 +296,36 @@ impl QuillApp {
 
     pub(super) fn set_agent_contacts(&mut self, on: bool, cx: &mut Context<Self>) {
         let account = self.agent_settings_account();
-        grants::update(&account, |g| g.contacts = on);
+        self.update_grants(&account, |g| g.contacts = on);
         cx.notify();
     }
 
     pub(super) fn remove_agent_chat(&mut self, chat_id: i64, cx: &mut Context<Self>) {
         let account = self.agent_settings_account();
-        grants::update(&account, |g| {
+        self.update_grants(&account, |g| {
             g.chats.remove(&chat_id);
         });
         cx.notify();
+    }
+
+    /// Changes `account`'s grants. A grants file that cannot be written
+    /// leaves the grants as they were and says so, so the page never shows
+    /// a change a restart would undo. Whether the change was kept.
+    pub(super) fn update_grants(
+        &mut self,
+        account: &AccountKey,
+        change: impl FnOnce(&mut AccountGrants),
+    ) -> bool {
+        match grants::update(account, change) {
+            Ok(()) => true,
+            Err(err) => {
+                self.set_note(super::status_note::StatusNote::error(tr_with(
+                    keys::Q_AGENT_GRANTS_SAVE_FAILED,
+                    &[("err", &err.0)],
+                )));
+                false
+            }
+        }
     }
 
     /// Answer the request `prompt`: on Allow the grant is applied first, so
@@ -318,10 +339,9 @@ impl QuillApp {
     ) {
         let waiting =
             prompts::current_for(&prompt.account).is_some_and(|current| current.id == prompt.id);
-        if waiting && allow {
-            grants::update(&prompt.account, |g| apply_ask(g, &prompt.ask));
-        }
-        let decision = if waiting && allow {
+        let saved = !(waiting && allow)
+            || self.update_grants(&prompt.account, |g| apply_ask(g, &prompt.ask));
+        let decision = if waiting && allow && saved {
             prompts::Decision::Allowed
         } else {
             prompts::Decision::Denied
@@ -411,7 +431,7 @@ pub(super) fn reset_for_test(account: &AccountKey) {
     activity::clear();
     quill::agent::access::set_confirm_sends(false);
     quill::agent::access::set_raw_calls(true);
-    grants::update(account, |g| *g = AccountGrants::default());
+    let _ = grants::update(account, |g| *g = AccountGrants::default());
     quill::agent::access::set_enabled(true);
 }
 

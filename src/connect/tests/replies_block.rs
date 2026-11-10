@@ -45,3 +45,23 @@ fn confirming_the_block_box_sends_its_checkboxes() {
     assert_eq!(request["delete_message"], true);
     assert_eq!(request["delete_all_messages"], false);
 }
+
+#[test]
+fn a_block_that_cannot_be_sent_keeps_its_box_and_choices() {
+    let store = MemorySecretStore::new();
+    let (_dir, prepared) = prepared_tmp(&store);
+    let sink = Arc::new(MemorySink::new());
+    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+    let recorder = Arc::new(RecordingSender::new());
+    let session = Session::new(AccountKey::primary(), dyn_sink);
+    // Never ready: the chats path is not active (locked, signed out).
+    let mut driver = ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
+    let block = RepliesBlock::new(MessageId(42), "Ada".into(), "Ada L".into(), true);
+    driver.session.users_state.replies_block = Some(block);
+    assert!(driver.submit_replies_block().is_err());
+    assert!(
+        driver.session.users_state.replies_block.is_some(),
+        "the box and its checkboxes stay for another try"
+    );
+    assert!(recorder.snapshot().is_empty());
+}

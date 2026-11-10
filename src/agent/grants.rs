@@ -245,9 +245,12 @@ pub(crate) fn bump_generation_for_test() {
 /// A change that leaves the grants as they were (an Allow on a one-off
 /// confirmation) saves nothing and keeps the generation, so it does not
 /// refuse the writes waiting on it.
-pub fn update(account: &AccountKey, change: impl FnOnce(&mut AccountGrants)) {
+pub fn update(
+    account: &AccountKey,
+    change: impl FnOnce(&mut AccountGrants),
+) -> Result<(), SaveError> {
     if super::ui_driver::guard::refuse_if_injecting("change which chats agents may use") {
-        return;
+        return Ok(());
     }
     change_all(|all| {
         let before = all.get(&account.0).cloned().unwrap_or_default();
@@ -258,7 +261,7 @@ pub fn update(account: &AccountKey, change: impl FnOnce(&mut AccountGrants)) {
         }
         all.insert(account.0.clone(), after);
         true
-    });
+    })
 }
 
 /// Serializes changes: each reads, changes and saves the grants while it
@@ -267,41 +270,96 @@ pub fn update(account: &AccountKey, change: impl FnOnce(&mut AccountGrants)) {
 /// file is written in the same order. Readers only wait for the cache.
 static CHANGING: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
+/// The grants file could not be written. The change was not made: the
+/// cache keeps what is on disk, so what Settings shows is what a restart
+/// reads back.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SaveError(pub String);
+
 /// Change every account's grants; `change` says whether it changed any.
-fn change_all(change: impl FnOnce(&mut BTreeMap<String, AccountGrants>) -> bool) {
+/// The file is written before the cache takes the change, so a failed save
+/// leaves both as they were and says so.
+fn change_all(
+    change: impl FnOnce(&mut BTreeMap<String, AccountGrants>) -> bool,
+) -> Result<(), SaveError> {
+    change_all_saving(change, save_to_disk)
+}
+
+/// Writes the grants file, when this run persists anything.
+fn save_to_disk(stored: &Stored) -> Result<(), String> {
+    if !crate::fast_buttons::persistence_enabled() {
+        return Ok(());
+    }
+    let Some(path) = path() else {
+        return Ok(());
+    };
+    crate::settings::write_json_atomic(&path, stored).map_err(|err| err.to_string())
+}
+
+fn change_all_saving(
+    change: impl FnOnce(&mut BTreeMap<String, AccountGrants>) -> bool,
+    save: impl FnOnce(&Stored) -> Result<(), String>,
+) -> Result<(), SaveError> {
     let _changing = crate::locks::lock_or_recover(&CHANGING);
     let mut all = crate::locks::read_or_recover(&CACHE)
         .clone()
         .unwrap_or_else(load);
     if !change(&mut all) {
-        return;
+        return Ok(());
+    }
+    if let Err(err) = save(&Stored {
+        accounts: all.clone(),
+    }) {
+        eprintln!("quill: could not save {GRANTS_FILE}: {err}");
+        return Err(SaveError(err));
     }
     GENERATION.fetch_add(1, Ordering::SeqCst);
-    if crate::fast_buttons::persistence_enabled()
-        && let Some(path) = path()
-        && let Err(err) = crate::settings::write_json_atomic(
-            &path,
-            &Stored {
-                accounts: all.clone(),
-            },
-        )
-    {
-        eprintln!("quill: could not save {GRANTS_FILE}: {err}");
-    }
     *crate::locks::write_or_recover(&CACHE) = Some(all);
     crate::wake::AGENT.poke();
+    Ok(())
 }
 
 /// `account` logged out or was removed: its grants go, so whoever signs in
 /// next under the same key starts from the defaults. Not refused while the
 /// UI driver injects input: it only ever narrows what agents may use.
 pub fn forget_account(account: &AccountKey) {
-    change_all(|all| all.remove(&account.0).is_some());
+    let _ = change_all(|all| all.remove(&account.0).is_some());
 }
 
 #[cfg(test)]
 mod tests {
     use super::{AccountGrants, ChatClass, ChatGrant, Scope};
+
+    #[test]
+    fn a_failed_save_leaves_the_cache_and_generation_as_they_were() {
+        let _guard = crate::locks::lock_or_recover(&crate::agent::access::TEST_LOCK);
+        let account = crate::ids::AccountKey("save-failure-test".into());
+        let failed = super::change_all_saving(
+            |all| {
+                all.insert(account.0.clone(), AccountGrants::default());
+                true
+            },
+            |_| Err("disk full".into()),
+        );
+        assert_eq!(failed, Err(super::SaveError("disk full".into())));
+        let read = super::for_account(&account);
+        assert_eq!(read, AccountGrants::default());
+        assert!(
+            crate::locks::read_or_recover(&super::CACHE)
+                .as_ref()
+                .is_none_or(|all| !all.contains_key(&account.0)),
+            "the cache never took the change"
+        );
+        let saved = super::change_all_saving(
+            |all| {
+                all.insert(account.0.clone(), AccountGrants::default());
+                true
+            },
+            |_| Ok(()),
+        );
+        assert_eq!(saved, Ok(()));
+        super::forget_account(&account);
+    }
 
     #[test]
     fn defaults_are_narrow_and_entries_override() {

@@ -678,6 +678,20 @@ impl QuillApp {
         self.notify_sidebar(cx);
     }
 
+    /// A pinned drag whose release never came (the pointer moves with no
+    /// button down): it ends where it is, and nothing is saved.
+    pub(super) fn cancel_pin_drag(&mut self, cx: &mut Context<Self>) {
+        let dragging = self
+            .chat_list
+            .pin_reorder
+            .as_ref()
+            .is_some_and(|pin| pin.reorder.dragging().is_some());
+        if dragging {
+            self.chat_list.pin_reorder = None;
+            self.notify_sidebar(cx);
+        }
+    }
+
     /// Pinned drag released (tdesktop `finishReorderOnRelease` +
     /// `savePinnedOrder`): the dragged row slides into its slot and the
     /// full order goes out as `setPinnedChats`.
@@ -689,7 +703,15 @@ impl QuillApp {
             return;
         }
         let archived = pin.archived;
-        let ids = pin.reorder.release(std::time::Instant::now());
+        let dragged = pin.reorder.release(std::time::Instant::now());
+        // Another device may have pinned or unpinned chats while the row was
+        // held: what is pinned now keeps its place, the dragged order only
+        // decides the order of the chats both lists have.
+        let now_pinned = match self.session() {
+            Some(session) => session.pinned_chat_ids(archived),
+            None => dragged.clone(),
+        };
+        let ids = quill::pin_reorder::merge_order(&dragged, &now_pinned);
         if let Some(live) = self.live.as_mut() {
             if let Err(err) = live.driver.set_pinned_chat_order(archived, ids) {
                 self.set_note(StatusNote::error(user_error_for(

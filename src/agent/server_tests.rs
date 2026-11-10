@@ -206,3 +206,23 @@ fn a_locked_quill_reads_out_only_the_guide() {
         "{grants}"
     );
 }
+
+#[test]
+fn a_finished_write_result_keeps_its_content_and_says_access_went_off() {
+    let done = crate::agent::server::result_line(
+        &json!(7),
+        json!({"content": [{"type": "text", "text": "sent"}], "isError": false}),
+    );
+    let noted: Value =
+        serde_json::from_str(&super::with_access_off_note(&done, "Agent access is off."))
+            .unwrap_or(Value::Null);
+    assert_eq!(noted["id"], 7);
+    assert_eq!(noted["result"]["content"][0]["text"], "sent");
+    assert!(
+        noted["result"]["content"][1]["text"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("Agent access is off.")
+    );
+    assert_eq!(super::with_access_off_note("not json", "x"), "not json");
+}

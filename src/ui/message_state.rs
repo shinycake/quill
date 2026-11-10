@@ -79,6 +79,9 @@ pub(crate) struct MessageUi {
     pub(super) poll_add_option: Option<PollAddOption>,
     /// The message menu's "Add Fact Check" / "Edit Fact Check" dialog.
     pub(super) fact_check_dialog: Option<super::fact_check::FactCheckDialog>,
+    /// Saved Messages: "Add Name" / "Edit Name" for a tag, in the window
+    /// whose tag menu asked.
+    pub(super) saved_tag_dialog: Option<super::saved_sublists::SavedTagDialog>,
 }
 
 impl MessageUi {
@@ -113,6 +116,7 @@ impl MessageUi {
             poll_voters_dialog: None,
             poll_add_option: None,
             fact_check_dialog: None,
+            saved_tag_dialog: None,
         }
     }
 }
