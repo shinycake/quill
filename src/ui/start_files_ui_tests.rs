@@ -108,16 +108,27 @@ fn a_chat_that_takes_files_opens_with_them_attached(cx: &mut TestAppContext) {
 fn a_chat_that_does_not_open_keeps_the_files_in_the_chooser(cx: &mut TestAppContext) {
     let (app, _shell, mut vcx) = new_app(cx);
     let vcx = &mut vcx;
+    app.update_in(vcx, |app, _, cx| app.begin_start_files(vec![a_file()], cx));
+    let chat = app.update_in(vcx, |app, _, _| {
+        let open = app.open_chat_id();
+        let session = app.demo_session.as_ref().expect("demo session");
+        session
+            .chats
+            .keys()
+            .copied()
+            .map(ChatId)
+            .find(|id| Some(*id) != open)
+            .expect("a second chat")
+    });
     app.update_in(vcx, |app, window, cx| {
-        app.begin_start_files(vec![a_file()], cx);
-        // A chat the list cannot open (not in it).
-        app.choose_start_files_chat(ChatId(987_654_321), window, cx);
+        // A driver that is not granted the chat cannot open it: the list
+        // does not open it either.
+        quill::agent::ui_driver::guard::set_injecting(true);
+        app.choose_start_files_chat(chat, window, cx);
+        quill::agent::ui_driver::guard::set_injecting(false);
         assert_eq!(app.start_files.choosing.len(), 1, "the files wait");
         assert!(app.pending_attachments().is_empty());
-        // Picking a chat that opens afterwards still attaches them.
-    });
-    let chat = first_chat(&app, vcx);
-    app.update_in(vcx, |app, window, cx| {
+        // Picking the chat again, now that it can open, attaches them.
         app.choose_start_files_chat(chat, window, cx);
         assert!(app.start_files.choosing.is_empty());
         assert_eq!(app.pending_attachments().len(), 1);

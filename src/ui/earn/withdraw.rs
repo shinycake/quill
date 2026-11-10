@@ -186,6 +186,7 @@ impl QuillApp {
             );
         if enabled || ad_url.is_some() {
             let withdraw = Button::new("earn-withdraw")
+                .debug_selector(|| "earn-withdraw".into())
                 .label(if locked {
                     tr_with(
                         keys::Q_MONEY_WITHDRAW_2,
