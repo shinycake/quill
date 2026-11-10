@@ -202,13 +202,21 @@ impl QuillApp {
         else {
             return false;
         };
-        let leave_after = matches!(
-            self.admin.ownership_dialog.as_ref().map(|d| d.stage),
-            Some(OwnershipStage::Confirm {
-                leave_after: true,
-                ..
-            })
-        );
+        // The dialog answers only for its own chat: another chat's box,
+        // opened after this transfer was sent, is left as it is.
+        let for_this_dialog = self
+            .admin
+            .ownership_dialog
+            .as_ref()
+            .is_some_and(|d| d.chat_id.0 == done.chat_id);
+        let leave_after = for_this_dialog
+            && matches!(
+                self.admin.ownership_dialog.as_ref().map(|d| d.stage),
+                Some(OwnershipStage::Confirm {
+                    leave_after: true,
+                    ..
+                })
+            );
         let name = self.contact_display_name(done.user_id);
         let is_channel = self.group_flavor(ChatId(done.chat_id)) == Some(GroupFlavor::Channel);
         self.set_note(StatusNote::silent(tr_with(
@@ -219,7 +227,9 @@ impl QuillApp {
             },
             &[("name", &name.to_string())],
         )));
-        self.admin.ownership_dialog = None;
+        if for_this_dialog {
+            self.admin.ownership_dialog = None;
+        }
         if leave_after {
             self.leave_channel(ChatId(done.chat_id), cx);
         }

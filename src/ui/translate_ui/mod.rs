@@ -239,7 +239,8 @@ impl QuillApp {
             return false;
         };
         let prefs = &self.preferences.translate.prefs;
-        let hidden = !session.chat_is_translatable(chat_id) || prefs.bar_hidden(&session.account, chat_id.0);
+        let hidden =
+            !session.chat_is_translatable(chat_id) || prefs.bar_hidden(&session.account, chat_id.0);
         let ui = self.translate_ui_language();
         hidden
             && prefs.translate_chats
