@@ -119,12 +119,6 @@ impl<S: JsonSender> ConnectDriver<S> {
         Ok(())
     }
 
-    /// The link box opened or closed: a save left over from an earlier box
-    /// no longer drives it (its answer still updates the list).
-    pub fn reset_chat_link_save(&mut self) {
-        self.session.settings.business_extra.chat_link_save = ChatLinkSave::Idle;
-    }
-
     /// Deletes a link and drops its row at once; a refused delete puts the
     /// row back (`RequestRollback::ChatLinkDelete`).
     pub fn delete_chat_link(&mut self, link: &str) -> Result<(), ConnectSendError> {

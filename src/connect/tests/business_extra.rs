@@ -435,7 +435,7 @@ fn a_refused_link_save_goes_back_to_idle_and_only_its_own_answer_counts() {
     assert!(matches!(save(&driver), ChatLinkSave::Saving(_)));
     let first = extra_of(&recorder, "createBusinessChatLink");
     // The box was closed and a new one opened: the old save no longer drives it.
-    driver.reset_chat_link_save();
+    driver.session.settings.business_extra.chat_link_save = ChatLinkSave::Idle;
     assert_eq!(save(&driver), ChatLinkSave::Idle);
     feed(
         &mut driver,

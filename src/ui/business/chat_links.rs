@@ -71,11 +71,18 @@ impl QuillApp {
         if !saved {
             return;
         }
-        if let Some(live) = self.live.as_mut() {
-            live.driver.reset_chat_link_save();
-        }
+        self.reset_link_save();
         self.business_go(View::ChatLinks, window, cx);
         self.business_note(tr(keys::CHAT_LINK_SAVED), cx);
+    }
+
+    /// The link box opened, or its answer was taken: a save left over from
+    /// an earlier box no longer drives it (its answer still updates the
+    /// list).
+    pub(super) fn reset_link_save(&mut self) {
+        if let Some(session) = self.session_mut() {
+            session.settings.business_extra.chat_link_save = ChatLinkSave::Idle;
+        }
     }
 
     fn business_links_max(&self) -> usize {
@@ -121,9 +128,7 @@ impl QuillApp {
             text.update(cx, |input, cx| input.set_value(markup, window, cx));
             name.update(cx, |input, cx| input.set_value(title, window, cx));
         }
-        if let Some(live) = self.live.as_mut() {
-            live.driver.reset_chat_link_save();
-        }
+        self.reset_link_save();
         self.business_go(View::LinkEdit, window, cx);
         if let Some(d) = self.business_mut() {
             d.link_edit = Some(LinkEditDraft {

@@ -116,9 +116,9 @@ impl QuillApp {
             note: None,
         });
         self.open_box(crate::ui::shell::DialogKind::Business);
+        self.reset_link_save();
         if let Some(live) = self.live.as_mut() {
             live.driver.session.settings.business.error = None;
-            live.driver.reset_chat_link_save();
             let _ = live.driver.ensure_quick_reply_shortcuts();
             // The hub's row order, and the clips of the feature previews.
             let _ = live.driver.maybe_fetch_business_features();

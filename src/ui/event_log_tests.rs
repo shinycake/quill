@@ -183,31 +183,38 @@ fn the_search_box_follows_the_chat_whose_log_is_open(cx: &mut TestAppContext) {
     let (app, mut vcx) = new_app(cx);
     let other = ChatId(CHANNEL.0 + 1);
     app.update_in(&mut vcx, |app, window, cx| {
+        let shown = |app: &QuillApp, cx: &gpui_kit::App| {
+            app.admin
+                .event_log_search
+                .as_ref()
+                .map(|search| search.input.read(cx).value().to_string())
+        };
         app.ensure_event_log_search(window, cx);
+        app.open_group_settings_view(CHANNEL, GroupSettingsView::RecentActions, cx);
+        app.event_log_search_upkeep(window, cx);
+        // "foo" is typed in this group's box.
+        if let Some(search) = app.admin.event_log_search.as_ref() {
+            search
+                .input
+                .update(cx, |state, cx| state.set_value("foo", window, cx));
+        }
         if let Some(session) = app.session_mut() {
             session
                 .groups
                 .event_log_queries
                 .insert(CHANNEL.0, "foo".to_string());
         }
-        app.open_group_settings_view(CHANNEL, GroupSettingsView::RecentActions, cx);
-        app.event_log_search_upkeep(window, cx);
-        let shown = app
-            .admin
-            .event_log_search
-            .as_ref()
-            .map(|search| search.input.read(cx).value().to_string());
-        assert_eq!(shown.as_deref(), Some("foo"));
+        assert_eq!(shown(app, cx).as_deref(), Some("foo"));
         // Another group's box (Manage > Recent actions): its own, empty query.
         app.close_group_settings_dialog(cx);
         app.open_group_settings_view(other, GroupSettingsView::RecentActions, cx);
         app.event_log_search_upkeep(window, cx);
-        let shown = app
-            .admin
-            .event_log_search
-            .as_ref()
-            .map(|search| search.input.read(cx).value().to_string());
-        assert_eq!(shown.as_deref(), Some(""));
+        assert_eq!(shown(app, cx).as_deref(), Some(""));
+        // Back to the first: its stored query comes back.
+        app.close_group_settings_dialog(cx);
+        app.open_group_settings_view(CHANNEL, GroupSettingsView::RecentActions, cx);
+        app.event_log_search_upkeep(window, cx);
+        assert_eq!(shown(app, cx).as_deref(), Some("foo"));
     });
 }
 
