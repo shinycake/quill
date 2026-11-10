@@ -64,7 +64,7 @@ prints `GATE OK` or `GATE FAIL`. Run it in the foreground. Builds are slow: buil
 
 ## Commit and push in steps
 
-Commit and push after every few fixes, so finished work survives an interruption:
+Commit and push after every few fixes, so finished work survives an interruption. Stage files by path (never `git add -A` or `git add .`); never commit `__pycache__` or build output.
 `git push -u origin <your-branch>` (retry up to 4 times on a network error, waiting 2, 4, 8, 16 s).
 Commit messages end with `Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>`. If the hotspot check needs it,
 put `Hotspot-change: <reason>` on the line directly above `Co-Authored-By:` with no blank line between.
