@@ -99,7 +99,10 @@ fn text_at(
 ) -> AnyElement {
     let runs = styled_runs(text, entities);
     let mut column = div()
-        .id(("msg-rich-text", msg_key.1.wrapping_mul(2).wrapping_add(is_caption as u64)))
+        .id((
+            "msg-rich-text",
+            msg_key.1.wrapping_mul(2).wrapping_add(is_caption as u64),
+        ))
         .text_size(font)
         .flex()
         .flex_col()

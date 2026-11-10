@@ -147,7 +147,10 @@ fn play(window: &mut Window, cx: &mut Context<QuillApp>) {
                 .timer(Duration::from_millis(at.saturating_sub(time)))
                 .await;
             time = at;
-            if app.update(cx, |this, cx| apply_json(this, &json, cx)).is_err() {
+            if app
+                .update(cx, |this, cx| apply_json(this, &json, cx))
+                .is_err()
+            {
                 return;
             }
         }
@@ -174,7 +177,10 @@ fn record(dir: std::path::PathBuf, window: &mut Window, cx: &mut Context<QuillAp
             while let Some((at, json)) = script.get(next)
                 && *at <= time
             {
-                if app.update(cx, |this, cx| apply_json(this, json, cx)).is_err() {
+                if app
+                    .update(cx, |this, cx| apply_json(this, json, cx))
+                    .is_err()
+                {
                     return;
                 }
                 next += 1;

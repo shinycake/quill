@@ -125,6 +125,8 @@ pub(super) struct SelectableRichText {
     emoji: Vec<InlineEmoji>,
     /// What the shaped text dropped from the message: a copy puts it back.
     source: Option<quill::display_text::SourceMap>,
+    /// The text is appearing line by line (`text_reveal`).
+    reveal: Option<super::text_reveal::RevealPaint>,
 }
 
 /// Highlights and font overrides of a paragraph, as `StyledText` takes them.
@@ -185,6 +187,7 @@ impl SelectableRichText {
             paragraph: None,
             emoji: Vec::new(),
             source: None,
+            reveal: super::text_reveal::current(),
         }
     }
 
@@ -517,6 +520,34 @@ impl Element for SelectableRichText {
             self.styled
                 .prepaint(global_id, inspector_id, bounds, &mut (), window, cx);
         }
+        if let Some(reveal) = &self.reveal {
+            match &self.paragraph {
+                Some(paragraph) => {
+                    let line = f32::from(paragraph.line_height()).max(1.);
+                    let count =
+                        (f32::from(paragraph.size().height) / line).round().max(1.) as usize;
+                    let top = f32::from(bounds.origin.y);
+                    let width = f32::from(paragraph.width());
+                    let lines: Vec<super::text_reveal::LaidLine> = (0..count)
+                        .map(|ix| super::text_reveal::LaidLine {
+                            top: top + line * ix as f32,
+                            bottom: top + line * (ix + 1) as f32,
+                            width,
+                            trailing: 0.,
+                        })
+                        .collect();
+                    reveal.report(&lines, paragraph.is_rtl());
+                }
+                None => reveal.report(
+                    &super::text_reveal::styled_lines(
+                        self.styled.layout(),
+                        &self.text,
+                        bounds.origin,
+                    ),
+                    false,
+                ),
+            }
+        }
         let hitbox = window.insert_hitbox(bounds, HitboxBehavior::Normal);
         let mut emoji = Vec::new();
         if !self.emoji.is_empty() {
@@ -535,6 +566,13 @@ impl Element for SelectableRichText {
                 let Some(rect) = rect else {
                     continue;
                 };
+                if self
+                    .reveal
+                    .as_ref()
+                    .is_some_and(|reveal| !reveal.shows(rect, bounds))
+                {
+                    continue;
+                }
                 let mut element = match &item.visual {
                     InlineEmojiVisual::Image(source) => img(source.clone())
                         .size(rect.size.width)
@@ -652,9 +690,11 @@ impl Element for SelectableRichText {
                 window.paint_quad(fill(quad, self.selection_color));
             }
         }
-        match &self.paragraph {
+        let paragraph = self.paragraph.clone();
+        let styled = &mut self.styled;
+        let mut draw = |window: &mut Window, cx: &mut App| match &paragraph {
             Some(paragraph) => paragraph.paint(bounds.origin, bounds.size.width, window, cx),
-            None => self.styled.paint(
+            None => styled.paint(
                 global_id,
                 inspector_id,
                 bounds,
@@ -663,6 +703,10 @@ impl Element for SelectableRichText {
                 window,
                 cx,
             ),
+        };
+        match &self.reveal {
+            Some(reveal) => reveal.paint(bounds, window, cx, &mut draw),
+            None => draw(window, cx),
         }
         for element in emoji.iter_mut() {
             element.paint(window, cx);

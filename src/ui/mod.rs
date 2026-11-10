@@ -165,6 +165,7 @@ pub(crate) mod startup_failure;
 mod stickers_manager;
 mod stories_state;
 mod synthetic;
+mod text_reveal;
 pub(crate) mod tooltip_timing;
 mod twofa_state;
 mod update_pill;
