@@ -187,9 +187,14 @@ impl QuillApp {
             .as_ref()
             .map(|recipient| recipient.sender)
             .or_else(|| {
-                let state = self.session()?.payments.gift_market.auctions.get(&gift_id)?;
+                let state = self
+                    .session()?
+                    .payments
+                    .gift_market
+                    .auctions
+                    .get(&gift_id)?;
                 if state.my_stars() > 0 {
-                    state.my().and_then(|my| my.owner.clone())
+                    state.my().and_then(|my| my.owner)
                 } else {
                     None
                 }
