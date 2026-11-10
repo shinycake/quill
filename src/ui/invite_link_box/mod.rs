@@ -22,8 +22,8 @@ use quill::invite_link_form::{
     ChatFacts, InviteLinkForm, InviteLinkRequest, NAME_MAX, STARS_MAX_DEFAULT, stars_amount,
 };
 use quill::lang::{keys, tr, tr_with};
-use quill::state::{Submit, SubmitView};
 use quill::local_time::now_unix;
+use quill::state::{Submit, SubmitView};
 use quill::telegram::envelope::ParsedChatInviteLink;
 
 /// The open box: its choices and its two text fields.
@@ -345,15 +345,16 @@ impl QuillApp {
                         let body = body_app
                             .update(cx, |this, cx| this.invite_link_box_body(cx))
                             .unwrap_or_else(|| div().into_any_element());
-                        let refused = body_app.read(cx).invite_link_box().and_then(|link_box| {
-                            match &link_box.submit {
-                                Submit::Failed(reason) => Some(tr_with(
-                                    keys::Q_PEOPLE_COULDNT_SAVE_REASON,
-                                    &[("reason", reason)],
-                                )),
-                                _ => None,
-                            }
-                        });
+                        let refused =
+                            body_app.read(cx).invite_link_box().and_then(
+                                |link_box| match &link_box.submit {
+                                    Submit::Failed(reason) => Some(tr_with(
+                                        keys::Q_PEOPLE_COULDNT_SAVE_REASON,
+                                        &[("reason", reason)],
+                                    )),
+                                    _ => None,
+                                },
+                            );
                         let danger = cx.theme().danger;
                         content.child(body).children(refused.map(|line| {
                             div()

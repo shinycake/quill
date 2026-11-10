@@ -55,9 +55,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             }
             if self.session.chat_unrestrict_boost_count(chat_id) != save.unrestrict_boost_count {
                 differs = true;
-                sent.extend(
-                    self.set_unrestrict_boost_count(chat_id, save.unrestrict_boost_count)?,
-                );
+                sent.extend(self.set_unrestrict_boost_count(chat_id, save.unrestrict_boost_count)?);
             }
         }
         Ok(match (sent.is_empty(), differs) {

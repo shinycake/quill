@@ -68,7 +68,9 @@ impl QuillApp {
                             keys::Q_PEOPLE_COULD_NOT_SET_CUSTOM_TITLE,
                         ))),
                     },
-                    None => Err(StatusNote::info(tr(keys::Q_PEOPLE_CUSTOM_TITLES_NEED_A_LIVE))),
+                    None => Err(StatusNote::info(tr(
+                        keys::Q_PEOPLE_CUSTOM_TITLES_NEED_A_LIVE,
+                    ))),
                 }
             }
             // Slice G10: `setCommunityName` (schema 1.8.67, line 11811;

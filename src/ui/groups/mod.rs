@@ -616,7 +616,9 @@ impl QuillApp {
                     .create_community(ChatId(chat_id), &name, hide_chat)
                 {
                     Ok(Some(id)) => Ok(id),
-                    _ => Err(StatusNote::error(tr(keys::Q_PEOPLE_COULD_NOT_CREATE_COMMUNITY))),
+                    _ => Err(StatusNote::error(tr(
+                        keys::Q_PEOPLE_COULD_NOT_CREATE_COMMUNITY,
+                    ))),
                 }
             }
             None => Err(StatusNote::info(tr(

@@ -295,7 +295,9 @@ pub(crate) fn seed_channel_statistics(session: &mut Session, chat_id: i64) {
     };
     session.groups.chat_statistics.insert(
         chat_id,
-        ChatStatisticsFetch::Loaded(std::sync::Arc::new(ChatStatistics::Channel(Box::new(stats)))),
+        ChatStatisticsFetch::Loaded(std::sync::Arc::new(ChatStatistics::Channel(Box::new(
+            stats,
+        )))),
     );
     session.groups.stats.graphs.insert(
         GraphKey {

@@ -115,7 +115,12 @@ impl QuillApp {
             .flex_col()
             .gap_1()
             .child(div().text_sm().font_semibold().child(title.to_string()))
-            .child(div().text_xs().text_color(danger()).child(message.to_string()))
+            .child(
+                div()
+                    .text_xs()
+                    .text_color(danger())
+                    .child(message.to_string()),
+            )
             .child(
                 Button::new(format!("stat-graph-retry-{id}"))
                     .label(tr(keys::Q_MONEY_RETRY))

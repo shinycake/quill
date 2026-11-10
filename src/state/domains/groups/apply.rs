@@ -309,9 +309,10 @@ impl Session {
                     && let Some(pending) = pending
                     && let Some(chat_id) = pending.chat_id
                 {
-                    self.groups
-                        .chat_statistics
-                        .insert(chat_id.0, ChatStatisticsFetch::Loaded(std::sync::Arc::new(statistics)));
+                    self.groups.chat_statistics.insert(
+                        chat_id.0,
+                        ChatStatisticsFetch::Loaded(std::sync::Arc::new(statistics)),
+                    );
                 }
             }
             GroupsPayload::MessageStatistics { statistics } => {

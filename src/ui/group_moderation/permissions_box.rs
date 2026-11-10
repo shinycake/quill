@@ -27,12 +27,12 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use quill::ids::ChatId;
 use quill::lang::{keys, tr, tr_with};
-use quill::state::{Submit, SubmitView};
 use quill::permissions_box::{
-    PermissionsSent,
-    BOOSTS_STOPS, MEDIA, Permission, PermissionsSave, SLOW_MODE_STOPS, bottom_rows,
-    has_send_restrictions, initial, lock, media_on, set_media, suggests_broadcast_group, toggle,
+    BOOSTS_STOPS, MEDIA, Permission, PermissionsSave, PermissionsSent, SLOW_MODE_STOPS,
+    bottom_rows, has_send_restrictions, initial, lock, media_on, set_media,
+    suggests_broadcast_group, toggle,
 };
+use quill::state::{Submit, SubmitView};
 use quill::telegram::envelope::ChatPermissions;
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -207,11 +207,15 @@ impl QuillApp {
             let Some(body) = this.permissions_box_body(cx) else {
                 return dialog.on_close(on_close);
             };
-            let sending = this.admin.permissions_dialog.as_ref().is_some_and(|dialog| {
-                dialog
-                    .submit
-                    .is_sending(this.session().map(|session| &session.requests))
-            });
+            let sending = this
+                .admin
+                .permissions_dialog
+                .as_ref()
+                .is_some_and(|dialog| {
+                    dialog
+                        .submit
+                        .is_sending(this.session().map(|session| &session.requests))
+                });
             let footer = div()
                 .flex()
                 .justify_end()

@@ -357,7 +357,9 @@ fn a_request_without_a_field_that_failed_keeps_the_box_open(cx: &mut TestAppCont
         assert!(app.group_edit_box().is_some(), "still out");
         if let Some(session) = app.demo_session.as_mut() {
             session.requests.take(id);
-            session.requests.record_failure(id, "CHAT_ADMIN_REQUIRED".into());
+            session
+                .requests
+                .record_failure(id, "CHAT_ADMIN_REQUIRED".into());
         }
         assert!(
             app.group_edit_box().is_some(),

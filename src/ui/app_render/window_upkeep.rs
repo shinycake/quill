@@ -139,10 +139,7 @@ impl QuillApp {
             self.maybe_prefill_folder_editor(window, cx);
         }
         // The welcome messages box clears its field when an Add is answered.
-        if self
-            .windows
-            .dialog_may_show_in(DialogKind::Welcome, here)
-        {
+        if self.windows.dialog_may_show_in(DialogKind::Welcome, here) {
             self.settle_welcome_dialog(window, cx);
         }
         // A collectible lookup that failed copies its link, with the toast

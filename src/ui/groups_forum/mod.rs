@@ -192,7 +192,10 @@ impl QuillApp {
                     })
             })
         });
-        if editor.submit.is_sending(self.session().map(|session| &session.requests)) {
+        if editor
+            .submit
+            .is_sending(self.session().map(|session| &session.requests))
+        {
             return;
         }
         let sent = match self.live.as_mut() {
@@ -206,10 +209,12 @@ impl QuillApp {
                     ),
                     // The General topic only has a name.
                     Some(id) if general => live.driver.edit_forum_topic(chat_id, id, &name),
-                    Some(id) => {
-                        live.driver
-                            .edit_forum_topic_with_icon(chat_id, id, &name, editor.icon_emoji)
-                    }
+                    Some(id) => live.driver.edit_forum_topic_with_icon(
+                        chat_id,
+                        id,
+                        &name,
+                        editor.icon_emoji,
+                    ),
                 };
                 match (result, editor.target) {
                     (Ok(Some(id)), _) => Ok(id),

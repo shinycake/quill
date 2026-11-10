@@ -247,8 +247,8 @@ fn a_recent_post_opens_its_statistics_and_back_returns(cx: &mut TestAppContext) 
 #[gpui_kit::test]
 fn a_redraw_shares_the_loaded_statistics(cx: &mut TestAppContext) {
     use quill::state::ChatStatisticsFetch;
-    let (app, mut vcx) = open_statistics(cx);
-    app.read_with(&mut vcx, |app, _| {
+    let (app, vcx) = open_statistics(cx);
+    app.read_with(&vcx, |app, _| {
         let held = &app.session().expect("session").groups.chat_statistics;
         let (Some(ChatStatisticsFetch::Loaded(first)), Some(ChatStatisticsFetch::Loaded(second))) =
             (held.get(&CHANNEL).cloned(), held.get(&CHANNEL).cloned())

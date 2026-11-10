@@ -175,5 +175,4 @@ mod tests {
         assert_eq!(registry.failure(RequestId(0)), None);
         assert_eq!(registry.failure(RequestId(199)), Some("e199"));
     }
-
 }

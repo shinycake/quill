@@ -78,7 +78,9 @@ impl QuillApp {
                 MemberListFilter::Search
             };
             let query = query.trim();
-            let sent = live.driver.refresh_supergroup_members(chat_id, filter, query);
+            let sent = live
+                .driver
+                .refresh_supergroup_members(chat_id, filter, query);
             // The page shown is the one asked with this query: `searched`
             // follows what the session recorded as asked, so a search the
             // driver refused leaves the old page under the old text.
@@ -213,7 +215,9 @@ impl QuillApp {
         };
         let sent = match (action, self.live.as_mut()) {
             (Err(note), _) => Err(note),
-            (Ok(_), None) => Err(StatusNote::info(tr(keys::Q_PEOPLE_ADMIN_ACTIONS_NEED_A_LIVE))),
+            (Ok(_), None) => Err(StatusNote::info(tr(
+                keys::Q_PEOPLE_ADMIN_ACTIONS_NEED_A_LIVE,
+            ))),
             (Ok(action), Some(live)) => {
                 let (result, refused) = match action {
                     AdminAction::Promote(user_id, rights) => (
@@ -356,7 +360,9 @@ impl QuillApp {
                     ))),
                 }
             }
-            None => Err(StatusNote::info(tr(keys::Q_PEOPLE_MEMBER_ACTIONS_NEED_A_LIVE))),
+            None => Err(StatusNote::info(tr(
+                keys::Q_PEOPLE_MEMBER_ACTIONS_NEED_A_LIVE,
+            ))),
         };
         match sent {
             Ok(id) => {
@@ -770,7 +776,7 @@ mod rights_editor_tests;
 mod stops_slider;
 #[cfg(test)]
 #[cfg(feature = "demo-capture")]
-mod submit_tests;
+mod stops_slider_tests;
 #[cfg(test)]
 #[cfg(feature = "demo-capture")]
-mod stops_slider_tests;
+mod submit_tests;

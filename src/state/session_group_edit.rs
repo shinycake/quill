@@ -86,10 +86,11 @@ impl Session {
             // The photo uploads after the box closes (tdesktop), so the
             // box cannot show its refusal: say it as the action error.
             RequestPurpose::SetChatPhoto => {
-                self.chats_state.chat_action_error = Some(super::request_errors::call_request_error_line(
-                    err,
-                    "Could not change the photo",
-                ));
+                self.chats_state.chat_action_error =
+                    Some(super::request_errors::call_request_error_line(
+                        err,
+                        "Could not change the photo",
+                    ));
                 (
                     GroupInfoField::Photo,
                     super::request_errors::error_reason(err),

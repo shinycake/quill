@@ -208,7 +208,12 @@ impl QuillApp {
         };
         let ask = Ask {
             title: tr_with(keys::Q_PEOPLE_DEMOTE, &[("name", &name)]).into(),
-            text: match this.admin.admin_dialog.as_ref().map(|dialog| &dialog.submit) {
+            text: match this
+                .admin
+                .admin_dialog
+                .as_ref()
+                .map(|dialog| &dialog.submit)
+            {
                 Some(Submit::Failed(reason)) => format!(
                     "{}\n{}",
                     tr(keys::Q_PEOPLE_THEY_WILL_BECOME_A_REGULAR),
