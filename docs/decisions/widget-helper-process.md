@@ -29,24 +29,15 @@ Three threads touch one live widget: Quill's runtime thread
 the sandbox's engine thread (both made by the C++). The UI thread never calls
 the C ABI. It sends `Inbox` messages and takes an `Outbox`.
 
-Calls from Rust into C++ (`ffi.rs`), all on the runtime thread, all blocking
-until the C++ returns:
-
-| Call | When | Returns |
-| --- | --- | --- |
-| `qw_resources_init` | once per process | bool |
-| `qw_create`, `qw_start`, `qw_destroy` | once per runtime | handle or error text |
-| `qw_set_visible`, `_theme`, `_data`, `_safe_area`, `_width` | on a change from the UI | nothing |
-| `qw_respond` | once per bot answer | nothing |
-| `qw_pointer`, `qw_hover` | per mouse event over the widget | nothing |
-| `qw_tick` | per display frame while it animates, or at the time it named | nothing |
-| `qw_get_state` | every turn of the thread's loop | a struct |
-| `qw_paint` | when the document is dirty and shown | the display list as JSON |
-| `qw_cursor` | after a hover | a string |
-| `qw_selected_text`, `qw_clear_selection` | after a press | a string, a bool |
-| `qw_trim` | when it leaves the screen | nothing |
-
-`qw_set_max_height`, `qw_wheel` and `qw_key` exist in the header and are
+Calls from Rust into C++ (`ffi.rs`) are all made on the runtime thread and
+all block until the C++ returns. `qw_resources_init` runs once per process,
+`qw_create`, `qw_start` and `qw_destroy` once per runtime. The setters
+(`qw_set_visible`, `_theme`, `_data`, `_safe_area`, `_width`), `qw_respond`,
+`qw_pointer`, `qw_hover`, `qw_tick` and `qw_trim` return nothing. Four return
+data: `qw_get_state` (a struct, every turn of the thread's loop), `qw_paint`
+(the display list as JSON, when the document is dirty and shown), `qw_cursor`
+(after a hover) and `qw_selected_text` with `qw_clear_selection` (after a
+press). `qw_set_max_height`, `qw_wheel` and `qw_key` are in the header and
 never called from Rust.
 
 Callbacks from C++ into Rust (`qw_callbacks`). The header says they arrive
@@ -107,27 +98,27 @@ lines, so new behavior goes in new files.
 ## One binary
 
 The helper is `quill --widget-helper`, one more early branch in `main.rs`
-next to `--apply-update` and `--video-probe`. It returns before the panic
-hook's crash log, the single-instance check, GPUI and TDLib, so a helper
-crash writes no Quill crash report and never touches `logs/clean-exit`.
+next to `--apply-update` and `--video-probe`. It returns before the crash
+log, the single-instance check, GPUI and TDLib, so a helper crash writes no
+Quill crash report and never touches `logs/clean-exit`.
 
-"Nothing extra to sign or notarize" is true, but it is a weak reason: the
-bundle already ships and signs two helper executables (`quill-webview`,
+"Nothing extra to sign or notarize" is true but a weak reason: the bundle
+already ships and signs two helper executables (`quill-webview`,
 `quill-qr-scanner`). The reasons that hold:
 
 - The runtime lives in the binary crate's `ui` module. A separate executable
   means moving about 3,900 lines into a crate, plus a build step in three
   package workflows and the bundle checkers.
 - Starting the big binary is cheap. `quill --version` on the 2026-10-21 local
-  macOS arm64 build takes 10 to 20 ms to exit and peaks at 4.7 MB of
-  footprint (`/usr/bin/time -l`, three runs). Its dynamic libraries (TDLib,
-  the call library) load on demand and the helper never asks for them.
+  macOS arm64 build exits in 10 to 20 ms and peaks at 4.7 MB of footprint
+  (`/usr/bin/time -l`, three runs). TDLib and the call library load on
+  demand, and the helper never asks for them.
 - Updates are applied after Quill exits (`update_install::hand_off`), so the
   file on disk normally is the running build. A package manager can replace
-  it under a running Quill on Linux and Windows, which the handshake catches.
+  it under a running Quill, which the handshake catches.
 
-Costs: the helper maps every framework Quill links, which limits how tight a
-sandbox can be (see Sandboxing), and Activity Monitor shows a second `quill`.
+The cost: the helper maps every framework Quill links, which limits how tight
+a sandbox can be, and Activity Monitor shows a second `quill`.
 
 ## Lifecycle
 
@@ -160,42 +151,41 @@ enum Helper {
 | `Unavailable` | `retry_at` passes and a widget asks: spawn. Otherwise it lasts until Quill restarts |
 
 Spawn: `current_exe()` with `--widget-helper`, no console window on Windows,
-stderr piped and kept as a bounded tail for the widget log, and only the
-environment that font lookup needs. On Linux the helper asks to be killed
-when its parent dies (`PR_SET_PDEATHSIG`, as `crates/webview-host` does). On
-Windows it sits in a kill-on-close job, as `proxy_carrier` does. On every OS
-it exits when its channel closes.
+stderr kept as a bounded tail for the widget log, and only the environment
+font lookup needs. On Linux the helper asks to be killed when its parent dies
+(`PR_SET_PDEATHSIG`, as `crates/webview-host` does), on Windows it sits in a
+kill-on-close job (as `proxy_carrier` does), and everywhere it exits when its
+channel closes.
 
 Handshake: Quill sends `Hello { protocol, build }`. The helper points its own
-stdout at stderr, applies its sandbox, loads the JS bundles, starts building
-the font database on a worker and answers `Ready { protocol, build, bundles }`.
-Both sides require equal values. This is one binary, so nothing negotiates:
-a mismatch means the file on disk changed, and widgets wait for the restart
-the update asks for anyway. `bundles: false` is the #1425 CRLF case. Every
-widget then shows the stopped card with that reason, as today.
+stdout at stderr, applies its sandbox, loads the JS bundles, starts the font
+database on a worker and answers `Ready { protocol, build, bundles }`. Both
+sides require equal values. A mismatch means the file on disk changed, and
+widgets wait for the restart the update asks for anyway. `bundles: false` is
+the #1425 CRLF case: every widget shows the stopped card with that reason, as
+today.
 
-Lazy start and idle exit, as the owner was told, with one addition. A helper
-that starts pays for the font scan and the bundle load again, so it lingers
-for 30 s after its last runtime ends (`Lingering`) before Quill closes it.
-Quill decides. The helper never exits by its own choice.
+Lazy start and idle exit hold, with one addition. A new helper pays for the
+font scan and the bundle load again, so a helper lingers 30 s after its last
+runtime ends before Quill closes it. The helper never exits by its own
+choice.
 
-Crash detection: the reader thread sees the end of the stream, the reaper
-(`child_reap.rs`) reports the exit status, and any exit Quill did not ask for
-counts as a death. The status (signal or NTSTATUS) and the stderr tail go to
-the widget log.
+Crash detection: the reader thread sees the end of the stream and the reaper
+(`child_reap.rs`) reports the exit status. Any exit Quill did not ask for is
+a death. The status and the stderr tail go to the widget log.
 
-Hang detection: a widget's own script loop is already stopped by the
-sandbox's CPU limit. What is left is native code that loops or deadlocks
-while holding the renderer's lock, which blocks that widget's runtime thread
-in `qw_get_state` or `qw_paint`. Each runtime thread reports the sequence
-number of the last command it applied after every turn. A runtime with a
-command unanswered for 10 s on the supervisor's clock is hung, and the helper
-is killed. A layout query may block for 3 s by design, hence 10. No ping runs
-while nothing is outstanding, so idle CPU stays at zero.
+Hang detection: the sandbox's CPU limit already stops a widget's own script
+loop. What is left is native code that loops or deadlocks holding the
+renderer's lock, which blocks that widget's runtime thread in `qw_get_state`
+or `qw_paint`. Each runtime thread reports the sequence number of the last
+command it applied. A runtime with a command unanswered for 10 s on the
+supervisor's clock is hung, and the helper is killed (a layout query may
+block 3 s by design, hence 10). Nothing is sent while nothing is outstanding,
+so idle CPU stays at zero.
 
-Backoff: 1 s, doubling to 60 s. The count resets when a helper closes cleanly
-from `Lingering` or stays `Ready` for 60 s. Five failures in a row give
-`Unavailable` with a retry after five minutes.
+Backoff: 1 s, doubling to 60 s, reset when a helper closes cleanly or stays
+`Ready` for 60 s. Five failures in a row give `Unavailable`, retried after
+five minutes.
 
 ### What a death does to each widget
 
@@ -331,162 +321,141 @@ that at a memory and start-up cost (see Rejected). The OS sandbox does not.
 
 ## Sandboxing
 
-Optional, and last. The helper needs very little after `Ready`: its channel,
-the regions it is handed, memory, threads, clocks, and read access to font
-files. cosmic-text opens a font file when a face is first used, so the font
-folders have to stay readable. That rules out the strictest profiles. The
-helper needs no network, no writes, no child process and no window.
+Optional, and last. After `Ready` the helper needs its channel, the regions
+it is handed, memory, threads, clocks and read access to font files.
+cosmic-text opens a font file when a face is first used, so the font folders
+stay readable, which rules out the strictest profiles. It needs no network,
+no writes, no child process and no window.
 
-- macOS: a custom profile applied with `sandbox_init` at helper start, after
-  dyld has loaded Quill's frameworks. Default deny, with file reads for the
-  system and user font folders. `sandbox_init` is deprecated, but it is what
-  Chromium and Firefox still use, and notarization accepts it.
-- Linux: `PR_SET_NO_NEW_PRIVS`, a seccomp filter (no `socket`, `execve`,
-  `ptrace`, `open` for writing) and Landlock rules that allow reads under the
-  font folders fontdb reported. Landlock needs kernel 5.13; without it the
-  seccomp filter still applies. Both nest inside Flatpak. New dependencies:
-  `seccompiler` and `landlock`.
-- Windows: the job object from PR 2 gains limits (one process, a memory cap,
-  the UI restrictions), and the helper sets `SetProcessMitigationPolicy` for
-  child processes and extension points. AppContainer would hide per-user
-  fonts under `%LOCALAPPDATA%`, so it is out. A low-integrity token is a
-  possible later step: it needs `CreateProcessAsUser`, which
-  `std::process::Command` cannot do. Win32k lockdown is not practical while
-  the helper is the GUI binary with `user32` loaded.
+- macOS: a custom default-deny profile applied with `sandbox_init` at helper
+  start, allowing reads of the system and user font folders. The call is
+  deprecated, but Chromium and Firefox still use it and notarization accepts
+  it.
+- Linux: `PR_SET_NO_NEW_PRIVS`, a seccomp filter (no `socket`, `execve` or
+  `ptrace`) and Landlock read rules for the font folders. Landlock needs
+  kernel 5.13; without it seccomp still applies. Both nest inside Flatpak.
+  New dependencies: `seccompiler` and `landlock`.
+- Windows: the job object gains limits (one process, a memory cap, the UI
+  restrictions) and the helper sets `SetProcessMitigationPolicy` for child
+  processes and extension points. AppContainer would hide per-user fonts
+  under `%LOCALAPPDATA%`, so it is out. A low-integrity token needs
+  `CreateProcessAsUser`, which `std::process::Command` cannot do. Win32k
+  lockdown is not practical while the helper is the GUI binary.
 
-A sandbox that fails to apply is logged and the helper runs without it. Crash
-isolation is the goal, and it does not depend on the sandbox.
+A sandbox that fails to apply is logged and the helper runs without it.
+Crash isolation does not depend on it.
 
 ## Memory and latency
 
-Nothing here was measured on a running helper. PR 2 has to measure it with
-`footprint` and the frame clock before any number is repeated. Derivation,
-macOS arm64:
+Nothing here was measured on a running helper. PR 2 measures it with
+`footprint` and the frame clock. Derivation, macOS arm64:
 
-- Process baseline: 4.7 MB (measured, `quill --version` above).
+- Process baseline: 4.7 MB (measured, above).
 - JS bundles copied once by `qw_resources_init`: 1.9 MB (file sizes).
 - Font database: unmeasured, a few MB.
 - Per live widget: the sandbox's QuickJS heap, capped at 8 MB
-  (`memoryLimitBytes`); the validator, the document and three or more thread
-  stacks; a private pixmap and a region of the same size, 1.9 MB each for an
-  800 × 600 px frame.
+  (`memoryLimitBytes`), the validator, the document, three or more thread
+  stacks, and a private pixmap plus a region of the same size (1.9 MB each
+  at 800 × 600 px).
 
 One or two simple widgets land in the 15 to 25 MB the owner was told. Eight
-heavy ones could pass 100 MB, because of the 8 MB heaps. But most of this is
+heavy ones could pass 100 MB because of the 8 MB heaps. Most of this is
 memory Quill holds itself today and would stop holding. What the design adds
-is the process baseline plus one more frame buffer per live widget: about
-7 MB for one widget, about 5 + 2n MB for n.
+is the baseline plus one frame buffer per live widget, about 5 + 2n MB for n
+widgets.
 
-Latency. An input now goes through a writer thread, a socket and the
-helper's reader before the runtime thread sees it, and the frame comes back
-through a message and one copy. Four thread wakeups cost tens of
-microseconds each. The copy is 0.2 to 1 ms for a 2 to 5 MB frame at memory
-speed. Together that is about 0.3 to 1.2 ms on top of today's path, or 2 to
-7% of a 60 Hz frame. So a press shows one display frame later about that
-often, when the extra time crosses a vsync. "A frame of input latency" is
-the worst case. Animated widgets get their tick the same way and paint the
-same frame count.
+Latency: an input goes through a writer thread, a socket and the helper's
+reader before the runtime thread sees it, and the frame comes back through a
+message and one copy. Four thread wakeups cost tens of microseconds each, and
+the copy 0.2 to 1 ms for a 2 to 5 MB frame. That is about 0.3 to 1.2 ms on
+top of today's path, 2 to 7% of a 60 Hz frame, so a press shows one display
+frame later about that often. "A frame of input latency" is the worst case.
 
 Start-up: 10 to 20 ms to reach `main` (measured), then the font scan and the
-bundle load, which the first widget already pays today inside Quill. The
-linger keeps a scroll past several widgets from paying it twice.
+bundle load, which the first widget already pays today inside Quill.
 
 ## Files and state
 
-All under `src/ui/widget_runtime/`, each well under 1,000 lines:
-`engine.rs` (today's `thread.rs`, now run by the helper), `protocol.rs`
-(messages, limits, checks), `helper_main.rs` (the helper's loop),
+All under `src/ui/widget_runtime/`, each well under 1,000 lines: `engine.rs`
+(today's `thread.rs`, run by the helper), `protocol.rs`, `helper_main.rs`,
 `supervisor.rs` (the pure state machine), `supervisor_io.rs` (spawn, reader,
-writer, reaper), `transport/{unix,windows}.rs` (channel and regions, the only
-new `unsafe`, each block with its reason) and `sandbox/{macos,linux,windows}.rs`.
-`Lifecycle` and `StopReason` stay in `src/message_widget`. No stage is a
-bool: the helper, placement and stop reason are the enums above, and the
-supervisor's clock is injected.
+writer, reaper), `transport/{unix,windows}.rs` (the only new `unsafe`) and
+`sandbox/{macos,linux,windows}.rs`. `Lifecycle` and `StopReason` stay in
+`src/message_widget`. No stage is a bool, and the supervisor's clock is
+injected.
 
 ## Tests
 
 No test sleeps or waits on wall time. The supervisor takes its clock as an
-argument, and tests that use a real process block on the runtime's own
-events, as the smoke tests do now.
+argument, and tests with a real process block on the runtime's own events, as
+the smoke tests do now.
 
-- Supervisor, with a fake link and a manual clock: every stage and every way
-  out in the table; backoff steps and reset; linger and idle close; build
-  mismatch; refused bundles; a flood; a full outgoing queue; an unanswered
-  command with the clock moved past 10 s; a late message from an old
-  generation; shared death with one widget and with three; a suspect's solo
-  death and its clearing.
-- Protocol: round trips, an oversized line, an unknown type, a frame larger
-  than its region, a link without a press, storage over quota, a query from
-  a widget that may not send one.
+- Supervisor, with a fake link and a manual clock: every stage and way out
+  in the table, backoff steps and reset, linger, build mismatch, refused
+  bundles, a flood, a full outgoing queue, an unanswered command with the
+  clock moved past 10 s, a late message from an old generation, a shared
+  death with one widget and with three, a suspect's solo death and clearing.
+- Protocol: round trips and each check under Security failing as it should.
 - Transport, per OS, both ends in one test process: a region made, passed,
-  written and read; a shrink attempt.
-- Fake helper: a scripted `Link` that plays a helper's side from a list. It
+  written and read, and a shrink attempt.
+- Fake helper: a scripted link that plays the helper's side from a list. It
   drives the `widgets_ui` tests (pill after `Lost`, auto restart, strikes).
 - Real helper: the test binary runs itself as the helper through an ignored
-  child test, the way `a_refused_bundle_stops_the_widget` does. One test
-  boots `tabs.html` and finds drawn pixels through the region.
+  child test, as `a_refused_bundle_stops_the_widget` does, boots `tabs.html`
+  and finds drawn pixels through the region.
 - Crash injection: the child, under `cfg(test)`, reads
   `QUILL_WIDGET_HELPER_FAULT` and calls `abort()` when the widget starts, or
   stops reading. The parent sees `Lost`, moves the clock through the backoff,
   and the widget paints again from a new helper. The CRLF test keeps passing,
-  now with the refusal inside the helper.
-- CI: the `windows-widgets` job runs all of it under cdb. The same tests run
-  on Linux and macOS. Linux widgets are untested today, and this is where
-  that ends.
+  with the refusal now inside the helper.
+- CI: `windows-widgets` runs all of it under cdb, and the same tests run on
+  Linux and macOS. Linux widgets are untested today.
 - `/verify`: `ready-widgets` through the real helper, and a demo step that
   kills the helper and captures the pill, then the redrawn widget.
-- By hand, once per OS: abort the helper and confirm no crash dialog appears
-  (macOS report dialog, Windows Error Reporting, a Linux core file), no Dock
-  icon or console window shows, and Quill's own crash log stays empty.
+- By hand, once per OS: abort the helper and confirm that no crash dialog,
+  Dock icon or console window appears and Quill's own crash log stays empty.
 
 ## Pull requests
 
-Four, one more than the owner was told. The third could fold into the second
-at the cost of a very large review, and the fourth is optional.
+Four, one more than the owner was told. The fourth is optional.
 
-1. The boundary in process. Split `thread.rs` into the engine and the
-   `Runtime` front, add the protocol types and checks, the pure supervisor and
-   the fake link, and run the engine over an in-memory link. Add `StopReason`
-   and the Quill-side checks from Security. Nothing changes for users.
-2. The process. `--widget-helper`, the transports and regions on three OSes,
-   spawn, handshake, linger, crash detection, backoff, the pill and the auto
-   restart. The real-helper and crash-injection tests, CI on three OSes, and
-   the measured memory and latency. Production stops running the engine in
-   Quill's process.
+1. The boundary in process: split `thread.rs` into the engine and the
+   `Runtime` front, add the protocol, the pure supervisor and the fake link,
+   run the engine over an in-memory link, add `StopReason` and the checks
+   under Security. Nothing changes for users.
+2. The process: `--widget-helper`, transports and regions on three OSes,
+   spawn, handshake, linger, crash detection, backoff, pill and auto restart,
+   the real-helper and crash-injection tests on three OSes, and measured
+   memory and latency. Production stops running the engine in Quill.
 3. Hangs and blame: the unanswered-command watchdog, suspects and solo
-   helpers, and the outgoing queue cap.
+   helpers, the outgoing queue cap.
 4. Sandboxing per OS.
 
 ## Rejected
 
-- Only the C++ in the helper, with fonts, images and the painter in Quill.
-  This is the synchronous-callback design. See "Where the process boundary
-  goes".
-- A separate `quill-widget` executable. It would allow a tighter sandbox
-  (fewer libraries, Win32k lockdown) and take about 9 MiB out of the main
-  binary. It costs a crate move, packaging in three workflows and a second
-  build to keep in step. Worth a second look if PR 4's sandbox turns out too
-  loose.
-- One helper per widget, always. Exact blame, one widget killed per hang and
-  no shared address space. Each helper repeats the 4.7 MB baseline, the
-  bundles and the font scan, so three widgets on screen start three scans.
+- Only the C++ in the helper, with fonts, images and the painter in Quill:
+  the synchronous-callback design, see "Where the process boundary goes".
+- A separate `quill-widget` executable. It allows a tighter sandbox and takes
+  about 9 MiB out of the main binary, at the cost of a crate move, packaging
+  in three workflows and a second build to keep in step. Worth a second look
+  if PR 4's sandbox turns out too loose.
+- One helper per widget, always. Exact blame and no shared address space,
+  but each helper repeats the 4.7 MB baseline, the bundles and the font scan.
   Suspects get this treatment anyway.
 - Frames through the channel. A 1.9 MB frame at 60 Hz is 115 MB a second
-  through 64 KB pipe buffers, two copies and dozens of system calls per
-  frame, and a large frame delays the input behind it.
-- Named shared memory. Names can collide and leak after a crash, and a
-  sandbox would have to allow opening them.
-- A shared GPU surface (IOSurface, dmabuf, a DXGI handle). It is the only
-  real zero copy, and it needs three backends and a GPUI patch to save under
-  a millisecond per frame.
-- The C++ compiled to WebAssembly and run in Quill's process. A crash
-  becomes a trap, but it needs a wasm toolchain on three CI systems and a
-  runtime dependency, loses the system ICU on Windows, and still needs a
-  watchdog.
-- Catching the signal or the abort in process and carrying on. The heap and
-  the locks of the crashed thread are in an unknown state.
+  through 64 KB pipe buffers, and a large frame delays the input behind it.
+- Named shared memory. Names collide and leak after a crash, and a sandbox
+  would have to allow opening them.
+- A shared GPU surface (IOSurface, dmabuf, a DXGI handle). The only real
+  zero copy, for three backends and a GPUI patch, to save under a
+  millisecond per frame.
+- The C++ compiled to WebAssembly inside Quill. A crash becomes a trap, but
+  it needs a wasm toolchain on three CI systems and a runtime dependency,
+  loses the system ICU on Windows, and still needs a watchdog.
+- Catching the signal or the abort in process and carrying on. The crashed
+  thread's heap and locks are in an unknown state.
 - Running widgets inside Quill when the helper cannot start. That brings
-  #1425 back in exactly the broken setups. Widgets show the stopped card.
+  #1425 back in exactly the broken setups.
 
 ## Open questions for the owner
 
