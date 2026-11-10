@@ -776,8 +776,9 @@ impl QuillApp {
                             .label(tr(keys::CANCEL))
                             .custom(chrome::ghost(cx))
                             .on_click(cx.listener(|this, _, _, cx| {
-                                this.stories
-                                    .with_viewer_ui(|open| open.close_friends = CloseFriendsStage::Closed);
+                                this.stories.with_viewer_ui(|open| {
+                                    open.close_friends = CloseFriendsStage::Closed
+                                });
                                 this.refresh_story_pause(cx);
                             })),
                     ),

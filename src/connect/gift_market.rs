@@ -331,6 +331,12 @@ impl<S: JsonSender> ConnectDriver<S> {
                 .gift_market
                 .previews
                 .contains_key(&gift_id)
+            || self
+                .session
+                .payments
+                .gift_market
+                .failed_previews
+                .contains(&gift_id)
             || self.session.requests.has_purpose(RequestPurpose::Payments(
                 PaymentsPurpose::GiftMarket(purpose),
             ))

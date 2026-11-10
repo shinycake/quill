@@ -282,7 +282,10 @@ fn custom_themes_are_stored_by_name() {
 /// stream twice; the archive is refused instead.
 #[test]
 fn a_zip_reusing_one_local_header_is_refused() {
-    let parts = vec![("colors.tdesktop-theme".to_string(), b"windowBg: #000000;".to_vec())];
+    let parts = vec![(
+        "colors.tdesktop-theme".to_string(),
+        b"windowBg: #000000;".to_vec(),
+    )];
     let zip = crate::stat_chart::xlsx::zip(&parts);
     assert!(ThemeFile::parse(&zip).is_ok());
     let eocd = zip.len() - 22;

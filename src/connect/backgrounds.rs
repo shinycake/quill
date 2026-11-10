@@ -41,6 +41,8 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session.requests.take(extra);
             return Err(err);
         }
+        self.session.chats_state.installed_backgrounds_fetch =
+            crate::state::fetch::Fetch::Loading { stale: None };
         Ok(Some(extra))
     }
 

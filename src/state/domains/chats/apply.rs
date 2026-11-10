@@ -416,6 +416,8 @@ impl Session {
                     self.upsert_background_files(background);
                 }
                 self.chats_state.installed_backgrounds = Some(list);
+                self.chats_state.installed_backgrounds_fetch =
+                    crate::state::fetch::Fetch::Ready(());
             }
             ChatsPayload::Background(background) => {
                 self.upsert_background_files(&background);

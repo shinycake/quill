@@ -478,3 +478,15 @@ fn craft_buys_a_listing_into_a_slot() {
     assert!(craft.market.listings.is_empty());
     assert!(f.driver.session.take_gift_market_toasts().is_empty());
 }
+
+#[test]
+fn a_failed_upgrade_preview_is_not_asked_again() {
+    let mut f = Fixture::new();
+    f.driver.fetch_gift_upgrade_preview(801).unwrap();
+    f.answer(
+        "getGiftUpgradePreview",
+        json!({"@type": "error", "code": 500, "message": "boom"}),
+    );
+    assert!(f.driver.fetch_gift_upgrade_preview(801).is_err());
+    assert!(f.driver.fetch_gift_upgrade_preview(802).is_ok());
+}

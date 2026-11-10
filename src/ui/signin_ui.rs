@@ -23,6 +23,16 @@ use std::time::{Duration, Instant};
 /// The country list under the 380 px sign-in card's button.
 const PICKER_WIDTH: f32 = 356.;
 
+/// The two phone-screen lookups (country list, IP default), asked once from
+/// the transition onto the phone screen. A settled answer, empty or an
+/// error, is not asked again until the screen is left and reopened.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(super) enum PhoneLookups {
+    #[default]
+    Idle,
+    Asked,
+}
+
 /// Per-screen UI state for the sign-in steps. Nothing here is a secret:
 /// the phone is shown on screen anyway and the code is never kept.
 pub(super) struct SignInUi {
@@ -42,6 +52,7 @@ pub(super) struct SignInUi {
     pub(super) email_clock: Option<(EmailResetState, Instant)>,
     pub(super) error_clock: Option<(AuthRequestError, Instant)>,
     pub(super) banned_dismissed: bool,
+    pub(super) lookups: PhoneLookups,
     tick_armed: bool,
     /// Demo-only fixtures (no live TDLib to ask).
     pub(super) demo_countries: Vec<Country>,
@@ -86,6 +97,7 @@ impl SignInUi {
             email_clock: None,
             error_clock: None,
             banned_dismissed: false,
+            lookups: PhoneLookups::Idle,
             tick_armed: false,
             demo_countries: Vec::new(),
             demo_guess: None,
@@ -162,11 +174,14 @@ impl QuillApp {
     /// auth state and prefill the default country code.
     pub(super) fn sync_signin(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let auth = self.current_auth();
-        if let Some(live) = self.live.as_mut()
-            && matches!(auth, AuthorizationState::WaitPhoneNumber)
-        {
-            let _ = live.driver.fetch_countries();
-            let _ = live.driver.fetch_country_code();
+        if !matches!(auth, AuthorizationState::WaitPhoneNumber) {
+            self.auth_ui.signin.lookups = PhoneLookups::Idle;
+        } else if self.auth_ui.signin.lookups == PhoneLookups::Idle {
+            if let Some(live) = self.live.as_mut() {
+                let _ = live.driver.fetch_countries();
+                let _ = live.driver.fetch_country_code();
+                self.auth_ui.signin.lookups = PhoneLookups::Asked;
+            }
         }
         match &auth {
             AuthorizationState::WaitCode { delivery, .. } => {

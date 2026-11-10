@@ -204,6 +204,17 @@ impl QuillApp {
         cx.notify();
     }
 
+    /// Appearance (or the look box) opened: a failed gallery request may be
+    /// asked once more by the next `ensure_wallpapers_loaded`.
+    pub(in crate::ui) fn retry_failed_wallpapers(&mut self) {
+        if let Some(live) = self.live.as_mut() {
+            let fetch = &mut live.driver.session.chats_state.installed_backgrounds_fetch;
+            if fetch.error().is_some() {
+                *fetch = quill::state::fetch::Fetch::Idle;
+            }
+        }
+    }
+
     /// Fetch the installed wallpapers when Appearance opens, and start the
     /// photo and pattern downloads.
     pub(in crate::ui) fn ensure_wallpapers_loaded(&mut self, cx: &mut Context<Self>) {
@@ -213,8 +224,8 @@ impl QuillApp {
                 .driver
                 .session
                 .chats_state
-                .installed_backgrounds
-                .is_none()
+                .installed_backgrounds_fetch
+                .is_idle()
             {
                 let _ = live.driver.fetch_installed_backgrounds(dark);
             }
