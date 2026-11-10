@@ -839,13 +839,23 @@ impl QuillApp {
             return true;
         }
         if let Some(info) = info {
+            let asked = self
+                .folders
+                .invite
+                .as_ref()
+                .map(|d| d.asked_chats.clone())
+                .unwrap_or_default();
             let unknown: Vec<i64> = info
                 .missing_chat_ids
                 .iter()
                 .chain(info.added_chat_ids.iter())
                 .copied()
+                .filter(|id| !asked.contains(id))
                 .filter(|id| self.session().is_some_and(|s| !s.chats.contains_key(id)))
                 .collect();
+            if let Some(dialog) = self.folders.invite.as_mut() {
+                dialog.asked_chats.extend(unknown.iter().copied());
+            }
             if let Some(live) = self.live.as_mut() {
                 let _ = live.driver.fetch_chats_for_folder_invite(&unknown);
             }

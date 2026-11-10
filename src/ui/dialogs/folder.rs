@@ -136,6 +136,9 @@ pub struct FolderInviteDialog {
     pub(crate) seeded: bool,
     /// `addChatFolderByInviteLink` is in flight.
     pub(crate) adding: bool,
+    /// Chats whose title `getChat` was asked for: each is asked once, so a
+    /// failed answer does not repeat on every poll tick.
+    pub(crate) asked_chats: HashSet<i64>,
 }
 
 impl FolderInviteDialog {
@@ -145,6 +148,7 @@ impl FolderInviteDialog {
             selected: HashSet::new(),
             seeded: false,
             adding: false,
+            asked_chats: HashSet::new(),
         }
     }
 }
