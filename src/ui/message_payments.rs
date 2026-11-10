@@ -77,6 +77,8 @@ fn markup_keyboard(
     let message_id = message.id.0 as u64;
     let mut grid = div()
         .id(("inline-keyboard", message_id))
+        .w_full()
+        .min_w_0()
         .flex()
         .flex_col()
         .gap_1()
@@ -88,8 +90,12 @@ fn markup_keyboard(
             continue;
         }
         any = true;
+        // Buttons share the row and never widen it: a long label ends in
+        // "…" (tdesktop `ReplyKeyboard` elides each button's text).
         let mut line = div()
             .id(format!("inline-keyboard-row-{message_id}-{row_index}"))
+            .w_full()
+            .min_w_0()
             .flex()
             .gap_1();
         for (button_index, button) in row.iter().enumerate() {
@@ -113,7 +119,7 @@ fn markup_keyboard(
                 .flatten();
             line = line.child(match number {
                 Some(number) => fast_button_cell(message.id.0 as u64, number, element, cx),
-                None => element.flex_1().into_any_element(),
+                None => element.flex_1().min_w_0().into_any_element(),
             });
         }
         grid = grid.child(line);
@@ -133,8 +139,9 @@ fn fast_button_cell(
         .id(("fast-button-cell", message_id * 10 + u64::from(number)))
         .relative()
         .flex_1()
+        .min_w_0()
         .flex()
-        .child(button.w_full())
+        .child(button.w_full().min_w_0())
         .child(
             div()
                 .absolute()
@@ -186,8 +193,16 @@ pub(super) fn inline_keyboard_button(
         "inline-btn-{}-{row_index}-{button_index}",
         message_id.0
     ))
-    .label(label)
-    .tooltip(button_tooltip(button))
+    .label(label.clone())
+    // A label cut short by the row width reads in full on hover.
+    .tooltip(match button_tooltip(button) {
+        "" => label,
+        hint => hint.to_string(),
+    })
+    // The spinner takes the icon slot; a plain label has none of its own.
+    .when(waiting, |element| {
+        element.icon(gpui_kit::assets::IconName::LoaderCircle)
+    })
     .loading(waiting);
     let element = inline_keyboard_style(element, button.style);
     if !button_is_pressable(&button.kind) {
@@ -227,7 +242,7 @@ pub(super) fn inline_keyboard_style(element: Button, style: InlineKeyboardButton
         InlineKeyboardButtonStyle::Danger => element.danger(),
         InlineKeyboardButtonStyle::Success => element.success(),
         InlineKeyboardButtonStyle::Link => element.link(),
-        InlineKeyboardButtonStyle::Default => element.ghost(),
+        InlineKeyboardButtonStyle::Default => element,
     }
 }
 
