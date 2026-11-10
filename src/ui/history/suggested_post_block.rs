@@ -129,7 +129,7 @@ pub(in crate::ui) fn suggestion_buttons(
     let mut first = div().flex().gap_1();
     if buttons.decline {
         first = first.child(
-            keyboard_button(("suggest-decline", id), tr(keys::Q_MONEY_DECLINE))
+            keyboard_button(("suggest-decline", id), tr(keys::Q_MONEY_DECLINE), cx)
                 .flex_1()
                 .on_click(cx.listener(move |this, _, window, cx| {
                     this.open_suggest_decline(chat_id, message_id, window, cx);
@@ -138,7 +138,7 @@ pub(in crate::ui) fn suggestion_buttons(
     }
     if buttons.accept {
         first = first.child(
-            keyboard_button(("suggest-accept", id), tr(keys::Q_MONEY_ACCEPT))
+            keyboard_button(("suggest-accept", id), tr(keys::Q_MONEY_ACCEPT), cx)
                 .flex_1()
                 .on_click(cx.listener(move |this, _, window, cx| {
                     this.begin_suggest_accept(chat_id, message_id, window, cx);
@@ -147,42 +147,46 @@ pub(in crate::ui) fn suggestion_buttons(
     }
     let owner = cx.entity().downgrade();
     let change = buttons.change.then(|| {
-        keyboard_button(("suggest-change", id), tr(keys::Q_MONEY_SUGGEST_CHANGES))
-            .w_full()
-            .dropdown_menu(move |mut menu, _, _| {
-                if can_edit {
-                    let owner = owner.clone();
-                    menu = menu.item(
-                        PopupMenuItem::new(tr(keys::Q_MONEY_EDIT_MESSAGE))
-                            .icon(IconName::Pencil)
-                            .on_click(move |_, window, cx| {
-                                let _ = owner.update(cx, |this, cx| {
-                                    this.begin_suggest_edit(chat_id, message_id, window, cx);
-                                });
-                            }),
-                    );
-                }
-                let price_owner = owner.clone();
-                let time_owner = owner.clone();
-                menu.item(
-                    PopupMenuItem::new(tr(keys::Q_MONEY_EDIT_PRICE))
-                        .icon(IconName::Coins)
+        keyboard_button(
+            ("suggest-change", id),
+            tr(keys::Q_MONEY_SUGGEST_CHANGES),
+            cx,
+        )
+        .w_full()
+        .dropdown_menu(move |mut menu, _, _| {
+            if can_edit {
+                let owner = owner.clone();
+                menu = menu.item(
+                    PopupMenuItem::new(tr(keys::Q_MONEY_EDIT_MESSAGE))
+                        .icon(IconName::Pencil)
                         .on_click(move |_, window, cx| {
-                            let _ = price_owner.update(cx, |this, cx| {
-                                this.suggest_edit_price(chat_id, message_id, window, cx);
+                            let _ = owner.update(cx, |this, cx| {
+                                this.begin_suggest_edit(chat_id, message_id, window, cx);
                             });
                         }),
-                )
-                .item(
-                    PopupMenuItem::new(tr(keys::Q_MONEY_EDIT_TIME))
-                        .icon(IconName::Clock)
-                        .on_click(move |_, window, cx| {
-                            let _ = time_owner.update(cx, |this, cx| {
-                                this.suggest_edit_time(chat_id, message_id, window, cx);
-                            });
-                        }),
-                )
-            })
+                );
+            }
+            let price_owner = owner.clone();
+            let time_owner = owner.clone();
+            menu.item(
+                PopupMenuItem::new(tr(keys::Q_MONEY_EDIT_PRICE))
+                    .icon(IconName::Coins)
+                    .on_click(move |_, window, cx| {
+                        let _ = price_owner.update(cx, |this, cx| {
+                            this.suggest_edit_price(chat_id, message_id, window, cx);
+                        });
+                    }),
+            )
+            .item(
+                PopupMenuItem::new(tr(keys::Q_MONEY_EDIT_TIME))
+                    .icon(IconName::Clock)
+                    .on_click(move |_, window, cx| {
+                        let _ = time_owner.update(cx, |this, cx| {
+                            this.suggest_edit_time(chat_id, message_id, window, cx);
+                        });
+                    }),
+            )
+        })
     });
     Some(
         div()
@@ -197,9 +201,10 @@ pub(in crate::ui) fn suggestion_buttons(
 }
 
 /// A decision button with the default inline keyboard look.
-fn keyboard_button(id: impl Into<ElementId>, label: &'static str) -> Button {
+fn keyboard_button(id: impl Into<ElementId>, label: &'static str, cx: &App) -> Button {
     crate::ui::message_payments::inline_keyboard_style(
         Button::new(id).label(label),
         quill::telegram::envelope::InlineKeyboardButtonStyle::Default,
+        cx,
     )
 }
