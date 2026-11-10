@@ -142,6 +142,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         for_craft: bool,
     ) -> Result<(), ConnectSendError> {
         let market = &self.session.payments.gift_market;
+        // A `sendResoldGift` is out: its answer belongs to this buy.
+        if market.buy.as_ref().is_some_and(|buy| buy.sending) {
+            return Err(ConnectSendError::InvalidRequest);
+        }
         let listing = market
             .resale
             .iter()

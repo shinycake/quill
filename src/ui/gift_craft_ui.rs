@@ -321,6 +321,13 @@ impl QuillApp {
         if crafting {
             return;
         }
+        // Closing the boxes while the forge runs leaves the craft in
+        // flight: its outcome still opens the result box.
+        if self.gift_market.forge_started.is_some()
+            || self.craft_session().is_some_and(|craft| craft.crafting)
+        {
+            return;
+        }
         self.gift_market.craft_primary = None;
         self.gift_market.forge_started = None;
         if let Some(market) = self.gift_market_mut() {
