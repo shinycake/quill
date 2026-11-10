@@ -3997,3 +3997,73 @@ and 10 are widget items another fixer owns).
   refusal assertion in `channel_auto_translate_is_parsed_gated_and_toggled`.
   None waits on time. No test for 6 and 11 (they need a photo file and a
   download answer the offline harness cannot produce).
+
+### Sweep fixes (s12-money)
+
+Payments, Stars, gifts, accounts, sign-in and passcode. Each entry was
+re-read at its spot first.
+
+- **Fixed.**
+  - 04-052: `passcode::enable` keeps each OS-store key until every delete
+    is done; a failed delete puts the already-deleted keys back before
+    the wrapped files go, and if a put-back fails the wrapped files stay
+    and the passcode stays on. No database key is lost.
+  - 01-044: `read_zip` refuses an archive that reuses one local header or
+    inflates past `SCHEME_LIMIT + BACKGROUND_LIMIT` in total.
+  - 13-140: `CloseFriendsStage { Closed, Loading, Editing, Saving }` in
+    `story_extras` replaces `close_friends_edit` + `close_friends_saving`.
+    Loading shows no checkboxes and no Save, so a save always starts from
+    the loaded list.
+  - 02-075 / 09-X013: a failed send in the login review drops the sends
+    that never went out from `review_pending`.
+  - 02-082 / 13-045: `PhoneLookups { Idle, Asked }` on the sign-in screen;
+    the lookups are asked on arrival, never again from `sync_signin` after
+    an empty or failed answer.
+  - 13-064: `installed_backgrounds_fetch: Fetch<()>`; a render asks only
+    from `Idle`, Appearance and the look box reopen a failed one.
+  - 09-X061: `gift_market.failed_previews`; a failed preview is not asked
+    again by the auction info box's render.
+  - 02-152 / 10-152: `submit_payment_form` refuses while the invoice has a
+    `sendPaymentForm` in flight (every caller, not the render).
+  - 05-017: `StarsGiftState::asked: Option<RequestId>` replaces
+    `loading`; only that request's answer or error lands.
+  - 03-058: the transfer in flight carries the recipient as confirmed
+    (`GiftManageState::transferring`); the toast reads it, not the picker.
+  - 02-062: `open_send_gift_to` while a `sendGift` is out reopens for the
+    same person and refuses another.
+  - 03-059: `start_gift_resale_buy` refuses while a buy is sending.
+  - 03-060 / 09-123: closing the market boxes during the forge keeps the
+    craft; its outcome opens the result box.
+  - 04-080: a registry file that exists but cannot be read is never saved
+    over by the default registry.
+  - 02-158: Undo forgets the waiting Stars only once the remove was sent.
+  - 02-083: one login-URL context at a time; a second button waits.
+  - 07-012: the hidden translate bars are keyed by account.
+  - 09-122: raising a channel's bid keeps the channel as the recipient.
+  - 10-001: closing a paid giveaway checkout closes the giveaway form.
+  - 11-p7-001: Pay refuses once the order fields differ from the last
+    validated order.
+  - 11-p6-003: the ownership answer closes and leaves only for the dialog
+    of the chat that was transferred.
+  - 12-086: the delete boxes act only on the account that opened them.
+  - 01-051: opening the boost box clears the old chat's intent and slots.
+  - 09-X012: closing a chat window no longer dismisses the queued account
+    notices (not seen on screen).
+- **Skipped.** 02-160 (the Star reaction box is already on `OnScreen`, so
+  per account), 04-057 (the commit is not confirmed back to the local
+  list; needs a committing stage, not done), 12-001 (the tray card needs
+  an owner that outlives the screen epoch), 01-085 (`KeyFilter` only
+  collapses edges; a missed key-up needs the OS key state, which would be
+  a poll).
+- **Tests.** `enable_failing_midway_keeps_every_database_key`,
+  `a_zip_reusing_one_local_header_is_refused`,
+  `close_friends_stage_waits_for_the_list`,
+  `a_failed_send_does_not_leave_the_review_pending`,
+  `a_failed_upgrade_preview_is_not_asked_again`, the second-Pay assertion,
+  `a_late_answer_for_another_contact_is_dropped`, the transfer picker move
+  in `a_transfer_goes_only_to_the_contact_the_confirmation_names`,
+  `closing_the_boxes_during_the_forge_keeps_the_outcome`,
+  `an_unreadable_registry_is_not_overwritten`, `hidden_chats_toggle`. No
+  test for 02-083, 02-062, 03-059, 10-001, 11-p7-001, 11-p6-003, 12-086,
+  01-051, 09-X012, 09-122, 13-064 (they need a fixture the offline harness
+  lacks).
