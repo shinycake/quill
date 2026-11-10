@@ -619,6 +619,13 @@ impl QuillApp {
                 let Some(close) = spec.close else {
                     continue;
                 };
+                // The account notices are a queue about the account, not
+                // about this window: closing it must not dismiss the
+                // queued ones unseen (a force-logout notice among them).
+                // They stay open and the main window shows them.
+                if spec.kind == DialogKind::AccountNotice {
+                    continue;
+                }
                 for _ in 0..8 {
                     if !(spec.is_open)(app) {
                         break;
