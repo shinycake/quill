@@ -44,6 +44,7 @@ impl QuillApp {
                 None => tr(keys::FILTERS_NEW),
             };
             let body = this.folder_editor_panel(cx);
+            let loading = this.folders.editor.as_ref().is_some_and(|d| d.fetch_pending);
             let footer = div()
                 .flex()
                 .justify_end()
@@ -61,6 +62,7 @@ impl QuillApp {
                 .child(
                     Button::new("folder-editor-save")
                         .label(tr(keys::SETTINGS_SAVE))
+                        .disabled(loading)
                         .on_click(cx.listener(|this, _, window, cx| {
                             this.save_folder_editor(cx);
                             this.close_kit_dialog_if_done(DialogKind::FolderEditor, window, cx);
