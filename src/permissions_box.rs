@@ -4,6 +4,7 @@
 //! pure so the box can be tested without a window or a session.
 #![deny(clippy::indexing_slicing)]
 
+use crate::ids::RequestId;
 use crate::lang::{Key, keys};
 use crate::telegram::envelope::ChatPermissions;
 
@@ -354,6 +355,18 @@ impl PermissionsSave {
 /// close to `supergroup_size_max` is offered a broadcast group.
 pub fn suggests_broadcast_group(member_count: i32, size_max: i32) -> bool {
     size_max > 0 && member_count >= size_max.saturating_sub(1000)
+}
+
+/// What a permissions Save did.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum PermissionsSent {
+    /// Nothing differs from what the chat has: there is nothing to save.
+    Unchanged,
+    /// Something differs but nothing could be sent (the viewer may not
+    /// save it, or the same request is still out).
+    Refused,
+    /// These requests (or the upgrade that carries them) are out.
+    Sent(Vec<RequestId>),
 }
 
 #[cfg(test)]

@@ -26,8 +26,10 @@ use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use quill::ids::ChatId;
-use quill::lang::{keys, tr};
+use quill::lang::{keys, tr, tr_with};
+use quill::state::Submit;
 use quill::permissions_box::{
+    PermissionsSent,
     BOOSTS_STOPS, MEDIA, Permission, PermissionsSave, SLOW_MODE_STOPS, bottom_rows,
     has_send_restrictions, initial, lock, media_on, set_media, suggests_broadcast_group, toggle,
 };
@@ -65,6 +67,7 @@ impl QuillApp {
             slow_mode_delay: session.chat_slow_mode_delay(chat_id),
             boosts: session.chat_unrestrict_boost_count(chat_id),
             lock_hint: None,
+            submit: Submit::default(),
         });
         self.open_box(DialogKind::Permissions);
         cx.notify();
@@ -108,26 +111,37 @@ impl QuillApp {
     /// changed; a basic group with slow mode or boosters set is upgraded
     /// first. Offline, the demo session takes the values directly.
     pub(super) fn submit_permissions_dialog(&mut self, cx: &mut Context<Self>) {
-        let Some(dialog) = self.admin.permissions_dialog.take() else {
+        let requests = self.session().map(|session| &session.requests);
+        let Some(dialog) = self.admin.permissions_dialog.as_ref() else {
             return;
         };
+        if dialog.submit.is_sending(requests) {
+            return;
+        }
+        let chat_id = dialog.chat_id;
         let save = PermissionsSave::new(dialog.permissions, dialog.slow_mode_delay, dialog.boosts);
         if let Some(live) = self.live.as_mut() {
-            match live.driver.save_permissions_box(dialog.chat_id, save) {
-                Ok(true) => {
-                    self.set_note(StatusNote::silent(tr(keys::Q_PEOPLE_PERMISSIONS_UPDATED)))
+            match live.driver.save_permissions_box(chat_id, save) {
+                Ok(PermissionsSent::Sent(ids)) => {
+                    if let Some(dialog) = self.admin.permissions_dialog.as_mut() {
+                        dialog.submit = Submit::sent(ids);
+                    }
                 }
-                Ok(false) => {}
-                Err(_) => {
-                    // box-host: put back after a failed submit; it stays where it shows
-                    self.admin.permissions_dialog = Some(dialog);
+                // Nothing differs: nothing to save, the box just closes.
+                Ok(PermissionsSent::Unchanged) => self.admin.permissions_dialog = None,
+                // Something differs but could not be sent: the box stays
+                // with the change instead of dropping it.
+                Ok(PermissionsSent::Refused) | Err(_) => {
                     self.set_note(StatusNote::error(tr(
                         keys::Q_PEOPLE_COULD_NOT_UPDATE_PERMISSIONS,
                     )));
                 }
             }
-        } else if let Some(session) = self.demo_session.as_mut() {
-            session.apply_permissions_save_locally(dialog.chat_id, save);
+        } else {
+            self.admin.permissions_dialog = None;
+            if let Some(session) = self.demo_session.as_mut() {
+                session.apply_permissions_save_locally(chat_id, save);
+            }
         }
         cx.notify();
     }
@@ -164,6 +178,11 @@ impl QuillApp {
             let Some(body) = this.permissions_box_body(cx) else {
                 return dialog.on_close(on_close);
             };
+            let sending = this.admin.permissions_dialog.as_ref().is_some_and(|dialog| {
+                dialog
+                    .submit
+                    .is_sending(this.session().map(|session| &session.requests))
+            });
             let footer = div()
                 .flex()
                 .justify_end()
@@ -182,6 +201,8 @@ impl QuillApp {
                         Button::new("g1-permissions-submit")
                             .primary()
                             .label(tr(keys::SETTINGS_SAVE))
+                            .loading(sending)
+                            .disabled(sending)
                             .on_click(cx.listener(|this, _, window, cx| {
                                 this.submit_permissions_dialog(cx);
                                 this.close_kit_dialog_if_done(DialogKind::Permissions, window, cx);
@@ -314,6 +335,20 @@ impl QuillApp {
                     chat_id,
                     cx,
                 ));
+        }
+        if let Submit::Failed(reason) = &dialog.submit {
+            body = body.child(
+                div()
+                    .id("permissions-refused")
+                    .px_2()
+                    .pb_2()
+                    .text_xs()
+                    .text_color(cx.theme().danger)
+                    .child(tr_with(
+                        keys::Q_PEOPLE_COULDNT_SAVE_REASON,
+                        &[("reason", reason)],
+                    )),
+            );
         }
         Some(body.into_any_element())
     }
