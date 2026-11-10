@@ -31,6 +31,12 @@ pub struct BotInfo {
     /// `description`, found by TDLib when the full info arrives
     /// (`crate::text::about`).
     pub description_entities: Vec<crate::text::TextEntity>,
+    /// `botInfo.photo`: the picture shown above the description in an
+    /// empty bot chat (tdesktop `BotInfo::photo`), smallest size first.
+    pub description_photo: Vec<super::PhotoSizeView>,
+    /// The files of `description_photo`, for the session's file map; the
+    /// session takes them when the full info arrives.
+    pub description_photo_files: Vec<super::ParsedFile>,
     pub commands: Vec<BotCommand>,
     /// Slice B2: `botInfo.menu_button` — `(text, url)`. Absent/null in the
     /// payload → `None` (bots without a menu button, or older payloads).
@@ -128,6 +134,11 @@ pub(crate) fn parse_bot_command(value: Option<&Value>) -> Option<BotCommand> {
 /// bot"), so null → `None` rather than an empty struct.
 pub(crate) fn parse_bot_info(value: Option<&Value>) -> Option<BotInfo> {
     let value = value.filter(|v| !v.is_null())?;
+    let (description_photo, description_photo_files) = value
+        .get("photo")
+        .filter(|photo| !photo.is_null())
+        .map(super::message_media::parse_photo_sizes)
+        .unwrap_or_default();
     Some(BotInfo {
         short_description: value
             .get("short_description")
@@ -140,6 +151,8 @@ pub(crate) fn parse_bot_info(value: Option<&Value>) -> Option<BotInfo> {
             .unwrap_or("")
             .to_string(),
         description_entities: Vec::new(),
+        description_photo,
+        description_photo_files,
         commands: value
             .get("commands")
             .and_then(Value::as_array)

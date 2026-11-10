@@ -105,10 +105,23 @@ impl QuillApp {
         apply_ready_bot_chat(session, &self.demo_ui.sink, &self.demo_ui.seq);
         let sink: std::sync::Arc<dyn quill::diagnostics::DiagnosticSink> =
             self.demo_ui.sink.clone();
-        if let Some(owned) =
-            quill::telegram::client::copy_and_parse(clear, &self.demo_ui.seq, &sink)
-        {
-            session.apply(owned);
+        // The bot's full info again, now with a description photo.
+        let extra = session.request(
+            quill::state::RequestPurpose::GetUserFullInfo,
+            Some(quill::ids::ChatId(21)),
+        );
+        let path = crate::ui::demo::demo_media_allowlist().join("showcase/p1.jpg");
+        let file = crate::ui::demo::demo_file_json(9401, &path.to_string_lossy(), true);
+        let full_info = format!(
+            r#"{{"@type":"userFullInfo","@extra":"{}","bot_info":{{"@type":"botInfo","short_description":"A demo bot","description":"Demo Bot answers questions and shows how the info panel looks. It understands /start, /help and /ping.","photo":{{"@type":"photo","has_stickers":false,"sizes":[{{"@type":"photoSize","type":"x","photo":{file},"width":1100,"height":739,"progressive_sizes":[]}}]}},"commands":[]}}}}"#,
+            extra.0,
+        );
+        for json in [clear, full_info.as_str()] {
+            if let Some(owned) =
+                quill::telegram::client::copy_and_parse(json, &self.demo_ui.seq, &sink)
+            {
+                session.apply(owned);
+            }
         }
         // Offline there is no TDLib to find the entities; mark what it
         // would.
