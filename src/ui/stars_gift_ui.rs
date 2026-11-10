@@ -129,7 +129,7 @@ impl QuillApp {
                         keys::Q_MONEY_CHOOSE_HOW_MANY_STARS_GETS,
                         &[("name", &target.name.to_string())],
                     )));
-                if gift.loading {
+                if gift.loading() {
                     body = body.child(
                         div()
                             .text_sm()

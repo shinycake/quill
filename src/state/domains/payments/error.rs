@@ -88,8 +88,10 @@ impl Session {
             }
             Some(RequestPurpose::GetStarGiftOptions) => {
                 let gift = &mut self.payments.stars_gift;
-                gift.loading = false;
-                gift.error = Some(format!("Couldn't load Star packs: {}", error_reason(err)));
+                if gift.asked.is_some() && gift.asked == pending.map(|p| p.id) {
+                    gift.asked = None;
+                    gift.error = Some(format!("Couldn't load Star packs: {}", error_reason(err)));
+                }
             }
             Some(RequestPurpose::GetStarPackOptions) => {
                 let packs = &mut self.payments.star_packs;

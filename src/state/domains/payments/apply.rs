@@ -273,9 +273,11 @@ impl Session {
             PaymentsPayload::StarPackOptions(options) => {
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::GetStarGiftOptions) {
                     let gift = &mut self.payments.stars_gift;
-                    gift.loading = false;
-                    gift.error = None;
-                    gift.options = options;
+                    if gift.asked.is_some() && gift.asked == pending.map(|p| p.id) {
+                        gift.asked = None;
+                        gift.error = None;
+                        gift.options = options;
+                    }
                 } else if pending.map(|p| p.purpose) == Some(RequestPurpose::GetStarPackOptions) {
                     let packs = &mut self.payments.star_packs;
                     packs.loading = false;

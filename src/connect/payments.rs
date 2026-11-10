@@ -74,6 +74,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         credentials: serde_json::Value,
         tip_amount: i64,
     ) -> Result<RequestId, ConnectSendError> {
+        // A second Pay before the answer must not pay twice.
+        if self.session.payments.is_paying(invoice) {
+            return Err(ConnectSendError::InvalidRequest);
+        }
         let extra = self.payment_extra(invoice, RequestPurpose::SendPaymentForm)?;
         self.session.payments.request = Some(PaymentRequest {
             invoice: invoice.clone(),
