@@ -135,19 +135,16 @@ impl QuillApp {
             cx.notify();
             return;
         };
-        match live.driver.create_community_with_photo(
+        // The box waits for the answer: it closes on `Created` and stays on
+        // a refusal, as tdesktop's does. A send that did not go (the chat
+        // left the model) stays too, with its note.
+        let sent = live.driver.create_community_with_photo(
             quill::ids::ChatId(chat_id),
             &name,
             hidden,
             photo,
-        ) {
-            // The box waits for the answer: it closes on `Created` and
-            // stays on a refusal, as tdesktop's does. A send that did not
-            // go (the chat left the model) stays too, with its note.
-            sent => {
-                self.community_step_went(None, sent);
-            }
-        }
+        );
+        self.community_step_went(None, sent);
         cx.notify();
     }
 
