@@ -387,7 +387,7 @@ fn a_created_link_does_not_fake_an_unfetched_or_failed_list() {
         .unwrap();
     rig.ingest(&link_answer(create, "https://t.me/+new"));
     assert!(
-        rig.driver.session.groups.invite_links.get(&13).is_none(),
+        !rig.driver.session.groups.invite_links.contains_key(&13),
         "never fetched stays unfetched"
     );
     let list = rig
@@ -422,12 +422,11 @@ fn a_created_link_does_not_fake_an_unfetched_or_failed_list() {
 }
 
 fn link_answer(extra: RequestId, link: &str) -> String {
-    let body = link_json(link, false, false).replacen(
+    link_json(link, false, false).replacen(
         r#"{"@type":"chatInviteLink""#,
         &format!(r#"{{"@type":"chatInviteLink","@extra":"{}""#, extra.0),
         1,
-    );
-    body
+    )
 }
 
 #[test]

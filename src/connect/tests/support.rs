@@ -569,14 +569,18 @@ impl JsonSender for Arc<ToggleSender> {
     }
 }
 
-/// A Ready driver over a [`ToggleSender`]; keep the returned dir alive.
-pub(crate) fn toggle_driver() -> (
+/// What [`toggle_driver`] returns: the dir to keep alive, the driver, its
+/// sender, the sink and the sequence counter.
+pub(crate) type ToggleRig = (
     std::path::PathBuf,
     ConnectDriver<Arc<ToggleSender>>,
     Arc<ToggleSender>,
     Arc<dyn DiagnosticSink>,
     AtomicU64,
-) {
+);
+
+/// A Ready driver over a [`ToggleSender`]; keep the returned dir alive.
+pub(crate) fn toggle_driver() -> ToggleRig {
     let (dir, prepared) = prepared_tmp(&MemorySecretStore::new());
     let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
     let sender = Arc::new(ToggleSender::default());
