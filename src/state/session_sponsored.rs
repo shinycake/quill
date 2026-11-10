@@ -232,9 +232,20 @@ impl Session {
             return None;
         }
         self.messages.sponsored_report = None;
-        self.messages.sponsored_report_target = Some((chat_id, message_id));
+        self.messages.sponsored_report_target = Some(SponsoredReportTarget {
+            chat_id,
+            message_id,
+            request: None,
+        });
         self.messages.last_sponsored_report = None;
         Some((chat_id, message_id))
+    }
+
+    /// The report request went out as `request`: only its answer applies.
+    pub fn note_sponsored_report_request(&mut self, request: RequestId) {
+        if let Some(target) = self.messages.sponsored_report_target.as_mut() {
+            target.request = Some(request);
+        }
     }
 
     /// Apply a `ReportSponsoredResult` for a finished `ReportChatSponsoredMessage`.
@@ -245,21 +256,20 @@ impl Session {
         pending: &PendingRequest,
         result: ReportSponsoredResult,
     ) {
-        let Some(chat_id) = pending.chat_id else {
+        // Only the answer to the request the flow waits on: after Cancel (or
+        // a newer report) the target is gone or waits on another request,
+        // and a late answer re-arms nothing and reports no ad.
+        let Some(SponsoredReportTarget {
+            chat_id,
+            message_id,
+            request: Some(request),
+        }) = self.messages.sponsored_report_target
+        else {
             return;
         };
-        let message_id = self
-            .messages
-            .sponsored_report
-            .as_ref()
-            .map(|flight| flight.message_id)
-            // Fallback for a response that arrives after its picker was
-            // dismissed: attribute to the latest report target. If the user
-            // starts a second report before the first responds, the first
-            // response is attributed to the second row — acceptable: reports
-            // are fire-and-forget and the outcome banner is per-chat.
-            .or_else(|| self.messages.sponsored_report_target.map(|(_, id)| id))
-            .unwrap_or(0);
+        if request != pending.id {
+            return;
+        }
         match result {
             ReportSponsoredResult::OptionRequired { title, options } => {
                 self.messages.sponsored_report = Some(SponsoredReportFlight {
@@ -309,7 +319,7 @@ impl Session {
         let target = self.messages.sponsored_report_target;
         let flight = self.messages.sponsored_report.as_ref();
         target
-            .map(|(chat_id, _)| chat_id)
+            .map(|target| target.chat_id)
             .or(flight.map(|flight| flight.chat_id))
     }
 

@@ -50,12 +50,11 @@ pub struct CallsState {
     /// Phase C2i: peer-to-peer calls
     /// (`userPrivacySettingAllowPeerToPeerCalls`, schema 1.8.67 :9009).
     pub privacy_p2p: Option<PrivacyWho>,
-    /// Outstanding call-privacy get/set round-trips. The fetch sends two
-    /// gets, so loading (see [`CallsState::privacy_loading`]) ends only when
-    /// the last response lands.
-    pub privacy_pending: u8,
-    /// The last privacy get/set failed.
-    pub privacy_error: bool,
+    /// Where each call-privacy rule's last get or set stands. The fetch
+    /// sends two gets, so loading (see [`CallsState::privacy_loading`])
+    /// ends only when both answered, and a failed send or answer marks
+    /// only its own rule.
+    pub privacy_asks: CallPrivacyAsks,
     /// Phase C2i: local call preferences (confirm-before-calling,
     /// less-data), persisted via `settings::CallPrefs`. The driver
     /// loads them at startup; the UI saves on toggle.
@@ -139,7 +138,12 @@ pub struct CallsState {
 impl CallsState {
     /// A privacy get/set round-trip is in flight.
     pub fn privacy_loading(&self) -> bool {
-        self.privacy_pending > 0
+        self.privacy_asks.loading()
+    }
+
+    /// The last privacy get/set of some rule failed.
+    pub fn privacy_error(&self) -> bool {
+        self.privacy_asks.failed()
     }
 
     /// A recent-calls page is in flight.
@@ -202,8 +206,7 @@ impl CallsState {
             answered_call: None,
             privacy_allow_calls: None,
             privacy_p2p: None,
-            privacy_pending: 0,
-            privacy_error: false,
+            privacy_asks: CallPrivacyAsks::default(),
             prefs: CallPrefs::default(),
             recent_calls: Vec::new(),
             recent_calls_offset: String::new(),
@@ -228,5 +231,75 @@ impl CallsState {
             add_people_search: ShareSearch::default(),
             invite_results: None,
         }
+    }
+}
+
+/// Where one call-privacy rule's last request stands.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum PrivacyAsk {
+    #[default]
+    Idle,
+    /// Asked as this request; only its answer settles the rule.
+    Asking(RequestId),
+    Failed,
+}
+
+/// The two rules the calls UI reads (`userPrivacySettingAllowCalls` and
+/// `userPrivacySettingAllowPeerToPeerCalls`), each with its own stage.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct CallPrivacyAsks {
+    allow_calls: PrivacyAsk,
+    peer_to_peer: PrivacyAsk,
+}
+
+impl CallPrivacyAsks {
+    fn slot(&mut self, setting: CallPrivacySetting) -> &mut PrivacyAsk {
+        match setting {
+            CallPrivacySetting::AllowCalls => &mut self.allow_calls,
+            CallPrivacySetting::PeerToPeer => &mut self.peer_to_peer,
+        }
+    }
+
+    pub fn of(self, setting: CallPrivacySetting) -> PrivacyAsk {
+        match setting {
+            CallPrivacySetting::AllowCalls => self.allow_calls,
+            CallPrivacySetting::PeerToPeer => self.peer_to_peer,
+        }
+    }
+
+    pub fn set(&mut self, setting: CallPrivacySetting, ask: PrivacyAsk) {
+        *self.slot(setting) = ask;
+    }
+
+    /// `request` answered for `setting`: whether it is the one the rule
+    /// waits for (a stale answer changes nothing).
+    pub fn answered(&mut self, setting: CallPrivacySetting, request: RequestId) -> bool {
+        let slot = self.slot(setting);
+        let waits = *slot == PrivacyAsk::Asking(request);
+        if waits {
+            *slot = PrivacyAsk::Idle;
+        }
+        waits
+    }
+
+    /// `request` failed for `setting`: whether it is the one the rule
+    /// waits for.
+    pub fn failed_by(&mut self, setting: CallPrivacySetting, request: RequestId) -> bool {
+        let slot = self.slot(setting);
+        let waits = *slot == PrivacyAsk::Asking(request);
+        if waits {
+            *slot = PrivacyAsk::Failed;
+        }
+        waits
+    }
+
+    pub fn loading(self) -> bool {
+        [self.allow_calls, self.peer_to_peer]
+            .iter()
+            .any(|ask| matches!(ask, PrivacyAsk::Asking(_)))
+    }
+
+    pub fn failed(self) -> bool {
+        [self.allow_calls, self.peer_to_peer].contains(&PrivacyAsk::Failed)
     }
 }

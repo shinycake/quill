@@ -375,6 +375,61 @@ fn link_json(link: &str, revoked: bool, primary: bool) -> String {
     )
 }
 
+/// Sweep 05-197: a created link does not turn a list that was never
+/// fetched (or failed) into a loaded one holding just that link.
+#[test]
+fn a_created_link_does_not_fake_an_unfetched_or_failed_list() {
+    let mut rig = Rig::new(false, ADMIN);
+    let create = rig
+        .driver
+        .create_chat_invite_link(ChatId(13), "", 0, 0, false)
+        .unwrap()
+        .unwrap();
+    rig.ingest(&link_answer(create, "https://t.me/+new"));
+    assert!(
+        rig.driver.session.groups.invite_links.get(&13).is_none(),
+        "never fetched stays unfetched"
+    );
+    let list = rig
+        .driver
+        .fetch_chat_invite_links(ChatId(13))
+        .unwrap()
+        .unwrap();
+    rig.ingest(&format!(
+        r#"{{"@type":"error","@extra":"{}","code":500,"message":"Timeout"}}"#,
+        list.0
+    ));
+    let create = rig
+        .driver
+        .create_chat_invite_link(ChatId(13), "", 0, 0, false)
+        .unwrap()
+        .unwrap();
+    rig.ingest(&link_answer(create, "https://t.me/+newer"));
+    assert!(
+        !matches!(
+            rig.driver.session.groups.invite_links.get(&13),
+            Some(InviteLinkFetch::Loaded(_))
+        ),
+        "a failed list is not loaded by one link"
+    );
+    assert!(
+        rig.driver
+            .fetch_chat_invite_links(ChatId(13))
+            .unwrap()
+            .is_some(),
+        "the list is fetched again"
+    );
+}
+
+fn link_answer(extra: RequestId, link: &str) -> String {
+    let body = link_json(link, false, false).replacen(
+        r#"{"@type":"chatInviteLink""#,
+        &format!(r#"{{"@type":"chatInviteLink","@extra":"{}""#, extra.0),
+        1,
+    );
+    body
+}
+
 #[test]
 fn revoke_moves_the_link_and_deletes_remove_it_from_the_revoked_list() {
     let mut rig = Rig::new(false, ADMIN);
@@ -492,6 +547,17 @@ fn subscription_links_are_for_channel_admins_and_use_the_monthly_period() {
             .unwrap()
             .is_none()
     );
+    // The list is fetched first: a created link is only merged into one
+    // that is loaded.
+    let list = channel
+        .driver
+        .fetch_chat_invite_links(ChatId(13))
+        .unwrap()
+        .unwrap();
+    channel.ingest(&format!(
+        r#"{{"@type":"chatInviteLinks","@extra":"{}","total_count":0,"invite_links":[]}}"#,
+        list.0
+    ));
     let extra = channel
         .driver
         .create_chat_subscription_invite_link(ChatId(13), "VIP", 250)

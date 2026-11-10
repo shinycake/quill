@@ -17,7 +17,7 @@ impl Session {
         if let Some(pending) = pending
             && pending.purpose == RequestPurpose::GetMapThumbnailFile
         {
-            self.media.map_thumbs.failed(pending.id);
+            self.media.map_thumbs.failed(pending.id, pending.chat_id);
         }
         if let Some(pending) = pending
             && let RequestPurpose::Media(MediaPurpose::LocationPicker(purpose)) = pending.purpose

@@ -220,7 +220,39 @@ fn a_stopped_shared_hub_is_replaced_but_a_running_one_is_kept() {
     dying_tx.send(()).unwrap();
     drop(dying_tx);
     assert!(wait_until(|| dead.stopped_unexpectedly()));
-    assert!(matches!(reusable(Some(&dead)), Reuse::Stopped(_)));
+    assert!(matches!(reusable(Some(&dead)), Reuse::Stopped(..)));
+}
+
+/// Sweep 06-065: a hub replacing a stopped one takes over its routes, so a
+/// client that was open keeps receiving, and its bridge reads running.
+#[test]
+fn a_replacement_hub_keeps_the_open_clients_routed() {
+    let (dying_tx, dying_rx) = mpsc::channel::<()>();
+    let source: ReceiveSource = Box::new(move |_| {
+        let _ = dying_rx.recv();
+        panic!("receive source failed");
+    });
+    let dead =
+        Arc::new(TdHub::with_source(source, no_wake(), Arc::new(MemorySink::new())).unwrap());
+    let bridge = dead.bridge(1);
+    dying_tx.send(()).unwrap();
+    drop(dying_tx);
+    assert!(wait_until(|| bridge.stopped_unexpectedly()));
+
+    let (tx, rx) = mpsc::channel::<String>();
+    let source: ReceiveSource =
+        Box::new(move |timeout| rx.recv_timeout(Duration::from_secs_f64(timeout)).ok());
+    let replacement = Arc::new(
+        TdHub::with_source_replacing(source, wake_on(&tx), Arc::new(MemorySink::new()), &dead)
+            .unwrap(),
+    );
+    assert!(!bridge.stopped_unexpectedly(), "running again");
+    tx.send(option_update(Some(1), 5)).unwrap();
+    let owned = bridge
+        .next_timeout(Duration::from_secs(2))
+        .expect("the old client's envelope is routed on the new hub");
+    assert_eq!(owned.client_id, Some(1));
+    assert!(!replacement.stopped_unexpectedly());
 }
 
 #[test]

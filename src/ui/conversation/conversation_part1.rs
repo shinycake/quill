@@ -589,7 +589,11 @@ impl QuillApp {
                         cx,
                     );
                     self.history.rows_key = Some(key);
-                    list
+                    let failed = self
+                        .saved_history()
+                        .is_some_and(|(_, history)| history.older == quill::state::OlderEnd::Failed)
+                        .then_some(super::older_retry::OlderRetryFor::Saved);
+                    super::older_retry::with_older_retry(list, failed, cx)
                 } else if thread_pending {
                     self.thread_status_pane(cx)
                 } else if let Some(thread) = thread_open {

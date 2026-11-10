@@ -40,6 +40,9 @@ pub struct ChatsState {
     /// The account's default wallpaper per theme (`false` light, `true`
     /// dark), from `updateDefaultBackground` and `setDefaultBackground`.
     pub default_backgrounds: HashMap<bool, Background>,
+    /// The default wallpaper `deleteDefaultBackground` removed at once, by
+    /// theme, with the request: a refusal puts it back.
+    pub(crate) removed_default_backgrounds: HashMap<bool, (crate::ids::RequestId, Background)>,
     /// Which theme the pending `setDefaultBackground` was for.
     pub background_set_for_dark: bool,
     /// `chat.background` / `updateChatBackground`, by chat id.
@@ -134,6 +137,7 @@ impl ChatsState {
         Self {
             installed_backgrounds: crate::state::fetch::Fetch::Idle,
             default_backgrounds: HashMap::new(),
+            removed_default_backgrounds: HashMap::new(),
             background_set_for_dark: false,
             chat_backgrounds: HashMap::new(),
             chat_theme_names: HashMap::new(),
@@ -176,5 +180,21 @@ impl ChatsState {
         self.deep_link = None;
         self.deep_link_from_agent = false;
         self.deep_link_original.clear();
+    }
+}
+
+impl ChatsState {
+    /// `deleteDefaultBackground` was refused: the wallpaper it took off the
+    /// screen returns, unless another one was set since.
+    pub(crate) fn restore_deleted_default_background(&mut self, request: crate::ids::RequestId) {
+        let theme = self
+            .removed_default_backgrounds
+            .iter()
+            .find_map(|(theme, (asked, _))| (*asked == request).then_some(*theme));
+        if let Some(theme) = theme
+            && let Some((_, background)) = self.removed_default_backgrounds.remove(&theme)
+        {
+            self.default_backgrounds.entry(theme).or_insert(background);
+        }
     }
 }

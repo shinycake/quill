@@ -12,6 +12,8 @@ use quill::lang::{keys, tr};
 pub(in crate::ui) enum OlderRetryFor {
     Thread,
     Topic,
+    /// The open Saved Messages sublist or tag filter.
+    Saved,
 }
 
 /// `list` with the strip above it while `failed`; the list unchanged
@@ -65,6 +67,7 @@ impl QuillApp {
             let _ = match which {
                 OlderRetryFor::Thread => live.driver.retry_thread_older(),
                 OlderRetryFor::Topic => live.driver.retry_topic_older(),
+                OlderRetryFor::Saved => live.driver.retry_saved_older(),
             };
         }
         cx.notify();

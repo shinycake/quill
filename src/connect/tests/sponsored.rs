@@ -118,3 +118,51 @@ fn sponsored_fetch_view_once_and_click() {
     assert!(driver.session.messages.last_sponsored_report.is_none());
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// Sweep 05-249: an answer to a report the user cancelled does not re-arm
+/// the option picker, and a late Ok hides no ad (message 0).
+#[test]
+fn a_cancelled_report_ignores_its_late_answer() {
+    let store = MemorySecretStore::new();
+    let (dir, prepared) = prepared_tmp(&store);
+    let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+    let recorder = Arc::new(RecordingSender::new());
+    let session = Session::new(AccountKey::primary(), sink.clone());
+    let mut driver = ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
+    let seq = AtomicU64::new(0);
+    for json in [
+        r#"{"@type":"updateAuthorizationState","authorization_state":{"@type":"authorizationStateReady"}}"#,
+        r#"{"@type":"updateNewChat","chat":{"id":13,"title":"Demo channel","type":{"@type":"chatTypeSupergroup","supergroup_id":13,"is_channel":true},"unread_count":0}}"#,
+    ] {
+        driver
+            .ingest(copy_and_parse(json, &seq, &sink).unwrap())
+            .unwrap();
+    }
+    let chat = ChatId(13);
+    driver.session.open_chat(chat);
+    let extra = driver.fetch_sponsored_messages(chat).unwrap().unwrap();
+    let response = format!(
+        r#"{{"@type":"sponsoredMessages","@extra":"{}","messages_between":0,"messages":[{{"@type":"sponsoredMessage","message_id":9001,"is_recommended":false,"can_be_reported":true,"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":"ad","entities":[]}}}},"sponsor":{{"@type":"advertisementSponsor","url":"https://example.com","photo":{{"@type":"photo","has_stickers":false,"sizes":[]}},"info":""}},"title":"T","button_text":"Go","accent_color_id":0,"background_custom_emoji_id":"0","additional_info":""}}]}}"#,
+        extra.0
+    );
+    driver
+        .ingest(copy_and_parse(&response, &seq, &sink).unwrap())
+        .unwrap();
+    let report = driver
+        .report_sponsored_message(chat, 9001, "")
+        .unwrap()
+        .expect("sent");
+    driver.session.dismiss_sponsored_report();
+    let answer = format!(
+        r#"{{"@type":"reportSponsoredResultOptionRequired","@extra":"{}","title":"Why?","options":[{{"@type":"reportOption","id":"c3BhbQ==","text":"Spam"}}]}}"#,
+        report.0
+    );
+    driver
+        .ingest(copy_and_parse(&answer, &seq, &sink).unwrap())
+        .unwrap();
+    assert!(
+        driver.session.messages.sponsored_report.is_none(),
+        "the picker stays closed"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}

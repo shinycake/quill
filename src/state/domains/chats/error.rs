@@ -48,6 +48,14 @@ impl Session {
                 | RequestPurpose::GetBackgroundUrl,
             ) => {
                 self.chats_state.background_error = Some(error_reason(err));
+                // The delete took the wallpaper off the screen at once: a
+                // refusal puts it back.
+                if let Some(pending) = pending
+                    && pending.purpose == RequestPurpose::DeleteDefaultBackground
+                {
+                    self.chats_state
+                        .restore_deleted_default_background(pending.id);
+                }
             }
             // Slice CL3: refused report / block surfaces in the
             // status note — never shown as success.

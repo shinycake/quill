@@ -104,6 +104,12 @@ impl Session {
         ) {
             self.fail_saved_tag_page(pending);
         }
+        if matches!(
+            pending.map(|p| p.purpose),
+            Some(RequestPurpose::GetSavedMessagesTopicHistory { .. })
+        ) {
+            self.fail_saved_topic_page(pending);
+        }
         // A failed thread request marks the open thread view.
         self.fail_thread(
             pending,

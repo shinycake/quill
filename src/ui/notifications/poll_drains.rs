@@ -70,6 +70,18 @@ impl QuillApp {
             self.set_note(StatusNote::error(err));
             progressed = true;
         }
+        // A profile change that failed after Save closed its dialog has
+        // no box to show the error in: it surfaces as a note, so the user
+        // does not believe the profile changed.
+        if self.dialogs.edit_profile_dialog.is_none()
+            && let Some(err) = self
+                .live
+                .as_mut()
+                .and_then(|live| live.driver.session.users_state.profile_edit_error.take())
+        {
+            self.set_note(StatusNote::error(err));
+            progressed = true;
+        }
         // Message widgets: their bots' answers and public data polls.
         let answers = self
             .live

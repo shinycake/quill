@@ -93,20 +93,25 @@ impl Session {
                 self.chats_state.chat_action_error =
                     Some(crate::chatlist_calls::clear_failed(err.code));
             }
-            Some(RequestPurpose::Calls(CallsPurpose::GetCallPrivacyRules { .. })) => {
-                self.privacy_roundtrip_done();
-                self.calls.privacy_error = true;
+            Some(RequestPurpose::Calls(CallsPurpose::GetCallPrivacyRules { setting })) => {
+                if let Some(pending) = pending {
+                    self.calls.privacy_asks.failed_by(setting, pending.id);
+                }
             }
             // Phase C2i: a failed `setUserPrivacySettingRules`
             // clears the optimistic value (the next fetch
             // restores the truth) and flags the error.
             Some(RequestPurpose::Calls(CallsPurpose::SetCallPrivacyRules { setting })) => {
-                match setting {
-                    CallPrivacySetting::AllowCalls => self.calls.privacy_allow_calls = None,
-                    CallPrivacySetting::PeerToPeer => self.calls.privacy_p2p = None,
+                // Only the set the rule waits for: an earlier one that
+                // fails after a later one was sent clears nothing.
+                if let Some(pending) = pending
+                    && self.calls.privacy_asks.failed_by(setting, pending.id)
+                {
+                    match setting {
+                        CallPrivacySetting::AllowCalls => self.calls.privacy_allow_calls = None,
+                        CallPrivacySetting::PeerToPeer => self.calls.privacy_p2p = None,
+                    }
                 }
-                self.privacy_roundtrip_done();
-                self.calls.privacy_error = true;
             }
             Some(RequestPurpose::SendCallLog) => {
                 if let Some(summary) = self.calls.summary.as_mut() {

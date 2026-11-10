@@ -429,20 +429,19 @@ impl Session {
                                 }
                             }
                         }
-                        fetch => {
-                            *fetch = InviteLinkFetch::Loaded(InviteLinkList {
-                                total_count: 1,
-                                links: vec![link],
-                            });
+                        // The list is still on its way: its answer is the
+                        // whole list, this link included once the server
+                        // has it. Nothing is invented from one entry.
+                        InviteLinkFetch::Loading => {}
+                        // A failed list is dropped so the next fetch asks
+                        // again, instead of showing one link as the list.
+                        InviteLinkFetch::Failed(_) => {
+                            entry.remove();
                         }
                     }
                 }
-                std::collections::hash_map::Entry::Vacant(entry) => {
-                    entry.insert(InviteLinkFetch::Loaded(InviteLinkList {
-                        total_count: 1,
-                        links: vec![link],
-                    }));
-                }
+                // Never fetched: the first fetch gets the whole list.
+                std::collections::hash_map::Entry::Vacant(_) => {}
             }
         }
     }

@@ -319,14 +319,27 @@ static SHARED: Mutex<Option<Arc<TdHub>>> = Mutex::new(None);
 enum Reuse {
     None,
     Running(Arc<TdHub>),
-    /// A hub whose receive thread ended unexpectedly, with its library.
-    Stopped(Option<Arc<TdJson>>),
+    /// A hub whose receive thread ended unexpectedly, with its library and
+    /// what its clients are tied to ([`Handover`]).
+    Stopped(Option<Arc<TdJson>>, Handover),
+}
+
+/// What a replacement hub takes over from a stopped one: the routing table
+/// and the stopped flag the live clients' bridges hold. Without it every
+/// open client would be unrouted on the new hub and still report itself
+/// stopped, while its TDLib instance stays open on the database.
+#[derive(Clone)]
+pub struct Handover {
+    routes: Arc<Routes>,
+    stopped: Arc<AtomicBool>,
 }
 
 fn reusable(slot: Option<&Arc<TdHub>>) -> Reuse {
     match slot {
         None => Reuse::None,
-        Some(hub) if hub.stopped_unexpectedly() => Reuse::Stopped(hub.api().cloned()),
+        Some(hub) if hub.stopped_unexpectedly() => {
+            Reuse::Stopped(hub.api().cloned(), hub.handover())
+        }
         Some(hub) => Reuse::Running(hub.clone()),
     }
 }
@@ -336,19 +349,23 @@ impl TdHub {
     /// use. A failed load is not remembered, so a later call can retry.
     pub fn shared(sink: Arc<dyn DiagnosticSink>) -> Result<Arc<TdHub>, TdJsonError> {
         let mut slot = lock(&SHARED);
+        let mut took_over = None;
         let api = match reusable(slot.as_ref()) {
             Reuse::Running(hub) => return Ok(hub),
             // The receive thread died: keep the loaded library (it is
             // already secured and must stay loaded for TDLib's worker
             // threads) and only start a new receive thread over it.
-            Reuse::Stopped(Some(api)) => api,
-            Reuse::Stopped(None) | Reuse::None => Self::load_secured_api()?,
+            Reuse::Stopped(Some(api), handover) => {
+                took_over = Some(handover);
+                api
+            }
+            Reuse::Stopped(None, _) | Reuse::None => Self::load_secured_api()?,
         };
         let receive = api.clone();
         let source: ReceiveSource = Box::new(move |timeout| receive.receive(timeout));
         let waker = api.clone();
         let wake: ReceiveWake = Box::new(move || waker.wake_receive());
-        let mut hub = TdHub::with_source(source, wake, sink).map_err(|_| TdJsonError::Load)?;
+        let mut hub = TdHub::start(source, wake, sink, took_over).map_err(|_| TdJsonError::Load)?;
         hub.api = Some(api);
         let hub = Arc::new(hub);
         *slot = Some(hub.clone());
@@ -387,10 +404,47 @@ impl TdHub {
         wake: ReceiveWake,
         sink: Arc<dyn DiagnosticSink>,
     ) -> std::io::Result<Self> {
-        let routes = Arc::new(Routes::default());
+        Self::start(source, wake, sink, None)
+    }
+
+    /// A hub taking over a stopped one's routes and stopped flag, so the
+    /// clients that were on it keep receiving.
+    pub fn with_source_replacing(
+        source: ReceiveSource,
+        wake: ReceiveWake,
+        sink: Arc<dyn DiagnosticSink>,
+        stopped_hub: &TdHub,
+    ) -> std::io::Result<Self> {
+        Self::start(source, wake, sink, Some(stopped_hub.handover()))
+    }
+
+    /// What a replacement of this hub takes over.
+    pub fn handover(&self) -> Handover {
+        Handover {
+            routes: self.routes.clone(),
+            stopped: self.stopped.clone(),
+        }
+    }
+
+    fn start(
+        source: ReceiveSource,
+        wake: ReceiveWake,
+        sink: Arc<dyn DiagnosticSink>,
+        handover: Option<Handover>,
+    ) -> std::io::Result<Self> {
+        let (routes, stopped) = match handover {
+            // The old loop is gone: the clients' flag reads running again.
+            Some(Handover { routes, stopped }) => {
+                stopped.store(false, Ordering::SeqCst);
+                (routes, stopped)
+            }
+            None => (
+                Arc::new(Routes::default()),
+                Arc::new(AtomicBool::new(false)),
+            ),
+        };
         let seq = Arc::new(AtomicU64::new(0));
         let shutdown = Arc::new(AtomicBool::new(false));
-        let stopped = Arc::new(AtomicBool::new(false));
         let guard = StopGuard {
             shutdown: shutdown.clone(),
             stopped: stopped.clone(),

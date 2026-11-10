@@ -525,6 +525,7 @@ impl QuillApp {
             {
                 let extra =
                     session.request(RequestPurpose::ReportChatSponsoredMessage, Some(chat_id));
+                session.note_sponsored_report_request(extra);
                 let json = format!(
                     r#"{{"@type":"reportSponsoredResultOptionRequired","@extra":"{}","title":"Why are you reporting this ad?","options":[{{"@type":"reportOption","id":"bWlzLWxlYWQ=","text":"Misleading or scam"}},{{"@type":"reportOption","id":"c3BhbQ==","text":"Spam"}}]}}"#,
                     extra.0

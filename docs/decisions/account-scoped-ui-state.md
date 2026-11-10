@@ -4077,3 +4077,66 @@ and 10 are widget items another fixer owns).
   (`cancel_inline_opening_unless_chat`, an invite preview, a text or typed
   link), or when another account is on screen (10-119). No timer: a lookup
   that never answers is the deep-link flow's own concern.
+
+### Sweep fixes (s3-links-tdlib)
+
+Links, mini apps, location, and TDLib state and connection.
+
+- **AI compose box.** A failed request is `CardState::Failed(AiBoxError)`, so
+  "Increase Limit" follows the card (a good result after buying Premium can be
+  applied) and clicking the active tab asks again after a failure (01-053,
+  01-054). The apply-in-place binding is per account
+  (`AiComposePrefs::bound_style_names`; the old app-wide value moves to the
+  primary account on load), and the request carries its account and the
+  composer's text, so an answer lands only while the composer still holds that
+  text (01-056, 07-028). The style preview's "Another example" fails at once
+  when no client is there (01-046).
+- **Links.** A new launch link replaces a finished flow nobody consumed
+  (02-041). A linked media timestamp waits for the unlock and is dropped when
+  its chat is no longer shown (09-012, 09-X008). A thread link of a chat with
+  its own window runs in that window's scope (09-013). A flow whose account
+  left the screen is ended by `LinkUi`'s farewell, so its late answer finds no
+  flow (09-010: already handled, test added).
+- **Mini apps.** `WebApps::replace_open_result` queues the launch of an
+  unshown `Opened` answer for `closeWebApp` (03-002); the emoji-status switch
+  goes back at once when the send never left (03-001). A phone share's answer
+  is `PhoneShare::Sent|Refused(request)` and only the flow that sent it takes
+  it; a timeout clears it (14-044). The marketplace gift says why Buy did
+  nothing and asks the text limit again (02-136).
+- **Location picker.** Venue queries are numbered from a counter that is never
+  reset (`LocationSharing::venue_generation`); the ask for a place carries its
+  stage (`Unsent|InFlight|Answered|Failed`), so closing the search after a
+  failed lookup asks again; Resolving and Missing bots reset at `open()`
+  (03-073, 03-085, 03-074). A locate's 30 s limit pauses while the system's
+  permission prompt is open (`Locating::permission_prompt`, `WaitBudget`;
+  10-166). The macOS side could not be built here.
+- **Connect.** Answers captured from an envelope are stashed before any step
+  that can fail (02-037). A Grams name whose request never left is asked
+  again (04-041); the secret-chat queue keeps the ids behind a failed send
+  (02-212). The system proxy step's outcome is its own (`SystemStepState`,
+  matched by request id) and the box's error line is neither read nor cleared
+  by it (02-187, 06-033). The offline network re-probe runs at most once a
+  second and off the tracker's mutex (04-001). The media cache scope follows
+  the client put on screen, not the first connect (03-070). Background
+  accounts follow the OS proxy through the mirror of the list on screen
+  (03-013: by design, test added).
+- **State.** A failed map tile is retried when its chat is opened afresh
+  (`MapThumbs` is one map of `Tile` stages; 05-187). A created invite link is
+  merged only into a loaded list (05-197). `request_kind` classifies requests
+  by their own variant name (it read `Payments(GetPaymentForm)` as a user
+  action) and logout settles every request but a login submit (05-200); the
+  per-variant `kind()` the register proposes was not done. A calendar's
+  generation never repeats (05-231). Call privacy is one stage per rule
+  (`CallPrivacyAsks`; 05-251). Saved Messages views page by request id
+  (`SavedPage`), a failed page stops paging with a Retry strip
+  (`OlderEnd::Failed`; 05-261, 05-263, 05-262). A sponsored report answer is
+  taken only for the request the flow waits on (05-249). A deletion in another
+  chat leaves the search jump alone (06-005). `updateDefaultBackground` with a
+  null background removes the wallpaper and a refused delete puts it back
+  (06-032). A replacement hub takes over a stopped one's routes and stopped
+  flag (06-065). A profile change that fails after Save closed its dialog
+  shows as a note (05-155).
+- **Not changed.** 05-043 (`join_conference` already refuses a second join, and
+  a test says so), 05-184 (tdesktop's `loadMoreRows` has no failure handler
+  either, as the code comment says), 05-196 (the payload's own setters
+  overwrite those fields right after the rebuild, so nothing is lost).

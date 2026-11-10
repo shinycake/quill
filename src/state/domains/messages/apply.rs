@@ -422,7 +422,7 @@ impl Session {
                 // Every window's thread, Saved Messages views and gallery.
                 self.in_every_view(|session| {
                     if is_permanent {
-                        session.miss_search_jump(&message_ids);
+                        session.miss_search_jump(chat_id, &message_ids);
                     }
                     session.thread_remove(chat_id, &message_ids);
                     session.saved_remove_messages(chat_id, &message_ids);

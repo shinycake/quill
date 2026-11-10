@@ -141,6 +141,10 @@ fn call_privacy_get_maps_rules_and_set_failure_clears() {
         }),
         None,
     );
+    session
+        .calls
+        .privacy_asks
+        .set(CallPrivacySetting::AllowCalls, PrivacyAsk::Asking(extra));
     apply_json(
         &mut session,
         &seq,
@@ -154,7 +158,7 @@ fn call_privacy_get_maps_rules_and_set_failure_clears() {
         session.calls.privacy_allow_calls,
         Some(PrivacyWho::Contacts)
     );
-    assert!(!session.calls.privacy_error);
+    assert!(!session.calls.privacy_error());
 
     // Optimistic set, then a TDLib error: the optimistic value is
     // cleared (the next fetch restores the truth) and the error
@@ -166,6 +170,10 @@ fn call_privacy_get_maps_rules_and_set_failure_clears() {
         }),
         None,
     );
+    session
+        .calls
+        .privacy_asks
+        .set(CallPrivacySetting::AllowCalls, PrivacyAsk::Asking(extra));
     apply_json(
         &mut session,
         &seq,
@@ -176,7 +184,7 @@ fn call_privacy_get_maps_rules_and_set_failure_clears() {
         ),
     );
     assert_eq!(session.calls.privacy_allow_calls, None);
-    assert!(session.calls.privacy_error);
+    assert!(session.calls.privacy_error());
 }
 
 #[test]
@@ -186,15 +194,22 @@ fn call_privacy_loading_clears_only_after_both_gets_land() {
     // nothing selected instead of "Loading…".
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
-    session.calls.privacy_pending = 2;
-    for setting in [
+    let settings = [
         CallPrivacySetting::AllowCalls,
         CallPrivacySetting::PeerToPeer,
-    ] {
+    ];
+    let asked = settings.map(|setting| {
         let extra = session.request(
             RequestPurpose::Calls(CallsPurpose::GetCallPrivacyRules { setting }),
             None,
         );
+        session
+            .calls
+            .privacy_asks
+            .set(setting, PrivacyAsk::Asking(extra));
+        extra
+    });
+    for (setting, extra) in settings.into_iter().zip(asked) {
         apply_json(
             &mut session,
             &seq,
@@ -386,4 +401,41 @@ fn other_discard_errors_leave_the_hang_up_alone() {
         session.calls.hang_up.as_ref().map(|h| h.resume.clone()),
         Some(CallState::HangingUp)
     );
+}
+
+/// Sweep 05-251: a send that failed marks only its own rule, so the answer
+/// of the other get neither hides the failure nor looks like a full load.
+#[test]
+fn a_failed_privacy_send_survives_the_other_rules_answer() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    let first = session.request(
+        RequestPurpose::Calls(CallsPurpose::GetCallPrivacyRules {
+            setting: CallPrivacySetting::AllowCalls,
+        }),
+        None,
+    );
+    let calls = &mut session.calls;
+    calls
+        .privacy_asks
+        .set(CallPrivacySetting::AllowCalls, PrivacyAsk::Asking(first));
+    // The second get never left.
+    calls
+        .privacy_asks
+        .set(CallPrivacySetting::PeerToPeer, PrivacyAsk::Failed);
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"userPrivacySettingRules","@extra":"{}","rules":[{{"@type":"userPrivacySettingRuleAllowAll"}}]}}"#,
+            first.0,
+        ),
+    );
+    assert_eq!(
+        session.calls.privacy_allow_calls,
+        Some(PrivacyWho::Everybody)
+    );
+    assert!(session.calls.privacy_error(), "the failure line stays");
+    assert!(!session.calls.privacy_loading());
 }

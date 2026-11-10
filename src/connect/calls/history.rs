@@ -1,5 +1,6 @@
 //! Connect driver: call debug logs, call history, call privacy and busy-call handling.
 use super::*;
+use crate::state::PrivacyAsk;
 
 impl<S: JsonSender> ConnectDriver<S> {
     pub(crate) fn call_debug_information(&self) -> Result<String, ConnectSendError> {
@@ -228,7 +229,6 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        self.session.calls.privacy_error = false;
         for setting in [
             CallPrivacySetting::AllowCalls,
             CallPrivacySetting::PeerToPeer,
@@ -242,12 +242,16 @@ impl<S: JsonSender> ConnectDriver<S> {
                 .send_json(&get_user_privacy_setting_rules(extra, setting))
             {
                 self.session.requests.take(extra);
-                self.session.calls.privacy_pending = 0;
-                self.session.calls.privacy_error = true;
+                self.session
+                    .calls
+                    .privacy_asks
+                    .set(setting, PrivacyAsk::Failed);
                 return Err(err);
             }
-            self.session.calls.privacy_pending =
-                self.session.calls.privacy_pending.saturating_add(1);
+            self.session
+                .calls
+                .privacy_asks
+                .set(setting, PrivacyAsk::Asking(extra));
         }
         Ok(())
     }
@@ -272,15 +276,20 @@ impl<S: JsonSender> ConnectDriver<S> {
             .send_json(&set_user_privacy_setting_rules(extra, setting, who))
         {
             self.session.requests.take(extra);
-            self.session.calls.privacy_pending = 0;
-            self.session.calls.privacy_error = true;
+            self.session
+                .calls
+                .privacy_asks
+                .set(setting, PrivacyAsk::Failed);
             return Err(err);
         }
         match setting {
             CallPrivacySetting::AllowCalls => self.session.calls.privacy_allow_calls = Some(who),
             CallPrivacySetting::PeerToPeer => self.session.calls.privacy_p2p = Some(who),
         }
-        self.session.calls.privacy_pending = self.session.calls.privacy_pending.saturating_add(1);
+        self.session
+            .calls
+            .privacy_asks
+            .set(setting, PrivacyAsk::Asking(extra));
         Ok(extra)
     }
 

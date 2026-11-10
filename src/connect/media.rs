@@ -82,6 +82,9 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// answered file then downloads like a photo thumbnail.
     fn maybe_request_map_thumbs(&mut self) -> Result<Vec<RequestId>, ConnectSendError> {
         let mut extras = Vec::new();
+        if let Some(open) = self.session.open_chat {
+            self.session.media.map_thumbs.retry_failed_outside(open);
+        }
         for (key, chat_id) in self.session.map_thumbs_to_request() {
             let extra = self
                 .session
