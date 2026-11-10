@@ -105,7 +105,8 @@ impl QuillApp {
         apply_ready_bot_chat(session, &self.demo_ui.sink, &self.demo_ui.seq);
         let sink: std::sync::Arc<dyn quill::diagnostics::DiagnosticSink> =
             self.demo_ui.sink.clone();
-        if let Some(owned) = quill::telegram::client::copy_and_parse(clear, &self.demo_ui.seq, &sink)
+        if let Some(owned) =
+            quill::telegram::client::copy_and_parse(clear, &self.demo_ui.seq, &sink)
         {
             session.apply(owned);
         }

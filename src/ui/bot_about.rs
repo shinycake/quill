@@ -3,8 +3,8 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
-use gpui_kit::component::StyledExt;
 use gpui_kit::component::ActiveTheme;
+use gpui_kit::component::StyledExt;
 use gpui_kit::*;
 use quill::lang::{keys, tr};
 use quill::telegram::envelope::BotInfo;

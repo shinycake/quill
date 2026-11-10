@@ -132,9 +132,7 @@ impl QuillApp {
             .gap_1()
             .px_3()
             .py_2()
-            .when(fill, |grid| {
-                grid.min_h(px(KEYBOARD_MAX_HEIGHT))
-            });
+            .when(fill, |grid| grid.min_h(px(KEYBOARD_MAX_HEIGHT)));
         for (row_index, row) in keyboard.rows.iter().enumerate() {
             if row.is_empty() {
                 continue;
