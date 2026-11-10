@@ -33,3 +33,4 @@ db.sqlite-shm
 # Vendored crate sources that the crate itself names `vendor/` (not the
 # native build outputs above).
 !third_party/*/vendor/
+__pycache__/
