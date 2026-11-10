@@ -249,10 +249,32 @@ pub fn update(
     account: &AccountKey,
     change: impl FnOnce(&mut AccountGrants),
 ) -> Result<(), SaveError> {
-    if super::ui_driver::guard::refuse_if_injecting("change which chats agents may use") {
+    update_as(account, Direction::Widen, change)
+}
+
+/// Like [`update`] for a change that only takes access away (a revoke, the
+/// contacts switch turned off). Not refused while the UI driver injects
+/// input, and the cache takes it even when the file cannot be written: a
+/// narrowing that failed to save must not leave agents with what the user
+/// just took back. The save error is still returned.
+pub fn update_narrowing(
+    account: &AccountKey,
+    change: impl FnOnce(&mut AccountGrants),
+) -> Result<(), SaveError> {
+    update_as(account, Direction::Narrow, change)
+}
+
+fn update_as(
+    account: &AccountKey,
+    direction: Direction,
+    change: impl FnOnce(&mut AccountGrants),
+) -> Result<(), SaveError> {
+    if direction == Direction::Widen
+        && super::ui_driver::guard::refuse_if_injecting("change which chats agents may use")
+    {
         return Ok(());
     }
-    change_all(|all| {
+    change_all(direction, |all| {
         let before = all.get(&account.0).cloned().unwrap_or_default();
         let mut after = before.clone();
         change(&mut after);
@@ -276,13 +298,23 @@ static CHANGING: std::sync::Mutex<()> = std::sync::Mutex::new(());
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SaveError(pub String);
 
+/// Whether a change gives agents more access or takes it away.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Direction {
+    /// The file is written before the cache takes the change, so a failed
+    /// save leaves both as they were.
+    Widen,
+    /// The cache takes the change whatever the save says, so a revoke
+    /// holds in this run even when the file cannot be written.
+    Narrow,
+}
+
 /// Change every account's grants; `change` says whether it changed any.
-/// The file is written before the cache takes the change, so a failed save
-/// leaves both as they were and says so.
 fn change_all(
+    direction: Direction,
     change: impl FnOnce(&mut BTreeMap<String, AccountGrants>) -> bool,
 ) -> Result<(), SaveError> {
-    change_all_saving(change, save_to_disk)
+    change_all_saving(direction, change, save_to_disk)
 }
 
 /// Writes the grants file, when this run persists anything.
@@ -297,6 +329,7 @@ fn save_to_disk(stored: &Stored) -> Result<(), String> {
 }
 
 fn change_all_saving(
+    direction: Direction,
     change: impl FnOnce(&mut BTreeMap<String, AccountGrants>) -> bool,
     save: impl FnOnce(&Stored) -> Result<(), String>,
 ) -> Result<(), SaveError> {
@@ -307,23 +340,28 @@ fn change_all_saving(
     if !change(&mut all) {
         return Ok(());
     }
-    if let Err(err) = save(&Stored {
+    let saved = save(&Stored {
         accounts: all.clone(),
-    }) {
+    });
+    if let Err(err) = &saved {
         eprintln!("quill: could not save {GRANTS_FILE}: {err}");
-        return Err(SaveError(err));
+        if direction == Direction::Widen {
+            return Err(SaveError(err.clone()));
+        }
     }
     GENERATION.fetch_add(1, Ordering::SeqCst);
     *crate::locks::write_or_recover(&CACHE) = Some(all);
     crate::wake::AGENT.poke();
-    Ok(())
+    saved.map_err(SaveError)
 }
 
 /// `account` logged out or was removed: its grants go, so whoever signs in
 /// next under the same key starts from the defaults. Not refused while the
-/// UI driver injects input: it only ever narrows what agents may use.
+/// UI driver injects input: it only ever narrows what agents may use. The
+/// forgetting holds in memory even when the file cannot be written (the
+/// failure is logged), so the next sign-in never inherits the grants.
 pub fn forget_account(account: &AccountKey) {
-    let _ = change_all(|all| all.remove(&account.0).is_some());
+    let _ = change_all(Direction::Narrow, |all| all.remove(&account.0).is_some());
 }
 
 #[cfg(test)]
@@ -335,6 +373,7 @@ mod tests {
         let _guard = crate::locks::lock_or_recover(&crate::agent::access::TEST_LOCK);
         let account = crate::ids::AccountKey("save-failure-test".into());
         let failed = super::change_all_saving(
+            super::Direction::Widen,
             |all| {
                 all.insert(account.0.clone(), AccountGrants::default());
                 true
@@ -351,6 +390,7 @@ mod tests {
             "the cache never took the change"
         );
         let saved = super::change_all_saving(
+            super::Direction::Widen,
             |all| {
                 all.insert(account.0.clone(), AccountGrants::default());
                 true
@@ -359,6 +399,38 @@ mod tests {
         );
         assert_eq!(saved, Ok(()));
         super::forget_account(&account);
+    }
+
+    #[test]
+    fn a_narrowing_that_fails_to_save_still_takes_hold_in_memory() {
+        let _guard = crate::locks::lock_or_recover(&crate::agent::access::TEST_LOCK);
+        let account = crate::ids::AccountKey("narrow-failure-test".into());
+        let wide = AccountGrants {
+            all_chats: Some(Scope::ReadWrite),
+            ..AccountGrants::default()
+        };
+        let widened = super::change_all_saving(
+            super::Direction::Widen,
+            |all| {
+                all.insert(account.0.clone(), wide.clone());
+                true
+            },
+            |_| Ok(()),
+        );
+        assert_eq!(widened, Ok(()));
+        let before = super::generation();
+        let narrowed = super::change_all_saving(
+            super::Direction::Narrow,
+            |all| all.remove(&account.0).is_some(),
+            |_| Err("disk full".into()),
+        );
+        assert_eq!(narrowed, Err(super::SaveError("disk full".into())));
+        assert_eq!(
+            super::for_account(&account),
+            AccountGrants::default(),
+            "the forgotten account keeps nothing, so a sign-in under the same key starts clean"
+        );
+        assert!(super::generation() > before, "waiting writes are refused");
     }
 
     #[test]

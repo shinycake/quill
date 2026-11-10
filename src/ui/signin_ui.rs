@@ -296,6 +296,8 @@ impl QuillApp {
     fn signin_toggle_picker(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.auth_ui.signin.picker_open = !self.auth_ui.signin.picker_open;
         if self.auth_ui.signin.picker_open {
+            // A list that failed is asked again when the picker opens.
+            self.retry_countries(cx);
             // The popover mounts on the next frame and takes focus then.
             let search = self.auth_ui.signin.search.clone();
             window.defer(cx, move |window, cx| {
@@ -619,7 +621,9 @@ impl QuillApp {
             .overflow_y_scroll()
             .flex()
             .flex_col();
-        if hits.is_empty() {
+        if hits.is_empty() && self.countries_failed() {
+            list = list.child(self.countries_failed_row("signin", cx));
+        } else if hits.is_empty() {
             list = list.child(
                 div()
                     .p_3()

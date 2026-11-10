@@ -271,7 +271,9 @@ impl QuillApp {
             });
             self.open_box(crate::ui::shell::DialogKind::AgentConsent);
         } else {
-            self.update_grants(&account, |g| apply_scope(g, target, scope));
+            let current = scope_of(&grants::for_account(&account), target);
+            let narrows = !widens(current, scope);
+            self.update_grants_as(&account, narrows, |g| apply_scope(g, target, scope));
         }
         cx.notify();
     }
@@ -296,13 +298,13 @@ impl QuillApp {
 
     pub(super) fn set_agent_contacts(&mut self, on: bool, cx: &mut Context<Self>) {
         let account = self.agent_settings_account();
-        self.update_grants(&account, |g| g.contacts = on);
+        self.update_grants_as(&account, !on, |g| g.contacts = on);
         cx.notify();
     }
 
     pub(super) fn remove_agent_chat(&mut self, chat_id: i64, cx: &mut Context<Self>) {
         let account = self.agent_settings_account();
-        self.update_grants(&account, |g| {
+        self.update_grants_as(&account, true, |g| {
             g.chats.remove(&chat_id);
         });
         cx.notify();
@@ -316,14 +318,30 @@ impl QuillApp {
         account: &AccountKey,
         change: impl FnOnce(&mut AccountGrants),
     ) -> bool {
-        match grants::update(account, change) {
+        self.update_grants_as(account, false, change)
+    }
+
+    /// [`Self::update_grants`] for a change that `narrows` access: it holds
+    /// in memory even when the save fails (the note still says so).
+    pub(super) fn update_grants_as(
+        &mut self,
+        account: &AccountKey,
+        narrows: bool,
+        change: impl FnOnce(&mut AccountGrants),
+    ) -> bool {
+        let result = if narrows {
+            grants::update_narrowing(account, change)
+        } else {
+            grants::update(account, change)
+        };
+        match result {
             Ok(()) => true,
             Err(err) => {
                 self.set_note(super::status_note::StatusNote::error(tr_with(
                     keys::Q_AGENT_GRANTS_SAVE_FAILED,
                     &[("err", &err.0)],
                 )));
-                false
+                narrows
             }
         }
     }
