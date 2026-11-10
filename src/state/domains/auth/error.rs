@@ -38,6 +38,11 @@ impl Session {
                 self.auth_state.password_state_loading = false;
                 self.auth_state.password_op_error = Some(password_op_error_line(op, err));
             }
+            // The list stays empty; the next box that needs it can ask
+            // again (a user action, never a frame).
+            Some(RequestPurpose::GetCountries) => {
+                self.auth_state.countries.fail(error_reason(err));
+            }
             // Slice A8: a refused change-number op (code send /
             // resend, code check) clears the in-flight flags and
             // parks the honest, classified error line — never a

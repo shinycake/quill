@@ -113,18 +113,30 @@ impl<S: JsonSender> ConnectDriver<S> {
     }
 
     /// Fetch the sign-in country list once (works before authorization).
+    /// Safe to call every frame: after a failure it waits for
+    /// [`Self::retry_countries`].
     pub fn fetch_countries(&mut self) -> Result<Option<RequestId>, ConnectSendError> {
-        if self.session.auth_state.countries.is_some()
-            || self
-                .session
-                .requests
-                .has_purpose(RequestPurpose::GetCountries)
-        {
+        if !self.session.auth_state.countries.is_idle() {
             return Ok(None);
         }
+        self.ask_countries()
+    }
+
+    /// The list again after it failed: for a user action (opening a country
+    /// box, "Retry"), never for a frame.
+    pub fn retry_countries(&mut self) -> Result<Option<RequestId>, ConnectSendError> {
+        if !self.session.auth_state.countries.can_ask() {
+            return Ok(None);
+        }
+        self.ask_countries()
+    }
+
+    fn ask_countries(&mut self) -> Result<Option<RequestId>, ConnectSendError> {
         let extra = self.session.request(RequestPurpose::GetCountries, None);
+        self.session.auth_state.countries.begin();
         if let Err(err) = self.sender.send_json(&get_countries(extra)) {
             self.session.requests.take(extra);
+            self.session.auth_state.countries.fail("not sent");
             return Err(err);
         }
         Ok(Some(extra))

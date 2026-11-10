@@ -209,3 +209,25 @@ fn a_look_alike_fragment_address_asks_before_opening(cx: &mut TestAppContext) {
     assert_eq!(note, note_before);
     assert!(vcx.debug_bounds("gift-value-box").is_none());
 }
+
+#[gpui_kit::test]
+fn a_lookup_asked_from_a_box_that_is_gone_does_not_open_later(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    set_lookup(&app, vcx, |_| None);
+    click(vcx, "gift-value-learn-more");
+    assert!(lookup_of(&app, vcx).is_some_and(|lookup| lookup.loading));
+    // The gift box is left before the answer lands.
+    app.update_in(vcx, |app, _, cx| {
+        if let Some(session) = app.demo_session.as_mut() {
+            session.payments.hub.gift_selected = None;
+        }
+        app.gift_market.stack.clear();
+        cx.notify();
+    });
+    settle(vcx);
+    assert!(
+        lookup_of(&app, vcx).is_none(),
+        "the pending lookup is dropped"
+    );
+}

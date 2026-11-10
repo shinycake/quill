@@ -148,10 +148,18 @@ impl QuillApp {
         // The send box's recipient, or none for yourself.
         let recipient = self.gift_market.recipient.clone();
         let started = match self.live.as_mut() {
-            Some(live) => live
-                .driver
-                .start_gift_resale_buy(&name, recipient, false)
-                .is_ok(),
+            Some(live) => {
+                let started = live
+                    .driver
+                    .start_gift_resale_buy(&name, recipient, false)
+                    .is_ok();
+                if !started {
+                    self.set_note(StatusNote::error(tr(
+                        keys::Q_MONEY_COULDNT_START_THE_PURCHASE,
+                    )));
+                }
+                started
+            }
             None => {
                 let me = self.session().and_then(|s| s.my_user_id).unwrap_or(0);
                 self.gift_market_mut().is_some_and(|market| {

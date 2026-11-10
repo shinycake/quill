@@ -144,7 +144,8 @@ impl QuillApp {
                 .session
                 .auth_state
                 .countries
-                .clone()
+                .data()
+                .cloned()
                 .unwrap_or_default(),
             None => self.auth_ui.signin.demo_countries.clone(),
         }

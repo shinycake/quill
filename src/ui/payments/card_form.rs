@@ -240,7 +240,12 @@ impl QuillApp {
             .and_then(|id| session.users.get(&id))
             .map(|me| quill::phone::digits_only(&me.phone_number))
             .unwrap_or_default();
-        let countries = session.auth_state.countries.clone().unwrap_or_default();
+        let countries = session
+            .auth_state
+            .countries
+            .data()
+            .cloned()
+            .unwrap_or_default();
         quill::phone::country_for_digits(&phone, &countries)
             .map(|country| country.iso.clone())
             .unwrap_or_default()

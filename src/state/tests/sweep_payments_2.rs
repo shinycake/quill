@@ -196,3 +196,20 @@ fn acquired_gifts_and_preview_failures_say_so_and_can_be_asked_again() {
         Some(Fetch::Failed { .. })
     ));
 }
+
+#[test]
+fn a_giveaway_launch_in_flight_survives_reopening_the_form() {
+    use crate::state::GiveawayLaunch;
+    let launching = GiveawayLaunch::Launching {
+        chat_id: 5,
+        request: 9,
+    };
+    assert_eq!(launching.clone().for_next_form(), launching);
+    for seen in [
+        GiveawayLaunch::Launched,
+        GiveawayLaunch::Failed("x".into()),
+        GiveawayLaunch::Idle,
+    ] {
+        assert_eq!(seen.for_next_form(), GiveawayLaunch::Idle);
+    }
+}

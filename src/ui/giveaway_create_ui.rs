@@ -102,7 +102,8 @@ impl QuillApp {
                 .submit_on_enter(false)
         });
         if let Some(live) = self.live.as_mut() {
-            live.driver.session.payments.giveaway.launch = GiveawayLaunch::Idle;
+            let giveaway = &mut live.driver.session.payments.giveaway;
+            giveaway.launch = std::mem::take(&mut giveaway.launch).for_next_form();
             if new_giveaway {
                 let _ = live.driver.request_giveaway_options(chat_id.0);
             }
@@ -122,12 +123,8 @@ impl QuillApp {
         let boosted = self.giveaway.form.take().map(|f| f.draft.boosted_chat_id);
         if let Some(live) = self.live.as_mut() {
             let launched = live.driver.session.payments.giveaway.launch == GiveawayLaunch::Launched;
-            if !matches!(
-                live.driver.session.payments.giveaway.launch,
-                GiveawayLaunch::Launching { .. }
-            ) {
-                live.driver.session.payments.giveaway.launch = GiveawayLaunch::Idle;
-            }
+            let giveaway = &mut live.driver.session.payments.giveaway;
+            giveaway.launch = std::mem::take(&mut giveaway.launch).for_next_form();
             if launched && let Some(chat) = boosted {
                 let _ = live.driver.fetch_chat_boost_status(ChatId(chat));
             }

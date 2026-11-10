@@ -142,6 +142,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         for_craft: bool,
     ) -> Result<(), ConnectSendError> {
         let market = &self.session.payments.gift_market;
+        // A purchase on its way is not replaced by another listing.
+        if market.buy.as_ref().is_some_and(|buy| buy.sending) {
+            return Err(ConnectSendError::InvalidRequest);
+        }
         let listing = market
             .resale
             .iter()
@@ -389,6 +393,22 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.search_resale_page(true, false)?;
         }
         Ok(())
+    }
+
+    /// "Retry" of a failed "on sale" list in Select Gifts: the first page
+    /// again.
+    pub fn retry_craft_listings(&mut self) -> Result<RequestId, ConnectSendError> {
+        let failed = self
+            .session
+            .payments
+            .gift_market
+            .craft
+            .as_ref()
+            .is_some_and(|craft| craft.market.error.is_some() && !craft.market.loading);
+        if !failed {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        self.search_resale_page(true, false)
     }
 
     /// The next page of the user's own gifts for crafting.

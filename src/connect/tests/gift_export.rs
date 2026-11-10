@@ -430,3 +430,59 @@ fn a_second_transfer_click_sends_nothing() {
     assert!(p.0.probe_gift_export().is_err());
     assert_eq!(count(&p.1, "getUpgradedGiftWithdrawalUrl"), 0);
 }
+
+#[test]
+fn cancel_waits_for_the_transfer_and_the_answer_still_opens_the_chat() {
+    let mut p = parts();
+    open_my_gifts(&mut p);
+    set_stage(
+        &mut p,
+        "open",
+        TransferStage::ConfirmPeer {
+            user_id: 21,
+            name: "Maya".into(),
+        },
+    );
+    let extra = p.0.transfer_picked_gift().unwrap();
+    assert!(matches!(
+        stage(&p),
+        Some(TransferStage::Transferring { user_id: 21, .. })
+    ));
+    // Cancel or Esc while the transfer is out does nothing.
+    if let Some(picker) = p.0.session.payments.gifts_manage.transfer_mut() {
+        picker.back();
+    }
+    assert!(matches!(
+        stage(&p),
+        Some(TransferStage::Transferring { .. })
+    ));
+    feed(&mut p, json!({"@type": "ok", "@extra": extra.as_extra()}));
+    let manage = &p.0.session.payments.gifts_manage;
+    assert!(manage.flow.is_none());
+    let moved = manage.transferred.as_ref().expect("the toast and chat");
+    assert_eq!((moved.user_id, moved.recipient.as_str()), (21, "Maya"));
+}
+
+#[test]
+fn a_failed_transfer_returns_to_the_confirmation() {
+    let mut p = parts();
+    open_my_gifts(&mut p);
+    set_stage(
+        &mut p,
+        "open",
+        TransferStage::ConfirmPeer {
+            user_id: 21,
+            name: "Maya".into(),
+        },
+    );
+    let extra = p.0.transfer_picked_gift().unwrap();
+    feed(
+        &mut p,
+        json!({"@type": "error", "@extra": extra.as_extra(), "code": 400, "message": "BAD"}),
+    );
+    assert!(matches!(
+        stage(&p),
+        Some(TransferStage::ConfirmPeer { user_id: 21, .. })
+    ));
+    assert!(!p.0.session.payments.hub.gift_mutating);
+}

@@ -471,6 +471,8 @@
 "qll_money_could_not_reassign_the_boost" = "Couldn't reassign the boost";
 "qll_money_could_not_load_the_collectible" = "Couldn't load the details";
 "qll_money_could_not_load_this_list" = "Couldn't load this list.";
+"qll_money_couldnt_start_the_purchase" = "Couldn't start the purchase";
+"qll_money_couldnt_send_the_stars" = "Couldn't send the Stars";
 "qll_money_could_not_rejoin_the_subscription" = "Couldn't rejoin the subscription";
 "qll_money_could_not_save_the_collection" = "could not save the collection";
 "qll_money_could_not_save_the_currency" = "Couldn't save the currency";

@@ -95,6 +95,10 @@ pub enum TransferStage {
     Pick,
     /// "Do you want to transfer ownership of {name} to {recipient}?"
     ConfirmPeer { user_id: i64, name: String },
+    /// "Transfer" was pressed: `transferGift` is out. Cancel and Esc wait
+    /// for the answer, which brings the toast and the recipient's chat; a
+    /// failure returns to the confirmation.
+    Transferring { user_id: i64, name: String },
     /// "Unlocking in progress".
     Locked { hours: i64 },
     /// "Manage with Fragment" with "Open Fragment".
@@ -171,6 +175,31 @@ impl TransferPicker {
         self.exporting() || self.stage == TransferStage::Probing
     }
 
+    /// Whether `transferGift` is out.
+    pub fn transferring(&self) -> bool {
+        matches!(self.stage, TransferStage::Transferring { .. })
+    }
+
+    /// `transferGift` went out for the contact the confirmation names.
+    pub fn begin_transfer(&mut self) {
+        if let TransferStage::ConfirmPeer { user_id, name } = &self.stage {
+            self.stage = TransferStage::Transferring {
+                user_id: *user_id,
+                name: name.clone(),
+            };
+        }
+    }
+
+    /// `transferGift` failed: the confirmation is back, to retry or cancel.
+    pub fn transfer_failed(&mut self) {
+        if let TransferStage::Transferring { user_id, name } = &self.stage {
+            self.stage = TransferStage::ConfirmPeer {
+                user_id: *user_id,
+                name: name.clone(),
+            };
+        }
+    }
+
     /// A contact was picked: ask before giving the gift away.
     pub fn choose(&mut self, user_id: i64, name: impl Into<String>) {
         if self.stage == TransferStage::Pick {
@@ -244,9 +273,9 @@ impl TransferPicker {
     }
 
     /// Cancel or OK on a step: back to the list. Not while an export
-    /// request is out.
+    /// request or the transfer is out.
     pub fn back(&mut self) {
-        if !self.export_busy() {
+        if !self.export_busy() && !self.transferring() {
             self.stage = TransferStage::Pick;
         }
     }

@@ -69,7 +69,8 @@ pub(super) fn stage_view(app: &QuillApp, cx: &mut Context<QuillApp>) -> Option<S
     let name = picker.gift_name.clone();
     Some(match &picker.stage {
         TransferStage::Pick => pick_view(app, session, picker, gift, cx),
-        TransferStage::ConfirmPeer { user_id, name: to } => {
+        TransferStage::ConfirmPeer { user_id, name: to }
+        | TransferStage::Transferring { user_id, name: to } => {
             confirm_peer_view(app, session, gift, &name, *user_id, to, cx)
         }
         TransferStage::Locked { hours } => locked_view(*hours, cx),

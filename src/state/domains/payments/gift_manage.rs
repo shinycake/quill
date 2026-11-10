@@ -126,7 +126,7 @@ impl Session {
                 manage.transferred = match manage.transfer() {
                     Some(TransferPicker {
                         gift_name,
-                        stage: TransferStage::ConfirmPeer { user_id, name },
+                        stage: TransferStage::Transferring { user_id, name },
                         ..
                     }) => Some(GiftTransferred {
                         gift_name: gift_name.clone(),
@@ -328,6 +328,13 @@ impl Session {
             }
             PaymentsPurpose::GetPremiumGiftOptions => {
                 manage.send.premium_fetch = GiftListFetch::Failed;
+            }
+            PaymentsPurpose::TransferGift => {
+                if let Some(picker) = manage.transfer_mut() {
+                    picker.transfer_failed();
+                }
+                self.payments.hub.gift_mutating = false;
+                self.payments.hub.gifts_error = Some(format!("Couldn't update the gift: {reason}"));
             }
             PaymentsPurpose::DeleteGift => {
                 manage.deleting = None;

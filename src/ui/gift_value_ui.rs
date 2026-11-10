@@ -174,6 +174,30 @@ impl QuillApp {
         cx.notify();
     }
 
+    /// A "learn more" asked from a box that is gone (the gift box closed or
+    /// another gift was picked, the resale buy box left) must not open the
+    /// value box over whatever is on screen when its answer lands, and its
+    /// error does not wait under a row nobody sees. A value that is already
+    /// known stays for the next "learn more".
+    pub(super) fn drop_orphaned_gift_value(&mut self) {
+        let Some(session) = self.session() else {
+            return;
+        };
+        let hub = &session.payments.hub;
+        let host_shown = hub.gift_selected.is_some()
+            || self.gift_market.top() == Some(&super::gift_market_state::MarketBox::Buy);
+        let pending = hub
+            .gift_value
+            .as_ref()
+            .is_some_and(|lookup| !lookup.open && lookup.info.is_none());
+        if host_shown || !pending {
+            return;
+        }
+        if let Some(slot) = self.gift_value_mut() {
+            *slot = None;
+        }
+    }
+
     /// Closes the box; the value stays known for the next "learn more".
     pub(super) fn close_gift_value(&mut self, cx: &mut Context<Self>) {
         if let Some(Some(lookup)) = self.gift_value_mut() {

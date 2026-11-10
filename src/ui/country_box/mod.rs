@@ -78,7 +78,8 @@ impl QuillApp {
                 .session
                 .auth_state
                 .countries
-                .clone()
+                .data()
+                .cloned()
                 .unwrap_or_default(),
             None => crate::ui::signin_ui::demo_country_fixtures(),
         }
@@ -122,7 +123,7 @@ impl QuillApp {
                     return;
                 };
                 if let Some(live) = self.live.as_mut() {
-                    let _ = live.driver.fetch_countries();
+                    let _ = live.driver.retry_countries();
                 }
                 if let Some(slot) = self.country_box_slot(host) {
                     *slot = Some(country_box);
@@ -152,7 +153,7 @@ impl QuillApp {
         };
         let country_box = CountryBox::new(mode, &chosen, window, cx);
         if let Some(live) = self.live.as_mut() {
-            let _ = live.driver.fetch_countries();
+            let _ = live.driver.retry_countries();
         }
         if let Some(slot) = self.country_box_slot(host) {
             *slot = Some(country_box);

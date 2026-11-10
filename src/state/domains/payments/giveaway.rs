@@ -68,6 +68,19 @@ pub enum GiveawayLaunch {
     Failed(String),
 }
 
+impl GiveawayLaunch {
+    /// What a form opened or closed now starts from: a launch still in
+    /// flight stays (its answer is for the giveaway being started, and the
+    /// Start button must not send it twice); an answer already seen is
+    /// forgotten.
+    pub fn for_next_form(self) -> Self {
+        match self {
+            Self::Launching { .. } => self,
+            _ => Self::Idle,
+        }
+    }
+}
+
 impl GiveawayState {
     /// Whether `request` is the launch in flight.
     fn launching(&self, request: u64) -> bool {

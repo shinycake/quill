@@ -261,9 +261,14 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(ConnectSendError::InvalidRequest);
         }
         let to = MessageSender::User { user_id };
-        self.mutate_own_gifts(PaymentsPurpose::TransferGift, |extra, _| {
+        let sent = self.mutate_own_gifts(PaymentsPurpose::TransferGift, |extra, _| {
             rq::transfer_gift(extra, &id, to, star_count)
-        })
+        })?;
+        // The confirmation holds until the answer: Cancel and Esc wait.
+        if let Some(picker) = self.session.payments.gifts_manage.transfer_mut() {
+            picker.begin_transfer();
+        }
+        Ok(sent)
     }
 
     /// Whether the export of gift `id` may be asked for now: an unlocked

@@ -384,7 +384,7 @@ impl QuillApp {
                     let _ = live.driver.search_award_members(ChatId(chat), "");
                 }
                 GiveawayPage::Countries => {
-                    let _ = live.driver.fetch_countries();
+                    let _ = live.driver.retry_countries();
                 }
                 GiveawayPage::Form => {}
             }
@@ -568,7 +568,7 @@ impl QuillApp {
                         ("len", &(draft.country_codes.len()).to_string()),
                     ],
                 )));
-                match session.auth_state.countries.as_ref() {
+                match session.auth_state.countries.data() {
                     Some(countries) => {
                         let mut list: Vec<&quill::phone::Country> = countries
                             .iter()
@@ -596,6 +596,33 @@ impl QuillApp {
                                     })),
                                 );
                         }
+                    }
+                    None if session.auth_state.countries.error().is_some() => {
+                        body = body.child(
+                            div()
+                                .flex()
+                                .items_center()
+                                .justify_between()
+                                .gap_2()
+                                .child(
+                                    div()
+                                        .text_sm()
+                                        .text_color(muted)
+                                        .child(tr(keys::Q_MONEY_COULD_NOT_LOAD_THIS_LIST)),
+                                )
+                                .child(
+                                    Button::new("giveaway-countries-retry")
+                                        .label(tr(keys::Q_CHAT_RETRY))
+                                        .ghost()
+                                        .small()
+                                        .on_click(cx.listener(|this, _, _, cx| {
+                                            if let Some(live) = this.live.as_mut() {
+                                                let _ = live.driver.retry_countries();
+                                            }
+                                            cx.notify();
+                                        })),
+                                ),
+                        );
                     }
                     None => {
                         body = body.child(
@@ -636,7 +663,7 @@ fn country_name(session: &Session, code: &str) -> String {
     session
         .auth_state
         .countries
-        .as_ref()
+        .data()
         .and_then(|list| list.iter().find(|c| c.iso == code))
         .map(|c| c.name.clone())
         .unwrap_or_else(|| code.to_string())

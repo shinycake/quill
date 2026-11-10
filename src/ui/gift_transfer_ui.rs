@@ -76,7 +76,9 @@ impl QuillApp {
     /// Close the picker and every step on it.
     pub(super) fn close_gift_transfer(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(manage) = self.gift_manage_mut()
-            && manage.transfer().is_some()
+            && manage
+                .transfer()
+                .is_some_and(|picker| !picker.transferring())
         {
             manage.flow = None;
         }
