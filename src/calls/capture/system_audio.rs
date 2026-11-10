@@ -25,6 +25,9 @@ pub fn system_audio_supported() -> bool {
 #[derive(Debug, Default)]
 pub struct SystemAudioMix {
     queue: Mutex<VecDeque<f32>>,
+    /// Why the stream feeding the queue died (the output device went
+    /// away), for the driver to end the audio share.
+    failure: Mutex<Option<String>>,
 }
 
 impl SystemAudioMix {
@@ -55,6 +58,17 @@ impl SystemAudioMix {
             *out += sample * scale;
         }
         count
+    }
+
+    /// The capture behind the queue failed for good: the driver ends the
+    /// audio share.
+    pub fn fail(&self, reason: String) {
+        *self.failure.lock_or_recover() = Some(reason);
+    }
+
+    /// Why the capture died, once it has.
+    pub fn failure(&self) -> Option<String> {
+        self.failure.lock_or_recover().clone()
     }
 
     /// Samples waiting.
