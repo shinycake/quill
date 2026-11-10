@@ -424,6 +424,28 @@ impl Session {
             .insert(chat_id.0, photo);
     }
 
+    /// The chat's current photo is unknown and the full-info request that
+    /// would tell it is not in flight any more (it failed, or never went
+    /// out): the viewer waiting for it must give up.
+    pub fn chat_photo_request_ended(&self, chat_id: ChatId) -> bool {
+        if self
+            .users_state
+            .chat_current_photos
+            .contains_key(&chat_id.0)
+        {
+            return false;
+        }
+        match self.chats.get(&chat_id.0).map(|chat| &chat.kind) {
+            Some(ChatKind::Supergroup { supergroup_id, .. }) => !self
+                .requests
+                .has_purpose_for_supergroup(RequestPurpose::GetSupergroupFullInfo, *supergroup_id),
+            Some(ChatKind::BasicGroup { .. }) => !self
+                .requests
+                .has_purpose_for_chat(RequestPurpose::GetBasicGroupFullInfo, chat_id),
+            _ => true,
+        }
+    }
+
     /// The chat's photo changed: what the viewer knew of its photos is out
     /// of date.
     pub(crate) fn forget_chat_photos(&mut self, chat_id: ChatId) {

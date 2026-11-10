@@ -137,6 +137,9 @@ impl Session {
             Some(RequestRollback::ProtectedContent { chat_id, previous }) => {
                 self.set_chat_protected(chat_id, previous);
             }
+            Some(RequestRollback::DefaultReaction { previous }) => {
+                self.stickers.default_reaction = previous;
+            }
             Some(RequestRollback::AvailableReactions { chat_id, previous }) => match previous {
                 Some(setting) => {
                     self.chats_state

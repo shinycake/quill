@@ -295,6 +295,5 @@ UsersState::profile_photo_emoji_icons_failed
 UsersState::wearable_gifts_loaded
 Validation::finished
 VideoEditorDialog::busy
-VideoEditorDialog::still_busy
 WebApps::grossing_loading
 WhatsNewUi::opening

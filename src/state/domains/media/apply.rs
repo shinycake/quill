@@ -27,11 +27,11 @@ impl Session {
                 self.apply_download_added(*download)
             }
             MediaPayload::FoundFileDownloads(found) => {
-                if pending.is_some_and(|pending| {
-                    pending.purpose
+                if let Some(pending) = pending
+                    && pending.purpose
                         == RequestPurpose::Media(MediaPurpose::SearchDiskPausedDownloads)
-                }) {
-                    self.apply_disk_paused_found(found);
+                {
+                    self.apply_disk_paused_found(pending.id, found);
                 }
             }
             MediaPayload::UpdateFileRemovedFromDownloads { file_id } => {

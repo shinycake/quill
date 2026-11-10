@@ -278,8 +278,8 @@ fn voice_note_send_uses_input_file_local_and_recording_action() {
             )
             .unwrap();
     driver.select_chat(ChatId(7)).unwrap();
-    driver.sync_voice_recording(true, 1_000).unwrap();
-    driver.sync_voice_recording(true, 1_100).unwrap();
+    driver.sync_voice_recording(None, true, 1_000).unwrap();
+    driver.sync_voice_recording(None, true, 1_100).unwrap();
     let actions: Vec<String> = recorder
         .snapshot()
         .into_iter()

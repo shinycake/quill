@@ -886,16 +886,27 @@ fn paused_found(file_id: i32, message: i64) -> crate::telegram::envelope::Parsed
     }
 }
 
+const SEARCH_REQUEST: RequestId = RequestId(5);
+
+fn asked_search(keys: &[(i64, i64)]) -> DiskSearch {
+    DiskSearch::Asked {
+        request: SEARCH_REQUEST,
+        keys: keys.iter().copied().collect(),
+    }
+}
+
 #[test]
 fn a_pause_saved_while_the_saved_pause_search_runs_is_kept() {
     let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
     let mut session = Session::new(AccountKey::primary(), sink.clone());
     session.settings.data_storage.disk_paused.insert((7, 99));
     session.settings.data_storage.disk_paused.insert((7, 100));
-    session.media.disk_search_keys.insert((7, 99));
-    session.media.disk_search_keys.insert((7, 100));
+    session.media.disk_search = asked_search(&[(7, 99), (7, 100)]);
     session.settings.data_storage.disk_paused.insert((7, 101));
-    session.apply_disk_paused_found(vec![paused_found(77, 99), paused_found(79, 101)]);
+    session.apply_disk_paused_found(
+        SEARCH_REQUEST,
+        vec![paused_found(77, 99), paused_found(79, 101)],
+    );
     assert_eq!(session.media.disk_resume_due, [77]);
     let saved = &session.settings.data_storage.disk_paused;
     assert_eq!(saved.iter().copied().collect::<Vec<_>>(), [(7, 101)]);
@@ -907,8 +918,8 @@ fn a_saved_pause_found_on_a_low_disk_waits_for_a_healthy_one() {
     let mut session = Session::new(AccountKey::primary(), sink);
     session.media.disk_room = Some(1);
     session.settings.data_storage.disk_paused.insert((7, 99));
-    session.media.disk_search_keys.insert((7, 99));
-    session.apply_disk_paused_found(vec![paused_found(77, 99)]);
+    session.media.disk_search = asked_search(&[(7, 99)]);
+    session.apply_disk_paused_found(SEARCH_REQUEST, vec![paused_found(77, 99)]);
     assert!(session.media.disk_resume_due.is_empty());
     assert!(session.media.disk_paused.contains(&77));
     assert!(session.settings.data_storage.disk_paused.contains(&(7, 99)));

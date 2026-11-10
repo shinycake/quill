@@ -66,6 +66,7 @@ impl QuillApp {
     /// it is not cached; a group or channel opens once its current photo
     /// is known, and its history fills in while the viewer is open.
     pub(in crate::ui) fn open_peer_photos(&mut self, owner: PhotoOwner, cx: &mut Context<Self>) {
+        let mut chat_sent = Ok(());
         if let (PhotoOwner::Chat(chat_id), Some(live)) = (owner, self.live.as_mut()) {
             if matches!(
                 live.driver
@@ -81,7 +82,7 @@ impl QuillApp {
                     .chat_photo_history
                     .remove(&chat_id.0);
             }
-            let _ = live.driver.fetch_chat_photos(chat_id);
+            chat_sent = live.driver.fetch_chat_photos(chat_id);
         }
         let ready = self
             .session()
@@ -118,7 +119,7 @@ impl QuillApp {
                 live.driver.fetch_user_profile_photos(user_id).map(|_| ())
             }
             // Sent above.
-            PhotoOwner::Chat(_) => Ok(()),
+            PhotoOwner::Chat(_) => chat_sent,
         };
         match sent {
             Ok(()) => self.wait_for_profile_gallery(owner),
@@ -145,6 +146,10 @@ impl QuillApp {
             },
             PhotoOwner::Chat(chat_id) => match s.users_state.chat_photo_history.get(&chat_id.0) {
                 Some(ChatPhotosFetch::Failed(reason)) => Some(reason.clone()),
+                // The current photo's request ended without an answer.
+                _ if s.chat_photo_request_ended(chat_id) => {
+                    Some(tr(keys::Q_PEOPLE_COULDNT_REACH_TELEGRAM_TRY_AGAIN).to_string())
+                }
                 _ => None,
             },
         });

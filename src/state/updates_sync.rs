@@ -306,8 +306,22 @@ impl Session {
     /// healthy reading if the disk went low again meanwhile. Saved messages
     /// the list no longer has are dropped; a pause saved or undone since the
     /// search went out is left as it stands.
-    pub(crate) fn apply_disk_paused_found(&mut self, found: Vec<ParsedFileDownload>) {
-        let asked = std::mem::take(&mut self.media.disk_search_keys);
+    pub(crate) fn apply_disk_paused_found(
+        &mut self,
+        request: RequestId,
+        found: Vec<ParsedFileDownload>,
+    ) {
+        let DiskSearch::Asked {
+            request: asked_as,
+            keys: asked,
+        } = self.media.disk_search.clone()
+        else {
+            return;
+        };
+        if asked_as != request {
+            return;
+        }
+        self.media.disk_search = DiskSearch::Done;
         let low = self.media.disk_room.is_some();
         let mut held = std::collections::BTreeSet::new();
         for download in found {

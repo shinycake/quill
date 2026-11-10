@@ -204,6 +204,8 @@ impl SharedMediaState {
     }
 
     /// A page of a profile tab landed. `append` adds to the loaded items.
+    /// `false` when the page was for a chat that is not the open gallery's,
+    /// so it changed nothing.
     pub fn accept_profile(
         &mut self,
         chat_id: ChatId,
@@ -212,9 +214,9 @@ impl SharedMediaState {
         total_count: i32,
         has_more: bool,
         append: bool,
-    ) {
+    ) -> bool {
         if !self.open || self.chat_id != Some(chat_id) {
-            return;
+            return false;
         }
         let state = self.tab_state(tab);
         if append {
@@ -231,6 +233,7 @@ impl SharedMediaState {
         } else {
             SharedMediaTabStatus::Ready
         };
+        true
     }
 
     /// A profile tab failed to load.
@@ -459,7 +462,7 @@ impl Session {
         self.want_profile_thumbs(files.iter().map(|file| file.id));
         let items = page.gifts.iter().map(gift_item).collect();
         self.set_profile_count(chat_id, COUNT_KEY_GIFTS, page.total_count);
-        self.media.shared_media.accept_profile(
+        let accepted = self.media.shared_media.accept_profile(
             chat_id,
             SharedMediaTab::Gifts,
             items,
@@ -467,8 +470,10 @@ impl Session {
             !page.next_offset.is_empty(),
             append,
         );
-        let state = self.media.shared_media.tab_state(SharedMediaTab::Gifts);
-        state.next_offset = page.next_offset;
+        if accepted {
+            let state = self.media.shared_media.tab_state(SharedMediaTab::Gifts);
+            state.next_offset = page.next_offset;
+        }
     }
 
     /// A `getUserProfileAudios` page for the user's playlist.
