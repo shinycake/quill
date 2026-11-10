@@ -579,3 +579,47 @@ fn statistics_waiting_for_a_full_info_that_fails_end_in_an_error() {
         Some(ChatStatisticsFetch::Failed(_))
     ));
 }
+
+/// Refuses every `getSupergroupFullInfo` send, records the rest.
+struct RefuseFullInfoSender(Arc<RecordingSender>);
+
+impl JsonSender for RefuseFullInfoSender {
+    fn send_json(&self, request: &str) -> Result<(), ConnectSendError> {
+        if request.contains("getSupergroupFullInfo") {
+            return Err(ConnectSendError::Native);
+        }
+        self.0.send_json(request)
+    }
+}
+
+/// The full-info request that statistics wait on cannot be sent: the panel
+/// ends in an error instead of waiting for an answer that never comes
+/// (sweep 13-022).
+#[test]
+fn statistics_whose_full_info_send_fails_end_in_an_error() {
+    let store = MemorySecretStore::new();
+    let (dir, prepared) = prepared_tmp(&store);
+    let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+    let session = Session::new(AccountKey::primary(), sink.clone());
+    let mut driver = ConnectDriver::new(
+        session,
+        RefuseFullInfoSender(Arc::new(RecordingSender::new())),
+        test_credentials(),
+        prepared,
+    );
+    let seq = AtomicU64::new(0);
+    seed_ready_alice(&mut driver, &seq, &sink);
+    driver
+        .ingest(copy_and_parse(
+            r#"{"@type":"updateNewChat","chat":{"id":-100,"title":"News","type":{"@type":"chatTypeSupergroup","supergroup_id":100,"is_channel":true},"unread_count":0}}"#,
+            &seq,
+            &sink,
+        ).unwrap())
+        .unwrap();
+    assert!(driver.fetch_chat_statistics(ChatId(-100), false).is_err());
+    assert!(matches!(
+        driver.session.groups.chat_statistics.get(&-100),
+        Some(ChatStatisticsFetch::Failed(_))
+    ));
+    let _ = std::fs::remove_dir_all(&dir);
+}

@@ -159,6 +159,29 @@ impl super::ChatWindows {
         })
     }
 
+    /// Ends the round trips of the chat windows not in place that are still
+    /// opening the bot's chat and that `ends` selects: a link that overtook
+    /// the lookup, or its failure, must not leave the start to be sent
+    /// into a chat opened later.
+    pub(in crate::ui) fn cancel_slot_inline_openings(
+        &self,
+        ends: impl Fn(&super::super::inline_return::InlineReturn) -> bool,
+    ) {
+        for slot in self.slots() {
+            let Ok(mut slot) = slot.try_borrow_mut() else {
+                continue;
+            };
+            let end = slot
+                .composer_ui
+                .inline_return
+                .as_ref()
+                .is_some_and(|ret| ret.is_opening() && ends(ret));
+            if end {
+                slot.composer_ui.inline_return = None;
+            }
+        }
+    }
+
     /// Whether the media panel of a chat window whose state is not in
     /// place shows its GIFs tab (`QuillApp::sync_gif_downloads`).
     pub(in crate::ui) fn slot_shows_gifs(&self) -> bool {

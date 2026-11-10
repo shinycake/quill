@@ -4077,3 +4077,11 @@ and 10 are widget items another fixer owns).
   (`cancel_inline_opening_unless_chat`, an invite preview, a text or typed
   link), or when another account is on screen (10-119). No timer: a lookup
   that never answers is the deep-link flow's own concern.
+- Re-review of s12-ui. 10-119: both cancels also run over the round trips
+  that chat windows keep in their own slots
+  (`ChatWindows::cancel_slot_inline_openings`), so a start-bot pressed in a
+  chat window ends when a link overtakes the lookup or the lookup fails.
+  13-022: when the `getSupergroupFullInfo` send that statistics wait on
+  fails, the panel goes to `Failed` instead of staying `WaitingForInfo`.
+  09-110 stays as is: a partly failed send re-asks only chats that are
+  neither in flight nor known, so nothing is asked twice.
