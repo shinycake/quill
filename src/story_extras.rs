@@ -104,6 +104,46 @@ impl CloseFriendsEdit {
     }
 }
 
+/// Where the close-friends editor is. It opens on the loaded list only:
+/// `Loading` shows no checkboxes and no Save, so a save can never send a
+/// list built on an empty base. Every stage can be left (Cancel, the viewer
+/// closing); `Saving` ends on the confirmed list or a failure.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum CloseFriendsStage {
+    #[default]
+    Closed,
+    Loading,
+    Editing(CloseFriendsEdit),
+    Saving(CloseFriendsEdit),
+}
+
+impl CloseFriendsStage {
+    pub fn is_open(&self) -> bool {
+        !matches!(self, Self::Closed)
+    }
+
+    pub fn edit(&self) -> Option<&CloseFriendsEdit> {
+        match self {
+            Self::Editing(edit) | Self::Saving(edit) => Some(edit),
+            Self::Closed | Self::Loading => None,
+        }
+    }
+
+    pub fn edit_mut(&mut self) -> Option<&mut CloseFriendsEdit> {
+        match self {
+            Self::Editing(edit) => Some(edit),
+            Self::Closed | Self::Loading | Self::Saving(_) => None,
+        }
+    }
+
+    /// The list arrived: a loading editor starts from it.
+    pub fn loaded(&mut self, list: &[i64]) {
+        if matches!(self, Self::Loading) {
+            *self = Self::Editing(CloseFriendsEdit::new(list));
+        }
+    }
+}
+
 /// Public link of a story: `https://t.me/<username>/s/<id>`
 /// (tdesktop `Data::Story::url`). `None` without a public username.
 pub fn story_link(username: &str, story_id: i32) -> Option<String> {
@@ -202,6 +242,22 @@ mod tests {
         edit.toggle(1);
         assert!(!edit.changed());
         assert_eq!(edit.count(), 2);
+    }
+
+    #[test]
+    fn close_friends_stage_waits_for_the_list() {
+        let mut stage = CloseFriendsStage::Loading;
+        assert!(stage.edit().is_none() && stage.edit_mut().is_none());
+        stage.loaded(&[4, 9]);
+        let edit = stage.edit_mut();
+        assert!(edit.is_some());
+        if let Some(edit) = edit {
+            edit.toggle(1);
+        }
+        assert_eq!(stage.edit().map(CloseFriendsEdit::ids), Some(vec![1, 4, 9]));
+        // A later answer never rebases an edit in progress.
+        stage.loaded(&[]);
+        assert_eq!(stage.edit().map(CloseFriendsEdit::count), Some(3));
     }
 
     #[test]
