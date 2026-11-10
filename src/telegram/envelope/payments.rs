@@ -451,11 +451,19 @@ pub(crate) fn parse_payment_receipt(value: &Value) -> Option<PaymentReceiptData>
         match receipt_type.get("@type").and_then(Value::as_str)? {
             "paymentReceiptTypeRegular" => {
                 let invoice = receipt_type.get("invoice")?;
+                let tip_amount = int53(receipt_type.get("tip_amount")).unwrap_or(0);
+                // What was charged: the goods, the chosen shipping option and
+                // the tip (the form's total, which the receipt does not carry).
+                let shipping = receipt_type
+                    .get("shipping_option")
+                    .map(|option| price_parts_total(&parse_shipping_option(option).price_parts))
+                    .unwrap_or(0);
+                let goods = price_parts_total(&parse_price_parts(invoice.get("price_parts")));
                 (
                     json_field_str(invoice, "currency"),
-                    price_parts_total(&parse_price_parts(invoice.get("price_parts"))),
+                    goods.saturating_add(shipping).saturating_add(tip_amount),
                     json_field_str(receipt_type, "credentials_title"),
-                    int53(receipt_type.get("tip_amount")).unwrap_or(0),
+                    tip_amount,
                     false,
                     0,
                 )
@@ -494,7 +502,9 @@ pub(crate) fn parse_payment_receipt(value: &Value) -> Option<PaymentReceiptData>
 /// Slice P1: sum of a `labeledPricePart` list — the receipt carries no
 /// `total_amount`, only the invoice's price parts (schema:4752).
 pub fn price_parts_total(parts: &[LabeledPrice]) -> i64 {
-    parts.iter().map(|part| part.amount).sum()
+    parts
+        .iter()
+        .fold(0_i64, |sum, part| sum.saturating_add(part.amount))
 }
 
 /// Slice P1: format a TDLib smallest-unit amount as "USD 19.99", using the
@@ -515,8 +525,8 @@ pub fn format_payment_price(currency: &str, amount: i64) -> String {
 /// Digits after the decimal point of an ISO 4217 currency's smallest unit.
 pub fn currency_exponent(currency: &str) -> u32 {
     match currency {
-        "BIF" | "CLP" | "DJF" | "GNF" | "JPY" | "KMF" | "KRW" | "MGA" | "PYG" | "RWF" | "UGX"
-        | "UYI" | "VND" | "VUV" | "XAF" | "XOF" | "XPF" => 0,
+        "BIF" | "CLP" | "DJF" | "GNF" | "ISK" | "JPY" | "KMF" | "KRW" | "MGA" | "PYG" | "RWF"
+        | "UGX" | "UYI" | "VND" | "VUV" | "XAF" | "XOF" | "XPF" => 0,
         "BHD" | "IQD" | "JOD" | "KWD" | "OMR" | "TND" => 3,
         _ => 2,
     }

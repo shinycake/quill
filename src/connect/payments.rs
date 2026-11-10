@@ -2,7 +2,7 @@
 use super::*;
 use crate::ids::{ChatId, MessageId, RequestId};
 use crate::payment_invoice::InputInvoice;
-use crate::state::BankCardLookup;
+use crate::state::{BankCardLookup, BankCardStage};
 use crate::state::PaymentsPurpose;
 use crate::state::{PaymentRequest, RequestPurpose};
 use crate::telegram::envelope::OrderInfoData;
@@ -144,13 +144,12 @@ impl<S: JsonSender> ConnectDriver<S> {
         let extra = self.session.request(RequestPurpose::GetBankCardInfo, None);
         self.session.payments.bank_card = Some(BankCardLookup {
             number: number.to_string(),
-            info: None,
-            loading: true,
+            stage: BankCardStage::Loading { request: extra },
         });
         let json = crate::telegram::requests::get_bank_card_info(extra, number);
         if let Err(err) = self.send_json_request(extra, &json) {
             if let Some(lookup) = self.session.payments.bank_card.as_mut() {
-                lookup.loading = false;
+                lookup.stage = BankCardStage::Failed;
             }
             return Err(err);
         }

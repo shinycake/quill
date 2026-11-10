@@ -4,7 +4,7 @@
 use super::ton_wallet::Rig;
 use crate::state::DeepLinkState;
 use crate::ton_wallet::{
-    FIRST_TRANSFER_HINT, MoneyTab, ProfileAddress, READ_ONLY_METHODS, WalletSurface,
+    FIRST_TRANSFER_HINT, MoneyTab, ProfileAddress, READ_ONLY_METHODS, TxLookup, WalletSurface,
 };
 use serde_json::{Value, json};
 
@@ -199,11 +199,14 @@ fn a_transfer_card_opens_its_transaction_and_the_first_grams_hint() {
         .to_string(),
     );
     assert!(rig.driver.open_wallet_transaction("t1").unwrap());
-    assert!(rig.driver.session.ton_wallet.money.tx_loading);
+    assert!(matches!(
+        rig.driver.session.ton_wallet.money.tx_lookup,
+        TxLookup::Loading { .. }
+    ));
     assert_eq!(rig.last("getTonWalletTransaction")["transaction_id"], "t1");
     rig.answer("getTonWalletTransaction", transfer("t1", 2_000_000_000));
     let money = &rig.driver.session.ton_wallet.money;
-    assert!(money.open && !money.tx_loading);
+    assert!(money.open && money.tx_lookup == TxLookup::Idle);
     assert_eq!(
         money.selected_tx.as_ref().map(|tx| tx.id.as_str()),
         Some("t1")
@@ -226,6 +229,26 @@ fn a_transfer_card_opens_its_transaction_and_the_first_grams_hint() {
 }
 
 #[test]
+fn failed_state_rates_and_explorer_are_asked_again_on_the_next_open() {
+    let mut rig = Rig::new();
+    rig.wallet_on(true);
+    rig.driver.open_money_page().unwrap();
+    assert_eq!(rig.sent("getApplicationConfig"), 1);
+    let error = json!({"@type": "error", "code": 500, "message": "TIMEOUT"});
+    rig.answer("loadTonWalletState", error.clone());
+    rig.answer("getCurrencyExchangeRates", error.clone());
+    rig.answer("getApplicationConfig", error);
+    // Still in flight, so nothing is asked twice meanwhile.
+    rig.driver.open_money_page().unwrap();
+    assert_eq!(rig.sent("loadTonWalletState"), 2);
+    assert_eq!(rig.sent("getCurrencyExchangeRates"), 2);
+    assert_eq!(rig.sent("getApplicationConfig"), 2);
+    rig.driver.open_money_page().unwrap();
+    assert_eq!(rig.sent("loadTonWalletState"), 2, "in flight: not again");
+    assert_eq!(rig.sent("getApplicationConfig"), 2, "in flight: not again");
+}
+
+#[test]
 fn a_failed_lookup_says_so() {
     let mut rig = Rig::new();
     rig.wallet_on(true);
@@ -235,8 +258,36 @@ fn a_failed_lookup_says_so() {
         json!({"@type": "error", "code": 400, "message": "TRANSACTION_NOT_FOUND"}),
     );
     let money = &rig.driver.session.ton_wallet.money;
-    assert!(!money.tx_loading && money.selected_tx.is_none());
-    assert!(money.tx_error.is_some());
+    assert!(money.selected_tx.is_none());
+    assert!(money.tx_error().is_some());
+}
+
+#[test]
+fn a_late_answer_for_an_earlier_card_is_dropped() {
+    let mut rig = Rig::new();
+    rig.wallet_on(true);
+    rig.driver.open_wallet_transaction("t1").unwrap();
+    let first_extra = rig.last("getTonWalletTransaction")["@extra"].clone();
+    rig.driver.open_wallet_transaction("t2").unwrap();
+    let second = rig.driver.session.ton_wallet.money.tx_lookup.clone();
+    // The first card answers after the second was clicked: dropped, for an
+    // answer and for an error alike.
+    let mut late = transfer("t1", 1);
+    late["@extra"] = first_extra.clone();
+    rig.ingest(&late.to_string());
+    let money = &rig.driver.session.ton_wallet.money;
+    assert!(money.selected_tx.is_none());
+    assert_eq!(money.tx_lookup, second);
+    rig.ingest(
+        &json!({"@type": "error", "@extra": first_extra, "code": 400, "message": "X"}).to_string(),
+    );
+    assert_eq!(rig.driver.session.ton_wallet.money.tx_lookup, second);
+    rig.answer("getTonWalletTransaction", transfer("t2", 2_000_000_000));
+    let money = &rig.driver.session.ton_wallet.money;
+    assert_eq!(
+        money.selected_tx.as_ref().map(|tx| tx.id.as_str()),
+        Some("t2")
+    );
 }
 
 fn resolve_link(rig: &mut Rig, url: &str, link_type: &str) -> Option<DeepLinkState> {

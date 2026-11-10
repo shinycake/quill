@@ -17,10 +17,40 @@ pub struct BoostsListState {
     pub boosts: Vec<ParsedChatBoost>,
     /// Empty once the last page arrived.
     pub next_offset: String,
-    pub loading: bool,
-    pub error: Option<String>,
-    /// Newest page request; replies with another id are stale.
-    pub request: Option<RequestId>,
+    /// The newest page request; replies with another id are stale.
+    pub page: BoostsPage,
+}
+
+/// Where the boosts list's newest page is.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum BoostsPage {
+    /// Nothing in flight: the list as it stands.
+    #[default]
+    Idle,
+    /// A page was asked for; its answer is the only one that lands.
+    Loading { request: RequestId },
+    /// The page failed; "Show more" asks again.
+    Failed(String),
+}
+
+impl BoostsListState {
+    /// A page is being asked for.
+    pub fn loading(&self) -> bool {
+        matches!(self.page, BoostsPage::Loading { .. })
+    }
+
+    /// The line of a failed page.
+    pub fn error(&self) -> Option<&str> {
+        match &self.page {
+            BoostsPage::Failed(error) => Some(error),
+            _ => None,
+        }
+    }
+
+    /// Whether `request` is the page this list waits for.
+    pub(crate) fn waits_for(&self, request: RequestId) -> bool {
+        self.page == BoostsPage::Loading { request }
+    }
 }
 
 /// Another admin's invite links, as the owner sees them

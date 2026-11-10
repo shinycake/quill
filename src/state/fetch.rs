@@ -25,6 +25,12 @@ impl<T> Fetch<T> {
         matches!(self, Self::Idle)
     }
 
+    /// Whether a once-per-session request may go out: never asked, or the
+    /// last try failed. A request in flight or an answer is not asked again.
+    pub fn can_ask(&self) -> bool {
+        matches!(self, Self::Idle | Self::Failed { .. })
+    }
+
     pub fn is_loading(&self) -> bool {
         matches!(self, Self::Loading { .. })
     }

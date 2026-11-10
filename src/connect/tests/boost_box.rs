@@ -237,6 +237,26 @@ fn other_slots_open_the_reassign_list_and_wait_for_a_second_click() {
 }
 
 #[test]
+fn a_reassign_click_that_cannot_be_sent_returns_to_the_list() {
+    let mut rig = Rig::new(true);
+    rig.driver.open_boost_box(ChatId(13)).unwrap();
+    rig.driver.request_chat_boost(ChatId(13)).unwrap();
+    rig.answer_slots(&format!("[{},{}]", slot(4, 20, 0), slot(5, 21, 0)));
+    let state = rig.driver.session.groups.boost_box.as_mut().unwrap();
+    state.toggle_slot(4, now(), 0);
+    let before = rig.phase();
+    rig.recorder.refuse_sends(true);
+    assert!(rig.driver.reassign_boosts().is_err());
+    assert_eq!(rig.phase(), before, "the list is back, not Working");
+    let state = rig.driver.session.groups.boost_box.as_ref().unwrap();
+    assert!(state.reassigning.is_none());
+    // The user can click again once the client is back.
+    rig.recorder.refuse_sends(false);
+    assert!(rig.driver.reassign_boosts().unwrap());
+    assert_eq!(rig.phase(), BoostPhase::Working);
+}
+
+#[test]
 fn a_lone_slot_asks_before_replacing() {
     let mut rig = Rig::new(true);
     rig.driver.open_boost_box(ChatId(13)).unwrap();

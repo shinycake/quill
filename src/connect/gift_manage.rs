@@ -108,7 +108,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         owner: MessageSender,
     ) -> Result<RequestId, ConnectSendError> {
         let extra = self.session.request(
-            RequestPurpose::Payments(PaymentsPurpose::GetGiftCollections),
+            RequestPurpose::Payments(PaymentsPurpose::GetGiftCollections { owner }),
             None,
         );
         self.session.payments.gifts_manage.collections_loading = true;

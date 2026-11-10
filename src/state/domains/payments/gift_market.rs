@@ -259,7 +259,9 @@ impl Session {
                     .iter_mut()
                     .chain(market.craft.as_mut().map(|craft| &mut craft.market))
                 {
-                    if search.loading {
+                    // Only the search that sent this request fails; a newer
+                    // filter's search (or the other box's) keeps loading.
+                    if search.loading && request != 0 && search.request_id == request {
                         search.loading = false;
                         search.loaded = true;
                         search.error = Some(note.clone());
@@ -282,6 +284,9 @@ impl Session {
                 }
             }
             GiftMarketPurpose::AuctionState { .. } => {
+                if request == 0 || market.auction_request != request {
+                    return;
+                }
                 market.auction_loading = false;
                 market.notes.push(note);
             }
@@ -294,10 +299,15 @@ impl Session {
                 }
             }
             GiftMarketPurpose::GiftsForCrafting { .. } => {
-                if let Some(craft) = market.craft.as_mut() {
-                    craft.candidates_loading = false;
-                    craft.candidates_loaded = true;
-                }
+                let Some(craft) = market
+                    .craft
+                    .as_mut()
+                    .filter(|craft| request != 0 && craft.candidates_request == request)
+                else {
+                    return;
+                };
+                craft.candidates_loading = false;
+                craft.candidates_loaded = true;
                 market.notes.push(note);
             }
             GiftMarketPurpose::Craft => {

@@ -176,9 +176,33 @@ impl PaymentsState {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BankCardLookup {
     pub number: String,
-    /// `None` while loading or after a failure.
-    pub info: Option<BankCardInfoData>,
-    pub loading: bool,
+    pub stage: BankCardStage,
+}
+
+/// Where a bank card lookup is. The answer is applied only while the stage
+/// is `Loading` for the request that answers, so a lookup of an earlier
+/// number never lands in a later one.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BankCardStage {
+    Loading { request: RequestId },
+    Ready(BankCardInfoData),
+    /// No card info: the menu keeps only "Copy Card Number".
+    Failed,
+}
+
+impl BankCardLookup {
+    /// The looked-up card info, once it arrived.
+    pub fn info(&self) -> Option<&BankCardInfoData> {
+        match &self.stage {
+            BankCardStage::Ready(info) => Some(info),
+            _ => None,
+        }
+    }
+
+    /// Whether `request` is the lookup this card waits for.
+    pub(crate) fn waits_for(&self, request: Option<RequestId>) -> bool {
+        request.is_some_and(|id| self.stage == BankCardStage::Loading { request: id })
+    }
 }
 
 impl PaymentsState {

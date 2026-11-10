@@ -29,7 +29,13 @@ impl Session {
             return;
         };
         match (payload, purpose) {
-            (GiftManagePayload::Collections(list), PaymentsPurpose::GetGiftCollections) => {
+            (
+                GiftManagePayload::Collections(list),
+                PaymentsPurpose::GetGiftCollections { owner },
+            ) => {
+                if self.payments.hub.gifts_owner != Some(owner) {
+                    return;
+                }
                 let files: Vec<ParsedFile> =
                     list.iter().flat_map(|c| c.files.iter().cloned()).collect();
                 self.remember_files(&files);
@@ -309,7 +315,11 @@ impl Session {
         let manage = &mut self.payments.gifts_manage;
         match purpose {
             PaymentsPurpose::GetGiftOption(_) => {}
-            PaymentsPurpose::GetGiftCollections => manage.collections_loading = false,
+            PaymentsPurpose::GetGiftCollections { owner } => {
+                if self.payments.hub.gifts_owner == Some(owner) {
+                    manage.collections_loading = false;
+                }
+            }
             PaymentsPurpose::GetAvailableGifts if !manage.send.asked_gifts(pending) => {}
             PaymentsPurpose::GetPremiumGiftOptions if !manage.send.asked_premium(pending) => {}
             PaymentsPurpose::GetAvailableGifts => {

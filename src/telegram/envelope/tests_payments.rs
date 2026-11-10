@@ -204,6 +204,20 @@ fn p1_payment_price_uses_currency_exponents() {
     assert_eq!(format_payment_price("BHD", 1999), "BHD 1.999");
     assert_eq!(format_payment_price("KRW", 1000), "KRW 1000");
     assert_eq!(format_payment_price("EUR", 5), "EUR 0.05");
+    assert_eq!(format_payment_price("ISK", 1500), "ISK 1500");
+}
+
+#[test]
+fn receipt_total_includes_shipping_and_tip() {
+    let json = r#"{"@type":"paymentReceipt","@extra":"25","product_info":{"@type":"productInfo","title":"Time machine","description":{"@type":"formattedText","text":"","entities":[]},"photo":null},"date":1790000000,"seller_bot_user_id":21,"type":{"@type":"paymentReceiptTypeRegular","payment_provider_user_id":99,"invoice":{"@type":"invoice","currency":"USD","price_parts":[{"@type":"labeledPricePart","label":"Machine","amount":1999}],"subscription_period":0,"max_tip_amount":500,"suggested_tip_amounts":[],"recurring_payment_terms_of_service_url":"","terms_of_service_url":"","is_test":false,"need_name":false,"need_phone_number":false,"need_email_address":false,"need_shipping_address":true,"send_phone_number_to_provider":false,"send_email_address_to_provider":false,"is_flexible":true},"order_info":null,"shipping_option":{"@type":"shippingOption","id":"fast","title":"Fast","price_parts":[{"@type":"labeledPricePart","label":"Courier","amount":700}]},"credentials_title":"Visa •• 4242","tip_amount":300}}"#;
+    let env = parse_envelope(json).unwrap();
+    match env.payload {
+        EnvelopePayload::Payments(PaymentsPayload::PaymentReceipt(receipt)) => {
+            assert_eq!(receipt.total_amount, 1999 + 700 + 300);
+            assert_eq!(receipt.tip_amount, 300);
+        }
+        other => panic!("{other:?}"),
+    }
 }
 
 #[test]

@@ -20,10 +20,7 @@ AwardMembers::loading
 AwardMembers::loading+error
 Backdrops::loading
 BackendStatus::failed
-BankCardLookup::loading
 BarFacts::bot_start_pending
-BoostsListState::loading
-BoostsListState::loading+error
 BotCreateDialog::submitted
 BotEditTexts::load_failed
 BotEditTexts::load_failed+error
@@ -153,8 +150,6 @@ MembersView::loading
 MiniAppWindow::closing_confirmation
 MiniAppWindow::data_sent
 MiniAppWindow::waiting_write_access
-MoneyPage::tx_loading
-MoneyPage::tx_loading+tx_error
 MutedSpeechHint::done
 NewChatView::busy
 NewChatView::busy+failure
@@ -279,9 +274,6 @@ ThemeGifts::loaded
 ThemeGifts::loading
 ThreadView::reading_started
 ThreadWindow::loaded_complete
-TonWalletState::explorer_url_requested
-TonWalletState::rates_requested
-TonWalletState::state_requested
 TopPerson::saved_messages
 TopicHistory::loaded_complete
 TopicHistory::newer_failed
