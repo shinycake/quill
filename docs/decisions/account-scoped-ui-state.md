@@ -4125,6 +4125,8 @@ and 10 are widget items another fixer owns).
   A failed output reopen is retried three times, 5 s apart (01-094). An X11
   push-to-talk thread that ends is a failed hook (`HookLife`) and releases a
   held key (01-086).
-- **Skipped.** 02-103: tdesktop's `toggleScreenSharing(Off)` is fire and
-  forget, and Quill already shows "Could not stop screen sharing" on the
-  error; the native presentation is stopped either way.
+- **Skipped.** 02-103: the native presentation is already stopped when the
+  end request fails, so there is no sharing stage to return to, and the error
+  already shows as "Could not stop screen sharing". The tdesktop source was
+  not available to this run to confirm that it does not revert either; the
+  smallest safe choice was to leave it.
