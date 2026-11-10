@@ -29,8 +29,12 @@ impl QuillApp {
             // queues this twice sends one request.
             self.spawn_screen(cx, async move |this, cx| {
                 let _ = this.update(cx, |this, cx| {
-                    if let Some(live) = this.live.as_mut() {
-                        let _ = live.driver.maybe_fetch_active_sessions();
+                    // Redraw only when a request went out (the list is
+                    // loading now): a fetch that cannot start changes
+                    // nothing, and a redraw would queue this again.
+                    if let Some(live) = this.live.as_mut()
+                        && let Ok(Some(_)) = live.driver.maybe_fetch_active_sessions()
+                    {
                         cx.notify();
                     }
                 });
