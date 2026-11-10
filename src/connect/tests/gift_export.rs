@@ -135,6 +135,15 @@ fn a_transfer_goes_only_to_the_contact_the_confirmation_names() {
         },
     );
     let extra = p.0.transfer_picked_gift().unwrap();
+    // The picker moves to someone else while the transfer is out.
+    set_stage(
+        &mut p,
+        "open",
+        TransferStage::ConfirmPeer {
+            user_id: 23,
+            name: "Bob".into(),
+        },
+    );
     let sent = sent_request(&p.1, "transferGift");
     assert_eq!(sent["received_gift_id"], "open");
     assert_eq!(sent["new_owner_id"]["@type"], "messageSenderUser");
