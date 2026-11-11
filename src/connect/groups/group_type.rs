@@ -21,7 +21,26 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// `checkChatUsername` for the text in the link field. A basic group
     /// is checked as a chat being created (`chat_id` 0), as it becomes a
     /// supergroup before the link is set.
+    ///
+    /// A check that cannot be sent is a failed check of that text: the box
+    /// says so and Save asks again, instead of "Checking..." with nobody to
+    /// answer.
     pub fn check_group_username(
+        &mut self,
+        chat_id: ChatId,
+        username: &str,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        let sent = self.send_group_username_check(chat_id, username);
+        if sent.is_err() {
+            self.session.groups.group_type.check = UsernameCheck::Failed {
+                chat_id,
+                username: username.to_string(),
+            };
+        }
+        sent
+    }
+
+    fn send_group_username_check(
         &mut self,
         chat_id: ChatId,
         username: &str,

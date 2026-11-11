@@ -241,6 +241,16 @@ impl Session {
         }
     }
 
+    /// The count of active invite links could not be read (the request
+    /// failed or was refused). Unlike a chat that has none, Save cannot
+    /// tell whether to ask about applying to existing links.
+    pub fn chat_invite_link_count_failed(&self, chat_id: ChatId) -> bool {
+        matches!(
+            self.groups.invite_link_counts.get(&chat_id.0),
+            Some(InviteLinkCountsFetch::Failed(_))
+        )
+    }
+
     /// A `checkChatUsernameResult*` answering the Type box's check. At
     /// the limit, the public links box opens (tdesktop
     /// `askUsernameRevoke`).

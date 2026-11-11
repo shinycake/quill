@@ -259,13 +259,7 @@ impl QuillApp {
                         .items_center()
                         .gap_1()
                         .px_2()
-                        .child(
-                            div()
-                                .flex_1()
-                                .text_sm()
-                                .text_color(muted)
-                                .child(error),
-                        )
+                        .child(div().flex_1().text_sm().text_color(muted).child(error))
                         .child(
                             Button::new("add-special-retry")
                                 .label(tr(keys::Q_PEOPLE_RETRY))

@@ -14,6 +14,7 @@ mod usernames;
 
 use super::app::QuillApp;
 use super::shell::{DialogKind, QuillShell};
+use super::status_note::StatusNote;
 use gpui_kit::component::button::*;
 use gpui_kit::component::dialog::Dialog;
 use gpui_kit::component::input::{InputEvent, InputState};
@@ -37,7 +38,8 @@ pub(crate) struct GroupTypeBox {
     link: LinkCheck,
 }
 
-/// Where the link field stands. `version` counts keystrokes: a check timer
+/// Where the link field stands. `version` names a keystroke (unique across
+/// boxes, see `next_link_version`): a check timer
 /// for an older one does nothing. `Refused` (Save found the link unusable;
 /// the line under the field says why) leaves with the next keystroke.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -50,6 +52,14 @@ enum LinkCheck {
     Refused {
         version: u64,
     },
+}
+
+/// Versions are process-wide, not per box: the pause task of a box that was
+/// closed (its Task is detached) must not match a version of the box that
+/// opened after it.
+fn next_link_version() -> u64 {
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+    NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
 }
 
 impl LinkCheck {
@@ -236,7 +246,7 @@ impl QuillApp {
             return;
         };
         let text = type_box.link_text(cx);
-        let version = type_box.link.version().wrapping_add(1);
+        let version = next_link_version();
         type_box.link = LinkCheck::Typed { version };
         if facts.setup {
             self.new_chat_link_edited();
@@ -385,15 +395,27 @@ impl QuillApp {
         let links = self
             .session()
             .map_or(0, |s| s.chat_active_invite_link_count(facts.chat_id));
-        let request_changed = type_box.draft.request_to_join != current.request_to_join;
+        let wanted = type_box.draft.request_to_join;
+        let request_changed = wanted != current.request_to_join;
+        if request_changed
+            && !facts.basic
+            && self
+                .session()
+                .is_some_and(|s| s.chat_invite_link_count_failed(facts.chat_id))
+        {
+            // The count did not load: Save asks for it again instead of
+            // skipping the question as if the chat had no links.
+            if let Some(live) = self.live.as_mut() {
+                let _ = live.driver.fetch_chat_invite_link_counts(facts.chat_id);
+            }
+            self.set_note(StatusNote::error(tr(
+                keys::Q_PEOPLE_COULD_NOT_REFRESH_INVITE_LINKS,
+            )));
+            cx.notify();
+            return;
+        }
         if request_changed && links > 0 && !facts.basic {
-            self.ask_apply_to_invite_links(
-                &facts,
-                type_box.draft.request_to_join,
-                links,
-                window,
-                cx,
-            );
+            self.ask_apply_to_invite_links(&facts, wanted, links, window, cx);
             return;
         }
         self.finish_group_type_box(None, cx);
