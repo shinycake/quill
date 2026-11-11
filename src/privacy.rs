@@ -273,10 +273,10 @@ impl crate::state::SettingsState {
         if Some(*live) == request {
             let detail = detail.clone();
             self.privacy.insert(key, PrivacyKeyState::Ready(detail));
-        } else if let Some(at) = earlier.iter().position(|(id, _)| Some(*id) == request) {
-            if let Some((_, accepted)) = earlier.drain(..=at).last() {
-                *confirmed = accepted;
-            }
+        } else if let Some(at) = earlier.iter().position(|(id, _)| Some(*id) == request)
+            && let Some((_, accepted)) = earlier.drain(..=at).next_back()
+        {
+            *confirmed = accepted;
         }
     }
 
@@ -334,7 +334,10 @@ impl crate::state::SettingsState {
                 earlier.push((older_request, older));
                 (confirmed, earlier)
             }
-            Some(state) => (state.detail().cloned().unwrap_or_else(|| detail.clone()), Vec::new()),
+            Some(state) => (
+                state.detail().cloned().unwrap_or_else(|| detail.clone()),
+                Vec::new(),
+            ),
             None => (detail.clone(), Vec::new()),
         };
         self.privacy.insert(
