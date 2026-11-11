@@ -49,6 +49,10 @@ impl QuillApp {
     }
 
     fn fetch_story_stats(&mut self, chat_id: &ChatId, story_id: i32, cx: &mut Context<Self>) {
+        // Another story's panel (or a retry): its first page is looked for
+        // afresh, from the top.
+        self.stories.stats_asked.reset();
+        self.stories.stats_scroll = ScrollHandle::new();
         let is_dark = super::chat_theme::is_dark_palette();
         if let Some(live) = self.live.as_mut() {
             if live
@@ -420,6 +424,9 @@ impl QuillApp {
         query: StorySearchQuery,
         cx: &mut Context<Self>,
     ) {
+        // A new search starts its list over.
+        self.stories.found_asked.reset();
+        self.stories.found_scroll = ScrollHandle::new();
         if let Some(live) = self.live.as_mut() {
             if live.driver.search_public_stories(query).is_err() {
                 self.set_note(StatusNote::error(tr(
@@ -578,7 +585,12 @@ impl QuillApp {
         }
         block = block.child(rows);
         if let Some(error) = search.page.error() {
-            block = block.child(div().text_sm().text_color(danger()).child(error.to_string()));
+            block = block.child(
+                div()
+                    .text_sm()
+                    .text_color(danger())
+                    .child(error.to_string()),
+            );
         }
         if search.page.is_loading() && search.stories.is_empty() {
             block = block.child(

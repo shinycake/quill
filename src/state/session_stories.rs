@@ -155,7 +155,13 @@ impl Session {
             .iter()
             .filter(|s| !self.stories.custom_emoji_stickers.contains_key(&s.id))
             .count();
-        if self.stories.custom_emoji_stickers.len().saturating_add(fresh) > STORY_CUSTOM_EMOJI_CAP {
+        if self
+            .stories
+            .custom_emoji_stickers
+            .len()
+            .saturating_add(fresh)
+            > STORY_CUSTOM_EMOJI_CAP
+        {
             self.stories.custom_emoji_stickers.clear();
         }
         for sticker in stickers {

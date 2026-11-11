@@ -531,6 +531,30 @@ fn ban_user_bans_from_the_channel_or_blocks() {
     );
 }
 
+#[test]
+fn ban_user_waits_for_the_delete_to_go_out() {
+    let mut h = watching();
+    h.ingest(&LIVE_CALL.replace("JOINED", "true").replace(
+        r#""can_send_messages""#,
+        r#""can_be_managed":true,"can_send_messages""#,
+    ));
+    let sender = MessageSender::User { user_id: 9 };
+    // The delete cannot go out: nobody is banned or blocked.
+    h.recorder.refuse(Some("deleteGroupCallMessages"));
+    assert!(matches!(
+        h.driver
+            .delete_live_story_comment_then_ban(3, false, None, Some(sender)),
+        Err(crate::connect::LiveDeleteFailed::Delete(_))
+    ));
+    assert_eq!(h.sent("setMessageSenderBlockList"), 0);
+    // Once it goes out, the ban follows.
+    h.recorder.refuse(None);
+    h.driver
+        .delete_live_story_comment_then_ban(3, false, None, Some(sender))
+        .unwrap();
+    assert_eq!(h.sent("setMessageSenderBlockList"), 1);
+}
+
 const LOOKED_AT_CHAT: &str = r#"{"@type":"updateGroupCall","group_call":{"@type":"groupCall","id":555,"title":"Chat","is_active":true,"is_video_chat":true,"is_joined":false,"need_rejoin":NEED}}"#;
 
 #[test]

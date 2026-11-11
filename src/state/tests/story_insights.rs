@@ -75,7 +75,10 @@ fn a_forwards_page_from_an_earlier_visit_is_not_appended() {
     apply_json(&mut session, &seq, &sink, &page(old.0));
     let state = session.stories.insights.as_ref().unwrap();
     assert!(state.forwards.is_empty(), "the old page lands in nothing");
-    assert!(state.forwards_page.is_loading(), "still waiting for its own");
+    assert!(
+        state.forwards_page.is_loading(),
+        "still waiting for its own"
+    );
 
     apply_json(&mut session, &seq, &sink, &page(fresh.0));
     let state = session.stories.insights.as_ref().unwrap();

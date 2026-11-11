@@ -108,7 +108,10 @@ impl HistoryCalendar {
     /// Whether the displayed month needs an older page: the data loaded so
     /// far does not reach back before the month begins.
     pub fn needs_older_page(&self) -> bool {
-        if matches!(self.paging, CalendarPaging::Exhausted | CalendarPaging::Loading) {
+        if matches!(
+            self.paging,
+            CalendarPaging::Exhausted | CalendarPaging::Loading
+        ) {
             return false;
         }
         match self.days.keys().next() {

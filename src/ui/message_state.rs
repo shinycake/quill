@@ -50,9 +50,6 @@ pub(crate) struct MessageUi {
     /// (chat id, message id, run index, is-caption block). Message ids are
     /// only unique within a chat, so the chat id is part of the key.
     pub(super) spoiler_revealed: HashSet<(i64, u64, u64, bool)>,
-    /// Messages whose fact-check block is expanded (`(chat id, message
-    /// id)`; tdesktop `Factcheck::expanded`).
-    pub(super) fact_check_expanded: HashSet<(i64, i64)>,
     /// B1: one-time custom keyboards the user already tapped
     /// (`(chat_id, message_id)`), hidden locally after use.
     pub(super) dismissed_keyboards: std::collections::HashSet<(i64, i64)>,
@@ -102,7 +99,6 @@ impl MessageUi {
             reactions_expanded: false,
             swipe_reply_start: None,
             spoiler_revealed: HashSet::new(),
-            fact_check_expanded: HashSet::new(),
             dismissed_keyboards: std::collections::HashSet::new(),
             collapsed_keyboards: std::collections::HashSet::new(),
             request_share: None,

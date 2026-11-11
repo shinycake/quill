@@ -722,9 +722,9 @@ impl QuillApp {
                         .child(tr(keys::Q_MEDIA_POST_AS)),
                 )
                 .child(picker)
-                .children(post_as_error.map(|error| {
-                    div().text_xs().text_color(danger()).child(error)
-                }))
+                .children(
+                    post_as_error.map(|error| div().text_xs().text_color(danger()).child(error)),
+                )
                 .into_any_element()
         });
 

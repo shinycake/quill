@@ -115,15 +115,10 @@ impl QuillApp {
         let Some(session) = self.session() else {
             return;
         };
-        let Some(call_id) = session.stories.live.as_ref().map(|l| l.group_call_id) else {
+        if session.stories.live.is_none() {
             return;
-        };
-        let call = session
-            .calls
-            .story_stream
-            .as_ref()
-            .filter(|call| call.id == call_id);
-        match call {
+        }
+        match session.live_call() {
             Some(call) if call.stream == StreamState::Ended => {
                 self.close_story_viewer(cx);
             }
@@ -218,7 +213,7 @@ impl QuillApp {
     /// Whether this is your own live story (tdesktop `canManage`).
     pub(super) fn live_story_admin(&self) -> bool {
         self.session()
-            .and_then(|s| s.calls.story_stream.as_ref())
+            .and_then(|s| s.live_call())
             .is_some_and(|call| call.can_be_managed)
     }
 
@@ -231,9 +226,7 @@ impl QuillApp {
             return;
         };
         let price = session
-            .calls
-            .story_stream
-            .as_ref()
+            .live_call()
             .map_or(0, |call| call.paid_message_star_count);
         let admin = self.live_story_admin();
         let levels = session.live_levels();
@@ -519,15 +512,23 @@ impl QuillApp {
         };
         let all_from = delete.delete_all.then_some(delete.sender);
         if let Some(live) = self.live.as_mut() {
-            let deleted = live
-                .driver
-                .delete_live_story_comment(delete.message_id, delete.report_spam, all_from)
-                .is_ok();
             // tdesktop `deleteConfirmed`: Ban User bans the sender from the
-            // channel, or blocks them on a user's live story.
-            let banned = !delete.ban || live.driver.ban_live_story_commenter(delete.sender).is_ok();
-            if !deleted || !banned {
-                self.surface_live_note();
+            // channel, or blocks them on a user's live story, once the
+            // delete went out.
+            let result = live.driver.delete_live_story_comment_then_ban(
+                delete.message_id,
+                delete.report_spam,
+                all_from,
+                delete.ban.then_some(delete.sender),
+            );
+            match result {
+                Ok(()) => {}
+                Err(quill::connect::LiveDeleteFailed::Delete(_)) => {
+                    self.set_note(StatusNote::error(tr(
+                        keys::Q_MEDIA_COULD_NOT_SEND_THE_REQUEST,
+                    )));
+                }
+                Err(quill::connect::LiveDeleteFailed::Ban(_)) => self.surface_live_note(),
             }
         } else if let Some(call) = self
             .demo_session
@@ -546,9 +547,7 @@ impl QuillApp {
         self.live.as_ref().is_some_and(|live| {
             live.driver
                 .session
-                .calls
-                .story_stream
-                .as_ref()
+                .live_call()
                 .is_some_and(|call| live.driver.group_call_playback_muted(call.id))
         })
     }
@@ -557,13 +556,7 @@ impl QuillApp {
     /// sound only, not the call you are in.
     pub(in crate::ui) fn toggle_live_story_sound(&mut self, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut()
-            && let Some(call_id) = live
-                .driver
-                .session
-                .calls
-                .story_stream
-                .as_ref()
-                .map(|c| c.id)
+            && let Some(call_id) = live.driver.session.live_call().map(|c| c.id)
         {
             let muted = live.driver.group_call_playback_muted(call_id);
             if let Err(err) = live.driver.set_group_call_playback_muted(call_id, !muted) {

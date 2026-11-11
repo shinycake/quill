@@ -105,8 +105,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             extra, chat_id, story_id, offset, PAGE,
         )) {
             Ok(()) => {
-                self.session
-                    .story_forwards_sent(chat_id.0, story_id, extra);
+                self.session.story_forwards_sent(chat_id.0, story_id, extra);
                 Ok(Some(extra))
             }
             Err(err) => {

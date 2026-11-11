@@ -21,6 +21,13 @@ use crate::telegram::requests::{
 /// the same chat holds the chat's stream.
 const STORY_CHAT_TAKEN: &str = "a call in this chat is using its stream";
 
+/// Which step of a live comment's delete box did not go out.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LiveDeleteFailed {
+    Delete(ConnectSendError),
+    Ban(ConnectSendError),
+}
+
 impl<S: JsonSender> ConnectDriver<S> {
     fn live_story_request(
         &mut self,
@@ -47,12 +54,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     }
 
     fn watched_live_call(&self) -> Option<&crate::state::ActiveGroupCall> {
-        let live = self.session.stories.live.as_ref()?;
-        self.session
-            .calls
-            .story_stream
-            .as_ref()
-            .filter(|call| call.id == live.group_call_id)
+        self.session.live_call()
     }
 
     /// Once the `joinLiveStory` answer is in: `getLiveStoryStreamer` (not
@@ -359,7 +361,13 @@ impl<S: JsonSender> ConnectDriver<S> {
             |extra| set_live_story_message_sender(extra, group_call_id, sender),
         )?;
         // Shown at once; `updateGroupCall` confirms.
-        if let Some(call) = self.session.calls.story_stream.as_mut() {
+        if let Some(call) = self
+            .session
+            .calls
+            .story_stream
+            .as_mut()
+            .filter(|call| call.id == group_call_id)
+        {
             call.message_sender_id = Some(sender);
         }
         Ok(extra)
@@ -387,7 +395,13 @@ impl<S: JsonSender> ConnectDriver<S> {
             })?,
         };
         // tdesktop removes them at once.
-        if let Some(call) = self.session.calls.story_stream.as_mut() {
+        if let Some(call) = self
+            .session
+            .calls
+            .story_stream
+            .as_mut()
+            .filter(|call| call.id == group_call_id)
+        {
             call.messages.retain(|m| match all_from {
                 Some(sender) => m.sender_id != sender,
                 None => m.message_id != message_id,
@@ -396,6 +410,25 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.session
             .after_live_story_messages_deleted(group_call_id);
         Ok(extra)
+    }
+
+    /// The delete box confirmed (tdesktop `Messages::deleteConfirmed`):
+    /// delete, and when `ban` names the sender, ban them, but only once the
+    /// delete went out: a comment that stayed is not a reason to ban.
+    pub fn delete_live_story_comment_then_ban(
+        &mut self,
+        message_id: i32,
+        report_spam: bool,
+        all_from: Option<MessageSender>,
+        ban: Option<MessageSender>,
+    ) -> Result<(), LiveDeleteFailed> {
+        self.delete_live_story_comment(message_id, report_spam, all_from)
+            .map_err(LiveDeleteFailed::Delete)?;
+        if let Some(sender) = ban {
+            self.ban_live_story_commenter(sender)
+                .map_err(LiveDeleteFailed::Ban)?;
+        }
+        Ok(())
     }
 
     /// The viewer left the live story: pending Stars are dropped (tdesktop

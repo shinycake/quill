@@ -35,11 +35,7 @@ impl QuillApp {
         self.live_story_shown()?;
         let session = self.session()?;
         let live = session.stories.live.as_ref()?;
-        let call = session
-            .calls
-            .story_stream
-            .as_ref()
-            .filter(|call| call.id == live.group_call_id);
+        let call = session.live_call();
         let admin = self.live_story_admin();
         let allowed = call.is_some_and(|call| call.are_messages_allowed && call.can_send_messages);
         let price = if admin {

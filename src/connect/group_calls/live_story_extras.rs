@@ -82,9 +82,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         };
         let manage = self
             .session
-            .calls
-            .story_stream
-            .as_ref()
+            .live_call()
             .is_some_and(|call| call.can_be_managed);
         if !manage {
             return Err(ConnectSendError::InvalidRequest);

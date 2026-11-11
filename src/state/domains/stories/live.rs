@@ -148,11 +148,10 @@ impl LiveStoryState {
 
     /// Your Stars the donors list does not count yet.
     fn unconfirmed_stars(&self) -> i64 {
-        self.committed
-            .iter()
-            .fold(self.pending_reaction.map_or(0, |p| p.stars), |sum, batch| {
-                sum.saturating_add(batch.stars)
-            })
+        self.committed.iter().fold(
+            self.pending_reaction.map_or(0, |p| p.stars),
+            |sum, batch| sum.saturating_add(batch.stars),
+        )
     }
 
     /// The pending Stars go out with the commit request `commit`.
@@ -259,6 +258,18 @@ impl Session {
             .filter(|live| live.group_call_id == group_call_id)
     }
 
+    /// The call of the live story watched: the story stream, only when it
+    /// is that story's call (it can hold another for a moment when the
+    /// viewer switches stories). Every read of the call for the watched
+    /// story goes through here.
+    pub fn live_call(&self) -> Option<&ActiveGroupCall> {
+        let live = self.stories.live.as_ref()?;
+        self.calls
+            .story_stream
+            .as_ref()
+            .filter(|call| call.id == live.group_call_id)
+    }
+
     /// The paid comment levels, lowest first.
     pub fn live_levels(&self) -> Vec<GroupCallMessageLevel> {
         if self.stories.live_levels.is_empty() {
@@ -301,9 +312,7 @@ impl Session {
     /// Who your live story comments are sent as: the call's choice, else
     /// yourself.
     pub fn live_story_sender(&self) -> Option<MessageSender> {
-        self.calls
-            .story_stream
-            .as_ref()
+        self.live_call()
             .and_then(|call| call.message_sender_id)
             .or_else(|| {
                 self.my_user_id

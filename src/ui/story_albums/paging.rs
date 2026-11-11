@@ -7,16 +7,17 @@
 use super::*;
 use crate::ui::scroll_load::{load_due, scrolled_near_end};
 use quill::state::RequestPurpose;
-use quill::story_page::{StoryPageOpState, story_page_op_label};
 
 impl QuillApp {
-    /// A page of `purpose` is on its way.
+    /// A page of `purpose` is on its way for the chat whose story page is
+    /// open. Read from the request itself: the page's one status op is
+    /// replaced by whatever starts next (a mutation, another chat's page).
     fn story_page_loading(&self, purpose: RequestPurpose) -> bool {
+        let Some(chat_id) = self.stories.page.as_ref().map(|page| page.chat_id) else {
+            return false;
+        };
         self.session()
-            .and_then(|s| s.stories.page_op.as_ref())
-            .is_some_and(|op| {
-                op.state == StoryPageOpState::Checking && op.label == story_page_op_label(purpose)
-            })
+            .is_some_and(|s| s.requests.has_purpose_for_chat(purpose, chat_id))
     }
 
     pub(super) fn archived_loading(&self) -> bool {
@@ -39,7 +40,7 @@ impl QuillApp {
             })
     }
 
-    fn archived_loaded(&self) -> usize {
+    pub(super) fn archived_loaded(&self) -> usize {
         let chat = self.stories.page.as_ref().map(|page| page.chat_id.0);
         chat.and_then(|chat| self.session()?.stories.archived_stories.get(&chat))
             .map_or(0, |archived| archived.story_ids.len())

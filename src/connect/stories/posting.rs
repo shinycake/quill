@@ -175,8 +175,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         let json = get_story_interactions_request(extra, story_id, "", offset, 50);
         match self.sender.send_json(&json) {
             Ok(()) => {
-                self.session
-                    .story_viewers_sent(chat_id.0, story_id, extra);
+                self.session.story_viewers_sent(chat_id.0, story_id, extra);
                 Ok(Some(extra))
             }
             Err(err) => {
