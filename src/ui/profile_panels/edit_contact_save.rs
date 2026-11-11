@@ -69,9 +69,10 @@ impl QuillApp {
             (Some(note), true) => live.driver.set_user_note(user_id, note).map(|_| None),
             // Nothing to change: the note is kept and the names are the same.
             (None, true) => Ok(None),
-            (note, false) => live
-                .driver
-                .edit_contact(user_id, &phone, &first, &last, note.as_deref(), share),
+            (note, false) => {
+                live.driver
+                    .edit_contact(user_id, &phone, &first, &last, note.as_deref(), share)
+            }
         };
         match sent {
             // The box stays until its own request answers.

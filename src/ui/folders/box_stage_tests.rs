@@ -7,8 +7,8 @@
 
 use crate::ui::app::QuillApp;
 use crate::ui::dialogs::{
-    AddContactDialog, ContactSave, EditContactDialog, FolderEditorDialog, FolderInviteDialog, FolderLoad,
-    FolderShareDialog, InviteStage, LinkOp,
+    AddContactDialog, ContactSave, EditContactDialog, FolderEditorDialog, FolderInviteDialog,
+    FolderLoad, FolderShareDialog, InviteStage, LinkOp,
 };
 use crate::ui::screenshot_demo::ScreenshotDemo;
 use crate::ui::shell::QuillShell;

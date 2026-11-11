@@ -61,7 +61,10 @@ impl Session {
             }
             // The tab order or the tags switch snapped back (its rollback):
             // the toast says why.
-            Some((RequestPurpose::ReorderChatFolders | RequestPurpose::ToggleChatFolderTags, _)) => {
+            Some((
+                RequestPurpose::ReorderChatFolders | RequestPurpose::ToggleChatFolderTags,
+                _,
+            )) => {
                 self.chats_state.chat_action_error = Some(error_reason(err));
             }
             Some((RequestPurpose::GetRecommendedChatFolders, _)) => {

@@ -138,7 +138,13 @@ fn a_limit_error_opens_the_limit_box_instead_of_an_error_line() {
     ));
 }
 
-fn refuse(session: &mut Session, seq: &AtomicU64, sink: &Arc<MemorySink>, extra: RequestId, message: &str) {
+fn refuse(
+    session: &mut Session,
+    seq: &AtomicU64,
+    sink: &Arc<MemorySink>,
+    extra: RequestId,
+    message: &str,
+) {
     apply_json(
         session,
         seq,
@@ -156,9 +162,21 @@ fn a_request_that_hit_a_limit_answers_its_box_with_the_limit_not_a_line() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
     for (purpose, message, other) in [
-        (RequestPurpose::CreateChatFolder, "DIALOG_FILTERS_TOO_MUCH", "FILTER_TITLE_EMPTY"),
-        (RequestPurpose::CreateChatFolderInviteLink, "INVITES_TOO_MUCH", "INVITE_HASH_EXPIRED"),
-        (RequestPurpose::AddChatFolderByInviteLink, "CHATLISTS_TOO_MUCH", "INVITE_SLUG_EXPIRED"),
+        (
+            RequestPurpose::CreateChatFolder,
+            "DIALOG_FILTERS_TOO_MUCH",
+            "FILTER_TITLE_EMPTY",
+        ),
+        (
+            RequestPurpose::CreateChatFolderInviteLink,
+            "INVITES_TOO_MUCH",
+            "INVITE_HASH_EXPIRED",
+        ),
+        (
+            RequestPurpose::AddChatFolderByInviteLink,
+            "CHATLISTS_TOO_MUCH",
+            "INVITE_SLUG_EXPIRED",
+        ),
     ] {
         let extra = session.request_for_folder(purpose, 3);
         refuse(&mut session, &seq, &sink, extra, message);
