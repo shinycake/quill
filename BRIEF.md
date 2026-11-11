@@ -117,3 +117,11 @@ IS entries are not user-visible bugs. Each one names a struct whose stages are k
 - Section 8 of the decision doc gets one "Sweep fixes (is-NN)" entry with the id table.
 - Reviews of the first IS bundles caught renames: a `bool` turned into a two-variant enum (`Idle`/`Asking`, `Unsent`/`Sent`) that still sits beside the real stage, is still reset by hand, or still matches its answer by something other than the request. That is not a fix. The new value must replace the old stage outright, carry its data (the `RequestId`, the resolved value), and leave on every exit without a hand reset elsewhere.
 - Keep every precondition the old flags encoded: when the old code needed two flags (`bridge_seen && receiving`), the new stage may not be reachable from one event alone.
+
+## Round 2 bundles (r2-NN)
+
+These come from the 2026-11-11 re-sweep of every file, run on the integration branch after all IS bundles merged.
+The whole re-sweep register is `register-r2.jsonl` (1,133 entries); line numbers refer to `origin/claude/project-thread-mnl7ex` at f9fd2d57b.
+Each r2 bundle holds the S2 and confirmed S3 entries for its files. While you are in a file, also fix any other `register-r2.jsonl`
+entry for that same file when the fix is local, and list it in your table.
+Do not spawn subagents or run anything in the background except the gate command with its Monitor wait: ending your turn ends your session.
