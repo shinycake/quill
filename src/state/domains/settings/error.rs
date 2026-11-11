@@ -287,10 +287,9 @@ impl Session {
         // again by itself.
         if pending.map(|p| p.purpose) == Some(RequestPurpose::GetChatNotificationSettingsExceptions)
             && let Some(scope) = pending.and_then(|p| p.scope)
+            && let Some(list) = self.settings.notification_exceptions.get_mut(&scope)
         {
-            if let Some(list) = self.settings.notification_exceptions.get_mut(&scope) {
-                list.failed(pending.map(|p| p.id), error_reason(err), false);
-            }
+            list.failed(pending.map(|p| p.id), error_reason(err), false);
         }
     }
 }
