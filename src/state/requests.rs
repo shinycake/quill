@@ -808,9 +808,20 @@ impl RequestRegistry {
     }
 
     pub fn has_purpose_for_chat(&self, purpose: RequestPurpose, chat_id: ChatId) -> bool {
+        self.id_for_purpose_for_chat(purpose, chat_id).is_some()
+    }
+
+    /// The in-flight request for a purpose and chat, to wait for it
+    /// instead of asking again.
+    pub fn id_for_purpose_for_chat(
+        &self,
+        purpose: RequestPurpose,
+        chat_id: ChatId,
+    ) -> Option<RequestId> {
         self.pending
             .values()
-            .any(|p| p.purpose == purpose && p.chat_id == Some(chat_id))
+            .find(|p| p.purpose == purpose && p.chat_id == Some(chat_id))
+            .map(|p| p.id)
     }
 
     /// An in-flight request for a purpose and message (`request_for_message`).

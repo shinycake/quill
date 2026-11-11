@@ -1,5 +1,6 @@
 //! Connect driver: member lists, adding, restricting, banning and removing members.
 use super::*;
+use crate::state::send_failed_line;
 
 impl<S: JsonSender> ConnectDriver<S> {
     /// Phase D3b / slice G1: `getSupergroupMembers` (TDLib 1.8.67,
@@ -15,6 +16,21 @@ impl<S: JsonSender> ConnectDriver<S> {
         chat_id: ChatId,
         filter: MemberListFilter,
         query: &str,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        self.send_supergroup_members(chat_id, filter, query, false)
+    }
+
+    /// [`Self::fetch_supergroup_members`]; `refresh` sends even when the
+    /// same list for the same query is loaded or loading. A send that is
+    /// refused leaves what was there (a refresh keeps showing its page),
+    /// or, when there was nothing, records `Failed` so the list draws its
+    /// Retry instead of a spinner nobody answers.
+    fn send_supergroup_members(
+        &mut self,
+        chat_id: ChatId,
+        filter: MemberListFilter,
+        query: &str,
+        refresh: bool,
     ) -> Result<Option<RequestId>, ConnectSendError> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
@@ -36,6 +52,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         // only its answer fills the list.
         let same_query = self.session.groups.member_query(key) == query;
         if same_query
+            && !refresh
             && (matches!(
                 self.session.groups.supergroup_members.get(&key),
                 Some(SupergroupMembersFetch::Loading | SupergroupMembersFetch::Loaded { .. })
@@ -43,10 +60,12 @@ impl<S: JsonSender> ConnectDriver<S> {
         {
             return Ok(None);
         }
-        self.session
+        let previous = self
+            .session
             .groups
             .supergroup_members
             .insert(key, SupergroupMembersFetch::Loading);
+        let previous_ask = self.session.groups.member_asks.get(&key).cloned();
         let extra = self.session.request(purpose, Some(chat_id));
         self.session.groups.note_member_first(key, extra, query);
         let filter_json = match filter {
@@ -64,26 +83,42 @@ impl<S: JsonSender> ConnectDriver<S> {
             200,
         )) {
             self.session.requests.take(extra);
-            self.session.groups.supergroup_members.remove(&key);
-            self.session.groups.member_asks.remove(&key);
+            // What was there comes back, with how it was asked: a page
+            // stays shown, a list still loading keeps waiting for its own
+            // request, a failed one keeps its Retry. Only a list that had
+            // nothing becomes `Failed`, under the query that was refused,
+            // so the box that asked draws Retry instead of "Loading".
+            let groups = &mut self.session.groups;
+            match previous {
+                Some(page) => {
+                    groups.supergroup_members.insert(key, page);
+                    match previous_ask {
+                        Some(ask) => groups.member_asks.insert(key, ask),
+                        None => groups.member_asks.remove(&key),
+                    };
+                }
+                None => {
+                    groups.supergroup_members.insert(
+                        key,
+                        SupergroupMembersFetch::Failed(send_failed_line("Could not load members")),
+                    );
+                    groups.note_member_refused(key, query);
+                }
+            }
             return Err(err);
         }
         Ok(Some(extra))
     }
 
-    /// Slice G1: explicit refresh of one member-list page — clears the
-    /// cached (chat, filter) page and re-sends.
+    /// Slice G1: explicit refresh of one member-list page — re-sends it
+    /// even when the same query is loaded.
     pub fn refresh_supergroup_members(
         &mut self,
         chat_id: ChatId,
         filter: MemberListFilter,
         query: &str,
     ) -> Result<Option<RequestId>, ConnectSendError> {
-        self.session
-            .groups
-            .supergroup_members
-            .remove(&(chat_id.0, filter));
-        self.fetch_supergroup_members(chat_id, filter, query)
+        self.send_supergroup_members(chat_id, filter, query, true)
     }
 
     /// Slice G1: `getBasicGroupFullInfo` (schema 1.8.67, line 11507) —

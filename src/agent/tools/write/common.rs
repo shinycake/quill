@@ -376,10 +376,20 @@ fn sent_ids(messages: &[Value]) -> Vec<i64> {
 /// Run a write that is not a send, logging how it went. It takes a turn in
 /// the paced queue like a send, so a flood wait stops it too.
 /// [`change`]'s queue turn and switch check, for writes that build their
-/// own call.
-pub fn take_write_turn(ctx: &Ctx, chat_id: i64) -> Result<(), ToolError> {
-    pacing::take_turn(&ctx.account, ctx.client.id(), chat_id, 1, false).map_err(refusal_error)?;
-    still_allowed()
+/// own call. The turn counts only once the caller commits it after the
+/// write went out.
+pub fn take_write_turn(ctx: &Ctx, chat_id: i64) -> Result<pacing::Turn, ToolError> {
+    let turn = pacing::take_turn(&ctx.account, ctx.client.id(), chat_id, 1, false)
+        .map_err(refusal_error)?;
+    still_allowed()?;
+    Ok(turn)
+}
+
+/// Keep `turn` when the write it was taken for went out.
+pub fn settle_turn<T>(turn: pacing::Turn, result: &Result<T, ToolError>) {
+    if result.is_ok() {
+        turn.commit();
+    }
 }
 
 pub fn change(
@@ -402,9 +412,10 @@ pub fn change_built(
     summary: &str,
     build: impl FnOnce() -> Result<Value, ToolError>,
 ) -> Result<Value, ToolError> {
-    take_write_turn(ctx, target.chat_id)?;
+    let turn = take_write_turn(ctx, target.chat_id)?;
     let result =
         build().and_then(|request| td::call(&ctx.client, request).map_err(write_error(ctx)));
+    settle_turn(turn, &result);
     log_on(ctx, target, tool, summary, result.is_ok(), Vec::new());
     result
 }
@@ -424,11 +435,20 @@ pub fn change_steps(
     if requests.is_empty() {
         return Ok(());
     }
-    take_write_turn(ctx, target.chat_id)?;
+    let turn = take_write_turn(ctx, target.chat_id)?;
+    // A step that went out before a later one failed still used the turn.
+    let mut went_out = false;
     let result = requests
         .into_iter()
-        .try_for_each(|request| td::call(&ctx.client, request).map(drop))
+        .try_for_each(|request| {
+            td::call(&ctx.client, request).map(|_| {
+                went_out = true;
+            })
+        })
         .map_err(write_error(ctx));
+    if went_out {
+        turn.commit();
+    }
     log_on(ctx, target, tool, summary, result.is_ok(), Vec::new());
     result
 }
@@ -442,8 +462,9 @@ pub fn change_on(
     request: Value,
     ids: Vec<i64>,
 ) -> Result<Value, ToolError> {
-    take_write_turn(ctx, target.chat_id)?;
+    let turn = take_write_turn(ctx, target.chat_id)?;
     let result = td::call(&ctx.client, request).map_err(write_error(ctx));
+    settle_turn(turn, &result);
     log_on(ctx, target, tool, summary, result.is_ok(), ids);
     result
 }
@@ -566,13 +587,14 @@ fn is_new_peer(ctx: &Ctx, target: &Target) -> bool {
 
 /// Let `count` messages to `target` go out: refuses paid chats, waits for
 /// a turn in the paced queue every agent write shares, then checks that
-/// Agent access is still on.
-pub fn admit(ctx: &Ctx, target: &Target, count: u32) -> Result<(), ToolError> {
+/// Agent access is still on. The turn counts only once the caller commits
+/// it after the send went out.
+pub fn admit(ctx: &Ctx, target: &Target, count: u32) -> Result<pacing::Turn, ToolError> {
     if stars_per_message(ctx, target.chat_id)? > 0 {
         return Err(paid_refusal());
     }
     let new_peer = is_new_peer(ctx, target);
-    pacing::take_turn(
+    let turn = pacing::take_turn(
         &ctx.account,
         ctx.client.id(),
         target.chat_id,
@@ -580,7 +602,8 @@ pub fn admit(ctx: &Ctx, target: &Target, count: u32) -> Result<(), ToolError> {
         new_peer,
     )
     .map_err(refusal_error)?;
-    still_allowed()
+    still_allowed()?;
+    Ok(turn)
 }
 
 fn refusal_error(refusal: Refusal) -> ToolError {
@@ -676,11 +699,12 @@ pub fn send(
 }
 
 fn send_inner(ctx: &Ctx, target: &Target, request: Value, count: u32) -> Result<Batch, ToolError> {
-    admit(ctx, target, count)?;
+    let turn = admit(ctx, target, count)?;
     // Before the request goes out: no outcome recorded earlier is this
     // send's.
     let since = events::send_mark();
     let answer = td::call(&ctx.client, request).map_err(write_error(ctx))?;
+    turn.commit();
     let pending: Vec<Value> = match answer.get("messages").and_then(Value::as_array) {
         Some(list) => list.clone(),
         None => vec![answer],

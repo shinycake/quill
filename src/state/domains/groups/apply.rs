@@ -280,9 +280,12 @@ impl Session {
                         .boost_box
                         .as_mut()
                         .filter(|state| state.chat_id == chat_id.0)
+                    && pending.is_some_and(|p| state.waits_for(p.id))
                     && matches!(
                         state.phase,
-                        crate::boost_box::BoostPhase::Working(crate::boost_box::BoostWork::Slots)
+                        crate::boost_box::BoostPhase::Working(
+                            crate::boost_box::BoostWork::Slots { .. }
+                        )
                     )
                 {
                     state.phase = crate::boost_box::BoostPhase::Working(
@@ -299,28 +302,24 @@ impl Session {
                     self.groups.chat_boost_details.remove(&chat_id.0);
                     // The boost box goes back to its counters, with a line
                     // about boosts that moved here (`lng_boost_reassign_done`).
-                    if let Some(state) = self
-                        .groups
-                        .boost_box
-                        .as_mut()
-                        .filter(|state| state.chat_id == chat_id.0)
+                    // Only the answer of the `boostChat` the box works on
+                    // does that; an earlier press's answer leaves it be.
+                    if let Some(state) = self.groups.boost_box.as_mut().filter(|state| {
+                        state.chat_id == chat_id.0 && pending.is_some_and(|p| state.waits_for(p.id))
+                    }) && let crate::boost_box::BoostPhase::Working(
+                        crate::boost_box::BoostWork::Boosting { reassign, .. },
+                    ) =
+                        std::mem::replace(&mut state.phase, crate::boost_box::BoostPhase::main())
                     {
-                        let moved = match std::mem::replace(
-                            &mut state.phase,
-                            crate::boost_box::BoostPhase::Main,
-                        ) {
-                            crate::boost_box::BoostPhase::Working(
-                                crate::boost_box::BoostWork::Boosting { reassign },
-                            ) => reassign,
-                            _ => None,
+                        state.phase = crate::boost_box::BoostPhase::Main {
+                            note: reassign.map(|moved| {
+                                crate::boost_box::reassign_done_text(
+                                    moved.count,
+                                    moved.groups,
+                                    moved.channels,
+                                )
+                            }),
                         };
-                        state.note = moved.map(|moved| {
-                            crate::boost_box::reassign_done_text(
-                                moved.count,
-                                moved.groups,
-                                moved.channels,
-                            )
-                        });
                     }
                 }
             }

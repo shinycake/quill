@@ -89,6 +89,19 @@ impl GroupsState {
         );
     }
 
+    /// A first page for `key` with `query` could not be sent: the list is
+    /// `Failed` under that query, with no request to wait for.
+    pub(crate) fn note_member_refused(&mut self, key: (i64, MemberListFilter), query: &str) {
+        self.member_asks.insert(
+            key,
+            MemberAsk {
+                first: None,
+                query: query.to_string(),
+                more: MoreMembers::Idle,
+            },
+        );
+    }
+
     /// The members panel of `chat` takes the failed next pages: each goes
     /// back to idle so the next scroll asks again. Whether any failed.
     pub fn take_member_more_failures(&mut self, chat: i64) -> bool {

@@ -157,3 +157,73 @@ fn a_new_search_query_supersedes_the_one_in_flight() {
     assert_eq!(driver.session.groups.member_query(key), "bob");
     drop(dir);
 }
+
+/// A refused member-list send is an answer the list can draw: `Failed` for
+/// a list that had no page, and the old page back for a refused refresh.
+#[test]
+fn a_refused_member_send_fails_the_list_or_keeps_its_page() {
+    let (dir, prepared) = prepared_tmp(&MemorySecretStore::new());
+    let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+    let recorder = Arc::new(RecordingSender::new());
+    let seq = AtomicU64::new(0);
+    let mut driver = ready_driver(&recorder, prepared, &sink, &seq);
+    driver
+        .ingest(
+            copy_and_parse(
+                r#"{"@type":"updateNewChat","chat":{"id":13,"title":"G","type":{"@type":"chatTypeSupergroup","supergroup_id":113,"is_channel":false},"unread_count":0}}"#,
+                &seq,
+                &sink,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+    let key = (13, MemberListFilter::Recent);
+    recorder.refuse_sends(true);
+    assert!(
+        driver
+            .fetch_supergroup_members(ChatId(13), MemberListFilter::Recent, "")
+            .is_err()
+    );
+    assert!(matches!(
+        driver.session.groups.supergroup_members.get(&key),
+        Some(SupergroupMembersFetch::Failed(_))
+    ));
+    // The retry goes out and fills the list.
+    recorder.refuse_sends(false);
+    let first = driver
+        .refresh_supergroup_members(ChatId(13), MemberListFilter::Recent, "")
+        .unwrap()
+        .expect("retry sent");
+    driver
+        .ingest(copy_and_parse(&members_json(1..4, 3, &first.as_extra()), &seq, &sink).unwrap())
+        .unwrap();
+    // A search nobody could send is `Failed` under its own query, and a
+    // refused retry of it leaves that as it is: the box that asked draws
+    // Retry, never "Loading" for a request that is not out.
+    let search = (13, MemberListFilter::Search);
+    recorder.refuse_sends(true);
+    for _ in 0..2 {
+        assert!(
+            driver
+                .refresh_supergroup_members(ChatId(13), MemberListFilter::Search, "bob")
+                .is_err()
+        );
+        assert!(matches!(
+            driver.session.groups.supergroup_members.get(&search),
+            Some(SupergroupMembersFetch::Failed(_))
+        ));
+        assert_eq!(driver.session.groups.member_query(search), "bob");
+    }
+    // A refused refresh leaves the page that was shown.
+    recorder.refuse_sends(true);
+    assert!(
+        driver
+            .refresh_supergroup_members(ChatId(13), MemberListFilter::Recent, "")
+            .is_err()
+    );
+    assert!(matches!(
+        driver.session.groups.supergroup_members.get(&key),
+        Some(SupergroupMembersFetch::Loaded { members, .. }) if members.len() == 3
+    ));
+    drop(dir);
+}

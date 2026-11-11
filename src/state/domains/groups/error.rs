@@ -601,19 +601,20 @@ impl Session {
                 ));
         }
         // A failed slots read or `boostChat` returns the boost box to its
-        // counters with the reason (tdesktop shows the error as a toast).
+        // counters with the reason (tdesktop shows the error as a toast),
+        // when it is the request the box works on.
         if matches!(
             pending.map(|p| p.purpose),
             Some(RequestPurpose::GetBoostSlotsForBoost | RequestPurpose::BoostChat)
         ) && let Some(chat_id) = pending.and_then(|p| p.chat_id)
-            && let Some(state) = self
-                .groups
-                .boost_box
-                .as_mut()
-                .filter(|state| state.chat_id == chat_id.0)
+            && let Some(state) = self.groups.boost_box.as_mut().filter(|state| {
+                state.chat_id == chat_id.0 && pending.is_some_and(|p| state.waits_for(p.id))
+            })
         {
-            state.phase = crate::boost_box::BoostPhase::Main;
-            state.note = Some(call_request_error_line(err, "Could not boost"));
+            state.phase = crate::boost_box::BoostPhase::main_with(call_request_error_line(
+                err,
+                "Could not boost",
+            ));
         }
     }
 }

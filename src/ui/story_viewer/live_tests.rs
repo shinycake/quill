@@ -490,8 +490,11 @@ fn a_story_that_ends_before_its_call_closes_the_viewer(cx: &mut TestAppContext) 
     let (app, mut vcx) = open_live(cx, "ready-live-story");
     let vcx = &mut vcx;
     app.update(vcx, |app, cx| {
-        app.stories.live.forget_call_seen();
+        // The join is out again and its call was not seen yet.
         let watched = app.stories.live.watching();
+        if let Some(target) = watched {
+            app.stories.live.start_watching(target, None);
+        }
         if let Some(session) = app.demo_session.as_mut() {
             session.calls.story_stream = None;
             if let Some((chat_id, story_id)) = watched
@@ -840,6 +843,27 @@ fn burst_sticker(file: FileId) -> StickerItem {
     }
 }
 
+/// A join waits on its `getGroupCall` request; refusing or seeing the call
+/// ends that wait (r2-05, 13-043).
+#[gpui_kit::test]
+fn a_join_waits_on_its_request_until_refused_or_seen(cx: &mut TestAppContext) {
+    use quill::ids::RequestId;
+    let (app, mut vcx) = open_live(cx, "ready-live-story");
+    let vcx = &mut vcx;
+    app.update(vcx, |app, _| {
+        let live = &mut app.stories.live;
+        live.start_watching((ChatId(5), 8), Some(RequestId(41)));
+        assert_eq!(live.joining(), Some(((ChatId(5), 8), RequestId(41))));
+        live.refuse((ChatId(5), 8));
+        assert_eq!(live.joining(), None, "refused: nothing waits");
+        live.start_watching((ChatId(5), 8), Some(RequestId(42)));
+        live.mark_call_seen();
+        assert_eq!(live.joining(), None, "the call came: nothing waits");
+        live.start_watching((ChatId(5), 8), None);
+        assert_eq!(live.joining(), None, "no driver: no request to lose");
+    });
+}
+
 /// A refused live join is one stage with the join itself: it stays for the
 /// story that was refused (the "Join live" button starts it again) and is
 /// gone once another story, or none, is shown (sweep 13-089).
@@ -857,7 +881,7 @@ fn a_refused_join_is_a_stage_that_another_story_clears(cx: &mut TestAppContext) 
         assert_eq!(live.refused(), Some((ChatId(5), 7)), "same story: stays");
         live.drop_stale_refusal(Some((ChatId(5), 8)));
         assert_eq!(live.join, LiveJoin::Idle, "another story clears it");
-        live.start_watching((ChatId(5), 8));
+        live.start_watching((ChatId(5), 8), None);
         live.mark_call_seen();
         assert!(live.seen_call());
         live.refuse((ChatId(5), 8));

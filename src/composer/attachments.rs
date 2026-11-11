@@ -129,10 +129,26 @@ impl ComposerAttachment {
     /// Whether the tray can switch between files and compressed media:
     /// some attachment is a photo, video or GIF file.
     pub fn can_send_as_files(list: &[Self]) -> bool {
-        list.iter().any(|attachment| {
-            !attachment.extras.file_only()
-                && (media_kind_for(&attachment.path).is_some() || is_gif_path(&attachment.path))
-        })
+        list.iter().any(Self::switchable)
+    }
+
+    /// A photo, video or GIF file that could go either as media or as a
+    /// file. A file kept as a file (`keep_as_file`) cannot.
+    fn switchable(&self) -> bool {
+        !self.extras.file_only()
+            && (media_kind_for(&self.path).is_some() || is_gif_path(&self.path))
+    }
+
+    /// Whether the tray is in "Send without compression": it has files
+    /// that could go as media and all of those go as files. The one rule
+    /// for the checkbox, the next drop and the send options; a file kept
+    /// as a file and a plain document do not count either way.
+    pub fn sends_as_files(list: &[Self]) -> bool {
+        Self::can_send_as_files(list)
+            && list
+                .iter()
+                .filter(|att| att.switchable())
+                .all(|att| att.kind == AttachmentKind::Document)
     }
 
     /// What was read about the file showed it can only go as a file.
@@ -229,9 +245,7 @@ impl ComposerAttachment {
         if paths.is_empty() {
             return Ok(0);
         }
-        let as_files = list
-            .iter()
-            .any(|att| att.kind == AttachmentKind::Document && media_kind_for(&att.path).is_some());
+        let as_files = Self::sends_as_files(list);
         // A lone `.gif` goes out as a GIF (an animation, with a caption
         // like any media); next to other files it stays a file.
         let gif_alone =
@@ -432,6 +446,25 @@ mod tests {
         assert!(!ComposerAttachment::can_send_as_files(&list));
         ComposerAttachment::set_send_as_files(&mut list, false);
         assert_eq!(list[0].kind, AttachmentKind::Document);
+    }
+
+    #[test]
+    fn a_file_kept_as_a_file_does_not_switch_the_tray_to_files() {
+        let mut wide = attachment("wide.jpg", AttachmentKind::Photo);
+        wide.keep_as_file();
+        let mut list = vec![wide, attachment("a.jpg", AttachmentKind::Photo)];
+        assert!(
+            !ComposerAttachment::sends_as_files(&list),
+            "the checkbox and the next drop agree: compressed"
+        );
+        ComposerAttachment::set_send_as_files(&mut list, true);
+        assert!(ComposerAttachment::sends_as_files(&list));
+        ComposerAttachment::set_send_as_files(&mut list, false);
+        assert!(!ComposerAttachment::sends_as_files(&list));
+        assert_eq!(list[0].kind, AttachmentKind::Document, "still a file");
+        assert_eq!(list[1].kind, AttachmentKind::Photo);
+        let only_file = vec![attachment("b.pdf", AttachmentKind::Document)];
+        assert!(!ComposerAttachment::sends_as_files(&only_file));
     }
 
     #[test]
