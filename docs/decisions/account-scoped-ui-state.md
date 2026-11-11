@@ -5031,3 +5031,83 @@ land and the typed form was gone.
   Retry instead of a spinner (08-059). The page itself is not covered by a
   UI test (no fake live connection exists); the ask is covered by
   `a_join_request_ask_that_cannot_go_out_fails_instead_of_loading`.
+
+### Sweep fixes (s3-messages-3)
+
+- **Menus follow their target.** `close_menus_of_gone_targets` (every
+  window's `per_window_upkeep`) closes the message menu when its message left
+  the session, the chat-row and top-person menus when their chat did, and a
+  pinned list opened for another chat (11-p2-007, 11-p2-008). The overlay
+  drew nothing and the open value stayed, so the arrows were swallowed and the
+  sidebar peeked until Escape. `HistoryUi::pinned_list_open` is
+  `Option<AccountChat>`, read through `pinned_list_open_for` (a lone pin has
+  no list, as in tdesktop), so another chat never shows it open (11-p2-014).
+- **Per chat, not per composer.** `pending_inline_bot_alert` moved from
+  `ComposerUi` to `ChatUi`, so a secret chat's warning stash goes with the
+  chat that asked (11-p2-012). The Save-as-HTML folder picker is
+  `HtmlSave::Picking(Task)` in `ChatUi`: a second click does not open a second
+  picker, a chat change drops it, and a pick for a message the selection no
+  longer holds starts its export without clearing another selection (12-088).
+- **Confirm boxes run in the window of the bar.** The pinned bar's Hide and
+  Unpin all confirm closures carry `QuillApp::scoped_app` (screen epoch and
+  window), not a bare weak handle (11-p2-013).
+- **Answers matched to what asked.** `MessageReportStage::Checking` and
+  `Sending` carry the `RequestId` they wait on; `accept_message_report` and
+  `fail_message_report` apply only that answer, so a cancelled report's late
+  answer never reaches a newer report of the same chat (11-p3-007). The
+  report box's flag is cleared in every window when a report opens or closes:
+  the flow is the session's (11-p4-008). A sticker set box's Add / Remove /
+  Archive is `SetChangeStage` in the viewed set (`Working`, `Done`, `Failed`):
+  `Ok(None)` (skipped as busy) is reported as not done, the button waits, and
+  the box closes on the answer (13-001, 13-002). The send-as list is a
+  `Fetch` per chat: a refused request shows Retry, an answered empty list is
+  not a spinner (12-099). A refused translation request shows failed, not
+  the placeholder (`TranslateAsk::Refused`, 13-162), and the offer cache holds
+  one entry per chat (13-163).
+- **Rapid poll taps** build on the marks of the newest `setPollAnswer` still
+  in flight (`RequestRegistry::poll_vote_in_flight`), not on marks an older
+  answer's `updatePoll` put back (11-p4-009).
+- **Owners.** The location lookup is `Locate::Searching(Task)` inside
+  `RequestShare`: closing the box drops it (11-p4-003). What was read about
+  tray files (`TrayReads`) lives in `ComposerSends`, the tray's owner, not in
+  each window's `SendBoxUi` (12-102). A thread's start is taken by the window
+  that asked (`ChatWindows::thread_asker`), not by whichever draws first
+  (13-105). A send's notes about preparation failing or a missing client are
+  shown only when the send's account is on screen (12-100). Locking takes
+  every window's message widgets off screen (14-048, the lock case; minimized
+  and tray-hidden windows have no signal to hang it on, so they are not
+  covered). A failed widget storage write stays pending: the entry is clean
+  only after the write took (14-055). `prune_hidden` counts only hidden
+  widgets that hold a runtime or a frame; one whose write fails sheds both
+  and keeps its `stored` copy for the save timer, so it is neither retried nor
+  logged on every pass, and it never keeps frames. `WidgetEntry::wants_frames`
+  is the runtime's own ask; `ticks()` is that ask while a window draws the
+  widget, and a widget that comes back on screen asks for its animation tick
+  again, as nothing else would (14-049). `ChatWindows::thread_asker` is the
+  `ThreadAsker` enum (`Nobody`, `Main`, `ChatWindow`).
+- **One-shot outcomes.** `Session::forget_screen_outcomes` runs in
+  `put_on_screen`: a bank page, a copied link, a forward answer or an old
+  error that landed while the account was in the background is not drained
+  as news when it comes back (11-p6-005). It covers every outcome
+  `poll_drains` takes (bot callback answers, login-URL answers with their
+  request, receipt and unlock notes, send-permission and flood notes); a test
+  scans `poll_drains.rs`, so a drained outcome that is not forgotten fails.
+- **Lost input.** A reply typed into a notification that could not be sent
+  waits in `unsent_replies` and goes into the composer of the chat the click
+  opened (11-p5-024); a chat with a window of its own gets it in that
+  window's composer (`compose_unsent_reply` in the window's scope, at its next
+  frame), and behind the lock it is kept until a click after the unlock. A held history press ends when a move reports the
+  button up, or the window loses focus, or Quill locks, instead of polling
+  for ever (11-p4-002). A saved manager change that failed (a refused or unsendable
+  step) leaves `StickersManager::failure`, which the poll turns into one toast
+  (13-010); only the failure of that change's own request counts
+  (`ManagerCommit::sent`), not a set box's refused change. An answered empty
+  send-as list opens no menu. "Done" in the New Sticker box leaves the box only when the upload
+  went out (13-007); a still sticker to adapt that is not downloaded is
+  fetched and decoded on arrival (13-006).
+- **Pull to the next channel.** The machine leaves `jumping` when the jump
+  ends without a new chat (`pull_jump_ended`), and the wait stops under the
+  lock instead of opening the chat behind it (04-074, 04-075).
+- **Inline results Start.** `InlineStage::Started` carries a `Baseline`: when
+  the bot chat's history was not loaded at the start, only messages after the
+  user's own start count, not old ones that load later (10-139).

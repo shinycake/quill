@@ -127,10 +127,18 @@ impl QuillApp {
         // The composer still belongs to the chat (or topic) the thread is
         // opened from: save it there before TDLib resolves the thread.
         self.flush_leaving_draft(cx);
-        if let Some(live) = self.live.as_mut()
-            && live.driver.open_thread(chat_id, message_id).is_err()
-        {
-            self.set_note(StatusNote::error(tr(keys::Q_OPS_COULD_NOT_OPEN_COMMENTS)));
+        let opened = self
+            .live
+            .as_mut()
+            .map(|live| live.driver.open_thread(chat_id, message_id).is_ok());
+        match opened {
+            // The session resolves it for this window.
+            Some(true) => self.windows.thread_asker = ThreadAsker::of(self.windows.scope),
+            Some(false) => {
+                self.windows.thread_asker = ThreadAsker::Nobody;
+                self.set_note(StatusNote::error(tr(keys::Q_OPS_COULD_NOT_OPEN_COMMENTS)));
+            }
+            None => {}
         }
         cx.notify();
     }
@@ -152,10 +160,18 @@ impl QuillApp {
     /// the first page, and keep paging while "jump to root" is pending.
     pub(super) fn advance_thread(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let in_chat_window = self.windows.scope.is_some();
+        let scope = self.windows.scope;
+        let asker = self.windows.thread_asker;
+        let asker_is_here = thread_asker_is_here(asker, scope, |chat| self.windows.has(chat));
         let Some(live) = self.live.as_mut() else {
             return;
         };
         if live.driver.thread_needs_start() {
+            // Another window asked for this thread: its own frame takes it.
+            if !asker_is_here {
+                return;
+            }
+            self.screen.windows.thread_asker = ThreadAsker::Nobody;
             // An opened thread lands at its first unread reply or its
             // latest, never where it was left last time.
             if let Some(thread) = live.driver.session.threads.thread.as_ref() {
@@ -470,4 +486,80 @@ pub(super) fn replier_avatars(
             )
         })
         .collect()
+}
+
+/// The window that asked for the thread the session is opening.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum ThreadAsker {
+    /// Nobody asked (a link): the first frame takes the thread.
+    Nobody,
+    /// The main window.
+    Main,
+    /// The window of this chat.
+    ChatWindow(ChatId),
+}
+
+impl ThreadAsker {
+    /// The asker for the window `scope` (`None`: the main one).
+    pub(super) fn of(scope: Option<ChatId>) -> Self {
+        scope.map_or(Self::Main, Self::ChatWindow)
+    }
+}
+
+/// Whether the frame of the window `scope` takes on the thread the session
+/// resolved: the window that asked for it does, and any window does when
+/// nobody asked (a link) or the window that asked has closed.
+fn thread_asker_is_here(
+    asker: ThreadAsker,
+    scope: Option<ChatId>,
+    window_open: impl Fn(ChatId) -> bool,
+) -> bool {
+    match asker {
+        ThreadAsker::Nobody => true,
+        ThreadAsker::Main => scope.is_none(),
+        ThreadAsker::ChatWindow(chat) => scope == Some(chat) || !window_open(chat),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{ThreadAsker, thread_asker_is_here};
+    use quill::ids::ChatId;
+
+    const WINDOW: ChatId = ChatId(7);
+
+    #[test]
+    fn only_the_window_that_asked_takes_the_thread() {
+        let open = |_: ChatId| true;
+        // Asked in a chat window: the main window's frame leaves it be.
+        assert!(!thread_asker_is_here(
+            ThreadAsker::ChatWindow(WINDOW),
+            None,
+            open
+        ));
+        assert!(thread_asker_is_here(
+            ThreadAsker::ChatWindow(WINDOW),
+            Some(WINDOW),
+            open
+        ));
+        // Asked in the main window: a chat window's frame leaves it be.
+        assert!(!thread_asker_is_here(ThreadAsker::Main, Some(WINDOW), open));
+        assert!(thread_asker_is_here(ThreadAsker::Main, None, open));
+    }
+
+    #[test]
+    fn a_thread_nobody_asked_for_or_whose_window_closed_is_taken_by_the_first() {
+        assert!(thread_asker_is_here(ThreadAsker::Nobody, None, |_| true));
+        assert!(thread_asker_is_here(
+            ThreadAsker::Nobody,
+            Some(WINDOW),
+            |_| true
+        ));
+        // The window that asked closed meanwhile.
+        assert!(thread_asker_is_here(
+            ThreadAsker::ChatWindow(WINDOW),
+            None,
+            |_| false
+        ));
+    }
 }

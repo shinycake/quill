@@ -236,7 +236,7 @@ impl QuillApp {
             (found, Some(saved)) => {
                 // A PNG: only its header is read, and a held Send goes now.
                 let check = check_photo(&saved);
-                self.composer_ui.send_box.media_checked.insert(saved, check);
+                self.composer_sends.reads.media_checked.insert(saved, check);
                 found.unwrap_or_default()
             }
         }

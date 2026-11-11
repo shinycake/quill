@@ -53,6 +53,7 @@ mod profile_panels;
 mod redraw;
 mod requests;
 mod requests_download_index;
+mod screen_outcomes;
 mod search;
 mod search_upgrades;
 mod send_permissions;

@@ -93,7 +93,15 @@ impl Session {
         {
             self.finish_sticker_batch_item(set_id, false);
         }
-        self.fail_mask_request(pending.map(|p| p.purpose));
+        if let Some(RequestPurpose::Stickers(StickersPurpose::ManageStickerSet {
+            set_id,
+            installed,
+            archived,
+        })) = pending.map(|p| p.purpose)
+        {
+            self.finish_set_change(set_id, SetChange::of(installed, archived), false);
+        }
+        self.fail_mask_request(pending);
         self.fail_sticker_creator(err, pending);
         if pending.map(|p| p.purpose) == Some(RequestPurpose::ChangeEmojiSet) {
             self.stickers.emoji.mutation_failed = true;
@@ -130,6 +138,11 @@ impl Session {
             )
         ) {
             self.stickers.stickers.failed = true;
+            // A step of the manager box's saved changes: the box is
+            // closed, so the failure is reported on its own.
+            if let Some(pending) = pending {
+                self.stickers.manager.note_commit_failure(pending.id);
+            }
         }
         if matches!(
             pending.map(|p| p.purpose),

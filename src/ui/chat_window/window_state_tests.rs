@@ -239,7 +239,7 @@ fn the_sticker_set_box_closes_in_the_window_that_showed_it(cx: &mut TestAppConte
 /// window closes, is dropped: its editor never pops up in the main window.
 #[gpui_kit::test]
 fn a_set_video_pick_goes_with_its_window(cx: &mut TestAppContext) {
-    use crate::ui::sticker_set_box::state::{PendingVideo, PickExisting};
+    use crate::ui::sticker_set_box::state::{PendingVideo, PickExisting, PickedFile};
     let (app, main, chat_window) = new_app(cx);
     app.update(cx, |app, _| {
         app.sticker_box.pending_video = Some(PendingVideo {
@@ -249,6 +249,7 @@ fn a_set_video_pick_goes_with_its_window(cx: &mut TestAppContext) {
                 adapt: false,
             },
             file_id: quill::ids::FileId(9_001),
+            file: PickedFile::Video,
             emoji: None,
             window: Some(OTHER),
         });

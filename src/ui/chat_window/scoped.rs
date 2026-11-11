@@ -281,7 +281,7 @@ impl QuillApp {
 
     /// The handle a task started now carries: the screen on screen and the
     /// window whose state is in place.
-    fn scoped_app(&self, cx: &Context<Self>) -> ScopedApp {
+    pub(in crate::ui) fn scoped_app(&self, cx: &Context<Self>) -> ScopedApp {
         ScopedApp {
             app: cx.weak_entity(),
             screen: Some(self.screen_epoch()),

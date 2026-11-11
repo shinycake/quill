@@ -94,6 +94,12 @@ impl QuillApp {
         // A chat with a window of its own takes the click (Telegram
         // Desktop `windowForShowingHistory`); the main window stays behind.
         if self.routed_to_chat_window(chat_id, cx) {
+            // The text typed into the toast goes to that window's composer.
+            if let Some(account) = self.current_account() {
+                self.in_window_scope(Some(chat_id), cx, |app, cx| {
+                    app.compose_unsent_reply(&account, chat_id, None, cx);
+                });
+            }
             return;
         }
         cx.activate(true);
@@ -104,6 +110,9 @@ impl QuillApp {
         }
         self.select_listed_chat(chat_id, window, cx);
         // A kit dialog keeps the keys until it closes.
+        if let Some(account) = self.current_account() {
+            self.compose_unsent_reply(&account, chat_id, Some(window), cx);
+        }
         if self.open_chat_id() == Some(chat_id) && !self.kit_dialog_open() {
             self.focus_opened_chat(window, cx);
         }

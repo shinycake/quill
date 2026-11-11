@@ -170,6 +170,8 @@ pub(crate) struct ComposerSends {
     /// The media sends being prepared, of every window and account
     /// (`send_prep`): one guard per slot whichever window shows it.
     pub(super) prep: super::send_prep::SendPrepState,
+    /// What was read about the files of every tray (`send_box_state`).
+    pub(super) reads: super::send_box_state::TrayReads,
 }
 
 impl ComposerSends {
@@ -584,16 +586,16 @@ impl QuillApp {
         self.forget_tray_checks(&dropped);
     }
 
-    /// These attachments left their tray: forget what this window read
+    /// These attachments left their tray: forget what was read
     /// about their files, unless another tray still holds the same file.
     pub(super) fn forget_tray_checks(&mut self, dropped: &[ComposerAttachment]) {
-        let sends = &self.composer_sends;
-        self.screen.composer_ui.send_box.forget(
-            dropped
-                .iter()
-                .map(|attachment| attachment.path.as_path())
-                .filter(|path| !sends.holds(path)),
-        );
+        let sends = &mut self.composer_sends;
+        let gone: Vec<&std::path::Path> = dropped
+            .iter()
+            .map(|attachment| attachment.path.as_path())
+            .filter(|path| !sends.holds(path))
+            .collect();
+        sends.reads.forget(gone.into_iter());
     }
 
     /// Whether the next send from the open chat goes without sound: the

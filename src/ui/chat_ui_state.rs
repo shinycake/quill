@@ -133,10 +133,13 @@ pub(crate) struct ChatUi {
     /// This window's copy of the session's resolution of the trigger's bot
     /// (the session has one slot any window's trigger replaces).
     pub(super) inline_bot: Option<quill::state::InlineBotResolve>,
-    /// Phase S2: pending inline-bot warning for a `SwitchInline` press in
-    /// a secret chat (TGX `SecretChatContextBotAlert`) — the stashed
-    /// query is inserted on Confirm. It belongs to the chat the button was
-    /// pressed in: another chat's value starts without it.
+    /// "Save as HTML" with "Ask where to save" on: the folder picker of
+    /// this chat's selection, while it is open.
+    pub(super) html_save: super::selection_html::HtmlSave,
+    /// Phase S2: pending inline-bot warning for a `SwitchInline` press (or
+    /// a typed trigger) in this secret chat (TGX `SecretChatContextBotAlert`);
+    /// the stashed query is inserted on Confirm. It lives with the chat
+    /// that asked, so another chat never confirms it.
     pub(super) pending_inline_bot_alert: Option<String>,
     /// What the last rich send took out of the field, until TDLib answers.
     pub(super) sent_text: super::composer::SentText,

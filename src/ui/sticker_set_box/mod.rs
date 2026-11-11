@@ -21,7 +21,7 @@ use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::{TestSupportExt, *};
 use quill::ids::FileId;
 use quill::lang::{keys, tr, tr_with};
-use quill::state::StickerSetViewStage;
+use quill::state::{SetChange, SetChangeStage, StickerSetViewStage};
 use quill::sticker_set_box::{
     ARCHIVED_NOTE, SetKind, can_archive, copied_note, has_add_cell, set_link, share_label,
 };
@@ -124,20 +124,20 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         if let Some(live) = self.live.as_mut() {
-            let result = live.driver.manage_sticker_set(set_id, install, false);
-            if result.is_ok() {
-                // The box closes in every window that shows the set, and
-                // its pending pick goes with it.
-                self.close_sticker_set_dialog(cx);
-                self.set_note(if install {
-                    StatusNote::silent(tr(keys::Q_MEDIA_STICKER_SET_ADDED))
-                } else {
-                    StatusNote::silent(tr(keys::Q_MEDIA_STICKER_SET_REMOVED))
-                });
+            let change = if install {
+                SetChange::Install
             } else {
-                self.set_note(StatusNote::error(tr(
+                SetChange::Remove
+            };
+            match live.driver.manage_sticker_set(set_id, install, false) {
+                // Asked: the box waits for TDLib's answer, then closes
+                // (`sticker_set_box_tick`).
+                Ok(Some(_)) => live.driver.session.begin_set_change(set_id, change),
+                // Skipped as busy (another change of the set is still on
+                // its way): nothing was sent, so nothing is reported done.
+                Ok(None) | Err(_) => self.set_note(StatusNote::error(tr(
                     keys::Q_MEDIA_COULD_NOT_CHANGE_THE_STICKER,
-                )));
+                ))),
             }
         } else {
             self.set_note(StatusNote::silent(tr(
@@ -180,17 +180,17 @@ impl QuillApp {
     pub(super) fn archive_viewed_sticker_set(
         &mut self,
         set_id: i64,
-        window: &mut Window,
+        _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         if let Some(live) = self.live.as_mut() {
             match live.driver.manage_sticker_set(set_id, false, true) {
-                Ok(_) => {
-                    self.close_sticker_set_dialog(cx);
-                    self.set_note(StatusNote::info(ARCHIVED_NOTE));
-                    self.close_kit_dialog_if_done(DialogKind::StickerSet, window, cx);
-                }
-                Err(_) => self.set_note(StatusNote::error(tr(
+                // Asked: the box closes once TDLib archived it.
+                Ok(Some(_)) => live
+                    .driver
+                    .session
+                    .begin_set_change(set_id, SetChange::Archive),
+                Ok(None) | Err(_) => self.set_note(StatusNote::error(tr(
                     keys::Q_MEDIA_COULD_NOT_ARCHIVE_THE_STICKER,
                 ))),
             }
@@ -423,6 +423,9 @@ impl QuillApp {
                     let kind = SetKind::of(is_emoji);
                     let count = stickers.len();
                     let reordering = this.sticker_box.reordering;
+                    // Add / Remove / Archive asked, answer not here yet:
+                    // the button waits instead of asking twice.
+                    let change_working = matches!(view.change, SetChangeStage::Working(_));
                     let mut grid = div().flex().flex_wrap().gap_1().w(px(380.)).max_w_full();
                     for (index, item) in stickers.iter().enumerate() {
                         grid = grid
@@ -513,6 +516,7 @@ impl QuillApp {
                                             })
                                             .when(installed, |button| button.danger())
                                             .when(!installed, |button| button.primary())
+                                            .disabled(change_working)
                                             .on_click(cx.listener(move |this, _, window, cx| {
                                                 this.toggle_viewed_sticker_set(
                                                     set_id, !installed, cx,

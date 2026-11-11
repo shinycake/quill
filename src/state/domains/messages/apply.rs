@@ -40,7 +40,9 @@ impl Session {
                 {
                     self.set_live_story_senders(group_call_id, senders);
                 } else if let Some(chat_id) = pending.and_then(|p| p.chat_id) {
-                    self.chats_state.send_as_options.insert(chat_id.0, senders);
+                    self.chats_state
+                        .send_as_options
+                        .insert(chat_id.0, crate::state::fetch::Fetch::Ready(senders));
                 }
             }
             MessagesPayload::UpdateChatIsTranslatable {

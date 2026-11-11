@@ -50,8 +50,13 @@ impl QuillApp {
                             video: None,
                             ..create
                         };
-                        this.upload_created_sticker(uploaded, cx);
-                        this.close_kit_dialog_if_done(DialogKind::StickerCreate, window, cx);
+                        if this.upload_created_sticker(uploaded.clone(), cx) {
+                            this.close_kit_dialog_if_done(DialogKind::StickerCreate, window, cx);
+                        } else {
+                            // The box stays for another Done, which
+                            // encodes again: this file is of no use.
+                            uploaded.drop_encoded_file();
+                        }
                     }
                     // Nobody's: dropping it removes it.
                     Ok(_) => {}
@@ -116,7 +121,13 @@ impl QuillApp {
         let Some(pending) = self.sticker_box.pending_video.take() else {
             return;
         };
-        let super::state::PendingVideo { pick, emoji, .. } = pending;
+        let super::state::PendingVideo {
+            pick, emoji, file, ..
+        } = pending;
+        if let super::state::PickedFile::Still(format) = file {
+            self.decode_still_pick(pick, pending.file_id, format, cx);
+            return;
+        }
         self.open_set_video_editor(
             pick.set_id,
             pick.kind,

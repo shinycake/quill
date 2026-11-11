@@ -29,6 +29,8 @@ impl QuillApp {
         self.fetch_missing_reply_target();
         // What was open for a chat the view no longer shows goes.
         self.sync_chat_ui(cx);
+        // A menu whose message or chat is gone closes with it.
+        self.close_menus_of_gone_targets();
         // An edit TDLib answered leaves edit mode (or goes on, on an error).
         self.settle_edit_send(window, cx);
         self.settle_sent_text(window, cx);

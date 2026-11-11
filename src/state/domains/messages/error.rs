@@ -53,9 +53,9 @@ impl Session {
             }
             // The message menu's Report flow and audience lists.
             Some(RequestPurpose::ReportMessages) => {
-                if let Some(chat_id) = pending.and_then(|p| p.chat_id) {
+                if let Some(pending) = pending {
                     self.fail_message_report(
-                        chat_id,
+                        pending.id,
                         format!("Reporting failed: {}", error_reason(err)),
                     );
                 }
@@ -68,6 +68,11 @@ impl Session {
                     ..
                 })),
             ) => self.fail_audience(purpose),
+            Some(RequestPurpose::GetChatAvailableMessageSenders) => {
+                if let Some(chat_id) = pending.and_then(|p| p.chat_id) {
+                    self.fail_message_senders(chat_id, error_reason(err));
+                }
+            }
             Some(RequestPurpose::SetChatMessageSender) => {
                 self.messages.message_action_note = Some(format!(
                     "could not change the sender: {}",

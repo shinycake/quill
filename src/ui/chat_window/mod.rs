@@ -69,12 +69,13 @@ mod window_pick_tests;
 mod window_state_tests;
 
 use super::app::QuillApp;
+use super::threads::ThreadAsker;
 use cover::WindowPlace;
 use gpui_kit::*;
 use quill::ids::ChatId;
 use quill::lang::{keys, tr};
 use quill::state::ChatSummary;
-pub(in crate::ui) use routing::ChatOpen;
+pub(in crate::ui) use routing::{ChatOpen, ChatOpenCarry};
 pub(in crate::ui) use scoped::ScopedApp;
 pub(in crate::ui) use slot::scope_probe;
 pub(in crate::ui) use view::ChatWindowView;
@@ -95,6 +96,10 @@ pub(crate) struct ChatWindows {
     /// Who asks for what the code running now opens (`dialog_hosts`):
     /// the window in place, a window a flow carried, or nobody.
     pub(super) asker: dialog_hosts::Asker,
+    /// The window that asked for the thread the session is opening (the
+    /// session keeps one thread): only its frame takes the resolved
+    /// thread on, not whichever window draws first (`advance_thread`).
+    pub(super) thread_asker: ThreadAsker,
     /// Which window shows each kit dialog (`dialog_hosts`).
     dialogs: dialog_hosts::DialogHosts,
     /// A write of the open windows is scheduled (`saved`).
@@ -187,6 +192,7 @@ impl ChatWindows {
             scope: None,
             last_press: None,
             asker: dialog_hosts::Asker::InPlace,
+            thread_asker: ThreadAsker::Nobody,
             dialogs: dialog_hosts::DialogHosts::default(),
             save_pending: false,
             closed: Vec::new(),

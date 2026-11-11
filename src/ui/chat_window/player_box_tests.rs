@@ -198,7 +198,7 @@ fn viewing_a_set_closes_the_box_in_the_other_window(cx: &mut TestAppContext) {
 /// when its download lands.
 #[gpui_kit::test]
 fn a_closed_boxs_video_pick_opens_no_editor(cx: &mut TestAppContext) {
-    use crate::ui::sticker_set_box::state::{PendingVideo, PickExisting};
+    use crate::ui::sticker_set_box::state::{PendingVideo, PickExisting, PickedFile};
     use quill::sticker_set_box::SetKind;
     let h = new_app(cx);
     in_window(&h, h.main, None, cx, |app, window, cx| {
@@ -210,6 +210,7 @@ fn a_closed_boxs_video_pick_opens_no_editor(cx: &mut TestAppContext) {
                 adapt: false,
             },
             file_id: quill::ids::FileId(5),
+            file: PickedFile::Video,
             emoji: None,
             window: None,
         });

@@ -158,7 +158,48 @@ impl QuillApp {
             "inline reply typed into a notification: {} chars",
             text.chars().count()
         );
-        self.send_inline_reply(account, chat_id, &text, cx) == InlineReplyOutcome::Sent
+        let sent = self.send_inline_reply(account, chat_id, &text, cx) == InlineReplyOutcome::Sent;
+        if !sent && !text.trim().is_empty() {
+            // Taken from the platform, so it must not be lost with the
+            // send: the chat that opens instead gets it in its composer.
+            self.delivery
+                .unsent_replies
+                .insert((account.clone(), chat_id), text);
+        }
+        sent
+    }
+
+    /// The reply typed into `account`'s notification for the chat that
+    /// could not be sent goes into the composer of the chat the click
+    /// opened, once that chat shows in the window in place. Without a
+    /// `window` (the chat's own window, whose frame is not at hand) the
+    /// text waits in that window's state for its next frame.
+    pub(in crate::ui) fn compose_unsent_reply(
+        &mut self,
+        account: &AccountKey,
+        chat_id: ChatId,
+        window: Option<&mut Window>,
+        cx: &mut Context<Self>,
+    ) {
+        if self.open_chat_id() != Some(chat_id) {
+            return;
+        }
+        let Some(text) = self
+            .delivery
+            .unsent_replies
+            .remove(&(account.clone(), chat_id))
+        else {
+            return;
+        };
+        self.apply_open_carry(
+            chat_id,
+            crate::ui::chat_window::ChatOpenCarry {
+                compose: Some(text),
+                ..Default::default()
+            },
+            window,
+            cx,
+        );
     }
 
     /// "Mark as read" from the notification: `viewMessages` through the

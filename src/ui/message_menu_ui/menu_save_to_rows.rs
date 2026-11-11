@@ -659,6 +659,9 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         self.message_ui.menu = None;
+        // The flow is the session's: one report at a time, so a box another
+        // window still shows for the one this replaces goes.
+        self.end_report_boxes(cx);
         self.message_ui.menu_ui.report_open = true;
         if let Some(live) = self.live.as_mut() {
             if live
@@ -672,13 +675,22 @@ impl QuillApp {
                 )));
             }
         } else if let Some(session) = self.demo_session.as_mut() {
-            session.begin_message_report(chat_id, message_ids);
+            let request =
+                session.request(quill::state::RequestPurpose::ReportMessages, Some(chat_id));
+            session.begin_message_report(chat_id, message_ids, request);
         }
         cx.notify();
     }
 
+    /// Clear the report box's flag in every window: the flow it shows is
+    /// the session's, so no window keeps a box for a flow that is gone or
+    /// replaced.
+    fn end_report_boxes(&mut self, cx: &mut Context<Self>) {
+        self.in_every_window(cx, |this, _| this.message_ui.menu_ui.report_open = false);
+    }
+
     pub(in crate::ui) fn close_message_report(&mut self, cx: &mut Context<Self>) {
-        self.message_ui.menu_ui.report_open = false;
+        self.end_report_boxes(cx);
         if let Some(live) = self.live.as_mut() {
             live.driver.session.clear_message_report();
         } else if let Some(session) = self.demo_session.as_mut() {
@@ -824,7 +836,7 @@ impl QuillApp {
             let mut body = div().flex().flex_col().gap_2().w(px(360.));
             let mut footer = div().flex().justify_end().gap_2();
             match &flow.stage {
-                MessageReportStage::Checking | MessageReportStage::Sending => {
+                MessageReportStage::Checking(_) | MessageReportStage::Sending(_) => {
                     body = body.child(
                         div()
                             .text_sm()

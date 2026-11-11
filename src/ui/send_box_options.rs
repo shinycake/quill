@@ -89,8 +89,8 @@ impl QuillApp {
     /// Size from the file header, read once per photo.
     fn tray_photo_size(&self, path: &Path) -> Option<(u32, u32)> {
         *self
-            .composer_ui
-            .send_box
+            .composer_sends
+            .reads
             .photo_sizes
             .borrow_mut()
             .entry(path.to_path_buf())
@@ -119,13 +119,13 @@ impl QuillApp {
             .filter(|attachment| attachment.needs_sound_check())
             .map(|attachment| attachment.path.clone())
             .filter(|path| {
-                let send_box = &self.composer_ui.send_box;
+                let send_box = &self.composer_sends.reads;
                 !send_box.sound_checking.contains_key(path)
                     && !send_box.sound_checked.contains(path)
             })
             .collect();
         for path in paths {
-            let send_box = &mut self.composer_ui.send_box;
+            let send_box = &mut self.composer_sends.reads;
             send_box.sound_jobs = send_box.sound_jobs.wrapping_add(1);
             let job = send_box.sound_jobs;
             send_box.sound_checking.insert(path.clone(), job);
@@ -135,7 +135,7 @@ impl QuillApp {
             self.spawn_scoped(cx, async move |this, cx| {
                 let silent = worker.await;
                 let _ = this.update(cx, |this, cx| {
-                    let send_box = &mut this.composer_ui.send_box;
+                    let send_box = &mut this.composer_sends.reads;
                     // The batch may have been sent or cleared meanwhile.
                     if send_box.sound_checking.get(&path) != Some(&job) {
                         return;
@@ -163,7 +163,7 @@ impl QuillApp {
     /// Videos in the open slot's tray are still being read (a probe for
     /// another chat's tray does not count).
     pub(super) fn tray_videos_checking(&self) -> bool {
-        let checking = &self.composer_ui.send_box.sound_checking;
+        let checking = &self.composer_sends.reads.sound_checking;
         self.pending_attachments()
             .iter()
             .any(|attachment| checking.contains_key(&attachment.path))

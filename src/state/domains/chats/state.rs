@@ -76,8 +76,9 @@ pub struct ChatsState {
     /// `chat.message_sender_id` / `updateChatMessageSender`: the "send as"
     /// identity selected per chat (absent when the user cannot change it).
     pub chat_message_sender: HashMap<i64, MessageSender>,
-    /// `getChatAvailableMessageSenders` answers per chat.
-    pub send_as_options: HashMap<i64, Vec<AvailableMessageSender>>,
+    /// `getChatAvailableMessageSenders` per chat: asked, answered or failed
+    /// (the picker shows a spinner, the list or a Retry).
+    pub send_as_options: HashMap<i64, crate::state::fetch::Fetch<Vec<AvailableMessageSender>>>,
     /// Batch 8: `chat.action_bar` / `updateChatActionBar` per chat — the
     /// Add contact / Block / Report spam / Share phone strip.
     pub chat_action_bars: HashMap<i64, ChatActionBar>,

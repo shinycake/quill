@@ -551,7 +551,7 @@ impl QuillApp {
             )
             .children(open.and_then(|chat_id| self.pinned_message_banner(chat_id, cx)))
             .children(
-                open.filter(|_| self.history.pinned_list_open)
+                open.filter(|chat| self.pinned_list_open_for(*chat))
                     .and_then(|chat_id| self.pinned_list_panel(chat_id, cx)),
             )
             .when_some(self.pending_bot_reply(cx), |this, reply| this.child(reply))

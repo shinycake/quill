@@ -67,12 +67,26 @@ pub(super) enum TranslateView {
     SkipList,
 }
 
+/// Where the box's request stands. `Refused`: it could not be sent
+/// (offline, a closed client), so the box says it failed instead of
+/// showing its placeholder for good.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum TranslateAsk {
+    /// Nothing sent from here (a message's translation is read by its
+    /// key), or not yet.
+    Idle,
+    /// A selection's job.
+    Job(u64),
+    /// The request could not be sent.
+    Refused,
+}
+
 pub(super) struct TranslateDialog {
     pub(super) view: TranslateView,
     pub(super) source: Option<TranslateSource>,
     pub(super) to: &'static str,
-    /// `translateText` job of a selection.
-    pub(super) job: Option<u64>,
+    /// The request the box waits on: a selection's `translateText` job.
+    pub(super) ask: TranslateAsk,
     pub(super) original_expanded: bool,
     /// Chooser opened from the bar menu: close it after a pick instead of
     /// returning to the box.
@@ -97,6 +111,9 @@ enum ToastAction {
     ShowBar,
     OpenSkipList,
 }
+
+/// Chats whose offered language is cached at once.
+const OFFER_CACHE_CHATS: usize = 32;
 
 #[derive(PartialEq, Eq)]
 struct OfferKey {
@@ -138,7 +155,9 @@ pub(super) struct TranslateScreen {
     pub(super) dialog: Option<TranslateDialog>,
     toast: Option<TranslateToast>,
     toast_seq: u64,
-    offer: RefCell<Option<(OfferKey, Option<&'static str>)>>,
+    /// The offered language per chat: each window shows its own chat, and
+    /// one slot thrashed when two showed different ones.
+    offer: RefCell<HashMap<i64, (OfferKey, Option<&'static str>)>>,
     /// What `pump_translation` tested last (`pump_scan`), by chat: each
     /// window pumps the chat it shows.
     pub(super) pump: std::collections::HashMap<i64, pump_scan::PumpScan>,
@@ -182,7 +201,7 @@ impl QuillApp {
             revision: history.messages.revision(),
             skip: skip.to_vec(),
         };
-        if let Some((cached, value)) = self.translate.offer.borrow().as_ref()
+        if let Some((cached, value)) = self.translate.offer.borrow().get(&chat_id.0)
             && *cached == key
         {
             return *value;
@@ -195,7 +214,13 @@ impl QuillApp {
             .filter_map(|message| translatable_content(&message.content).map(|(text, _)| text))
             .collect();
         let value = offer_language(texts, skip);
-        *self.translate.offer.borrow_mut() = Some((key, value));
+        let mut offers = self.translate.offer.borrow_mut();
+        // A chat per window is a handful; a long session of chats is not
+        // kept whole.
+        if offers.len() >= OFFER_CACHE_CHATS {
+            offers.clear();
+        }
+        offers.insert(chat_id.0, (key, value));
         value
     }
 
@@ -289,7 +314,7 @@ impl QuillApp {
             view,
             source,
             to,
-            job: None,
+            ask: TranslateAsk::Idle,
             original_expanded: false,
             close_after_choose: false,
             note: None,
@@ -385,7 +410,7 @@ impl QuillApp {
     }
 
     pub(super) fn close_translate_dialog(&mut self, cx: &mut Context<Self>) {
-        if let Some(job) = self.translate.dialog.as_ref().and_then(|d| d.job)
+        if let Some(TranslateAsk::Job(job)) = self.translate.dialog.as_ref().map(|d| d.ask)
             && let Some(live) = self.live.as_mut()
         {
             live.driver.session.drop_text_translation(job);
@@ -408,9 +433,11 @@ impl QuillApp {
                 message_id,
                 ..
             }) => {
+                dialog.ask = TranslateAsk::Idle;
                 if let Some(live) = self.live.as_mut()
                     && let Err(err) = live.driver.translate_message(chat_id, message_id, to)
                 {
+                    dialog.ask = TranslateAsk::Refused;
                     self.set_note(StatusNote::error(user_error_for(
                         keys::Q_NOTES_FAILED_TRANSLATE,
                         &err,
@@ -419,15 +446,18 @@ impl QuillApp {
             }
             Some(TranslateSource::Selection { text, .. }) => {
                 if let Some(live) = self.live.as_mut() {
-                    if let Some(old) = dialog.job.take() {
+                    if let TranslateAsk::Job(old) = dialog.ask {
                         live.driver.session.drop_text_translation(old);
                     }
                     match live.driver.translate_selection(&text, to) {
-                        Ok(job) => dialog.job = Some(job),
-                        Err(err) => self.set_note(StatusNote::error(user_error_for(
-                            keys::Q_NOTES_FAILED_TRANSLATE,
-                            &err,
-                        ))),
+                        Ok(job) => dialog.ask = TranslateAsk::Job(job),
+                        Err(err) => {
+                            dialog.ask = TranslateAsk::Refused;
+                            self.set_note(StatusNote::error(user_error_for(
+                                keys::Q_NOTES_FAILED_TRANSLATE,
+                                &err,
+                            )));
+                        }
                     }
                 }
             }
@@ -577,6 +607,10 @@ impl QuillApp {
     fn dialog_translation(&self) -> Option<Translation> {
         let dialog = self.translate.dialog.as_ref()?;
         let session = self.session()?;
+        // The request never went out: failed, not pending.
+        if dialog.ask == TranslateAsk::Refused {
+            return Some(Translation::Failed(String::new()));
+        }
         match dialog.source.as_ref()? {
             TranslateSource::Message {
                 chat_id,
@@ -585,10 +619,10 @@ impl QuillApp {
             } => session
                 .message_translation(*chat_id, *message_id, dialog.to)
                 .cloned(),
-            TranslateSource::Selection { .. } => dialog
-                .job
-                .and_then(|job| session.text_translation(job))
-                .cloned(),
+            TranslateSource::Selection { .. } => match dialog.ask {
+                TranslateAsk::Job(job) => session.text_translation(job).cloned(),
+                TranslateAsk::Idle | TranslateAsk::Refused => None,
+            },
         }
     }
 

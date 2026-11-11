@@ -70,7 +70,7 @@ fn another_link_ending_in_a_different_chat_ends_the_round_trip(cx: &mut TestAppC
 /// the bot's chat; leaving it ends the trip.
 #[gpui_kit::test]
 fn leaving_the_bots_chat_after_the_start_ends_the_round_trip(cx: &mut TestAppContext) {
-    use super::{InlineReturn, InlineStage};
+    use super::{Baseline, InlineReturn, InlineStage};
     let (app, mut vcx) = open(cx);
     // Chat 11 is the private chat with user 11, standing in for the bot's.
     const BOT_CHAT: ChatId = ChatId(11);
@@ -82,7 +82,9 @@ fn leaving_the_bots_chat_after_the_start_ends_the_round_trip(cx: &mut TestAppCon
             origin: ChatId(12),
             bot_id: 11,
             username: "somebot".into(),
-            stage: InlineStage::Started { baseline: 0 },
+            stage: InlineStage::Started {
+                baseline: Baseline::At(0),
+            },
         });
         app.flush_inline_return(window, cx);
     });
@@ -97,5 +99,87 @@ fn leaving_the_bots_chat_after_the_start_ends_the_round_trip(cx: &mut TestAppCon
     assert!(
         !waiting(&app, &vcx),
         "another chat ended it: a later message of the bot goes nowhere"
+    );
+}
+
+fn apply_json(app: &mut QuillApp, json: &str) {
+    let last = app
+        .demo_session
+        .as_ref()
+        .map_or(0, |session| session.last_seq);
+    app.demo_ui
+        .seq
+        .fetch_max(last, std::sync::atomic::Ordering::Relaxed);
+    let sink: std::sync::Arc<dyn quill::diagnostics::DiagnosticSink> = app.demo_ui.sink.clone();
+    let owned = quill::telegram::client::copy_and_parse(json, &app.demo_ui.seq, &sink)
+        .expect("a valid update");
+    app.demo_session
+        .as_mut()
+        .expect("a demo session")
+        .apply(owned);
+}
+
+fn bot_message(chat: i64, id: i64, outgoing: bool, switch: bool) -> String {
+    let markup = if switch {
+        r#","reply_markup":{"@type":"replyMarkupInlineKeyboard","rows":[[{"@type":"inlineKeyboardButton","text":"Search","icon_custom_emoji_id":0,"style":{"@type":"buttonStyleDefault"},"type":{"@type":"inlineKeyboardButtonTypeSwitchInline","query":"pic","target_chat":{"@type":"targetChatCurrent"}}}]],"force_reply":false}"#
+    } else {
+        ""
+    };
+    format!(
+        r#"{{"@type":"updateNewMessage","message":{{"id":{id},"chat_id":{chat},"is_outgoing":{outgoing},"date":1790631720{markup},"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":"hi","entities":[]}}}}}}}}"#
+    )
+}
+
+/// The bot's chat history was not loaded when the start went out: an old
+/// message of the bot with a switch-inline button, loaded later, is not
+/// its answer (sweep 10-139). Only what follows the user's own start is.
+#[gpui_kit::test]
+fn an_old_bot_message_loaded_after_the_start_does_not_bring_the_user_back(cx: &mut TestAppContext) {
+    use quill::telegram::envelope::ChatKind;
+    let (app, mut vcx) = open(cx);
+    let (origin, bot_chat, bot_id) = app.read_with(&vcx, |app, _| {
+        let session = app.session().expect("demo session");
+        let origin = session.open_chat.expect("an open chat");
+        let (chat, user) = session
+            .chats
+            .values()
+            .find_map(|chat| match &chat.kind {
+                ChatKind::Private { user_id } if chat.id != origin => Some((chat.id.0, user_id.0)),
+                _ => None,
+            })
+            .expect("a private chat to stand for the bot");
+        (origin, chat, user)
+    });
+    app.update(&mut vcx, |app, cx| {
+        app.demo_session
+            .as_mut()
+            .expect("a demo session")
+            .histories
+            .remove(&bot_chat);
+        app.begin_inline_return(bot_id, "somebot", "param");
+        assert!(
+            app.take_inline_start(ChatId(bot_chat), cx),
+            "the start goes"
+        );
+    });
+    // The user lands in the bot's chat; its history loads: an old answer
+    // of the bot, then the user's own start.
+    app.update_in(&mut vcx, |app, window, cx| {
+        app.demo_session.as_mut().expect("a demo session").open_chat = Some(ChatId(bot_chat));
+        apply_json(app, &bot_message(bot_chat, 5, false, true));
+        apply_json(app, &bot_message(bot_chat, 10, true, false));
+        app.flush_inline_return(window, cx);
+    });
+    assert!(waiting(&app, &vcx), "the old message did not end the trip");
+    // The bot's real answer comes after the start.
+    app.update_in(&mut vcx, |app, window, cx| {
+        apply_json(app, &bot_message(bot_chat, 11, false, true));
+        app.flush_inline_return(window, cx);
+    });
+    assert!(!waiting(&app, &vcx), "the answer took the user back");
+    assert_eq!(
+        app.read_with(&vcx, |app, _| app.open_chat_id()),
+        Some(origin),
+        "to the chat the query came from"
     );
 }

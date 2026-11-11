@@ -501,6 +501,7 @@ impl QuillApp {
     /// asked, which is gone.
     pub(in crate::ui) fn put_on_screen(&mut self, mut live: LiveConnect) {
         live.driver.session.communities.forget_outcomes();
+        live.driver.session.forget_screen_outcomes();
         debug_assert!(self.live.is_none(), "a client is already on screen");
         debug_assert!(
             !self.screen.goodbyes_due,

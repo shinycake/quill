@@ -133,6 +133,7 @@ mod session_message_menu;
 mod session_message_story;
 mod session_new;
 mod session_notifications;
+mod session_outcomes;
 mod session_peer_color;
 mod session_permissions_box;
 mod session_privacy_data;
@@ -227,7 +228,8 @@ pub(crate) use session_history_window::WindowEdge;
 pub use session_links_boosts::*;
 pub use session_message_menu::{
     Audience, CustomEmojiPreview, MessageAudience, MessageReportFlow, MessageReportStage,
-    PollOptionMenu, StickerSetView, StickerSetViewStage, poll_option_key, reaction_filter_key,
+    PollOptionMenu, SetChange, SetChangeStage, StickerSetView, StickerSetViewStage,
+    poll_option_key, reaction_filter_key,
 };
 pub use session_message_story::{
     StoryCardState, StoryPreview, media_unlocked_note, message_story_key,

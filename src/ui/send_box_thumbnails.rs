@@ -37,12 +37,12 @@ impl QuillApp {
             .filter(|attachment| is_image_file(&attachment.file_name, ""))
             .map(|attachment| attachment.path.clone())
             .filter(|path| {
-                let send_box = &self.composer_ui.send_box;
+                let send_box = &self.composer_sends.reads;
                 !send_box.thumbnailing.contains_key(path) && !send_box.thumbnailed.contains(path)
             })
             .collect();
         for path in paths {
-            let send_box = &mut self.composer_ui.send_box;
+            let send_box = &mut self.composer_sends.reads;
             send_box.thumbnail_jobs += 1;
             let job = send_box.thumbnail_jobs;
             send_box.thumbnailing.insert(path.clone(), job);
@@ -53,7 +53,7 @@ impl QuillApp {
             self.spawn_scoped(cx, async move |this, cx| {
                 timer.await;
                 let _ = this.update(cx, |this, cx| {
-                    let send_box = &mut this.composer_ui.send_box;
+                    let send_box = &mut this.composer_sends.reads;
                     if send_box.settle_thumbnail(&waited, job) {
                         cx.notify();
                     }
@@ -63,7 +63,7 @@ impl QuillApp {
             self.spawn_scoped(cx, async move |this, cx| {
                 let thumbnail = worker.await;
                 let _ = this.update(cx, |this, cx| {
-                    let send_box = &mut this.composer_ui.send_box;
+                    let send_box = &mut this.composer_sends.reads;
                     // The batch may have been sent or cleared, or the job
                     // given up on, meanwhile.
                     if !send_box.settle_thumbnail(&path, job) {
@@ -83,14 +83,14 @@ impl QuillApp {
 
     /// Thumbnails of the open slot's tray files are still being made.
     pub(super) fn tray_thumbnails_pending(&self) -> bool {
-        let making = &self.composer_ui.send_box.thumbnailing;
+        let making = &self.composer_sends.reads.thumbnailing;
         self.pending_attachments()
             .iter()
             .any(|attachment| making.contains_key(&attachment.path))
     }
 }
 
-impl super::send_box_state::SendBoxUi {
+impl super::send_box_state::TrayReads {
     /// End thumbnail job `job` for `path`: `false` when it is no longer
     /// the current one (given up on, superseded, or the batch cleared).
     fn settle_thumbnail(&mut self, path: &Path, job: u64) -> bool {

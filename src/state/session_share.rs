@@ -199,13 +199,51 @@ impl Session {
             .contains_key(&chat_id.0)
     }
 
-    /// The loaded `getChatAvailableMessageSenders` list, if any.
+    /// The loaded `getChatAvailableMessageSenders` list, if any (the
+    /// previous one while a refetch runs or after one failed).
     pub fn available_message_senders(&self, chat_id: ChatId) -> &[AvailableMessageSender] {
         self.chats_state
             .send_as_options
             .get(&chat_id.0)
+            .and_then(crate::state::fetch::Fetch::data)
             .map(Vec::as_slice)
             .unwrap_or(&[])
+    }
+
+    /// Where the sender list of the chat stands.
+    pub fn message_senders_fetch(
+        &self,
+        chat_id: ChatId,
+    ) -> &crate::state::fetch::Fetch<Vec<AvailableMessageSender>> {
+        const IDLE: &crate::state::fetch::Fetch<Vec<AvailableMessageSender>> =
+            &crate::state::fetch::Fetch::Idle;
+        self.chats_state
+            .send_as_options
+            .get(&chat_id.0)
+            .unwrap_or(IDLE)
+    }
+
+    /// The list was asked for: the picker shows a spinner, over the
+    /// previous list if there was one.
+    pub fn message_senders_loading(&mut self, chat_id: ChatId) {
+        let slot = self
+            .chats_state
+            .send_as_options
+            .entry(chat_id.0)
+            .or_default();
+        let stale = std::mem::take(slot).take_data();
+        *slot = crate::state::fetch::Fetch::Loading { stale };
+    }
+
+    /// The request for the list failed: the picker offers Retry.
+    pub fn fail_message_senders(&mut self, chat_id: ChatId, error: String) {
+        let slot = self
+            .chats_state
+            .send_as_options
+            .entry(chat_id.0)
+            .or_default();
+        let stale = std::mem::take(slot).take_data();
+        *slot = crate::state::fetch::Fetch::Failed { error, stale };
     }
 
     /// Display name of a sender for the picker. Users resolve through the

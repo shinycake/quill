@@ -39,14 +39,14 @@ impl QuillApp {
             .map(|attachment| (attachment.path.clone(), attachment.kind))
             .collect();
         for (path, kind) in unread {
-            if let Some(check) = self.composer_ui.send_box.media_checked.get(&path).cloned() {
+            if let Some(check) = self.composer_sends.reads.media_checked.get(&path).cloned() {
                 self.apply_media_check(&path, &check);
                 continue;
             }
-            if self.composer_ui.send_box.media_checking.contains_key(&path) {
+            if self.composer_sends.reads.media_checking.contains_key(&path) {
                 continue;
             }
-            let send_box = &mut self.composer_ui.send_box;
+            let send_box = &mut self.composer_sends.reads;
             send_box.media_check_jobs += 1;
             let job = send_box.media_check_jobs;
             send_box.media_checking.insert(path.clone(), job);
@@ -78,7 +78,7 @@ impl QuillApp {
 
     /// Files of the open slot's tray are still being read.
     pub(super) fn tray_media_checks_pending(&self) -> bool {
-        let reading = &self.composer_ui.send_box.media_checking;
+        let reading = &self.composer_sends.reads.media_checking;
         self.pending_attachments()
             .iter()
             .any(|attachment| reading.contains_key(&attachment.path))
@@ -91,7 +91,7 @@ impl QuillApp {
         check: MediaCheck,
         cx: &mut Context<Self>,
     ) {
-        let send_box = &mut self.composer_ui.send_box;
+        let send_box = &mut self.composer_sends.reads;
         if send_box.media_checking.get(path) != Some(&job) {
             return;
         }
