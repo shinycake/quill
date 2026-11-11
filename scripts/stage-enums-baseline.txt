@@ -105,7 +105,6 @@ bare:Playback::Waiting 1
 bare:Poll::Asking 1
 bare:PollPage::Opening 1
 bare:PollStatsFetch::Loading 1
-bare:ProfileAddress::Loading 1
 bare:PublicChatsFetch::Loading 1
 bare:Refire::Running 1
 bare:ReplyState::Loading 1

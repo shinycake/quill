@@ -146,11 +146,8 @@ fn viewer_caption_custom_emoji_covers_media_captions() {
         has_spoiler: false,
         is_secret: false,
         file_id: crate::ids::FileId(1),
-        thumb_file_id: None,
-        thumb_width: 0,
-        thumb_height: 0,
+        thumb: crate::telegram::envelope::Thumb::of(None, 0, 0, true),
         minithumbnail: None,
-        thumb_still: true,
     });
     assert_eq!(viewer_caption_custom_emoji(&gif), vec![777]);
     assert!(

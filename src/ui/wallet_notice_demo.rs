@@ -73,6 +73,27 @@ fn add_service(session: &mut quill::state::Session, id: i64, action: ServiceActi
 }
 
 impl QuillApp {
+    /// What the open Money page shows: a transfer and an NFT.
+    fn seed_demo_money_lists(&mut self) {
+        let Some(money) = self
+            .demo_session
+            .as_mut()
+            .and_then(|session| session.ton_wallet.money.as_mut())
+        else {
+            return;
+        };
+        money.history.set_ready(vec![demo_tx()], String::new());
+        money.nfts.set_ready(
+            vec![WalletNft {
+                address: "EQnft".into(),
+                name: "Cat #7".into(),
+                index: "7".into(),
+                ..WalletNft::default()
+            }],
+            String::new(),
+        );
+    }
+
     fn demo_wallet_notice(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let mode = demo_mode();
         if let Some(session) = self.demo_session.as_mut() {
@@ -85,19 +106,6 @@ impl QuillApp {
                 is_being_created: false,
                 is_backup_enabled: true,
             });
-            wallet
-                .money
-                .history
-                .set_ready(vec![demo_tx()], String::new());
-            wallet.money.nfts.set_ready(
-                vec![WalletNft {
-                    address: "EQnft".into(),
-                    name: "Cat #7".into(),
-                    index: "7".into(),
-                    ..WalletNft::default()
-                }],
-                String::new(),
-            );
             if mode == "chat" {
                 add_service(
                     session,
@@ -139,9 +147,13 @@ impl QuillApp {
             }
         }
         match mode.as_str() {
-            "money" => self.open_money(cx),
+            "money" => {
+                self.open_money(cx);
+                self.seed_demo_money_lists();
+            }
             "notice" => {
                 self.open_money(cx);
+                self.seed_demo_money_lists();
                 self.show_wallet_notice(WalletSurface::Send, cx);
             }
             "notice-send-money" => self.show_wallet_notice(WalletSurface::SendMoney, cx),
@@ -155,6 +167,7 @@ impl QuillApp {
             }
             "details" => {
                 self.open_money(cx);
+                self.seed_demo_money_lists();
                 self.select_wallet_tx(demo_tx(), cx);
             }
             "address" => {

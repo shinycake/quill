@@ -35,7 +35,6 @@ MediaMenuFacts::downloading
 
 
 
-ParsedGroupCall::loaded_all_participants
 ParsedSession::is_password_pending
 PasswordBox::sending
 PasswordBox::sending+error

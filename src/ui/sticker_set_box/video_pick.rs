@@ -39,8 +39,7 @@ impl QuillApp {
     /// The still the chooser shows for a GIF.
     pub(super) fn gif_still(&self, animation: &AnimationItem) -> Option<PathBuf> {
         animation
-            .thumb_file_id
-            .filter(|id| id.0 != 0)
+            .thumb_file_id()
             .and_then(|id| self.local_media_path(id))
             .map(PathBuf::from)
     }

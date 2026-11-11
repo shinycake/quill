@@ -123,7 +123,7 @@ pub(super) fn call_status(
             true,
         ),
         CallState::ExchangingKeys => (tr(keys::CALL_STATUS_EXCHANGING).into(), true),
-        CallState::Ready => match transport {
+        CallState::Ready(_) => match transport {
             Some(TransportState::Connected) => (duration_text(connected_secs), false),
             Some(TransportState::Failed) => (tr(keys::CALL_STATUS_FAILED).into(), false),
             _ => (tr(keys::CALL_STATUS_CONNECTING).into(), true),
@@ -193,7 +193,7 @@ impl QuillApp {
             call.transport.state(),
             call.connected_secs(),
         );
-        let ready = matches!(call.state, CallState::Ready);
+        let ready = matches!(call.state, CallState::Ready(_));
         Some(CallSnap {
             user_id,
             is_video,

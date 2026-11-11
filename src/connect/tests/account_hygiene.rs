@@ -470,7 +470,7 @@ fn recovery_email_code_confirms_the_pending_address() {
             .password_state
             .as_ref()
             .unwrap()
-            .pending_email_pattern,
+            .pending_email,
         None
     );
     assert_eq!(
@@ -512,7 +512,7 @@ fn wrong_recovery_email_code_reports_without_changing_state() {
             .password_state
             .as_ref()
             .unwrap()
-            .pending_email_pattern
+            .pending_email
             .is_some()
     );
     cleanup(f);

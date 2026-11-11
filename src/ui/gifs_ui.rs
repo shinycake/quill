@@ -601,7 +601,7 @@ impl QuillApp {
         let full = (animation.file_id, (animation.width, animation.height));
         let preview = animation
             .preview_clip()
-            .map(|id| (id, (animation.thumb_width, animation.thumb_height)));
+            .map(|id| (id, animation.thumb.size()));
         [Some(full), preview]
             .into_iter()
             .flatten()

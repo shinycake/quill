@@ -278,7 +278,9 @@ impl Session {
             // The explorer stays the default; the next wallet or address
             // menu asks again.
             Some(RequestPurpose::GetTonExplorerUrl) => {
-                self.ton_wallet.explorer.fail(error_reason(err));
+                self.ton_wallet
+                    .explorer
+                    .failed(pending.map(|p| p.id), error_reason(err), false);
             }
             // The next look at the sticker preview asks again.
             Some(RequestPurpose::GetPremiumStickerExamples) => {

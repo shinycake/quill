@@ -8670,3 +8670,37 @@ listed; the rest of the bundle's files hold no other entry.
   matches), `location_picker/mod.rs`, `proxy.rs`, `info_types.rs`,
   `sticker_gif_types.rs`, the connect drivers and the UI readers of the
   changed fields.
+
+### Sweep fixes (r2-21)
+
+| Ids | Fix |
+| --- | --- |
+| 06-042 | `FramePlan` holds one `SlotClock { Empty, Running { base, last } }`; the first picture fixes both at once. |
+| 06-043 | The sticker decoder library is cached only on success; a failed load is tried again on the next sticker. |
+| 06-053 | `system_proxy::Follow { Off, On { asked, seen } }` per driver replaces the process-wide `WANTED` flag; the follow runs for background accounts too (above the background early return). The network watcher no longer reads the OS proxy: it counts the change (`network_changed`) and pokes the poll loops, and each client that follows reads once per change (`Follow::step` returns whether to). With nobody following nothing is read. |
+| 07-006, 07-007, 06-061, 07-008 | Out-of-range TDLib integers saturate or skip instead of wrapping (`sat_i32`, `i32::try_from`, `saturating_add`); a scheduled date past 2038 sends `i32::MAX`, never a past date. The birthday `as u8`/`as i32` casts in `parse.rs` are `try_from` too. |
+| 07-004 | `RequestLogGate` is `Gate { Shown, Hidden { calls, saved } }`; a failed level read stores TDLib's default when the first call hides. |
+| 07-002 | `LaunchChats` is one `Launch { Starting, Claimed, Asked, In }` behind one mutex; a new claim starts over for its own client. |
+| 07-003 | `TdHub` has one `RunStage { Running, Died, Stopping, Joined }` per receive loop. The bridges' report cell is written only by the loop's own transitions (`Run::begin` on start, `died`); a replacement hub starts its own `Run` over the same cell, and dropping the old hub touches only the old stage. |
+| 07-005 | `name_accent::forget_account` runs from `account_data::forget`: the palette and the screen's active key go with the account. |
+| 06-049 | `ParsedGroupCallParticipant::video_enabled()`/`screen_sharing_enabled()` derive from the video infos; the two bools are gone. |
+| 06-050 | `CallState::Ready(ReadyParams)`; `ParsedCall::ready` and the `ActiveCall::fresh` argument are gone. |
+| 06-051, 07-001 | `ParsedGroupCall::loaded_all_participants` and `ChecklistSend::others_can_mark_tasks_as_done` are facts TDLib reports and a send option, not stages: moved from the baseline to the allow list with their reasons. |
+| 06-058 | `InlineResultKind` and `InlineQueryResultsButtonKind { StartBot { parameter }, WebApp { url }, Unknown }` replace the kind strings. |
+| 06-056 | `PollRequest { Any, RegularOnly, QuizOnly }` replaces the two bools (both set reads as a quiz, as before). |
+| 06-057 | `Thumb { None, Still, Clip }` (with the size inside) replaces `thumb_file_id`/`thumb_width`/`thumb_height`/`thumb_still` on `AnimationContent`, `VideoContent` and `AnimationItem`. |
+| 06-059 | `DiceState { Rolling, Landed { value, .. } }`: the rolled number exists only once landed, so the label and the animation read one stage. |
+| 06-060 | `PaymentReceiptKind { Regular { .. }, Stars { star_count } }`. |
+| 06-062 | `StoryContentView::Video::file_id` is `Option<FileId>`. |
+| 06-054 | `PasswordState::pending_email: Option<PendingRecoveryEmail { pattern, code_length }>`. |
+| 06-055 | The made-up scope of the `getScopeNotificationSettings` answer is gone from the payload; the request that asked holds it. |
+| 07-011 | The wallet's `explorer`, `state_fetch` and `rates_fetch` call `Fetch::sent` after each send and settle with `answered`/`failed(request, ..)`, so an older request's late error fails nothing newer (tested in both orders). |
+| 07-012 | `TonWalletState::money` is `Option<MoneyPage>`; `MoneyPage::open` is gone. |
+| 07-015 | `ProfileAddress::{Loading { request }, Found, NoWallet, Failed}`: a failed lookup is asked again when the profile opens; answers and errors match the request; a late error after the wallet toggled lands nowhere. |
+| 07-016 | `set_can_use(false)` replaces the whole wallet state (keeping the explorer, the app-config rate and the chosen currency), so the notice and the rates go with the Money page. |
+| 07-023 | `TranslatePrefs::skip` dedups with a seen set, so a repeated or aliased language toggles off. |
+
+- **Behaviour that changed.** An MP4/GIF-format animation thumbnail in the
+  inline results grid plays as the preview clip (only `thumbnailFormatMpeg4`
+  did before). A video or GIF whose thumbnail file does not parse draws no
+  tile instead of a tile with no file.

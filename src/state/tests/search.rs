@@ -43,7 +43,7 @@ fn inline_query_first_page_loads_slot() {
                 assert_eq!(next_offset, "25");
                 assert_eq!(results.len(), 1);
                 assert_eq!(results[0].id, "a1");
-                assert_eq!(results[0].kind, "article");
+                assert_eq!(results[0].kind.name(), "article");
                 assert_eq!(results[0].title, "An article");
                 assert_eq!(results[0].description, "Desc");
             }
@@ -74,7 +74,7 @@ fn inline_query_pagination_appends() {
             button: None,
             results: vec![InlineQueryResultSummary {
                 id: "a1".to_string(),
-                kind: "article".to_string(),
+                kind: "article".into(),
                 title: "An article".to_string(),
                 description: String::new(),
                 ..Default::default()
@@ -104,7 +104,7 @@ fn inline_query_pagination_appends() {
                 assert_eq!(next_offset, "50");
                 let ids: Vec<&str> = results.iter().map(|r| r.id.as_str()).collect();
                 assert_eq!(ids, vec!["a1", "p1"]);
-                assert_eq!(results[1].kind, "photo");
+                assert_eq!(results[1].kind.name(), "photo");
             }
             other => panic!("unexpected {other:?}"),
         },
@@ -171,7 +171,7 @@ fn inline_query_pagination_error_keeps_loaded_page() {
             button: None,
             results: vec![InlineQueryResultSummary {
                 id: "a1".to_string(),
-                kind: "article".to_string(),
+                kind: "article".into(),
                 title: "An article".to_string(),
                 description: String::new(),
                 ..Default::default()
@@ -806,9 +806,9 @@ fn loaded_inline_slot(session: &mut Session, results: Vec<InlineQueryResultSumma
             inline_query_id: 9001,
             button: Some(InlineQueryResultsButton {
                 text: "Log in".into(),
-                kind: "start_bot".into(),
-                parameter: "auth".into(),
-                url: String::new(),
+                kind: crate::telegram::envelope::InlineQueryResultsButtonKind::StartBot {
+                    parameter: "auth".into(),
+                },
             }),
             results,
             next_offset: "25".to_string(),
@@ -882,7 +882,14 @@ fn inline_next_page_stamps_its_own_query_id_and_keeps_the_button() {
         vec![9001, 9002]
     );
     assert_eq!(next_offset, "50");
-    assert_eq!(button.as_ref().map(|b| b.parameter.as_str()), Some("auth"));
+    assert_eq!(
+        button.as_ref().map(|b| &b.kind),
+        Some(
+            &crate::telegram::envelope::InlineQueryResultsButtonKind::StartBot {
+                parameter: "auth".into()
+            }
+        )
+    );
 }
 
 #[test]

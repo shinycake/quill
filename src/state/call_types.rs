@@ -271,17 +271,20 @@ impl ActiveCall {
         is_outgoing: bool,
         is_video: bool,
         state: CallState,
-        ready: Option<ReadyParams>,
     ) -> Self {
+        let ready = match &state {
+            CallState::Ready(params) => Some(CallReady {
+                params: Some(params.clone()),
+                since: Instant::now(),
+            }),
+            _ => None,
+        };
         Self {
             id,
             user_id,
             is_outgoing,
             is_video,
-            ready: matches!(state, CallState::Ready).then(|| CallReady {
-                params: ready,
-                since: Instant::now(),
-            }),
+            ready,
             state,
             started_at: Instant::now(),
             transport: CallTransport::default(),

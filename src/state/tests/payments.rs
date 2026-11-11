@@ -174,8 +174,16 @@ fn payment_receipt_opens_dialog() {
     );
     let receipt = session.payments.receipt.data().expect("receipt");
     assert_eq!(receipt.product_title, "Time machine");
-    assert_eq!(receipt.total_amount, 1999);
-    assert_eq!(receipt.credentials_title, "Visa •• 4242");
+    let crate::telegram::envelope::PaymentReceiptKind::Regular {
+        total_amount,
+        credentials_title,
+        ..
+    } = &receipt.kind
+    else {
+        panic!("not a card receipt");
+    };
+    assert_eq!(*total_amount, 1999);
+    assert_eq!(credentials_title, "Visa •• 4242");
     assert!(session.payments.receipt.is_open());
 }
 

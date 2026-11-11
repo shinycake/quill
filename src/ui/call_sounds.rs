@@ -280,7 +280,7 @@ impl super::app::QuillApp {
                 .or(second_rings.then_some(CallSound::Incoming));
                 sounds.keep_looping(ringing);
                 let connected =
-                    matches!(call.state, CallState::Ready) && call.transport.is_connected();
+                    matches!(call.state, CallState::Ready(_)) && call.transport.is_connected();
                 if connected && marks.cue < CueStage::Connected {
                     marks.cue = CueStage::Connected;
                     sounds.play_cue(CallSound::Connect);

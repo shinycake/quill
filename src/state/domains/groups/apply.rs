@@ -235,7 +235,7 @@ impl Session {
                     self.groups.boosts_per_gift = Some(boosts_per_gift);
                 }
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::GetTonExplorerUrl) {
-                    self.ton_wallet.explorer.succeed(());
+                    self.ton_wallet.explorer_answered(pending.map(|p| p.id));
                 }
                 // Any app-config answer carries the current explorer.
                 if ton_explorer_url.is_some() {
