@@ -39,6 +39,9 @@ struct PendingSweep {
     text: bool,
     /// Idle trims that found the mark still waiting for its frame.
     waited: u8,
+    /// The window left the foreground while the mark waited: the stage
+    /// after the mark is `Left`, so the next trim still sweeps any emoji.
+    left: bool,
 }
 
 /// Idle trims a mark waits for its frame. A minimized or covered window
@@ -68,10 +71,42 @@ impl Sweep {
     fn wait_for_frame(&mut self) {
         if let Sweep::Marked(pending) = self {
             if pending.waited >= MARK_PATIENCE {
-                *self = Sweep::Idle;
+                *self = Sweep::after_mark(*pending);
             } else {
                 pending.waited += 1;
             }
+        }
+    }
+
+    /// The window left the foreground. A mark that waits keeps that with
+    /// it, so it outlives the mark however the mark ends.
+    fn leave_foreground(&mut self) {
+        match self {
+            Sweep::Idle => *self = Sweep::Left,
+            Sweep::Left => {}
+            Sweep::Marked(pending) => pending.left = true,
+        }
+    }
+
+    /// The stage after `pending`'s mark ended (its frame came, or it was
+    /// given up).
+    fn after_mark(pending: PendingSweep) -> Self {
+        if pending.left {
+            Sweep::Left
+        } else {
+            Sweep::Idle
+        }
+    }
+
+    /// The frame after the mark started: the mark to sweep by, if one
+    /// waited.
+    fn take_mark(&mut self) -> Option<PendingSweep> {
+        match *self {
+            Sweep::Marked(pending) => {
+                *self = Sweep::after_mark(pending);
+                Some(pending)
+            }
+            Sweep::Idle | Sweep::Left => None,
         }
     }
 }
@@ -118,11 +153,7 @@ fn text_worth_a_sweep(count: usize, kept: usize) -> bool {
 
 pub(super) fn window_activation(id: WindowId, active: bool) {
     if !active {
-        with_sweep(id, |sweep| {
-            if matches!(sweep.sweep, Sweep::Idle) {
-                sweep.sweep = Sweep::Left;
-            }
-        });
+        with_sweep(id, |sweep| sweep.sweep.leave_foreground());
         super::image_budget::note_activity();
     }
 }
@@ -168,6 +199,7 @@ fn begin(window: &mut Window) {
                 mark,
                 text,
                 waited: 0,
+                left: false,
             });
         });
     } else {
@@ -187,14 +219,7 @@ pub(super) fn start_frame(window: &mut Window, cx: &mut App) {
 
 fn finish_pending_sweep(window: &mut Window, cx: &mut App) {
     let handle = window.window_handle();
-    let marked = with_sweep(handle.window_id(), |sweep| match sweep.sweep {
-        Sweep::Marked(pending) => {
-            sweep.sweep = Sweep::Idle;
-            Some(pending)
-        }
-        Sweep::Idle | Sweep::Left => None,
-    })
-    .flatten();
+    let marked = with_sweep(handle.window_id(), |sweep| sweep.sweep.take_mark()).flatten();
     if let Some(pending) = marked {
         // Deferred work runs once this frame is drawn.
         cx.defer(move |cx| {
@@ -287,6 +312,49 @@ mod tests {
         built
     }
 
+    fn marked() -> Sweep {
+        Sweep::Marked(PendingSweep {
+            mark: 1,
+            text: false,
+            waited: 0,
+            left: false,
+        })
+    }
+
+    /// The window is marked, then goes to the background before another
+    /// frame starts: the mark is given up after its trims, and the leaving
+    /// is still there for the next trim to sweep by.
+    #[test]
+    fn leaving_the_foreground_outlives_a_mark_that_is_given_up() {
+        let mut sweep = marked();
+        sweep.leave_foreground();
+        for _ in 0..=MARK_PATIENCE {
+            assert!(matches!(sweep, Sweep::Marked(_)));
+            sweep.wait_for_frame();
+        }
+        assert!(matches!(sweep, Sweep::Left));
+    }
+
+    /// The same when the mark's frame does come: its sweep runs, and the
+    /// next trim still knows the window left.
+    #[test]
+    fn leaving_the_foreground_outlives_a_mark_whose_frame_came() {
+        let mut sweep = marked();
+        sweep.leave_foreground();
+        assert!(sweep.take_mark().is_some());
+        assert!(matches!(sweep, Sweep::Left));
+        assert!(sweep.take_mark().is_none());
+        // Without a leaving, the mark ends idle.
+        let mut sweep = marked();
+        assert!(sweep.take_mark().is_some());
+        assert!(matches!(sweep, Sweep::Idle));
+        let mut sweep = marked();
+        for _ in 0..=MARK_PATIENCE {
+            sweep.wait_for_frame();
+        }
+        assert!(matches!(sweep, Sweep::Idle));
+    }
+
     #[test]
     fn a_sweep_drops_only_the_emoji_nothing_drew_since_it_began() {
         let atlas = HeadlessAtlas::default();
@@ -357,11 +425,7 @@ mod tests {
 
     #[test]
     fn a_mark_whose_frame_never_starts_is_given_up() {
-        let mut sweep = Sweep::Marked(PendingSweep {
-            mark: 1,
-            text: false,
-            waited: 0,
-        });
+        let mut sweep = marked();
         for _ in 0..MARK_PATIENCE {
             sweep.wait_for_frame();
             assert!(matches!(sweep, Sweep::Marked(_)), "still waiting");
