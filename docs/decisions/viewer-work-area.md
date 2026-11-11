@@ -39,8 +39,9 @@ window of its own, maximized to the screen's available area
 - **The controller drags** (`ControllerPlace`): a press on the panel's
   background (not a button, the seek bar or the volume slider) picks it up
   and it follows the pointer inside the safe area, 8 pt in from its edges.
-  Within 24 pt of home it snaps onto it, and a double-click on the panel
-  puts it home from anywhere. The spot lives with the account's viewer
+  Within 24 pt of home it snaps onto it. Away from home the bar shows a
+  "Move controls back" button (and a double-click on the panel does the
+  same) that puts it home from anywhere. The spot lives with the account's viewer
   state, so it stays moved from one video to the next, and is kept inside
   the window as the window resizes.
 - **The caption goes with it.** Away from home, the caption leaves the

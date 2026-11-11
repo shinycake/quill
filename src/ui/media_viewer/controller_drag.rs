@@ -44,6 +44,13 @@ impl QuillApp {
         })
     }
 
+    /// The bar's snap-back button: the controller (and the caption on it)
+    /// go back to their spot.
+    pub(super) fn viewer_controller_snap_back(&mut self, cx: &mut Context<Self>) {
+        self.viewer.controller.reset();
+        cx.notify();
+    }
+
     /// How far the controller is drawn from its home spot.
     pub(super) fn viewer_controller_offset(&self, frame: ControllerFrame) -> (f32, f32) {
         self.viewer.controller.offset(frame.home, frame.area)

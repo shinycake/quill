@@ -84,6 +84,10 @@ impl QuillApp {
                 .speed_dial(speed_dial)
                 .quality(quality)
                 .bare(docked)
+                .snap_back(
+                    (self.viewer.controller.spot() != ControllerSpot::Home)
+                        .then(|| handler(|this, _, cx| this.viewer_controller_snap_back(cx))),
+                )
                 .on_press(
                     self.viewer_controller_press(place, cx),
                     self.viewer.controller.is_held(),

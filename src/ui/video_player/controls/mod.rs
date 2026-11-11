@@ -244,6 +244,7 @@ pub(crate) struct VideoController {
     press: Option<PanelPress>,
     grabbed: bool,
     bare: bool,
+    snap_back: Option<Handler>,
 }
 
 impl VideoController {
@@ -270,6 +271,7 @@ impl VideoController {
             press: None,
             grabbed: false,
             bare: false,
+            snap_back: None,
         }
     }
 
@@ -301,6 +303,13 @@ impl VideoController {
     /// The quality picker, for clips with alternative qualities.
     pub(crate) fn quality(mut self, quality: Option<AnyElement>) -> Self {
         self.quality = quality;
+        self
+    }
+
+    /// A button that puts the dragged panel back in its spot; `None`
+    /// while it is there.
+    pub(crate) fn snap_back(mut self, snap_back: Option<Handler>) -> Self {
+        self.snap_back = snap_back;
         self
     }
 
@@ -447,10 +456,21 @@ impl RenderOnce for VideoController {
                 .accessibility_label(tr(keys::Q_AV_PICTURE_IN_PICTURE))
                 .on_click(move |_, window, cx| pip(window, cx))
         });
+        let snap_back = self.snap_back.map(|snap_back| {
+            let label = tr(keys::Q_AV_CONTROLS_SNAP_BACK);
+            Button::new(("media-viewer-snap-back", row_id))
+                .icon(IconName::PanelBottom)
+                .custom(variant)
+                .with_size(SIDE_BUTTON)
+                .tooltip(label)
+                .accessibility_label(label)
+                .on_click(move |_, window, cx| snap_back(window, cx))
+        });
         let right = div()
             .flex()
             .items_center()
             .gap(BUTTONS_SKIP)
+            .children(snap_back)
             .children(self.speed_dial)
             .children(self.quality)
             .children(pip)
