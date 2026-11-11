@@ -374,6 +374,7 @@ fn joining_new_chats_sends_only_what_the_folder_still_offers(cx: &mut TestAppCon
     let dialog = crate::ui::folder_extras::FolderNewChatsDialog {
         folder_id: 5,
         selected: [1, 2, 3].into_iter().collect(),
+        stage: crate::ui::folder_extras::JoinStage::Choosing,
     };
     assert_eq!(dialog.still_offered(&[3, 9, 1]), vec![1, 3]);
     assert!(dialog.still_offered(&[]).is_empty());

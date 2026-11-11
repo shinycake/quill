@@ -186,6 +186,13 @@ impl QuillApp {
         if self.windows.dialog_may_show_in(DialogKind::Welcome, here) {
             self.settle_welcome_dialog(window, cx);
         }
+        // The shared folder's join box closes on its request's answer.
+        if self
+            .windows
+            .dialog_may_show_in(DialogKind::FolderNewChats, here)
+        {
+            self.folder_new_chats_upkeep(window, cx);
+        }
         // A collectible lookup that failed copies its link, with the toast
         // in the box's window.
         if self
