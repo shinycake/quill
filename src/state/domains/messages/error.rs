@@ -47,7 +47,7 @@ impl Session {
                     stale: None,
                 },
             );
-            self.chats_state.chat_action_error = Some(
+            self.chats_state.chat_action_error.push(
                 crate::lang::tr(crate::lang::keys::Q_MISC_COULD_NOT_LOAD_FULL_MESSAGE).to_string(),
             );
         }

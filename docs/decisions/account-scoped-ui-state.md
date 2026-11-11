@@ -6111,8 +6111,11 @@ Thirty-four minor entries; each was proved against the integration branch first.
   part whole (`replace_content`); a widget starts at the scale of the window
   that shows it (`WidgetsUi::scales`); canvas reads and puts check their size
   (14-046, 14-051, 14-058, 14-056, 14-047).
-- **Notifications.** A preview that has to download plays only if it finishes
-  within `SOUND_PREVIEW_WINDOW` of the press (11-p5-023). "Mark as read"
+- **Notifications.** A preview that has to download plays only while a sound
+  picker is open: `pending_sound_downloads` is a set the UI empties
+  (`forget_sound_previews`) on any poll that finds no picker open, with no
+  clock in the reducer (11-p5-023). A sound finishing in a background
+  account is not played. "Mark as read"
   waits, queued, while locked (11-p5-025). A toast replaced in the call slot
   is dismissed first (11-p5-022, partly). A Linux toast withdrawn while its
   `Notify` is on the bus is closed when its id lands (`Sending`), and the
@@ -6123,7 +6126,10 @@ Thirty-four minor entries; each was proved against the integration branch first.
   (13-009); Reply in Another Chat keeps the reply when an agent may not open
   the chat (12-073); leaving or changing a thread closes its info card
   (13-106); the manager box puts the composer panel's tab back on close
-  (13-012, the shared open flag stays); a demo session clears the translation
+  (13-012, the shared open flag stays; the tab goes back only if the box
+  was open); a closed chat window drops its widget scale; a reaction picked
+  from the menu strip is toggled before the menu closes, so a locked emoji
+  still finds its Premium options; a demo session clears the translation
   of a chat whose bar is gone (13-166).
 - **Skipped.** 12-098: the background poll already drains
   `take_finished_rich_html_exports` per account. 14-054: query tokens are

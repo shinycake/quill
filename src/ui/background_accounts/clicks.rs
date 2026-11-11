@@ -38,9 +38,9 @@ impl QuillApp {
             }
             self.show_background_notification(account, queued, cx);
         }
-        for path in drain.sound_plays {
-            self.play_sound_file(path);
-        }
+        // A sound preview belongs to the picker of the account on screen;
+        // one that finishes in a background account is not played.
+        drop(drain.sound_plays);
     }
 
     /// The account on screen, or the one about to be (no session yet).

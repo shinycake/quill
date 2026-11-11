@@ -434,7 +434,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.session
             .settings
             .pending_sound_downloads
-            .insert(sound_id, std::time::Instant::now());
+            .insert(sound_id);
         // A play request is explicit: retry even if an earlier attempt
         // stalled (the stall mark only stops per-ingest auto retries).
         self.session.media.downloads.clear_stalled(file_id.0);

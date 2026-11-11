@@ -19,11 +19,13 @@ impl QuillApp {
         window: Option<&mut Window>,
         cx: &mut Context<Self>,
     ) {
-        if let Some(drain) = self
-            .live
-            .as_mut()
-            .map(|live| quill::notify_accounts::drain_on_screen(&mut live.driver.session))
-        {
+        let picker_open = self.notify.sound_picker_open();
+        if let Some(drain) = self.live.as_mut().map(|live| {
+            if !picker_open {
+                live.driver.session.settings.forget_sound_previews();
+            }
+            quill::notify_accounts::drain_on_screen(&mut live.driver.session)
+        }) {
             self.hand_out_notifications(drain, window, cx);
         }
         // The call windows follow the call from here too, not from the
