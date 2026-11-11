@@ -170,7 +170,7 @@ fn sending_without_premium_offers_the_text_without_formatting(cx: &mut TestAppCo
     let vcx = &mut vcx;
     remote_rich_draft(&app, vcx, false);
     vcx.update(|window, cx| {
-        app.update(cx, |app, cx| app.submit_from_send_button(window, cx));
+        app.update(cx, |app, cx| app.submit_from_send_button(Default::default(), window, cx));
     });
     frames(vcx);
     let choice = app.read_with(vcx, |app, _| app.chat_ui.rich_draft_box.clone());
@@ -191,7 +191,7 @@ fn a_rich_draft_box_goes_with_its_chat(cx: &mut TestAppContext) {
     let vcx = &mut vcx;
     remote_rich_draft(&app, vcx, false);
     vcx.update(|window, cx| {
-        app.update(cx, |app, cx| app.submit_from_send_button(window, cx));
+        app.update(cx, |app, cx| app.submit_from_send_button(Default::default(), window, cx));
     });
     frames(vcx);
     assert!(shown(vcx, "rich-choice-plain"));

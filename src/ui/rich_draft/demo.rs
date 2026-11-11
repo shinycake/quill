@@ -6,6 +6,7 @@
 //! `paste` (the paste notice with Open) or `paste-locked` (the notice
 //! without Premium).
 
+use crate::ui::composer_sends::SendOnce;
 use crate::ui::app::QuillApp;
 use crate::ui::screenshot_demo::{DemoSpec, register_demos};
 use gpui_kit::*;
@@ -73,7 +74,7 @@ impl QuillApp {
             "discard" => self.chat_ui.rich_draft_box = super::RichDraftBox::Discard,
             "editor" => self.open_rich_draft(window, cx),
             "choice" | "toast" => {
-                let _ = self.submit_rich_draft(window, cx);
+                let _ = self.submit_rich_draft(SendOnce::default(), window, cx);
             }
             "paste" | "paste-locked" => {
                 self.set_composer_markup(PASTED, window, cx);

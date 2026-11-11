@@ -356,7 +356,7 @@ fn removing_cards_before_and_past_the_tenth_sends_the_rest_in_order(cx: &mut Tes
     vcx.run_until_parked();
     app.update_in(&mut vcx, |app, window, cx| {
         app.set_composer_group_media(Some(true));
-        app.submit_composer(String::new(), window, cx);
+        app.submit_composer(String::new(), Default::default(), window, cx);
         assert!(app.pending_attachments().is_empty(), "the tray went");
         let sent = newest_photos(app, 11);
         let names: Vec<&str> = sent.iter().map(|(name, _)| name.as_str()).collect();

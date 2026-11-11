@@ -8,6 +8,7 @@
 //! the message and no Stars move.
 #![deny(clippy::indexing_slicing)]
 
+use crate::ui::composer_sends::SendOnce;
 use super::app::QuillApp;
 use super::chat_theme::{danger, text_muted, warning};
 use super::paid_messages_state::{ComposerPaidConfirm, RemoveFeeBox};
@@ -43,6 +44,7 @@ impl QuillApp {
         &mut self,
         chat_id: ChatId,
         text: &str,
+        once: SendOnce,
         cx: &mut Context<Self>,
     ) -> bool {
         let Some(session) = self.session() else {
@@ -69,7 +71,7 @@ impl QuillApp {
                 text: text.to_string(),
             },
             slot,
-            once: self.send_once(),
+            once,
         });
         self.open_box(DialogKind::PaidSendConfirm);
         self.paid_messages.confirm_trust = None;
@@ -167,7 +169,7 @@ impl QuillApp {
             }
         }
         let total = confirm.total();
-        self.with_send_once(once, |this| this.submit_composer(confirm.text, window, cx));
+        self.submit_composer(confirm.text, once, window, cx);
         // Not trusted: what the send left held is released up to the total
         // the user just agreed to, never more.
         let mut budget = total;

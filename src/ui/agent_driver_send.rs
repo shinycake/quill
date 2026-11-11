@@ -6,6 +6,7 @@
 //! back with `UiCommand::ComposerSent` so the box clears.
 #![deny(clippy::indexing_slicing)]
 
+use crate::ui::composer_sends::SendOnce;
 use super::app::QuillApp;
 use gpui_kit::*;
 use quill::agent::ui_driver::bridge::UiSend;
@@ -53,7 +54,7 @@ impl QuillApp {
         // else the box could carry does (a schedule, a silent send, an
         // effect, a paid message, suggested-post terms). The tool path
         // checks the request again before sending.
-        let composer = self.composer_send_options();
+        let composer = self.composer_send_options(SendOnce::default());
         let options = SendOptions {
             link_preview_disabled: composer.link_preview_disabled,
             link_preview_above_text: composer.link_preview_above_text,

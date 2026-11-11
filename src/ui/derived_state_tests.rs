@@ -340,7 +340,7 @@ fn sending_drops_a_reply_to_a_message_deleted_since_the_last_frame(cx: &mut Test
     let before = ids(&app, vcx);
     vcx.update(|window, cx| {
         app.update(cx, |app, cx| {
-            app.submit_composer("sounds good".into(), window, cx)
+            app.submit_composer("sounds good".into(), Default::default(), window, cx)
         })
     });
     assert!(
@@ -378,7 +378,7 @@ fn submitting_an_edit_of_a_deleted_message_sends_nothing(cx: &mut TestAppContext
     let before = history_len(&app, vcx);
     vcx.update(|window, cx| {
         app.update(cx, |app, cx| {
-            app.submit_composer("new words".into(), window, cx)
+            app.submit_composer("new words".into(), Default::default(), window, cx)
         })
     });
     assert!(app.read_with(vcx, |app, _| !app.chat_ui.is_editing()));

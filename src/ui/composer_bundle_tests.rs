@@ -91,12 +91,12 @@ fn the_repeat_choice_rides_the_schedule_for_premium(cx: &mut TestAppContext) {
             ComposerScheduling::SendAtDate(_)
         ));
         assert_eq!(app.pending_send().schedule_repeat, 7 * DAY);
-        let options = app.composer_send_options();
+        let options = app.composer_send_options(Default::default());
         assert_eq!(options.schedule_repeat_period, 7 * DAY);
         // The choice is as one-shot as the schedule: clearing the schedule
         // drops it from the options.
         app.update_pending_send(|send| send.scheduling = ComposerScheduling::None);
-        assert_eq!(app.composer_send_options().schedule_repeat_period, 0);
+        assert_eq!(app.composer_send_options(Default::default()).schedule_repeat_period, 0);
     });
 }
 
@@ -168,15 +168,17 @@ fn silent_send_and_just_send_need_something_to_send(cx: &mut TestAppContext) {
         assert!(app.send_silently_by_key(window, cx));
         assert!(app.composer.read(cx).value().is_empty());
         // The silence was for that one send.
-        assert!(!app.composer_ui.once.silent);
         assert!(!app.composer_effective_silent());
         app.composer
             .update(cx, |input, cx| input.set_value("loud", window, cx));
         assert!(app.just_send_by_key(window, cx));
         assert!(app.composer.read(cx).value().is_empty());
         // The option itself reaches the wire options.
-        app.composer_ui.once.silent = true;
-        assert!(app.composer_send_options().disable_notification);
+        let once = crate::ui::composer_sends::SendOnce {
+            silent: true,
+            ..Default::default()
+        };
+        assert!(app.composer_send_options(once).disable_notification);
     });
 }
 

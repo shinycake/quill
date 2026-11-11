@@ -246,7 +246,7 @@ impl QuillApp {
 mod tests {
     use super::*;
 
-    #[test]
+    #[core::prelude::v1::test]
     fn linking_is_busy_so_no_new_link_replaces_the_pending_answer() {
         assert!(!DeviceLink::default().is_busy());
         assert!(!DeviceLink::failed("x").is_busy());

@@ -37,6 +37,7 @@ impl QuillApp {
         &mut self,
         chat_id: ChatId,
         text: &str,
+        once: SendOnce,
         cx: &mut Context<Self>,
     ) -> bool {
         if text.trim().is_empty() && self.pending_attachments().is_empty() {
@@ -67,7 +68,7 @@ impl QuillApp {
                 self.chat_ui.bot_thread = BotThreadStart::Asked {
                     request,
                     text: text.to_string(),
-                    once: self.send_once(),
+                    once,
                 };
             }
             None => self.set_note(StatusNote::error(tr(
@@ -118,7 +119,7 @@ impl QuillApp {
         if let Some(tray) = tray {
             self.update_pending_send(|send| *send = tray);
         }
-        self.with_send_once(once, |this| this.submit_composer(text, window, cx));
+        self.submit_composer(text, once, window, cx);
     }
 
     /// The demo has no TDLib: the thread is made from the answer TDLib

@@ -1212,7 +1212,7 @@ fn a_held_send_whose_chat_window_closed_says_it_did_not_go(cx: &mut TestAppConte
                     Some(PhotoEditor::new(EditorPurpose::Attachment(item), pixels));
                 app.photo_editor_mut(PhotoEditor::rotate, cx);
                 app.save_photo_editor(window, cx);
-                app.submit_composer(String::new(), window, cx);
+                app.submit_composer(String::new(), Default::default(), window, cx);
                 app.open_photo_editor(0, cx);
             });
         });

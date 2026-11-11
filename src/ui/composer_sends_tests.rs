@@ -84,7 +84,7 @@ fn assert_nothing_chosen(app: &QuillApp, path: &str) {
     let send = app.pending_send();
     assert!(send.self_destruct.is_none(), "{path}: self-destruct leaked");
     assert!(!send.caption_above, "{path}: caption-above leaked");
-    let options = app.composer_send_options();
+    let options = app.composer_send_options(Default::default());
     assert!(
         matches!(options.scheduling, ComposerScheduling::None),
         "{path}: schedule leaked"
@@ -114,7 +114,7 @@ fn a_chat_switch_shows_the_other_chats_choices_and_back_restores_them(cx: &mut T
         // tdesktop keeps per chat).
         app.select_listed_chat(A, window, cx);
         assert_eq!(app.pending_attachments().len(), 1);
-        let options = app.composer_send_options();
+        let options = app.composer_send_options(Default::default());
         assert!(matches!(
             options.scheduling,
             ComposerScheduling::SendWhenOnline
@@ -181,7 +181,7 @@ fn a_send_starts_its_chat_over_and_keeps_the_silent_choice(cx: &mut TestAppConte
         });
         assert!(app.just_send_by_key(window, cx));
         // tdesktop clears the draft and its preview choice after a send.
-        let options = app.composer_send_options();
+        let options = app.composer_send_options(Default::default());
         assert!(matches!(options.scheduling, ComposerScheduling::None));
         assert!(!options.link_preview_disabled);
         // The silent choice is the chat's, not the message's.
@@ -335,7 +335,7 @@ fn another_account_never_sees_this_accounts_choices_for_the_same_chat_id(cx: &mu
             .map(|attachment| attachment.file_name.clone())
             .collect();
         assert_eq!(names, ["a.jpg"]);
-        let options = app.composer_send_options();
+        let options = app.composer_send_options(Default::default());
         assert!(matches!(
             options.scheduling,
             ComposerScheduling::SendWhenOnline
@@ -556,7 +556,7 @@ fn pay_sends_only_in_the_chat_and_account_it_was_asked_in(cx: &mut TestAppContex
             false,
         );
         // Another chat by the time Pay is pressed: nothing is sent there.
-        assert!(app.paid_send_waits(A, "hello", cx));
+        assert!(app.paid_send_waits(A, "hello", Default::default(), cx));
         app.select_listed_chat(B, window, cx);
         let before = history_len(app, B);
         app.confirm_paid_send(window, cx);
@@ -565,14 +565,14 @@ fn pay_sends_only_in_the_chat_and_account_it_was_asked_in(cx: &mut TestAppContex
         // Another account with the same chat id open: nothing either.
         app.select_listed_chat(A, window, cx);
         let first = app.session().expect("demo").account.clone();
-        assert!(app.paid_send_waits(A, "hello", cx));
+        assert!(app.paid_send_waits(A, "hello", Default::default(), cx));
         become_account(app, &second_account());
         let before = history_len(app, A);
         app.confirm_paid_send(window, cx);
         assert_eq!(history_len(app, A), before);
         // In the chat it was asked in, Pay sends.
         become_account(app, &first);
-        assert!(app.paid_send_waits(A, "hello", cx));
+        assert!(app.paid_send_waits(A, "hello", Default::default(), cx));
         app.confirm_paid_send(window, cx);
         assert_eq!(history_len(app, A), before + 1);
     });
@@ -801,7 +801,7 @@ fn slow_mode_refuses_a_send_of_more_than_one_message_and_keeps_the_tray(cx: &mut
     app.update_in(&mut vcx, |app, window, cx| {
         let group = slow_group(app);
         let before = history_len(app, group);
-        app.submit_composer("caption".into(), window, cx);
+        app.submit_composer("caption".into(), Default::default(), window, cx);
         assert_eq!(history_len(app, group), before, "nothing went");
         assert_eq!(app.pending_attachments().len(), 11, "the tray stays");
         assert_eq!(
@@ -810,7 +810,7 @@ fn slow_mode_refuses_a_send_of_more_than_one_message_and_keeps_the_tray(cx: &mut
         );
         // One album is one message, which slow mode lets through.
         app.update_pending_attachments(|tray| tray.truncate(10));
-        app.submit_composer("caption".into(), window, cx);
+        app.submit_composer("caption".into(), Default::default(), window, cx);
         assert!(app.pending_attachments().is_empty(), "the album went");
     });
 }

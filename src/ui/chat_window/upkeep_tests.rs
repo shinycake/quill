@@ -288,18 +288,19 @@ fn a_send_that_waited_keeps_its_one_time_options(cx: &mut TestAppContext) {
         effect: 7,
     };
     let (inside, after) = read(&h, None, cx, |app, _| {
-        let inside = app.with_send_once(once, |app| {
-            let options = app.composer_send_options();
-            (options.disable_notification, options.effect_id)
-        });
-        (inside, app.send_once())
+        let options = app.composer_send_options(once);
+        let later = app.composer_send_options(Default::default());
+        (
+            (options.disable_notification, options.effect_id),
+            (later.disable_notification, later.effect_id),
+        )
     });
     assert_eq!(
         inside,
         (true, 7),
         "the held send goes silent, with its effect"
     );
-    assert_eq!(after, crate::ui::composer_sends::SendOnce::default());
+    assert_eq!(after, (false, 0), "the next send has none of them");
 }
 
 /// Round 13 B, finding 4: a chat window's reply bar, pointing at a message

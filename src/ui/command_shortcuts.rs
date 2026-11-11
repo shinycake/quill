@@ -69,7 +69,7 @@ impl QuillApp {
         {
             return false;
         }
-        self.submit_from_send_button(window, cx);
+        self.submit_from_send_button(SendOnce::default(), window, cx);
         true
     }
 
@@ -89,9 +89,9 @@ impl QuillApp {
         }
         let once = SendOnce {
             silent: true,
-            ..self.send_once()
+            ..Default::default()
         };
-        self.with_send_once(once, |this| this.submit_from_send_button(window, cx));
+        self.submit_from_send_button(once, window, cx);
         true
     }
 

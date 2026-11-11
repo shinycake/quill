@@ -1,5 +1,6 @@
 //! The bot command menu above the composer.
 
+use crate::ui::composer_sends::SendOnce;
 use super::send_bot_command::MenuSend;
 use super::*;
 use quill::composer::{commands_with_username, complete_command_at};
@@ -365,7 +366,7 @@ impl QuillApp {
         // Demo and connecting panes have no live send: the composer's own
         // path reports it, then the kept text goes back.
         let rest = self.composer_markup(cx);
-        self.submit_composer(command, window, cx);
+        self.submit_composer(command, SendOnce::default(), window, cx);
         if !rest.is_empty() && self.composer.read(cx).value().is_empty() {
             self.set_composer_markup(&rest, window, cx);
             self.composer.update(cx, |input, cx| {

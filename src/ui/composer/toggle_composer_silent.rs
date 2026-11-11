@@ -1,5 +1,6 @@
 //! Methods moved out of `composer.rs` to keep files under 1000 lines.
 
+use crate::ui::composer_sends::SendOnce;
 use super::*;
 use crate::ui::status_note::StatusNote;
 use quill::lang::{keys, tr};
@@ -15,10 +16,10 @@ pub(in crate::ui) struct SendOptionsState {
 
 impl QuillApp {
     /// M1: the composer's `messageSendOptions` for the next send.
-    pub(in crate::ui) fn composer_send_options(&self) -> SendOptions {
+    pub(in crate::ui) fn composer_send_options(&self, once: SendOnce) -> SendOptions {
         let send = self.pending_send();
         SendOptions {
-            disable_notification: self.composer_effective_silent() || self.composer_ui.once.silent,
+            disable_notification: self.composer_effective_silent() || once.silent,
             scheduling: send.scheduling,
             schedule_repeat_period: match send.scheduling {
                 ComposerScheduling::SendAtDate(_) => send.schedule_repeat,
@@ -30,7 +31,7 @@ impl QuillApp {
             link_preview_link: send.preview.link_index,
             // The driver overrides this for secret chats at send time.
             is_secret: false,
-            effect_id: self.composer_ui.once.effect,
+            effect_id: once.effect,
             ..SendOptions::default()
         }
     }

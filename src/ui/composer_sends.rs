@@ -57,7 +57,7 @@ pub(crate) struct PendingSend {
 }
 
 /// The options a single send carries and the next does not: "Send without
-/// sound" and "Send with Effect" (`ComposerUi::once`). A send that waits (a paid-message confirm, a photo
+/// sound" and "Send with Effect" (passed down the send path). A send that waits (a paid-message confirm, a photo
 /// edit still rendering) keeps its own copy, so it goes out with them.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(super) struct SendOnce {
@@ -403,24 +403,6 @@ impl QuillApp {
         if let Some(slot) = self.send_slot() {
             self.composer_sends.set_draft_clear(&slot, Some(clear));
         }
-    }
-
-    /// The one-time options of the send being made now.
-    pub(super) fn send_once(&self) -> SendOnce {
-        self.composer_ui.once
-    }
-
-    /// Run a send that waited with the one-time options it was made with.
-    pub(super) fn with_send_once<R>(
-        &mut self,
-        once: SendOnce,
-        f: impl FnOnce(&mut Self) -> R,
-    ) -> R {
-        let outer = self.send_once();
-        self.composer_ui.once = once;
-        let result = f(self);
-        self.composer_ui.once = outer;
-        result
     }
 
     /// The slot the composer on screen sends from: the account on screen,

@@ -408,9 +408,9 @@ impl QuillApp {
                 if send_after {
                     let once = super::composer_sends::SendOnce {
                         effect: send_effect,
-                        ..self.send_once()
+                        ..Default::default()
                     };
-                    self.with_send_once(once, |this| this.send_composer_after_schedule(window, cx));
+                    self.send_composer_after_schedule(once, window, cx);
                 }
             }
             ScheduleTarget::Reschedule(message_id) => {

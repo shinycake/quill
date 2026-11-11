@@ -6,6 +6,7 @@
 //! `suggested_posts_decide.rs`.
 #![deny(clippy::indexing_slicing)]
 
+use crate::ui::composer_sends::SendOnce;
 use super::app::QuillApp;
 use super::suggested_posts_state::{BalanceFor, SuggestTarget};
 use crate::ui::status_note::StatusNote;
@@ -95,8 +96,8 @@ impl QuillApp {
 
     /// The composer's options with the suggest bar's terms: a send while
     /// the bar is up is a suggested post.
-    pub(in crate::ui) fn composer_post_options(&self) -> SendOptions {
-        let mut options = self.composer_send_options();
+    pub(in crate::ui) fn composer_post_options(&self, once: SendOnce) -> SendOptions {
+        let mut options = self.composer_send_options(once);
         options.suggested_post = self
             .open_chat_id()
             .and_then(|chat| self.session()?.suggest_bar(chat))

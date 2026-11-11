@@ -127,6 +127,7 @@ impl QuillApp {
                     let markup = self.composer_markup(cx);
                     self.submit_composer(
                         quill::composer::send_text_on_enter(markup, self.chat_prefs.send_key_mode),
+                        crate::ui::composer_sends::SendOnce::default(),
                         window,
                         cx,
                     );

@@ -121,7 +121,7 @@ impl QuillApp {
                     // The tray goes now, so no editor opens on it.
                     Some((text, once)) if here => {
                         this.viewer.photo_editor_after = None;
-                        this.with_send_once(once, |this| this.submit_composer(text, window, cx));
+                        this.submit_composer(text, once, window, cx);
                     }
                     Some(_) => this.note_held_send_dropped(),
                     None => {

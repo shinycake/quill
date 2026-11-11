@@ -61,11 +61,6 @@ pub(crate) struct ComposerUi {
     /// The composer text before the last keystroke, for "Replace emoji
     /// automatically" (it only reacts to one typed character).
     pub(super) echo: super::composer_field::FieldEcho,
-    /// The one-time options of the send being made: "Silent send" and
-    /// "Send with Effect" (`messageSendOptions.effect_id`). Set only for the
-    /// duration of that send (`QuillApp::with_send_once`), never by a caller
-    /// that has to reset it.
-    pub(super) once: super::composer_sends::SendOnce,
     /// The send button's options menu and its effect picker
     /// (`send_effects`).
     pub(super) send_menu: super::send_effects::SendMenuUi,
@@ -116,7 +111,6 @@ impl ComposerUi {
             inline_return: None,
             preview_timer: None,
             echo: Default::default(),
-            once: Default::default(),
             send_menu: Default::default(),
             rich_draft: Default::default(),
             draft_restore: None,

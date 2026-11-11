@@ -18,6 +18,7 @@ mod demo;
 #[path = "rich_draft_tests.rs"]
 mod tests;
 
+use crate::ui::composer_sends::SendOnce;
 use super::app::QuillApp;
 use crate::ui::message_text::rich_block_element;
 use crate::ui::status_note::StatusNote;
@@ -249,6 +250,7 @@ impl QuillApp {
     /// the press.
     pub(in crate::ui) fn submit_rich_draft(
         &mut self,
+        once: SendOnce,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
@@ -262,11 +264,11 @@ impl QuillApp {
         }
         let premium = self.session().is_some_and(Session::my_is_premium);
         if premium {
-            self.submit_rich_composer(rich.blocks(), window, cx);
+            self.submit_rich_composer(rich.blocks(), once, window, cx);
         } else if rich.uses_premium_formatting() {
             self.refuse_rich_send(&rich, window, cx);
         } else if let Some(plain) = rich.plain_markup() {
-            self.send_rich_draft_plain(plain, window, cx);
+            self.send_rich_draft_plain(plain, once, window, cx);
         }
         true
     }
@@ -302,12 +304,13 @@ impl QuillApp {
     fn send_rich_draft_plain(
         &mut self,
         plain: String,
+        once: SendOnce,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         self.chat_ui.rich_editor_open = false;
         self.set_composer_markup(&plain, window, cx);
-        self.submit_composer(plain.clone(), window, cx);
+        self.submit_composer(plain.clone(), once, window, cx);
         // A refused send leaves the draft: the field it hides goes back
         // to empty.
         if self.shown_rich_draft().is_some() && self.composer_markup(cx) == plain {

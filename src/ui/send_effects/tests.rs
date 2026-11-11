@@ -227,16 +227,17 @@ fn the_send_menu_offers_effects_and_sends_with_the_chosen_one(cx: &mut TestAppCo
 
     // The send carries the effect once, then the menu closes.
     app.update(vcx, |app, _| {
-        app.composer_ui.once.effect = fire;
-        assert_eq!(app.composer_send_options().effect_id, fire);
-        app.composer_ui.once.effect = 0;
+        let once = crate::ui::composer_sends::SendOnce {
+            effect: fire,
+            ..Default::default()
+        };
+        assert_eq!(app.composer_send_options(once).effect_id, fire);
     });
     vcx.update(|window, cx| window.click("send-with-effect", cx));
     frames(vcx);
     assert!(!menu_open(&app, vcx));
     app.update(vcx, |app, _| {
-        assert_eq!(app.composer_ui.once.effect, 0);
-        assert_eq!(app.composer_send_options().effect_id, 0);
+        assert_eq!(app.composer_send_options(Default::default()).effect_id, 0);
     });
 }
 

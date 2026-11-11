@@ -306,7 +306,7 @@ impl QuillApp {
             silent,
             effect: effect_id,
         };
-        self.with_send_once(once, |this| this.submit_from_send_button(window, cx));
+        self.submit_from_send_button(once, window, cx);
     }
 
     /// The card's "Schedule": pick the time, then send with the effect.

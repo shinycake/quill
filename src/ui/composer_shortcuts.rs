@@ -57,9 +57,33 @@ pub(super) struct CodeLanguageDialog {
     /// Where the block was when the box opened, to notice a changed draft.
     block: Range<usize>,
     input: Entity<TextareaState>,
-    error: Option<&'static str>,
-    /// `Opening` until the dialog has mounted and focused the field.
-    stage: BoxStage,
+    stage: CodeLanguageStage,
+}
+
+/// The Code Language box: waiting for its first frame (to focus the field),
+/// then editing, with the language error the last Apply found.
+#[derive(Clone, Copy)]
+enum CodeLanguageStage {
+    Opening,
+    Editing { error: Option<&'static str> },
+}
+
+impl CodeLanguageStage {
+    /// The first frame: true once, then the box is `Editing` with no error.
+    fn mounted(&mut self) -> bool {
+        let first = matches!(self, Self::Opening);
+        if first {
+            *self = Self::Editing { error: None };
+        }
+        first
+    }
+
+    fn error(&self) -> Option<&'static str> {
+        match *self {
+            Self::Opening => None,
+            Self::Editing { error } => error,
+        }
+    }
 }
 
 /// The chord for a shortcut as shown in menus: "⌘B" on macOS, "Ctrl+B"
@@ -331,8 +355,7 @@ impl QuillApp {
         self.chat_ui.code_language = Some(CodeLanguageDialog {
             block,
             input,
-            error: None,
-            stage: BoxStage::Opening,
+            stage: CodeLanguageStage::Opening,
         });
         cx.notify();
     }
@@ -375,7 +398,9 @@ impl QuillApp {
                 }
                 Err(error) => {
                     if let Some(dialog) = self.chat_ui.code_language.as_mut() {
-                        dialog.error = Some(error.note());
+                        dialog.stage = CodeLanguageStage::Editing {
+                            error: Some(error.note()),
+                        };
                     }
                 }
             }
@@ -405,7 +430,9 @@ impl QuillApp {
             }
             Err(error) => {
                 if let Some(dialog) = self.chat_ui.code_language.as_mut() {
-                    dialog.error = Some(error.note());
+                    dialog.stage = CodeLanguageStage::Editing {
+                            error: Some(error.note()),
+                        };
                 }
             }
         }
@@ -445,7 +472,7 @@ impl QuillApp {
                         .child(
                             div()
                                 .text_color(cx.theme().danger)
-                                .child(dialog.error.unwrap_or("")),
+                                .child(dialog.stage.error().unwrap_or("")),
                         )
                         .child(
                             div()
