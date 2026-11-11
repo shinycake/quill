@@ -8078,6 +8078,7 @@ Review round and file-complete pass (round 2):
 | 10-024 | One reader (`giveaway_notice`: a refused field, else the failed launch) and one dismissal (`dismiss_giveaway_notice` clears both) on every edit. |
 | 10-025 | The confirmation page is no longer reset by hand to follow the launch: it stays while the launch is out (its Start shows busy) and after a failure (the line shows, Start asks again). `page` is navigation, the per-chat stage is the session's. |
 | 05-035 | `GiveawayLaunch::Launching { request: RequestId }`; no `0` for none. |
+| 05-034 | The Premium and Stars price lists are answered and failed by the `RequestId` their `Fetch` waits for (`Fetch::sent`/`answered`/`failed`), not by chat id or purpose: a late answer to an earlier request (a Retry) is dropped. |
 | 06-044, 06-045 | `StoryComposer::open` is gone (`mode`); the link URL and reaction text are read from the inputs when used (`areas_json(link, reactions)`), no mirror is kept. |
 | 10-080 | The dialog body hand-over is a `Cell` (`Cell::take` cannot panic on re-entry), in `groups_welcome`, `collectible_info_ui`, `ownership`, `send_box_options` and `bot_create_dialog`. |
 | 11-040 | Already fixed in round 1; tested now (the field keeps what was typed when nothing was sent). |
@@ -8089,6 +8090,9 @@ Review round and file-complete pass (round 2):
 | 14-005 | `Installing` holds a 30 s watch: a quit that does not land ends in `InstallFailed` (`restart_did_not_land`). |
 | 14-003 | Already `Installed(release, ChangelogBanner)` from round 1. |
 
-- **Not this bundle's.** Entries in files this round touched only for one call
-  (02-092 `connect/payments.rs`, 05-034 `state/.../giveaway.rs`, 10-026 and 10-027
-  `giveaway_pick_ui.rs`, 09-056 `dialogs/welcome.rs`): see the report.
+- **Not fixed here.** 02-092 (`connect/payments.rs`: the checkout invoice
+  `payments.request` beside the `CheckoutForm` stage, 29 readers and writers in
+  the payments domain's own files) and 09-056's remaining text buffer (the edit
+  row's text is the `Textarea`'s own value, written when a row opens). The
+  `giveaway_pick_ui.rs` entries (10-026, 10-027) are in a file this round did not
+  touch.

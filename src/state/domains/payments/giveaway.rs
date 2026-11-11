@@ -285,12 +285,14 @@ impl Session {
         options: Vec<PremiumGiveawayOption>,
         pending: Option<&PendingRequest>,
     ) {
-        // Only the answer for the chat the form shows now.
-        if pending.map(|p| p.purpose) == Some(RequestPurpose::GetPremiumGiveawayOptions)
-            && pending.and_then(|p| p.chat_id).map(|c| c.0)
-                == Some(self.payments.giveaway.options.for_chat)
-        {
-            self.payments.giveaway.options.premium.succeed(options);
+        // Only the answer to the request the list waits for: a late answer
+        // for another chat's form asked an older request.
+        if pending.map(|p| p.purpose) == Some(RequestPurpose::GetPremiumGiveawayOptions) {
+            self.payments
+                .giveaway
+                .options
+                .premium
+                .answered(pending.map(|p| p.id), options);
         }
     }
 
@@ -301,7 +303,11 @@ impl Session {
         pending: Option<&PendingRequest>,
     ) {
         if pending.map(|p| p.purpose) == Some(RequestPurpose::GetStarGiveawayOptions) {
-            self.payments.giveaway.options.stars.succeed(options);
+            self.payments
+                .giveaway
+                .options
+                .stars
+                .answered(pending.map(|p| p.id), options);
         }
     }
 
@@ -339,12 +345,16 @@ impl Session {
                 }
             }
             Some(RequestPurpose::GetPremiumGiveawayOptions) => {
-                if pending.and_then(|p| p.chat_id).map(|c| c.0) == Some(state.options.for_chat) {
-                    state.options.premium.fail_dropping_data(reason);
-                }
+                state
+                    .options
+                    .premium
+                    .failed(pending.map(|p| p.id), reason, true);
             }
             Some(RequestPurpose::GetStarGiveawayOptions) => {
-                state.options.stars.fail_dropping_data(reason);
+                state
+                    .options
+                    .stars
+                    .failed(pending.map(|p| p.id), reason, true);
             }
             Some(RequestPurpose::LaunchPrepaidGiveaway) => {
                 if let Some(chat_id) = pending.and_then(|p| state.launches.launching(p.id)) {

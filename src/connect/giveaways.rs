@@ -67,6 +67,8 @@ impl<S: JsonSender> ConnectDriver<S> {
                 .options
                 .premium
                 .fail_dropping_data(send_failed_line("Could not load the prices"));
+        } else {
+            self.session.payments.giveaway.options.premium.sent(extra);
         }
         let extra = self
             .session
@@ -79,6 +81,8 @@ impl<S: JsonSender> ConnectDriver<S> {
                 .options
                 .stars
                 .fail_dropping_data(send_failed_line("Could not load the prices"));
+        } else {
+            self.session.payments.giveaway.options.stars.sent(extra);
         }
         premium.and(stars).map(|_| ())
     }

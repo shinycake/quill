@@ -124,3 +124,34 @@ fn giveaway_options_that_cannot_be_sent_are_failed_with_a_retry() {
     let options = &driver.session.payments.giveaway.options;
     assert!(options.premium.is_loading() && options.stars.is_loading());
 }
+
+/// 05-034: a Premium price answer to an earlier request (same chat, before
+/// a Retry) is not taken by the list waiting for the newer one.
+#[test]
+fn a_late_price_answer_to_an_older_request_is_not_taken() {
+    let (_dir, mut driver, sender, sink, seq) = toggle_driver();
+    assert!(driver.request_giveaway_options(-100).is_ok());
+    let first = sender
+        .snapshot()
+        .into_iter()
+        .rev()
+        .find(|json| json.contains("getPremiumGiveawayPaymentOptions"))
+        .and_then(|json| serde_json::from_str::<serde_json::Value>(&json).ok())
+        .and_then(|value| value.get("@extra").cloned())
+        .expect("the first request");
+    // The form asked again (Retry) for the same chat: only the newer request's
+    // answer counts.
+    assert!(driver.request_giveaway_options(-100).is_ok());
+    let late = serde_json::json!({
+        "@type": "premiumGiveawayPaymentOptions", "@extra": first, "options": []
+    })
+    .to_string();
+    driver
+        .ingest(copy_and_parse(&late, &seq, &sink).expect("parse"))
+        .expect("ingest");
+    let options = &driver.session.payments.giveaway.options;
+    assert!(
+        options.premium.is_loading(),
+        "the older request's answer is dropped"
+    );
+}
