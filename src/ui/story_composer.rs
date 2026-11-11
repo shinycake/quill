@@ -265,11 +265,18 @@ impl QuillApp {
         match answer {
             Err(error) => self.stories.composer.set_error(error),
             Ok(result) => {
+                let link_url = self.stories.composer_link.read(cx).value().to_string();
                 if !result.can_post() {
                     self.stories.composer.set_error(result.user_message());
                     if let Some(kind) = result.premium_limit() {
                         self.show_premium_limit(kind, 0, cx);
                     }
+                } else if let Some(error) = StoryComposer::link_url_error(&link_url) {
+                    // The inputs stay live while the check runs, and the
+                    // areas are read from them below: a link edited since
+                    // the press is checked again, as at the press, so a
+                    // typo shows here instead of failing the post.
+                    self.stories.composer.set_error(error);
                 } else {
                     // Phase 9.5: `target` is the chat the check was asked for,
                     // so the post goes where the eligibility was computed.

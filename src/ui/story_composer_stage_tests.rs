@@ -100,6 +100,31 @@ fn a_check_answer_reaches_only_the_composer_that_asked(cx: &mut TestAppContext) 
     });
 }
 
+/// The link is read from its input when the check answers, so one edited
+/// while the check ran is validated again and a bad one is not posted.
+#[gpui_kit::test]
+fn a_link_edited_during_the_check_is_validated_again(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    app.update_in(&mut vcx, |app, window, cx| {
+        app.open_story_composer(window, cx);
+        let request = send(app, RequestPurpose::CheckCanPostStory);
+        app.stories.composer.stage = ComposerStage::Checking {
+            request,
+            target: ChatId(5),
+        };
+        app.stories
+            .composer_link
+            .update(cx, |input, cx| input.set_value("foo", window, cx));
+        answer_check(app, request, Ok(CanPostStoryResult::Ok { story_count: 0 }));
+        app.story_composer_upkeep(cx);
+        assert!(!app.stories.composer.stage.busy());
+        assert_eq!(
+            app.stories.composer.error(),
+            quill::story_composer::StoryComposer::link_url_error("foo")
+        );
+    });
+}
+
 /// A check whose call is gone and that nothing answered leaves Checking
 /// with an error; Post asks again.
 #[gpui_kit::test]
