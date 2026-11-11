@@ -6784,3 +6784,48 @@ Thirty-four minor entries; each was proved against the integration branch first.
   process-wide (`next_query_token`). 13-165: tdesktop toasts the hide at
   once (the bar is optimistic here too, with `RequestRollback`), and the
   local hidden flag is already keyed by account.
+
+### Sweep fixes (is-18)
+
+Implicit state in the settings, sign-in, stickers, stories, suggested-posts,
+wallet and Touch Bar files: a stage kept as bools, flags beside an `Option`
+or a side list becomes one value whose variants carry their data.
+
+| Id | Fix |
+| --- | --- |
+| 12-109, 13-082 | `SettingsUi::boxes: SettingsBox { None, LogOut, Stickers }` replaces `log_out_confirm` and `sticker_settings_open`; closing one box never closes the other. The Account box's `confirm_delete` / `confirm_logout` pair is `AccountConfirm { None, Delete, LogOut }`. |
+| 12-108 | `KeybindingUi { capture: Capture { Idle, Waiting(action), Refused { action, message } }, keymap: Keymap }` replaces `keybinding_capture`, `keybinding_error`, `keybindings_applied`; `SystemAccent { Unread, Read(Option<u32>) }` replaces `system_accent` + `system_accent_probed`. |
+| 13-079 | `Arrival::stage: Stage { Seeking, Washing { landed, centered_at } }`. |
+| 13-080 | `SettingsSearch::field: Field { Settled, ClearOnNextRender }` replaces `pending_clear`. |
+| 12-110 | `ChatListState::archive_settings: Fetch<ArchiveChatListSettings>` replaces the loading bool and the `Option`; a refused fetch now ends `Failed` (it used to leave the box "still loading" in `None`). The open flag stays in the session: it is the registry's single predicate and `Farewell` closes it. |
+| 13-081 | `AgentPageUi::picker` holds its fingerprint (`BuiltPicker`). `focus_chat` is the card's chat and `scroll_to` a one-shot scroll request: independent. |
+| 12-112 | Skipped: `reset_confirm` is the dialog registry's one open predicate (`AgentResetToken`), not a mirror of anything. |
+| 13-083 | `Mount { Mounting, Shown }` (`ui/mount.rs`) for the forward box's search focus and the contact box's; `link_text` and `forward_result` are single values with their own exits (`esc_stack`, chat change), not two fields in step. |
+| 13-063 | Skipped: already `chat_list.tab: SidebarTab`. |
+| 13-054 | `SidebarReveal::mode: Mode { Docked, Hidden(Peek) }`: the pointer's peek exists only while hidden. |
+| 13-047, 13-048 | `ui/signin_clock.rs`: `StepClock { None, Code, Email }`, `ErrorClock { None, Seen { banner } }` (a different error shows its banned box again), `Ticker { Idle, Armed(task) }`. `PhoneStep` already carried the phone stages; `picker_open`, `touched` and `hint` are independent. |
+| 13-059 | `ComposerSpelling { underlines: Underlines { found, text }, check: Check { Idle, Checking(task) } }`: ranges and the text they refer to are one value. |
+| 13-035 | `StartFiles { Idle, Choosing { files } }`; closing hands the files back. |
+| 13-038 | `Recovery { Healthy, Recovered }` replaces the `Cell<bool>`. The kept window stays its own slot. |
+| 13-025 | `ZoomedDay::fetch: Fetch<Rc<StatChart>>`. |
+| 13-043 | `RangeSelector` and `PieZoom` own their subscription. |
+| 13-031 | Skipped: the lists already use `ForwardsPage` (matched to a `RequestId`). |
+| 13-014 | `UiClip::opening: Opening { Pending, Ready(timeline), Failed }`; the sticker pump and closer are `Upkeep { Idle, Running(task) }`. |
+| 13-004 | `SetConfirm { None, Rename, DeleteSticker(item), DeleteSet, RemoveSet }` and `PickWait { None, Downloading(pending), Decoding(pick, file) }` replace six fields. `reordering`, `create`, `encoding` and `pick` stay: separate flows. |
+| 13-011 | `StickerPanel::installed_loaded()` reads `lists.installed`; the masks panel has `installed_fetch` / `archived_fetch` (`Fetch<()>`) instead of `installed_loaded`, `archived_loaded`, `failed`; `ManagerView` derives a `ListStatus`. The masks strip reads the same fetch (the twin screen). |
+| 13-017 | `StickerPanel::greeting: Fetch<Vec<StickerItem>>`: marked when answered, asked only from `Idle`, `Failed` when refused or not sent. |
+| 13-018 | Skipped: the picker's status is already per-tab `Fetch` plus `StickerSetStage`; `search_has_more` is a paging cursor. |
+| 13-147 | `StripPull { Collapsed, Revealing, Expanded }`. `context` is a last-seen token and `bounce` the kit's output cell. |
+| 13-120, 13-149 | Skipped: `CoverStage` and the `RequestId` of the call are already separate things on purpose: the call outlives the panel (`close_other_panels`), so its answer still settles. |
+| 13-137 | `ComposerMode { New, Repost, Edit }` replaces `edit_target` / `repost_source`; the press stage was already `ComposerStage`. |
+| 13-134 | Skipped: already `AlbumView` / `AlbumDelete`. |
+| 13-102 | Skipped: `extras_requested` is gone. |
+| 13-095, 13-094 | `AfterStars` in the Stars box; `LiveJoin { Idle, Joining, Joined, Refused }`. |
+| 13-098 | `ReplyRow { Closed, Typing, Panel }`: the panel exists only in an open row. |
+| 13-109 | `SuggestedPostsUi` is a base box (price, accept or decline) and one box over it (time or Grams Needed). |
+| 13-110 | `SuggestBar::kind: BarKind { New, Edit { of, send } }`: only an edit has a message and a send. |
+| 13-118 | `SyntheticKind::{ImageLoading, ImageLoaded}`. |
+| 13-116 | `Showing::timer: Timer { Running, Paused }` and `ToastQueue::pointer: Pointer { Away, Over }`. |
+| 13-114 | `MoneyPage::view: MoneyView { Overview, Lookup, Tx, Nft }`; `Paged` carries a `Fetch<()>`. `hint_open` is an overlay over the view, kept. |
+| 13-119, 13-154, 13-155 | `PickerFill { Unfilled, Shown, Waiting }`, `SyncStage { Idle, Scheduled(task) }`, `SlideRun { Still, Since }`. The pinned panel's `touch` is already a `PinTouch` and its `timer` handle is its own armed state. macOS only: not built in the Linux gate. |
+| 13-161 | `close_after_choose` is dropped: a chooser with no box under it (no source) closes after a pick. |

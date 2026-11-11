@@ -84,6 +84,18 @@ pub(crate) enum SettingsBox {
     Stickers,
 }
 
+impl SettingsBox {
+    /// Open `which` (replacing any other box), or close it when it is the
+    /// one open: closing a box never closes another.
+    pub(crate) fn set(&mut self, which: SettingsBox, open: bool) {
+        if open {
+            *self = which;
+        } else if *self == which {
+            *self = SettingsBox::None;
+        }
+    }
+}
+
 impl SettingsUi {
     pub(super) fn box_open(&self, which: SettingsBox) -> bool {
         self.boxes == which
@@ -92,11 +104,7 @@ impl SettingsUi {
     /// Open `which` (replacing any other box), or close it when it is the
     /// one open: closing a box never closes another.
     pub(super) fn set_box(&mut self, which: SettingsBox, open: bool) {
-        if open {
-            self.boxes = which;
-        } else if self.boxes == which {
-            self.boxes = SettingsBox::None;
-        }
+        self.boxes.set(which, open);
     }
 
     pub(super) fn new(cx: &mut Context<QuillApp>) -> Self {
@@ -238,5 +246,20 @@ impl PreferencesUi {
             emoji_style: Default::default(),
             send_to: Default::default(),
         }
+    }
+}
+
+#[cfg(test)]
+mod box_tests {
+    use super::SettingsBox;
+
+    #[test]
+    fn closing_a_box_never_closes_the_other() {
+        let mut boxes = SettingsBox::None;
+        boxes.set(SettingsBox::Stickers, true);
+        boxes.set(SettingsBox::LogOut, false);
+        assert_eq!(boxes, SettingsBox::Stickers);
+        boxes.set(SettingsBox::LogOut, true);
+        assert_eq!(boxes, SettingsBox::LogOut, "one box at a time");
     }
 }

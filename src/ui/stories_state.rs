@@ -378,3 +378,26 @@ impl StoryUi {
         }
     }
 }
+
+#[cfg(test)]
+mod reply_tests {
+    use super::StoryViewerUi;
+
+    #[test]
+    fn the_panel_belongs_to_an_open_row_and_goes_with_it() {
+        let mut ui = StoryViewerUi::default();
+        ui.open_reply_panel();
+        assert!(!ui.reply_is_open(), "a closed row has no panel");
+        ui.open_reply();
+        ui.open_reply_panel();
+        assert!(ui.reply_is_open() && ui.reply_panel_shown());
+        ui.close_reply_panel();
+        assert!(ui.reply_is_open() && !ui.reply_panel_shown());
+        ui.open_reply_panel();
+        ui.close_reply();
+        assert!(!ui.reply_is_open() && !ui.reply_panel_shown());
+        // Reopening starts without the old panel.
+        ui.open_reply();
+        assert!(!ui.reply_panel_shown());
+    }
+}

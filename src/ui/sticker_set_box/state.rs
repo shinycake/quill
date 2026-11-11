@@ -353,3 +353,47 @@ mod encoding_tests {
         assert!(!encoding.is_running());
     }
 }
+
+#[cfg(test)]
+mod confirm_tests {
+    use super::{PickExisting, PickWait, SetConfirm, SetKind};
+    use quill::ids::FileId;
+
+    fn pick() -> PickExisting {
+        PickExisting {
+            set_id: 7,
+            kind: SetKind::Stickers,
+            adapt: false,
+        }
+    }
+
+    #[test]
+    fn closing_one_box_leaves_another_open() {
+        let mut confirm = SetConfirm::DeleteSet;
+        confirm.close_rename();
+        confirm.close_remove_set();
+        assert!(
+            confirm.is_delete_set(),
+            "another box's close is not its own"
+        );
+        confirm.close_delete_set();
+        assert!(matches!(confirm, SetConfirm::None));
+    }
+
+    #[test]
+    fn opening_a_box_replaces_the_one_under_it() {
+        let mut confirm = SetConfirm::Rename;
+        assert!(confirm.is_rename());
+        confirm = SetConfirm::RemoveSet;
+        assert!(!confirm.is_rename() && confirm.is_remove_set());
+    }
+
+    #[test]
+    fn a_new_pick_replaces_the_one_waiting_and_only_its_own_decode_lands() {
+        let mut wait = PickWait::Decoding(pick(), FileId(1));
+        assert!(!wait.finish_decoding(pick(), FileId(2)), "another sticker");
+        assert!(wait.finish_decoding(pick(), FileId(1)));
+        assert_eq!(wait, PickWait::None);
+        assert!(!wait.finish_decoding(pick(), FileId(1)), "already landed");
+    }
+}

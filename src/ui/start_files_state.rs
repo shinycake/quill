@@ -102,3 +102,22 @@ impl StartFilesUi {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::StartFiles;
+    use std::path::PathBuf;
+
+    #[test]
+    fn files_wait_once_and_leave_with_the_chooser() {
+        let mut chooser = StartFiles::default();
+        assert!(!chooser.is_choosing());
+        let a = PathBuf::from("a.txt");
+        chooser.add(vec![a.clone(), a.clone()]);
+        chooser.add(vec![PathBuf::from("b.txt"), a.clone()]);
+        assert!(chooser.is_choosing());
+        assert_eq!(chooser.take(), vec![a, PathBuf::from("b.txt")]);
+        assert!(!chooser.is_choosing(), "taking the files closes it");
+        assert!(chooser.take().is_empty());
+    }
+}
