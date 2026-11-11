@@ -47,7 +47,7 @@ fn a_switch_closes_the_boxes_whose_flag_is_the_sessions(cx: &mut TestAppContext)
     app.update_in(vcx, |app, _, cx| {
         if let Some(session) = app.demo_session.as_mut() {
             session.open_chat(CHAT);
-            session.stickers.masks.open = true;
+            session.stickers.masks.set_dialog_open(true);
             session.stickers.emoji.open = true;
             session.chat_list.archive_settings_open = true;
             session.calls.rtmp_start = Some(RtmpStart::new(CHAT));
@@ -72,7 +72,7 @@ fn a_switch_closes_the_boxes_whose_flag_is_the_sessions(cx: &mut TestAppContext)
     app.read_with(vcx, |app, _| {
         assert!(!app.location_picker_open(), "Send Location");
         let session = app.session().expect("the demo session");
-        assert!(!session.stickers.masks.open, "Manage masks");
+        assert!(!session.stickers.masks.dialog_open(), "Manage masks");
         assert!(!session.stickers.emoji.open, "Emoji sets");
         assert!(!session.chat_list.archive_settings_open, "Archive settings");
         assert!(session.calls.rtmp_start.is_none(), "RTMP start");

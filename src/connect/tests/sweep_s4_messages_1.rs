@@ -213,8 +213,8 @@ fn a_mask_list_asked_before_a_change_does_not_land_after_it() {
         {"@type":"stickerSetInfo","id":"3","size":1,"is_installed":true}]}),
     );
     let masks = &t.driver.session.stickers.masks;
-    assert!(!masks.installed_loaded);
-    assert!(masks.installed.is_empty());
+    assert!(masks.installed.is_idle());
+    assert!(masks.installed.items().is_empty());
 }
 
 #[test]

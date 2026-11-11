@@ -30,7 +30,7 @@ impl QuillApp {
         let running = self
             .session()
             .and_then(|s| s.payments.marketplace_gift.as_ref())
-            .filter(|g| g.loading || g.sending)
+            .filter(|g| g.is_loading() || g.is_sending())
             .map(|g| g.chat_id);
         // A purchase on its way is for the chat it started in: another
         // chat's box waits for it instead of taking it over.
@@ -110,7 +110,7 @@ impl QuillApp {
                 .session()
                 .and_then(|s| s.payments.marketplace_gift.clone());
             let limit = this.session().and_then(|s| s.payments.gift_text_length_max);
-            let busy = gift.as_ref().is_some_and(|g| g.loading || g.sending);
+            let busy = gift.as_ref().is_some_and(|g| g.is_loading() || g.is_sending());
             let mut body = div()
                 .flex()
                 .flex_col()
@@ -156,10 +156,10 @@ impl QuillApp {
                             &[("recipient_name", &gift.recipient_name.to_string())],
                         )),
                 );
-                if gift.loading {
+                if gift.is_loading() {
                     body = body.child(div().child(tr(keys::Q_OPS_LOADING_THE_GIFT)));
                 }
-                if let Some(note) = gift.note {
+                if let Some(note) = gift.note() {
                     body = body.child(
                         div()
                             .id("gift-result")
@@ -168,7 +168,7 @@ impl QuillApp {
                             .child(note),
                     );
                 }
-                if let Some(quote) = gift.quote {
+                if let Some(quote) = gift.quote().cloned() {
                     let title = format!("{} — {}", quote.title, quote.name);
                     body = body.child(
                         div()
@@ -182,15 +182,14 @@ impl QuillApp {
                         body = body.child(
                             Button::new(format!("gift-price-{}", price.label()))
                                 .label(price.label())
-                                .selected(gift.price == Some(price))
-                                .disabled(busy || gift.completed)
+                                .selected(gift.price() == Some(price))
+                                .disabled(busy || gift.is_completed())
                                 .on_click(cx.listener(move |this, _, _, cx| {
                                     if let Some(live) = this.live.as_mut()
                                         && let Some(g) =
                                             live.driver.session.payments.marketplace_gift.as_mut()
-                                        && !g.sending
                                     {
-                                        g.price = Some(price);
+                                        g.select_price(price);
                                     }
                                     cx.notify();
                                 })),
@@ -199,7 +198,7 @@ impl QuillApp {
                     body = body
                         .child(
                             Textarea::new(&this.payments.marketplace_comment_input)
-                                .disabled(busy || gift.completed)
+                                .disabled(busy || gift.is_completed())
                                 .aria_label(tr(keys::Q_OPS_PERSONAL_COMMENT)),
                         )
                         .child(
@@ -224,14 +223,14 @@ impl QuillApp {
                                     tr(keys::Q_OPS_COMMENT_AND_SENDER_VISIBLE_TO)
                                 })
                                 .selected(this.payments.marketplace_private)
-                                .disabled(busy || gift.completed)
+                                .disabled(busy || gift.is_completed())
                                 .on_click(cx.listener(|this, _, _, cx| {
                                     this.payments.marketplace_private =
                                         !this.payments.marketplace_private;
                                     cx.notify();
                                 })),
                         );
-                    if let Some(price) = gift.price {
+                    if let Some(price) = gift.price() {
                         let quoted_name = quote.name.clone();
                         body = body.child(
                             Button::new("gift-buy")
@@ -242,7 +241,7 @@ impl QuillApp {
                                         ("recipient_name", &gift.recipient_name.to_string()),
                                     ],
                                 ))
-                                .disabled(busy || gift.completed)
+                                .disabled(busy || gift.is_completed())
                                 .on_click(cx.listener(move |this, _, _, cx| {
                                     if this.payments.marketplace_name_input.read(cx).value().trim()
                                         != quoted_name

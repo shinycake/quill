@@ -57,9 +57,6 @@ GifPanel::loading
 GifPanel::search_failed
 GifPanel::search_loading
 GiftManageState::collections_loading
-GiftPurchase::completed
-GiftPurchase::loading
-GiftPurchase::sending
 GiftValueLookup::loading
 GiftValueLookup::loading+error
 GiveawayInfoLookup::loading
@@ -93,9 +90,6 @@ Lookup::fade_started
 Lookup::pending
 ManagerView::failed
 ManagerView::loading
-MasksPanel::archived_loaded
-MasksPanel::failed
-MasksPanel::installed_loaded
 MediaFacts::downloading
 MediaFacts::in_saved_messages
 MediaMenuFacts::downloading
@@ -167,7 +161,6 @@ SettingsState::pending_attention+default_auto_delete_error
 SettingsState::saved_sounds_loaded
 SettingsState::saved_sounds_stale
 SettingsState::storage_limits_seed_sent
-SettingsState::storage_stats_loading
 SharedMediaTabState::loading_more
 SharedMediaTabState::loading_more+error
 Shown::waiting_for_input

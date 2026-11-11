@@ -23,7 +23,7 @@ pub struct LanguageLinkLookup {
 
 impl LanguageLinkLookup {
     /// A box whose lookup went out as `request`.
-    pub(crate) fn looking_up(id: String, request: RequestId) -> Self {
+    pub fn looking_up(id: String, request: RequestId) -> Self {
         Self {
             id,
             stage: LanguageLinkStage::Looking(request),
