@@ -88,13 +88,14 @@ impl ClipSpec {
         match self.format {
             StickerFormat::Webm => {
                 let path = self.path.clone();
-                let file = self.file.0;
+                // The frames go under the account that asked: the worker
+                // runs later, maybe after a switch.
+                let dir_of_file = quill::animation::gif_frame_cache_dir(self.file.0);
                 Origin::Decoded(Box::new(move |cancel, frames| {
                     let nonce = std::time::SystemTime::now()
                         .duration_since(std::time::UNIX_EPOCH)
                         .map_or(0, |d| d.as_nanos());
-                    let dir = quill::animation::gif_frame_cache_dir(file)
-                        .join(format!("sticker-{edge}-{nonce}"));
+                    let dir = dir_of_file.join(format!("sticker-{edge}-{nonce}"));
                     let fps = quill::sticker_playback::stream_webm_sized(
                         &path,
                         &dir,

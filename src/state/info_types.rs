@@ -121,23 +121,39 @@ impl ProfilePhoto {
 }
 
 /// The next page of a loaded photo list.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub enum PhotoPage {
     /// No page is out.
     #[default]
     Idle,
     /// This request asks for the next page; only its answer extends the list.
     Asking(RequestId),
+    /// The page failed. Nothing asks again on its own; the viewer retries
+    /// on the person's next step ([`PhotoPage::retry`]).
+    Failed(String),
 }
 
 impl PhotoPage {
-    pub fn asking(self) -> bool {
+    pub fn asking(&self) -> bool {
         matches!(self, PhotoPage::Asking(_))
     }
 
+    /// Whether the viewer may ask for the next page on its own.
+    pub fn askable(&self) -> bool {
+        matches!(self, PhotoPage::Idle)
+    }
+
     /// `request` is the page this list waits for.
-    pub fn answers(self, request: RequestId) -> bool {
-        self == PhotoPage::Asking(request)
+    pub fn answers(&self, request: RequestId) -> bool {
+        *self == PhotoPage::Asking(request)
+    }
+
+    /// An explicit action (a step in the viewer) lets a failed page be asked
+    /// again.
+    pub fn retry(&mut self) {
+        if matches!(self, PhotoPage::Failed(_)) {
+            *self = PhotoPage::Idle;
+        }
     }
 }
 
@@ -490,14 +506,17 @@ pub enum AdminListFetch {
 /// Loading-guard convention.
 #[derive(Debug, Clone, PartialEq)]
 pub enum SupergroupMembersFetch {
-    /// The first page is in flight as this request: only its answer or
-    /// error counts (a newer search for another query replaces it).
-    Loading(RequestId),
+    Loading,
     Loaded {
         members: Vec<ParsedChatMember>,
         total_count: i32,
     },
+    /// TDLib refused the request.
     Failed(String),
+    /// The request never left: the path was inactive or the sender closed.
+    /// Drawn like `Failed` with Retry, but it says nothing about whether the
+    /// viewer may see the members (so no administrators fallback).
+    NotSent(String),
 }
 
 /// Where the next page of a member list stands.
@@ -511,10 +530,11 @@ pub enum MoreMembers {
     Failed,
 }
 
-/// How one member list was asked: the query and the next page (the first
-/// page's request is the list's own `Loading` stage).
+/// How one member list was asked: the first-page request (`None` when the
+/// list was filled without one), the query, and the next page.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct MemberAsk {
+    pub first: Option<RequestId>,
     pub query: String,
     pub more: MoreMembers,
 }
@@ -540,16 +560,51 @@ pub enum PollVotersFetch {
 /// page-next keeps the loaded page.
 #[derive(Debug, Clone, PartialEq)]
 pub enum InlineQueryFetch {
-    /// The first page is in flight as this request: only its answer or
-    /// error counts (a re-query replaces the slot, and with it the wait).
-    Loading(RequestId),
+    /// The first page is out under `request`; only its answer or error
+    /// settles the slot.
+    Loading {
+        request: RequestId,
+    },
     Loaded {
         inline_query_id: i64,
         button: Option<InlineQueryResultsButton>,
         results: Vec<InlineQueryResultSummary>,
         next_offset: String,
+        /// The next page of these results.
+        more: InlineMore,
     },
     Failed(String),
+}
+
+/// The "load more" of a loaded inline query.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum InlineMore {
+    #[default]
+    Idle,
+    /// The page at `next_offset` is out under `request`.
+    Asking { request: RequestId },
+    /// The page at `offset` failed: it is not asked again until the next
+    /// query replaces the slot.
+    Failed { offset: String },
+}
+
+impl InlineQueryFetch {
+    /// A request of this fetch is out.
+    pub fn in_flight(&self) -> bool {
+        self.request().is_some()
+    }
+
+    /// The request this fetch waits for: the first page, or the next one.
+    pub fn request(&self) -> Option<RequestId> {
+        match self {
+            Self::Loading { request }
+            | Self::Loaded {
+                more: InlineMore::Asking { request },
+                ..
+            } => Some(*request),
+            Self::Loaded { .. } | Self::Failed(_) => None,
+        }
+    }
 }
 
 /// Bots slice: the single active inline-query slot — which (chat, bot)
@@ -561,9 +616,19 @@ pub struct InlineQuerySlot {
     pub bot_user_id: i64,
     pub query: String,
     pub fetch: InlineQueryFetch,
-    /// The `next_offset` a "load more" request failed on: that page is not
-    /// asked again until the next query replaces the slot.
-    pub more_failed: Option<String>,
+}
+
+impl InlineQuerySlot {
+    /// The `next_offset` a "load more" request failed on, if it did.
+    pub fn more_failed(&self) -> Option<&str> {
+        match &self.fetch {
+            InlineQueryFetch::Loaded {
+                more: InlineMore::Failed { offset },
+                ..
+            } => Some(offset),
+            _ => None,
+        }
+    }
 }
 
 /// Bots slice: `@botname` → bot user id resolution for inline mode.
@@ -596,66 +661,21 @@ pub enum InlineBotResolve {
 pub const CHAT_EVENT_LOG_PAGE_SIZE: i32 = 100;
 
 /// Phase D3c: fetch state for one chat's `getChatEventLog` result
-/// (schema 1.8.67, line 15252). Keyed by chat id. The stage names the
-/// requests it waits for: only their answers fill the list, and a refresh
-/// (a new search query or filter) drops the stage and with it every
-/// request asked under the previous query. Also the in-flight guard — the
-/// driver never sends a second page while one is outstanding.
+/// (schema 1.8.67, line 15252). Keyed by chat id. `Loading` is the
+/// in-flight guard — the driver never sends a second request while one
+/// is outstanding.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub enum ChatEventLogFetch {
     /// Never asked, or cleared by a refresh.
     #[default]
     Idle,
-    /// The first page is in flight as this request.
-    Loading(crate::ids::RequestId),
-    Loaded(LoadedEventLog),
-    /// The first page failed; Retry asks again.
+    Loading,
+    Loaded(ChatEventLogPage),
     Failed(String),
 }
 
-/// What a loaded log is also waiting for: an older page and the live poll,
-/// each under its request.
-#[derive(Debug, Clone, PartialEq, Default)]
-pub struct LoadedEventLog {
-    pub page: ChatEventLogPage,
-    /// The next older page in flight.
-    pub older: Option<crate::ids::RequestId>,
-    /// The live poll in flight.
-    pub poll: Option<crate::ids::RequestId>,
-}
-
-impl LoadedEventLog {
-    /// A page with nothing else in flight.
-    pub fn new(page: ChatEventLogPage) -> Self {
-        Self {
-            page,
-            older: None,
-            poll: None,
-        }
-    }
-}
-
-impl std::ops::Deref for LoadedEventLog {
-    type Target = ChatEventLogPage;
-
-    fn deref(&self) -> &ChatEventLogPage {
-        &self.page
-    }
-}
-
-/// Which `getChatEventLog` request of a log was sent.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum EventLogAsk {
-    /// The first page (cursor 0).
-    First,
-    /// The next older page.
-    Older,
-    /// The live poll of the newest page.
-    Poll,
-}
-
 /// One chat's recent actions: what it is asked for (kept across
-/// refreshes) and where the asking stands.
+/// refreshes), where the asking stands, and the requests it waits for.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct EventLog {
     /// The text search (`getChatEventLog.query`); empty = no search.
@@ -665,20 +685,48 @@ pub struct EventLog {
     /// The `user_ids` filter; empty = every admin.
     pub users: Vec<i64>,
     pub fetch: ChatEventLogFetch,
+    pub wait: EventLogWait,
+}
+
+/// The `getChatEventLog` requests one chat's log waits for
+/// (`GroupsState::event_log_waits`). Only their answers fill the list: a
+/// refresh (a new search query or filter) forgets both, so a page or poll
+/// asked under the previous query is dropped when it lands.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct EventLogWait {
+    /// The first or older page in flight.
+    pub page: Option<crate::ids::RequestId>,
+    /// The live poll in flight.
+    pub poll: Option<crate::ids::RequestId>,
 }
 
 /// Phase D3c: one cached `getChatEventLog` result. Events arrive in
 /// reverse chronological order (decreasing event `id`, schema 1.8.67,
 /// line 15252); pages append older events, deduped by event id.
-/// `has_more` is true when the last page was full — an older page is
-/// worth requesting.
+/// `older` says whether an older page is worth requesting.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct ChatEventLogPage {
     pub events: Vec<ParsedChatEvent>,
-    pub has_more: bool,
+    pub older: OlderEvents,
+}
+
+/// Where the log's older events stand. A full last page is `Available`; a
+/// short one `Exhausted`; an older page that was refused (or never sent) is
+/// `Failed`, drawn with Retry, and asked again only from there.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub enum OlderEvents {
+    #[default]
+    Exhausted,
+    Available,
+    Failed(String),
 }
 
 impl ChatEventLogPage {
+    /// Older events may exist (also after a failed ask: Retry asks again).
+    pub fn has_more(&self) -> bool {
+        !matches!(self.older, OlderEvents::Exhausted)
+    }
+
     /// Slice G2: distinct admin user ids (first-seen order) from a loaded
     /// page; drives the per-admin filter chips in the info panel. Chat
     /// senders (`MessageSender::Chat`) are not admins and are skipped.

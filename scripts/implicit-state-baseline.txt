@@ -5,18 +5,10 @@ ActiveGroupCall::loaded_all_participants
 
 
 BackendStatus::failed
-BarFacts::bot_start_pending
 CallSnap::connecting
 
-ChatSwipeFacts::is_saved
 
-ChatSwipeFacts::is_saved
 
-Checklist::others_can_mark_tasks_as_done
-ChecklistDialog::others_can_mark_tasks_as_done
-ChecklistDialog::others_can_mark_tasks_as_done+error
-ChecklistDraft::others_can_mark_tasks_as_done
-ChecklistSend::others_can_mark_tasks_as_done
 CheckoutView::sending
 
 DestRow::saved
@@ -26,8 +18,6 @@ Drawn::leaving
 DestRow::saved
 DragSelect::pending
 Drawn::leaving
-FastShareFacts::sent
-FieldResult::finished
 FooterMeta::pending
 
 GiveawaySummary::finished
@@ -45,7 +35,6 @@ Lookup::pending
 
 MediaMenuFacts::downloading
 
-MiniAppWindow::closing_confirmation
 
 
 
@@ -59,15 +48,11 @@ PasswordBox::sending+error
 PlaybackHealth::output_failed
 
 
-ReceivedGift::is_saved
 RowForum::loaded
-RowMenuFacts::is_saved_messages
 RowState::pending
 
 
-ReceivedGift::is_saved
 RowForum::loaded
-RowMenuFacts::is_saved_messages
 RowState::pending
 SettingsState::pending_attention
 
@@ -89,5 +74,4 @@ Tempo::inner_done
 TopPerson::saved_messages
 
 
-Validation::finished
 

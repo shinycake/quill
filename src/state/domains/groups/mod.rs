@@ -1,6 +1,7 @@
 //! The groups domain: groups and channels: members, admin rights, invite links, join requests, boosts, communities.
 mod apply;
 mod boost_level;
+mod community_full_infos;
 mod error;
 mod event_log;
 mod group_type;
@@ -13,6 +14,7 @@ mod stage_answers;
 mod state;
 mod supergroup_answer;
 
+pub use community_full_infos::CommunityFullInfos;
 pub use group_type::*;
 pub use invite_pages::InvitePages;
 pub use new_chat::*;

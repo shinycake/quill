@@ -598,8 +598,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             && suggest_emoji_for(text).is_none()
             && stickers.suggestions.is_empty()
             && stickers.suggest_for.is_nothing()
-            && emoji.animated_emoji.is_none()
-            && emoji.animated_emoji_for.is_none()
+            && emoji.animated.is_idle()
             && !self
                 .session
                 .requests
@@ -776,7 +775,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         // An update of the shown trending tab left its list `Idle`.
         let emoji_trending = emoji.open
             && emoji.tab == crate::emoji::EmojiSetTab::Trending
-            && emoji.lists.trending.is_idle();
+            && emoji.lists.trending.wants_fetch();
         let reactions = self.session.stickers.reaction_options_stale;
         if !self.chats_path_active() {
             return Ok(());

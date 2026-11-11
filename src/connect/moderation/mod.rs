@@ -5,9 +5,9 @@ use crate::state::GroupsPurpose;
 use crate::state::TransferStage;
 use crate::state::fetch::Fetch;
 use crate::state::{
-    AdminListFetch, AdminRightsFetch, CHAT_EVENT_LOG_PAGE_SIZE, ChatEventLogFetch, EventLogAsk,
-    InviteLinkFetch, JoinRequestFetch, MemberListFilter, MemberStatusChange, OwnerLookup,
-    RequestPurpose, RequestRollback, SupergroupMembersFetch,
+    AdminListFetch, AdminRightsFetch, CHAT_EVENT_LOG_PAGE_SIZE, ChatEventLogFetch, InviteLinkFetch,
+    JoinRequestFetch, MemberListFilter, MemberStatusChange, OwnerLookup, RequestPurpose,
+    RequestRollback, SupergroupMembersFetch,
 };
 use crate::telegram::envelope::{
     CanTransferOwnershipResult, ChatAdminRights, ChatKind, ChatPermissions,
@@ -31,6 +31,7 @@ mod admins;
 mod invites;
 mod members;
 mod members_more;
+mod ownership_open;
 mod permissions;
 
 impl<S: JsonSender> ConnectDriver<S> {
@@ -38,6 +39,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// gate. Sent when the transfer dialog opens, never on a timer.
     pub fn check_can_transfer_ownership(&mut self) -> Result<Option<RequestId>, ConnectSendError> {
         if !self.chats_path_active() {
+            self.fail_ownership_check_send();
             return Err(ConnectSendError::InvalidRequest);
         }
         if self.session.groups.ownership.check.is_loading() {
@@ -49,7 +51,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.session.begin_ownership_check(extra);
         if let Err(err) = self.sender.send_json(&can_transfer_ownership(extra)) {
             self.session.requests.take(extra);
-            self.session.groups.ownership.check.cancel();
+            self.fail_ownership_check_send();
             return Err(err);
         }
         Ok(Some(extra))
@@ -104,6 +106,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         chat_id: ChatId,
     ) -> Result<Option<RequestId>, ConnectSendError> {
         if !self.chats_path_active() {
+            self.fail_owner_lookup_send(chat_id);
             return Err(ConnectSendError::InvalidRequest);
         }
         let supported = matches!(
@@ -132,11 +135,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .send_json(&get_chat_owner_after_leaving(extra, chat_id.0))
         {
             self.session.requests.take(extra);
-            self.session
-                .groups
-                .ownership
-                .owner_after_leaving
-                .remove(&chat_id.0);
+            self.fail_owner_lookup_send(chat_id);
             return Err(err);
         }
         Ok(Some(extra))

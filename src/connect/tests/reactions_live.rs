@@ -318,7 +318,7 @@ fn keyword_emoji_search_uses_the_typed_language() {
             .stickers
             .emoji
             .keyword_emojis
-            .emojis
+            .for_query("")
             .is_empty()
     );
 }

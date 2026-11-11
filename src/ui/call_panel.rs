@@ -75,6 +75,8 @@ pub(super) struct CallSnap {
     /// The connection's signal bars, once established (tdesktop
     /// `Calls::SignalBars`).
     pub(super) signal_bars: Option<u8>,
+    /// Why your microphone, level tap or shared screen stopped.
+    pub(super) media_note: Option<String>,
     /// The peer's picture has a frame: it fills the window.
     pub(super) video: bool,
     /// Your camera's preview has a frame.
@@ -178,6 +180,7 @@ impl QuillApp {
                 remote_muted: false,
                 remote_battery_low: false,
                 signal_bars: None,
+                media_note: None,
                 video: false,
                 preview: false,
                 can_add_people: false,
@@ -214,6 +217,7 @@ impl QuillApp {
             remote_muted: ready && call.remote_audio_muted,
             remote_battery_low: ready && call.remote_battery_low,
             signal_bars: notices::shown_signal_bars(&call),
+            media_note: call.media_note.clone(),
             // The root made the players follow the call before this draw.
             video: self.call_picture_drawn(CallPicture::Remote),
             preview: self.call_picture_drawn(CallPicture::Local),
@@ -771,6 +775,16 @@ impl Render for CallPanel {
                 .child(notices::microphone_off_line(&snap.name))
         });
 
+        let media_note = snap.media_note.clone().map(|note| {
+            div()
+                .id("call-media-note")
+                .max_w(px(420.))
+                .text_size(px(12.))
+                .text_color(call_chrome::muted())
+                .text_center()
+                .child(note)
+        });
+
         // tdesktop's low-battery notice over the buttons, while the
         // microphone notice is not showing.
         let battery_low = notices::battery_notice_shown(snap.remote_battery_low, snap.remote_muted)
@@ -829,6 +843,7 @@ impl Render for CallPanel {
                 .child(name.text_size(px(17.)))
                 .child(status)
                 .children(mic_off)
+                .children(media_note)
                 .into_any_element()
         } else {
             div()
@@ -844,6 +859,7 @@ impl Render for CallPanel {
                 .child(div().mt(px(16.)).max_w(px(420.)).child(name))
                 .child(status)
                 .children(mic_off)
+                .children(media_note)
                 .children(snap.joined_line.clone().map(|line| {
                     div()
                         .max_w(px(420.))

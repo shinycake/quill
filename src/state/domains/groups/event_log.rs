@@ -14,52 +14,104 @@ impl Session {
         events: Vec<ParsedChatEvent>,
         pending: Option<&PendingRequest>,
     ) {
-        // Only the requests the log waits for: a page or poll asked under
-        // an earlier query or filter is dropped.
-        let Some((pending, chat_id)) = pending.and_then(|p| Some((p, p.chat_id?))) else {
+        // Only the requests the log waits for (`event_log_waits`): a page
+        // or poll asked under an earlier query or filter is dropped.
+        let Some(pending) = pending.filter(|pending| self.take_event_log_wait(pending)) else {
             return;
         };
-        let Some(ask) = self.groups.take_event_log_wait(chat_id.0, pending.id) else {
-            return;
-        };
-        match ask {
-            EventLogAsk::Poll => {
-                // The live poll: new events join the loaded page.
-                if let Some(ChatEventLogFetch::Loaded(loaded)) =
-                    self.groups.event_log_fetch_mut(chat_id.0)
-                {
-                    let mut merged = loaded.page.events.clone();
-                    crate::state::paging::append_new_by_id(&mut merged, events, |event| event.id);
-                    merged.sort_by_key(|event| std::cmp::Reverse(event.id));
-                    loaded.page.events = merged;
-                }
-            }
-            EventLogAsk::Older => {
-                if let Some(ChatEventLogFetch::Loaded(loaded)) =
-                    self.groups.event_log_fetch_mut(chat_id.0)
-                {
-                    let has_more = events.len() as i32 >= CHAT_EVENT_LOG_PAGE_SIZE;
-                    let mut merged = loaded.page.events.clone();
-                    crate::state::paging::append_new_by_id(&mut merged, events, |event| event.id);
-                    merged.sort_by_key(|event| std::cmp::Reverse(event.id));
-                    loaded.page = ChatEventLogPage {
-                        events: merged,
-                        has_more,
-                    };
-                }
-            }
-            EventLogAsk::First => {
-                let has_more = events.len() as i32 >= CHAT_EVENT_LOG_PAGE_SIZE;
-                let mut events = events;
-                events.sort_by_key(|event| std::cmp::Reverse(event.id));
+        let pending = Some(pending);
+        if let Some(pending) = pending
+            && pending.purpose == RequestPurpose::Groups(GroupsPurpose::PollChatEventLog)
+            && let Some(chat_id) = pending.chat_id
+        {
+            // The live poll: new events join the loaded page; with
+            // no loaded page (a filter change cleared it) the
+            // answer is stale and dropped.
+            if let Some(ChatEventLogFetch::Loaded(page)) = self.groups.event_log_fetch(chat_id.0) {
+                let mut merged = page.events.clone();
+                crate::state::paging::append_new_by_id(&mut merged, events, |event| event.id);
+                merged.sort_by_key(|event| std::cmp::Reverse(event.id));
+                let older = page.older.clone();
                 self.groups.set_event_log_fetch(
                     chat_id.0,
-                    ChatEventLogFetch::Loaded(LoadedEventLog::new(ChatEventLogPage {
-                        events,
-                        has_more,
-                    })),
+                    ChatEventLogFetch::Loaded(ChatEventLogPage {
+                        events: merged,
+                        older,
+                    }),
                 );
             }
+        } else if let Some(pending) = pending
+            && let RequestPurpose::Groups(GroupsPurpose::GetChatEventLog { from_event_id }) =
+                pending.purpose
+            && let Some(chat_id) = pending.chat_id
+        {
+            let older = if events.len() as i32 >= CHAT_EVENT_LOG_PAGE_SIZE {
+                OlderEvents::Available
+            } else {
+                OlderEvents::Exhausted
+            };
+            let mut merged = match (from_event_id, self.groups.event_log_fetch(chat_id.0)) {
+                (0, _) => events,
+                (_, Some(ChatEventLogFetch::Loaded(page))) => {
+                    let mut merged = page.events.clone();
+                    crate::state::paging::append_new_by_id(&mut merged, events, |event| event.id);
+                    merged
+                }
+                _ => events,
+            };
+            merged.sort_by_key(|event| std::cmp::Reverse(event.id));
+            self.groups.set_event_log_fetch(
+                chat_id.0,
+                ChatEventLogFetch::Loaded(ChatEventLogPage {
+                    events: merged,
+                    older,
+                }),
+            );
         }
+    }
+
+    /// The older page of `chat`'s loaded log was refused or never sent: the
+    /// log keeps what it has and draws Retry. Nothing else changes.
+    pub(crate) fn fail_older_events(&mut self, chat: i64, line: String) {
+        if let Some(ChatEventLogFetch::Loaded(page)) = self.groups.event_log_fetch(chat) {
+            let mut page = page.clone();
+            page.older = OlderEvents::Failed(line);
+            self.groups
+                .set_event_log_fetch(chat, ChatEventLogFetch::Loaded(page));
+        }
+    }
+
+    /// An older page goes out again: the failed line is gone.
+    pub(crate) fn begin_older_events(&mut self, chat: i64) {
+        if let Some(ChatEventLogFetch::Loaded(page)) = self.groups.event_log_fetch(chat)
+            && matches!(page.older, OlderEvents::Failed(_))
+        {
+            let mut page = page.clone();
+            page.older = OlderEvents::Available;
+            self.groups
+                .set_event_log_fetch(chat, ChatEventLogFetch::Loaded(page));
+        }
+    }
+
+    /// Whether `pending` is a `getChatEventLog` page or poll its chat's log
+    /// still waits for; if so the log stops waiting for it.
+    pub(super) fn take_event_log_wait(&mut self, pending: &PendingRequest) -> bool {
+        let Some(chat_id) = pending.chat_id else {
+            return false;
+        };
+        let Some(log) = self.groups.event_logs.get_mut(&chat_id.0) else {
+            return false;
+        };
+        let wait = &mut log.wait;
+        let slot = match pending.purpose {
+            RequestPurpose::Groups(GroupsPurpose::PollChatEventLog) => &mut wait.poll,
+            RequestPurpose::Groups(GroupsPurpose::GetChatEventLog { .. }) => &mut wait.page,
+            _ => return false,
+        };
+        if *slot != Some(pending.id) {
+            return false;
+        }
+        *slot = None;
+        true
     }
 }

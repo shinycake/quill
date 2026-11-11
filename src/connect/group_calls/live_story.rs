@@ -83,11 +83,17 @@ impl<S: JsonSender> ConnectDriver<S> {
             live.donors.is_idle(),
             live.message_senders.is_idle(),
         );
+        // A new Join (every extra idle again) lets a failed bursts ask go out.
+        if want.1 && want.2 {
+            self.session.stories.live_bursts.retry_failed();
+        }
         if !(want.0 || want.1 || want.2) {
             return Ok(());
         }
         if want.0 {
-            live.streamer.begin();
+            if let Some(live) = self.session.live_story_mut(group_call_id) {
+                live.streamer.begin();
+            }
             let sent = self
                 .live_story_request(LiveStoryPurpose::GetStreamer { group_call_id }, |extra| {
                     get_live_story_streamer(extra, group_call_id)
@@ -140,21 +146,33 @@ impl<S: JsonSender> ConnectDriver<S> {
                 }
             }
         }
-        self.maybe_fetch_live_bursts()
+        Ok(())
     }
 
     /// The Stars effect's bursts, once per session (tdesktop asks for the
     /// generic animations once too, `Reactions::requestGeneric`).
-    fn maybe_fetch_live_bursts(&mut self) -> Result<(), ConnectSendError> {
-        if self.session.stories.live_bursts != LiveBursts::Unasked {
+    /// Asked from its own step, so an early return of the extras fetch never
+    /// skips it; a refused send ends in `Failed`, not in a re-ask per ingest.
+    pub(crate) fn maybe_fetch_live_bursts(&mut self) -> Result<(), ConnectSendError> {
+        let joined = self
+            .watched_live_call()
+            .is_some_and(|call| call.is_joined || !call.transport.answer().is_empty());
+        if self.session.stories.live_bursts != LiveBursts::Unasked || !joined {
             return Ok(());
         }
-        self.live_story_request(
+        match self.live_story_request(
             LiveStoryPurpose::GetBursts,
             get_custom_emoji_reaction_animations,
-        )?;
-        self.session.stories.live_bursts = LiveBursts::Requested;
-        Ok(())
+        ) {
+            Ok(request) => {
+                self.session.stories.live_bursts = LiveBursts::Requested(request);
+                Ok(())
+            }
+            Err(err) => {
+                self.session.stories.live_bursts = LiveBursts::Failed;
+                Err(err)
+            }
+        }
     }
 
     /// The streamer's camera and screen for the engine's video
@@ -263,18 +281,23 @@ impl<S: JsonSender> ConnectDriver<S> {
 
     /// The toast's Undo: the pending Stars are dropped.
     pub fn undo_live_story_reaction(&mut self) -> Result<(), ConnectSendError> {
-        let Some(live) = self.session.stories.live.as_mut() else {
+        let Some(live) = self.session.stories.live.as_ref() else {
             return Ok(());
         };
-        if live.pending_reaction.take().is_none() {
+        if live.pending_reaction.is_none() {
             return Ok(());
         }
         let group_call_id = live.group_call_id;
+        // The pending Stars are dropped only once the removal went out: a
+        // refused send leaves them (and the Undo) as they were.
         self.live_story_request(
             LiveStoryPurpose::RemovePendingReactions { group_call_id },
             |extra| remove_pending_live_story_reactions(extra, group_call_id),
-        )
-        .map(|_| ())
+        )?;
+        if let Some(live) = self.session.live_story_mut(group_call_id) {
+            live.pending_reaction = None;
+        }
+        Ok(())
     }
 
     /// Commits the pending Stars once their Undo window is over. Returns
@@ -300,23 +323,27 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session.requests.take(extra);
             return false;
         };
-        // tdesktop `addStars(from, stars, mine)` at send time: your Stars
-        // fly up from the button as the reaction goes out.
-        if let Some(sender) = self.session.live_story_sender()
-            && let Some(live) = self.session.live_story_mut(group_call_id)
-        {
-            live.push_effect(sender, pending.stars);
-        }
         if self
             .send_json_request(
                 extra,
                 &commit_pending_live_story_reactions(extra, group_call_id),
             )
             .is_err()
+        {
+            // Nothing went out: TDLib still holds the taps as pending, so
+            // they wait here again for the next commit.
+            if let Some(live) = self.session.live_story_mut(group_call_id) {
+                live.commit_unsent(extra, pending, now_ms);
+                live.note = Some(Refusal::NotEnough.message().to_string());
+            }
+            return true;
+        }
+        // tdesktop `addStars(from, stars, mine)` at send time: your Stars
+        // fly up from the button as the reaction goes out.
+        if let Some(sender) = self.session.live_story_sender()
             && let Some(live) = self.session.live_story_mut(group_call_id)
         {
-            live.commit_failed(extra);
-            live.note = Some(Refusal::NotEnough.message().to_string());
+            live.push_effect(sender, pending.stars);
         }
         true
     }

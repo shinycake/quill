@@ -120,6 +120,7 @@ impl QuillApp {
             remote_muted: false,
             remote_battery_low: false,
             signal_bars: None,
+            media_note: None,
             video: false,
             preview: false,
             can_add_people: false,

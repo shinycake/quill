@@ -20,7 +20,7 @@ use gpui_kit::gpui::{AnyElement, Context, Window};
 use quill::composer::inline_query_trigger;
 use quill::inline_grid::layout_results;
 use quill::lang::{keys, tr, tr_with};
-use quill::state::{InlineBotResolve, InlineQueryFetch};
+use quill::state::{InlineBotResolve, InlineQueryFetch, InlineQuerySlot};
 use quill::telegram::envelope::{InlineQueryResultSummary, InlineQueryResultsButton};
 use std::time::Duration;
 
@@ -146,7 +146,7 @@ pub(super) fn inline_view(app: &QuillApp, cx: &Context<QuillApp>) -> Option<Inli
                 slot.chat_id == chat_id && slot.bot_user_id == *user_id && slot.query == query
             });
             match slot.map(|slot| &slot.fetch) {
-                None | Some(InlineQueryFetch::Loading(_)) => {
+                None | Some(InlineQueryFetch::Loading { .. }) => {
                     InlineView::Status(tr(keys::Q_MEDIA_LOADING_RESULTS).to_string())
                 }
                 Some(InlineQueryFetch::Failed(reason)) => InlineView::Status(reason.clone()),
@@ -185,6 +185,13 @@ impl QuillApp {
             if self.chat_ui.bot_alert == BotAlert::Typed {
                 self.chat_ui.bot_alert = BotAlert::None;
             }
+            // A failed lookup of the bot goes with the trigger.
+            if matches!(
+                self.chat_ui.inline_bot,
+                Some(InlineBotResolve::Failed { .. })
+            ) {
+                self.chat_ui.inline_bot = None;
+            }
             self.chat_ui.inline.close();
             return;
         };
@@ -200,7 +207,16 @@ impl QuillApp {
             return;
         }
         self.capture_inline_bot(username);
-        let username_changed = self.inline_bot_for(username).is_none();
+        // A failed lookup is not an answer to keep: the next composer event
+        // asks again (a lookup that failed offline works once back online).
+        let failed = matches!(
+            self.inline_bot_for(username),
+            Some(InlineBotResolve::Failed { .. })
+        );
+        if failed {
+            self.chat_ui.inline_bot = None;
+        }
+        let username_changed = failed || self.inline_bot_for(username).is_none();
         if username_changed {
             self.resolve_inline_bot(username);
             // The query goes out once the bot is known (`progress_inline_mode`).
@@ -411,7 +427,18 @@ impl QuillApp {
                     // An older query of this chat and bot is in flight:
                     // this one goes out when it answers.
                     Ok(None) => this.chat_ui.inline.wait_for_session(),
-                    Err(_) => this.chat_ui.inline.close(),
+                    // Nothing was sent: the panel says so, and the next
+                    // composer event asks again.
+                    Err(_) => {
+                        live.driver.session.bots.inline_query = Some(InlineQuerySlot {
+                            chat_id,
+                            bot_user_id: user_id,
+                            query: query.clone(),
+                            fetch: InlineQueryFetch::Failed(
+                                tr(keys::Q_MEDIA_COULD_NOT_LOAD_INLINE_RESULTS).to_string(),
+                            ),
+                        });
+                    }
                 }
                 cx.notify();
             })
@@ -485,6 +512,14 @@ impl QuillApp {
         let Some(chat_id) = self.open_chat_id() else {
             return;
         };
+        // No connection: nothing is cleared, the typed query stays.
+        if self.live.is_none() {
+            self.set_note(StatusNote::error(tr(
+                keys::Q_MEDIA_COULD_NOT_SEND_THE_INLINE,
+            )));
+            cx.notify();
+            return;
+        }
         // Clear first: the schema clears the chat draft on send, so the
         // composer must never show a stale `@bot query` after the round
         // trip.

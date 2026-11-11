@@ -312,6 +312,8 @@ impl Backend for FfmpegBackend {
     }
 
     fn seek(&mut self, secs: f64) {
+        // A picture stepped to before the seek is not the one to show next.
+        self.pending_step = None;
         self.player.seek(secs);
         if let Some(sound) = &self.sound {
             sound.flush();
@@ -323,18 +325,25 @@ impl Backend for FfmpegBackend {
     fn set_volume(&mut self, volume: f32) {
         self.volume = volume.clamp(0.0, 1.0);
         if self.volume > 0.0 && !self.options.want_audio {
-            self.options.want_audio = true;
-            self.options.output = self.output;
+            // Sound is wanted only once the reopen worked: a failed one
+            // leaves the clip as it was, and the next turn-up tries again.
+            let reopened = OpenOptions {
+                want_audio: true,
+                output: self.output,
+                ..self.options.clone()
+            };
             let position = self.player.position();
             let running = self.player.is_playing();
-            if let Ok(mut player) = Player::open(&self.path, self.options.clone()) {
+            if let Ok(mut player) = Player::open(&self.path, reopened.clone()) {
                 player.set_rate(self.want.rate);
                 player.seek(position);
                 if running {
                     player.play();
                 }
+                self.options = reopened;
                 self.player = player;
                 self.sound = None;
+                self.pending_step = None;
             }
         }
         if let Some(sound) = &self.sound {
@@ -348,6 +357,7 @@ impl Backend for FfmpegBackend {
                 self.pending_step = Some(frame);
             }
         } else {
+            self.pending_step = None;
             self.player.step_back();
         }
     }
@@ -520,6 +530,20 @@ mod tests {
         output.settle_device();
         assert!(!backend.status().has_sound);
         assert!(!backend.player.has_sound(), "the wall clock is");
+    }
+
+    #[test]
+    fn a_seek_drops_the_picture_stepped_to_before_it() {
+        let options = OpenOptions::viewer();
+        let tone = Tone {
+            started: None,
+            pts: 0.0,
+        };
+        let player = Player::with_demuxer(Box::new(tone), options.clone()).unwrap();
+        let mut backend = FfmpegBackend::with_player(Path::new("tone"), options, player);
+        backend.pending_step = Some(VideoFrame::bgra(0.0, 2, 2, vec![0; 16]));
+        backend.seek(1.0);
+        assert!(backend.pending_step.is_none());
     }
 
     /// A BGRA picture's buffer goes back to its player once the image

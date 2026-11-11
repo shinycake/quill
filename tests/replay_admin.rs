@@ -260,9 +260,6 @@ fn replay_supergroup_members_picker_cache() {
         }),
         Some(chat_id),
     );
-    session
-        .groups
-        .note_member_first((13, MemberListFilter::Recent), members_extra, "");
     apply_all_seq(
         &mut session,
         &sink,
@@ -299,9 +296,6 @@ fn replay_supergroup_members_picker_cache() {
         }),
         Some(chat_id),
     );
-    session
-        .groups
-        .note_member_first((13, MemberListFilter::Recent), retry_extra, "");
     apply_all_seq(
         &mut session,
         &sink,

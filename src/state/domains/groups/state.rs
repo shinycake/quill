@@ -5,10 +5,6 @@ use crate::state::*;
 use crate::telegram::envelope::{ParsedBoostFeatures, ParsedBoostStatus};
 
 impl GroupsState {
-    pub(crate) fn event_log_fetch_mut(&mut self, chat: i64) -> Option<&mut ChatEventLogFetch> {
-        self.event_logs.get_mut(&chat).map(|log| &mut log.fetch)
-    }
-
     /// Where `chat`'s event log fetch stands; `None` until it was asked.
     pub fn event_log_fetch(&self, chat: i64) -> Option<&ChatEventLogFetch> {
         self.event_logs
@@ -42,44 +38,7 @@ impl GroupsState {
     pub(crate) fn reset_event_log_fetch(&mut self, chat: i64) {
         if let Some(log) = self.event_logs.get_mut(&chat) {
             log.fetch = ChatEventLogFetch::Idle;
-        }
-    }
-
-    /// A `getChatEventLog` request of `chat` went out as `request`: the
-    /// first page starts the log loading; an older page or a poll rides a
-    /// loaded one (with none loaded they have nothing to merge into).
-    pub fn event_log_asked(&mut self, chat: i64, request: RequestId, ask: EventLogAsk) {
-        let log = self.event_logs.entry(chat).or_default();
-        match (ask, &mut log.fetch) {
-            (EventLogAsk::First, fetch) => *fetch = ChatEventLogFetch::Loading(request),
-            (EventLogAsk::Older, ChatEventLogFetch::Loaded(loaded)) => {
-                loaded.older = Some(request);
-            }
-            (EventLogAsk::Poll, ChatEventLogFetch::Loaded(loaded)) => {
-                loaded.poll = Some(request);
-            }
-            _ => {}
-        }
-    }
-
-    /// Whether `request` is a page or poll `chat`'s log still waits for; if
-    /// so the log stops waiting for it and says which it was.
-    pub(crate) fn take_event_log_wait(
-        &mut self,
-        chat: i64,
-        request: RequestId,
-    ) -> Option<EventLogAsk> {
-        match &mut self.event_logs.get_mut(&chat)?.fetch {
-            ChatEventLogFetch::Loading(asked) if *asked == request => Some(EventLogAsk::First),
-            ChatEventLogFetch::Loaded(loaded) if loaded.older == Some(request) => {
-                loaded.older = None;
-                Some(EventLogAsk::Older)
-            }
-            ChatEventLogFetch::Loaded(loaded) if loaded.poll == Some(request) => {
-                loaded.poll = None;
-                Some(EventLogAsk::Poll)
-            }
-            _ => None,
+            log.wait = EventLogWait::default();
         }
     }
 
@@ -112,20 +71,31 @@ impl GroupsState {
             .map_or("", |ask| ask.query.as_str())
     }
 
-    /// A first page for `key` was sent as `request` with `query`: the list
-    /// loads under that request, and how it was asked replaces the old one
-    /// (a next page of the old one is dropped).
-    pub fn note_member_first(
+    /// A first page for `key` was sent as `request` with `query`: it
+    /// replaces how the list was asked, and drops a next page of the old one.
+    pub(crate) fn note_member_first(
         &mut self,
         key: (i64, MemberListFilter),
         request: RequestId,
         query: &str,
     ) {
-        self.supergroup_members
-            .insert(key, SupergroupMembersFetch::Loading(request));
         self.member_asks.insert(
             key,
             MemberAsk {
+                first: Some(request),
+                query: query.to_string(),
+                more: MoreMembers::Idle,
+            },
+        );
+    }
+
+    /// A first page for `key` with `query` could not be sent: the list is
+    /// `Failed` under that query, with no request to wait for.
+    pub(crate) fn note_member_refused(&mut self, key: (i64, MemberListFilter), query: &str) {
+        self.member_asks.insert(
+            key,
+            MemberAsk {
+                first: None,
                 query: query.to_string(),
                 more: MoreMembers::Idle,
             },
@@ -145,17 +115,17 @@ impl GroupsState {
         any
     }
 
-    /// Whether `pending` is the first-page request `key`'s list loads
-    /// under, the one whose answer may fill it.
+    /// Whether `pending` is the latest first-page request for `key`, the
+    /// one whose answer may fill it.
     pub(crate) fn is_latest_member_request(
         &self,
         key: (i64, MemberListFilter),
         pending: &PendingRequest,
     ) -> bool {
-        matches!(
-            self.supergroup_members.get(&key),
-            Some(SupergroupMembersFetch::Loading(asked)) if *asked == pending.id
-        )
+        self.member_asks
+            .get(&key)
+            .and_then(|ask| ask.first)
+            .is_none_or(|id| id == pending.id)
     }
 
     /// A next-page request for `key` was sent: it extends the list the
@@ -212,9 +182,9 @@ pub struct GroupsState {
     pub communities: HashMap<i64, ParsedCommunity>,
     /// Slice (communities backend core): `communityFullInfo` cache, keyed
     /// by community id, fed by the `getCommunityFullInfo` answer and
-    /// `updateCommunityFullInfo` (TDLib 1.8.68). Presence records
-    /// "fetched".
-    pub community_full_infos: HashMap<i64, ParsedCommunityFullInfo>,
+    /// `updateCommunityFullInfo` (TDLib 1.8.68); one fetch per community
+    /// holds the stage, its request and the pack.
+    pub community_full_infos: CommunityFullInfos,
     /// TDLib 1.8.68 community management: one-shot; set when
     /// `setCommunityName` / `setCommunityPhoto` / `setCommunityPermissions`
     /// / `deleteCommunity` errors. The UI drains it into the status note.
@@ -456,7 +426,7 @@ impl GroupsState {
             invite_link_error: None,
             supergroup_full_infos: HashMap::new(),
             communities: HashMap::new(),
-            community_full_infos: HashMap::new(),
+            community_full_infos: CommunityFullInfos::default(),
             community_error: None,
             chat_statistics: HashMap::new(),
             stats: StatsState::default(),

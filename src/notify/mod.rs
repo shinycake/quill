@@ -774,11 +774,13 @@ pub fn build_notification_command_with_icon(
 }
 
 /// Result of running a [`NotificationCommand`] to completion.
-pub struct NotificationOutcome {
-    /// True when the user clicked the notification (Linux `--wait` action).
-    pub clicked: bool,
-    /// Which action was picked, when `clicked`.
-    pub action: Option<NotificationAction>,
+pub enum NotificationOutcome {
+    /// Nothing was clicked: the notification was dismissed or expired, the
+    /// command could not run, or it does not report clicks.
+    Dismissed,
+    /// The user clicked the notification or one of its buttons (Linux
+    /// `--wait` action).
+    Picked(NotificationAction),
 }
 
 /// Map `notify-send --wait` stdout (the picked action name) to an action.
@@ -790,7 +792,8 @@ fn parse_notify_send_output(stdout: &str) -> Option<NotificationAction> {
 }
 
 /// Run the command to completion. Spawning the process itself failing (e.g.
-/// no notification daemon) yields `clicked: false`; never panics.
+/// no notification daemon) yields [`NotificationOutcome::Dismissed`]; never
+/// panics.
 pub fn run_notification_command(command: &NotificationCommand) -> NotificationOutcome {
     let mut process = std::process::Command::new(&command.program);
     process.args(&command.args);
@@ -804,10 +807,7 @@ pub fn run_notification_command(command: &NotificationCommand) -> NotificationOu
         }
         _ => None,
     };
-    NotificationOutcome {
-        clicked: action.is_some(),
-        action,
-    }
+    action.map_or(NotificationOutcome::Dismissed, NotificationOutcome::Picked)
 }
 
 #[cfg(test)]

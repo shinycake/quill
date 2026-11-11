@@ -12,6 +12,7 @@
 use crate::state::fetch::Fetch;
 use crate::telegram::envelope::{MessageSender, StickerContent, parse_sticker_value};
 pub use feature::{BusinessFeature, PremiumFeature};
+pub use lists::{ReceivedGifts, StarsHistory, StarsView};
 use serde_json::Value;
 
 fn int(value: Option<&Value>) -> i64 {
@@ -671,6 +672,7 @@ pub mod fragment;
 pub mod gift_value;
 pub mod gift_view;
 pub mod limit_notice;
+pub mod lists;
 pub mod page_stage;
 pub mod premium_box;
 pub mod promo;
@@ -762,31 +764,13 @@ pub struct PremiumAutoStart {
 #[derive(Debug, Clone, Default)]
 pub struct PremiumHub {
     // Stars.
-    pub stars_open: bool,
     pub balance: Option<StarAmount>,
-    pub filter: TxFilter,
-    pub transactions: Vec<StarTx>,
-    pub tx_offset: String,
-    /// The history request: only the newest one's answer counts (a filter
-    /// switched mid-flight drops older ones).
-    pub tx: page_stage::PageStage,
-    /// Transaction whose details box is showing.
-    pub tx_selected: Option<String>,
+    /// The Stars box and the history of its filter ([`lists::StarsHistory`]).
+    pub stars: lists::StarsHistory,
     // Gifts.
-    pub gifts_open: bool,
-    pub gifts_owner: Option<MessageSender>,
-    pub gifts: Vec<ReceivedGift>,
-    pub gifts_total: i32,
-    pub gifts_offset: String,
-    /// The list request: only the newest one's answer counts.
-    pub gifts_page: page_stage::PageStage,
-    /// Why the last toggle, sale or management request failed.
-    pub gift_notice: Option<String>,
-    /// The open panel, its confirmation, or the request in flight.
-    pub gift_view: gift_view::GiftView,
-    /// The gifts list's changes: one mutation in flight under its request
-    /// (the controls stay off), or the list marked to be fetched again.
-    pub gifts_op: crate::state::fetch::ListOp,
+    /// The received gifts box and the list of its owner
+    /// ([`lists::ReceivedGifts`]).
+    pub received: lists::ReceivedGifts,
     // Premium.
     /// The Premium dialog, while it is open.
     pub premium_box: Option<premium_box::PremiumBox>,
@@ -803,7 +787,9 @@ pub struct PremiumHub {
     /// `getPremiumFeatures`: asked again after a failure, not while it is
     /// out or answered.
     pub premium: Fetch<PremiumInfo>,
-    pub premium_state: Option<PremiumStateInfo>,
+    /// `getPremiumState`: the state text, the plans and the clips; asked
+    /// again after a failure, and only its own request's answer counts.
+    pub premium_state: Fetch<PremiumStateInfo>,
     /// `getPremiumStickerExamples`: the stickers the stickers feature
     /// preview shows; asked again after a failure.
     pub premium_stickers: Fetch<Vec<crate::telegram::envelope::StickerItem>>,
@@ -825,30 +811,31 @@ pub struct PremiumHub {
 
 impl PremiumHub {
     pub fn apply_transactions(&mut self, page: StarTxPage, append: bool) {
-        self.tx = page_stage::PageStage::Ready;
+        self.stars.page = page_stage::PageStage::Ready;
         self.balance = Some(page.balance);
-        self.tx_offset = page.next_offset;
+        self.stars.offset = page.next_offset;
         if append {
-            self.transactions.extend(page.transactions);
+            self.stars.rows.extend(page.transactions);
         } else {
-            self.transactions = page.transactions;
+            self.stars.rows = page.transactions;
         }
     }
 
     pub fn apply_gifts(&mut self, page: GiftsPage, append: bool) {
-        self.gifts_page = page_stage::PageStage::Ready;
-        self.gift_notice = None;
+        let list = &mut self.received;
+        list.page = page_stage::PageStage::Ready;
+        list.notice = None;
         // Only a first page answers a refetch; an appended page of the old
         // list leaves the list stale.
         if !append {
-            self.gifts_op.refetched();
+            list.op.refetched();
         }
-        self.gifts_total = page.total_count;
-        self.gifts_offset = page.next_offset;
+        list.total = page.total_count;
+        list.offset = page.next_offset;
         if append {
-            self.gifts.extend(page.gifts);
+            list.rows.extend(page.gifts);
         } else {
-            self.gifts = page.gifts;
+            list.rows = page.gifts;
         }
     }
 
@@ -924,27 +911,27 @@ impl PremiumHub {
     }
 
     pub fn selected_tx(&self) -> Option<&StarTx> {
-        let id = self.tx_selected.as_deref()?;
-        self.transactions.iter().find(|tx| tx.id == id)
+        let id = self.stars.selected()?;
+        self.stars.rows.iter().find(|tx| tx.id == id)
     }
 
     pub fn selected_gift(&self) -> Option<&ReceivedGift> {
-        let id = self.gift_view.selected()?;
-        self.gifts.iter().find(|g| g.id == id)
+        let id = self.received.view.selected()?;
+        self.received.rows.iter().find(|g| g.id == id)
     }
 
     /// Whether the open gifts list belongs to the signed-in user (the only
     /// case where visibility toggles and conversion are offered).
     pub fn gifts_are_mine(&self, my_user_id: Option<i64>) -> bool {
         matches!(
-            (self.gifts_owner, my_user_id),
+            (self.received.owner, my_user_id),
             (Some(MessageSender::User { user_id }), Some(me)) if user_id == me
         )
     }
 
     /// Flip `is_saved` after the server confirmed `toggleGiftIsSaved`.
     pub fn set_gift_saved(&mut self, id: &str, saved: bool) {
-        if let Some(gift) = self.gifts.iter_mut().find(|g| g.id == id) {
+        if let Some(gift) = self.received.rows.iter_mut().find(|g| g.id == id) {
             gift.is_saved = saved;
         }
     }

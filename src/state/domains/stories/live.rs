@@ -44,15 +44,26 @@ pub enum LiveStoryPurpose {
 pub enum LiveBursts {
     #[default]
     Unasked,
-    Requested,
+    /// Asked under this request; only its answer or error leaves.
+    Requested(RequestId),
     Loaded(Vec<StickerItem>),
+    /// The ask failed (a refused send or an error answer): not asked again
+    /// until the next Join.
+    Failed,
 }
 
 impl LiveBursts {
     pub fn stickers(&self) -> &[StickerItem] {
         match self {
             Self::Loaded(stickers) => stickers,
-            Self::Unasked | Self::Requested => &[],
+            Self::Unasked | Self::Requested(_) | Self::Failed => &[],
+        }
+    }
+
+    /// A new Join: a failed ask may go out again.
+    pub fn retry_failed(&mut self) {
+        if *self == Self::Failed {
+            *self = Self::Unasked;
         }
     }
 }
@@ -170,6 +181,20 @@ impl LiveStoryState {
     /// were never added.
     pub(crate) fn commit_failed(&mut self, commit: RequestId) {
         self.committed.retain(|batch| batch.commit != commit);
+    }
+
+    /// The commit request `commit` never left (a refused send): TDLib still
+    /// holds its Stars as pending, so they go back to the pending slot with
+    /// a new Undo window, for the next commit (never a retry on every poll).
+    pub(crate) fn commit_unsent(
+        &mut self,
+        commit: RequestId,
+        pending: PendingLiveReaction,
+        now_ms: u64,
+    ) {
+        self.commit_failed(commit);
+        self.last_commit = self.committed.last().map_or(0, |batch| batch.commit.0);
+        self.pending_reaction = Some(PendingLiveReaction::add(None, pending.stars, now_ms));
     }
 
     /// New donors from TDLib. A pushed update counts every batch committed
@@ -460,8 +485,15 @@ impl Session {
         }
     }
 
-    pub(crate) fn set_live_bursts(&mut self, stickers: Vec<StickerItem>) {
-        self.stories.live_bursts = LiveBursts::Loaded(stickers);
+    /// The bursts' answer; only the request that asked for them counts.
+    pub(crate) fn set_live_bursts(
+        &mut self,
+        stickers: Vec<StickerItem>,
+        answered: Option<RequestId>,
+    ) {
+        if answered.is_some_and(|id| self.stories.live_bursts == LiveBursts::Requested(id)) {
+            self.stories.live_bursts = LiveBursts::Loaded(stickers);
+        }
     }
 
     /// A live story request failed.
@@ -473,7 +505,9 @@ impl Session {
     ) {
         let group_call_id = match purpose {
             LiveStoryPurpose::GetBursts => {
-                self.stories.live_bursts = LiveBursts::Unasked;
+                if failed.is_none_or(|id| self.stories.live_bursts == LiveBursts::Requested(id)) {
+                    self.stories.live_bursts = LiveBursts::Failed;
+                }
                 return;
             }
             LiveStoryPurpose::GetStreamer { group_call_id }

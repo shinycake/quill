@@ -207,10 +207,10 @@ impl QuillApp {
                 }
                 (members.clone(), *total_count, MembersStage::Ready)
             }
-            Some(SupergroupMembersFetch::Failed(message)) => {
-                (Vec::new(), 0, MembersStage::Failed(message.clone()))
-            }
-            Some(SupergroupMembersFetch::Loading(_)) | None => {
+            Some(
+                SupergroupMembersFetch::Failed(message) | SupergroupMembersFetch::NotSent(message),
+            ) => (Vec::new(), 0, MembersStage::Failed(message.clone())),
+            Some(SupergroupMembersFetch::Loading) | None => {
                 let snapshot = self.inline_members.snapshot.borrow();
                 match snapshot
                     .as_ref()

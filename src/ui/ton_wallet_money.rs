@@ -27,8 +27,6 @@ use quill::ton_wallet::{
     MoneyTab, TonWalletState, WalletNft, WalletSurface, WalletTx, fiat, format_gram_amount_with,
     own,
 };
-use std::cell::RefCell;
-use std::rc::Rc;
 
 impl QuillApp {
     pub(super) fn ton_wallet_mut(&mut self) -> Option<&mut TonWalletState> {
@@ -74,6 +72,17 @@ impl QuillApp {
             let _ = live.driver.set_money_tab(tab);
         } else if let Some(wallet) = self.ton_wallet_mut() {
             wallet.money.tab = tab;
+        }
+        cx.notify();
+    }
+
+    /// Retry of a failed first page of the Money list.
+    fn retry_money(&mut self, tab: MoneyTab, cx: &mut Context<Self>) {
+        if let Some(live) = self.live.as_mut() {
+            let _ = match tab {
+                MoneyTab::Transactions => live.driver.fetch_wallet_history(false),
+                MoneyTab::Collectibles => live.driver.fetch_wallet_nfts(false),
+            };
         }
         cx.notify();
     }
@@ -217,16 +226,7 @@ impl QuillApp {
                 MoneyDetail::Overview => overview(session, &roots, cx),
             };
             dialog
-                .content(crate::ui::shell::scrollable_dialog_content({
-                    let body = Rc::new(RefCell::new(Some(body)));
-                    move |content, _, _| {
-                        let body = body
-                            .borrow_mut()
-                            .take()
-                            .unwrap_or_else(|| div().into_any_element());
-                        content.child(body)
-                    }
-                }))
+                .content(crate::ui::shell::one_shot_dialog_content(body))
                 .on_close(on_close)
         })
     }
@@ -409,6 +409,17 @@ fn overview(
     };
     if let Some(error) = error {
         body = body.child(div().text_sm().child(error));
+        // A first page that failed has nothing shown to page from: Retry asks
+        // for it again (a failed next page retries through Load more).
+        if empty && !loading {
+            let tab = money.tab;
+            body = body.child(
+                Button::new("money-retry")
+                    .label(tr(keys::Q_MONEY_RETRY))
+                    .ghost()
+                    .on_click(cx.listener(move |this, _, _, cx| this.retry_money(tab, cx))),
+            );
+        }
     }
     if loading && empty {
         body = body.child(

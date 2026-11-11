@@ -17,7 +17,7 @@ use gpui_kit::*;
 use quill::event_log_list::{ListSync, plan_sync};
 use quill::ids::ChatId;
 use quill::lang::{keys, tr, tr_with};
-use quill::state::{AdminListFetch, ChatEventLogFetch, ChatEventLogPage};
+use quill::state::{AdminListFetch, ChatEventLogFetch, ChatEventLogPage, OlderEvents};
 use std::rc::Rc;
 use std::time::Duration;
 
@@ -32,66 +32,62 @@ const TOP_SLACK: f32 = 2.;
 const LIST_OVERDRAW: f32 = 400.;
 
 impl QuillApp {
-    /// The search box (created on first use; its value follows the chat's
-    /// stored query).
-    pub(super) fn ensure_event_log_search(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.admin.event_log_search.is_some() {
-            return;
-        }
-        let input = cx.new(|cx| {
-            TextareaState::new(window, cx)
-                .placeholder(tr(keys::Q_PEOPLE_SEARCH_RECENT_ACTIONS))
-                .auto_grow(1, 1)
-                .submit_on_enter(false)
-        });
-        cx.subscribe_in(&input, window, |this, _, event: &InputEvent, window, cx| {
-            if matches!(event, InputEvent::Change) {
-                this.in_window_of(window, cx, |this, _, cx| this.event_log_search_typed(cx));
-            }
-        })
-        .detach();
-        self.admin.event_log_search = Some(EventLogSearch { input, shows: None });
-    }
-
-    /// Fill the search box with `chat_id`'s stored query (an empty one for a
-    /// chat never searched): what the box shows is always that of the log
-    /// it sits over.
-    pub(super) fn show_event_log_query(
+    /// The search box of `chat_id`'s page, built on first use with the
+    /// chat's stored query. The page owns it, so another chat's page has a
+    /// box of its own.
+    pub(super) fn ensure_event_log_search(
         &mut self,
         chat_id: ChatId,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if self.event_log_page_for(chat_id).search.is_some() {
+            return;
+        }
         let query = self
             .session()
             .map(|session| session.groups.event_log_query(chat_id.0).to_string())
             .unwrap_or_default();
-        if let Some(search) = self.admin.event_log_search.as_mut() {
-            search.shows = Some(chat_id);
-            let input = search.input.clone();
-            input.update(cx, |state, cx| state.set_value(&query, window, cx));
-        }
+        let input = cx.new(|cx| {
+            let mut state = TextareaState::new(window, cx)
+                .placeholder(tr(keys::Q_PEOPLE_SEARCH_RECENT_ACTIONS))
+                .auto_grow(1, 1)
+                .submit_on_enter(false);
+            state.set_value(&query, window, cx);
+            state
+        });
+        let typed = cx.subscribe_in(&input, window, |this, _, event: &InputEvent, window, cx| {
+            if matches!(event, InputEvent::Change) {
+                this.in_window_of(window, cx, |this, _, cx| this.event_log_search_typed(cx));
+            }
+        });
+        self.event_log_page_for(chat_id).search = Some(EventLogSearch {
+            input,
+            _typed: typed,
+        });
     }
 
-    /// Frame upkeep of the window hosting Group Settings: the search box
-    /// follows the chat whose recent actions are open, however the page was
-    /// reached.
+    /// Frame upkeep of the window hosting Group Settings: the page of the
+    /// chat whose recent actions are open has its search box, however the
+    /// page was reached.
     pub(in crate::ui) fn event_log_search_upkeep(
         &mut self,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(chat_id) = self.event_log_open_chat() else {
-            return;
-        };
-        if self
-            .admin
-            .event_log_search
-            .as_ref()
-            .is_some_and(|search| search.shows != Some(chat_id))
-        {
-            self.show_event_log_query(chat_id, window, cx);
+        if let Some(chat_id) = self.event_log_open_chat() {
+            self.ensure_event_log_search(chat_id, window, cx);
         }
+    }
+
+    /// The search box of the open page of `chat_id`.
+    fn event_log_search_input(&self, chat_id: ChatId) -> Option<Entity<TextareaState>> {
+        self.admin
+            .event_log_page
+            .as_ref()
+            .filter(|page| page.chat == chat_id)
+            .and_then(|page| page.search.as_ref())
+            .map(|search| search.input.clone())
     }
 
     /// The chat whose recent actions are open.
@@ -140,10 +136,8 @@ impl QuillApp {
     /// box clears it) when it differs from what the log is filtered by.
     pub(super) fn apply_event_log_search(&mut self, chat_id: ChatId, cx: &mut Context<Self>) {
         let query = self
-            .admin
-            .event_log_search
-            .as_ref()
-            .map(|search| search.input.read(cx).value().trim().to_string())
+            .event_log_search_input(chat_id)
+            .map(|input| input.read(cx).value().trim().to_string())
             .unwrap_or_default();
         let current = self
             .session()
@@ -210,6 +204,33 @@ impl QuillApp {
     /// reader who has scrolled up where they are).
     pub(super) fn start_event_log_poll(&mut self, chat_id: ChatId, cx: &mut Context<Self>) {
         self.event_log_page_for(chat_id).autoload.set(None);
+        self.spawn_event_log_poll(chat_id, cx);
+    }
+
+    /// The window woke up: a poll that stopped while the app was in the
+    /// background starts again, asking at once for what happened meanwhile.
+    pub(in crate::ui) fn resume_event_log_poll(&mut self, cx: &mut Context<Self>) {
+        let Some(chat_id) = self.event_log_open_chat() else {
+            return;
+        };
+        let stopped = self
+            .admin
+            .event_log_page
+            .as_ref()
+            .is_some_and(|page| page.chat == chat_id && page.poll.is_none());
+        if !stopped || !self.frame.window_active.get() {
+            return;
+        }
+        self.spawn_event_log_poll(chat_id, cx);
+        if !self.refused_while_locked()
+            && let Some(live) = self.live.as_mut()
+        {
+            let _ = live.driver.poll_chat_event_log(chat_id);
+        }
+        cx.notify();
+    }
+
+    fn spawn_event_log_poll(&mut self, chat_id: ChatId, cx: &mut Context<Self>) {
         if self.live.is_none() {
             return;
         }
@@ -230,12 +251,18 @@ impl QuillApp {
         self.event_log_page_for(chat_id).poll = Some(poll);
     }
 
-    /// One poll step; `false` once the page is closed.
+    /// One poll step; `false` once the page is closed or the app is inactive.
     fn event_log_poll_tick(&mut self, chat_id: ChatId, cx: &mut Context<Self>) -> bool {
         if self.event_log_open_chat() != Some(chat_id) {
             return false;
         }
-        if self.frame.window_active.get()
+        if !self.frame.window_active.get() {
+            // Nothing to keep fresh for nobody: the timer stops here and
+            // `resume_event_log_poll` starts it when a window wakes.
+            self.event_log_page_for(chat_id).poll = None;
+            return false;
+        }
+        if !self.refused_while_locked()
             && let Some(live) = self.live.as_mut()
         {
             let _ = live.driver.poll_chat_event_log(chat_id);
@@ -332,12 +359,7 @@ impl QuillApp {
                 .child(div().text_sm().font_semibold().child(title))
                 .child(filter_button),
         );
-        if let Some(input) = self
-            .admin
-            .event_log_search
-            .as_ref()
-            .map(|s| s.input.clone())
-        {
+        if let Some(input) = self.event_log_search_input(chat_id) {
             header = header.child(
                 Textarea::new(&input)
                     .aria_label(tr(keys::Q_PEOPLE_SEARCH_RECENT_ACTIONS))
@@ -352,7 +374,7 @@ impl QuillApp {
         );
 
         let content = match fetch {
-            None | Some(ChatEventLogFetch::Idle | ChatEventLogFetch::Loading(_)) => {
+            None | Some(ChatEventLogFetch::Idle | ChatEventLogFetch::Loading) => {
                 self.event_log_reset_list();
                 self.event_log_centered(
                     div()
@@ -459,9 +481,8 @@ impl QuillApp {
         if let Some(page) = self.admin.event_log_page.as_ref() {
             page.autoload.set(None);
         }
-        let mut shown = self.admin.event_log_ids.borrow_mut();
-        if !shown.is_empty() {
-            shown.clear();
+        let was_shown = !self.admin.event_log_ids.take().is_empty();
+        if was_shown {
             self.admin.event_log_list.reset(0);
         }
     }
@@ -479,25 +500,26 @@ impl QuillApp {
         let entries: Rc<Vec<LogEntry>> = Rc::new(self.event_log_entries(&chronological));
         let ids: Vec<i64> = entries.iter().map(|entry| entry.id).collect();
         let state = self.admin.event_log_list.clone();
-        {
-            let mut shown = self.admin.event_log_ids.borrow_mut();
-            match plan_sync(&shown, &ids) {
-                ListSync::Keep => {}
-                ListSync::Reset => state.reset(ids.len()),
-                ListSync::Grow { older, newer } => {
-                    let before = shown.len();
-                    if older > 0 {
-                        state.splice(0..0, older);
-                        // The old first row may have lost its day label.
-                        state.remeasure_items(older..older.saturating_add(1));
-                    }
-                    if newer > 0 {
-                        let end = older.saturating_add(before);
-                        state.splice(end..end, newer);
-                    }
+        // The list is taken out of its cell before it is read, so nothing
+        // is held while the list is touched.
+        let shown = self.admin.event_log_ids.take();
+        let (plan, before) = (plan_sync(&shown, &ids), shown.len());
+        let count = ids.len();
+        self.admin.event_log_ids.set(ids);
+        match plan {
+            ListSync::Keep => {}
+            ListSync::Reset => state.reset(count),
+            ListSync::Grow { older, newer } => {
+                if older > 0 {
+                    state.splice(0..0, older);
+                    // The old first row may have lost its day label.
+                    state.remeasure_items(older..older.saturating_add(1));
+                }
+                if newer > 0 {
+                    let end = older.saturating_add(before);
+                    state.splice(end..end, newer);
                 }
             }
-            *shown = ids;
         }
         // Only once the list has been laid out: before that every offset is 0.
         let laid_out = state.viewport_bounds().size.height > px(0.);
@@ -509,7 +531,7 @@ impl QuillApp {
             .as_ref()
             .filter(|open| open.chat == chat_id)
             .map(|open| &open.autoload);
-        if page.has_more
+        if matches!(page.older, OlderEvents::Available)
             && at_top
             && let Some(mark) = mark
             && mark.get() != asked
@@ -535,7 +557,30 @@ impl QuillApp {
             .flex_1()
             .min_h_0()
             .w_full();
-        if page.has_more {
+        if let OlderEvents::Failed(line) = &page.older {
+            // The older page was refused: the log stays, with its Retry.
+            area = area.child(
+                div()
+                    .flex()
+                    .flex_none()
+                    .items_center()
+                    .justify_center()
+                    .gap_2()
+                    .py_1()
+                    .text_xs()
+                    .text_color(theme.muted_foreground)
+                    .child(line.clone())
+                    .child(
+                        Button::new("event-log-older-retry")
+                            .label(tr(keys::Q_PEOPLE_RETRY))
+                            .ghost()
+                            .xsmall()
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.load_more_event_log(chat_id, cx);
+                            })),
+                    ),
+            );
+        } else if page.has_more() {
             // Above the first row while earlier events remain to load.
             area = area.child(
                 div()

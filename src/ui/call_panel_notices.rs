@@ -231,6 +231,7 @@ mod tests {
             remote_audio_muted: false,
             remote_battery_low: false,
             signal_bars: bars,
+            media_note: None,
         }
     }
 

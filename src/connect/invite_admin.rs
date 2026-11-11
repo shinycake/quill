@@ -240,7 +240,12 @@ impl<S: JsonSender> ConnectDriver<S> {
             .insert(chat_id.0, InviteLinkCountsFetch::Loading(extra));
         let sent = self.send_invite_admin(extra, &get_chat_invite_link_counts(extra, chat_id.0));
         if sent.is_err() {
-            self.session.groups.invite_link_counts.remove(&chat_id.0);
+            self.session.groups.invite_link_counts.insert(
+                chat_id.0,
+                InviteLinkCountsFetch::Failed(crate::state::send_failed_line(
+                    "Could not load invite links",
+                )),
+            );
         }
         sent
     }

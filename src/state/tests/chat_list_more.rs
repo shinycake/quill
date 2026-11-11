@@ -599,7 +599,17 @@ fn folder_link_chats_are_cached_per_folder() {
 fn installed_backgrounds_and_default_updates_are_cached() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
-    let extra = session.request(RequestPurpose::GetInstalledBackgrounds, None);
+    let extra = session.request(
+        RequestPurpose::Chats(ChatsPurpose::GetInstalledBackgrounds {
+            for_dark_theme: false,
+        }),
+        None,
+    );
+    {
+        let fetch = session.chats_state.installed_backgrounds.theme_mut(false);
+        fetch.begin();
+        fetch.sent(extra);
+    }
     apply_json(
         &mut session,
         &seq,
@@ -612,6 +622,7 @@ fn installed_backgrounds_and_default_updates_are_cached() {
     let list = session
         .chats_state
         .installed_backgrounds
+        .theme(false)
         .data()
         .expect("list");
     assert_eq!(list.len(), 2);

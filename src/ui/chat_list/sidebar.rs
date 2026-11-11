@@ -389,10 +389,18 @@ impl QuillApp {
             // fires `getCommunityFullInfo` when live), so it spins like the
             // community info panel. An empty pack / no matching loaded
             // chats is the genuine empty state, never a crash.
-            if self
-                .session()
-                .is_some_and(|s| !s.groups.community_full_infos.contains_key(&community_id))
-            {
+            let pack = self.session().map(|s| {
+                let infos = &s.groups.community_full_infos;
+                (
+                    infos.contains_key(&community_id),
+                    infos
+                        .fetch(community_id)
+                        .is_some_and(|fetch| fetch.error().is_some()),
+                )
+            });
+            if let Some((false, true)) = pack {
+                EmptyState::new(id, IconName::Users).title(tr(keys::Q_NOTES_FAILED_COMMUNITY_INFO))
+            } else if let Some((false, false)) = pack {
                 EmptyState::loading(id)
                     .title(tr(keys::Q_CHATLIST_LOADING_COMMUNITY))
                     .hint(tr(keys::Q_CHATLIST_FETCHING_THE_COMMUNITYS_CHATS))

@@ -38,7 +38,7 @@ fn new_app(cx: &mut TestAppContext) -> (Entity<QuillApp>, VisualTestContext) {
 fn select(app: &Entity<QuillApp>, vcx: &mut VisualTestContext, id: &str) {
     app.update_in(vcx, |app, _, cx| {
         if let Some(session) = app.demo_session.as_mut() {
-            session.payments.hub.gift_view.select(Some(id.into()));
+            session.payments.hub.received.view.select(Some(id.into()));
         }
         cx.notify();
     });
@@ -48,7 +48,15 @@ fn select(app: &Entity<QuillApp>, vcx: &mut VisualTestContext, id: &str) {
 fn ids(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> Vec<String> {
     app.read_with(vcx, |app, _| {
         app.session()
-            .map(|s| s.payments.hub.gifts.iter().map(|g| g.id.clone()).collect())
+            .map(|s| {
+                s.payments
+                    .hub
+                    .received
+                    .rows
+                    .iter()
+                    .map(|g| g.id.clone())
+                    .collect()
+            })
             .unwrap_or_default()
     })
 }
@@ -84,10 +92,10 @@ fn confirming_removes_the_gift_from_the_grid_and_the_box(cx: &mut TestAppContext
     app.read_with(vcx, |app, _| {
         let hub = app.session().map(|s| &s.payments.hub);
         assert_eq!(
-            hub.and_then(|h| h.gift_view.selected().map(str::to_string)),
+            hub.and_then(|h| h.received.view.selected().map(str::to_string)),
             None
         );
-        assert_eq!(hub.map(|h| h.gifts_total), Some(1));
+        assert_eq!(hub.map(|h| h.received.total), Some(1));
     });
 }
 
@@ -95,7 +103,7 @@ fn new_with_owner(cx: &mut TestAppContext, owner: i64) -> (Entity<QuillApp>, Vis
     let (app, mut vcx) = new_app(cx);
     app.update_in(&mut vcx, |app, _, cx| {
         if let Some(session) = app.demo_session.as_mut() {
-            session.payments.hub.gifts_owner =
+            session.payments.hub.received.owner =
                 Some(quill::telegram::envelope::MessageSender::Chat { chat_id: owner });
         }
         cx.notify();

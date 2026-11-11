@@ -43,6 +43,12 @@ impl Session {
                 self.users_state.peer_color_error =
                     Some(format!("Profile update failed: {}", error_reason(err)));
             }
+            // The own id stays unknown: the probe is not asked again.
+            Some(RequestPurpose::GetMe) => {
+                self.users_state
+                    .my_id_probe
+                    .failed(extra, error_reason(err), false);
+            }
             Some(RequestPurpose::GetUserFullInfo) => {
                 let user = pending.and_then(|p| {
                     p.user_id.or_else(|| {

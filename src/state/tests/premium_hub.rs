@@ -22,19 +22,19 @@ fn transactions_apply_only_to_the_newest_request() {
         RequestPurpose::Payments(PaymentsPurpose::GetStarTransactions { append: false }),
         None,
     );
-    session.payments.hub.tx = PageStage::Loading {
+    session.payments.hub.stars.page = PageStage::Loading {
         request: new,
         kind: PageKind::First,
     };
     // A slower answer to the previous filter is dropped.
     apply_json(&mut session, &seq, &sink, &tx_page(old.0, "stale"));
-    assert!(session.payments.hub.transactions.is_empty());
+    assert!(session.payments.hub.stars.rows.is_empty());
     apply_json(&mut session, &seq, &sink, &tx_page(new.0, "fresh"));
-    assert_eq!(session.payments.hub.transactions.len(), 1);
-    assert_eq!(session.payments.hub.transactions[0].id, "fresh");
+    assert_eq!(session.payments.hub.stars.rows.len(), 1);
+    assert_eq!(session.payments.hub.stars.rows[0].id, "fresh");
     assert_eq!(session.payments.hub.balance.map(|b| b.stars), Some(300));
-    assert!(!session.payments.hub.tx.is_loading());
-    assert_eq!(session.payments.hub.tx_offset, "n");
+    assert!(!session.payments.hub.stars.page.is_loading());
+    assert_eq!(session.payments.hub.stars.offset, "n");
 }
 
 #[test]
@@ -58,7 +58,7 @@ fn gifts_page_applies_and_registers_sticker_files() {
         RequestPurpose::Payments(PaymentsPurpose::GetReceivedGifts { append: false }),
         None,
     );
-    session.payments.hub.gifts_page = PageStage::Loading {
+    session.payments.hub.received.page = PageStage::Loading {
         request: extra,
         kind: PageKind::First,
     };
@@ -71,10 +71,10 @@ fn gifts_page_applies_and_registers_sticker_files() {
             extra.0
         ),
     );
-    assert_eq!(session.payments.hub.gifts.len(), 1);
+    assert_eq!(session.payments.hub.received.rows.len(), 1);
     assert!(
-        session.payments.hub.gifts_page.is_loaded()
-            && !session.payments.hub.gifts_page.is_loading()
+        session.payments.hub.received.page.is_loaded()
+            && !session.payments.hub.received.page.is_loading()
     );
     assert!(session.media.files.contains_key(&88));
 }
@@ -87,24 +87,26 @@ fn gift_mutation_ok_marks_the_list_stale_and_errors_release_the_lock() {
         RequestPurpose::Payments(PaymentsPurpose::ToggleGiftSaved { saved: false }),
         None,
     );
-    session.payments.hub.gifts_op = crate::state::fetch::ListOp::Mutating(extra);
+    session.payments.hub.received.open();
+    session.payments.hub.received.op = crate::state::fetch::ListOp::Mutating(extra);
     apply_json(
         &mut session,
         &seq,
         &sink,
         &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra.0),
     );
-    assert!(!session.payments.hub.gifts_op.is_mutating());
-    assert!(session.payments.hub.gifts_op.is_stale());
+    assert!(!session.payments.hub.received.op.is_mutating());
+    assert!(session.payments.hub.received.op.is_stale());
 
-    session.payments.hub.gift_view.select(Some("g1".into()));
+    session.payments.hub.received.view.select(Some("g1".into()));
     session
         .payments
         .hub
-        .gift_view
+        .received
+        .view
         .confirm_convert(Some("g1".into()));
     let extra = session.request(RequestPurpose::SellGift, None);
-    session.payments.hub.gifts_op = crate::state::fetch::ListOp::Mutating(extra);
+    session.payments.hub.received.op = crate::state::fetch::ListOp::Mutating(extra);
     apply_json(
         &mut session,
         &seq,
@@ -114,14 +116,14 @@ fn gift_mutation_ok_marks_the_list_stale_and_errors_release_the_lock() {
             extra.0
         ),
     );
-    assert!(!session.payments.hub.gifts_op.is_mutating());
-    assert_eq!(session.payments.hub.gift_view.confirming(), None);
+    assert!(!session.payments.hub.received.op.is_mutating());
+    assert_eq!(session.payments.hub.received.view.confirming(), None);
     assert_eq!(
-        session.payments.hub.gift_view.selected(),
+        session.payments.hub.received.view.selected(),
         Some("g1"),
         "the panel stays"
     );
-    assert!(session.payments.hub.gift_notice.is_some());
+    assert!(session.payments.hub.received.notice.is_some());
 }
 
 #[test]
@@ -129,7 +131,7 @@ fn another_requests_answer_does_not_free_a_gift_mutation() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
     let busy = session.request(RequestPurpose::SellGift, None);
-    session.payments.hub.gifts_op = crate::state::fetch::ListOp::Mutating(busy);
+    session.payments.hub.received.op = crate::state::fetch::ListOp::Mutating(busy);
     let other = session.request(
         RequestPurpose::Payments(PaymentsPurpose::ToggleGiftSaved { saved: true }),
         None,
@@ -141,7 +143,7 @@ fn another_requests_answer_does_not_free_a_gift_mutation() {
         &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, other.0),
     );
     assert!(
-        session.payments.hub.gifts_op.is_mutating(),
+        session.payments.hub.received.op.is_mutating(),
         "only the request that locked it frees it"
     );
     apply_json(
@@ -150,19 +152,21 @@ fn another_requests_answer_does_not_free_a_gift_mutation() {
         &sink,
         &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, busy.0),
     );
-    assert!(!session.payments.hub.gifts_op.is_mutating());
+    assert!(!session.payments.hub.received.op.is_mutating());
 }
 
 #[test]
 fn a_sold_gifts_answer_leaves_another_selected_gift_open() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
+    session.payments.hub.received.open();
     let sell = |session: &mut Session, id: &str| {
-        session.payments.hub.gift_view.select(Some("g2".into()));
+        session.payments.hub.received.view.select(Some("g2".into()));
         session
             .payments
             .hub
-            .gift_view
+            .received
+            .view
             .confirm_convert(Some("g2".into()));
         session.request_for_subject(RequestPurpose::SellGift, id)
     };
@@ -173,8 +177,8 @@ fn a_sold_gifts_answer_leaves_another_selected_gift_open() {
         &sink,
         &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra.0),
     );
-    assert_eq!(session.payments.hub.gift_view.selected(), Some("g2"));
-    assert_eq!(session.payments.hub.gift_view.confirming(), Some("g2"));
+    assert_eq!(session.payments.hub.received.view.selected(), Some("g2"));
+    assert_eq!(session.payments.hub.received.view.confirming(), Some("g2"));
     let extra = sell(&mut session, "g2");
     apply_json(
         &mut session,
@@ -182,7 +186,7 @@ fn a_sold_gifts_answer_leaves_another_selected_gift_open() {
         &sink,
         &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra.0),
     );
-    assert_eq!(session.payments.hub.gift_view, GiftView::List);
+    assert_eq!(session.payments.hub.received.view, GiftView::List);
 }
 
 #[test]
@@ -191,6 +195,7 @@ fn premium_features_apply_to_their_request() {
     let seq = AtomicU64::new(0);
     let extra = session.request(RequestPurpose::GetPremiumFeatures, None);
     session.payments.hub.premium.begin();
+    session.payments.hub.premium.sent(extra);
     apply_json(
         &mut session,
         &seq,
@@ -219,6 +224,7 @@ fn business_features_keep_the_server_order() {
     let seq = AtomicU64::new(0);
     let extra = session.request(RequestPurpose::GetBusinessFeatures, None);
     session.payments.hub.business_features.begin();
+    session.payments.hub.business_features.sent(extra);
     apply_json(
         &mut session,
         &seq,
@@ -248,7 +254,7 @@ fn a_late_answer_of_an_older_gift_change_leaves_the_newer_one_locked() {
         None,
     );
     let new = session.request(RequestPurpose::SellGift, None);
-    session.payments.hub.gifts_op = crate::state::fetch::ListOp::Mutating(new);
+    session.payments.hub.received.op = crate::state::fetch::ListOp::Mutating(new);
     apply_json(
         &mut session,
         &seq,
@@ -256,7 +262,65 @@ fn a_late_answer_of_an_older_gift_change_leaves_the_newer_one_locked() {
         &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, old.0),
     );
     assert!(
-        session.payments.hub.gifts_op.is_mutating(),
+        session.payments.hub.received.op.is_mutating(),
         "the sale is still out"
     );
+}
+
+/// 04-027: the Premium state is its own fetch: only its request's answer
+/// lands, its error is kept (and asked again), and a change of Premium
+/// status makes it out of date.
+#[test]
+fn the_premium_state_is_matched_to_its_request_and_refreshes() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    let old = session.request(RequestPurpose::GetPremiumState, None);
+    let live = session.request(RequestPurpose::GetPremiumState, None);
+    session.payments.hub.premium_state.begin();
+    session.payments.hub.premium_state.sent(live);
+    let state = |extra: u64, text: &str| {
+        format!(
+            r#"{{"@type":"premiumState","@extra":"{extra}","state":{{"text":"{text}","entities":[]}},"payment_options":[],"animations":[],"business_animations":[]}}"#
+        )
+    };
+    apply_json(&mut session, &seq, &sink, &state(old.0, "old"));
+    assert!(session.payments.hub.premium_state.is_loading());
+    apply_json(&mut session, &seq, &sink, &state(live.0, "live"));
+    assert_eq!(
+        session
+            .payments
+            .hub
+            .premium_state
+            .data()
+            .map(|s| s.text.as_str()),
+        Some("live")
+    );
+    // A failure of the request out is kept for the next opening to retry.
+    let failing = session.request(RequestPurpose::GetPremiumState, None);
+    session.payments.hub.premium_state.begin();
+    session.payments.hub.premium_state.sent(failing);
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"error","@extra":"{}","code":500,"message":"INTERNAL"}}"#,
+            failing.0
+        ),
+    );
+    assert!(session.payments.hub.premium_state.can_ask());
+    assert!(session.payments.hub.premium_state.error().is_some());
+    // Subscribing changes the status the plans were asked under.
+    session
+        .payments
+        .hub
+        .premium_state
+        .succeed(Default::default());
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        r#"{"@type":"updateOption","name":"is_premium","value":{"@type":"optionValueBoolean","value":true}}"#,
+    );
+    assert!(session.payments.hub.premium_state.is_outdated());
 }

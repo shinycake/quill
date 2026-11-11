@@ -82,16 +82,25 @@ impl Session {
             message_id,
         })) = pending.map(|p| p.purpose)
         {
-            self.messages.full_rich_loads.insert(
-                crate::ids::ChatMessage::new(chat_id, message_id),
-                crate::state::fetch::Fetch::Failed {
-                    error: format!("could not load the full message (error {})", err.code),
-                    stale: None,
-                },
-            );
-            self.chats_state.chat_action_error.push(
-                crate::lang::tr(crate::lang::keys::Q_MISC_COULD_NOT_LOAD_FULL_MESSAGE).to_string(),
-            );
+            let failed = self
+                .messages
+                .full_rich_loads
+                .get_mut(&crate::ids::ChatMessage::new(chat_id, message_id))
+                .is_some_and(|load| {
+                    load.failed(
+                        pending.map(|p| p.id),
+                        format!("could not load the full message (error {})", err.code),
+                        true,
+                    )
+                });
+            // An older ask's refusal, while a newer one waits, says nothing
+            // about the message now being loaded.
+            if failed {
+                self.chats_state.chat_action_error.push(
+                    crate::lang::tr(crate::lang::keys::Q_MISC_COULD_NOT_LOAD_FULL_MESSAGE)
+                        .to_string(),
+                );
+            }
         }
         if let Some(RequestPurpose::Messages(MessagesPurpose::GetMessageAvailableReactions {
             message_id,
@@ -315,6 +324,16 @@ impl Session {
                 | RequestPurpose::CreateRichMessageWithAi
                 | RequestPurpose::FixRichMessageWithAi,
             ) => {
+                if let Some(pending) = pending
+                    && let Some(chat) = pending.chat_id
+                {
+                    self.messages.ai_answers.push(AiAnswer {
+                        request: pending.id,
+                        window: pending.asked_in.chat(),
+                        chat,
+                        result: AiResult::Failed,
+                    });
+                }
                 self.messages.ai_error.push(match err.class {
                     ErrorClass::AiComposeFloodPremium => {
                         "AI limit reached — Telegram Premium is required for more requests"

@@ -57,7 +57,7 @@ impl Session {
             self.note_premium_limit(err, pending);
         }
         self.record_group_info_edit_error(err, pending);
-        self.note_community_full_info_failed(pending);
+        self.note_community_full_info_failed(err, pending);
         self.apply_group_type_error(err, pending);
         match pending.map(|p| p.purpose) {
             Some(RequestPurpose::CanTransferOwnership) => {
@@ -506,13 +506,7 @@ impl Session {
                 }
             }
             Some(RequestPurpose::GetBasicGroupFullInfo) => {
-                if let Some(p) = pending
-                    && let Some(chat_id) = p.chat_id
-                    && matches!(
-                        self.groups.basic_group_members.get(&chat_id.0),
-                        Some(SupergroupMembersFetch::Loading(asked)) if *asked == p.id
-                    )
-                {
+                if let Some(chat_id) = pending.and_then(|p| p.chat_id) {
                     self.groups.basic_group_members.insert(
                         chat_id.0,
                         SupergroupMembersFetch::Failed(call_request_error_line(
@@ -571,28 +565,37 @@ impl Session {
             // already-loaded page so the button stays retryable.
             // A failed poll changes nothing shown; the next tick asks again.
             Some(RequestPurpose::Groups(GroupsPurpose::PollChatEventLog)) => {
-                if let Some(pending) = pending
-                    && let Some(chat_id) = pending.chat_id
-                {
-                    self.groups.take_event_log_wait(chat_id.0, pending.id);
+                if let Some(pending) = pending {
+                    self.take_event_log_wait(pending);
                 }
             }
-            Some(RequestPurpose::Groups(GroupsPurpose::GetChatEventLog { .. })) => {
+            Some(RequestPurpose::Groups(GroupsPurpose::GetChatEventLog { from_event_id })) => {
                 // Only the page the log waits for; one asked under an
-                // earlier query or filter changes nothing. A failed older
-                // page leaves the loaded one retryable.
-                if let Some(pending) = pending
-                    && let Some(chat_id) = pending.chat_id
-                    && self.groups.take_event_log_wait(chat_id.0, pending.id)
-                        == Some(EventLogAsk::First)
+                // earlier query or filter changes nothing.
+                if let Some(chat_id) = pending
+                    .filter(|pending| self.take_event_log_wait(pending))
+                    .and_then(|p| p.chat_id)
                 {
-                    self.groups.set_event_log_fetch(
-                        chat_id.0,
-                        ChatEventLogFetch::Failed(call_request_error_line(
-                            err,
-                            "Could not load recent actions",
-                        )),
-                    );
+                    if from_event_id == 0
+                        || !matches!(
+                            self.groups.event_log_fetch(chat_id.0),
+                            Some(ChatEventLogFetch::Loaded(_))
+                        )
+                    {
+                        self.groups.set_event_log_fetch(
+                            chat_id.0,
+                            ChatEventLogFetch::Failed(call_request_error_line(
+                                err,
+                                "Could not load recent actions",
+                            )),
+                        );
+                    } else {
+                        // An older page: the loaded log stays, with Retry.
+                        self.fail_older_events(
+                            chat_id.0,
+                            call_request_error_line(err, "Could not load earlier actions"),
+                        );
+                    }
                 }
             }
             Some(RequestPurpose::Groups(GroupsPurpose::GetAdminRights { user_id })) => {
@@ -629,19 +632,20 @@ impl Session {
                 ));
         }
         // A failed slots read or `boostChat` returns the boost box to its
-        // counters with the reason (tdesktop shows the error as a toast).
+        // counters with the reason (tdesktop shows the error as a toast),
+        // when it is the request the box works on.
         if matches!(
             pending.map(|p| p.purpose),
             Some(RequestPurpose::GetBoostSlotsForBoost | RequestPurpose::BoostChat)
         ) && let Some(chat_id) = pending.and_then(|p| p.chat_id)
-            && let Some(state) = self
-                .groups
-                .boost_box
-                .as_mut()
-                .filter(|state| state.chat_id == chat_id.0)
+            && let Some(state) = self.groups.boost_box.as_mut().filter(|state| {
+                state.chat_id == chat_id.0 && pending.is_some_and(|p| state.waits_for(p.id))
+            })
         {
-            state.phase = crate::boost_box::BoostPhase::Main;
-            state.note = Some(call_request_error_line(err, "Could not boost"));
+            state.phase = crate::boost_box::BoostPhase::main_with(call_request_error_line(
+                err,
+                "Could not boost",
+            ));
         }
     }
 }

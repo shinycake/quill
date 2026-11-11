@@ -128,11 +128,26 @@ fn a_lone_word_waits_and_starts_with_nothing_highlighted(cx: &mut TestAppContext
         (kind, glyphs, selected),
         (SuggestKind::EmojiWord, vec!["😂".to_string()], None)
     );
-    // Left with nothing highlighted is the caret's; Tab takes the first.
-    vcx.simulate_keystrokes("left");
-    assert_eq!(shown(&app, vcx).and_then(|s| s.2), None);
+    // Tab takes the first.
     vcx.simulate_keystrokes("tab");
     assert_eq!(text(&app, vcx), "😂");
+}
+
+/// Left with nothing highlighted is the caret's, and a caret off the end
+/// of the word closes the strip (tdesktop `handleCursorPositionChange`).
+#[gpui_kit::test]
+fn moving_the_caret_off_a_lone_word_closes_its_strip(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    answer(&app, vcx, "funny", &[("😂", "funny")]);
+    vcx.simulate_input("funny");
+    vcx.executor().advance_clock(Duration::from_millis(300));
+    vcx.run_until_parked();
+    assert!(shown(&app, vcx).is_some());
+    vcx.simulate_keystrokes("left");
+    vcx.update(|window, cx| window.render_frame(cx));
+    assert_eq!(shown(&app, vcx), None);
+    assert_eq!(text(&app, vcx), "funny");
 }
 
 #[gpui_kit::test]
@@ -180,5 +195,60 @@ fn escape_keeps_the_strip_closed_for_that_query(cx: &mut TestAppContext) {
     assert_eq!(shown(&app, vcx), None);
     // A new keyword answer does not bring it back.
     answer(&app, vcx, "fire", &[("🔥", "fire"), ("🧯", "fire")]);
+    assert_eq!(shown(&app, vcx), None);
+}
+
+/// The bug from 2026-11-11: "Yes" sent before the lone-word delay ran out
+/// left the delay running, and the strip opened over the empty field.
+#[gpui_kit::test]
+fn a_word_sent_before_its_delay_never_opens_the_strip(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    answer(&app, vcx, "yes", &[("👍", "yes"), ("👌", "yes")]);
+    vcx.simulate_input("yes");
+    vcx.update(|window, cx| window.press("enter", cx));
+    assert_eq!(text(&app, vcx), "");
+    vcx.executor().advance_clock(Duration::from_millis(300));
+    vcx.run_until_parked();
+    vcx.update(|window, cx| window.render_frame(cx));
+    assert_eq!(shown(&app, vcx), None);
+}
+
+/// Sending under an open strip closes it.
+#[gpui_kit::test]
+fn sending_closes_an_open_word_strip(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    answer(&app, vcx, "yes", &[("👍", "yes")]);
+    vcx.simulate_input("yes");
+    vcx.executor().advance_clock(Duration::from_millis(300));
+    vcx.run_until_parked();
+    assert!(shown(&app, vcx).is_some());
+    vcx.update(|window, cx| window.press("enter", cx));
+    vcx.update(|window, cx| window.render_frame(cx));
+    vcx.run_until_parked();
+    assert_eq!(text(&app, vcx), "");
+    assert_eq!(shown(&app, vcx), None);
+    // Nor does a later keyword answer bring it back.
+    answer(&app, vcx, "yes", &[("👍", "yes"), ("💪", "yes")]);
+    assert_eq!(shown(&app, vcx), None);
+}
+
+/// A field cleared or replaced without a key press (a draft or chat
+/// switch, the clear after a send) closes the strip at the next frame.
+#[gpui_kit::test]
+fn a_field_changed_in_code_closes_the_strip(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    answer(&app, vcx, "fire", &[("🔥", "fire")]);
+    vcx.simulate_input("hot :fire");
+    assert!(shown(&app, vcx).is_some());
+    vcx.update(|window, cx| {
+        app.update(cx, |app, cx| {
+            app.composer
+                .update(cx, |input, cx| input.set_value("another draft", window, cx));
+        });
+        window.render_frame(cx);
+    });
     assert_eq!(shown(&app, vcx), None);
 }

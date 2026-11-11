@@ -95,7 +95,7 @@ pub enum Fetch<T> {
     /// A request is in flight; `stale` is the last answer, if any.
     /// `request` is the one that asked, recorded by [`Fetch::sent`] (`None`
     /// until it is sent, and for the senders listed in
-    /// `scripts/fetch-unmatched-baseline.txt`, which take their answer
+    /// `scripts/request-match-baseline.txt`, which take their answer
     /// through [`Fetch::succeed`] and [`Fetch::fail`]): only its own answer or
     /// error acts through [`Fetch::answered`] and [`Fetch::failed`].
     Loading {
@@ -292,8 +292,8 @@ impl<T> Fetch<T> {
     /// An answer that names no request: a pushed update, or a fetch whose
     /// sender does not record its request ([`Fetch::sent`]). An older request's
     /// late answer lands on a newer ask through this, so a sender prefers
-    /// [`Fetch::answered`]; `scripts/check-fetch-answers.py` holds the callers
-    /// that remain and fails a new one.
+    /// [`Fetch::answered`]; `scripts/check-request-match.py` counts the callers
+    /// that remain in its baseline and fails a new one.
     pub fn succeed(&mut self, value: T) {
         *self = Self::Ready(value);
     }

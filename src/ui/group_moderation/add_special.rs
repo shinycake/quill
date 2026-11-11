@@ -69,6 +69,24 @@ impl QuillApp {
         cx.notify();
     }
 
+    /// The Failed list's Retry: asks again for what the box shows now.
+    fn retry_add_special(&mut self, cx: &mut Context<Self>) {
+        let Some(dialog) = self.admin.add_special.as_ref() else {
+            return;
+        };
+        let chat_id = dialog.chat_id;
+        let (filter, query) = Self::add_special_filter(dialog, cx);
+        if let Some(live) = self.live.as_mut()
+            && live
+                .driver
+                .refresh_supergroup_members(chat_id, filter, &query)
+                .is_err()
+        {
+            self.set_note(StatusNote::error(tr(keys::Q_PEOPLE_COULD_NOT_LOAD_MEMBERS)));
+        }
+        cx.notify();
+    }
+
     fn add_special_filter(dialog: &AddSpecialDialog, cx: &App) -> (MemberListFilter, String) {
         let query = dialog.search.read(cx).value().trim().to_string();
         let filter = if query.is_empty() {
@@ -234,8 +252,25 @@ impl QuillApp {
             None | Some(SupergroupMembersFetch::Loading(_)) => {
                 list = list.child(message(tr(keys::CONTACTS_LOADING)));
             }
-            Some(SupergroupMembersFetch::Failed(error)) => {
-                list = list.child(div().px_2().text_sm().text_color(muted).child(error));
+            Some(
+                SupergroupMembersFetch::Failed(error) | SupergroupMembersFetch::NotSent(error),
+            ) => {
+                list = list.child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap_1()
+                        .px_2()
+                        .child(div().flex_1().text_sm().text_color(muted).child(error))
+                        .child(
+                            Button::new("add-special-retry")
+                                .label(tr(keys::Q_PEOPLE_RETRY))
+                                .ghost()
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.retry_add_special(cx);
+                                })),
+                        ),
+                );
             }
             Some(SupergroupMembersFetch::Loaded { members, .. }) => {
                 let rows: Vec<ParsedChatMember> = members

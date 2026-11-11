@@ -20,6 +20,7 @@ use crate::ui::settings_window::rows::{detail_row, group, switch_row};
 use gpui_kit::component::button::*;
 use gpui_kit::component::switch::Switch;
 use gpui_kit::component::*;
+use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::data_settings::{
     AutoDownloadNetSettings, CapKind, DataStoragePrefs, NO_LIMIT_SIZE_CAP, NetworkKind,
@@ -93,7 +94,11 @@ impl StorageScroll {
 impl QuillApp {
     pub(crate) fn open_local_storage(&mut self, cx: &mut Context<Self>) {
         self.open_data_storage(cx);
-        self.settings.storage_scroll.stage = StorageScrollStage::Requested;
+        if self.settings.open
+            && self.settings.page == Some(quill::settings_catalog::Page::DataStorage)
+        {
+            self.settings.storage_scroll.stage = StorageScrollStage::Requested;
+        }
     }
 
     pub(in crate::ui) fn ensure_storage_scroll(
@@ -103,7 +108,7 @@ impl QuillApp {
     ) {
         let settled = self
             .session()
-            .is_none_or(|session| !session.settings.data_storage.seeded.is_in_flight());
+            .is_none_or(|session| !session.settings.data_storage.seeded.is_loading());
         let scroll = &mut self.settings.storage_scroll;
         let offset = scroll.page.offset().y;
         let user_moved = match &scroll.stage {
@@ -197,6 +202,21 @@ impl QuillApp {
                 &[("network", network.label())],
             )))
             .child(self.data_storage_editor_body(cx, network, &draft))
+            .children(
+                self.session()
+                    .and_then(|s| {
+                        s.settings
+                            .data_storage_save
+                            .error_of(quill::state::StorageSaveKind::AutoDownload)
+                            .map(str::to_owned)
+                    })
+                    .map(|err| {
+                        div()
+                            .text_xs()
+                            .text_color(danger())
+                            .child(tr_with(keys::Q_OPS_ERROR, &[("err", &err)]))
+                    }),
+            )
             .child(
                 div()
                     .flex()
@@ -239,7 +259,7 @@ impl QuillApp {
             }
         } else if let Some(demo) = self.demo_session.as_mut() {
             *demo.settings.data_storage.for_network_mut(network) = draft;
-            demo.settings.data_storage.seeded = quill::data_settings::Seed::Seeded;
+            demo.settings.data_storage.seeded = quill::data_settings::PresetsSeed::Seeded;
             self.settings.data_storage_editor = StorageEditor::Closed;
         }
         cx.notify();
@@ -248,6 +268,7 @@ impl QuillApp {
     /// Leaving the page drops an unsaved editor and any pending confirm.
     pub(crate) fn leave_data_storage(&mut self) {
         self.apply_unreleased_storage_drag();
+        self.settings.storage_scroll.stage = StorageScrollStage::Idle;
         self.settings.data_storage_editor = StorageEditor::Closed;
         self.settings.storage_confirm = None;
         self.privacy.extra.network_reset = Default::default();
@@ -259,7 +280,8 @@ impl QuillApp {
     pub(crate) fn arrive_data_storage(&mut self) {
         self.forget_storage_sliders();
         if let Some(session) = self.session_mut() {
-            session.settings.data_storage_save.clear_error();
+            session.settings.data_storage_save.clear();
+            session.settings.auto_download_answers.clear();
             if session.settings.storage_clear.failed().is_some() {
                 session.settings.storage_clear = quill::state::StorageClear::Idle;
             }
@@ -323,7 +345,7 @@ impl QuillApp {
         let prefs = session.as_ref().map(|s| &s.settings.data_storage);
         let mut downloads: Vec<AnyElement> = Vec::new();
         if !prefs.is_some_and(|p| p.seeded.is_seeded()) {
-            let loading = prefs.is_some_and(|p| p.seeded.is_in_flight());
+            let loading = prefs.is_some_and(|p| p.seeded.is_loading());
             downloads.push(
                 self.setting_spot(
                     &[
@@ -335,12 +357,32 @@ impl QuillApp {
                     div()
                         .px_3()
                         .py_2()
+                        .flex()
+                        .flex_row()
+                        .items_center()
+                        .gap_2()
                         .text_xs()
                         .text_color(cx.theme().muted_foreground)
                         .child(if loading {
                             tr(keys::Q_OPS_LOADING_DOWNLOAD_SETTINGS)
                         } else {
                             tr(keys::Q_OPS_DOWNLOAD_SETTINGS_UNAVAILABLE)
+                        })
+                        // Retry whenever nothing is out: after a failure,
+                        // and when the request could not be sent at all.
+                        .when(!loading, |this| {
+                            this.child(
+                                Button::new("download-settings-retry")
+                                    .label(tr(keys::Q_CHAT_RETRY))
+                                    .ghost()
+                                    .small()
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        if let Some(live) = this.live.as_mut() {
+                                            let _ = live.driver.fetch_auto_download_presets();
+                                        }
+                                        cx.notify();
+                                    })),
+                            )
                         }),
                     cx,
                 ),

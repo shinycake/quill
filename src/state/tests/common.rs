@@ -111,11 +111,59 @@ pub(crate) const MEMBER_STATUS: &str = r#"{"@type":"chatMemberStatusMember"}"#;
 /// then waits for it (`EventLog::wait`).
 pub(crate) fn event_log_request(session: &mut Session, purpose: GroupsPurpose) -> RequestId {
     let extra = session.request(RequestPurpose::Groups(purpose), Some(ChatId(13)));
-    let ask = match purpose {
-        GroupsPurpose::PollChatEventLog => crate::state::EventLogAsk::Poll,
-        GroupsPurpose::GetChatEventLog { from_event_id: 0 } => crate::state::EventLogAsk::First,
-        _ => crate::state::EventLogAsk::Older,
-    };
-    session.groups.event_log_asked(13, extra, ask);
+    let wait = &mut session.groups.event_logs.entry(13).or_default().wait;
+    if purpose == GroupsPurpose::PollChatEventLog {
+        wait.poll = Some(extra);
+    } else {
+        wait.page = Some(extra);
+    }
     extra
+}
+
+/// The invoice a test's checkout pays.
+pub(crate) fn test_invoice() -> PaymentRequest {
+    PaymentRequest {
+        invoice: crate::payment_invoice::InputInvoice::Name("shop".into()),
+    }
+}
+
+/// A form to pay `star_count` Stars, for tests that need a checkout open.
+pub(crate) fn test_form() -> crate::telegram::envelope::PaymentFormData {
+    crate::telegram::envelope::PaymentFormData {
+        id: 1,
+        form_type: crate::telegram::envelope::PaymentFormTypeData::Stars { star_count: 5 },
+        seller_bot_user_id: 0,
+        product_title: String::new(),
+        product_description: String::new(),
+    }
+}
+
+/// The checkout of `invoice` is open and ready.
+pub(crate) fn open_checkout(session: &mut Session, invoice: crate::payment_invoice::InputInvoice) {
+    session.payments.checkout =
+        crate::state::CheckoutForm::ready(test_form(), PaymentRequest { invoice });
+}
+
+/// Continue went out as `request` for the open checkout (one is opened
+/// when none is).
+pub(crate) fn validating(
+    session: &mut Session,
+    request: RequestId,
+    order: crate::telegram::envelope::OrderInfoData,
+) {
+    if session.payments.checkout.open().is_none() {
+        open_checkout(session, test_invoice().invoice);
+    }
+    session.payments.checkout.begin_validating(request, order);
+}
+
+/// `sendPaymentForm` went out as `request` for the invoice on screen.
+pub(crate) fn payment_sent_for_shown(session: &mut Session, request: RequestId) {
+    let invoice = session
+        .payments
+        .checkout
+        .invoice()
+        .map(|shown| shown.invoice.clone())
+        .expect("a checkout is open");
+    session.payment_sent(request, &invoice);
 }

@@ -105,8 +105,8 @@ fn b1_login_url_info_error_degrades_to_url() {
         from_agent: false,
     };
     for purpose in [RequestPurpose::GetLoginUrlInfo, RequestPurpose::GetLoginUrl] {
-        session.bots.login_url_request = Some(login_request.clone());
         let extra = session.request(purpose, Some(ChatId(21)));
+        session.bots.login_url = LoginUrlStage::asking(extra, login_request.clone());
         apply_json(
             &mut session,
             &seq,
@@ -117,12 +117,64 @@ fn b1_login_url_info_error_degrades_to_url() {
             ),
         );
         assert_eq!(
-            session.bots.last_login_url_info,
-            Some(LoginUrlInfo::Failed {
-                fallback_url: "https://example.com/login".to_string()
-            })
+            session.bots.login_url.take_answer(),
+            Some((
+                LoginUrlInfo::Failed {
+                    fallback_url: "https://example.com/login".to_string()
+                },
+                login_request.clone()
+            ))
         );
     }
+}
+
+#[test]
+fn a_login_url_answer_is_taken_only_by_the_press_that_asked() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(1);
+    let context = LoginUrlRequest {
+        chat_id: ChatId(21),
+        message_id: MessageId(301),
+        button_id: 11,
+        raw_url: "https://example.com/login".to_string(),
+        from_agent: false,
+    };
+    let asked = session.request(RequestPurpose::GetLoginUrl, Some(ChatId(21)));
+    session.bots.login_url = LoginUrlStage::asking(asked, context.clone());
+    // An answer of another request of the same kind changes nothing.
+    let other = session.request(RequestPurpose::GetLoginUrl, Some(ChatId(21)));
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"httpUrl","@extra":"{}","url":"https://example.com/other"}}"#,
+            other.0
+        ),
+    );
+    assert!(matches!(
+        session.bots.login_url,
+        LoginUrlStage::Asking { request, .. } if request == asked
+    ));
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"httpUrl","@extra":"{}","url":"https://example.com/authed"}}"#,
+            asked.0
+        ),
+    );
+    assert_eq!(
+        session.bots.login_url.take_answer(),
+        Some((
+            LoginUrlInfo::Open {
+                url: "https://example.com/authed".to_string()
+            },
+            context
+        ))
+    );
+    assert!(session.bots.login_url.is_idle());
 }
 
 #[test]
@@ -133,6 +185,16 @@ fn b1_get_login_url_http_url_opens() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(1);
     let extra = session.request(RequestPurpose::GetLoginUrl, Some(ChatId(21)));
+    session.bots.login_url = LoginUrlStage::asking(
+        extra,
+        LoginUrlRequest {
+            chat_id: ChatId(21),
+            message_id: MessageId(301),
+            button_id: 11,
+            raw_url: String::new(),
+            from_agent: false,
+        },
+    );
     apply_json(
         &mut session,
         &seq,
@@ -143,7 +205,7 @@ fn b1_get_login_url_http_url_opens() {
         ),
     );
     assert_eq!(
-        session.bots.last_login_url_info,
+        session.bots.login_url.take_answer().map(|(info, _)| info),
         Some(LoginUrlInfo::Open {
             url: "https://example.com/authed".to_string()
         })
@@ -384,7 +446,7 @@ fn bots_games_high_scores_answer_lands_in_panel() {
         (7, 301),
         crate::state::fetch::Fetch::Loading {
             stale: None,
-            request: None,
+            request: Some(extra),
         },
     );
     apply_json(
@@ -419,7 +481,7 @@ fn a_refused_game_scores_request_leaves_the_panel_failed_to_retry() {
         (7, 301),
         crate::state::fetch::Fetch::Loading {
             stale: None,
-            request: None,
+            request: Some(extra),
         },
     );
     apply_json(
@@ -435,6 +497,42 @@ fn a_refused_game_scores_request_leaves_the_panel_failed_to_retry() {
     assert!(
         matches!(panel, Some(crate::state::fetch::Fetch::Failed { .. })),
         "the panel stays, failed, so it can draw Retry: {panel:?}"
+    );
+}
+
+/// Sweep 11-019: an answer of an older request (the panel was closed and
+/// opened again) does not fill the panel waiting for the newer one.
+#[test]
+fn a_game_scores_answer_of_an_older_request_is_ignored() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    let old =
+        session.request_for_message(RequestPurpose::GetGameHighScores, ChatId(7), MessageId(301));
+    let new =
+        session.request_for_message(RequestPurpose::GetGameHighScores, ChatId(7), MessageId(301));
+    session.bots.game_scores.insert(
+        (7, 301),
+        crate::state::fetch::Fetch::Loading {
+            stale: None,
+            request: Some(new),
+        },
+    );
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"gameHighScores","@extra":"{}","scores":[{{"@type":"gameHighScore","position":1,"user_id":21,"score":1}}]}}"#,
+            old.0
+        ),
+    );
+    assert!(
+        session
+            .bots
+            .game_scores
+            .get(&(7, 301))
+            .is_some_and(|panel| panel.is_loading()),
+        "the newer request is still the one awaited"
     );
 }
 

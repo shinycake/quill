@@ -285,31 +285,13 @@ impl Session {
         if !self.stickers.gifs.search_waits_for(request) {
             return;
         }
-        self.stickers.gifs.search_answered();
-        if first_page {
-            self.stickers.gifs.search_results = animations;
-        } else {
-            for item in animations {
-                if !self
-                    .stickers
-                    .gifs
-                    .search_results
-                    .iter()
-                    .any(|r| r.file_id == item.file_id)
-                {
-                    self.stickers.gifs.search_results.push(item);
-                }
-            }
-        }
-        self.stickers.gifs.search_next_offset =
-            if !next_offset.is_empty() && next_offset == self.stickers.gifs.search_offset {
-                String::new()
-            } else {
-                next_offset
-            };
+        self.stickers
+            .gifs
+            .search_page_answered(animations, next_offset, first_page);
         let gifs = &mut self.stickers.gifs;
         let query = gifs.search_query().to_string();
-        gifs.searches_kept.keep(&query, &gifs.search_results);
+        let found = gifs.search_results().to_vec();
+        gifs.searches_kept.keep(&query, &found);
     }
 
     /// The answer of `request`; one for a set that is no longer the asked

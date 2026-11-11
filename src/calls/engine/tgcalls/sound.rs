@@ -50,6 +50,11 @@ impl SoundSlot {
         self.audio.store(None);
     }
 
+    /// The local mute the output is held at, the one record of it.
+    pub(super) fn muted(&self) -> bool {
+        self.wanted.lock_or_recover().muted
+    }
+
     pub(super) fn set_muted(&self, muted: bool) {
         let mut wanted = self.wanted.lock_or_recover();
         wanted.muted = muted;

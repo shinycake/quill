@@ -118,7 +118,7 @@ fn account_loss_resets_the_loading_flags_of_pending_lookups() {
         RequestPurpose::Payments(PaymentsPurpose::GetStarTransactions { append: false }),
         None,
     );
-    session.payments.hub.tx = PageStage::Loading {
+    session.payments.hub.stars.page = PageStage::Loading {
         request: history,
         kind: PageKind::First,
     };
@@ -126,7 +126,7 @@ fn account_loss_resets_the_loading_flags_of_pending_lookups() {
         RequestPurpose::Payments(PaymentsPurpose::GetReceivedGifts { append: false }),
         None,
     );
-    session.payments.hub.gifts_page = PageStage::Loading {
+    session.payments.hub.received.page = PageStage::Loading {
         request: gifts,
         kind: PageKind::First,
     };
@@ -147,8 +147,8 @@ fn account_loss_resets_the_loading_flags_of_pending_lookups() {
 
     assert!(!session.settings.privacy_data.network.is_loading());
     assert!(!session.payments.star_subscriptions.is_loading());
-    assert!(!session.payments.hub.tx.is_loading());
-    assert!(!session.payments.hub.gifts_page.is_loading());
+    assert!(!session.payments.hub.stars.page.is_loading());
+    assert!(!session.payments.hub.received.page.is_loading());
     assert!(!session.media.playlists[&9].loading());
     assert!(session.requests.is_empty());
     assert!(session.requests.get(user_action).is_none());
@@ -368,7 +368,8 @@ fn sweeping_a_lost_panel_request_ends_its_loading_stage() {
     );
     session
         .groups
-        .event_log_asked(13, log, crate::state::EventLogAsk::First);
+        .set_event_log_fetch(13, ChatEventLogFetch::Loading);
+    session.groups.event_logs.entry(13).or_default().wait.page = Some(log);
     let owner = asked(&mut session, RequestPurpose::GetChatOwnerAfterLeaving);
     session.begin_owner_lookup(13, owner);
     let voters = asked(
@@ -396,8 +397,7 @@ fn sweeping_a_lost_panel_request_ends_its_loading_stage() {
         chat_id: chat,
         bot_user_id: 77,
         query: "cats".into(),
-        fetch: InlineQueryFetch::Loading(inline),
-        more_failed: None,
+        fetch: InlineQueryFetch::Loading { request: inline },
     });
 
     assert!(sweep(&mut session));

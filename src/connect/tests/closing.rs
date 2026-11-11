@@ -457,6 +457,7 @@ fn active_call(is_outgoing: bool, state: CallState) -> ActiveCall {
         remote_audio_muted: false,
         remote_battery_low: false,
         signal_bars: None,
+        media_note: None,
     }
 }
 
@@ -534,6 +535,10 @@ fn closing_hangs_up_a_running_call_and_sends_close_behind_the_terminal_update() 
     let mut client = calling_driver().with_call(true, CallState::Ready);
     crate::connect::closing::begin_close(&mut client.driver);
     assert_eq!(client.sent(), ["discardCall", "setOption"]);
+    assert!(
+        !client.driver.chats_path_active(),
+        "an account on its way out starts nothing while close is held"
+    );
 
     let before_the_hold_ends = Instant::now();
     crate::connect::closing::release_close(&mut client.driver, before_the_hold_ends);

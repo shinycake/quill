@@ -140,9 +140,23 @@ impl Limiter {
     }
 }
 
-/// A reserved screenshot: given back with [`release`] when none is taken.
+/// A reserved screenshot. Dropping it gives the slot back to the limiter;
+/// [`Slot::keep`] is for the picture that was taken.
 #[derive(Debug, PartialEq, Eq)]
 pub struct Slot(u64);
+
+impl Slot {
+    /// The picture was taken: the slot stays counted.
+    pub fn keep(self) {
+        std::mem::forget(self);
+    }
+}
+
+impl Drop for Slot {
+    fn drop(&mut self) {
+        crate::locks::lock_or_recover(&LIMITER).release(self.0);
+    }
+}
 
 static LIMITER: Mutex<Limiter> = Mutex::new(Limiter {
     taken: VecDeque::new(),
@@ -157,19 +171,13 @@ fn now_ms() -> u64 {
 }
 
 /// Count a screenshot against the limits, or say when the next is allowed.
-/// The slot is given back with [`release`] when the picture is not taken.
+/// The slot goes back when the returned [`Slot`] is dropped without `keep`.
 pub fn reserve() -> Result<Slot, String> {
     let at = now_ms();
     crate::locks::lock_or_recover(&LIMITER)
         .reserve(at)
         .map(|()| Slot(at))
         .map_err(rate_limited)
-}
-
-/// The command refused, failed or timed out before a picture was taken:
-/// the slot goes back, so an immediate retry is not rate limited.
-pub fn release(slot: Slot) {
-    crate::locks::lock_or_recover(&LIMITER).release(slot.0);
 }
 
 /// The refusal for a screenshot over the limits.

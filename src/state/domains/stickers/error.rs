@@ -41,10 +41,24 @@ impl Session {
                     self.stickers.emoji.keyword_lookups.failed(pending.id);
                 }
             }
-            Some(RequestPurpose::Stickers(StickersPurpose::GetMessageEffect { effect_id })) => self
-                .stickers
-                .effects
-                .fail(effect_id, err.code, std::time::Instant::now()),
+            Some(RequestPurpose::Stickers(StickersPurpose::GetMessageEffect { effect_id })) => {
+                if let Some(pending) = pending {
+                    self.stickers.effects.fail(
+                        effect_id,
+                        pending.id,
+                        err.code,
+                        std::time::Instant::now(),
+                    );
+                }
+            }
+            Some(RequestPurpose::Stickers(StickersPurpose::EmojiPackTitle { set_id })) => {
+                // The ask failed: the next menu asks for the title again.
+                let titles = &mut self.stickers.emoji_pack_titles;
+                if matches!(titles.get(&set_id), Some(PackTitle::Asking(asked)) if Some(*asked) == pending.map(|p| p.id))
+                {
+                    titles.remove(&set_id);
+                }
+            }
             Some(RequestPurpose::Stickers(StickersPurpose::ViewStickerSet { set_id })) => {
                 self.fail_sticker_set_view(set_id)
             }
@@ -131,6 +145,24 @@ impl Session {
             )
         {
             self.stickers.emoji.status_change = crate::emoji::StatusChange::Idle;
+        }
+        if emoji_purpose == Some(RequestPurpose::GetTrendingEmojiSets) {
+            self.stickers.emoji.lists.trending.failed_request(
+                pending.map(|p| p.id),
+                crate::lang::tr(crate::lang::keys::Q_MEDIA_COULD_NOT_UPDATE_EMOJI_PACKS),
+            );
+        }
+        if emoji_purpose == Some(RequestPurpose::GetKeywordEmojis) {
+            self.stickers
+                .emoji
+                .keyword_emojis
+                .failed_request(pending.map(|p| p.id));
+        }
+        if emoji_purpose == Some(RequestPurpose::GetAnimatedEmoji) {
+            self.stickers
+                .emoji
+                .animated
+                .failed_request(pending.map(|p| p.id));
         }
         if let Some(list) = emoji_purpose.and_then(|p| self.stickers.emoji.lists.for_purpose(p)) {
             list.fail(crate::lang::tr(
