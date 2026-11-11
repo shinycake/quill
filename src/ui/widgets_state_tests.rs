@@ -205,7 +205,7 @@ fn a_released_pointer_has_no_press_or_hover_left() {
 fn the_selection_stays_until_the_content_changes() {
     let mut entry = entry();
     entry.selection = "kept".into();
-    entry.lifecycle = Lifecycle::Idle;
+    entry.lifecycle = quill::message_widget::Lifecycle::Idle;
     assert_eq!(entry.selection, "kept");
     entry.replace_content(
         super::Identity {
