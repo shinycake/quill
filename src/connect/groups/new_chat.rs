@@ -86,12 +86,21 @@ impl<S: JsonSender> ConnectDriver<S> {
         saves.extend(sent.iter().map(|id| (*id, TypeSave::Sent)));
     }
 
-    /// The dialog that asked for this create was closed: the chat still
-    /// comes (TDLib cannot cancel it) but nothing opens it on top of
-    /// whatever the person is doing now.
+    /// The dialog no longer owns this create (it was closed, or its answer
+    /// was taken into the next step). An answered create is forgotten; one
+    /// still out comes anyway (TDLib cannot cancel it) but nothing opens it
+    /// on top of whatever the person is doing now, and its entry goes when
+    /// its answer is applied.
     pub fn abandon_new_chat(&mut self, request: RequestId) {
-        if let Some(creation) = self.session.groups.new_chats.creations.get_mut(&request) {
-            creation.asker = CreationAsker::Closed;
+        let creations = &mut self.session.groups.new_chats.creations;
+        match creations.get_mut(&request) {
+            Some(creation) if creation.outcome.is_none() => {
+                creation.asker = CreationAsker::Closed;
+            }
+            Some(_) => {
+                creations.remove(&request);
+            }
+            None => {}
         }
     }
 
@@ -121,6 +130,12 @@ impl<S: JsonSender> ConnectDriver<S> {
             _ => return None,
         };
         let created = matches!(outcome, CreationOutcome::Created(_));
+        // Nobody reads the answer of a create whose dialog is gone: a
+        // refusal is forgotten now, a made chat after its photo and link.
+        if !created && creation.asker == CreationAsker::Closed {
+            self.session.groups.new_chats.creations.remove(&extra);
+            return None;
+        }
         creation.outcome = Some(outcome);
         created.then_some(extra)
     }
@@ -134,7 +149,8 @@ impl<S: JsonSender> ConnectDriver<S> {
             return;
         };
         let photo = creation.photo.take();
-        let open = creation.open_when_created && creation.asker == CreationAsker::Dialog;
+        let dialog_reads = creation.asker == CreationAsker::Dialog;
+        let open = creation.open_when_created && dialog_reads;
         let make_invite_link = creation.make_invite_link;
         if let Some(photo) = photo {
             let photo_request = self
@@ -151,6 +167,9 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         if open {
             let _ = self.select_chat(chat_id);
+        }
+        if !dialog_reads {
+            self.session.groups.new_chats.creations.remove(&extra);
         }
     }
 }

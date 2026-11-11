@@ -231,11 +231,41 @@ fn an_abandoned_create_neither_blocks_nor_opens_its_chat() {
         r#"{{"@type":"createdBasicGroupChat","chat_id":{GROUP},"failed_to_add_members":{{"@type":"failedToAddMembers","failed_to_add_members":[]}},"@extra":"{}"}}"#,
         extra.0
     ));
-    assert_eq!(
-        rig.outcome(extra),
-        Some(CreationOutcome::Created(ChatId(GROUP)))
-    );
     assert_ne!(rig.driver.session.open_chat, Some(ChatId(GROUP)));
+    assert!(
+        !rig.driver
+            .session
+            .groups
+            .new_chats
+            .creations
+            .contains_key(&extra),
+        "nobody reads the answer: the entry is dropped when it is applied"
+    );
+}
+
+/// Round 4, 006: a create's entry goes with its answer, whoever reads it.
+#[test]
+fn an_answered_creation_is_dropped_once_its_dialog_has_taken_it() {
+    let mut rig = Rig::new();
+    let creations = |rig: &Rig| rig.driver.session.groups.new_chats.creations.len();
+    // Refused after the dialog closed: forgotten at once.
+    let closed = rig.create(NewChatKind::Group, &[5], None);
+    rig.driver.abandon_new_chat(closed);
+    rig.ingest(&format!(
+        r#"{{"@type":"error","code":400,"message":"USERS_TOO_FEW","@extra":"{}"}}"#,
+        closed.0
+    ));
+    assert_eq!(creations(&rig), 0);
+    // Refused with the dialog open: the dialog reads the reason, then
+    // leaves the stage (abandon is its "answer taken").
+    let open = rig.create(NewChatKind::Group, &[5], None);
+    rig.ingest(&format!(
+        r#"{{"@type":"error","code":400,"message":"USERS_TOO_FEW","@extra":"{}"}}"#,
+        open.0
+    ));
+    assert!(rig.outcome(open).is_some());
+    rig.driver.abandon_new_chat(open);
+    assert_eq!(creations(&rig), 0);
 }
 
 /// Round 5, 086: a type-step Save that was refused for a reason other
