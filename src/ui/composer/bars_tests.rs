@@ -1077,3 +1077,35 @@ fn a_forced_reply_waits_while_the_composer_replies(cx: &mut TestAppContext) {
     });
     assert_eq!(reply, Some((KEYBOARD_BOT, MessageId(88))));
 }
+
+/// Sweep 10-092 and 10-096: a failed bot lookup goes with the trigger, and
+/// a pick with no connection leaves the typed query in the field.
+#[gpui_kit::test]
+fn inline_mode_forgets_a_failed_lookup_and_keeps_the_query_without_a_connection(
+    cx: &mut TestAppContext,
+) {
+    use quill::state::InlineBotResolve;
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    open_chat(&app, vcx, GROUP);
+    app.update(vcx, |app, _| {
+        app.chat_ui.inline_bot = Some(InlineBotResolve::Failed {
+            username: "somebot".into(),
+            reason: "could not look up the bot".into(),
+        });
+    });
+    set_field(&app, vcx, "hello");
+    app.update(vcx, |app, cx| app.sync_inline_mode(cx));
+    assert!(
+        app.read_with(vcx, |app, _| app.chat_ui.inline_bot.is_none()),
+        "the trigger went away, the failure with it"
+    );
+    set_field(&app, vcx, "@somebot hi");
+    vcx.update(|window, cx| {
+        app.update(cx, |app, cx| {
+            app.send_inline_pick(1, "r".into(), window, cx)
+        })
+    });
+    let text = app.read_with(vcx, |app, cx| app.composer.read(cx).value().to_string());
+    assert_eq!(text, "@somebot hi", "the pick had no connection to go over");
+}
