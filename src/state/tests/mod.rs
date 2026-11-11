@@ -3,6 +3,7 @@ use super::*;
 
 mod boost_level;
 mod boosts;
+mod bot_threads;
 mod bots;
 mod bubble_headers;
 mod calls;
@@ -60,6 +61,7 @@ mod sessions;
 mod shared_media;
 mod shared_media_profile;
 mod similar_strip;
+mod sponsored_placement;
 mod status_badges;
 mod stickers;
 mod stories;

@@ -44,6 +44,15 @@ impl InlineReturn {
     fn started(&self) -> bool {
         matches!(self.stage, InlineStage::Started { .. })
     }
+
+    /// Whether the round trip still waits to open the bot's chat.
+    pub(in crate::ui) fn is_opening(&self) -> bool {
+        !self.started()
+    }
+
+    pub(in crate::ui) fn bot_id(&self) -> i64 {
+        self.bot_id
+    }
 }
 
 impl QuillApp {
@@ -105,6 +114,7 @@ impl QuillApp {
         {
             self.composer_ui.inline_return = None;
         }
+        self.windows.cancel_slot_inline_openings(|_| true);
     }
 
     /// Another link ended in `chat_id`. A round trip still opening the bot's
@@ -123,6 +133,10 @@ impl QuillApp {
         if other {
             self.composer_ui.inline_return = None;
         }
+        // The chat windows not in place keep their own round trips.
+        self.windows.cancel_slot_inline_openings(|ret| {
+            chat_id.0 != ret.bot_id() && !self.is_private_chat_with(chat_id, ret.bot_id())
+        });
     }
 
     /// The round trip on screen's account, if it has one: a trip begun on

@@ -19,10 +19,10 @@ impl Session {
             }
             Some(RequestPurpose::PostStory) => {
                 if let Some(request) = pending.map(|p| p.id) {
-                    self.stories.post.outcome = StoryPostOutcome::Failed {
+                    self.stories.post.outcomes.record(StoryPostOutcome::Failed {
                         request,
                         message: format!("Posting failed: {}", error_reason(err)),
-                    };
+                    });
                 }
             }
             Some(RequestPurpose::CheckCanPostStory) => {
@@ -30,14 +30,14 @@ impl Session {
                 // TGX-verbatim notice; anything else keeps the
                 // generic eligibility failure.
                 if let Some(request) = pending.map(|p| p.id) {
-                    self.stories.post.check = StoryCheck::Answered {
+                    self.stories.post.check.record(
                         request,
-                        result: Err(crate::story_restriction::notice_for_error_class(err.class)
+                        Err(crate::story_restriction::notice_for_error_class(err.class)
                             .map(str::to_string)
                             .unwrap_or_else(|| {
                                 format!("Eligibility check failed: {}", error_reason(err))
                             })),
-                    };
+                    );
                 }
             }
             Some(RequestPurpose::ActivateStoryStealthMode) => {
@@ -45,7 +45,10 @@ impl Session {
                 if let Some(request) = pending.map(|p| p.id) {
                     self.stories.stealth_refusal = Some((
                         request,
-                        format!("Could not enable Stealth Mode: {}", error_reason(err)),
+                        crate::lang::tr_with(
+                            crate::lang::keys::Q_MEDIA_COULD_NOT_ENABLE_STEALTH_MODE_BECAUSE,
+                            &[("reason", &error_reason(err))],
+                        ),
                     ));
                 }
             }
@@ -156,6 +159,11 @@ impl Session {
             ) => {
                 if purpose == RequestPurpose::SetCloseFriends {
                     self.stories.close_friends_pending = None;
+                }
+                if purpose == RequestPurpose::GetCloseFriends
+                    && let Some(pending) = pending
+                {
+                    self.stories.close_friends.fail_load(pending.id);
                 }
                 // The profile gallery's Stories tab loads from this request
                 // too: it fails instead of loading forever.

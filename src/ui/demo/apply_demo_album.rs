@@ -211,8 +211,31 @@ impl QuillApp {
                 serde_json::to_string(text).unwrap_or_else(|_| "\"\"".into()),
             ),
         };
-        if let Some(owned) = copy_and_parse(&json, &self.demo_ui.seq, &dyn_sink) {
-            session.apply(owned);
+        // In an open forum topic the message belongs to it, and TDLib then
+        // reports the topic read up to it.
+        let topic = session
+            .open_topic
+            .filter(|_| session.open_chat == Some(chat_id));
+        let json = match topic {
+            Some(topic) => json.replacen(
+                r#""is_outgoing":true,"#,
+                &format!(
+                    r#""is_outgoing":true,"topic_id":{{"@type":"messageTopicForum","forum_topic_id":{topic}}},"#
+                ),
+                1,
+            ),
+            None => json,
+        };
+        let read = topic.map(|topic| {
+            format!(
+                r#"{{"@type":"updateForumTopic","chat_id":{},"forum_topic_id":{topic},"is_pinned":false,"last_read_inbox_message_id":{id},"last_read_outbox_message_id":0,"unread_mention_count":0,"unread_reaction_count":0,"notification_settings":{{"@type":"chatNotificationSettings","use_default_mute_for":true,"mute_for":0}},"draft_message":null}}"#,
+                chat_id.0
+            )
+        });
+        for json in std::iter::once(json).chain(read) {
+            if let Some(owned) = copy_and_parse(&json, &self.demo_ui.seq, &dyn_sink) {
+                session.apply(owned);
+            }
         }
     }
 

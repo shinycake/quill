@@ -42,8 +42,7 @@ impl Session {
                     self.payments.form = Some(form);
                     self.payments.form_loading = false;
                     self.payments.form_paid = false;
-                    self.payments.validated = None;
-                    self.payments.validate_request = None;
+                    self.payments.order_info = OrderInfoStage::Unvalidated;
                     self.payments.shipping_id = None;
                     self.payments.note = None;
                 }
@@ -55,12 +54,16 @@ impl Session {
                 // is not this one's.
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::ValidateOrderInfo)
                     && extra.is_some()
-                    && self.payments.validate_request == extra
+                    && let OrderInfoStage::Validating { request, order } = &self.payments.order_info
+                    && Some(*request) == extra
                 {
-                    self.payments.validate_request = None;
+                    let order = order.clone();
                     self.payments.shipping_id =
                         validated.shipping_options.first().map(|o| o.id.clone());
-                    self.payments.validated = Some(validated);
+                    self.payments.order_info = OrderInfoStage::Validated {
+                        order,
+                        info: validated,
+                    };
                     self.payments.note = None;
                 }
             }
@@ -77,6 +80,9 @@ impl Session {
                     }
                     if result.success {
                         self.note_paid_media_unlocked(&paid);
+                        if let Some(chat_id) = paid.invoice.giveaway_chat_id() {
+                            self.payments.giveaway.launch = GiveawayLaunch::Paid { chat_id };
+                        }
                         if shown {
                             self.payments.form_paid = true;
                             self.payments.note = Some("✅ Payment successful".to_string());
@@ -86,9 +92,15 @@ impl Session {
                         // credentials verification (e.g. 3-D Secure) — the
                         // UI opens it in the OS browser. It is this
                         // payment's own step, shown or not.
+                        // Whatever the checkout shows, the giveaway's
+                        // payment is now in the provider's hands.
+                        if let Some(chat_id) = paid.invoice.giveaway_chat_id() {
+                            self.payments.giveaway.launch = GiveawayLaunch::Verifying { chat_id };
+                        }
                         self.payments.verification_url = Some(PaymentVerification {
                             url: result.verification_url,
                             closes_checkout: shown,
+                            giveaway_chat_id: paid.invoice.giveaway_chat_id(),
                         });
                         if shown {
                             self.payments.verification_started = true;
@@ -273,9 +285,11 @@ impl Session {
             PaymentsPayload::StarPackOptions(options) => {
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::GetStarGiftOptions) {
                     let gift = &mut self.payments.stars_gift;
-                    gift.loading = false;
-                    gift.error = None;
-                    gift.options = options;
+                    if gift.asked.is_some() && gift.asked == pending.map(|p| p.id) {
+                        gift.asked = None;
+                        gift.error = None;
+                        gift.options = options;
+                    }
                 } else if pending.map(|p| p.purpose) == Some(RequestPurpose::GetStarPackOptions) {
                     let packs = &mut self.payments.star_packs;
                     packs.loading = false;

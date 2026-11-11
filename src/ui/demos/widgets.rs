@@ -13,6 +13,13 @@ register_demos![
     // Tabs, a canvas bar chart and a theme-following card, in one chat.
     DemoSpec::chats("ready-widgets", "screenshot demo — message widgets")
         .setup(QuillApp::demo_ready_widgets),
+    // Widgets as bots send them: an animated game, two weather cards, a
+    // product card and a widget without CSS under its caption.
+    DemoSpec::chats(
+        "ready-widgets-showcase",
+        "screenshot demo — widget showcase"
+    )
+    .setup(QuillApp::demo_widgets_showcase),
 ];
 
 /// The demo's widgets: (message id, outgoing, caption, html).
@@ -37,15 +44,39 @@ const WIDGETS: [(i64, bool, &str, &str); 3] = [
     ),
 ];
 
+/// The showcase's widgets, as [`WIDGETS`].
+const SHOWCASE: [(i64, bool, &str, &str); 5] = [
+    (130, false, "", include_str!("widgets/game.html")),
+    (131, false, "", include_str!("widgets/weather.html")),
+    // Its background is on an inner card, as many bots write it: it must
+    // still reach the bubble's bottom edge under the time.
+    (134, false, "", include_str!("widgets/weather-card.html")),
+    (132, false, "", include_str!("widgets/product.html")),
+    (
+        133,
+        true,
+        "Your order is on its way",
+        include_str!("widgets/order.html"),
+    ),
+];
+
 impl QuillApp {
     fn demo_ready_widgets(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {
+        self.demo_widgets(&WIDGETS, "screenshot demo — message widgets");
+    }
+
+    fn demo_widgets_showcase(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {
+        self.demo_widgets(&SHOWCASE, "screenshot demo — widget showcase");
+    }
+
+    fn demo_widgets(&mut self, widgets: &[(i64, bool, &str, &str)], note: &'static str) {
         let Some(session) = self.demo_session.as_mut() else {
             return;
         };
         self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
         let sink: std::sync::Arc<dyn quill::diagnostics::DiagnosticSink> =
             self.demo_ui.sink.clone();
-        for (id, outgoing, caption, html) in WIDGETS {
+        for &(id, outgoing, caption, html) in widgets {
             let json = serde_json::json!({
                 "@type": "updateNewMessage",
                 "message": {
@@ -67,6 +98,6 @@ impl QuillApp {
             }
         }
         session.open_chat(ChatId(11));
-        self.set_note(StatusNote::silent("screenshot demo — message widgets"));
+        self.set_note(StatusNote::silent(note));
     }
 }

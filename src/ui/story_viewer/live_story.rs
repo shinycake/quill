@@ -264,17 +264,25 @@ impl QuillApp {
                     }
                 };
                 if sent {
-                    self.stories.live.input.update(cx, |input, cx| {
-                        input.set_value("", window, cx);
-                    });
-                    // tdesktop goes back to the price of a plain comment.
-                    self.stories.live.chosen_stars = 0;
+                    self.live_comment_sent(window, cx);
                 } else {
                     self.surface_live_note();
                 }
             }
         }
         cx.notify();
+    }
+
+    /// The comment went out: the field empties and the price goes back to a
+    /// plain comment's (tdesktop does the same). Nothing is left for a
+    /// top-up to reopen on.
+    pub(super) fn live_comment_sent(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.stories.live.input.update(cx, |input, cx| {
+            input.set_value("", window, cx);
+        });
+        self.stories.live.chosen_stars = 0;
+        // box-host: forgetting the flow opens nothing
+        self.stories.live.stars = StarsFlow::Idle;
     }
 
     /// The driver's last refusal, in the status line.
@@ -373,7 +381,8 @@ impl QuillApp {
     }
 
     /// Opens the Stars box. `min` is the least it allows (the Stars a
-    /// waiting comment needs); `then_send` sends that comment after.
+    /// waiting comment needs); `then_send` sends that comment after (only a
+    /// send that needs Stars asks for it).
     pub(super) fn open_live_stars_box(
         &mut self,
         mode: StarsBoxMode,
@@ -390,9 +399,8 @@ impl QuillApp {
             .live
             .stars
             .take_top_up()
-            .filter(|(kept_mode, _, _)| *kept_mode == mode);
-        let then_send = then_send || kept.is_some_and(|(_, _, waiting)| waiting);
-        let current = match kept.map(|(_, stars, _)| stars) {
+            .filter(|(kept_mode, _)| *kept_mode == mode);
+        let current = match kept.map(|(_, stars)| stars) {
             Some(stars) => stars,
             None if mode == StarsBoxMode::Comment => self.stories.live.chosen_stars,
             None => 0,
@@ -458,7 +466,6 @@ impl QuillApp {
                 self.stories.live.stars = StarsFlow::TopUp {
                     mode: boxed.mode,
                     stars: boxed.stars,
-                    then_send: boxed.then_send,
                 };
             }
             return;
@@ -479,6 +486,8 @@ impl QuillApp {
     /// "Remove Stars" from the send button's menu.
     pub(super) fn clear_live_stars(&mut self, cx: &mut Context<Self>) {
         self.stories.live.chosen_stars = 0;
+        // box-host: forgetting the flow opens nothing
+        self.stories.live.stars = StarsFlow::Idle;
         cx.notify();
     }
 

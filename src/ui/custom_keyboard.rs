@@ -7,13 +7,22 @@ use super::*;
 use crate::ui::dialogs::poll::QuizLock;
 use crate::ui::status_note::StatusNote;
 use gpui_kit::component::button::*;
+use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::component::*;
+use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use quill::composer::ComposerReplyTo;
 use quill::ids::{ChatId, MessageId};
 use quill::lang::{keys, tr};
 use quill::state::ForceReplyTarget;
 use quill::telegram::envelope::{KeyboardButton, KeyboardButtonType, ReplyKeyboard};
+
+/// tdesktop `botKbButton.height`.
+const KEYBOARD_BUTTON_HEIGHT: f32 = 38.;
+/// The tallest the keyboard gets before it scrolls: tdesktop's
+/// `historyComposeFieldMaxHeight` (224px) less a one-line field.
+const KEYBOARD_MAX_HEIGHT: f32 = 176.;
+
 impl QuillApp {
     /// B1: the active custom keyboard for the open chat, if any (live or
     /// demo session).
@@ -57,10 +66,55 @@ impl QuillApp {
         )
     }
 
+    /// The composer's bot button: the keyboard toggle while the open chat
+    /// has a reply keyboard, else tdesktop's `/` button
+    /// (`_botCommandStart`), shown in an empty field of a chat whose bots
+    /// have commands. Unlike the Menu button, it writes `/` into the field,
+    /// which opens the typed command list.
+    pub(super) fn composer_bot_button(&self, cx: &mut Context<Self>) -> Option<Button> {
+        if let Some(toggle) = self.keyboard_toggle_button(cx) {
+            return Some(toggle);
+        }
+        let session = self.session()?;
+        let chat_id = session.open_chat?;
+        let has_commands = session
+            .command_menu_items(chat_id)
+            .iter()
+            .any(|item| item.quick_reply.is_none());
+        if !has_commands
+            || self.chat_ui.is_editing()
+            || self.open_chat_force_reply().is_some()
+            || !self.pending_attachments().is_empty()
+            || !self.composer.read(cx).value().is_empty()
+        {
+            return None;
+        }
+        let label = tr(keys::BOT_COMMANDS_START);
+        Some(
+            Button::new("composer-bot-command-start")
+                .icon(gpui_kit::assets::IconName::SquareSlash)
+                .ghost()
+                .tooltip(label)
+                .accessibility_label(label)
+                .on_click(cx.listener(|this, _, window, cx| {
+                    this.close_command_menu(cx);
+                    this.composer.update(cx, |input, cx| {
+                        input.set_value("/", window, cx);
+                        input.focus(window, cx);
+                        input.set_selected_range(1..1, cx);
+                    });
+                    this.sync_command_menu(cx);
+                })),
+        )
+    }
+
     /// B1: the custom keyboard panel rendered above the composer, or
     /// `None` when the open chat has no active `replyMarkupShowKeyboard`.
-    /// `resize_keyboard` renders compact; `is_persistent` has no visual
-    /// difference (it only tells TDLib to keep showing the keyboard).
+    /// Sized like tdesktop's `BotKeyboard`: 38px buttons, at most
+    /// [`KEYBOARD_MAX_HEIGHT`] tall with the rest scrolling; a keyboard
+    /// without `resize_keyboard` fills that height and its rows stretch
+    /// (`_maximizeSize`). `is_persistent` has no visual difference (it only
+    /// tells TDLib to keep showing the keyboard).
     pub(super) fn custom_keyboard_panel(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let (chat_id, message_id, keyboard) = self.open_chat_custom_keyboard()?;
         if self
@@ -70,18 +124,15 @@ impl QuillApp {
         {
             return None;
         }
+        let fill = !keyboard.resize_keyboard;
         let mut grid = div()
-            .id(("custom-keyboard", message_id.0 as u64))
+            .id(("custom-keyboard-rows", message_id.0 as u64))
             .flex()
             .flex_col()
             .gap_1()
-            .px_3();
-        if keyboard.resize_keyboard {
-            grid = grid.py_1();
-        } else {
-            grid = grid.py_2();
-        }
-        grid = grid.border_t_1().border_color(border());
+            .px_3()
+            .py_2()
+            .when(fill, |grid| grid.min_h(px(KEYBOARD_MAX_HEIGHT)));
         for (row_index, row) in keyboard.rows.iter().enumerate() {
             if row.is_empty() {
                 continue;
@@ -89,7 +140,9 @@ impl QuillApp {
             let mut line = div()
                 .id(format!("custom-keyboard-row-{}-{row_index}", message_id.0))
                 .flex()
-                .gap_1();
+                .gap_1()
+                .min_h(px(KEYBOARD_BUTTON_HEIGHT))
+                .when(fill, |line| line.flex_1());
             for (button_index, button) in row.iter().enumerate() {
                 line = line.child(
                     Self::custom_keyboard_button(
@@ -101,12 +154,26 @@ impl QuillApp {
                         keyboard.one_time,
                         cx,
                     )
-                    .flex_1(),
+                    .flex_1()
+                    .min_w_0()
+                    .h_auto()
+                    .min_h(px(KEYBOARD_BUTTON_HEIGHT)),
                 );
             }
             grid = grid.child(line);
         }
-        Some(grid.into_any_element())
+        Some(
+            div()
+                .id(("custom-keyboard", message_id.0 as u64))
+                .flex()
+                .flex_col()
+                .max_h(px(KEYBOARD_MAX_HEIGHT))
+                .border_t_1()
+                .border_color(border())
+                .child(grid)
+                .overflow_y_scrollbar()
+                .into_any_element(),
+        )
     }
 
     /// B1: tap a `keyboardButtonTypeText` button: the button's text goes

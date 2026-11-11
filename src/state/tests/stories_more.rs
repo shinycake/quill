@@ -284,11 +284,11 @@ fn story_post_outcome_transitions() {
     );
     let posted = extra;
     assert_eq!(
-        session.stories.post.outcome,
-        StoryPostOutcome::Posting {
+        session.stories.post.outcomes.get(posted).cloned(),
+        Some(StoryPostOutcome::Posting {
             request: posted,
             story_id: 8
-        }
+        })
     );
 
     // `updateStoryPostSucceeded` with a matching old_story_id →
@@ -300,8 +300,8 @@ fn story_post_outcome_transitions() {
         r#"{"@type":"updateStoryPostSucceeded","story":{"@type":"story","id":9,"poster_chat_id":777,"date":1,"content":{"@type":"storyContentUnsupported"},"caption":{"@type":"formattedText","text":"","entities":[]}},"old_story_id":8}"#,
     );
     assert_eq!(
-        session.stories.post.outcome,
-        StoryPostOutcome::Succeeded { request: posted }
+        session.stories.post.outcomes.get(posted).cloned(),
+        Some(StoryPostOutcome::Succeeded { request: posted })
     );
     assert!(session.stories.stories.contains_key(&(777, 9)));
 
@@ -323,8 +323,8 @@ fn story_post_outcome_transitions() {
         r#"{"@type":"updateStoryPostFailed","story":{"@type":"story","id":10,"poster_chat_id":777,"date":1,"content":{"@type":"storyContentUnsupported"},"caption":{"@type":"formattedText","text":"","entities":[]}},"error":{"@type":"error","code":400,"message":"x"},"error_type":{"@type":"canPostStoryResultOk"}}"#,
     );
     assert!(matches!(
-        session.stories.post.outcome,
-        StoryPostOutcome::Failed { request, .. } if request == extra
+        session.stories.post.outcomes.get(extra),
+        Some(StoryPostOutcome::Failed { .. })
     ));
 
     // A raw `error` answer on `postStory` → Failed; on `canPostStory`
@@ -340,8 +340,8 @@ fn story_post_outcome_transitions() {
         ),
     );
     assert!(matches!(
-        session.stories.post.outcome,
-        StoryPostOutcome::Failed { request, .. } if request == extra
+        session.stories.post.outcomes.get(extra),
+        Some(StoryPostOutcome::Failed { .. })
     ));
     let extra = session.request(RequestPurpose::CheckCanPostStory, None);
     apply_json(
@@ -450,11 +450,11 @@ fn story_post_second_answer_without_pending_is_absorbed() {
         ),
     );
     assert_eq!(
-        session.stories.post.outcome,
-        StoryPostOutcome::Posting {
+        session.stories.post.outcomes.get(extra).cloned(),
+        Some(StoryPostOutcome::Posting {
             request: extra,
             story_id: 8
-        }
+        })
     );
     assert!(!session.requests.has_purpose(RequestPurpose::PostStory));
 
@@ -467,11 +467,11 @@ fn story_post_second_answer_without_pending_is_absorbed() {
         r#"{"@type":"story","id":8,"poster_chat_id":777,"date":1,"content":{"@type":"storyContentUnsupported"},"caption":{"@type":"formattedText","text":"","entities":[]}}"#,
     );
     assert_eq!(
-        session.stories.post.outcome,
-        StoryPostOutcome::Posting {
+        session.stories.post.outcomes.get(extra).cloned(),
+        Some(StoryPostOutcome::Posting {
             request: extra,
             story_id: 8
-        }
+        })
     );
     assert!(!session.requests.has_purpose(RequestPurpose::PostStory));
     assert!(session.stories.stories.contains_key(&(777, 8)));
@@ -659,13 +659,10 @@ fn b14_close_friends_load_and_save_round_trip() {
         &sink,
         r#"{"@type":"users","@extra":"no-such","total_count":1,"user_ids":[9]}"#,
     );
-    assert!(session.stories.close_friends.is_none());
+    assert!(session.stories.close_friends.ids().is_none());
 
     let extra = session.request(RequestPurpose::GetCloseFriends, None);
-    session.begin_story_page_check(
-        crate::story_page::story_page_op_label(RequestPurpose::GetCloseFriends),
-        extra,
-    );
+    session.stories.close_friends.begin_load(extra);
     apply_json(
         &mut session,
         &seq,
@@ -675,7 +672,7 @@ fn b14_close_friends_load_and_save_round_trip() {
             extra.0
         ),
     );
-    assert_eq!(session.stories.close_friends, Some(vec![31, 33]));
+    assert_eq!(session.stories.close_friends.ids(), Some(&vec![31, 33]));
     assert!(session.stories.page_ops.is_empty());
 
     // `setCloseFriends` applies the staged ids on `ok`.
@@ -687,7 +684,7 @@ fn b14_close_friends_load_and_save_round_trip() {
         &sink,
         &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra.0),
     );
-    assert_eq!(session.stories.close_friends, Some(vec![33]));
+    assert_eq!(session.stories.close_friends.ids(), Some(&vec![33]));
     assert!(session.stories.close_friends_pending.is_none());
 }
 
@@ -695,7 +692,7 @@ fn b14_close_friends_load_and_save_round_trip() {
 fn b14_close_friends_error_drops_staged_ids() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
-    session.stories.close_friends = Some(vec![31]);
+    session.stories.close_friends = CloseFriendsList::Ready(vec![31]);
     session.stories.close_friends_pending = Some(vec![31, 32]);
     let extra = session.request(RequestPurpose::SetCloseFriends, None);
     session.begin_story_page_op(
@@ -711,7 +708,7 @@ fn b14_close_friends_error_drops_staged_ids() {
             extra.0
         ),
     );
-    assert_eq!(session.stories.close_friends, Some(vec![31]));
+    assert_eq!(session.stories.close_friends.ids(), Some(&vec![31]));
     assert!(session.stories.close_friends_pending.is_none());
     assert!(matches!(
         session.stories.page_ops.latest().map(|op| &op.state),
@@ -860,4 +857,52 @@ fn story_custom_emoji_stickers_are_bounded() {
         );
     }
     assert!(session.stories.custom_emoji_stickers.contains_key(&total));
+}
+
+/// A later story-page op overwrites the viewer's single op; the
+/// close-friends load failure is still its own, matched to its request.
+#[test]
+fn close_friends_load_failure_survives_a_later_story_page_op() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    let load = session.request(RequestPurpose::GetCloseFriends, None);
+    session.stories.close_friends.begin_load(load);
+    // Another op takes the viewer's page op before the failure lands.
+    let other = session.request(RequestPurpose::SetChatActiveStoriesList, None);
+    session.begin_story_page_op("hiding", other);
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"error","@extra":"{}","code":500,"message":"X"}}"#,
+            load.0
+        ),
+    );
+    assert!(session.stories.close_friends.failed_without_list());
+    // An error for another request leaves a new load alone.
+    let again = session.request(RequestPurpose::GetCloseFriends, None);
+    session.stories.close_friends.begin_load(again);
+    session.stories.close_friends.fail_load(load);
+    assert!(matches!(
+        session.stories.close_friends,
+        CloseFriendsList::Loading { .. }
+    ));
+}
+
+/// An account going away answers no more calls: a story management call on
+/// its way reads as lost (its sender leaves its stage), not in flight.
+#[test]
+fn an_account_going_away_ends_the_management_calls_on_their_way() {
+    let (mut session, _sink) = session();
+    session.stories.manage.start(RequestId(30), ChatId(5), 3);
+    assert_eq!(
+        session.stories.manage.outcome(RequestId(30)),
+        StoryManageOutcome::InFlight
+    );
+    session.settle_account_requests();
+    assert_eq!(
+        session.stories.manage.outcome(RequestId(30)),
+        StoryManageOutcome::Lost
+    );
 }

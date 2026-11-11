@@ -59,11 +59,12 @@ pub(in crate::ui) enum StarsFlow {
     Idle,
     Box(LiveStarsBox),
     /// The box sent the viewer to top up with `stars`: the box opens on
-    /// them again, and `then_send` still sends the comment that waited.
+    /// them again. A comment that waited sends only when the box reopens
+    /// from a send that needs Stars (`SendAction::NeedsStars`), never from a
+    /// price edit.
     TopUp {
         mode: StarsBoxMode,
         stars: i64,
-        then_send: bool,
     },
 }
 
@@ -95,13 +96,9 @@ impl StarsFlow {
 
     /// The amount a top-up waits to reopen the box on, leaving the flow
     /// idle.
-    pub(super) fn take_top_up(&mut self) -> Option<(StarsBoxMode, i64, bool)> {
+    pub(super) fn take_top_up(&mut self) -> Option<(StarsBoxMode, i64)> {
         match std::mem::replace(self, Self::Idle) {
-            Self::TopUp {
-                mode,
-                stars,
-                then_send,
-            } => Some((mode, stars, then_send)),
+            Self::TopUp { mode, stars } => Some((mode, stars)),
             other => {
                 *self = other;
                 None

@@ -50,67 +50,27 @@ pub(crate) struct StoryViewerUi {
     /// B14: the press-and-hold / Space pause, and the viewer's extra
     /// panels (close friends, share) with their last result line.
     pub(super) pause: quill::story_extras::StoryUserPause,
-    pub(super) close_friends: CloseFriendsStage,
+    pub(super) close_friends: quill::story_extras::CloseFriendsStage,
     /// The story-page call sent from here (Hide, the profile toggle, the
     /// close-friends list): only its status line shows under the story.
     pub(super) page_op: Option<quill::ids::RequestId>,
     pub(super) share_open: bool,
     /// The copy of the story's file to Downloads (`save_story_media`).
-    pub(super) media_save: MediaSave,
     pub(super) notice: Option<String>,
     /// The ⋯ menu is open: the story holds still under it, and its entries
     /// act on the story it was opened for (`MenuAct` carries it).
     pub(super) menu_open: bool,
 }
 
-/// The story's file being copied to Downloads, on a background thread. It
-/// ends with the copy's result; leaving the story drops it with the rest of
-/// what the viewer had open.
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+/// One story's file being copied to Downloads on a background thread
+/// (`StoryUi::media_saves`, one per story item). `Saving` ends with the
+/// copy's result, which waits in `Done` for the story it was for, so
+/// stepping away and back still shows it. Saving again is allowed once it
+/// is `Done`.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) enum MediaSave {
-    #[default]
-    Idle,
     Saving,
-}
-
-/// The close-friends editor: closed, being edited, or saved as `request`.
-/// `Saving` leaves with the answer to that request (the list landed, or the
-/// call failed and the edit is back to try again), never by comparing lists.
-#[derive(Default)]
-pub(super) enum CloseFriendsStage {
-    #[default]
-    Closed,
-    Editing(quill::story_extras::CloseFriendsEdit),
-    Saving {
-        edit: quill::story_extras::CloseFriendsEdit,
-        request: quill::ids::RequestId,
-    },
-}
-
-impl CloseFriendsStage {
-    pub(super) fn is_open(&self) -> bool {
-        !matches!(self, Self::Closed)
-    }
-
-    pub(super) fn is_saving(&self) -> bool {
-        matches!(self, Self::Saving { .. })
-    }
-
-    /// The edit shown, while the editor is open.
-    pub(super) fn edit(&self) -> Option<&quill::story_extras::CloseFriendsEdit> {
-        match self {
-            Self::Closed => None,
-            Self::Editing(edit) | Self::Saving { edit, .. } => Some(edit),
-        }
-    }
-
-    /// The edit the user can still change: not while it is being saved.
-    pub(super) fn edit_mut(&mut self) -> Option<&mut quill::story_extras::CloseFriendsEdit> {
-        match self {
-            Self::Editing(edit) => Some(edit),
-            _ => None,
-        }
-    }
+    Done(String),
 }
 
 /// A panel the viewer draws over its story. One is open at a time:
@@ -152,7 +112,7 @@ impl StoryViewerUi {
             self.privacy_edit = None;
         }
         if keep != ViewerPanel::CloseFriends {
-            self.close_friends = CloseFriendsStage::Closed;
+            self.close_friends = quill::story_extras::CloseFriendsStage::Closed;
         }
     }
 }
@@ -214,6 +174,10 @@ pub(crate) struct StoryUi {
     /// viewer is open (`viewer_ui_mut`), dropped by every close
     /// (`release_story_viewer`).
     open: Option<StoryViewerUi>,
+    /// The Save media copies, by the story they are for: they outlive a
+    /// step to another story (a second press for the same story waits for
+    /// the first), and the results are dropped with the viewer.
+    pub(super) media_saves: std::collections::HashMap<(quill::ids::ChatId, i32), MediaSave>,
     /// What reads see while the viewer is closed: always empty, since only
     /// `viewer_ui` (shared) hands it out.
     closed: StoryViewerUi,
@@ -256,6 +220,10 @@ impl StoryUi {
     /// The viewer closed: what it had open goes, as one value.
     pub(super) fn drop_viewer_ui(&mut self) {
         self.open = None;
+        // Finished results go with the viewer; a copy still running stays
+        // so a reopened viewer does not start a second one.
+        self.media_saves
+            .retain(|_, save| matches!(save, MediaSave::Saving));
     }
 
     /// The viewer moved on from the story it showed: what was open over
@@ -363,6 +331,7 @@ impl StoryUi {
             tick_active: false,
             emoji_warm: None,
             open: None,
+            media_saves: std::collections::HashMap::new(),
             closed: StoryViewerUi::default(),
         }
     }

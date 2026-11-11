@@ -179,6 +179,18 @@ impl QuillApp {
         if prev != next {
             self.clear_story_fields(cx);
         }
+        // A Save media that finished while another story was showing says
+        // so when its story is back.
+        let done = self.stories.viewer.current().and_then(|item| {
+            match self.stories.media_saves.get(&item.key()) {
+                Some(crate::ui::stories_state::MediaSave::Done(notice)) => Some(notice.clone()),
+                _ => None,
+            }
+        });
+        if let Some(notice) = done {
+            self.stories
+                .with_viewer_ui(|open| open.notice = Some(notice));
+        }
     }
 
     pub(in crate::ui) fn leave_story_item(&mut self, cx: &mut Context<Self>) {

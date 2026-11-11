@@ -145,24 +145,24 @@ impl QuillApp {
             )
     }
 
-    /// Phase 3.2: show a `callbackQueryAnswer` in the status line (the
-    /// transient feedback surface this app has). A URL answer opens in the
-    /// OS browser, like message-text links; `show_alert` has no modal yet,
-    /// so its text lands in the status line too.
+    /// Show a `callbackQueryAnswer` as tdesktop does: a URL opens like a
+    /// clicked link, `show_alert` text opens a box, other text is a toast,
+    /// and an empty answer shows nothing (the button's spinner already
+    /// stopped).
     pub(super) fn present_callback_answer(
         &mut self,
         answer: CallbackQueryAnswer,
         cx: &mut Context<Self>,
     ) {
-        if answer.url.is_empty() {
-            self.set_note(if answer.text.is_empty() {
-                StatusNote::silent(tr(keys::Q_MEDIA_BOT_ANSWERED))
-            } else {
-                StatusNote::info(answer.text)
-            });
-            cx.notify();
-        } else {
+        if !answer.url.is_empty() {
             self.open_link(&answer.url, cx);
+        } else if answer.text.is_empty() {
+            cx.notify();
+        } else if answer.show_alert {
+            self.open_bot_alert(answer.text, cx);
+        } else {
+            self.set_note(StatusNote::info(answer.text));
+            cx.notify();
         }
     }
 
@@ -283,6 +283,8 @@ impl QuillApp {
                 cx,
             );
         }
+        // The button spins until the answer.
+        cx.notify();
     }
 
     /// B1: user button (`inlineKeyboardButtonTypeUser`, schema 1.8.67 line
@@ -511,6 +513,12 @@ impl QuillApp {
             .get(&open.0)
             .is_none_or(|history| history.messages.is_empty());
         if !empty && start_param.is_none() {
+            return None;
+        }
+        // The empty chat's intro card already shows the description, and
+        // Telegram Desktop shows nothing else there: block, restart and
+        // the rest live in the profile and the chat menu.
+        if empty && start_param.is_none() && super::bot_about::bot_about_text(&info).is_some() {
             return None;
         }
         let blocked = session.chats.get(&open.0).is_some_and(|chat| chat.blocked);
@@ -773,11 +781,10 @@ impl QuillApp {
         );
     }
 
-    /// Phase 3.1: insert a tapped bot command into the composer. Empty
-    /// composer → the bare command; otherwise appended after a space (3.3
-    /// owns the full `/` menu).
     /// Telegram Desktop's bot "Menu" button left of the composer: the bot's
-    /// web menu when it has one, else the `/` command list.
+    /// web menu when it has one, else the list of its commands above the
+    /// composer. The list opens without writing to the field
+    /// (`HistoryWidget::updateCmdStartShown`); a second press hides it.
     pub(super) fn bot_menu_button(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let session = self.session()?;
         let open = session.open_chat?;
@@ -795,9 +802,20 @@ impl QuillApp {
             .map(|(text, _)| text.clone())
             .filter(|text| !text.is_empty())
             .unwrap_or_else(|| tr(keys::Q_MEDIA_MENU).to_string());
+        let list_open = url.is_none()
+            && matches!(
+                self.chat_ui.command_menu,
+                crate::ui::composer::CommandMenu::Button { .. }
+            );
+        // A kit Button never takes focus on press, so the composer keeps
+        // it and its blur does not close the list before this click.
         Some(
             Button::new("bot-menu")
-                .icon(IconName::Menu)
+                .icon(if list_open {
+                    IconName::Close
+                } else {
+                    IconName::Menu
+                })
                 .label(label)
                 .small()
                 .primary()
@@ -805,19 +823,14 @@ impl QuillApp {
                 .tooltip(tr(keys::Q_MEDIA_BOT_MENU))
                 .on_click(cx.listener(move |this, _, window, cx| match &url {
                     Some((_, url)) => this.open_bot_menu_web_app(url, cx),
-                    None => {
-                        this.composer.update(cx, |input, cx| {
-                            input.set_value("/", window, cx);
-                            input.focus(window, cx);
-                            input.set_selected_range(1..1, cx);
-                        });
-                        this.sync_command_menu(cx);
-                    }
+                    None => this.toggle_button_command_menu(window, cx),
                 }))
                 .into_any_element(),
         )
     }
 
+    /// Put a bot command in front of the composer text (the bot card's
+    /// command buttons, Tab on the Menu button's list).
     pub(super) fn insert_bot_command(
         &mut self,
         command: &str,

@@ -826,11 +826,15 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         if let Some(live) = self.live.as_mut() {
-            let result = live.driver.send_callback_query(chat_id, message_id, &data);
-            self.set_note(match result {
-                Ok(_) => StatusNote::silent(tr(keys::Q_CHAT_SENDING)),
-                Err(_) => StatusNote::error(tr(keys::Q_CHAT_COULD_NOT_SEND_CALLBACK)),
-            });
+            // The pressed button spins until the answer
+            // (`Session::callback_button_waiting`).
+            if live
+                .driver
+                .send_callback_query(chat_id, message_id, &data)
+                .is_err()
+            {
+                self.set_note(StatusNote::error(tr(keys::Q_CHAT_COULD_NOT_SEND_CALLBACK)));
+            }
             cx.notify();
             return;
         }

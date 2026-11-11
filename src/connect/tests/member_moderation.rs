@@ -304,7 +304,7 @@ fn transfer_waits_for_the_security_check_and_never_stores_the_password() {
     // Before the check: refused, nothing sent.
     assert_eq!(
         driver
-            .transfer_chat_ownership(ChatId(-100), 8, "hunter2")
+            .transfer_chat_ownership(ChatId(-100), 8, "hunter2", false)
             .unwrap(),
         None
     );
@@ -329,7 +329,7 @@ fn transfer_waits_for_the_security_check_and_never_stores_the_password() {
     );
     assert_eq!(
         driver
-            .transfer_chat_ownership(ChatId(-100), 8, "hunter2")
+            .transfer_chat_ownership(ChatId(-100), 8, "hunter2", false)
             .unwrap(),
         None
     );
@@ -348,11 +348,13 @@ fn transfer_waits_for_the_security_check_and_never_stores_the_password() {
     );
     // Empty password, yourself and a missing chat are refused.
     assert_eq!(
-        driver.transfer_chat_ownership(ChatId(-100), 8, "").unwrap(),
+        driver
+            .transfer_chat_ownership(ChatId(-100), 8, "", false)
+            .unwrap(),
         None
     );
     driver
-        .transfer_chat_ownership(ChatId(-100), 8, "hunter2")
+        .transfer_chat_ownership(ChatId(-100), 8, "hunter2", false)
         .unwrap()
         .expect("sent");
     let sent = sent_request(&recorder, "transferChatOwnership");
@@ -363,7 +365,7 @@ fn transfer_waits_for_the_security_check_and_never_stores_the_password() {
     // A second tap while waiting sends nothing.
     assert_eq!(
         driver
-            .transfer_chat_ownership(ChatId(-100), 8, "hunter2")
+            .transfer_chat_ownership(ChatId(-100), 8, "hunter2", false)
             .unwrap(),
         None
     );
@@ -389,7 +391,7 @@ fn transfer_waits_for_the_security_check_and_never_stores_the_password() {
     assert!(!format!("{:?}", driver.session.groups.ownership).contains("hunter2"));
 
     driver
-        .transfer_chat_ownership(ChatId(-100), 8, "correct horse")
+        .transfer_chat_ownership(ChatId(-100), 8, "correct horse", false)
         .unwrap()
         .expect("retry");
     assert!(driver.session.groups.ownership.transfer_error.is_none());
@@ -403,6 +405,36 @@ fn transfer_waits_for_the_security_check_and_never_stores_the_password() {
     );
     let done = driver.session.groups.ownership.transferred.expect("done");
     assert_eq!((done.chat_id, done.user_id), (-100, 8));
+}
+
+/// "Appoint and leave" rides with its own transfer: the answer reads it
+/// from there, not from whichever box is open when the answer comes.
+#[test]
+fn leave_after_travels_with_the_transfer() {
+    let (mut driver, recorder, sink, seq) = owner_driver();
+    driver.check_can_transfer_ownership().unwrap();
+    answer(
+        &mut driver,
+        &recorder,
+        &seq,
+        &sink,
+        "canTransferOwnership",
+        r#"{"@type":"canTransferOwnershipResultOk"}"#,
+    );
+    driver
+        .transfer_chat_ownership(ChatId(-100), 8, "pw", true)
+        .unwrap()
+        .expect("sent");
+    answer(
+        &mut driver,
+        &recorder,
+        &seq,
+        &sink,
+        "transferChatOwnership",
+        r#"{"@type":"ok"}"#,
+    );
+    let done = driver.session.groups.ownership.transferred.expect("done");
+    assert!(done.leave_after);
 }
 
 #[test]
@@ -421,7 +453,7 @@ fn only_the_owner_may_transfer() {
     );
     assert_eq!(
         driver
-            .transfer_chat_ownership(ChatId(-100), 8, "pw")
+            .transfer_chat_ownership(ChatId(-100), 8, "pw", false)
             .unwrap(),
         None
     );

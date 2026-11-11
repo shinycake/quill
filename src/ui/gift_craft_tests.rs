@@ -209,3 +209,19 @@ fn a_refused_craft_keeps_the_craft_box(cx: &mut TestAppContext) {
         assert_eq!(slot_ids(app), ["own-1204", "own-77", "own-19"]);
     });
 }
+
+#[gpui_kit::test]
+fn closing_the_boxes_during_the_forge_keeps_the_outcome(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    vcx.run_until_parked();
+    app.update_in(vcx, |app, _, cx| {
+        app.craft_now(cx);
+        app.gift_market.stack.clear();
+        app.after_craft_pop();
+        assert!(app.craft_session().is_some(), "the craft is still out");
+        answer_forge(app, CraftResult::Fail);
+        app.craft_frame_upkeep(cx);
+        assert_eq!(app.gift_market.top(), Some(&MarketBox::CraftResult));
+    });
+}

@@ -1,4 +1,5 @@
 //! Failed requests for forum topics, comment threads and Saved Messages.
+use crate::lang::{keys, tr};
 use crate::premium_limits::PremiumLimitKind;
 use crate::state::*;
 
@@ -9,10 +10,17 @@ impl Session {
         &mut self,
         err: &TdError,
         pending: Option<&PendingRequest>,
-        _extra: Option<RequestId>,
+        extra: Option<RequestId>,
         _seq: u64,
     ) {
         match pending.map(|p| p.purpose) {
+            Some(RequestPurpose::StartBotThread) => {
+                if let Some(request) = extra {
+                    let line =
+                        call_request_error_line(err, tr(keys::Q_CHAT_COULDN_T_START_A_NEW_THREAD));
+                    self.bot_thread_answered(request, Err(line));
+                }
+            }
             // tdesktop `SublistsPinsLimitBox`: Saved Messages has its own
             // pin limit.
             Some(RequestPurpose::Threads(ThreadsPurpose::ToggleSavedMessagesTopicPinned {

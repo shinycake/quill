@@ -23,6 +23,9 @@ pub enum ThreadsPurpose {
     /// refetched on success; `updateForumTopicInfo` keeps it fresh
     /// otherwise.
     CreateForumTopic,
+    /// `createForumTopic` for a bot's new thread, asked by a send from the
+    /// "All" view; the send goes into the thread it answers.
+    StartBotThread,
     EditForumTopic {
         forum_topic_id: i32,
     },
@@ -135,6 +138,7 @@ flat_purposes!(Threads(ThreadsPurpose) {
     GetTopicHistory,
     GetTopicHistoryNewer,
     CreateForumTopic,
+    StartBotThread,
     ToggleGeneralForumTopicHidden,
     ToggleChatViewAsTopics,
     GetForumTopicDefaultIcons,

@@ -15,7 +15,7 @@ use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::ids::ChatId;
 use quill::lang::{keys, tr, tr_with};
-use quill::state::{StoryCheck, StoryPostOutcome, StoryPostState};
+use quill::state::StoryPostState;
 use quill::story_composer::{
     ComposerStage, StoryComposer, StoryExpiry, StoryMedia, StoryMediaKind, StoryPrivacy,
 };
@@ -184,8 +184,8 @@ impl QuillApp {
         let target = self.story_composer_target_chat();
         if let Some(live) = self.live.as_mut() {
             self.screen.stories.composer.local_error = None;
-            live.driver.session.stories.post.check = StoryCheck::None;
-            live.driver.session.stories.post.outcome = StoryPostOutcome::None;
+            live.driver.session.stories.post.check.clear();
+            live.driver.session.stories.post.outcomes.clear();
             // The stage is entered only once the check went out, with its
             // request: a failed send leaves the composer as it was.
             match live.driver.check_can_post_story(target) {
@@ -317,7 +317,7 @@ impl QuillApp {
                                 self.screen.stories.composer.stage =
                                     ComposerStage::Posting { request };
                                 // Fresh eligibility for the next post.
-                                live.driver.session.stories.post.check = StoryCheck::None;
+                                live.driver.session.stories.post.check.clear();
                             }
                             Err(_) => {
                                 self.stories.composer.local_error =
@@ -383,7 +383,7 @@ impl QuillApp {
             ComposerStage::Posting { request } => {
                 let uploading = self
                     .session()
-                    .is_some_and(|s| s.stories.post.outcome.request() == Some(*request));
+                    .is_some_and(|s| s.stories.post.outcomes.get(*request).is_some());
                 Some(if uploading {
                     tr(keys::Q_MEDIA_POSTING).into()
                 } else {

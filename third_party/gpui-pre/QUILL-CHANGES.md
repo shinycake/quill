@@ -123,6 +123,14 @@ Desktop does (`docs/decisions/history-preload.md`). `src/elements/list.rs`:
 viewport to the list's start and end, counting each item not measured yet at
 the mean height of the measured ones, and the viewport's height.
 
+## A list estimates its items' heights
+
+Channel ads go between posts at least two screens apart, as Telegram
+Desktop does (`SponsoredMessages::inject`, `docs/decisions/sponsored-placement.md`).
+`src/elements/list.rs`: `ListState::estimated_item_heights` returns the
+height of each item in a range, measured items at their height and the
+others at the mean height of the measured ones.
+
 ## The accessibility tree can be forced and read in-process
 
 Added in 2026 for Agent access's UI driver

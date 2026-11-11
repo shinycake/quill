@@ -22,6 +22,11 @@ impl QuillApp {
         let open_album = page.view.open_album();
         let view = page.view;
         let new_album_name = page.new_album_name.clone();
+        // One mutation of the page at a time (`story_page_mutate`): its
+        // buttons are off while one is in flight, not silently ignored.
+        let busy = self
+            .session()
+            .is_some_and(|s| s.stories.page_ops.mutating(chat_id.0));
         let rename_input = page.rename_input.clone();
         let title = self
             .session()
@@ -124,6 +129,7 @@ impl QuillApp {
                         )
                         .child(
                             Button::new("story-page-rename")
+                                .disabled(busy)
                                 .label(tr(keys::Q_MEDIA_RENAME))
                                 .on_click(cx.listener(|this, _, _, cx| {
                                     this.rename_story_album(cx);
@@ -132,6 +138,7 @@ impl QuillApp {
                 )
                 .child(
                     Button::new("story-page-delete")
+                        .disabled(busy)
                         .label(if view.delete_armed(album_id) {
                             tr(keys::Q_MEDIA_CONFIRM_DELETE)
                         } else {
@@ -165,6 +172,7 @@ impl QuillApp {
                                 .gap_1()
                                 .child(
                                     Button::new(("story-page-album-top", story_id as u64))
+                                        .disabled(busy)
                                         .label(tr(keys::Q_MEDIA_TOP))
                                         .ghost()
                                         .text_color(cx.theme().foreground)
@@ -174,6 +182,7 @@ impl QuillApp {
                                 )
                                 .child(
                                     Button::new(("story-page-album-remove", story_id as u64))
+                                        .disabled(busy)
                                         .label(tr(keys::BOX_REMOVE))
                                         .ghost()
                                         .text_color(cx.theme().foreground)
@@ -292,6 +301,7 @@ impl QuillApp {
                             )
                             .child(
                                 Button::new("story-page-create")
+                                    .disabled(busy)
                                     .label(tr(keys::Q_MEDIA_CREATE_ALBUM))
                                     .on_click(cx.listener(|this, _, _, cx| {
                                         this.create_story_album(cx);
@@ -345,6 +355,7 @@ impl QuillApp {
                         )
                         .child(
                             Button::new(("story-page-pin", story_id as u64))
+                                .disabled(busy)
                                 .label(if is_pinned {
                                     tr(keys::Q_MEDIA_UNPIN)
                                 } else {

@@ -88,6 +88,20 @@ impl BubbleRoom {
         MAX_MEDIA_SIZE.min(self.room - chrome).max(1)
     }
 
+    /// The widest a widget is drawn: the bubble's width (`msgMaxWidth`,
+    /// narrowed to the room) inside its border when the widget leads the
+    /// bubble (`led`), inside its padding under a header.
+    pub(in crate::ui) fn widget(self, led: bool) -> i32 {
+        let chrome = if self.plain {
+            0
+        } else if led {
+            2
+        } else {
+            PADDED_CHROME
+        };
+        (self.outer() - chrome).max(1)
+    }
+
     /// A width Telegram Desktop gives a bubble, narrowed to the room.
     fn cap(self, outer: i32) -> i32 {
         outer.min(self.outer())

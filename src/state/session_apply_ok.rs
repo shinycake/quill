@@ -27,6 +27,7 @@ impl Session {
         self.apply_giveaway_ok(pending);
         self.apply_gift_manage_ok(pending);
         self.apply_earn_ok(pending);
+        self.apply_paid_reaction_ok(pending);
         self.apply_passkeys_ok(pending);
         self.apply_boost_settings_ok(pending);
         self.apply_web_app_ok(pending);
@@ -500,7 +501,7 @@ impl Session {
             // new list.
             Some(RequestPurpose::SetCloseFriends) => {
                 if let Some(ids) = self.stories.close_friends_pending.take() {
-                    self.stories.close_friends = Some(ids);
+                    self.stories.close_friends = CloseFriendsList::Ready(ids);
                 }
                 self.succeed_story_page_op(pending);
             }

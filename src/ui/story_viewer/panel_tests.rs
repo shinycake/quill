@@ -99,15 +99,14 @@ fn opening_one_panel_closes_the_others(cx: &mut TestAppContext) {
 /// back to try again, a success closes the editor.
 #[gpui_kit::test]
 fn the_close_friends_save_leaves_saving_with_its_answer(cx: &mut TestAppContext) {
-    use crate::ui::stories_state::CloseFriendsStage;
     use quill::ids::RequestId;
-    use quill::story_extras::CloseFriendsEdit;
+    use quill::story_extras::{CloseFriendsEdit, CloseFriendsStage};
     use quill::story_page::{StoryPageOp, StoryPageOpState};
     let (app, mut vcx) = open_app(cx, "ready-story-viewer");
     let vcx = &mut vcx;
     let set_op = |app: &mut crate::ui::app::QuillApp, state| {
         if let Some(session) = app.demo_session.as_deref_mut() {
-            session.stories.close_friends = None;
+            session.stories.close_friends = quill::state::CloseFriendsList::NotLoaded;
             session.stories.page_ops.begin(StoryPageOp {
                 label: "saving close friends".into(),
                 state,
@@ -151,19 +150,19 @@ fn the_close_friends_save_leaves_saving_with_its_answer(cx: &mut TestAppContext)
 }
 
 /// The copy of a story's file to Downloads runs in the background: a second
-/// press while it runs starts nothing, and the state goes with the story.
+/// press while it runs starts nothing, also after stepping away and back,
+/// and the result waits for its story.
 #[gpui_kit::test]
-fn a_story_media_save_in_flight_is_not_started_twice_and_goes_with_its_story(
-    cx: &mut TestAppContext,
-) {
+fn a_story_media_save_belongs_to_its_story(cx: &mut TestAppContext) {
     use crate::ui::stories_state::MediaSave;
     let (app, mut vcx) = open_app(cx, "ready-story-viewer");
     let vcx = &mut vcx;
-    app.update(vcx, |app, cx| {
-        app.stories.with_viewer_ui(|open| {
-            open.media_save = MediaSave::Saving;
-            open.notice = Some("Saving…".into());
-        });
+    let key = app.update(vcx, |app, cx| {
+        let key = app.stories.viewer.current().map(|item| item.key());
+        let key = key.expect("the demo viewer shows a story");
+        app.stories.media_saves.insert(key, MediaSave::Saving);
+        app.stories
+            .with_viewer_ui(|open| open.notice = Some("Saving…".into()));
         app.save_story_media(cx);
         assert_eq!(
             app.stories.viewer_ui().notice.as_deref(),
@@ -171,10 +170,25 @@ fn a_story_media_save_in_flight_is_not_started_twice_and_goes_with_its_story(
             "the second press changed nothing"
         );
         app.step_story_viewer(1, cx);
+        key
     });
     frames(vcx);
-    app.read_with(vcx, |app, _| {
-        assert_eq!(app.stories.viewer_ui().media_save, MediaSave::Idle);
+    app.update(vcx, |app, cx| {
         assert_eq!(app.stories.viewer_ui().notice, None);
+        assert_eq!(
+            app.stories.media_saves.get(&key),
+            Some(&MediaSave::Saving),
+            "the copy is still the first story's"
+        );
+        // It finishes while the other story shows; back on the first, the
+        // result is there and the save is free to run again.
+        app.stories
+            .media_saves
+            .insert(key, MediaSave::Done("Saved to Downloads".into()));
+        app.step_story_viewer(-1, cx);
+        assert_eq!(
+            app.stories.viewer_ui().notice.as_deref(),
+            Some("Saved to Downloads")
+        );
     });
 }

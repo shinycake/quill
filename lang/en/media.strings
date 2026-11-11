@@ -211,7 +211,6 @@
 "qll_media_bot_3" = "Bot {user_id}";
 "qll_media_bot_about_text" = "Bot about text";
 "qll_media_bot_actions" = "Bot actions";
-"qll_media_bot_answered" = "Bot answered";
 "qll_media_bot_link_copied" = "Bot link copied";
 "qll_media_bot_menu" = "Bot menu";
 "qll_media_bot_started_demo" = "Bot started (demo)";
@@ -273,6 +272,8 @@
 "qll_media_could_not_install_sticker_set" = "Couldn't install sticker set";
 "qll_media_could_not_join_the_live" = "could not join the live story";
 "qll_media_could_not_load_animated_emoji" = "Couldn't load animated emoji suggestion";
+"qll_media_could_not_enable_stealth_mode_because" = "Could not enable Stealth Mode: {reason}";
+"qll_media_could_not_load_close_friends" = "Could not load close friends";
 "qll_media_could_not_load_emoji_packs" = "Couldn't load emoji packs";
 "qll_media_could_not_load_members" = "Couldn't load members";
 "qll_media_could_not_load_more_emoji" = "Couldn't load more emoji packs";

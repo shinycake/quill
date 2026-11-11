@@ -218,13 +218,8 @@ impl QuillApp {
     /// A bot's streaming reply (`updatePendingMessage`) is its next
     /// incoming message, growing as it arrives (Telegram Desktop): the
     /// row after the rows that hand down `seed`.
-    pub(super) fn streaming_bot_row(
-        &self,
-        seed: &RowSeed,
-        build: &RowBuild,
-        cx: &mut Context<Self>,
-    ) -> Option<HistoryRow> {
-        let message = self.streaming_bot_message(cx)?;
+    pub(super) fn streaming_bot_row(&self, seed: &RowSeed, build: &RowBuild) -> Option<HistoryRow> {
+        let message = self.streaming_bot_message()?;
         let spot = ChromeSpot {
             sender_changed: seed.previous != Some((message.is_outgoing, message.sender)),
             next_same_sender: true,

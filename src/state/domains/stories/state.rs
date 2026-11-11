@@ -5,6 +5,64 @@ use crate::state::*;
 use crate::story_page::StoryPageOps;
 use std::time::{Duration, Instant};
 
+/// The close-friends list and the request loading it, in one value so a
+/// failure is matched to the `getCloseFriends` that asked (the viewer's
+/// single story-page op is overwritten by any later op).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum CloseFriendsList {
+    #[default]
+    NotLoaded,
+    /// `getCloseFriends` `request` is out; `stale` is the last list.
+    Loading {
+        request: RequestId,
+        stale: Option<Vec<i64>>,
+    },
+    Ready(Vec<i64>),
+    /// The load failed; `stale` is the last list, if any.
+    Failed {
+        stale: Option<Vec<i64>>,
+    },
+}
+
+impl CloseFriendsList {
+    /// The newest list held.
+    pub fn ids(&self) -> Option<&Vec<i64>> {
+        match self {
+            Self::NotLoaded => None,
+            Self::Ready(ids) => Some(ids),
+            Self::Loading { stale, .. } | Self::Failed { stale } => stale.as_ref(),
+        }
+    }
+
+    /// The load failed and there is no list to fall back on.
+    pub fn failed_without_list(&self) -> bool {
+        matches!(self, Self::Failed { stale: None })
+    }
+
+    fn take_ids(&mut self) -> Option<Vec<i64>> {
+        match std::mem::take(self) {
+            Self::NotLoaded => None,
+            Self::Ready(ids) => Some(ids),
+            Self::Loading { stale, .. } | Self::Failed { stale } => stale,
+        }
+    }
+
+    /// `getCloseFriends` `request` went out.
+    pub fn begin_load(&mut self, request: RequestId) {
+        let stale = self.take_ids();
+        *self = Self::Loading { request, stale };
+    }
+
+    /// The send of the load failed, or TDLib's error for `request`
+    /// arrived: only the load in flight under that id fails.
+    pub fn fail_load(&mut self, request: RequestId) {
+        if matches!(self, Self::Loading { request: r, .. } if *r == request) {
+            let stale = self.take_ids();
+            *self = Self::Failed { stale };
+        }
+    }
+}
+
 /// How far `loadActiveStories` got through one story list. TDLib sends
 /// `updateChatActiveStories` only for chats above the point loaded so far
 /// (`send_update_chat_active_stories` skips `public_order_ == 0`), so a list
@@ -123,7 +181,7 @@ pub struct StoriesState {
     pub page_ops: StoryPageOps,
     /// B14: the close-friends list (`getCloseFriends` / `setCloseFriends`);
     /// `None` until loaded.
-    pub close_friends: Option<Vec<i64>>,
+    pub close_friends: CloseFriendsList,
     /// B14: ids sent by an in-flight `setCloseFriends`, applied on `ok`.
     pub close_friends_pending: Option<Vec<i64>>,
     /// Paging of the main story list.
@@ -155,6 +213,13 @@ pub struct StoriesState {
 }
 
 impl StoriesState {
+    /// The account is going away: the story-page calls and management
+    /// calls on their way will never be answered.
+    pub fn settle_account(&mut self) {
+        self.page_ops.clear();
+        self.manage.forget_in_flight();
+    }
+
     pub(crate) fn new() -> Self {
         Self {
             tray: HashMap::new(),
@@ -177,7 +242,7 @@ impl StoriesState {
             chat_page_stories: HashMap::new(),
             archived_stories: HashMap::new(),
             page_ops: StoryPageOps::default(),
-            close_friends: None,
+            close_friends: CloseFriendsList::NotLoaded,
             close_friends_pending: None,
             main_paging: ActiveStoriesPaging::default(),
             hidden_paging: ActiveStoriesPaging::default(),

@@ -245,6 +245,10 @@ pub(super) fn album_history_row(
             sender.is_none(),
             !album_has_caption,
         )
+        .joined(
+            quill::chat_wide::has_right_layout(first.is_outgoing, look.wide),
+            look.joined_above,
+        )
     };
     for (index, message) in messages.iter().enumerate() {
         let Some(part) = layout.get(index) else {
@@ -529,6 +533,7 @@ pub use session_history_row::*;
 mod custom_emoji_chip_glyph;
 mod fact_check_block;
 mod load_older_action;
+pub(in crate::ui) mod new_bot_thread;
 pub(in crate::ui) mod sharing_request;
 pub(in crate::ui) mod suggested_post_block;
 #[allow(unused_imports)]

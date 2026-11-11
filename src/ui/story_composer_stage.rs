@@ -6,6 +6,7 @@
 use super::app::QuillApp;
 use gpui_kit::Context;
 use quill::ids::RequestId;
+use quill::lang::{keys, tr};
 use quill::state::{StoryManageOutcome, StoryPostOutcome};
 use quill::story_composer::ComposerStage;
 
@@ -35,6 +36,12 @@ impl QuillApp {
         }
     }
 
+    /// `request` is still waiting for TDLib's answer.
+    fn story_request_pending(&self, request: RequestId) -> bool {
+        self.session()
+            .is_some_and(|s| s.requests.get(request).is_some())
+    }
+
     /// Per frame: move the composer on once the request of its stage is
     /// answered. main-only: the story composer is the main window's overlay.
     pub(super) fn story_composer_upkeep(&mut self, cx: &mut Context<Self>) {
@@ -49,6 +56,14 @@ impl QuillApp {
                 if let Some(answer) = answer {
                     self.stories.composer.stage = ComposerStage::Editing;
                     self.story_composer_after_check(target, answer, cx);
+                } else if !self.story_request_pending(request) {
+                    // The call is gone (its send was lost, the account went
+                    // away) and nothing answers it: back to the composer,
+                    // where Post asks again.
+                    self.stories.composer.stage = ComposerStage::Editing;
+                    self.stories.composer.local_error =
+                        Some(tr(keys::Q_MEDIA_COULD_NOT_CHECK_POSTING_ELIGIBILITY).into());
+                    cx.notify();
                 }
             }
             // Phase 9.3: `postStory` was sent — its outcome ends the stage:
@@ -56,8 +71,7 @@ impl QuillApp {
             ComposerStage::Posting { request } => {
                 let outcome = self
                     .session()
-                    .map(|s| s.stories.post.outcome.clone())
-                    .filter(|outcome| outcome.request() == Some(request));
+                    .and_then(|s| s.stories.post.outcomes.get(request).cloned());
                 match outcome {
                     Some(StoryPostOutcome::Succeeded { .. }) => {
                         self.stories.composer.stage = ComposerStage::Posted;
@@ -68,7 +82,16 @@ impl QuillApp {
                         self.stories.composer.local_error = Some(message);
                         cx.notify();
                     }
-                    Some(StoryPostOutcome::Posting { .. } | StoryPostOutcome::None) | None => {}
+                    Some(StoryPostOutcome::Posting { .. }) => {}
+                    // No outcome and the call is gone: it was lost, so the
+                    // composer is back with a way to post again.
+                    None if !self.story_request_pending(request) => {
+                        self.stories.composer.stage = ComposerStage::Editing;
+                        self.stories.composer.local_error =
+                            Some(tr(keys::Q_MEDIA_COULD_NOT_SEND_THE_POST).into());
+                        cx.notify();
+                    }
+                    None => {}
                 }
             }
             // Phase 9.5: `editStory` was sent — its own answer closes the

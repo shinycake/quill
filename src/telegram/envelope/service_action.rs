@@ -105,6 +105,10 @@ pub enum ServiceAction {
     /// Telegram Desktop generates for a channel you joined
     /// (`GenerateJoinedMessage`), which hosts the similar-channels strip.
     YouJoinedChannel,
+    /// Quill-local, never parsed: the "New Thread" card under the history
+    /// of a bot that lets users create threads (tdesktop
+    /// `AboutView::makeNewBotThread`).
+    NewBotThread,
     /// Quill-local, never parsed: the divider between a thread's root post
     /// and its replies (tdesktop `RepliesList::injectRootDivider`):
     /// "Discussion started" with replies, "No comments here yet..." without.

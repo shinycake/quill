@@ -4,12 +4,9 @@ use super::*;
 /// Phase 9.3: honest `postStory` UI states — pending while TDLib uploads,
 /// succeeded / failed when `updateStoryPostSucceeded` /
 /// `updateStoryPostFailed` arrive. Every state names the `postStory`
-/// request it is about, so a composer reads only the answer to its own
-/// post.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+/// request it is about.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StoryPostOutcome {
-    #[default]
-    None,
     /// `postStory` answered with a `story`; `story_id` is the temporary
     /// id the succeeded/failed updates correlate against
     /// (`old_story_id` / `story.id`).
@@ -28,38 +25,67 @@ pub enum StoryPostOutcome {
 
 impl StoryPostOutcome {
     /// The `postStory` call this outcome is about.
-    pub fn request(&self) -> Option<RequestId> {
+    pub fn request(&self) -> RequestId {
         match self {
-            Self::None => None,
             Self::Posting { request, .. }
             | Self::Succeeded { request }
-            | Self::Failed { request, .. } => Some(*request),
+            | Self::Failed { request, .. } => *request,
         }
     }
 }
 
-/// The latest `canPostStory` answer, with the call it answers.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub enum StoryCheck {
-    #[default]
-    None,
-    Answered {
-        request: RequestId,
-        /// The eligibility, or why the check failed.
-        result: Result<CanPostStoryResult, String>,
-    },
+/// The `postStory` outcomes by request, so a composer reads only the
+/// outcome of its own post and another post's outcome never replaces it.
+/// `clear` runs when a composer starts a post, so it stays small.
+#[derive(Debug, Clone, Default)]
+pub struct StoryPostOutcomes {
+    by_request: HashMap<RequestId, StoryPostOutcome>,
 }
 
-impl StoryCheck {
-    /// The answer to `request`, if that is the call answered.
-    pub fn answer_to(&self, request: RequestId) -> Option<&Result<CanPostStoryResult, String>> {
-        match self {
-            Self::Answered {
-                request: answered,
-                result,
-            } if *answered == request => Some(result),
+impl StoryPostOutcomes {
+    pub fn get(&self, request: RequestId) -> Option<&StoryPostOutcome> {
+        self.by_request.get(&request)
+    }
+
+    pub fn record(&mut self, outcome: StoryPostOutcome) {
+        self.by_request.insert(outcome.request(), outcome);
+    }
+
+    /// The post that is `Posting` as the temporary story `story_id`.
+    pub fn posting_as(&self, story_id: i32) -> Option<RequestId> {
+        self.by_request.values().find_map(|outcome| match outcome {
+            StoryPostOutcome::Posting {
+                request,
+                story_id: id,
+            } if *id == story_id => Some(*request),
             _ => None,
-        }
+        })
+    }
+
+    pub fn clear(&mut self) {
+        self.by_request.clear();
+    }
+}
+
+/// The `canPostStory` answers by the call they answer, so a late answer to
+/// an earlier check never hides the answer the composer waits for.
+#[derive(Debug, Clone, Default)]
+pub struct StoryChecks {
+    answers: HashMap<RequestId, Result<CanPostStoryResult, String>>,
+}
+
+impl StoryChecks {
+    /// The eligibility, or why the check failed, for `request`.
+    pub fn answer_to(&self, request: RequestId) -> Option<&Result<CanPostStoryResult, String>> {
+        self.answers.get(&request)
+    }
+
+    pub fn record(&mut self, request: RequestId, result: Result<CanPostStoryResult, String>) {
+        self.answers.insert(request, result);
+    }
+
+    pub fn clear(&mut self) {
+        self.answers.clear();
     }
 }
 
@@ -68,9 +94,9 @@ impl StoryCheck {
 /// load, and the `postStory` outcome.
 #[derive(Debug, Clone, Default)]
 pub struct StoryPostState {
-    pub check: StoryCheck,
+    pub check: StoryChecks,
     pub post_as_error: Option<String>,
-    pub outcome: StoryPostOutcome,
+    pub outcomes: StoryPostOutcomes,
 }
 
 /// Phase 9.5: honest pending/failed states for `editStory` /
@@ -219,6 +245,15 @@ pub struct StoryManageState {
     in_flight: Vec<RequestId>,
     /// The latest calls to settle and their failures.
     settled: Vec<(RequestId, Option<String>)>,
+}
+
+impl StoryManageState {
+    /// The account is going away: no call still on its way will be answered,
+    /// so each reads as `Lost` (its sender leaves its stage) instead of
+    /// `InFlight` for good.
+    pub fn forget_in_flight(&mut self) {
+        self.in_flight.clear();
+    }
 }
 
 /// What became of one management call (`StoryManageState::outcome`).

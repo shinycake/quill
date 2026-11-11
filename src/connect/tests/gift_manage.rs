@@ -591,8 +591,11 @@ fn a_channel_creator_can_delete_its_gift_and_an_admin_cannot() {
     assert_eq!(sent_request(&p.1, "deleteGift")["received_gift_id"], "a");
 }
 
+/// Reopening the send dialog for the same recipient while its `sendGift` is
+/// out keeps that send: its answer is shown, and Send stays off until then
+/// (no second purchase). Another recipient waits for the answer.
 #[test]
-fn a_send_answer_for_an_earlier_dialog_does_not_land_in_the_open_one() {
+fn reopening_the_send_dialog_keeps_the_send_that_is_out() {
     let mut p = parts();
     p.0.session.payments.hub.balance = Some(StarAmount {
         stars: 1000,
@@ -600,26 +603,24 @@ fn a_send_answer_for_an_earlier_dialog_does_not_land_in_the_open_one() {
     });
     open_send_dialog(&mut p);
     let first = p.0.send_star_gift(55, "", false, false).unwrap();
-    // Closed before the answer; the dialog opens again for a new send.
-    open_send_dialog(&mut p);
-    let second = p.0.send_star_gift(55, "", false, false).unwrap();
-    feed(&mut p, json!({"@type": "ok", "@extra": first.as_extra()}));
+    p.0.close_send_gift();
+    p.0.open_send_gift(ChatId(21)).unwrap();
     let send = &p.0.session.payments.gifts_manage.send;
-    assert!(
-        send.sending(),
-        "the open dialog still waits for its own send"
-    );
-    assert!(send.done.is_none());
+    assert!(send.open && send.sending(), "the same send, shown again");
     assert!(
         p.0.send_star_gift(55, "", false, false).is_err(),
         "Send stays disabled: no double purchase"
     );
-    feed(
+    assert_eq!(count(&p.1, "sendGift"), 1);
+    add_chat(
         &mut p,
-        json!({"@type": "error", "@extra": first.as_extra(), "code": 400, "message": "STARGIFT_USAGE_LIMITED"}),
+        json!({"@type":"updateNewChat","chat":{"id":22,"title":"Bob","type":{"@type":"chatTypePrivate","user_id":22},"unread_count":0}}),
     );
-    assert!(p.0.session.payments.gifts_manage.send.error.is_none());
-    feed(&mut p, json!({"@type": "ok", "@extra": second.as_extra()}));
+    assert!(
+        p.0.open_send_gift(ChatId(22)).is_err(),
+        "waits for the answer"
+    );
+    feed(&mut p, json!({"@type": "ok", "@extra": first.as_extra()}));
     let send = &p.0.session.payments.gifts_manage.send;
     assert!(!send.sending());
     assert_eq!(send.done.as_deref(), Some("Gift sent."));

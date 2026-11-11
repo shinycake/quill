@@ -542,7 +542,10 @@ fn validated_order_info_selects_first_shipping() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
     let extra = session.request(RequestPurpose::ValidateOrderInfo, Some(ChatId(51)));
-    session.payments.validate_request = Some(extra);
+    session.payments.order_info = OrderInfoStage::Validating {
+        request: extra,
+        order: Default::default(),
+    };
     apply_json(
         &mut session,
         &seq,
@@ -552,7 +555,7 @@ fn validated_order_info_selects_first_shipping() {
             extra.0
         ),
     );
-    let validated = session.payments.validated.as_ref().expect("validated");
+    let validated = session.payments.order_info.validated().expect("validated");
     assert_eq!(validated.order_info_id, "oid1");
     assert_eq!(validated.shipping_options.len(), 2);
     assert_eq!(session.payments.shipping_id.as_deref(), Some("ship1"));
@@ -566,7 +569,10 @@ fn a_closed_checkouts_order_check_lands_nowhere() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
     let extra = session.request(RequestPurpose::ValidateOrderInfo, Some(ChatId(51)));
-    session.payments.validate_request = Some(extra);
+    session.payments.order_info = OrderInfoStage::Validating {
+        request: extra,
+        order: Default::default(),
+    };
     session.close_checkout();
     apply_json(
         &mut session,
@@ -577,9 +583,12 @@ fn a_closed_checkouts_order_check_lands_nowhere() {
             extra.0
         ),
     );
-    assert!(session.payments.validated.is_none());
+    assert!(session.payments.order_info.validated().is_none());
     let failed = session.request(RequestPurpose::ValidateOrderInfo, Some(ChatId(51)));
-    session.payments.validate_request = Some(extra);
+    session.payments.order_info = OrderInfoStage::Validating {
+        request: extra,
+        order: Default::default(),
+    };
     apply_json(
         &mut session,
         &seq,

@@ -132,6 +132,7 @@ impl QuillApp {
             Page::Language => self.leave_language_settings(),
             Page::System => quill::link_handler::read_now(),
             Page::Calls => self.fetch_call_settings(),
+            Page::Appearance => self.retry_failed_wallpapers(),
             _ => {}
         }
     }

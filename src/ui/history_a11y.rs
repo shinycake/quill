@@ -18,9 +18,9 @@
 //!   or pauses the focused voice message, audio or video message when
 //!   nothing is selected (`keyPressEvent`, `playPauseFocusedMedia`).
 //!
-//! The focused message is the selection's focus row (`selection_focus`),
-//! the same row Ctrl+Space toggles, as tdesktop shares
-//! `_accessibilityFocusedItem` between the two.
+//! The focused message is the chat's `A11yFocus` (`ChatUi::a11y_focus`: none,
+//! the unread bar, or a row), the same row Ctrl+Space toggles, as tdesktop
+//! shares `_accessibilityFocusedItem` between the two.
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;

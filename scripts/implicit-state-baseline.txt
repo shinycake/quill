@@ -245,8 +245,6 @@ StageFacts::type_pending
 StarPacksState::loaded
 StarPacksState::loading
 StarPacksState::loading+error
-StarsGiftState::loading
-StarsGiftState::loading+error
 State::started
 Step::started
 StickerPanel::failed

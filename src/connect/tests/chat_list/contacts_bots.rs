@@ -700,6 +700,58 @@ fn callback_query_sent_for_button_press() {
             .pending_extra_for(RequestPurpose::GetCallbackQueryAnswer, Some(ChatId(21)))
             .is_some()
     );
+    // The pressed button waits for the bot; its neighbours do not.
+    let pressed = crate::state::CallbackButtonKey::Data(vec![1, 2, 3]);
+    let other = crate::state::CallbackButtonKey::Data(vec![9]);
+    assert!(
+        driver
+            .session
+            .callback_button_waiting(ChatId(21), MessageId(301), &pressed)
+    );
+    assert!(
+        !driver
+            .session
+            .callback_button_waiting(ChatId(21), MessageId(301), &other)
+    );
+    // The bot's answer ends the wait.
+    let answer = format!(
+        r#"{{"@type":"callbackQueryAnswer","@extra":"{}","text":"","show_alert":false,"url":""}}"#,
+        extra.0
+    );
+    driver
+        .ingest(copy_and_parse(&answer, &seq, &dyn_sink).unwrap())
+        .unwrap();
+    assert!(
+        !driver
+            .session
+            .callback_button_waiting(ChatId(21), MessageId(301), &pressed)
+    );
+    // So does an error (TDLib 502 when the bot misses its deadline).
+    let again = driver
+        .send_callback_query(ChatId(21), MessageId(301), &[1, 2, 3])
+        .expect("a second press sends");
+    assert!(
+        driver
+            .session
+            .callback_button_waiting(ChatId(21), MessageId(301), &pressed)
+    );
+    let error = format!(
+        r#"{{"@type":"error","@extra":"{}","code":502,"message":"BOT_RESPONSE_TIMEOUT"}}"#,
+        again.0
+    );
+    driver
+        .ingest(copy_and_parse(&error, &seq, &dyn_sink).unwrap())
+        .unwrap();
+    assert!(
+        !driver
+            .session
+            .callback_button_waiting(ChatId(21), MessageId(301), &pressed)
+    );
+    assert_eq!(
+        driver.session.bots.callback_presses.len(),
+        1,
+        "only the last press is kept"
+    );
     // Pending (unsent, negative id) messages cannot be answered.
     assert!(
         driver

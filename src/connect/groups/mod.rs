@@ -357,7 +357,13 @@ impl<S: JsonSender> ConnectDriver<S> {
                     .groups
                     .chat_statistics
                     .insert(chat_id.0, ChatStatisticsFetch::WaitingForInfo { is_dark });
-                return self.fetch_supergroup_full_info(supergroup_id).map(|_| None);
+                return match self.fetch_supergroup_full_info(supergroup_id) {
+                    Ok(_) => Ok(None),
+                    Err(err) => {
+                        self.fail_chat_statistics(chat_id, keys::Q_MONEY_STATISTICS_SEND_FAILED);
+                        Err(err)
+                    }
+                };
             }
         }
         let held = self.session.groups.chat_statistics.get(&chat_id.0);

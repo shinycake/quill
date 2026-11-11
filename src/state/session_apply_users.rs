@@ -19,6 +19,7 @@ impl Session {
         // pending request's explicit `user_id` (contacts-panel
         // fetch) or its private chat (chat-header fetch). Responses
         // for chats that stopped being private chats are dropped.
+        let bot_info = self.received_bot_info(bot_info);
         if pending.map(|p| p.purpose) == Some(RequestPurpose::GetUserFullInfo)
             && let Some(pending) = pending
         {
@@ -56,6 +57,20 @@ impl Session {
                 }
             }
         }
+    }
+
+    /// A bot's info as it arrived in a full info, made ready to keep: the
+    /// description's links and commands found, its photo's files cached.
+    pub(crate) fn received_bot_info(&mut self, bot_info: Option<BotInfo>) -> Option<BotInfo> {
+        let mut info = bot_info?;
+        info.description_entities =
+            crate::text::about::bot_description_entities(info.description.trim());
+        let mut files = std::mem::take(&mut info.description_photo_files);
+        files.append(&mut info.description_animation_files);
+        for file in files {
+            self.upsert_file(file, false);
+        }
+        Some(info)
     }
 
     /// Cache the files of the photos a `userFullInfo` names (every size

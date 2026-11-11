@@ -272,11 +272,18 @@ impl WidgetEntry {
     }
 }
 
+/// How a window's pass drew one widget.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub(super) struct Noted {
+    /// The card width, CSS px.
+    pub width: f32,
+}
+
 /// What the history passes of this frame drew, per window.
 #[derive(Default)]
 pub(super) struct Passes {
     /// The widgets each window's pass drew, with the width it gave them.
-    pub seen: HashMap<Option<ChatId>, HashMap<WidgetKey, f32>>,
+    pub seen: HashMap<Option<ChatId>, HashMap<WidgetKey, Noted>>,
     /// Windows whose pass waits for its reconcile.
     pub queued: HashSet<Option<ChatId>>,
     /// The view each window's history draws in, to redraw it alone.

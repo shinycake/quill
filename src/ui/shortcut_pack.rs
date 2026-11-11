@@ -289,6 +289,15 @@ impl QuillApp {
                     return false;
                 };
                 let count = self.history.scroller.read(cx).item_count();
+                if key == HistoryKey::PageDown {
+                    // A page past a channel's end adds its next ad first.
+                    let page = self
+                        .history
+                        .viewport
+                        .get()
+                        .map_or(px(0.), |v| v.size.height);
+                    self.sponsored_bottom_request(page, cx);
+                }
                 let target = if key == HistoryKey::PageUp {
                     page_up_target(first, last)
                 } else {

@@ -10,7 +10,9 @@ use super::app::QuillApp;
 use super::owned_image::OwnedImage;
 use super::status_note::StatusNote;
 use super::widget_runtime::{Launch, Runtime, RuntimeEvent, WIDGETS};
-use super::widgets_state::{Identity, Poll, PresenceChange, Showing, WidgetEntry, WidgetStorage};
+use super::widgets_state::{
+    Identity, Noted, Poll, PresenceChange, Showing, WidgetEntry, WidgetStorage,
+};
 use gpui_kit::*;
 use quill::ids::ChatId;
 use quill::lang::{keys, tr_with};
@@ -91,7 +93,7 @@ impl QuillApp {
             .seen
             .entry(window)
             .or_default()
-            .insert(key, width);
+            .insert(key, Noted { width });
     }
 
     /// A frame of the window `window` (`None`: the main one) starts: the
@@ -239,7 +241,7 @@ impl QuillApp {
             self.widget_left(key, window);
         }
         self.prune_hidden_widgets();
-        for (key, width) in seen {
+        for (key, Noted { width }) in seen {
             let Some((content, outgoing)) = self.widget_message(key) else {
                 continue;
             };
@@ -888,7 +890,19 @@ impl QuillApp {
                 "header_bg_color": hex(flat(t::bg_subtle(), 1.0)),
                 "bottom_bar_bg_color": hex(flat(t::bg_subtle(), 1.0)),
             },
-            "text": {"fontSize": font, "lineHeight": 1.35},
+            // The default `<button>` is the app's primary button, as in
+            // Telegram Desktop (`--tg-button-*`); the body margin is a
+            // text bubble's padding.
+            "button": {
+                "bg": hex(flat(button, 1.0)),
+                "text": hex(flat(button_text, 1.0)),
+                "radius": format!("{}px", f32::from(gpui_kit::component::theme::ActiveTheme::theme(cx).radius).round()),
+                "padding": "8px 16px",
+                "height": "36px",
+                "pressedOpacity": 0.8,
+                "disabledOpacity": 0.5,
+            },
+            "text": {"fontSize": font, "lineHeight": 1.35, "padding": "8px 12px"},
         });
         let byte = |v: f32| (v.clamp(0.0, 1.0) * 255.0).round() as u8;
         (theme.to_string(), [byte(bg.r), byte(bg.g), byte(bg.b)])

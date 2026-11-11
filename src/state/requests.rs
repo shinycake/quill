@@ -161,8 +161,7 @@ impl Session {
 
     /// The account is going away (logout, close): no answer can land any
     /// more, so settle every pending lookup the way a failure would and
-    /// forget the stale-window marks. User actions (sends, edits, ...) are
-    /// dropped without a failure notice about a session the user left.
+    /// forget the stale marks. User actions are dropped without a notice.
     pub(crate) fn settle_account_requests(&mut self) {
         for pending in self.requests.drain_all() {
             if !super::session_apply_error::is_user_action(pending.purpose) {
@@ -170,7 +169,7 @@ impl Session {
             }
         }
         self.stale_history_requests.clear();
-        self.stories.page_ops.clear();
+        self.stories.settle_account();
     }
 }
 
@@ -404,6 +403,11 @@ pub struct ChatSponsoredMessages {
     /// When the response arrived (tdesktop `lastReceived`): refetches inside
     /// `SPONSORED_REFETCH_AFTER` are skipped.
     pub fetched_at: Option<std::time::Instant>,
+    /// The ads placed in the history so far, in placement order (tdesktop
+    /// `Entry::item`): each sits after the message it was placed under and
+    /// stays there as newer messages arrive. An ad not listed here is not in
+    /// the history yet. Cleared when the chat is left (`clearItems`).
+    pub placed: Vec<SponsoredPlacement>,
 }
 
 /// tdesktop `kRequestTimeLimit`: a chat's sponsored messages are not

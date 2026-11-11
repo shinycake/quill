@@ -22,6 +22,7 @@ HistoryUi.painted_ids | rebuilt by every paint of the history list
 HistoryUi.seen | carries its chat; read once at the next render
 HistoryUi.on_screen | rebuilt by every paint of the history list
 HistoryUi.reported_visible | carries its chat: a repeat check, a new chat never matches
+HistoryUi.sponsored.spots * | rebuilt from the open chat's placed ads after every history render (sync_sponsored_spots)
 HistoryUi.ends | compared with the history synced next; a new chat's ends differ
 HistoryUi.last_highlight | compared with the session's highlight, which is the open chat's
 HistoryUi.self_destruct_tick_chat | marks a running tick task, as slow_mode_tick_chat
@@ -37,7 +38,7 @@ MessageUi.rendered_sponsored | each ad carries the chat painted; the next frame 
 HistoryUi.key | the chat and topic the scroller last synced for: the check that resets it on a change
 HistoryUi.row_hover.under | the row under the pointer, rebuilt by every paint and move
 HistoryUi.row_hover.painted | the rows' hitboxes, rebuilt by every paint
-HistoryUi.stream_reveal.draft_id | the bot draft being revealed: another draft starts over
+HistoryUi.stream_reveal.Finishing.message | the bot reply finishing its reveal: the reveal names its chat and starts over in another
 HistoryUi.pull.next_chat | the pull gesture's next chat; `pull_sync` resets it when the chat or topic shown changes
 HistoryUi.pull.window | the window and chat-window scope of that gesture, read by its jump, which `pull_sync` drops
 ViewerUi.extra.share_at | the media viewer's "Share at" forward, as ViewerUi.video

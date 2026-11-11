@@ -427,10 +427,11 @@ fn stars_past_the_balance_open_the_stars_top_up(cx: &mut TestAppContext) {
     });
 }
 
-/// A comment that waited for Stars is still waiting after the box sent the
-/// viewer to top up: the box reopened on the same amount sends it.
+/// The top-up the box sent the viewer to is forgotten once the comment it
+/// waited for went out, and when the price is removed: a later box that only
+/// sets a price neither sends nor starts on the old amount.
 #[gpui_kit::test]
-fn a_waiting_comment_survives_the_top_up(cx: &mut TestAppContext) {
+fn a_stale_top_up_never_sends_a_later_comment(cx: &mut TestAppContext) {
     let (app, mut vcx) = open_live(cx, "ready-live-story");
     let vcx = &mut vcx;
     app.update(vcx, |app, cx| {
@@ -444,25 +445,42 @@ fn a_waiting_comment_survives_the_top_up(cx: &mut TestAppContext) {
     app.update_in(vcx, |app, window, cx| app.submit_live_stars_box(window, cx));
     frames(vcx);
     app.read_with(vcx, |app, _| {
-        assert!(
-            matches!(
-                app.stories.live.stars,
-                StarsFlow::TopUp {
-                    then_send: true,
-                    ..
-                }
-            ),
-            "the top-up still carries the waiting comment"
-        );
+        assert!(matches!(app.stories.live.stars, StarsFlow::TopUp { .. }));
+    });
+    // A price edit reopening the box does not send the waiting comment.
+    app.update(vcx, |app, cx| {
+        app.open_live_stars_box(StarsBoxMode::Comment, 0, false, cx);
+    });
+    app.read_with(vcx, |app, _| {
+        assert!(app.stories.live.stars.boxed().is_some_and(|b| !b.then_send));
+    });
+    // The top-up, then the Send that went out: the flow is idle again.
+    app.update(vcx, |app, cx| {
+        app.stories.live.stars = StarsFlow::TopUp {
+            mode: StarsBoxMode::Comment,
+            stars: 40,
+        };
+        cx.notify();
+    });
+    app.update_in(vcx, |app, window, cx| app.live_comment_sent(window, cx));
+    app.read_with(vcx, |app, _| {
+        assert!(matches!(app.stories.live.stars, StarsFlow::Idle));
     });
     app.update(vcx, |app, cx| {
         app.open_live_stars_box(StarsBoxMode::Comment, 0, false, cx);
     });
     app.read_with(vcx, |app, _| {
-        assert!(
-            app.stories.live.stars.boxed().is_some_and(|b| b.then_send),
-            "the reopened box sends the comment that waited"
-        );
+        let boxed = app.stories.live.stars.boxed();
+        assert!(boxed.is_some_and(|b| !b.then_send && b.stars != 40));
+    });
+    // Remove Stars also forgets a top-up.
+    app.update(vcx, |app, cx| {
+        app.stories.live.stars = StarsFlow::TopUp {
+            mode: StarsBoxMode::Comment,
+            stars: 40,
+        };
+        app.clear_live_stars(cx);
+        assert!(matches!(app.stories.live.stars, StarsFlow::Idle));
     });
 }
 

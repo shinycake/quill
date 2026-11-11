@@ -52,6 +52,7 @@ pub(in crate::ui) fn rich_block_element(
                                 button_index,
                                 button,
                                 None,
+                                false,
                                 cx,
                             )
                             .flex_1(),
@@ -254,6 +255,7 @@ pub(in crate::ui) fn rich_block_element(
                         button_index,
                         button,
                         None,
+                        false,
                         cx,
                     )
                     .flex_1(),

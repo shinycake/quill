@@ -571,6 +571,7 @@ impl QuillApp {
         let Some(session) = self.session() else {
             return;
         };
+        let account = session.account.clone();
         // A secret chat always deletes for both, so there is nothing to choose.
         let revoke_label =
             (offer_revoke && !session.is_secret_chat(chat_id)).then(|| {
@@ -596,6 +597,7 @@ impl QuillApp {
         let app = cx.entity().downgrade();
         window.open_alert_dialog(cx, move |alert, _, _| {
             let (app, ids, revoke) = (app.clone(), ids.clone(), revoke.clone());
+            let account = account.clone();
             let checkbox_state = revoke.clone();
             let label = revoke_label.clone();
             alert
@@ -621,7 +623,11 @@ impl QuillApp {
                     let revoke = revoke.get();
                     let ids = ids.clone();
                     let _ = app.update(cx, |this, cx| {
-                        this.delete_selection(chat_id, &ids, revoke, cx);
+                        // The box was opened for one account: after a
+                        // switch it must not delete in the new one.
+                        if this.session().is_some_and(|s| s.account == account) {
+                            this.delete_selection(chat_id, &ids, revoke, cx);
+                        }
                     });
                     true
                 })
@@ -690,6 +696,7 @@ impl QuillApp {
         let secret = self
             .session()
             .is_some_and(|s| s.is_secret_chat(confirm.chat_id));
+        let account = self.session().map(|s| s.account.clone());
         let label = (confirm.can_revoke && !secret).then(|| {
             let session = self.session();
             match session
@@ -723,6 +730,7 @@ impl QuillApp {
         let app = cx.entity().downgrade();
         window.open_alert_dialog(cx, move |alert, _, _| {
             let (app, revoke, confirm) = (app.clone(), revoke.clone(), confirm.clone());
+            let account = account.clone();
             let checkbox_state = revoke.clone();
             let (moderation_state, moderation_offer) = (choice.clone(), moderation.clone());
             let on_ok_choice = choice.clone();
@@ -876,6 +884,10 @@ impl QuillApp {
                         .filter(|_| on_ok_community.get())
                         .zip(offer.clone());
                     let _ = app.update(cx, |this, cx| {
+                        // Opened for one account: a switch since cancels it.
+                        if this.session().map(|s| &s.account) != account.as_ref() {
+                            return;
+                        }
                         if let Some(((community_id, _), offer)) = community {
                             this.start_community_ban(
                                 community_id,
