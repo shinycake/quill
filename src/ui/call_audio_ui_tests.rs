@@ -13,7 +13,7 @@ use crate::ui::screenshot_demo::ScreenshotDemo;
 use crate::ui::shell::QuillShell;
 
 /// A microphone that counts how many times it is open.
-struct Microphone(Arc<AtomicUsize>);
+struct Microphone(Arc<AtomicUsize>, bool);
 
 impl LevelSource for Microphone {
     fn take_level(&self) -> Option<f32> {
@@ -21,7 +21,7 @@ impl LevelSource for Microphone {
     }
 
     fn error(&self) -> Option<String> {
-        None
+        self.1.then(|| "device lost".to_string())
     }
 }
 
@@ -52,7 +52,7 @@ fn settings_with_a_microphone(
     app.update(&mut vcx, |app, _| {
         app.call_boxes.open_mic_test = Arc::new(move || {
             counted.fetch_add(1, Ordering::SeqCst);
-            Ok(Box::new(Microphone(counted.clone())) as Box<dyn LevelSource + Send>)
+            Ok(Box::new(Microphone(counted.clone(), false)) as Box<dyn LevelSource + Send>)
         });
     });
     (app, vcx, open)
@@ -102,4 +102,29 @@ fn closing_settings_while_the_microphone_opens_leaves_it_off(cx: &mut TestAppCon
     vcx.run_until_parked();
     assert!(!testing(&app, &vcx));
     assert_eq!(open.load(Ordering::SeqCst), 0, "the microphone was closed");
+}
+
+#[gpui_kit::test]
+fn a_device_that_fails_ends_the_test_in_failed(cx: &mut TestAppContext) {
+    let (app, mut vcx, open) = settings_with_a_microphone(cx);
+    app.update(&mut vcx, |app, _| {
+        let counted = open.clone();
+        app.call_boxes.open_mic_test = Arc::new(move || {
+            counted.fetch_add(1, Ordering::SeqCst);
+            Ok(Box::new(Microphone(counted.clone(), true)) as Box<dyn LevelSource + Send>)
+        });
+    });
+    app.update(&mut vcx, |app, cx| app.toggle_mic_test(cx));
+    vcx.run_until_parked();
+    vcx.executor()
+        .advance_clock(std::time::Duration::from_millis(600));
+    vcx.run_until_parked();
+    let reason = app.read_with(&vcx, |app, _| match &app.call_boxes.mic_test {
+        MicTestRun::Failed(reason) => Some(reason.clone()),
+        _ => None,
+    });
+    assert_eq!(reason.as_deref(), Some("device lost"));
+    assert_eq!(open.load(Ordering::SeqCst), 0, "the device was closed");
+    app.update(&mut vcx, |app, cx| app.toggle_mic_test(cx));
+    assert!(!testing(&app, &vcx), "Stop test leaves the failure");
 }

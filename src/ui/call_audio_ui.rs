@@ -29,6 +29,9 @@ pub(crate) enum MicTestRun {
     Off,
     Opening(u64),
     On(MicTest),
+    /// The device failed while the test ran; the reason shows until the
+    /// next click on Stop test.
+    Failed(String),
 }
 
 /// Opens the microphone for the test, off the UI thread.
@@ -50,13 +53,15 @@ pub(crate) struct MicTest {
     /// When the meter last rendered; the watchdog stops a test whose
     /// section went away (another tab, another settings page).
     last_render: Cell<Instant>,
+    /// The watchdog that stops the test; dropped with the stage.
+    _watchdog: Task<()>,
 }
 
 /// Without a render for this long, the test stops.
 const UNSEEN_STOP: Duration = Duration::from_secs(1);
 
 impl MicTest {
-    fn new(source: Box<dyn LevelSource + Send>) -> Self {
+    fn new(source: Box<dyn LevelSource + Send>, watchdog: Task<()>) -> Self {
         let now = Instant::now();
         Self {
             source,
@@ -64,6 +69,7 @@ impl MicTest {
             anim: Cell::new(LevelAnimation::new(0.0, MIC_TEST_ANIMATION_MS)),
             last_sample: Cell::new(now),
             last_render: Cell::new(now),
+            _watchdog: watchdog,
         }
     }
 
@@ -99,7 +105,10 @@ impl QuillApp {
             MicTestRun::On(test) => Some(test),
             _ => None,
         };
-        let error = test.and_then(|test| test.source.error());
+        let error = match &self.call_boxes.mic_test {
+            MicTestRun::Failed(reason) => Some(reason.clone()),
+            _ => None,
+        };
         let row = div()
             .id("call-mic-test")
             .flex()
@@ -129,16 +138,16 @@ impl QuillApp {
                             .child(tr(keys::Q_OPS_SPEAK_TO_SEE_YOUR_MICROPHONES)),
                     ),
             );
-        let Some(test) = test else {
-            return row.into_any_element();
-        };
-        test.last_render.set(Instant::now());
-        self.request_animation_tick(30, cx);
         if let Some(error) = error {
             return row
                 .child(div().text_xs().text_color(cx.theme().danger).child(error))
                 .into_any_element();
         }
+        let Some(test) = test else {
+            return row.into_any_element();
+        };
+        test.last_render.set(Instant::now());
+        self.request_animation_tick(30, cx);
         let value = test.meter_value();
         let lit = meter_lit_lines(value, METER_LINE_COUNT);
         let (active, inactive) = (cx.theme().primary, cx.theme().border);
@@ -201,24 +210,28 @@ impl QuillApp {
     }
 
     fn start_mic_test(&mut self, source: Box<dyn LevelSource + Send>, cx: &mut Context<Self>) {
-        self.call_boxes.mic_test = MicTestRun::On(MicTest::new(source));
         // Stop the test, and close the microphone, once its meter stops
         // rendering: the Calls section is gone, so nobody is watching.
         // The test is the screen's: a switch drops it with its box.
-        self.spawn_screen(cx, async move |this, cx| {
+        let watchdog = self.spawn_screen(cx, async move |this, cx| {
             loop {
                 cx.background_executor()
                     .timer(Duration::from_millis(500))
                     .await;
                 let keep = this
                     .update(cx, |this, cx| match &this.call_boxes.mic_test {
-                        MicTestRun::On(test) if test.last_render.get().elapsed() < UNSEEN_STOP => {
-                            true
-                        }
-                        MicTestRun::On(_) => {
-                            this.call_boxes.mic_test = MicTestRun::Off;
-                            cx.notify();
-                            false
+                        MicTestRun::On(test) => {
+                            if let Some(reason) = test.source.error() {
+                                this.call_boxes.mic_test = MicTestRun::Failed(reason);
+                                cx.notify();
+                                false
+                            } else if test.last_render.get().elapsed() < UNSEEN_STOP {
+                                true
+                            } else {
+                                this.call_boxes.mic_test = MicTestRun::Off;
+                                cx.notify();
+                                false
+                            }
                         }
                         _ => false,
                     })
@@ -227,8 +240,8 @@ impl QuillApp {
                     break;
                 }
             }
-        })
-        .detach();
+        });
+        self.call_boxes.mic_test = MicTestRun::On(MicTest::new(source, watchdog));
     }
 
     /// Your own level and speaking state in the voice chat, from the
