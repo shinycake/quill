@@ -400,12 +400,18 @@ impl QuillApp {
     }
 
     pub(in crate::ui) fn finish_successful_sends(&mut self, cx: &mut Context<Self>) {
-        let clears = self
+        let (clears, failed) = self
             .live
             .as_mut()
-            .map(|live| std::mem::take(&mut live.driver.session.messages.draft_clears))
+            .map(|live| {
+                let messages = &mut live.driver.session.messages;
+                (
+                    std::mem::take(&mut messages.draft_clears),
+                    std::mem::take(&mut messages.failed_sends),
+                )
+            })
             .unwrap_or_default();
-        if clears.is_empty() {
+        if clears.is_empty() && failed.is_empty() {
             return;
         }
         let open_chat = self.open_chat_id();
@@ -415,6 +421,13 @@ impl QuillApp {
         let Some(account) = self.session().map(|session| session.account.clone()) else {
             return;
         };
+        // A send that failed clears nothing: its entry goes, the draft stays,
+        // and the ack of a later send of the slot finds none to take.
+        for (chat_id, topic) in failed {
+            let _ = self
+                .composer_sends
+                .take_draft_clear(&account, topic.key(chat_id.0));
+        }
         for (chat_id, topic) in clears {
             let Some(flag) = self
                 .composer_sends

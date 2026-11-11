@@ -224,11 +224,7 @@ impl Session {
                 self.in_every_view(|session| session.replace_view_copy(old_message_id, &row));
                 // The draft of the slot the message went to (topic, thread
                 // or chat) is cleared once the composer is seen idle.
-                let slot = if direct_topic != 0 && self.is_direct_messages_admin(chat_id) {
-                    crate::composer::DraftTopic::DirectMessages(direct_topic)
-                } else {
-                    Self::draft_topic_of_message(topic_id, thread_id)
-                };
+                let slot = self.draft_slot_of_message(chat_id, topic_id, thread_id, direct_topic);
                 self.messages.draft_clears.push((chat_id, slot));
             }
             MessagesPayload::UpdateMessageSendFailed {
@@ -246,6 +242,15 @@ impl Session {
                 }
                 let chat_id = message.chat_id;
                 let topic_id = message.topic_id();
+                // The send never became a message: whatever waited on its
+                // ack to clear the draft must let the draft stay.
+                let slot = self.draft_slot_of_message(
+                    chat_id,
+                    topic_id,
+                    message.thread_id(),
+                    message.extras.direct_messages_topic_id(),
+                );
+                self.messages.failed_sends.push((chat_id, slot));
                 let failed = crate::telegram::envelope::MessageSendState::Failed {
                     can_retry: matches!(
                         message.send_state,

@@ -46,11 +46,7 @@ impl QuillApp {
                 }
                 (None, note, stage)
             }
-            None => (
-                None,
-                "Connecting to Telegram…".into(),
-                ConnectStage::Connecting,
-            ),
+            None => (None, "Connecting to Telegram…".into(), ConnectStage::Idle),
         };
         let screen = super::on_screen::OnScreen::new(
             Default::default(),

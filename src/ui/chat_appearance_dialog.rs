@@ -439,7 +439,7 @@ impl QuillApp {
                         })),
                 );
             dialog
-                .content(crate::ui::dialog_once_body::once_dialog_body(body))
+                .content(crate::ui::shell::one_shot_dialog_content(body))
                 .footer(footer)
                 .on_close(on_close)
         })

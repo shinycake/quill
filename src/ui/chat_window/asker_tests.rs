@@ -331,13 +331,9 @@ fn the_custom_emoji_card_shows_where_the_emoji_was_tapped(cx: &mut TestAppContex
     let _chat_window = h.open_in_new_window(OTHER, cx);
     h.app.update(cx, |app, cx| {
         app.set_window_scope(Some(OTHER));
-        app.note_custom_emoji_tap(77);
+        app.note_custom_emoji_tap(77, quill::ids::RequestId(1));
         if let Some(session) = app.demo_session.as_mut() {
-            session.stickers.custom_emoji_preview = Some(quill::state::CustomEmojiPreview {
-                emoji_id: 77,
-                set_id: 5,
-                title: "Pack".into(),
-            });
+            session.accept_custom_emoji_preview(quill::ids::RequestId(1), 77, 5, "Pack".into());
         }
         assert!(app.custom_emoji_card(cx).is_some(), "the window of the tap");
         app.set_window_scope(None);
@@ -351,13 +347,9 @@ fn the_custom_emoji_card_shows_where_the_emoji_was_tapped(cx: &mut TestAppContex
 fn tapping_the_same_custom_emoji_again_restarts_the_card_timer(cx: &mut TestAppContext) {
     let h = new_app(cx);
     h.app.update(cx, |app, cx| {
-        app.note_custom_emoji_tap(77);
+        app.note_custom_emoji_tap(77, quill::ids::RequestId(1));
         if let Some(session) = app.demo_session.as_mut() {
-            session.stickers.custom_emoji_preview = Some(quill::state::CustomEmojiPreview {
-                emoji_id: 77,
-                set_id: 5,
-                title: "Pack".into(),
-            });
+            session.accept_custom_emoji_preview(quill::ids::RequestId(1), 77, 5, "Pack".into());
         }
         assert!(app.custom_emoji_card(cx).is_some());
     });
@@ -365,7 +357,7 @@ fn tapping_the_same_custom_emoji_again_restarts_the_card_timer(cx: &mut TestAppC
         .advance_clock(std::time::Duration::from_secs(5));
     cx.run_until_parked();
     h.app.update(cx, |app, cx| {
-        app.note_custom_emoji_tap(77);
+        app.tap_custom_emoji(77, cx);
         assert!(app.custom_emoji_card(cx).is_some(), "shown again");
     });
     cx.executor()
@@ -382,6 +374,37 @@ fn tapping_the_same_custom_emoji_again_restarts_the_card_timer(cx: &mut TestAppC
     cx.run_until_parked();
     h.app.update(cx, |app, cx| {
         assert!(app.custom_emoji_card(cx).is_none(), "its own timer ended");
+    });
+}
+
+/// 09-019: another request's answer does not show the card, and a refused
+/// lookup ends the tap instead of leaving it waiting.
+#[gpui_kit::test]
+fn a_custom_emoji_card_waits_for_its_own_request_and_a_refusal_ends_it(cx: &mut TestAppContext) {
+    use quill::ids::RequestId;
+    let h = new_app(cx);
+    h.app.update(cx, |app, cx| {
+        app.note_custom_emoji_tap(77, RequestId(2));
+        if let Some(session) = app.demo_session.as_mut() {
+            session.accept_custom_emoji_preview(RequestId(1), 77, 5, "Other".into());
+        }
+        assert!(app.custom_emoji_card(cx).is_none(), "another request's");
+        if let Some(session) = app.demo_session.as_mut() {
+            session.accept_custom_emoji_preview(RequestId(2), 77, 5, "Pack".into());
+        }
+        assert!(app.custom_emoji_card(cx).is_some(), "its own answer");
+        app.note_custom_emoji_tap(78, RequestId(3));
+        if let Some(session) = app.demo_session.as_mut() {
+            session.accept_custom_emoji_preview(RequestId(3), 78, 5, String::new());
+        }
+        assert!(app.custom_emoji_card(cx).is_none(), "no title: no card");
+        assert!(
+            matches!(
+                app.message_ui.custom_emoji,
+                crate::ui::custom_emoji_card::CustomEmojiCard::Hidden
+            ),
+            "the tap is over, not waiting"
+        );
     });
 }
 

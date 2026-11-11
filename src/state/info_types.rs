@@ -953,6 +953,10 @@ pub enum DeepLinkState {
 pub struct DeepLinkFlow {
     pub stage: DeepLinkState,
     pub from_agent: bool,
+    /// The chat window the link was clicked in, whose boxes and chat open
+    /// it takes (`None`: the main window). It lives and dies with the flow:
+    /// every terminal state consumes the flow with it.
+    pub window: Option<crate::ids::ChatId>,
 }
 
 impl DeepLinkState {

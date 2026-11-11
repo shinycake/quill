@@ -228,6 +228,22 @@ impl Session {
         }
     }
 
+    /// The slot a sent message's ack clears the draft of: a direct-messages
+    /// topic of an admin, else [`Self::draft_topic_of_message`].
+    pub(crate) fn draft_slot_of_message(
+        &self,
+        chat_id: ChatId,
+        topic_id: Option<i32>,
+        thread_id: Option<i64>,
+        direct_topic: i64,
+    ) -> DraftTopic {
+        if direct_topic != 0 && self.is_direct_messages_admin(chat_id) {
+            DraftTopic::DirectMessages(direct_topic)
+        } else {
+            Self::draft_topic_of_message(topic_id, thread_id)
+        }
+    }
+
     /// The slot a sent message clears the draft of: its forum topic, its
     /// reply thread, or the chat.
     pub(crate) fn draft_topic_of_message(

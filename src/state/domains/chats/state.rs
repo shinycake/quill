@@ -175,9 +175,9 @@ pub struct ChatsState {
     pub chat_upgrades: Vec<(i64, i64)>,
     /// `parity:platform-deep-links`: the single active deep-link flow
     /// (launch link → `getDeepLinkInfo` → follow-up → open chat).
-    /// The stage and the origin are one value ([`DeepLinkFlow`]); the UI
-    /// takes it at every terminal state and puts it back while the flow
-    /// goes on.
+    /// The stage and the origin (who asked, from which window) are one
+    /// value ([`DeepLinkFlow`]); the UI takes each terminal step once
+    /// ([`Self::take_deep_link_step`]).
     pub deep_link: Option<DeepLinkFlow>,
     /// Generation counter for deep-link request correlation.
     pub deep_link_seq: u64,
@@ -273,13 +273,32 @@ impl ChatsState {
     /// The flow moves to `stage`, keeping who started it. With no flow in
     /// progress it starts one from the user.
     pub fn enter_deep_link_stage(&mut self, stage: DeepLinkState) {
-        let from_agent = self.deep_link.as_ref().is_some_and(|flow| flow.from_agent);
-        self.deep_link = Some(DeepLinkFlow { stage, from_agent });
+        let (from_agent, window) = self
+            .deep_link
+            .as_ref()
+            .map_or((false, None), |flow| (flow.from_agent, flow.window));
+        self.deep_link = Some(DeepLinkFlow {
+            stage,
+            from_agent,
+            window,
+        });
+    }
+
+    /// The flow in progress was asked from `window` (`None`: the main
+    /// window). Nothing happens with no flow.
+    pub fn set_deep_link_window(&mut self, window: Option<crate::ids::ChatId>) {
+        if let Some(flow) = self.deep_link.as_mut() {
+            flow.window = window;
+        }
     }
 
     /// A flow `from_agent` starts at `stage` (a new flow, whoever started
     /// the last one).
     pub fn start_deep_link(&mut self, stage: DeepLinkState, from_agent: bool) {
-        self.deep_link = Some(DeepLinkFlow { stage, from_agent });
+        self.deep_link = Some(DeepLinkFlow {
+            stage,
+            from_agent,
+            window: None,
+        });
     }
 }

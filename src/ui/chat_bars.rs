@@ -555,7 +555,7 @@ impl QuillApp {
                     keys::Q_CHAT_BLOCK_2,
                     &[("name", &name.to_string())],
                 )))
-                .content(crate::ui::dialog_once_body::once_dialog_body(body))
+                .content(crate::ui::shell::one_shot_dialog_content(body))
                 .footer(footer)
                 .on_close(on_close)
         })

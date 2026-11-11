@@ -254,12 +254,12 @@ fn a_switch_ends_the_link_flow_the_account_was_running(cx: &mut TestAppContext) 
     app.read_with(&vcx, |app, _| {
         let session = app.session().expect("a session");
         assert!(session.chats_state.deep_link.is_none(), "the flow ended");
-        assert!(app.links.flow.invite().is_none());
+        assert!(!app.links.invite_box.is_open());
     });
     switch(&app, &mut vcx, &AccountKey::primary().0);
     frames(&mut vcx);
     app.read_with(&vcx, |app, _| {
-        assert!(app.links.flow.invite().is_none(), "no Join box came back");
+        assert!(!app.links.invite_box.is_open(), "no Join box came back");
         assert!(app.links.resolved.is_none());
     });
 }

@@ -858,7 +858,7 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if !self.composer_ui.inline_bot_alert_shown && self.open_chat_is_secret() {
+        if !self.screen.inline_bot.is_confirmed() && self.open_chat_is_secret() {
             self.chat_ui.bot_alert = crate::ui::inline_mode::BotAlert::Switch(query.to_string());
             cx.notify();
             return;
@@ -890,7 +890,7 @@ impl QuillApp {
             crate::ui::inline_mode::BotAlert::Typed => String::new(),
             crate::ui::inline_mode::BotAlert::Switch(query) => query,
         };
-        self.composer_ui.inline_bot_alert_shown = true;
+        self.screen.inline_bot.confirm();
         if !query.is_empty() {
             let next =
                 quill::composer::insert_switch_inline_text(&self.composer_markup(cx), &query);

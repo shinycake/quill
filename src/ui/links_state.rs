@@ -102,78 +102,42 @@ impl ResolvedLink {
     }
 }
 
-/// Who started the flow in progress: the chat window it was asked from
-/// (`None`: the main window). Whether a step the agent UI driver injected
-/// asked is the session flow's own (`DeepLinkFlow::from_agent`). It lives
-/// and dies with the running flow.
+/// The invite box of the deep-link flow: closed, or open for the invite of
+/// the flow generation it shows. The invite itself is the session flow's
+/// stage (`DeepLinkState::InvitePreview`), which stays until the user
+/// decides; this only says that its box is up, and for which flow.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub(super) struct FlowOrigin {
-    pub(super) window: Option<ChatId>,
-}
-
-/// Where the deep-link flow in progress stands in this window's UI, with
-/// its origin.
-#[derive(Default)]
-pub(super) enum LinkFlow {
+pub(super) enum InviteBox {
     #[default]
-    Idle,
-    /// The session resolves the link. The origin is taken with the flow's
-    /// state at each pump and put back only while the flow goes on, so every
-    /// terminal state leaves none behind.
-    Running { origin: FlowOrigin },
-    /// An invite preview waits for the user's answer (`DeepLinkInvite`).
-    Asking { invite: quill::state::DeepLinkState },
+    Closed,
+    Open {
+        generation: u64,
+    },
 }
 
-impl LinkFlow {
-    /// A flow asked from `from` starts; an unanswered invite gives way to it.
-    pub(super) fn start(&mut self, origin: FlowOrigin) {
-        *self = Self::Running { origin };
+impl InviteBox {
+    pub(super) fn is_open(&self) -> bool {
+        matches!(self, Self::Open { .. })
     }
 
-    /// The origin of the running flow, which is no longer running: a step
-    /// that goes on puts it back with [`Self::resume`].
-    pub(super) fn take_origin(&mut self) -> Option<FlowOrigin> {
+    /// The generation of the invite the box is up for, if it is.
+    pub(super) fn generation(&self) -> Option<u64> {
         match self {
-            Self::Running { origin } => {
-                let origin = *origin;
-                *self = Self::Idle;
-                Some(origin)
-            }
-            Self::Idle | Self::Asking { .. } => None,
+            Self::Open { generation } => Some(*generation),
+            Self::Closed => None,
         }
     }
 
-    /// The flow goes on with its origin; an invite being asked stays.
-    pub(super) fn resume(&mut self, origin: Option<FlowOrigin>) {
-        if !matches!(self, Self::Asking { .. }) {
-            *self = Self::Running {
-                origin: origin.unwrap_or_default(),
-            };
-        }
+    /// The box is up for the invite of `generation`.
+    pub(super) fn show(&mut self, generation: u64) {
+        *self = Self::Open { generation };
     }
 
-    /// The invite preview the user is asked about.
-    pub(super) fn invite(&self) -> Option<&quill::state::DeepLinkState> {
-        match self {
-            Self::Asking { invite } => Some(invite),
-            Self::Idle | Self::Running { .. } => None,
-        }
-    }
-
-    pub(super) fn ask(&mut self, invite: quill::state::DeepLinkState) {
-        *self = Self::Asking { invite };
-    }
-
-    /// The invite is answered or dropped.
-    pub(super) fn take_invite(&mut self) -> Option<quill::state::DeepLinkState> {
-        match std::mem::take(self) {
-            Self::Asking { invite } => Some(invite),
-            other => {
-                *self = other;
-                None
-            }
-        }
+    /// The invite is answered or dropped: the generation it was up for.
+    pub(super) fn take(&mut self) -> Option<u64> {
+        let generation = self.generation();
+        *self = Self::Closed;
+        generation
     }
 }
 
@@ -181,9 +145,9 @@ pub(crate) struct LinkUi {
     /// `parity:platform-deep-links`: TDLib's info / error text for the
     /// deep link, shown in a dialog (`DialogKind::DeepLinkInfo`).
     pub(super) deep_link_dialog: Option<String>,
-    /// The deep-link flow in progress: its origin window, or the invite
-    /// preview it asks about.
-    pub(super) flow: LinkFlow,
+    /// The invite preview box of the deep-link flow (the flow itself, with
+    /// its origin window, is the session's).
+    pub(super) invite_box: InviteBox,
     /// A resolved link waiting for the frame of its window to run it.
     pub(super) resolved: Option<ResolvedLink>,
     /// B1: password prompt for `inlineKeyboardButtonTypeCallbackWithPassword`.
@@ -233,7 +197,7 @@ impl LinkUi {
     pub(super) fn new() -> Self {
         Self {
             deep_link_dialog: None,
-            flow: LinkFlow::Idle,
+            invite_box: InviteBox::Closed,
             resolved: None,
             callback_password_dialog: None,
             login_url_confirm: None,
@@ -245,40 +209,15 @@ impl LinkUi {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use quill::state::DeepLinkState;
-
-    fn invite() -> DeepLinkState {
-        DeepLinkState::ShowText("preview".into())
-    }
 
     #[core::prelude::v1::test]
-    fn the_origin_is_taken_with_the_step_and_put_back_while_the_flow_goes_on() {
-        let mut flow = LinkFlow::default();
-        let origin = FlowOrigin {
-            window: Some(ChatId(7)),
-        };
-        flow.start(origin);
-        assert_eq!(flow.take_origin(), Some(origin));
-        assert_eq!(flow.take_origin(), None, "a terminal step leaves none");
-        flow.resume(Some(origin));
-        assert_eq!(
-            flow.take_origin(),
-            Some(origin),
-            "a window's flow stays its"
-        );
-    }
-
-    #[core::prelude::v1::test]
-    fn an_invite_being_asked_survives_the_pump_and_gives_way_to_a_new_flow() {
-        let mut flow = LinkFlow::default();
-        flow.ask(invite());
-        assert_eq!(flow.take_origin(), None);
-        flow.resume(None);
-        assert!(flow.invite().is_some(), "the pump does not drop the invite");
-        flow.start(FlowOrigin::default());
-        assert!(flow.invite().is_none(), "a new flow replaces it");
-        flow.ask(invite());
-        assert!(flow.take_invite().is_some());
-        assert!(flow.take_invite().is_none());
+    fn the_invite_box_answers_once_for_its_generation() {
+        let mut invite = InviteBox::default();
+        assert!(!invite.is_open());
+        invite.show(4);
+        assert_eq!(invite.generation(), Some(4));
+        assert_eq!(invite.take(), Some(4));
+        assert_eq!(invite.take(), None, "answered once");
+        assert!(!invite.is_open());
     }
 }

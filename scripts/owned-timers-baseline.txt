@@ -9,7 +9,6 @@ detached:QuillApp::bot_username_changed 1
 detached:QuillApp::business_bot_watch 1
 detached:QuillApp::close_earn_layer 1
 detached:QuillApp::close_profile_modal 1
-detached:QuillApp::custom_emoji_card_body 1
 detached:QuillApp::emoji_sets_search_typed 1
 detached:QuillApp::ensure_self_destruct_tick 1
 detached:QuillApp::general_link_handler_section 1
@@ -18,7 +17,6 @@ detached:QuillApp::live_story_header 1
 detached:QuillApp::new_chatbot_draft 2
 detached:QuillApp::ptt_release 1
 detached:QuillApp::schedule_chat_search_commit 1
-detached:QuillApp::schedule_draft_commit 1
 detached:QuillApp::schedule_search_commit 1
 detached:QuillApp::show_notification_with_preview 1
 detached:QuillApp::show_qr_toast 1
@@ -27,7 +25,6 @@ detached:QuillApp::sidebar_pointer_moved_away 1
 detached:QuillApp::spawn_passcode_tick 1
 detached:QuillApp::spawn_poll_loop 1
 detached:QuillApp::spawn_system_unlock_wait 1
-detached:QuillApp::start_connection 1
 detached:QuillApp::start_update_checks 1
 detached:QuillApp::status_toast_visible 1
 detached:SyntheticChat::new 1
@@ -36,7 +33,6 @@ detached:request_video_frame 1
 detached:run_screenshot_demo 2
 detached:spawn_menu_sync 1
 detached:start_sweeper 1
-detached:watch 1
 detached:watch_closed_windows 2
 detached:watch_saver 1
 poll:QuillApp::after_closing 1

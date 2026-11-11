@@ -237,15 +237,50 @@ impl Session {
             .direct
             .kicked
             .get(&(channel.0, user_id))
-            .copied()
+            .and_then(|status| status.data().copied())
     }
 
-    pub fn set_direct_member_banned(&mut self, channel: ChatId, user_id: i64, banned: bool) {
+    /// The last check of the user's status failed, with nothing known.
+    pub fn direct_member_check_failed(&self, channel: ChatId, user_id: i64) -> bool {
         self.threads
             .direct
             .kicked
-            .insert((channel.0, user_id), banned);
+            .get(&(channel.0, user_id))
+            .is_some_and(|status| status.error().is_some())
+    }
+
+    /// An update (a ban, an unban) tells the user's status.
+    pub fn set_direct_member_banned(&mut self, channel: ChatId, user_id: i64, banned: bool) {
+        self.threads.direct.kicked.insert(
+            (channel.0, user_id),
+            crate::state::fetch::Fetch::Ready(banned),
+        );
         self.view_generation.bump();
+    }
+
+    /// The answer of the status check `request`: taken only by the check
+    /// that waits for it.
+    pub(crate) fn answer_direct_member(
+        &mut self,
+        channel: ChatId,
+        user_id: i64,
+        request: Option<RequestId>,
+        banned: bool,
+    ) {
+        if let Some(status) = self.threads.direct.kicked.get_mut(&(channel.0, user_id))
+            && status.answered(request, banned)
+        {
+            self.view_generation.bump();
+        }
+    }
+
+    /// The status check `request` was refused, or never left.
+    pub(crate) fn fail_direct_member(&mut self, channel: ChatId, user_id: i64, request: RequestId) {
+        if let Some(status) = self.threads.direct.kicked.get_mut(&(channel.0, user_id))
+            && status.failed(Some(request), "Could not check the member", false)
+        {
+            self.view_generation.bump();
+        }
     }
 
     /// Stars this conversation paid; `None` until asked.

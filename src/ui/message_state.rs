@@ -48,8 +48,8 @@ pub(crate) struct MessageUi {
     pub(super) rendered_sponsored: std::rc::Rc<std::cell::RefCell<Vec<(ChatId, i64)>>>,
     /// The custom emoji card of this window: tapped, asked for, shown (it
     /// times itself out; a new tap of the same emoji starts the timer over).
-    /// It shows here, over the window of the tap (the session keeps one
-    /// preview, as the answer).
+    /// It shows here, over the window of the tap; the session keeps the
+    /// answer under the request that asked until this window takes it.
     pub(super) custom_emoji: super::custom_emoji_card::CustomEmojiCard,
     /// B4: poll voter-list viewer.
     pub(super) poll_voters_dialog: Option<PollVotersDialog>,

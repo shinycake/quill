@@ -61,6 +61,11 @@ impl Session {
             Some(RequestPurpose::Stickers(StickersPurpose::ViewStickerSet { set_id })) => {
                 self.fail_sticker_set_view(set_id)
             }
+            Some(RequestPurpose::Stickers(StickersPurpose::CustomEmojiPack { .. })) => {
+                if let Some(pending) = pending {
+                    self.fail_custom_emoji_preview(pending.id);
+                }
+            }
             // "Attached Stickers": the box it opened (set 0) says it failed.
             Some(RequestPurpose::Stickers(StickersPurpose::GetAttachedStickerSets { .. })) => {
                 if pending.map(|p| p.id) == self.stickers.stickers.attached_request {

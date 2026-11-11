@@ -170,10 +170,6 @@ pub(crate) struct ComposerUi {
     /// What the compose field's placeholder was last built from
     /// (`sync_composer_placeholder`): the facts and the language.
     pub(super) placeholder_shown: Option<(quill::composer::PlaceholderFacts, usize)>,
-    /// Phase S2: the inline-bot warning has been confirmed once this
-    /// session (TGX `TUTORIAL_INLINE_SEARCH_SECRECY`, which persists;
-    /// Quill keeps it per session — documented divergence).
-    pub(super) inline_bot_alert_shown: bool,
     /// Files being dragged over the conversation, and what they hold
     /// (`drop_zones`), or a demo's fixed drop-zone state (no real drag in
     /// a screenshot).
@@ -206,7 +202,6 @@ impl ComposerUi {
             remote_draft_seen: 0,
             draft_load: DraftLoad::Unshown,
             placeholder_shown: None,
-            inline_bot_alert_shown: false,
             file_drag: super::drop_zones::FileDrag::Idle,
             archive: Default::default(),
             slow_mode_tick: SlowModeTick::Idle,

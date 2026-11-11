@@ -43,8 +43,9 @@ pub struct StickersState {
     /// existence: the driver fetches both installed lists again so menus
     /// and the panel show the server's sets.
     pub creator_refetch_sets: bool,
-    /// The pack of the custom emoji the user just tapped in a message.
-    pub custom_emoji_preview: Option<CustomEmojiPreview>,
+    /// The packs of the custom emoji the user tapped in messages, by the
+    /// request that asked.
+    pub custom_emoji_answers: CustomEmojiAnswers,
     /// Titles of the emoji packs a message uses, by set id, for the menu's
     /// "This message contains emoji from X pack" footer.
     pub emoji_pack_titles: HashMap<i64, PackTitle>,
@@ -78,7 +79,7 @@ impl StickersState {
             sticker_set_view: None,
             creator_notes: Default::default(),
             creator_refetch_sets: false,
-            custom_emoji_preview: None,
+            custom_emoji_answers: Default::default(),
             emoji_pack_titles: HashMap::new(),
             stickers: StickerPanel::default(),
             emoji: EmojiPanel::default(),
