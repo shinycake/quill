@@ -136,7 +136,6 @@ bare:SendState::Sent 1
 bare:SendToMenu::Reading 1
 bare:Sent::Queued 1
 bare:SetFiles::Asked 1
-bare:ShareLink::Fetching 1
 bare:SharedMediaTabStatus::Loading 1
 bare:Sheet::Loading 1
 bare:Showing::Sending 1
@@ -148,7 +147,6 @@ bare:Stage::Opening 1
 bare:Stage::Queued 1
 bare:Stage::Running 1
 bare:Stage::Starting 1
-bare:Stage::Writing 1
 bare:StickerSetViewStage::Loading 1
 bare:StorageClear::Clearing 1
 bare:StorageScrollStage::Requested 1
@@ -191,7 +189,6 @@ unkeyed:Assembly::Reading 1
 unkeyed:AuctionFetch::Loading 1
 unkeyed:AuctionOpen::Waiting 1
 unkeyed:Beats::Running 1
-unkeyed:BoostPhase::Working 1
 unkeyed:BotUsernameCheck::Checking 1
 unkeyed:BuyPhase::Sending 1
 unkeyed:CallLinkStage::Leaving 1
@@ -242,7 +239,6 @@ unkeyed:Lifecycle::Waiting 1
 unkeyed:LinkFlow::Asking 1
 unkeyed:LinkFlow::Running 1
 unkeyed:ListEdit::InFlight 1
-unkeyed:LiveJoin::Joining 1
 unkeyed:LiveOverlay::Opening 1
 unkeyed:Load::Reading 1
 unkeyed:MessageReactionsState::Loading 1
