@@ -97,9 +97,9 @@ impl QuillApp {
                                     Ok(_) => {
                                         StatusNote::info(tr(keys::Q_CHAT_SAVED_TO_SAVED_MESSAGES))
                                     }
-                                    Err(_) => StatusNote::error(tr(
-                                        keys::Q_CHAT_COULD_NOT_SAVE_TO_SAVED,
-                                    )),
+                                    Err(_) => {
+                                        StatusNote::error(tr(keys::Q_CHAT_COULD_NOT_SAVE_TO_SAVED))
+                                    }
                                 },
                             );
                         }

@@ -75,9 +75,7 @@ impl QuillApp {
             // started since: the files are not the tray's.
             let stale = match asked_edit {
                 Some(_) => this.chat_ui.edit_id() != asked_edit,
-                None => {
-                    this.chat_ui.is_editing() && this.send_slot().as_ref() == Some(&asked_in)
-                }
+                None => this.chat_ui.is_editing() && this.send_slot().as_ref() == Some(&asked_in),
             };
             if !stale {
                 this.attach_picked_in(&asked_in, paths, as_files, cx)

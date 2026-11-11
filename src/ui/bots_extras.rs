@@ -223,7 +223,10 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         if self.profile_box_in_the_way() {
-            self.set_status_note(StatusNote::info(tr(keys::Q_MISC_CLOSE_THE_OPEN_BOX_FIRST)), cx);
+            self.set_status_note(
+                StatusNote::info(tr(keys::Q_MISC_CLOSE_THE_OPEN_BOX_FIRST)),
+                cx,
+            );
             return;
         }
         if let Some(live) = self.live.as_mut() {
@@ -617,7 +620,10 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         if self.profile_box_in_the_way() {
-            self.set_status_note(StatusNote::info(tr(keys::Q_MISC_CLOSE_THE_OPEN_BOX_FIRST)), cx);
+            self.set_status_note(
+                StatusNote::info(tr(keys::Q_MISC_CLOSE_THE_OPEN_BOX_FIRST)),
+                cx,
+            );
             return;
         }
         self.dialogs.profile_dialog = Some(ProfileDialog::ShareGame {

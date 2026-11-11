@@ -259,7 +259,10 @@ impl QuillApp {
     ) {
         // A request that cannot be sent has no answer to report it later.
         if let Some(live) = self.live.as_mut()
-            && live.driver.get_item_link(chat_id, message_id, item).is_err()
+            && live
+                .driver
+                .get_item_link(chat_id, message_id, item)
+                .is_err()
         {
             self.set_note(StatusNote::error(tr(
                 keys::Q_MEDIA_COULDNT_REACH_TELEGRAM_TRY_AGAIN,
