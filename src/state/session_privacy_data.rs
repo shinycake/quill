@@ -128,13 +128,14 @@ impl Session {
                 if purpose == Some(RequestPurpose::CanSendMessageToUser)
                     && let Some(user_id) = pending.and_then(|p| p.user_id)
                 {
-                    let premium = self.my_is_premium();
-                    self.payments.paid_messages.record_answer(
-                        user_id,
-                        *answer,
-                        unix_ms_now(),
-                        premium,
-                    );
+                    if let Some(pending) = pending {
+                        self.payments.paid_messages.accept_answer(
+                            user_id,
+                            pending.id,
+                            *answer,
+                            unix_ms_now(),
+                        );
+                    }
                 }
                 true
             }
@@ -323,10 +324,12 @@ impl Session {
             }
             RequestPurpose::CanSendMessageToUser => {
                 // The chat stays as it was; the next open asks again.
-                if let Some(user_id) = pending.and_then(|p| p.user_id) {
+                if let Some(pending) = pending
+                    && let Some(user_id) = pending.user_id
+                {
                     self.payments
                         .paid_messages
-                        .ask_failed(user_id, unix_ms_now());
+                        .ask_failed(user_id, pending.id, unix_ms_now());
                 }
             }
             RequestPurpose::GetPaidMessageRevenue | RequestPurpose::LoadDirectMessagesChat => {

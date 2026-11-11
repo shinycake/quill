@@ -51,7 +51,11 @@ impl QuillApp {
             return false;
         };
         let stars = session.send_gate(chat_id).stars();
-        if !needs_confirmation(&session.payments.paid_messages.trust, chat_id.0, stars) {
+        if !session
+            .payments
+            .paid_messages
+            .needs_confirmation(chat_id.0, stars)
+        {
             return false;
         }
         let name = session.chats.get(&chat_id.0).map_or_else(
@@ -174,8 +178,7 @@ impl QuillApp {
                 session
                     .payments
                     .paid_messages
-                    .trust
-                    .trust(chat.0, confirm.per_message);
+                    .remember_trust(chat.0, confirm.per_message);
             }
         }
         let total = confirm.total();
