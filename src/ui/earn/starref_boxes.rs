@@ -119,6 +119,7 @@ impl QuillApp {
         // unasked, in the next account or after the layer was left.
         if let Some(earn) = self.earn_mut() {
             earn.pending_join = None;
+            earn.resolve = quill::earn::Resolve::Idle;
         }
         let Some(earn) = self.earn_state() else {
             return;

@@ -510,6 +510,7 @@ impl QuillApp {
         self.screen.client_filled = true;
         // The private media scratch is this account's from here on.
         quill::local_path::set_media_cache_scope(&live.driver.session.account);
+        quill::telegram::name_accent::set_active_account(&live.driver.session.account);
         self.live = Some(live);
     }
 }

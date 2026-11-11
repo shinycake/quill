@@ -254,9 +254,9 @@ impl Session {
                 colors,
                 available_ids,
             } => {
-                // Server name-color palette (ids 7+); the renderer reads it
-                // through the process-wide table.
-                crate::telegram::name_accent::set_palette(&colors);
+                // Server name-color palette (ids 7+); the renderer reads the
+                // table of the account on screen.
+                crate::telegram::name_accent::set_palette(&self.account, &colors);
                 self.chats_state.name_accent_colors = colors;
                 self.chats_state.available_name_accent_ids = available_ids;
             }
