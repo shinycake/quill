@@ -24,7 +24,7 @@ use quill::telegram::envelope::ChatKind;
 use super::forward_stage::ForwardStage;
 impl QuillApp {
     pub(super) fn toggle_share_destination(&mut self, id: ChatId, cx: &mut Context<Self>) {
-        self.share.selection.toggle(id);
+        self.share.toggle_tick(id);
         cx.notify();
     }
 
@@ -56,7 +56,7 @@ impl QuillApp {
 
     /// Ctrl/Cmd+Enter in the share box search: send to the ticked chats.
     pub(super) fn submit_share_from_search(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if !self.share.selection.is_empty() {
+        if self.share.tick_count() > 0 {
             self.submit_share(ShareSend::Normal, window, cx);
         }
     }
@@ -95,8 +95,13 @@ impl QuillApp {
         let Some(draft) = self.forward_draft() else {
             return;
         };
-        let entries: Vec<(ChatId, ChatSend)> = self.share.selection.entries().to_vec();
-        let dests: Vec<ChatId> = self.share.selection.chats();
+        let entries: Vec<(ChatId, ChatSend)> = self
+            .share
+            .forward
+            .ticks()
+            .map(|ticks| ticks.entries().to_vec())
+            .unwrap_or_default();
+        let dests: Vec<ChatId> = entries.iter().map(|(id, _)| *id).collect();
         if dests.is_empty() {
             self.set_note(StatusNote::silent(tr(keys::Q_OPS_CHOOSE_A_CHAT_TO_FORWARD)));
             cx.notify();
@@ -175,11 +180,12 @@ impl QuillApp {
         }
         if unfinished.is_empty() {
             self.share.forward = ForwardStage::None;
-            self.share.selection.clear();
         } else {
             // Only the unfinished chats stay ticked. A chat whose comment
             // went out is marked, so the retry sends it only the forward.
-            self.share.selection.keep_unfinished(&unfinished);
+            if let Some(ticks) = self.share.forward.ticks_mut() {
+                ticks.keep_unfinished(&unfinished);
+            }
             if unfinished
                 .iter()
                 .all(|(_, stage)| *stage == ChatSend::CommentSent)
@@ -212,7 +218,7 @@ impl QuillApp {
     /// and the comment ride with the open to the window that shows the
     /// chat; the box's window keeps none of it.
     pub(super) fn share_continue_in_chat(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(dest) = self.share.selection.single() else {
+        let Some(dest) = self.share.single_tick() else {
             return;
         };
         if let Some(note) = self.share_dest_refusal(dest, cx) {
@@ -222,10 +228,6 @@ impl QuillApp {
         }
         let comment = self.share.comment_input.read(cx).value().trim().to_string();
         let draft = self.share.forward.take_draft();
-        self.share.selection.clear();
-        self.share
-            .search_input
-            .update(cx, |input, cx| input.set_value("", window, cx));
         let mut open = super::chat_window::ChatOpen::new(dest);
         if let Some(draft) = draft {
             open = open.forwarding(draft);
@@ -487,7 +489,7 @@ impl QuillApp {
         let dest = self.share.forward.bar_shown();
         self.open_forward_picker(window, cx);
         if let Some(dest) = dest {
-            self.share.selection.toggle(dest);
+            self.share.toggle_tick(dest);
         }
         cx.notify();
     }

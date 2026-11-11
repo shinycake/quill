@@ -561,7 +561,10 @@ fn a_forward_answer_keeps_a_newer_selection(cx: &mut TestAppContext) {
             app.selecting_in(FORUM_CHAT),
             "a late answer from the same topic does not end the newer selection"
         );
-        assert!(app.share.forward_result.is_some(), "the answer still shows");
+        assert!(
+            app.chat_ui.forward_result.is_some(),
+            "the answer still shows"
+        );
     });
 }
 
@@ -580,6 +583,39 @@ fn another_chat_drops_the_secret_inline_bot_alert(cx: &mut TestAppContext) {
     assert!(
         app.read_with(&vcx, |app, _| !app.chat_ui.bot_alert.is_pending()),
         "the alert stayed with the chat it was raised in"
+    );
+}
+
+/// The forward result banner is the source chat's: a window showing another
+/// chat draws none, and leaving the chat takes it along.
+#[gpui_kit::test]
+fn the_forward_result_banner_stays_with_its_source_chat(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let other = other_chat(&app, &mut vcx);
+    let answer = |from: ChatId| quill::state::ForwardResult {
+        dest_chat_id: other,
+        dest_title: "B".into(),
+        from_chat_id: from,
+        from_topic: quill::ids::TopicId::None,
+        requested: 1,
+        forwarded_ids: vec![MessageId(1)],
+    };
+    open(&app, &mut vcx, CHAT);
+    app.update(&mut vcx, |app, cx| {
+        app.present_forward_result(answer(other), cx);
+    });
+    assert!(
+        app.read_with(&vcx, |app, _| app.chat_ui.forward_result.is_none()),
+        "a result for another chat is not drawn here"
+    );
+    app.update(&mut vcx, |app, cx| {
+        app.present_forward_result(answer(CHAT), cx);
+    });
+    assert!(app.read_with(&vcx, |app, _| app.chat_ui.forward_result.is_some()));
+    open(&app, &mut vcx, other);
+    assert!(
+        app.read_with(&vcx, |app, _| app.chat_ui.forward_result.is_none()),
+        "the banner went with its chat"
     );
 }
 

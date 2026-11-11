@@ -17,7 +17,7 @@ use quill::composer::ForwardDraft;
 use quill::ids::{FileId, MessageId};
 use quill::lang::{keys, tr};
 use quill::state::{
-    MediaMenuFacts, MediaMenuItem, SelectedMedia, SharedMediaAction, SharedMediaItem,
+    MediaMenuFacts, MediaMenuItem, MenuFile, SelectedMedia, SharedMediaAction, SharedMediaItem,
     SharedMediaState, SharedMediaTab, media_menu_items,
 };
 use quill::telegram::envelope::MessageActions;
@@ -193,8 +193,17 @@ impl QuillApp {
         );
         MediaMenuFacts {
             is_message: item.action == SharedMediaAction::Message,
-            downloading,
-            local: document_tab && on_disk && !protected && actions.is_none_or(|a| a.can_be_saved),
+            file: if downloading {
+                MenuFile::Downloading
+            } else if document_tab
+                && on_disk
+                && !protected
+                && actions.is_none_or(|a| a.can_be_saved)
+            {
+                MenuFile::OnDisk
+            } else {
+                MenuFile::Remote
+            },
             can_forward,
             can_delete,
             selected: session.media.shared_media.is_selected(item.message_id),
@@ -375,7 +384,7 @@ impl QuillApp {
             remove_caption: false,
             topic_id: None,
         };
-        self.share.forward = crate::ui::forward_stage::ForwardStage::Selecting(draft);
+        self.share.forward.begin_selection(draft);
         self.clear_shared_media_selection(cx);
         self.open_forward_picker(window, cx);
     }

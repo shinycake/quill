@@ -148,18 +148,13 @@ impl QuillApp {
         if !self.selection_forwardable(draft.from_chat_id) || !self.share.forward.open_picker() {
             return;
         }
-        self.share.selection.clear();
         self.share
-            .comment_input
-            .update(cx, |input, cx| input.set_value("", window, cx));
-        self.share.search_input.update(cx, |input, cx| {
-            input.set_value("", window, cx);
-            input.focus(window, cx);
-        });
+            .search_input
+            .update(cx, |input, cx| input.focus(window, cx));
         cx.notify();
     }
 
-    pub(super) fn close_forward_picker(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    pub(super) fn close_forward_picker(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
         if self
             .chat_ui
             .schedule_picker
@@ -169,25 +164,17 @@ impl QuillApp {
             self.close_schedule_picker(cx);
         }
         self.share.forward.close_picker();
-        self.share.selection.clear();
         // "Share at 1:23" lasts as long as the picker it opened.
         self.viewer.extra.share_at = None;
-        self.share
-            .search_input
-            .update(cx, |input, cx| input.set_value("", window, cx));
         cx.notify();
     }
 
     /// Leave selection mode (or drop the draft) with nothing said: the
     /// selection ended by Cancel, Escape, or by being used (Report, Save
     /// as HTML), as tdesktop's `clearSelected`.
-    pub(super) fn end_selection(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    pub(super) fn end_selection(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
         let _ = cancel_forward_draft(self.share.forward.take_draft());
         self.chat_ui.focus.clear_row();
-        self.share.selection.clear();
-        self.share
-            .search_input
-            .update(cx, |input, cx| input.set_value("", window, cx));
         cx.notify();
     }
 
@@ -252,7 +239,10 @@ impl QuillApp {
                 StatusNote::info(label)
             },
         );
-        self.share.forward_result = Some(result);
+        // The banner is the source chat's, where the window shows it.
+        if self.session().and_then(|s| s.open_chat_id()) == Some(result.from_chat_id) {
+            self.chat_ui.forward_result = Some(result);
+        }
         cx.notify();
     }
 
@@ -288,7 +278,7 @@ impl QuillApp {
                 Button::new("dismiss-forward-success")
                     .label(tr(keys::Q_MISC_DISMISS))
                     .on_click(cx.listener(|this, _, _, cx| {
-                        this.share.forward_result = None;
+                        this.chat_ui.forward_result = None;
                         cx.notify();
                     })),
             )

@@ -324,9 +324,9 @@ pub(super) static ESC_LAYERS: &[EscLayer] = &[
     ),
     layer!(
         "forward-result",
-        |app| app.share.forward_result.is_some(),
+        |app| app.chat_ui.forward_result.is_some(),
         |app, _, cx| {
-            app.share.forward_result = None;
+            app.chat_ui.forward_result = None;
             app.set_note(StatusNote::silent(tr(
                 keys::Q_MISC_FORWARD_RESULT_DISMISSED,
             )));

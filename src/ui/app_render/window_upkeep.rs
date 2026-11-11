@@ -22,6 +22,8 @@ impl QuillApp {
         self.menu_focus_upkeep(window, cx);
         // A resolved comment thread moves the view into its discussion group.
         self.advance_thread(window, cx);
+        // The share box's typed text goes with the box.
+        self.share.sync_inputs(window, cx);
         // A deleted message's reply or edit bar goes.
         self.cancel_gone_composer_targets(window, cx);
         // The reply bar's message, when it is not in memory: each window's

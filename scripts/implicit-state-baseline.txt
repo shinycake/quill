@@ -43,7 +43,6 @@ LiveInput::failed
 Lookup::fade_started
 Lookup::pending
 
-MediaMenuFacts::downloading
 
 MiniAppWindow::closing_confirmation
 
