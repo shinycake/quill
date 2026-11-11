@@ -6784,3 +6784,87 @@ Thirty-four minor entries; each was proved against the integration branch first.
   process-wide (`next_query_token`). 13-165: tdesktop toasts the hide at
   once (the bar is optimistic here too, with `RequestRollback`), and the
   local hidden flag is already keyed by account.
+
+### Sweep fixes (is-10)
+
+Forty-two implicit-state entries. A fix means the shape is gone: one enum per
+stage, every stage with a way out (the answer, the error, a cancel, the owner
+going away), and the baseline line of each converted field dropped.
+
+- **Settings** (05-140, 05-141, 04-047). Each fetched resource is one
+  `Fetch<T>`: storage statistics, account TTL (also the `setAccountTtl` and
+  `deleteAccount` in flight, so the surfaces disable while the value loads),
+  connected websites, default auto-delete, the auto-download presets and the
+  cache clear (`Fetch<i64>`: in flight, the bytes freed, or why it failed).
+  `data_storage_error` was one slot shared by five requests; it is gone, each
+  request keeps its own failure (`data_storage_error()` joins them for the
+  screen). A write against a list is `ListEdit { Idle, InFlight, Refetch }`
+  (the sessions and websites lists, with the "refetch on the next ingest"
+  need), the device link is `DeviceLogin { Idle, InFlight, Done(result) }`
+  taken once, and the read-date setting is `ReadDate { Unknown, Getting,
+  Known, Setting, Failed }`, so the value and the request that owns it are
+  one value.
+- **Stickers** (05-150, 05-151, 05-152, 05-153, 05-154, 05-238, 09-079). The
+  set box's edits are `StickerSetEdits { Idle, InFlight, NeedsRefresh,
+  Deleted }`; `files_requested` moved into the `Ready` stage of the set view
+  (a refreshed set starts unasked). The emoji panel's install is
+  `EmojiMutation`, the status picker's action `EmojiStatusStage`, and the
+  tab a search returns to is part of `EmojiSetTab::Search { back }`, so the
+  picker no longer keeps a second field in step. The GIF panel has
+  `saved` and `search` as `Fetch<Vec<_>>`; a refetch owed (an
+  `updateSavedAnimations`, a save or remove) is `Loading` with no request,
+  asked once the panel is open, and a failed list waits for the panel to
+  reopen. The masks panel has a `Fetch` per list and `archived_more`
+  (the offset of the next page); the manager's commit is a queue of
+  `CommitStep`s.
+- **Stories** (05-164, 05-165, 05-260, 05-282). `ActiveStoriesPaging` is
+  `Idle | Waiting | Exhausted` (a late failure no longer turns an
+  exhausted list back into a wait), the picker's custom emoji fetch is
+  `CustomEmojiFetch { Idle, Backoff }` (an answer ends the failure count),
+  and one `StoryFetches` map holds where each story's `getStory` stands
+  (`Asked | Gone | Retry`), replacing the asked set, the gone set and the
+  retry map.
+- **Threads and users** (05-170, 05-171, 05-173, 05-174, 05-175, 05-271). The
+  direct-messages topics keep `TopicsLoad { Asked | Failed | Exhausted }` per
+  chat; the forum row keeps `ForumRowLoad { Asked | Failed }`; contacts are
+  `Fetch<Vec<i64>>`; the New Contact box's import is `NewContact { Closed,
+  Sending, Done }`; the three emoji icon lists and the wearable gifts are
+  `Fetch`es (an empty answer is now an answer, not "not loaded").
+- **History** (05-176, 05-179, 05-180, 05-241). A window's two ends are
+  `WindowLoad { older: Open | Failed | Complete, newer: Open | Failed |
+  Exhausted }`, replaced whole with the window. The `viewMessages`
+  bookkeeping is one `ViewBook`: a stage per message (`Due | InFlight(request)
+  | Done`) and whether rows were reported, so a trimmed message leaves every
+  stage at once. The dropped-history memos carry their own order.
+- **Session** (05-189, 05-190, 05-211, 05-212, 05-216, 05-224, 05-237, 05-239,
+  05-245, 05-259, 05-273). A set's library load is `SetLoad { Loading(request)
+  | Ready | Failed }`; the picker's Star offer lives in the reaction options;
+  Stop on a streaming bot reply is `BotStopStage::Stopping(request)` (the bar
+  no longer reads the request table), and an error settles only the Stop it
+  answers; the window a request was asked in is one `AskingView` (the
+  window and its opening); `getRepliedMessage` registers its request and its
+  `Loading(request)` row together; the "boosts to bypass restrictions" save
+  carries its request, and an older answer does not settle a newer save; the
+  report flow's steps are one list; the next page of a reactions tab is
+  `Audience::Paging`; forwards are `Forwards` (one flight per destination and
+  a queue of outcomes, so two forwards finishing before the UI polls both
+  show, and a log-out clears the queued flights too); shown notifications
+  are `NotifyShown { Shown | ClearDue }` per chat.
+- **Skipped.** 05-166: `CloseFriendsList` already matches the load to its
+  request, and the sent list rides the request (tested in `stories_more.rs`).
+  05-167: `extras_requested` is gone, the three extras are `Fetch`es.
+  05-181: the unread bar (`unread_anchor`) and the read hold
+  (`opened_with_unread`) are separate in tdesktop too (`_unreadBarView` and
+  `_firstUnreadView`) and take all four combinations. 05-213: the optional
+  key fields of `PendingRequest` are written once at registration and never
+  change; they are keys, not a stage. 05-214: `open_chat` and `open_topic`
+  are written only by `open_chat` and the view swap; an enum would touch
+  every reader of both. 05-228: `rejoin` is already `GroupCallRejoin`,
+  `is_joined` mirrors TDLib's `groupCall.is_joined`. 05-252: the privacy
+  counter is gone (`privacy_asks` derives loading and failed). Left as they
+  are inside converted structs: the manager's and the masks panel's `open`
+  (each has a closer in its `Farewell`, and the driver reads `open` to
+  decide what to download), `strip_wanted`, `confirm_remove` (one `Option`
+  holding the target captured when the box opened), and
+  `Session::stale_history_requests` (request ids superseded by a window
+  reset; single writer, consumed by the answer, cleared on log-out).

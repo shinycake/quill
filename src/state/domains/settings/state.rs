@@ -216,12 +216,12 @@ pub struct SettingsState {
     pub default_auto_delete: Fetch<i32>,
     /// Parity slice: `getSavedNotificationSounds` cache (titles / durations
     /// for the sound picker; `sound` files download on demand).
-    pub saved_notification_sounds: Vec<NotificationSound>,
-    /// Parity slice: the saved-sound list has been fetched at least once.
-    pub saved_sounds_loaded: bool,
-    /// Parity slice: `updateSavedNotificationSounds` arrived since the last
-    /// fetch — the driver refetches on the next ingest.
-    pub saved_sounds_stale: bool,
+    ///
+    /// `Loading` with no request in flight means the list changed since
+    /// the last fetch (`updateSavedNotificationSounds`, an upload, a
+    /// removal): the driver refetches on the next ingest. A failed fetch
+    /// waits for the next change.
+    pub saved_sounds: Fetch<Vec<NotificationSound>>,
     /// "Upload Sound": the file in flight, or how it ended until the
     /// screen has reacted.
     pub tone_upload: crate::tone_upload::ToneUpload,
@@ -476,9 +476,7 @@ impl SettingsState {
             disable_contact_registered_notifications: false,
             notified: ShownNotifications::default(),
             default_auto_delete: Fetch::Idle,
-            saved_notification_sounds: Vec::new(),
-            saved_sounds_loaded: false,
-            saved_sounds_stale: false,
+            saved_sounds: Fetch::Idle,
             tone_upload: crate::tone_upload::ToneUpload::Idle,
             scope_notification_settings: HashMap::new(),
             notification_exceptions: HashMap::new(),
@@ -553,6 +551,11 @@ impl SettingsState {
             .error()
             .or_else(|| self.storage_clear.error())
             .or_else(|| self.data_storage_save.error())
+    }
+
+    /// The saved notification sounds held.
+    pub fn saved_notification_sounds(&self) -> &[NotificationSound] {
+        self.saved_sounds.data().map_or(&[], Vec::as_slice)
     }
 
     /// A preview download finished: whether a picker still waits for it.

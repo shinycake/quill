@@ -10,7 +10,16 @@ impl Session {
     pub(crate) fn mark_saved_sounds_stale(&mut self) {
         self.requests
             .take_purpose(RequestPurpose::GetSavedNotificationSounds);
-        self.settings.saved_sounds_stale = true;
+        self.settings.saved_sounds.begin();
+    }
+
+    /// The saved-sound list is owed a fetch: it changed, and no request
+    /// for it is out.
+    pub fn saved_sounds_owed(&self) -> bool {
+        self.settings.saved_sounds.is_loading()
+            && !self
+                .requests
+                .has_purpose(RequestPurpose::GetSavedNotificationSounds)
     }
 
     /// `notificationSound`: the new sound joins the front of the list
@@ -22,10 +31,11 @@ impl Session {
         };
         self.remember_files(std::slice::from_ref(&sound.sound));
         let sound_id = sound.id;
-        self.settings
-            .saved_notification_sounds
-            .retain(|saved| saved.id != sound_id);
-        self.settings.saved_notification_sounds.insert(0, sound);
+        self.settings.saved_sounds.insert_data_if_missing(Vec::new);
+        if let Some(saved) = self.settings.saved_sounds.data_mut() {
+            saved.retain(|saved| saved.id != sound_id);
+            saved.insert(0, sound);
+        }
         self.mark_saved_sounds_stale();
         let target = match &self.settings.tone_upload {
             ToneUpload::Uploading { target, .. } => Some(*target),

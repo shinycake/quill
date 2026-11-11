@@ -237,10 +237,17 @@ impl Session {
                     .account_ttl
                     .fail(sessions_error_line("update the account", err));
             }
+            // A refused saved-sound list is not asked for again by itself;
+            // the next change of the list does.
+            Some(RequestPurpose::GetSavedNotificationSounds) => {
+                self.settings
+                    .saved_sounds
+                    .fail(sessions_error_line("load the saved sounds", err));
+            }
             // Slice A4: a failed websites fetch or disconnect
-            // clears the in-flight flags and parks the honest,
+            // parks the honest,
             // classified error line on the overlay.
-            // A failed stale-refetch also clears `websites_stale`
+            // A failed refetch also ends the refetch need
             // (mirroring A3's sessions arm): otherwise the next
             // ingest retries the fetch and flood state worsens;
             // retry is user-driven via the Refresh button. The old

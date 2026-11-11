@@ -209,7 +209,7 @@ fn sound_list_refetch_prunes_file_ids() {
             sound_file, extra.0
         ),
     );
-    assert!(session.settings.saved_sounds_loaded);
+    assert!(session.settings.saved_sounds.data().is_some());
     assert!(!session.settings.sound_file_ids.contains_key(&91));
     assert_eq!(session.settings.sound_file_ids.get(&92), Some(&8));
 }
@@ -225,7 +225,7 @@ fn a_sound_list_answer_older_than_the_stale_mark_is_dropped() {
         &sink,
         r#"{"@type":"updateSavedNotificationSounds","notification_sound_ids":["1"]}"#,
     );
-    assert!(session.settings.saved_sounds_stale);
+    assert!(session.saved_sounds_owed());
     apply_json(
         &mut session,
         &seq,
@@ -236,7 +236,8 @@ fn a_sound_list_answer_older_than_the_stale_mark_is_dropped() {
         ),
     );
     assert!(
-        session.settings.saved_sounds_stale && !session.settings.saved_sounds_loaded,
+        session.settings.saved_sounds.is_loading()
+            && session.settings.saved_sounds.data().is_none(),
         "the older answer must not clear the mark"
     );
     assert!(

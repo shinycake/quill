@@ -278,7 +278,7 @@ impl QuillApp {
                 && quill::message_menu::tone_offered(
                     target,
                     file.map_or(0, |f| f.display_size()),
-                    session.settings.saved_notification_sounds.len(),
+                    session.settings.saved_notification_sounds().len(),
                     session.messages.tone_limits,
                 ),
         }
