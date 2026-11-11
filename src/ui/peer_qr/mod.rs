@@ -51,7 +51,8 @@ const CLOCK: Duration = Duration::from_secs(1);
 
 /// The panel's open or close motion, for drawing only: the reducer's
 /// `panel` says what is open. A panel change replaces it whole; a close
-/// stays `Closing` (at rest) until the next change.
+/// settles to `Idle` once its duration has passed (`settle`), so a closed
+/// panel holds no list.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(super) enum PanelMotion {
     /// No panel was shown yet.
@@ -75,11 +76,34 @@ impl PanelMotion {
         }
     }
 
-    /// The panel being shown, kept while it closes.
-    pub(super) fn shown(&self) -> Option<QrPanel> {
+    /// The panel the motion last named, kept while it closes.
+    fn shown(&self) -> Option<QrPanel> {
         match self {
             Self::Idle => None,
             Self::Opening { panel, .. } | Self::Closing { panel, .. } => Some(*panel),
+        }
+    }
+
+    /// The panel that is open, or still drawn while it closes: `None` once
+    /// a close has run its course, even before `settle`.
+    pub(super) fn visible(&self, now: Instant) -> Option<QrPanel> {
+        match *self {
+            Self::Idle => None,
+            Self::Opening { panel, .. } => Some(panel),
+            Self::Closing { panel, since } => (now.saturating_duration_since(since).as_secs_f64()
+                * 1000.
+                < quill::peer_qr::layout::PANEL_CLOSE_MS)
+                .then_some(panel),
+        }
+    }
+
+    /// End a close whose duration has passed.
+    fn settle(&mut self, now: Instant) {
+        if let Self::Closing { since, .. } = *self
+            && now.saturating_duration_since(since).as_secs_f64() * 1000.
+                >= quill::peer_qr::layout::PANEL_CLOSE_MS
+        {
+            *self = Self::Idle;
         }
     }
 
@@ -137,6 +161,23 @@ pub(super) struct PatternSwap {
     pub(super) started: Instant,
 }
 
+/// The box's toast: hidden, or showing with the timer that hides it. The
+/// timer is the stage's own task, so a newer toast or closing the box
+/// cancels it and it never hides a toast that is not its own.
+pub(super) enum ToastStage {
+    Hidden,
+    Showing { toast: QrToast, _timer: Task<()> },
+}
+
+impl ToastStage {
+    pub(super) fn toast(&self) -> Option<&QrToast> {
+        match self {
+            Self::Showing { toast, .. } => Some(toast),
+            Self::Hidden => None,
+        }
+    }
+}
+
 /// The plain emoji of `picks`, the ones the pattern draws.
 pub(super) fn plain_picks(picks: &[quill::peer_qr::theme::ThemeEmoji]) -> Vec<String> {
     picks
@@ -182,7 +223,7 @@ pub(super) struct OpenQr {
     pub(super) state: PeerQrBox,
     pub(super) opened: Instant,
     pub(super) motion: PanelMotion,
-    pub(super) toast: Option<(QrToast, Instant)>,
+    pub(super) toast: ToastStage,
     pub(super) swap: Option<PatternSwap>,
     /// When the shown gift's pattern began to come in (tdesktop
     /// `PeerQrGiftField::startEntry`).
@@ -291,7 +332,7 @@ impl QuillApp {
             state: PeerQrBox::new(subject, self.peer_qr.last_box),
             opened: now,
             motion: PanelMotion::IDLE,
-            toast: None,
+            toast: ToastStage::Hidden,
             swap: None,
             gift_entry: now,
             share: QrShare::Idle,
@@ -482,31 +523,48 @@ impl QuillApp {
     /// the pictures the box needs, and run the clock while a countdown
     /// shows.
     fn qr_refresh(&mut self, cx: &mut Context<Self>) {
+        self.qr_settle(Instant::now());
         self.ensure_qr_contact_link();
         self.qr_prepare_art(cx);
         self.qr_prepare_gift_art(cx);
         self.sync_qr_clock(cx);
     }
 
-    /// A toast over the box's bottom (tdesktop `ShowFreeToast`).
-    pub(super) fn show_qr_toast(&mut self, toast: QrToast, cx: &mut Context<Self>) {
+    /// End the motions that have run their course: a closed panel stops
+    /// holding its gift list, and a swapped-out emoji stops being kept.
+    fn qr_settle(&mut self, now: Instant) {
         let Some(open) = self.peer_qr.open.as_mut() else {
             return;
         };
-        let shown = Instant::now();
-        open.toast = Some((toast, shown));
-        self.spawn_screen(cx, async move |this, cx| {
+        open.motion.settle(now);
+        let swap_ms = quill::peer_qr::pattern::SWAP_MS as f64;
+        if open.swap.as_ref().is_some_and(|swap| {
+            now.saturating_duration_since(swap.started).as_secs_f64() * 1000. >= swap_ms
+        }) {
+            open.swap = None;
+        }
+    }
+
+    /// A toast over the box's bottom (tdesktop `ShowFreeToast`).
+    pub(super) fn show_qr_toast(&mut self, toast: QrToast, cx: &mut Context<Self>) {
+        if self.peer_qr.open.is_none() {
+            return;
+        }
+        let timer = self.spawn_screen(cx, async move |this, cx| {
             cx.background_executor().timer(TOAST).await;
             let _ = this.update(cx, |this, cx| {
-                if let Some(open) = this.peer_qr.open.as_mut()
-                    && open.toast.as_ref().is_some_and(|(_, at)| *at == shown)
-                {
-                    open.toast = None;
+                if let Some(open) = this.peer_qr.open.as_mut() {
+                    open.toast = ToastStage::Hidden;
                     cx.notify();
                 }
             });
-        })
-        .detach();
+        });
+        if let Some(open) = self.peer_qr.open.as_mut() {
+            open.toast = ToastStage::Showing {
+                toast,
+                _timer: timer,
+            };
+        }
         cx.notify();
     }
 
