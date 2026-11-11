@@ -1,4 +1,5 @@
 //! Error routing: maps TDLib errors onto per-purpose handlers.
+use super::request_kind::RequestKind;
 use super::*;
 
 impl Session {
@@ -29,7 +30,7 @@ impl Session {
         // `lng_flood_error`); background lookups were already retried by
         // the driver and stay quiet.
         if let Some(notice) = err.flood_notice()
-            && pending.is_some_and(|p| is_user_action(p.purpose))
+            && pending.is_some_and(|p| p.purpose.kind() == RequestKind::UserAction)
         {
             self.messages.flood_notice = Some(notice);
         }
@@ -260,114 +261,5 @@ impl Session {
                 flood_wait_secs: err.flood_wait_secs,
             });
         }
-    }
-}
-
-/// The name of the innermost variant of `purpose`: `GetPaymentForm` for
-/// `Payments(GetPaymentForm { .. })`, `SetName` for `SetName`.
-fn purpose_variant_name(purpose: RequestPurpose) -> String {
-    let debug = format!("{purpose:?}");
-    let mut rest = debug.as_str();
-    while let Some((head, inner)) = rest.split_once('(') {
-        if head.is_empty() || !head.chars().all(|c| c.is_ascii_alphanumeric()) {
-            break;
-        }
-        rest = inner;
-    }
-    rest.chars()
-        .take_while(|c| c.is_ascii_alphanumeric())
-        .collect()
-}
-
-/// What a request is, for the flood notice and for settling at logout.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum RequestKind {
-    /// Something the user did on purpose (send, edit, join, close a secret
-    /// chat, ...).
-    UserAction,
-    /// A background lookup, a view/online ping or a chat open: retried by
-    /// the driver, quiet on failure.
-    Lookup,
-    /// A login submit, which has its own error line.
-    Auth,
-}
-
-/// Whole-chat and presence pings that are not lookups by name.
-const QUIET_PINGS: [&str; 7] = [
-    "SetOnline",
-    "OpenChat",
-    "OpenChatSimilarChat",
-    "OpenMessageContent",
-    "OpenStory",
-    "CloseChat",
-    "CloseStory",
-];
-
-pub(crate) fn request_kind(purpose: RequestPurpose) -> RequestKind {
-    if is_auth_submit(purpose) {
-        return RequestKind::Auth;
-    }
-    if purpose.is_sweepable() {
-        return RequestKind::Lookup;
-    }
-    let name = purpose_variant_name(purpose);
-    let lookup = ["Get", "Load", "Search", "Download", "View"]
-        .iter()
-        .any(|prefix| name.starts_with(prefix))
-        || QUIET_PINGS.contains(&name.as_str());
-    if lookup {
-        RequestKind::Lookup
-    } else {
-        RequestKind::UserAction
-    }
-}
-
-/// Q1: whether a request is something the user did on purpose (send,
-/// edit, join, ...), as opposed to a background lookup, a view/online
-/// ping or a login submit (which has its own error line).
-pub(crate) fn is_user_action(purpose: RequestPurpose) -> bool {
-    request_kind(purpose) == RequestKind::UserAction
-}
-
-#[cfg(test)]
-mod kind_tests {
-    use super::{RequestKind, request_kind};
-    use crate::state::RequestPurpose;
-
-    #[test]
-    fn requests_are_classified_by_their_own_variant_name() {
-        assert_eq!(
-            request_kind(RequestPurpose::GetHistory),
-            RequestKind::Lookup
-        );
-        assert_eq!(request_kind(RequestPurpose::OpenChat), RequestKind::Lookup);
-        assert_eq!(request_kind(RequestPurpose::SetOnline), RequestKind::Lookup);
-        assert_eq!(
-            request_kind(RequestPurpose::SetPhoneNumber),
-            RequestKind::Auth
-        );
-        // Closing a secret chat is what the user asked for.
-        assert_eq!(
-            request_kind(RequestPurpose::CloseSecretChat),
-            RequestKind::UserAction
-        );
-        assert_eq!(
-            request_kind(RequestPurpose::SetName),
-            RequestKind::UserAction
-        );
-    }
-
-    #[test]
-    fn a_wrapped_purpose_is_read_through_its_domain() {
-        // `Payments(GetPaymentForm)` is a lookup: it does not start with
-        // "Get" as printed, only once the domain wrapper is read through.
-        assert_eq!(
-            request_kind(RequestPurpose::GetPaymentForm),
-            RequestKind::Lookup
-        );
-        assert_eq!(
-            request_kind(RequestPurpose::SendPaymentForm),
-            RequestKind::UserAction
-        );
     }
 }
