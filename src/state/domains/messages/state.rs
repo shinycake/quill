@@ -63,13 +63,22 @@ pub struct MessagesState {
     /// the window that asked (`None`: the main window): only that window
     /// takes the answer, even when another shows the same chat; the chat
     /// id guards against applying to a chat the window has since left.
-    pub ai_composer_text: Option<(Option<ChatId>, ChatId, String)>,
+    pub ai_composer_text: Option<(RequestId, Option<ChatId>, ChatId, String)>,
     /// Slice msg-richtext-ai-tools: one-shot `composeRichMessageWithAi`
     /// / `createRichMessageWithAi` / `fixRichMessageWithAi` answer for
     /// the open chat's composer. Same drain contract as
     /// `ai_composer_text`. The UI writes the blocks back as editor markup
     /// (`blocks_to_markup`); the note distinguishes create / fix / rewrite.
-    pub ai_composer_blocks: Option<(Option<ChatId>, ChatId, RichMessageContent, &'static str)>,
+    pub ai_composer_blocks: Option<(
+        RequestId,
+        Option<ChatId>,
+        ChatId,
+        RichMessageContent,
+        &'static str,
+    )>,
+    /// The AI requests TDLib refused, for the window whose ask they were:
+    /// it ends its wait (`AiAsk::Asked`) on its own request's entry.
+    pub ai_failed: Vec<RequestId>,
     /// Slice msg-richtext-ai-tools: one-shot; set when an AI request
     /// errors. The UI drains it into the status note so the click never
     /// silently does nothing.
@@ -213,6 +222,7 @@ impl MessagesState {
             message_link_error: Notes::default(),
             ai_composer_text: None,
             ai_composer_blocks: None,
+            ai_failed: Vec::new(),
             ai_error: Notes::default(),
             message_caption_length_max: 1024,
             paid_media_star_max: crate::composer::PAID_MEDIA_MAX_STARS,

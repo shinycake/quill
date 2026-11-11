@@ -572,7 +572,7 @@ impl QuillApp {
     /// it a round video or GIF parked to play during it, so it neither
     /// starts with sound when the chat shows again nor holds the slot.
     fn replace_chat_ui(&mut self, next: ChatUi) {
-        let old = std::mem::replace(&mut *self.screen.chat_ui, next);
+        let mut old = std::mem::replace(&mut *self.screen.chat_ui, next);
         // The send menu (and its effect card) was opened over the old
         // value's composer; its popup and subscriptions go with it.
         self.composer_ui.send_menu.open = None;
@@ -581,6 +581,9 @@ impl QuillApp {
         {
             live.driver.session.acks.forget(request);
         }
+        // A rich send still waiting goes on waiting off the view, so a
+        // refusal after the chat changed still gives the text back.
+        self.leave_sent_text(std::mem::take(&mut old.sent_text));
         self.drop_play_intent_of_visit(old.visit);
     }
 

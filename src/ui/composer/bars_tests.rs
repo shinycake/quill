@@ -735,6 +735,7 @@ fn a_refused_rich_send_gives_the_text_back(cx: &mut TestAppContext) {
             app.chat_ui.sent_text = SentText::Sent {
                 request: RequestId(9),
                 markup: "# Title\nbody".into(),
+                slot: None,
             };
         });
     };
@@ -792,6 +793,7 @@ fn a_refused_send_drops_its_draft_clear_and_gives_back_the_text(cx: &mut TestApp
         app.chat_ui.sent_text = SentText::Sent {
             request: RequestId(9),
             markup: "rich".into(),
+            slot: None,
         };
     });
     assert!(clear_waits(&app, vcx));
@@ -807,6 +809,7 @@ fn a_refused_send_drops_its_draft_clear_and_gives_back_the_text(cx: &mut TestApp
         app.chat_ui.sent_text = SentText::InlinePick {
             request: RequestId(10),
             markup: "@bot cats".into(),
+            slot: None,
         };
     });
     vcx.update(|window, cx| {
@@ -826,17 +829,26 @@ fn an_ai_answer_applies_only_to_the_draft_it_was_asked_about(cx: &mut TestAppCon
     let (app, mut vcx) = new_app(cx);
     let vcx = &mut vcx;
     open_chat(&app, vcx, GROUP);
-    let answer = |app: &Entity<QuillApp>, vcx: &mut VisualTestContext, text: &str| {
+    use quill::ids::RequestId;
+    let answer_to = |app: &Entity<QuillApp>,
+                     vcx: &mut VisualTestContext,
+                     request: u64,
+                     text: &str| {
         app.update(vcx, |app, _| {
             if let Some(session) = app.demo_session.as_mut() {
-                session.messages.ai_composer_text = Some((None, GROUP, text.to_string()));
+                session.messages.ai_composer_text =
+                    Some((RequestId(request), None, GROUP, text.to_string()));
             }
         });
         vcx.update(|window, cx| app.update(cx, |app, cx| app.apply_ai_composer_answer(window, cx)));
     };
+    let answer = |app: &Entity<QuillApp>, vcx: &mut VisualTestContext, text: &str| {
+        answer_to(app, vcx, 1, text)
+    };
     set_field(&app, vcx, "teh draft");
     app.update(vcx, |app, _| {
         app.chat_ui.ai_ask = AiAsk::Asked {
+            request: RequestId(1),
             markup: "teh draft".into(),
         };
     });
@@ -845,6 +857,7 @@ fn an_ai_answer_applies_only_to_the_draft_it_was_asked_about(cx: &mut TestAppCon
     // Asked about "the draft", then the user typed on before the answer.
     app.update(vcx, |app, _| {
         app.chat_ui.ai_ask = AiAsk::Asked {
+            request: RequestId(1),
             markup: "the draft".into(),
         };
     });
@@ -855,6 +868,35 @@ fn an_ai_answer_applies_only_to_the_draft_it_was_asked_about(cx: &mut TestAppCon
         "the draft and more",
         "typed text survives"
     );
+    // Fix, then Rewrite on the same draft: the first request's answer is
+    // stale and dropped, the second one applies.
+    set_field(&app, vcx, "teh draft");
+    app.update(vcx, |app, _| {
+        app.chat_ui.ai_ask = AiAsk::Asked {
+            request: RequestId(3),
+            markup: "teh draft".into(),
+        };
+    });
+    answer_to(&app, vcx, 2, "first answer");
+    assert_eq!(
+        field(&app, vcx),
+        "teh draft",
+        "the older ask's answer is stale"
+    );
+    answer_to(&app, vcx, 3, "second answer");
+    assert_eq!(field(&app, vcx), "second answer", "the latest ask wins");
+    // A refused ask ends its wait: nothing is left asked.
+    app.update(vcx, |app, _| {
+        app.chat_ui.ai_ask = AiAsk::Asked {
+            request: RequestId(4),
+            markup: "second answer".into(),
+        };
+        if let Some(session) = app.demo_session.as_mut() {
+            session.messages.ai_failed.push(RequestId(4));
+        }
+    });
+    vcx.update(|window, cx| app.update(cx, |app, cx| app.apply_ai_composer_answer(window, cx)));
+    app.read_with(vcx, |app, _| assert_eq!(app.chat_ui.ai_ask, AiAsk::Idle));
 }
 
 /// Sweep 10-115: a window reads its own bot, not the one another window's

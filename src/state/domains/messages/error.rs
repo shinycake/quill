@@ -313,6 +313,12 @@ impl Session {
                 | RequestPurpose::CreateRichMessageWithAi
                 | RequestPurpose::FixRichMessageWithAi,
             ) => {
+                if let Some(pending) = pending {
+                    if self.messages.ai_failed.len() >= 16 {
+                        self.messages.ai_failed.remove(0);
+                    }
+                    self.messages.ai_failed.push(pending.id);
+                }
                 self.messages.ai_error.push(match err.class {
                     ErrorClass::AiComposeFloodPremium => {
                         "AI limit reached — Telegram Premium is required for more requests"

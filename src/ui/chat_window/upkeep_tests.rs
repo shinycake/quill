@@ -108,12 +108,18 @@ fn an_ai_answer_for_a_chat_window_lands_in_its_composer(cx: &mut TestAppContext)
     in_window(&h, chat_window, Some(OTHER), cx, |app, window, cx| {
         composer.update(cx, |field, cx| field.set_value("fixd text", window, cx));
         app.chat_ui.ai_ask = crate::ui::composer::AiAsk::Asked {
+            request: quill::ids::RequestId(1),
             markup: "fixd text".into(),
         };
     });
     h.app.update(cx, |app, _| {
         if let Some(session) = app.session_mut() {
-            session.messages.ai_composer_text = Some((Some(OTHER), OTHER, "fixed text".into()));
+            session.messages.ai_composer_text = Some((
+                quill::ids::RequestId(1),
+                Some(OTHER),
+                OTHER,
+                "fixed text".into(),
+            ));
         }
     });
     // The main window's frame leaves another window's answer alone.
@@ -137,6 +143,7 @@ fn an_ai_answer_goes_to_the_window_that_asked(cx: &mut TestAppContext) {
     in_window(&h, chat_window, Some(OTHER), cx, |app, window, cx| {
         composer.update(cx, |field, cx| field.set_value("fixd text", window, cx));
         app.chat_ui.ai_ask = crate::ui::composer::AiAsk::Asked {
+            request: quill::ids::RequestId(1),
             markup: "fixd text".into(),
         };
     });
@@ -144,7 +151,8 @@ fn an_ai_answer_goes_to_the_window_that_asked(cx: &mut TestAppContext) {
     // does not take the answer.
     h.app.update(cx, |app, _| {
         if let Some(session) = app.session_mut() {
-            session.messages.ai_composer_text = Some((None, OTHER, "fixed text".into()));
+            session.messages.ai_composer_text =
+                Some((quill::ids::RequestId(1), None, OTHER, "fixed text".into()));
         }
     });
     draw(chat_window, cx);

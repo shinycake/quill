@@ -8,8 +8,9 @@
 //!   typed.
 //! - [`AiAsk`]: the draft an AI action (Fix, Rewrite) was asked about, so
 //!   its answer replaces that draft only while the field still holds it.
+use super::super::composer_sends::SendSlot;
 use super::*;
-use quill::ids::RequestId;
+use quill::ids::{ChatId, RequestId};
 
 /// One chat view's last rich send and where it stands.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -17,15 +18,23 @@ pub(in crate::ui) enum SentText {
     #[default]
     None,
     /// The field was cleared for the send `request`; `markup` is what it held.
-    Sent { request: RequestId, markup: String },
+    Sent {
+        request: RequestId,
+        markup: String,
+        slot: Option<SendSlot>,
+    },
     /// The same for an inline result pick: the `@bot query` the pick took
     /// out of the field, given back when TDLib refuses the result (an
     /// expired query or result id).
-    InlinePick { request: RequestId, markup: String },
+    InlinePick {
+        request: RequestId,
+        markup: String,
+        slot: Option<SendSlot>,
+    },
 }
 
 impl SentText {
-    fn request(&self) -> Option<RequestId> {
+    pub(in crate::ui) fn request(&self) -> Option<RequestId> {
         match self {
             Self::None => None,
             Self::Sent { request, .. } | Self::InlinePick { request, .. } => Some(*request),
@@ -33,25 +42,79 @@ impl SentText {
     }
 }
 
+/// A rich send whose chat view was replaced before TDLib answered (another
+/// chat opened, the account switched). It waits, with the slot the text was
+/// typed in, so a refusal puts the text back in that slot's draft.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(in crate::ui) struct LeftSend {
+    pub(in crate::ui) request: RequestId,
+    pub(in crate::ui) slot: super::super::composer_sends::SendSlot,
+    pub(in crate::ui) markup: String,
+}
+
 /// The draft the last AI composer action was asked about.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(in crate::ui) enum AiAsk {
     #[default]
     Idle,
-    /// Asked about this markup; the answer applies while the field holds it.
-    Asked { markup: String },
+    /// `request` was asked about this markup; only its answer applies, and
+    /// only while the field holds it. Its error ends the wait, and a newer
+    /// ask replaces it (the older answer is then dropped as stale).
+    Asked { request: RequestId, markup: String },
 }
 
 impl QuillApp {
     /// The rich send `request` took `markup` out of the field. A newer
     /// send replaces an older one (its answer no longer restores anything).
     pub(super) fn remember_sent_text(&mut self, request: RequestId, markup: String) {
-        self.remember_sent(SentText::Sent { request, markup });
+        let slot = self.send_slot();
+        self.remember_sent(SentText::Sent {
+            request,
+            markup,
+            slot,
+        });
     }
 
     /// An inline result pick took `markup` out of the field.
     pub(in crate::ui) fn remember_inline_pick(&mut self, request: RequestId, markup: String) {
-        self.remember_sent(SentText::InlinePick { request, markup });
+        let slot = self.send_slot();
+        self.remember_sent(SentText::InlinePick {
+            request,
+            markup,
+            slot,
+        });
+    }
+
+    /// The chat view in place is replaced while a rich send waits: the send
+    /// goes on waiting on its own, off the view (`settle_left_sends`).
+    pub(in crate::ui) fn leave_sent_text(&mut self, old: SentText) {
+        let (request, markup, slot) = match old {
+            SentText::None => return,
+            SentText::Sent {
+                request,
+                markup,
+                slot,
+            }
+            | SentText::InlinePick {
+                request,
+                markup,
+                slot,
+            } => (request, markup, slot),
+        };
+        let Some(slot) = slot else {
+            if let Some(live) = self.live.as_mut() {
+                live.driver.session.acks.forget(request);
+            }
+            return;
+        };
+        let overflow = self.composer_sends.keep_left_send(LeftSend {
+            request,
+            slot,
+            markup,
+        });
+        if let (Some(old), Some(live)) = (overflow, self.live.as_mut()) {
+            live.driver.session.acks.forget(old.request);
+        }
     }
 
     fn remember_sent(&mut self, sent: SentText) {
@@ -65,6 +128,33 @@ impl QuillApp {
         }
         if let Some(live) = self.live.as_mut() {
             live.driver.session.acks.expect(request);
+        }
+    }
+
+    /// Frame upkeep: a rich send of a chat view since replaced was answered:
+    /// a refusal puts its text in the draft of the slot it was typed in, an
+    /// accepted one lets it go.
+    pub(in crate::ui) fn settle_left_sends(&mut self, cx: &mut Context<Self>) {
+        let Some(live) = self.live.as_mut() else {
+            return;
+        };
+        let account = live.driver.session.account.clone();
+        let answered = self
+            .composer_sends
+            .take_left_sends(&account, |request| live.driver.session.acks.take(request));
+        for (send, answer) in answered {
+            if matches!(answer, quill::state::Answer::Done) {
+                continue;
+            }
+            let chat_id = ChatId(send.slot.draft.chat_id);
+            self.save_chat_draft(
+                chat_id,
+                send.slot.draft.topic,
+                quill::composer::DraftContent::Text(send.markup),
+                None,
+                false,
+                cx,
+            );
         }
     }
 
@@ -112,3 +202,8 @@ impl QuillApp {
         }
     }
 }
+
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+#[path = "left_sends_tests.rs"]
+mod tests;

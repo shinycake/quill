@@ -495,8 +495,9 @@ impl QuillApp {
             && let Some(chat_id) = live.driver.session.open_chat_id()
         {
             let sent = send(live, chat_id, &text);
-            if sent.is_ok() {
+            if let Ok(request) = sent {
                 self.chat_ui.ai_ask = super::AiAsk::Asked {
+                    request,
                     markup: text.clone(),
                 };
             }

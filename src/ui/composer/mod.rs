@@ -991,7 +991,7 @@ mod copy_inline_text;
 mod field_placeholder;
 mod send_bot_command;
 mod sent_text;
-pub(in crate::ui) use sent_text::{AiAsk, SentText};
+pub(in crate::ui) use sent_text::{AiAsk, LeftSend, SentText};
 #[cfg(test)]
 #[cfg(feature = "demo-capture")]
 mod send_options_to_tests;
