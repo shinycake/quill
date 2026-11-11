@@ -434,7 +434,7 @@ fn an_admin_list_asked_before_a_membership_change_is_dropped() {
     session
         .groups
         .admin_lists
-        .insert(13, AdminListFetch::Loading);
+        .insert(13, AdminListFetch::Loading(asked));
     apply_json(
         &mut session,
         &seq,
@@ -744,6 +744,18 @@ fn g2_chat_boost_status_cached() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
     let extra = session.request(RequestPurpose::GetChatBoostStatus, Some(ChatId(13)));
+    session
+        .groups
+        .chat_boost_status
+        .entry(13)
+        .or_default()
+        .begin();
+    session
+        .groups
+        .chat_boost_status
+        .entry(13)
+        .or_default()
+        .sent(extra);
     apply_json(
         &mut session,
         &seq,
@@ -753,7 +765,7 @@ fn g2_chat_boost_status_cached() {
             extra.0
         ),
     );
-    assert_eq!(session.groups.chat_boost_status.get(&13), Some(&(3, 42)));
+    assert_eq!(session.groups.boost_level_count(13), Some((3, 42)));
 }
 
 #[test]

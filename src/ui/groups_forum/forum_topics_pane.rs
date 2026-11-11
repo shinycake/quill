@@ -1,7 +1,7 @@
 //! Methods moved out of `groups_forum.rs` to keep files under 1000 lines.
 
 use super::*;
-use crate::ui::history_state::ForumColumnUi;
+use crate::ui::history_state::ForumPeek;
 use crate::ui::status_note::StatusNote;
 use quill::lang::{keys, tr, tr_with};
 
@@ -206,31 +206,25 @@ impl QuillApp {
         list.into_any_element()
     }
 
-    /// Where the forum topic column sits for this window; also records
-    /// whether it is on screen for the conversation pane. A peek at the chat
-    /// list ends once the open chat is no longer a forum.
-    pub(in crate::ui) fn forum_column_layout(
-        &mut self,
-        window: &Window,
-    ) -> quill::state::ForumColumn {
-        let width = f32::from(window.viewport_size().width);
-        let peeking = self.history.forum_column.peeking();
-        let layout = self
-            .session()
+    /// Whether the user is peeking at the chat list over the open forum's
+    /// topics.
+    pub(in crate::ui) fn forum_peeking(&self) -> bool {
+        let open = self.session().and_then(|s| s.open_chat_id());
+        self.history.forum_peek.is_for(open)
+    }
+
+    /// Where the forum topic column sits in a window of this width: a pure
+    /// function of the session, the width and the user's peek.
+    pub(in crate::ui) fn forum_column_at(&self, width: f32) -> quill::state::ForumColumn {
+        self.session()
             .map_or(quill::state::ForumColumn::Hidden, |s| {
-                s.forum_column(width, peeking)
-            });
-        let forum_still_open = self
-            .session()
-            .is_some_and(|s| s.forum_column(width, false) != quill::state::ForumColumn::Hidden);
-        self.history.forum_column = if layout != quill::state::ForumColumn::Hidden {
-            ForumColumnUi::Column
-        } else if peeking && forum_still_open {
-            ForumColumnUi::Peek
-        } else {
-            ForumColumnUi::Hidden
-        };
-        layout
+                s.forum_column(width, self.forum_peeking())
+            })
+    }
+
+    /// `forum_column_at` for the width of `window`.
+    pub(in crate::ui) fn forum_column_layout(&self, window: &Window) -> quill::state::ForumColumn {
+        self.forum_column_at(f32::from(window.viewport_size().width))
     }
 
     /// The forum's topic list as its own column (tdesktop shows the topics
@@ -297,8 +291,10 @@ impl QuillApp {
                                 .ghost()
                                 .tooltip(tr(keys::Q_PEOPLE_SHOW_CHATS))
                                 .accessibility_label(tr(keys::Q_PEOPLE_SHOW_CHATS))
-                                .on_click(cx.listener(|this, _, _, cx| {
-                                    this.history.forum_column = ForumColumnUi::Peek;
+                                .on_click(cx.listener(move |this, _, _, cx| {
+                                    if let Some(forum) = open {
+                                        this.history.forum_peek = ForumPeek::Chats { forum };
+                                    }
                                     cx.notify();
                                 })),
                         )

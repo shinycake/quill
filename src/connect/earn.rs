@@ -54,18 +54,17 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.earn_ready()?;
         if !self.session.payments.earn.limits.app_config.can_ask()
             || self.earn_in_flight(EarnPurpose::AppConfig)
-            || self
-                .session
-                .requests
-                .has_purpose(RequestPurpose::GetBoostsPerGift)
+            || self.session.groups.boosts_per_gift.is_loading()
         {
             return Ok(());
         }
-        self.send_earn(
+        let request = self.send_earn(
             EarnPurpose::AppConfig,
             crate::telegram::requests::get_application_config,
         )?;
-        self.session.payments.earn.limits.app_config.begin();
+        let app_config = &mut self.session.payments.earn.limits.app_config;
+        app_config.begin();
+        app_config.sent(request);
         Ok(())
     }
 

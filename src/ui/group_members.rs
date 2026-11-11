@@ -38,13 +38,27 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.open_member_dialog_on(chat_id, MemberTab::All, window, cx);
+    }
+
+    /// Open the member dialog on `tab`, so its first ask is that tab's
+    /// page and not the All tab's.
+    pub(super) fn open_member_dialog_on(
+        &mut self,
+        chat_id: ChatId,
+        tab: MemberTab,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let is_basic_group = self.session().is_some_and(|session| {
             session
                 .chats
                 .get(&chat_id.0)
                 .is_some_and(|chat| matches!(chat.kind, ChatKind::BasicGroup { .. }))
         });
-        self.admin.member_dialog = Some(MemberDialog::new(window, cx, chat_id, is_basic_group));
+        let mut dialog = MemberDialog::new(window, cx, chat_id, is_basic_group);
+        dialog.tab = tab;
+        self.admin.member_dialog = Some(dialog);
         self.open_box(DialogKind::Member);
         // Slice G1: a fresh dialog open clears the last action error —
         // stale failures from a previous open must not linger.

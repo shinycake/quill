@@ -234,11 +234,37 @@ impl Session {
             // error instead of spinning forever.
             // A list that already holds an answer (a newer request landed
             // first) is not failed by an older request's error.
+            // The boost status ends in the error its panel draws with a
+            // Retry; an older request's error leaves a newer one waiting.
+            Some(RequestPurpose::GetChatBoostStatus) => {
+                if let Some(pending) = pending
+                    && let Some(chat_id) = pending.chat_id
+                    && let Some(fetch) = self.groups.chat_boost_status.get_mut(&chat_id.0)
+                {
+                    fetch.failed(
+                        Some(pending.id),
+                        call_request_error_line(err, "Could not load boost status"),
+                        false,
+                    );
+                }
+            }
+            // The boost box reads the level table without it; the next box
+            // asks again.
+            Some(RequestPurpose::GetBoostsPerGift) => {
+                self.groups.boosts_per_gift.failed(
+                    pending.map(|p| p.id),
+                    call_request_error_line(err, "Could not load the boost settings"),
+                    false,
+                );
+            }
             Some(RequestPurpose::GetChatInviteLinks) => {
-                if let Some(chat_id) = pending.and_then(|p| p.chat_id)
-                    && !matches!(
+                // An older request's error leaves a newer one waiting, and a
+                // list that already loaded stays.
+                if let Some(pending) = pending
+                    && let Some(chat_id) = pending.chat_id
+                    && super::invite_pages::waits_for(
                         self.groups.invite_links.get(&chat_id.0),
-                        Some(InviteLinkFetch::Loaded(_))
+                        pending.id,
                     )
                 {
                     self.groups.invite_links.insert(
@@ -460,13 +486,13 @@ impl Session {
             // the fetch state so the panel shows an honest error
             // instead of spinning forever.
             Some(RequestPurpose::GetChatAdministrators) => {
-                if let Some(chat_id) = pending.and_then(|p| p.chat_id) {
-                    self.groups.admin_lists.insert(
+                if let Some(pending) = pending
+                    && let Some(chat_id) = pending.chat_id
+                {
+                    self.groups.fail_administrators(
                         chat_id.0,
-                        AdminListFetch::Failed(call_request_error_line(
-                            err,
-                            "Could not load administrators",
-                        )),
+                        pending.id,
+                        call_request_error_line(err, "Could not load administrators"),
                     );
                 }
             }

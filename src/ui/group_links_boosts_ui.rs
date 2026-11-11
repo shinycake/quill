@@ -103,7 +103,7 @@ impl QuillApp {
             .and_then(|s| s.groups.chat_boost_lists.get(&chat_id.0))
             .cloned();
         let only_gifts = list.as_ref().is_some_and(|l| l.only_gifts);
-        let level = session.and_then(|s| s.groups.chat_boost_status.get(&chat_id.0).copied());
+        let level = session.and_then(|s| s.groups.boost_level_count(chat_id.0));
         let mut body = div().flex().flex_col().gap_1().px_2();
         body = body.child(self.boosts_overview(chat_id, cx));
         body = body.child(self.giveaway_boosts_section(chat_id, cx));

@@ -10,29 +10,14 @@ use crate::ui::shell::{DialogKind, QuillShell};
 use crate::ui::status_note::StatusNote;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::*;
-use gpui_kit::component::dialog::{Dialog, DialogContent};
+use gpui_kit::component::dialog::Dialog;
 use gpui_kit::component::menu::{DropdownMenu, PopupMenuItem};
 use gpui_kit::component::spinner::Spinner;
 use quill::earn::*;
 use quill::lang::{keys, tr, tr_with, trn_with};
-use std::cell::RefCell;
-use std::rc::Rc;
 use std::time::{Duration, Instant};
 
-/// The one-shot body the kit dialog content closure takes.
-fn one_shot(
-    body: AnyElement,
-) -> impl Fn(DialogContent, &mut Window, &mut App) -> DialogContent + 'static {
-    let body = Rc::new(RefCell::new(Some(body)));
-    crate::ui::shell::scrollable_dialog_content(move |content, _, _| {
-        let body = body
-            .borrow_mut()
-            .take()
-            .unwrap_or_else(|| div().into_any_element());
-        content.child(body)
-    })
-}
-
+use crate::ui::shell::one_shot_dialog_content as one_shot;
 /// A centered box title (tdesktop `st::boxTitle` with `al_top`).
 fn box_title(text: impl Into<SharedString>) -> Div {
     div()
@@ -236,6 +221,8 @@ impl QuillApp {
                     Button::new("earn-setup-end-confirm")
                         .label(tr(keys::Q_MONEY_END_ANYWAY))
                         .danger()
+                        // A save in flight makes the driver ignore an End.
+                        .disabled(setup.is_saving())
                         .on_click(cx.listener(|this, _, window, cx| {
                             // tdesktop closes this box before the request.
                             this.earn_call(

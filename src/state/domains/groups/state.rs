@@ -369,8 +369,10 @@ pub struct GroupsState {
     /// beside a refetch. `Loading` is the in-flight guard.
     pub welcome_messages: HashMap<i64, crate::state::fetch::Fetch<Vec<ParsedWelcomeMessage>>>,
     /// Slice G2: `(level, boost_count)` from `getChatBoostStatus`
-    /// (schema 1.8.67, lines 13917/6943), keyed by chat id.
-    pub chat_boost_status: HashMap<i64, (i32, i32)>,
+    /// (schema 1.8.67, lines 13917/6943), keyed by chat id: asked,
+    /// answered or failed, the last answer kept beside a refetch (read it
+    /// with [`GroupsState::boost_level_count`]).
+    pub chat_boost_status: HashMap<i64, crate::state::fetch::Fetch<(i32, i32)>>,
     /// Full `getChatBoostStatus` answer (progress to the next level,
     /// Premium audience), keyed by chat id.
     pub chat_boost_details: HashMap<i64, ParsedBoostStatus>,
@@ -395,8 +397,9 @@ pub struct GroupsState {
     /// them.
     pub boost_box: Option<crate::boost_box::BoostBoxState>,
     /// `boosts_per_sent_gift` of the app config: boosts a gifted Premium
-    /// subscription gives. `None` until asked.
-    pub boosts_per_gift: Option<i32>,
+    /// subscription gives. Asked once; the answer of that request alone
+    /// fills it, and a refused or unsent ask is `Failed` (asked again).
+    pub boosts_per_gift: crate::state::fetch::Fetch<i32>,
     /// Parity slice: first active username per supergroup (`supergroup`
     /// object / `updateSupergroup`, schema 1.8.67 line 2746), keyed by
     /// supergroup id. Feeds the channel/supergroup header's @username.
@@ -517,6 +520,20 @@ pub struct GroupsState {
 }
 
 impl GroupsState {
+    /// `updateChatWelcomeMessages` carries the whole pack and asks nothing:
+    /// it is the newest truth, so it replaces the pack whichever fetch was
+    /// in flight (a late answer of that fetch finds `Ready` and is dropped).
+    pub(crate) fn welcome_pack_pushed(
+        &mut self,
+        chat_id: i64,
+        messages: Vec<ParsedWelcomeMessage>,
+    ) {
+        self.welcome_messages
+            .entry(chat_id)
+            .or_default()
+            .succeed(messages);
+    }
+
     pub(crate) fn new() -> Self {
         Self {
             ownership: OwnershipState::default(),
@@ -562,7 +579,7 @@ impl GroupsState {
             subscription_star_max: None,
             stars_usd_rate: None,
             boost_box: None,
-            boosts_per_gift: None,
+            boosts_per_gift: crate::state::fetch::Fetch::Idle,
             supergroup_usernames: HashMap::new(),
             supergroup_verification: HashMap::new(),
             supergroup_boost_levels: HashMap::new(),

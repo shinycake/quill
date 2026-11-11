@@ -26,7 +26,6 @@ use quill::ids::ChatId;
 use quill::lang::{keys, tr, tr_with, trn_with};
 use quill::state::{DiscussionControl, ProfileChatsFetch, ProfileChatsKind, Session, SubmitView};
 use quill::telegram::envelope::{ChatAvailableReactions, ChatKind, ReactionType};
-use std::cell::Cell;
 use std::rc::Rc;
 
 impl QuillApp {
@@ -508,12 +507,11 @@ impl QuillApp {
                 current.as_ref(),
                 session
                     .groups
-                    .chat_boost_status
-                    .get(&chat_id.0)
+                    .boost_level_count(chat_id.0)
                     .and_then(|(level, _)| {
                         custom_reactions_allowed(
                             session.groups.chat_boost_features.get(&chat_id.0),
-                            *level,
+                            level,
                         )
                     }),
             )
@@ -893,7 +891,7 @@ impl QuillApp {
                 .is_some_and(|dialog| dialog.view == GroupSettingsView::RecentActions);
             // `content` needs an `Fn` closure, but the body is built once
             // per dialog render — hand it over through a one-shot cell.
-            let body = Rc::new(Cell::new(Some(body)));
+            let body = Rc::new(std::cell::Cell::new(Some(body)));
             let take = move || body.take().unwrap_or_else(|| div().into_any_element());
             let content: Box<dyn Fn(DialogContent, &mut Window, &mut App) -> DialogContent> =
                 if fixed {

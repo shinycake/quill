@@ -286,7 +286,11 @@ fn driver_mutation_confirmed_refetches_dropped_cache() {
         .groups
         .welcome_messages
         .insert(13, crate::state::fetch::Fetch::Ready(vec![]));
-    driver.session.groups.chat_boost_status.insert(13, (0, 0));
+    driver
+        .session
+        .groups
+        .chat_boost_status
+        .insert(13, crate::state::fetch::Fetch::Ready((0, 0)));
     let sent_types = || {
         recorder
             .snapshot()
@@ -391,7 +395,11 @@ fn driver_mutation_confirmed_refetches_dropped_cache() {
             boost_extra.0
         ),
     );
-    assert!(!driver.session.groups.chat_boost_status.contains_key(&13));
+    assert_eq!(
+        driver.session.groups.boost_level_count(13),
+        None,
+        "the old level is dropped"
+    );
     assert!(
         sent_types().iter().any(|t| t == "getChatBoostStatus"),
         "boost status refetched after confirmed boost"

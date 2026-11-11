@@ -167,21 +167,8 @@ impl QuillApp {
                         &err,
                     )));
                 }
-            } else if let Some(demo) = self.demo_session.as_mut() {
-                // The screenshot demo has no server to ask: nothing to leave.
-                let request = demo.request_for_folder(
-                    quill::state::RequestPurpose::GetChatFolderChatsToLeave,
-                    folder_id,
-                );
-                let fetch = demo
-                    .chat_list
-                    .folder_chats_to_leave
-                    .entry(folder_id)
-                    .or_default();
-                fetch.begin();
-                fetch.sent(request);
-                fetch.answered(Some(request), Vec::new());
-                demo.requests.take(request);
+            } else {
+                self.apply_demo_no_chats_to_leave(folder_id);
             }
         }
         cx.notify();
@@ -236,16 +223,23 @@ impl QuillApp {
             Some(live) => live
                 .driver
                 .delete_chat_folder(confirm.folder_id, &leave)
-                .map(|_| ()),
+                .map(Some),
             None => {
                 self.apply_demo_folder_delete(confirm.folder_id);
-                Ok(())
+                Ok(None)
             }
         };
-        self.set_note(match result {
-            Ok(()) => StatusNote::silent(tr(keys::Q_CHATLIST_FOLDER_DELETED)),
-            Err(err) => StatusNote::error(user_error_for(keys::Q_NOTES_FAILED_DELETE_FOLDER, &err)),
-        });
+        match result {
+            // The toast waits for TDLib's answer (`settle_folder_deletes`).
+            Ok(Some(request)) => {
+                self.folders.deletes.insert(request);
+            }
+            Ok(None) => self.set_note(StatusNote::silent(tr(keys::Q_CHATLIST_FOLDER_DELETED))),
+            Err(err) => self.set_note(StatusNote::error(user_error_for(
+                keys::Q_NOTES_FAILED_DELETE_FOLDER,
+                &err,
+            ))),
+        }
         // The tab follows the folder's end: the live app leaves it when
         // `updateChatFolders` no longer lists the folder (the poll), so a
         // delete that failed keeps the folder and its tab.
@@ -253,6 +247,37 @@ impl QuillApp {
             self.set_chat_list_view(self.chat_list.view.filter(), None);
         }
         cx.notify();
+    }
+
+    /// Poll-loop half of the folder delete: the toast says what TDLib
+    /// answered to each `deleteChatFolder`.
+    pub(in crate::ui) fn settle_folder_deletes(&mut self, cx: &mut Context<Self>) -> bool {
+        if self.folders.deletes.is_empty() {
+            return false;
+        }
+        let waiting: Vec<quill::ids::RequestId> = self.folders.deletes.iter().copied().collect();
+        let mut changed = false;
+        for request in waiting {
+            let Some(answer) = self
+                .session_mut()
+                .and_then(|s| s.chat_list.dialog_answers.take(request))
+            else {
+                continue;
+            };
+            self.folders.deletes.remove(&request);
+            use quill::state::DialogAnswer;
+            self.set_note(match answer {
+                DialogAnswer::Failed(line) => StatusNote::error(line),
+                DialogAnswer::Done | DialogAnswer::Checked(_) | DialogAnswer::LimitHit => {
+                    StatusNote::silent(tr(keys::Q_CHATLIST_FOLDER_DELETED))
+                }
+            });
+            changed = true;
+        }
+        if changed {
+            cx.notify();
+        }
+        changed
     }
 
     /// Settings > Folders' up and down buttons: swap a folder with its

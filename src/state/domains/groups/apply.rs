@@ -188,11 +188,7 @@ impl Session {
             // schema 1.8.67, line 10649) — the full pack replaces the
             // cache; the welcome dialog renders it.
             GroupsPayload::UpdateChatWelcomeMessages { chat_id, messages } => {
-                self.groups
-                    .welcome_messages
-                    .entry(chat_id)
-                    .or_default()
-                    .succeed(messages);
+                self.groups.welcome_pack_pushed(chat_id, messages);
             }
             // Slice G2: `updateChatHasWelcomeMessages` (schema 1.8.67,
             // line 10600).
@@ -204,14 +200,13 @@ impl Session {
                     .chat_has_welcome_messages
                     .insert(chat_id, has_welcome_messages);
             }
-            // Slice G2: `getChatBoostStatus` answer (schema 1.8.67, line
-            // 13917) — correlated via the pending request's `chat_id`.
+            // Slice G2: `getChatBoostStatus` answer (schema 1.8.67, line 13917).
             GroupsPayload::ChatBoostStatus(status) => {
-                if let Some(chat_id) = pending.and_then(|p| p.chat_id) {
+                if let Some(pending) = pending
+                    && let Some(chat_id) = pending.chat_id
+                {
                     self.groups
-                        .chat_boost_status
-                        .insert(chat_id.0, (status.level, status.boost_count));
-                    self.groups.chat_boost_details.insert(chat_id.0, status);
+                        .answer_boost_status(chat_id.0, pending.id, status);
                 }
             }
             GroupsPayload::ApplicationConfig {
@@ -231,12 +226,9 @@ impl Session {
                 if passkeys.max.is_some() {
                     self.settings.passkeys.max_passkeys = passkeys.max;
                 }
-                if pending.map(|p| p.purpose) == Some(RequestPurpose::GetBoostsPerGift) {
-                    self.groups.boosts_per_gift = Some(boosts_per_gift);
-                }
-                if pending.map(|p| p.purpose) == Some(RequestPurpose::GetTonExplorerUrl) {
-                    self.ton_wallet.explorer_answered(pending.map(|p| p.id));
-                }
+                let asked = pending.map(|p| p.id);
+                self.groups.boosts_per_gift.answered(asked, boosts_per_gift);
+                self.ton_wallet.explorer.answered(asked, ());
                 // Any app-config answer carries the current explorer.
                 if ton_explorer_url.is_some() {
                     self.ton_wallet.explorer_url = ton_explorer_url;
@@ -251,7 +243,7 @@ impl Session {
                 let limits = &mut self.payments.earn.limits;
                 limits.starref_join_allowed = starref_join;
                 limits.starref_setup_allowed = starref_setup;
-                limits.app_config.succeed(());
+                limits.app_config.answered(asked, ());
                 self.payments.hub.purchase = premium_purchase;
                 self.payments.hub.fragment = fragment;
                 self.stickers.reaction_limits = reaction_limits;
@@ -376,9 +368,10 @@ impl Session {
                 {
                     match pending.purpose {
                         RequestPurpose::GetChatInviteLinks => {
-                            self.groups.invite_links.insert(
+                            self.groups.answer_invite_links(
                                 chat_id.0,
-                                InviteLinkFetch::Loaded(InviteLinkList { total_count, links }),
+                                pending.id,
+                                InviteLinkList { total_count, links },
                             );
                         }
                         // B8: the revoke answer holds only the revoked link
@@ -530,13 +523,12 @@ impl Session {
             // Phase D3b: `getChatAdministrators` answer — replaces the
             // cached admin list.
             GroupsPayload::ChatAdministrators { administrators } => {
-                if pending.map(|p| p.purpose) == Some(RequestPurpose::GetChatAdministrators)
-                    && let Some(pending) = pending
+                if let Some(pending) = pending
+                    && pending.purpose == RequestPurpose::GetChatAdministrators
                     && let Some(chat_id) = pending.chat_id
                 {
                     self.groups
-                        .admin_lists
-                        .insert(chat_id.0, AdminListFetch::Loaded(administrators));
+                        .answer_administrators(chat_id.0, pending.id, administrators);
                 }
             }
             // Phase D3b / slice G1: `getSupergroupMembers` answer —

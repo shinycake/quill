@@ -28,26 +28,40 @@ impl<S: JsonSender> ConnectDriver<S> {
         ) {
             return Ok(None);
         }
+        // Asked once: never asked, or due again after a boost or a level
+        // move (`outdate_boost_status`). A request in flight, an answer and
+        // a failure wait for the Retry.
         if self
             .session
             .groups
-            .chat_boost_status
-            .contains_key(&chat_id.0)
-            || self
-                .session
-                .requests
-                .has_purpose_for_chat(RequestPurpose::GetChatBoostStatus, chat_id)
+            .boost_status_fetch(chat_id.0)
+            .is_some_and(|fetch| !fetch.wants_fetch() && !fetch.can_ask())
         {
             return Ok(None);
         }
         let extra = self
             .session
             .request(RequestPurpose::GetChatBoostStatus, Some(chat_id));
+        let fetch = self
+            .session
+            .groups
+            .chat_boost_status
+            .entry(chat_id.0)
+            .or_default();
+        fetch.begin();
+        fetch.sent(extra);
         if let Err(err) = self
             .sender
             .send_json(&get_chat_boost_status(extra, chat_id))
         {
             self.session.requests.take(extra);
+            if let Some(fetch) = self.session.groups.chat_boost_status.get_mut(&chat_id.0) {
+                fetch.failed(
+                    Some(extra),
+                    crate::state::send_failed_line("Could not load boost status"),
+                    false,
+                );
+            }
             return Err(err);
         }
         Ok(Some(extra))
@@ -130,7 +144,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         let now = crate::local_time::now_unix();
         let choice = classify(chat_id, &slots, now);
         let session = &self.session;
-        let receive = session.groups.boosts_per_gift.unwrap_or(0);
+        let receive = session.groups.boosts_per_gift.data().copied().unwrap_or(0);
         let decision = decide(&choice, session.my_is_premium(), receive, now, |id| {
             session.chat_is_group(ChatId(id))
         });
@@ -172,20 +186,23 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        if self.session.groups.boosts_per_gift.is_some()
-            || self
-                .session
-                .requests
-                .has_purpose(RequestPurpose::GetBoostsPerGift)
-        {
+        if !self.session.groups.boosts_per_gift.can_ask() {
             return Ok(());
         }
         let extra = self.session.request(RequestPurpose::GetBoostsPerGift, None);
+        let fetch = &mut self.session.groups.boosts_per_gift;
+        fetch.begin();
+        fetch.sent(extra);
         if let Err(err) = self
             .sender
             .send_json(&crate::telegram::requests::get_application_config(extra))
         {
             self.session.requests.take(extra);
+            self.session.groups.boosts_per_gift.failed(
+                Some(extra),
+                crate::state::send_failed_line("Could not load the boost settings"),
+                false,
+            );
             return Err(err);
         }
         Ok(())

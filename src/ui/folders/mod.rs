@@ -612,7 +612,7 @@ impl QuillApp {
         }
         match &dialog.load {
             FolderLoad::Ready { .. } | FolderLoad::Merging | FolderLoad::Saving(_) => {}
-            FolderLoad::Loading => {
+            FolderLoad::Loading(_) => {
                 return panel
                     .child(
                         div()
@@ -858,7 +858,12 @@ impl QuillApp {
             self.show_folder_limit(quill::folder_limits::FolderLimitKind::Folders, cx);
             return;
         }
-        self.folders.editor = Some(FolderEditorDialog::new(window, cx, None));
+        self.folders.editor = Some(FolderEditorDialog::new(
+            window,
+            cx,
+            None,
+            FolderLoad::ready(),
+        ));
         self.open_box(DialogKind::FolderEditor);
         cx.notify();
     }

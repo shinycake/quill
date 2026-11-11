@@ -35,6 +35,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .request(RequestPurpose::GetTonExplorerUrl, None);
         let json = crate::telegram::requests::get_application_config(extra);
         self.session.ton_wallet.explorer.begin();
+        self.session.ton_wallet.explorer.sent(extra);
         if let Err(err) = self.send_json_request(extra, &json) {
             self.session.ton_wallet.explorer.cancel();
             return Err(err);

@@ -80,7 +80,7 @@ fn explorer_prefix_is_asked_once_and_applied() {
         "https://tonscan.org/EQabc"
     );
     // The boosts value is left alone: it was not what was asked.
-    assert_eq!(rig.driver.session.groups.boosts_per_gift, None);
+    assert!(rig.driver.session.groups.boosts_per_gift.is_idle());
 }
 
 #[test]

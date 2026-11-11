@@ -2,7 +2,6 @@
 # <rule>:<Enum>::<Variant> <count>. Only remove lines.
 bare:AccessStage::Asking 1
 bare:AccountStage::Starting 1
-bare:AdminListFetch::Loading 1
 bare:AdminRightsFetch::Loading 1
 bare:Answer::Waiting 1
 bare:ApplyStage::Sent 1
@@ -43,7 +42,6 @@ bare:DeviceRun::Opening 1
 bare:DownloadStatus::Downloading 1
 bare:Draft::Waiting 1
 bare:Echo::Waiting 1
-bare:EditBoxState::Saving 1
 bare:EditStage::Loading 1
 bare:EngineState::Loading 1
 bare:Entry::Pending 1

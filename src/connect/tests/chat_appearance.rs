@@ -100,9 +100,24 @@ fn opening_refreshes_the_level_and_loads_choices_once() {
             .unwrap();
     }
     // A stale level is dropped so the box never gates on old boosts.
-    driver.session.groups.chat_boost_status.insert(-20, (1, 3));
+    driver
+        .session
+        .groups
+        .chat_boost_status
+        .insert(-20, crate::state::fetch::Fetch::Ready((1, 3)));
     driver.open_chat_appearance(ChatId(-20)).unwrap();
-    assert!(!driver.session.groups.chat_boost_status.contains_key(&-20));
+    assert_eq!(
+        driver.session.groups.boost_level_count(-20),
+        None,
+        "the box never gates on the old boosts"
+    );
+    assert!(
+        driver
+            .session
+            .groups
+            .boost_status_fetch(-20)
+            .is_some_and(|fetch| fetch.is_loading())
+    );
     assert_eq!(count(&recorder, "getChatBoostStatus"), 1);
     assert_eq!(count(&recorder, "getChatBoostFeatures"), 1);
     assert_eq!(count(&recorder, "getDefaultChatEmojiStatuses"), 1);

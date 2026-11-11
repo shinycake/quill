@@ -483,12 +483,12 @@ pub enum AdminRightsFetch {
 }
 
 /// Phase D3b: fetch state for one chat's `getChatAdministrators` result
-/// (schema 1.8.67, line 13632). Keyed by chat id. `Loading` is the
-/// in-flight guard — the driver never sends a second request while one
-/// is outstanding.
+/// (schema 1.8.67, line 13632). Keyed by chat id. `Loading` names the
+/// request the list waits for: a refresh asks again under a new id, and
+/// only that request's answer or error lands.
 #[derive(Debug, Clone, PartialEq)]
 pub enum AdminListFetch {
-    Loading,
+    Loading(RequestId),
     Loaded(Vec<ChatAdministratorEntry>),
     Failed(String),
 }

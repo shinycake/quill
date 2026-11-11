@@ -295,13 +295,11 @@ fn a_chat_windows_frame_leaves_the_main_windows_peek(cx: &mut TestAppContext) {
     let h = new_app(cx);
     let chat_window = h.open_in_new_window(OTHER, cx);
     read(&h, None, cx, |app, _| {
-        app.history.forum_column = crate::ui::history_state::ForumColumnUi::Peek
+        app.history.forum_peek = crate::ui::history_state::ForumPeek::Chats { forum: OTHER }
     });
     draw(chat_window, cx);
-    assert!(read(&h, None, cx, |app, _| app
-        .history
-        .forum_column
-        .peeking()));
+    assert!(read(&h, None, cx, |app, _| app.history.forum_peek
+        == crate::ui::history_state::ForumPeek::Chats { forum: OTHER }));
 }
 
 #[gpui_kit::test]

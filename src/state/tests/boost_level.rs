@@ -19,7 +19,10 @@ fn channel_with_status(level: i32) -> (Session, Arc<MemorySink>, AtomicU64) {
         r#"{"@type":"updateNewChat","chat":{"id":13,"title":"G","type":{"@type":"chatTypeSupergroup","supergroup_id":113,"is_channel":true},"unread_count":0}}"#,
     );
     apply_json(&mut session, &seq, &sink, &supergroup_update(level));
-    session.groups.chat_boost_status.insert(13, (level, 5));
+    session
+        .groups
+        .chat_boost_status
+        .insert(13, crate::state::fetch::Fetch::Ready((level, 5)));
     (session, sink, seq)
 }
 
@@ -32,12 +35,19 @@ fn the_same_level_keeps_the_cached_status() {
 }
 
 #[test]
-fn a_moved_level_drops_the_cached_status_once() {
+fn a_moved_level_makes_the_cached_status_due_once() {
     let (mut session, sink, seq) = channel_with_status(2);
     apply_json(&mut session, &seq, &sink, &supergroup_update(3));
     apply_json(&mut session, &seq, &sink, &supergroup_update(3));
     assert_eq!(session.take_moved_boost_chats(), vec![ChatId(13)]);
-    assert!(!session.groups.chat_boost_status.contains_key(&13));
+    // The old level stays on screen until the refetch replaces it.
+    assert_eq!(session.groups.boost_level_count(13), Some((2, 5)));
+    assert!(
+        session
+            .groups
+            .boost_status_fetch(13)
+            .is_some_and(|fetch| fetch.is_outdated())
+    );
     assert!(session.take_moved_boost_chats().is_empty());
 }
 

@@ -36,6 +36,18 @@ fn boost_status_keeps_progress_details() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
     let extra = session.request(RequestPurpose::GetChatBoostStatus, Some(ChatId(13)));
+    session
+        .groups
+        .chat_boost_status
+        .entry(13)
+        .or_default()
+        .begin();
+    session
+        .groups
+        .chat_boost_status
+        .entry(13)
+        .or_default()
+        .sent(extra);
     apply_json(
         &mut session,
         &seq,
@@ -48,7 +60,61 @@ fn boost_status_keeps_progress_details() {
     let details = &session.groups.chat_boost_details[&13];
     assert_eq!(details.level_fraction(), 0.5);
     assert_eq!(details.boosts_to_next_level(), Some(5));
-    assert_eq!(session.groups.chat_boost_status.get(&13), Some(&(2, 15)));
+    assert_eq!(session.groups.boost_level_count(13), Some((2, 15)));
+}
+
+fn boost_status_json(extra: RequestId, level: i32, count: i32) -> String {
+    format!(
+        r#"{{"@type":"chatBoostStatus","@extra":"{}","level":{level},"boost_count":{count}}}"#,
+        extra.0
+    )
+}
+
+#[test]
+fn a_boost_status_waits_for_its_own_request_and_keeps_the_old_level_on_a_failed_refetch() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    let first = session.request(RequestPurpose::GetChatBoostStatus, Some(ChatId(13)));
+    let fetch = session.groups.chat_boost_status.entry(13).or_default();
+    fetch.begin();
+    fetch.sent(first);
+    apply_json(&mut session, &seq, &sink, &boost_status_json(first, 1, 3));
+    assert_eq!(session.groups.boost_level_count(13), Some((1, 3)));
+
+    // A change made the level due again: it stays on screen, and the
+    // request in flight asked before the change, so its answer is dropped.
+    let stale = session.request(RequestPurpose::GetChatBoostStatus, Some(ChatId(13)));
+    if let Some(fetch) = session.groups.chat_boost_status.get_mut(&13) {
+        fetch.begin();
+        fetch.sent(stale);
+    }
+    session.groups.outdate_boost_status(13);
+    assert_eq!(session.groups.boost_level_count(13), Some((1, 3)));
+    apply_json(&mut session, &seq, &sink, &boost_status_json(stale, 2, 9));
+    assert_eq!(
+        session.groups.boost_level_count(13),
+        Some((1, 3)),
+        "an answer nobody waits for is dropped"
+    );
+
+    // The refetch fails: the old level stays, the fetch says why.
+    let refetch = session.request(RequestPurpose::GetChatBoostStatus, Some(ChatId(13)));
+    if let Some(fetch) = session.groups.chat_boost_status.get_mut(&13) {
+        fetch.begin();
+        fetch.sent(refetch);
+    }
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"error","@extra":"{}","code":400,"message":"CHAT_ADMIN_REQUIRED"}}"#,
+            refetch.0
+        ),
+    );
+    let fetch = session.groups.boost_status_fetch(13);
+    assert!(fetch.is_some_and(|fetch| fetch.error().is_some()));
+    assert_eq!(session.groups.boost_level_count(13), Some((1, 3)));
 }
 
 #[test]

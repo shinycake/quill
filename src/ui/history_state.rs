@@ -60,30 +60,23 @@ impl ScrollAim {
     }
 }
 
-/// Where the forum topic column stands in one window. `Peek` leaves when a
-/// chat is chosen from the list or the open chat stops being a forum;
-/// `Column` and `Hidden` are laid out again every frame
-/// (`forum_column_layout`).
+/// The user's choice, on a narrow window where the forum's topic column
+/// replaces the chat list, to see the list again. It belongs to the forum
+/// it was made over: it counts only while that chat is the open one, and
+/// opening any chat ends it. Where the column sits is a pure function of
+/// this, the session and the window's width (`forum_column_layout`).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub(crate) enum ForumColumnUi {
-    /// No topic column is on screen.
+pub(crate) enum ForumPeek {
     #[default]
-    Hidden,
-    /// The column is on screen, so the conversation shows a hint instead
-    /// of repeating the topic list.
-    Column,
-    /// On a narrow window the column replaces the chat list; the user
-    /// brought the list back until another chat opens.
-    Peek,
+    Off,
+    /// The chat list is shown over the topics of `forum`.
+    Chats { forum: ChatId },
 }
 
-impl ForumColumnUi {
-    pub(crate) fn peeking(self) -> bool {
-        self == Self::Peek
-    }
-
-    pub(crate) fn on_screen(self) -> bool {
-        self == Self::Column
+impl ForumPeek {
+    /// Whether the peek is on while `open` is the open chat.
+    pub(crate) fn is_for(self, open: Option<ChatId>) -> bool {
+        matches!(self, Self::Chats { forum } if Some(forum) == open)
     }
 }
 
@@ -100,10 +93,8 @@ pub(crate) struct HistoryUi {
     /// list's paint (overdraw rows included); the history's own canvas
     /// turns them into `seen`.
     pub(super) painted_ids: std::rc::Rc<std::cell::RefCell<Vec<(Bounds<Pixels>, Vec<MessageId>)>>>,
-    /// The forum topic column in this window: on screen, hidden, or
-    /// pushed aside by a peek at the chat list. Each window lays out its
-    /// own column.
-    pub(super) forum_column: ForumColumnUi,
+    /// The user's peek at the chat list over the forum's topic column.
+    pub(super) forum_peek: ForumPeek,
     /// Messages whose row's bottom edge was inside the viewport at the last
     /// paint (tdesktop `HistoryInner` reads an unread message once its
     /// bottom is shown), not the list's overdraw. Reported as
@@ -280,7 +271,7 @@ impl HistoryUi {
             scroller: cx.new(|cx| MessageScrollerState::new(0, cx)),
             rows: Vec::new(),
             painted_ids: Default::default(),
-            forum_column: ForumColumnUi::Hidden,
+            forum_peek: ForumPeek::Off,
             seen: Default::default(),
             on_screen: Default::default(),
             reported_visible: None,

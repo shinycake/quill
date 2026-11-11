@@ -23,7 +23,7 @@ use quill::boost_box::{
 };
 use quill::ids::ChatId;
 use quill::lang::{keys, tr, tr_with};
-use quill::state::{RequestPurpose, Session};
+use quill::state::Session;
 
 fn chat_title(session: &Session, chat_id: i64) -> String {
     session
@@ -91,7 +91,7 @@ impl QuillApp {
     fn boost_box_toggle(&mut self, slot_id: i32, cx: &mut Context<Self>) {
         let now = quill::local_time::now_unix();
         if let Some(session) = self.boost_session_mut() {
-            let receive = session.groups.boosts_per_gift.unwrap_or(0);
+            let receive = session.groups.boosts_per_gift.data().copied().unwrap_or(0);
             if let Some(state) = session.groups.boost_box.as_mut() {
                 state.toggle_slot(slot_id, now, receive);
             }
@@ -282,8 +282,9 @@ impl QuillApp {
                 }
             }
             None if session
-                .requests
-                .has_purpose_for_chat(RequestPurpose::GetChatBoostStatus, chat_id) =>
+                .groups
+                .boost_status_fetch(chat_id.0)
+                .is_some_and(|fetch| fetch.shows_loading()) =>
             {
                 body = body.child(
                     div()
@@ -348,7 +349,7 @@ impl QuillApp {
                 .text_color(text_muted())
                 .child(reassign_text(
                     &name,
-                    session.groups.boosts_per_gift.unwrap_or(0),
+                    session.groups.boosts_per_gift.data().copied().unwrap_or(0),
                 )),
         );
         for slot in slots {
@@ -424,7 +425,7 @@ impl QuillApp {
                     let working = matches!(state.phase, BoostPhase::Working(_));
                     footer = footer.child(close_button(tr(keys::CLOSE)));
                     if let Some(counters) = counters {
-                        let allow_multi = session.groups.boosts_per_gift.unwrap_or(0) > 0;
+                        let allow_multi = session.groups.boosts_per_gift.data().copied().unwrap_or(0) > 0;
                         let button = counters.button(state.group, allow_multi);
                         footer = footer.child(
                             Button::new("boost-box-boost")

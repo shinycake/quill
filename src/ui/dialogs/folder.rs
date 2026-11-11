@@ -12,11 +12,12 @@ use std::collections::HashSet;
 /// offers Retry or closing, and a Save waits for its own answer.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FolderLoad {
-    Loading,
+    /// `getChatFolder` is out as this request; the form fills from its
+    /// answer, or it ends in `Failed` with Retry.
+    Loading(RequestId),
     Failed(String),
-    /// The form is editable. `error` is the line a refused Save (or a
-    /// failed fetch of the fresh folder) left, drawn above the form; the
-    /// next Save leaves this stage and so takes it away.
+    /// The form. `error` is the line the last Save or merge left on it
+    /// (cleared by the next stage, so it never draws beside a load error).
     Ready {
         error: Option<String>,
     },
@@ -31,12 +32,12 @@ pub enum FolderLoad {
 }
 
 impl FolderLoad {
-    /// An editable form with nothing to complain about.
+    /// The form with no line under it.
     pub(crate) fn ready() -> Self {
         FolderLoad::Ready { error: None }
     }
 
-    /// An editable form with the reason its last Save was refused.
+    /// The form with `line` under it.
     pub(crate) fn refused(line: impl Into<String>) -> Self {
         FolderLoad::Ready {
             error: Some(line.into()),
@@ -47,7 +48,7 @@ impl FolderLoad {
         matches!(self, FolderLoad::Ready { .. })
     }
 
-    /// The line to draw above the form.
+    /// The line under the form.
     pub(crate) fn error(&self) -> Option<&str> {
         match self {
             FolderLoad::Ready { error } => error.as_deref(),
@@ -79,6 +80,7 @@ impl FolderEditorDialog {
         window: &mut Window,
         cx: &mut Context<QuillApp>,
         folder_id: Option<i32>,
+        load: FolderLoad,
     ) -> Self {
         let name_input = cx.new(|cx| {
             TextareaState::new(window, cx)
@@ -104,11 +106,7 @@ impl FolderEditorDialog {
             editor: FolderEditor::new(),
             base: ChatFolderSpec::default(),
             name_input,
-            load: if folder_id.is_some() {
-                FolderLoad::Loading
-            } else {
-                FolderLoad::ready()
-            },
+            load,
             picker: None,
             picker_search,
         }
