@@ -29,17 +29,89 @@ pub enum LanguagePurpose {
     Synchronize,
 }
 
+type Strings = Vec<(String, PackValue)>;
+
+/// Which of a switch's two string sets have arrived.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub enum SwitchStrings {
+    /// Neither the pack nor its base.
+    #[default]
+    Neither,
+    Pack(Strings),
+    Base(Strings),
+    Both {
+        pack: Strings,
+        base: Strings,
+    },
+}
+
+impl SwitchStrings {
+    fn with(self, base: bool, strings: Strings) -> Self {
+        match (self, base) {
+            (Self::Neither | Self::Pack(_), false) => Self::Pack(strings),
+            (Self::Neither | Self::Base(_), true) => Self::Base(strings),
+            (Self::Base(held) | Self::Both { base: held, .. }, false) => Self::Both {
+                pack: strings,
+                base: held,
+            },
+            (Self::Pack(held) | Self::Both { pack: held, .. }, true) => Self::Both {
+                pack: held,
+                base: strings,
+            },
+        }
+    }
+}
+
 /// A pack whose strings are being fetched.
 #[derive(Debug, Clone, PartialEq)]
 pub struct LanguageSwitch {
     pub info: LanguagePackInfoData,
     pub generation: u32,
-    pub pack: Option<Vec<(String, PackValue)>>,
-    /// `Some(vec![])` up front when the pack has no base pack.
-    pub base: Option<Vec<(String, PackValue)>>,
+    /// The strings that arrived; a pack with no base pack starts with an
+    /// empty base.
+    pub strings: SwitchStrings,
     /// What the server changed in this pack while its strings were being
     /// fetched; applied once the switch is ready.
     pub late: LateChange,
+}
+
+impl LanguageSwitch {
+    /// A switch to `info`; `no_base` says the pack has no base pack.
+    pub fn new(info: LanguagePackInfoData, generation: u32, no_base: bool) -> Self {
+        Self {
+            info,
+            generation,
+            strings: if no_base {
+                SwitchStrings::Base(Vec::new())
+            } else {
+                SwitchStrings::Neither
+            },
+            late: LateChange::Nothing,
+        }
+    }
+}
+
+/// Where the interface language switch stands. It leaves by the strings
+/// arriving, an error, or a newer switch replacing it.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub enum LanguageStage {
+    #[default]
+    Idle,
+    Fetching(Box<LanguageSwitch>),
+}
+
+/// What the language flow hands to the UI, in the order it happened. The UI
+/// drains them all at once.
+#[derive(Debug, Clone, PartialEq)]
+pub enum LanguageEvent {
+    /// Install these strings.
+    Install(LanguageReady),
+    /// Changed strings of the current pack.
+    Patch(Strings),
+    /// TDLib says every string changed: fetch the current pack again.
+    Reload,
+    /// Why the last switch failed.
+    SwitchFailed(String),
 }
 
 /// Changes to the pack being switched to that arrived before its strings
@@ -83,17 +155,100 @@ pub struct LanguageState {
     /// The pack the interface uses (the one TDLib's `language_pack_id`
     /// names); empty for the built-in English.
     pub current: Option<LanguagePackInfoData>,
-    pub switching: Option<LanguageSwitch>,
+    pub stage: LanguageStage,
     pub generation: u32,
-    /// One-shot for the UI: install these strings.
-    pub ready: Option<LanguageReady>,
-    /// One-shot for the UI: changed strings of the current pack.
-    pub patch: Vec<(String, PackValue)>,
-    /// One-shot for the UI: TDLib says every string changed; fetch the
-    /// current pack again.
-    pub reload: bool,
-    /// One-shot for the UI: why the last switch failed.
-    pub error: Option<String>,
+    /// Queue for the UI: strings to install, changed strings, a reload
+    /// request, a failure.
+    pub events: Vec<LanguageEvent>,
+}
+
+impl LanguageState {
+    /// The switch whose strings are being fetched.
+    pub fn switching(&self) -> Option<&LanguageSwitch> {
+        match &self.stage {
+            LanguageStage::Fetching(switch) => Some(switch),
+            LanguageStage::Idle => None,
+        }
+    }
+
+    /// Queue strings to install in place of any not yet installed.
+    pub fn queue_install(&mut self, ready: LanguageReady) {
+        self.events
+            .retain(|event| !matches!(event, LanguageEvent::Install(_)));
+        self.events.push(LanguageEvent::Install(ready));
+    }
+
+    /// Queue changed strings of the current pack, joining a patch queued
+    /// last.
+    pub fn queue_patch(&mut self, strings: Strings) {
+        if let Some(LanguageEvent::Patch(queued)) = self.events.last_mut() {
+            queued.extend(strings);
+        } else {
+            self.events.push(LanguageEvent::Patch(strings));
+        }
+    }
+
+    pub fn queue_reload(&mut self) {
+        if !self.events.contains(&LanguageEvent::Reload) {
+            self.events.push(LanguageEvent::Reload);
+        }
+    }
+
+    /// Everything but a failure is dropped.
+    pub fn drop_all_but_failures(&mut self) {
+        self.events
+            .retain(|event| matches!(event, LanguageEvent::SwitchFailed(_)));
+    }
+
+    /// A new switch starts without the last failure.
+    pub fn forget_failure(&mut self) {
+        self.events
+            .retain(|event| !matches!(event, LanguageEvent::SwitchFailed(_)));
+    }
+
+    /// Strings are waiting to be installed.
+    pub fn install_queued(&self) -> bool {
+        self.events
+            .iter()
+            .any(|event| matches!(event, LanguageEvent::Install(_)))
+    }
+
+    /// The strings waiting to be installed, taken once.
+    pub fn take_install(&mut self) -> Option<LanguageReady> {
+        let at = self
+            .events
+            .iter()
+            .position(|event| matches!(event, LanguageEvent::Install(_)))?;
+        match self.events.remove(at) {
+            LanguageEvent::Install(ready) => Some(ready),
+            _ => None,
+        }
+    }
+
+    /// Strings of changes waiting for the UI.
+    pub fn queued_patch(&self) -> Strings {
+        self.events
+            .iter()
+            .filter_map(|event| match event {
+                LanguageEvent::Patch(strings) => Some(strings.iter().cloned()),
+                _ => None,
+            })
+            .flatten()
+            .collect()
+    }
+
+    /// A reload of the current pack is waiting for the UI.
+    pub fn reload_queued(&self) -> bool {
+        self.events.contains(&LanguageEvent::Reload)
+    }
+
+    /// The failure of the last switch, if the UI has not taken it.
+    pub fn failure(&self) -> Option<&str> {
+        self.events.iter().find_map(|event| match event {
+            LanguageEvent::SwitchFailed(error) => Some(error.as_str()),
+            _ => None,
+        })
+    }
 }
 
 impl Session {
@@ -123,35 +278,32 @@ impl Session {
                 else {
                     return;
                 };
-                let Some(switch) = state.switching.as_mut() else {
+                let LanguageStage::Fetching(switch) = &mut state.stage else {
                     return;
                 };
                 if switch.generation != generation {
                     return;
                 }
-                if base {
-                    switch.base = Some(strings);
-                } else {
-                    switch.pack = Some(strings);
-                }
-                if switch.pack.is_some()
-                    && switch.base.is_some()
-                    && let Some(switch) = state.switching.take()
+                switch.strings = std::mem::take(&mut switch.strings).with(base, strings);
+                if matches!(switch.strings, SwitchStrings::Both { .. })
+                    && let LanguageStage::Fetching(switch) = std::mem::take(&mut state.stage)
+                    && let SwitchStrings::Both { pack, base } = switch.strings
                 {
                     state.current = Some(switch.info.clone());
                     // Changes queued for the old pack do not apply to this one.
-                    state.patch.clear();
-                    state.reload = false;
+                    state.events.retain(|event| {
+                        !matches!(event, LanguageEvent::Patch(_) | LanguageEvent::Reload)
+                    });
+                    state.queue_install(LanguageReady {
+                        info: switch.info,
+                        pack,
+                        base,
+                    });
                     match switch.late {
                         LateChange::Nothing => {}
-                        LateChange::Patch(late) => state.patch = late,
-                        LateChange::Reload => state.reload = true,
+                        LateChange::Patch(late) => state.queue_patch(late),
+                        LateChange::Reload => state.queue_reload(),
                     }
-                    state.ready = Some(LanguageReady {
-                        info: switch.info,
-                        pack: switch.pack.unwrap_or_default(),
-                        base: switch.base.unwrap_or_default(),
-                    });
                 }
             }
             LanguagePayload::UpdateStrings {
@@ -164,7 +316,7 @@ impl Session {
                 }
                 // The pack being switched to is not `current` yet: keep what
                 // changed in it for when its strings arrive.
-                if let Some(switch) = state.switching.as_mut() {
+                if let LanguageStage::Fetching(switch) = &mut state.stage {
                     let own = language_pack_id == switch.info.id;
                     if own || language_pack_id == switch.info.base_language_pack_id {
                         switch.late.note(own, strings.clone());
@@ -177,13 +329,13 @@ impl Session {
                 // snapshot no longer keeps apart: fetch both again.
                 let deletes = strings.iter().any(|(_, v)| matches!(v, PackValue::Deleted));
                 if language_pack_id == current.id && !strings.is_empty() && !deletes {
-                    state.patch.extend(strings);
+                    state.queue_patch(strings);
                 } else if language_pack_id == current.id
                     || language_pack_id == current.base_language_pack_id
                 {
                     // Every string changed, or the base pack changed under
                     // the pack's own strings: fetch both again.
-                    state.reload = true;
+                    state.queue_reload();
                 }
             }
         }
@@ -199,9 +351,12 @@ impl Session {
         match purpose {
             LanguagePurpose::TargetInfo => state.packs.fail(error_reason(err)),
             LanguagePurpose::Strings { generation, .. } => {
-                if state.switching.as_ref().map(|s| s.generation) == Some(generation) {
-                    state.switching = None;
-                    state.error = Some(error_reason(err));
+                if state.switching().map(|s| s.generation) == Some(generation) {
+                    state.stage = LanguageStage::Idle;
+                    state.forget_failure();
+                    state
+                        .events
+                        .push(LanguageEvent::SwitchFailed(error_reason(err)));
                 }
             }
             // The badge types it asked for are asked again by the next pump.

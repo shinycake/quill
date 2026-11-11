@@ -2,7 +2,7 @@
 use super::*;
 use crate::ids::{ChatId, MessageId, RequestId, TopicId};
 use crate::lang::{Key, keys, tr};
-use crate::state::{ChatStatisticsFetch, RequestPurpose, RequestRollback, WelcomeMessagesFetch};
+use crate::state::{ChatStatisticsFetch, RequestPurpose, RequestRollback};
 use crate::state::{GroupsPurpose, ThreadsPurpose, WindowEnd};
 use crate::telegram::envelope::{ChatKind, ParsedCommunity};
 use crate::telegram::requests::{

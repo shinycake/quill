@@ -3,6 +3,7 @@
 //! media channel requests answered from the participants' audio sources,
 //! since decrypting a frame needs its sender (tdesktop
 //! `mediaChannelDescriptionsStart`).
+use super::Native;
 use super::group_callbacks::{GroupContext, context};
 use crate::calls::engine::{FrameCrypto, SsrcOwners};
 use crate::locks::LockExt;
@@ -10,7 +11,6 @@ use quill_calls_sys::{
     Loader, qc_group, qc_group_e2e_frame, qc_group_e2e_result_fn, qc_group_media_channel,
 };
 use std::ffi::c_void;
-use std::sync::atomic::{AtomicBool, AtomicPtr, Ordering};
 use std::sync::{Arc, Mutex};
 
 /// A media channel request's answer: `(request id, channels)`.
@@ -19,29 +19,45 @@ pub(super) type MediaAnswer = (u64, Vec<qc_group_media_channel>);
 /// What a conference call's instance (and its presentation) reads.
 pub(super) struct Conference {
     pub(super) crypto: Arc<dyn FrameCrypto>,
-    /// The instance answers go to: null until `qc_group_create` returned
-    /// ([`Conference::attach`]) and again once it is going away
-    /// ([`Conference::close`]). Stored and read under `media`'s lock, so
-    /// an answer is either sent or kept for `attach`, never lost.
-    handle: AtomicPtr<qc_group>,
-    /// The instance is being destroyed: every frame is dropped at once,
-    /// so no media thread waits on TDLib while `qc_group_destroy` waits
-    /// for it.
-    closed: AtomicBool,
+    /// Where the instance stands and the requests waiting on it, under one
+    /// lock: an answer is either sent or kept for `attach`, never lost, and
+    /// a closed conference holds nothing.
     media: Mutex<MediaChannels>,
 }
 
-#[derive(Default)]
+/// The instance answers go to. `Unattached` until `qc_group_create`
+/// returned ([`Conference::attach`]), `Closed` once it is going away
+/// ([`Conference::close`]): then every frame is dropped at once, so no
+/// media thread waits on TDLib while `qc_group_destroy` waits for it.
+enum Link {
+    Unattached {
+        /// Requests tgcalls is waiting on: `(request id, ssrcs)`.
+        pending: Vec<(u64, Vec<u32>)>,
+        /// Answers ready before the instance had a handle (a request made
+        /// during `qc_group_create`), sent by [`Conference::attach`].
+        unsent: Vec<MediaAnswer>,
+    },
+    Attached {
+        handle: Native<qc_group>,
+        pending: Vec<(u64, Vec<u32>)>,
+    },
+    Closed,
+}
+
 struct MediaChannels {
     owners: SsrcOwners,
-    /// Requests tgcalls is waiting on: `(request id, ssrcs)`.
-    pending: Vec<(u64, Vec<u32>)>,
-    /// Answers ready before the instance had a handle (a request made
-    /// during `qc_group_create`), sent by [`Conference::attach`].
-    unsent: Vec<MediaAnswer>,
+    link: Link,
 }
 
 impl MediaChannels {
+    /// The requests tgcalls waits on; none once closed.
+    fn pending_mut(&mut self) -> Option<&mut Vec<(u64, Vec<u32>)>> {
+        match &mut self.link {
+            Link::Unattached { pending, .. } | Link::Attached { pending, .. } => Some(pending),
+            Link::Closed => None,
+        }
+    }
+
     /// The answer for `ssrcs`, once every one has an owner or every
     /// participant is loaded (tdesktop answers with the resolved ones).
     fn answer(&self, ssrcs: &[u32]) -> Option<Vec<qc_group_media_channel>> {
@@ -64,35 +80,44 @@ impl Conference {
     pub(super) fn new(crypto: Arc<dyn FrameCrypto>) -> Self {
         Self {
             crypto,
-            handle: AtomicPtr::new(std::ptr::null_mut()),
-            closed: AtomicBool::new(false),
-            media: Mutex::new(MediaChannels::default()),
+            media: Mutex::new(MediaChannels {
+                owners: SsrcOwners::default(),
+                link: Link::Unattached {
+                    pending: Vec::new(),
+                    unsent: Vec::new(),
+                },
+            }),
         }
     }
 
     /// The instance answers go to, right after `qc_group_create`: the
     /// answers made before it, for the caller to send now.
     pub(super) fn attach(&self, handle: *mut qc_group) -> Vec<MediaAnswer> {
-        let mut media = self.media.lock_or_recover();
-        if self.closed.load(Ordering::SeqCst) {
+        let Some(handle) = Native::new(handle) else {
             return Vec::new();
+        };
+        let mut media = self.media.lock_or_recover();
+        match std::mem::replace(&mut media.link, Link::Closed) {
+            Link::Unattached { pending, unsent } => {
+                media.link = Link::Attached { handle, pending };
+                unsent
+            }
+            Link::Attached { pending, .. } => {
+                media.link = Link::Attached { handle, pending };
+                Vec::new()
+            }
+            Link::Closed => Vec::new(),
         }
-        self.handle.store(handle, Ordering::SeqCst);
-        std::mem::take(&mut media.unsent)
     }
 
     /// Before `qc_group_destroy`: frames are dropped without asking
     /// TDLib, and nothing answers the instance any more.
     pub(super) fn close(&self) {
-        self.closed.store(true, Ordering::SeqCst);
-        let mut media = self.media.lock_or_recover();
-        self.handle.store(std::ptr::null_mut(), Ordering::SeqCst);
-        media.pending.clear();
-        media.unsent.clear();
+        self.media.lock_or_recover().link = Link::Closed;
     }
 
     pub(super) fn is_closed(&self) -> bool {
-        self.closed.load(Ordering::SeqCst)
+        matches!(self.media.lock_or_recover().link, Link::Closed)
     }
 
     /// The participants' sources changed: the requests that can be
@@ -106,15 +131,20 @@ impl Conference {
             return Vec::new();
         }
         media.owners = owners.clone();
+        let Some(pending) = media.pending_mut().map(std::mem::take) else {
+            return Vec::new();
+        };
         let mut ready = Vec::new();
         let mut waiting = Vec::new();
-        for (id, ssrcs) in std::mem::take(&mut media.pending) {
+        for (id, ssrcs) in pending {
             match media.answer(&ssrcs) {
                 Some(answer) => ready.push((id, answer)),
                 None => waiting.push((id, ssrcs)),
             }
         }
-        media.pending = waiting;
+        if let Some(pending) = media.pending_mut() {
+            *pending = waiting;
+        }
         ready
     }
 
@@ -123,8 +153,10 @@ impl Conference {
     fn request(&self, id: u64, ssrcs: Vec<u32>) -> Option<Vec<qc_group_media_channel>> {
         let mut media = self.media.lock_or_recover();
         let answer = media.answer(&ssrcs);
-        if answer.is_none() {
-            media.pending.push((id, ssrcs));
+        if answer.is_none()
+            && let Some(pending) = media.pending_mut()
+        {
+            pending.push((id, ssrcs));
         }
         answer
     }
@@ -133,9 +165,12 @@ impl Conference {
     /// request.
     pub(super) fn cancel(&self, id: u64) -> bool {
         let mut media = self.media.lock_or_recover();
-        let before = media.pending.len();
-        media.pending.retain(|(pending, _)| *pending != id);
-        media.pending.len() != before
+        let Some(pending) = media.pending_mut() else {
+            return false;
+        };
+        let before = pending.len();
+        pending.retain(|(pending, _)| *pending != id);
+        pending.len() != before
     }
 
     /// Where request `id`'s answer goes now: the instance, or `None`
@@ -143,14 +178,14 @@ impl Conference {
     /// [`Conference::attach`]) or is going away.
     fn deliver(&self, id: u64, channels: &[qc_group_media_channel]) -> Option<*mut qc_group> {
         let mut media = self.media.lock_or_recover();
-        let handle = self.handle.load(Ordering::SeqCst);
-        if !handle.is_null() {
-            return Some(handle);
+        match &mut media.link {
+            Link::Attached { handle, .. } => Some(handle.as_ptr()),
+            Link::Unattached { unsent, .. } => {
+                unsent.push((id, channels.to_vec()));
+                None
+            }
+            Link::Closed => None,
         }
-        if !self.is_closed() {
-            media.unsent.push((id, channels.to_vec()));
-        }
-        None
     }
 
     /// Answers request `id` on the instance; before it has a handle the
@@ -170,23 +205,21 @@ impl Conference {
     /// `unsent` request ids, for tests.
     #[cfg(test)]
     pub(super) fn unsent(&self) -> Vec<u64> {
-        self.media
-            .lock_or_recover()
-            .unsent
-            .iter()
-            .map(|(id, _)| *id)
-            .collect()
+        match &self.media.lock_or_recover().link {
+            Link::Unattached { unsent, .. } => unsent.iter().map(|(id, _)| *id).collect(),
+            Link::Attached { .. } | Link::Closed => Vec::new(),
+        }
     }
 
     /// `pending` request ids, for tests.
     #[cfg(test)]
     pub(super) fn pending(&self) -> Vec<u64> {
-        self.media
-            .lock_or_recover()
-            .pending
-            .iter()
-            .map(|(id, _)| *id)
-            .collect()
+        match &mut self.media.lock_or_recover().link {
+            Link::Unattached { pending, .. } | Link::Attached { pending, .. } => {
+                pending.iter().map(|(id, _)| *id).collect()
+            }
+            Link::Closed => Vec::new(),
+        }
     }
 }
 

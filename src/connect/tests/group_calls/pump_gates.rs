@@ -48,7 +48,7 @@ fn a_rejoin_subscribes_its_new_instance_with_nothing_changed() {
     let syncs = handle.group_video_syncs().len();
     let call = driver.session.calls.group_call_mut(555).expect("tracked");
     call.transport.reset();
-    call.transport.store_payload("rejoin-answer".to_string());
+    call.transport.store_answer("rejoin-answer".to_string());
 
     ingest_call_json(&mut driver, &seq, &sink, UNRELATED);
 

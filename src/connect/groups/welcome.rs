@@ -22,11 +22,8 @@ impl<S: JsonSender> ConnectDriver<S> {
             .session
             .groups
             .welcome_messages
-            .contains_key(&chat_id.0)
-            || self
-                .session
-                .requests
-                .has_purpose_for_chat(RequestPurpose::LoadChatWelcomeMessages, chat_id)
+            .get(&chat_id.0)
+            .is_some_and(|pack| !pack.can_ask())
         {
             return Ok(None);
         }
@@ -42,8 +39,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         self.session
             .groups
-            .welcome_message_fetches
-            .insert(chat_id.0, WelcomeMessagesFetch::Loading);
+            .welcome_messages
+            .entry(chat_id.0)
+            .or_default()
+            .begin();
         Ok(Some(extra))
     }
 

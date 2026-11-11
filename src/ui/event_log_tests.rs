@@ -47,7 +47,7 @@ fn rows_run_oldest_first_with_the_message_each_action_concerns(cx: &mut TestAppC
     app.update_in(&mut vcx, |app, _, _| {
         let page = match app
             .session()
-            .and_then(|session| session.groups.event_logs.get(&CHANNEL.0))
+            .and_then(|session| session.groups.event_log_fetch(CHANNEL.0))
         {
             Some(ChatEventLogFetch::Loaded(page)) => page.clone(),
             other => panic!("log not loaded: {other:?}"),
@@ -120,10 +120,8 @@ fn another_admins_links_close_with_the_group_settings_box(cx: &mut TestAppContex
             CHANNEL.0,
             quill::state::AdminLinksState {
                 creator_user_id: 77,
-                active: quill::state::InviteLinkFetch::Loading,
-                revoked: quill::state::InviteLinkFetch::Loading,
-                active_request: None,
-                revoked_request: None,
+                active: quill::state::InviteLinkFetch::Loading(quill::ids::RequestId(1)),
+                revoked: quill::state::InviteLinkFetch::Loading(quill::ids::RequestId(2)),
             },
         );
         app.close_group_settings_dialog(cx);
@@ -154,10 +152,8 @@ fn the_box_for_another_chat_replaces_the_invite_pages(cx: &mut TestAppContext) {
             CHANNEL.0,
             quill::state::AdminLinksState {
                 creator_user_id: 77,
-                active: quill::state::InviteLinkFetch::Loading,
-                revoked: quill::state::InviteLinkFetch::Loading,
-                active_request: None,
-                revoked_request: None,
+                active: quill::state::InviteLinkFetch::Loading(quill::ids::RequestId(1)),
+                revoked: quill::state::InviteLinkFetch::Loading(quill::ids::RequestId(2)),
             },
         );
         // The same chat again keeps its pages.
@@ -201,8 +197,10 @@ fn the_search_box_follows_the_chat_whose_log_is_open(cx: &mut TestAppContext) {
         if let Some(session) = app.session_mut() {
             session
                 .groups
-                .event_log_queries
-                .insert(CHANNEL.0, "foo".to_string());
+                .event_logs
+                .entry(CHANNEL.0)
+                .or_default()
+                .query = "foo".to_string();
         }
         assert_eq!(shown(app, cx).as_deref(), Some("foo"));
         // Another group's box (Manage > Recent actions): its own, empty query.

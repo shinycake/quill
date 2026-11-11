@@ -48,10 +48,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .supergroup_members
             .insert(key, SupergroupMembersFetch::Loading);
         let extra = self.session.request(purpose, Some(chat_id));
-        self.session
-            .groups
-            .supergroup_member_queries
-            .insert(key, (extra, query.to_string()));
+        self.session.groups.note_member_first(key, extra, query);
         let filter_json = match filter {
             MemberListFilter::Recent => supergroup_members_filter_recent_json(),
             MemberListFilter::Search => supergroup_members_filter_search_json(query),
@@ -68,7 +65,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         )) {
             self.session.requests.take(extra);
             self.session.groups.supergroup_members.remove(&key);
-            self.session.groups.supergroup_member_queries.remove(&key);
+            self.session.groups.member_asks.remove(&key);
             return Err(err);
         }
         Ok(Some(extra))

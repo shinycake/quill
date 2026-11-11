@@ -120,6 +120,7 @@ pub fn list_messages(args: &Value) -> Result<ToolOutput, ToolError> {
             "messages": shaped,
             "older_cursor": older_cursor,
         }),
+        images: Vec::new(),
     })
 }
 
@@ -182,6 +183,7 @@ pub fn read_history(args: &Value) -> Result<ToolOutput, ToolError> {
             "older_cursor": older_cursor,
             "newer_cursor": newer_cursor,
         }),
+        images: Vec::new(),
     })
 }
 
@@ -276,6 +278,7 @@ pub fn search_messages(args: &Value) -> Result<ToolOutput, ToolError> {
             "messages": shaped,
             "next_cursor": next,
         }),
+        images: Vec::new(),
     })
 }
 
@@ -391,6 +394,7 @@ fn search_everywhere(
             "messages": shaped,
             "next_cursor": next,
         }),
+        images: Vec::new(),
     })
 }
 
@@ -429,6 +433,7 @@ pub fn get_message(args: &Value) -> Result<ToolOutput, ToolError> {
     Ok(ToolOutput {
         text: messages::line(&shaped),
         data: shaped,
+        images: Vec::new(),
     })
 }
 

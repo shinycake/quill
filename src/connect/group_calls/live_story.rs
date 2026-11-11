@@ -67,7 +67,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         let Some((group_call_id, is_rtmp)) = self
             .watched_live_call()
-            .filter(|call| call.is_joined || call.transport.payload().is_some())
+            .filter(|call| call.is_joined || !call.transport.answer().is_empty())
             .map(|call| (call.id, call.is_rtmp_stream))
         else {
             return Ok(());
@@ -523,7 +523,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         self.teardown_group_call_transport(group_call_id);
         if let Some(call) = self.session.calls.story_stream.as_mut() {
-            call.transport.handshake_failed(STORY_CHAT_TAKEN);
+            call.transport.connect_failed(STORY_CHAT_TAKEN);
         }
     }
 
@@ -545,7 +545,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .as_mut()
             .filter(|call| call.id == group_call_id)
         {
-            call.transport.set_error(STORY_CHAT_TAKEN);
+            call.transport.fail(STORY_CHAT_TAKEN);
         }
         true
     }

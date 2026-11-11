@@ -82,10 +82,63 @@ pub struct Session {
     pub started_ms: u64,
     /// The last command or step.
     pub last_ms: u64,
-    /// Set when the session was cut short: Stop, a disconnect, a switch
+    /// Whether the session was cut short: Stop, a disconnect, a switch
     /// turned off. Otherwise it ends [`HOLD`] after `last_ms`.
-    pub ended_ms: Option<u64>,
+    pub run: Run,
     pub action: Option<Action>,
+}
+
+/// Whether a session is still running or was cut short.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Run {
+    Running,
+    Ended { at_ms: u64 },
+}
+
+impl Session {
+    fn running(&self) -> bool {
+        self.run == Run::Running
+    }
+
+    /// When it ends: when it was cut short, else [`HOLD`] after the last
+    /// command.
+    fn end_ms(&self) -> u64 {
+        match self.run {
+            Run::Ended { at_ms } => at_ms,
+            Run::Running => self.last_ms.saturating_add(ms(HOLD)),
+        }
+    }
+}
+
+/// Whether the user holds the driver back.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum Hold {
+    #[default]
+    None,
+    /// The user took the window back. `since_ms` is when the pause began,
+    /// so what moves on screen can hold still at that moment.
+    Paused { reason: PauseReason, since_ms: u64 },
+    /// The user pressed Stop: UI commands are refused until the driving
+    /// switch (or Agent access) goes off, or Quill restarts. A reconnect
+    /// does not clear it.
+    Stopped,
+}
+
+impl Hold {
+    pub fn paused(self) -> Option<PauseReason> {
+        match self {
+            Hold::Paused { reason, .. } => Some(reason),
+            Hold::None | Hold::Stopped => None,
+        }
+    }
+
+    /// When the pause began (0 when not paused).
+    pub fn paused_ms(self) -> u64 {
+        match self {
+            Hold::Paused { since_ms, .. } => since_ms,
+            Hold::None | Hold::Stopped => 0,
+        }
+    }
 }
 
 /// Everything the phase is derived from, besides the switches and who is
@@ -93,14 +146,7 @@ pub struct Session {
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Facts {
     pub session: Option<Session>,
-    pub paused: Option<PauseReason>,
-    /// When the pause began, so what moves on screen can hold still at
-    /// that moment.
-    pub paused_ms: u64,
-    /// The user pressed Stop: UI commands are refused until the driving
-    /// switch (or Agent access) goes off, or Quill restarts. A reconnect
-    /// does not clear it.
-    pub stopped: bool,
+    pub hold: Hold,
     /// When the user last pressed "Let it continue" or answered one of the
     /// agent's prompts (0: never), for [`RESUME_GRACE`].
     pub resumed_ms: u64,
@@ -193,17 +239,15 @@ pub fn phase(facts: &Facts, live: Live, now: u64) -> Phase {
     let Some(session) = &facts.session else {
         return Phase::Idle;
     };
-    let on = live.connected && live.allowed && session.ended_ms.is_none();
-    if on && let Some(reason) = facts.paused {
+    let on = live.connected && live.allowed && session.running();
+    if on && let Some(reason) = facts.hold.paused() {
         return Phase::Paused {
             agent: session.agent.clone(),
             since_ms: session.started_ms,
             reason,
         };
     }
-    let end = session
-        .ended_ms
-        .unwrap_or_else(|| session.last_ms.saturating_add(ms(HOLD)));
+    let end = session.end_ms();
     if on && now < end {
         return Phase::Driving {
             agent: session.agent.clone(),
@@ -231,35 +275,35 @@ pub fn phase(facts: &Facts, live: Live, now: u64) -> Phase {
 /// no agent then: the one connected may not be the one the user paused.
 pub fn observe(facts: &mut Facts, live: Live, now: u64) {
     if !live.allowed {
-        facts.paused = None;
-        facts.stopped = false;
+        facts.hold = Hold::None;
     }
     if live.connected && live.allowed {
-        if facts.paused.is_some()
+        if facts.hold.paused().is_some()
             && let Some(session) = facts.session.as_mut()
-            && session.ended_ms.is_some()
+            && !session.running()
         {
             session.started_ms = now;
             session.last_ms = now;
-            session.ended_ms = None;
+            session.run = Run::Running;
             session.action = None;
             session.agent.clear();
         }
         return;
     }
     if let Some(session) = facts.session.as_mut()
-        && session.ended_ms.is_none()
-        && now < session.last_ms.saturating_add(ms(HOLD))
+        && session.running()
+        && now < session.end_ms()
     {
-        session.ended_ms = Some(now);
+        session.run = Run::Ended { at_ms: now };
     }
 }
 
 /// A command reached the window: start a session, or extend the running one.
 pub fn command(facts: &mut Facts, agent: &str, now: u64) {
-    let running = facts.session.as_ref().is_some_and(|session| {
-        session.ended_ms.is_none() && now < session.last_ms.saturating_add(ms(HOLD))
-    });
+    let running = facts
+        .session
+        .as_ref()
+        .is_some_and(|session| session.running() && now < session.end_ms());
     match facts.session.as_mut() {
         Some(session) if running => {
             session.last_ms = now;
@@ -270,7 +314,7 @@ pub fn command(facts: &mut Facts, agent: &str, now: u64) {
                 agent: agent.to_string(),
                 started_ms: now,
                 last_ms: now,
-                ended_ms: None,
+                run: Run::Running,
                 action: None,
             });
         }
@@ -357,9 +401,11 @@ pub fn pauses_on(facts: &Facts, phase: &Phase, input: RealInput, active: bool, n
 
 /// Pause for `reason` at `now`; an earlier pause and its reason are kept.
 pub fn pause_at(facts: &mut Facts, reason: PauseReason, now: u64) {
-    if facts.paused.is_none() {
-        facts.paused = Some(reason);
-        facts.paused_ms = now;
+    if facts.hold == Hold::None {
+        facts.hold = Hold::Paused {
+            reason,
+            since_ms: now,
+        };
     }
 }
 
@@ -371,10 +417,12 @@ pub fn answered(facts: &mut Facts, now: u64) {
 
 /// The user handed control back to the agent.
 pub fn resume(facts: &mut Facts, now: u64) {
-    facts.paused = None;
+    if facts.hold.paused().is_some() {
+        facts.hold = Hold::None;
+    }
     facts.resumed_ms = now;
     if let Some(session) = facts.session.as_mut()
-        && session.ended_ms.is_none()
+        && session.running()
     {
         session.last_ms = session.last_ms.max(now);
     }
@@ -382,13 +430,13 @@ pub fn resume(facts: &mut Facts, now: u64) {
 
 /// The user pressed Stop: the session ends now and UI commands are refused.
 pub fn stop(facts: &mut Facts, now: u64) {
-    facts.stopped = true;
-    facts.paused = None;
+    facts.hold = Hold::Stopped;
     if let Some(session) = facts.session.as_mut()
-        && session.ended_ms.is_none()
+        && session.running()
     {
-        let end = session.last_ms.saturating_add(ms(HOLD));
-        session.ended_ms = Some(now.min(end));
+        session.run = Run::Ended {
+            at_ms: now.min(session.end_ms()),
+        };
     }
 }
 
@@ -397,11 +445,7 @@ pub fn stop(facts: &mut Facts, now: u64) {
 pub fn next_change_ms(phase: &Phase, facts: &Facts) -> Option<u64> {
     let session = facts.session.as_ref()?;
     match phase {
-        Phase::Driving { .. } => Some(
-            session
-                .ended_ms
-                .unwrap_or_else(|| session.last_ms.saturating_add(ms(HOLD))),
-        ),
+        Phase::Driving { .. } => Some(session.end_ms()),
         Phase::FadingOut { ended_ms, .. } => Some(ended_ms.saturating_add(ms(FADE_OUT))),
         Phase::Idle | Phase::Paused { .. } => None,
     }
@@ -427,9 +471,7 @@ pub fn moving(phase: &Phase, now: u64) -> bool {
 
 static FACTS: Mutex<Facts> = Mutex::new(Facts {
     session: None,
-    paused: None,
-    paused_ms: 0,
-    stopped: false,
+    hold: Hold::None,
     resumed_ms: 0,
     last_pointer: None,
 });
@@ -572,8 +614,7 @@ pub fn note_answered() {
 /// forgotten, so turning it back on lets agents drive again.
 pub fn forget_hold() {
     let mut facts = crate::locks::lock_or_recover(&FACTS);
-    facts.paused = None;
-    facts.stopped = false;
+    facts.hold = Hold::None;
 }
 
 /// The agent of the latest session, ended or not.
@@ -598,23 +639,24 @@ pub fn stop_driving() {
 }
 
 pub fn paused() -> bool {
-    crate::locks::lock_or_recover(&FACTS).paused.is_some()
+    crate::locks::lock_or_recover(&FACTS)
+        .hold
+        .paused()
+        .is_some()
 }
 
 pub fn stopped() -> bool {
-    crate::locks::lock_or_recover(&FACTS).stopped
+    crate::locks::lock_or_recover(&FACTS).hold == Hold::Stopped
 }
 
 /// Why the driver refuses every command right now: the user took control
 /// or pressed Stop.
 pub fn refusal() -> Option<String> {
     let facts = crate::locks::lock_or_recover(&FACTS);
-    if facts.stopped {
-        Some(stopped_refusal())
-    } else if facts.paused.is_some() {
-        Some(paused_refusal())
-    } else {
-        None
+    match facts.hold {
+        Hold::Stopped => Some(stopped_refusal()),
+        Hold::Paused { .. } => Some(paused_refusal()),
+        Hold::None => None,
     }
 }
 

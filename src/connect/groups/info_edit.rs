@@ -100,21 +100,18 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        let users = &self.session.users_state;
-        if (!users.chat_photo_emoji_icons.is_empty() && !users.chat_photo_emoji_icons_failed)
-            || self
-                .session
-                .requests
-                .has_purpose(RequestPurpose::GetChatPhotoEmojiIcons)
-        {
+        if !self.session.users_state.chat_photo_emoji_icons.can_ask() {
             return Ok(None);
         }
-        self.session.users_state.chat_photo_emoji_icons_failed = false;
         let extra = self
             .session
             .request(RequestPurpose::GetChatPhotoEmojiIcons, None);
         let json = get_default_chat_photo_custom_emoji_stickers(extra);
-        self.send_json_request(extra, &json).map(Some)
+        let sent = self.send_json_request(extra, &json).map(Some);
+        if sent.is_ok() {
+            self.session.users_state.chat_photo_emoji_icons.begin();
+        }
+        sent
     }
 
     /// One info edit: gated on `Session::chat_can_edit_information`

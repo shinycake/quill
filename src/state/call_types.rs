@@ -369,14 +369,21 @@ pub struct ActiveGroupCall {
     pub mute_new_participants: bool,
     pub can_toggle_mute_new_participants: bool,
     pub verification: Option<GroupCallVerificationState>,
-    /// Phase C2g: the native group transport: the `joinVideoChat` answer
-    /// the pump finishes the handshake with, whether it completed, and the
-    /// last transport error (see [`GroupTransport`]).
+    /// The native group transport: the `joinVideoChat` answer the driver
+    /// pump connects, the completed handshake, or its failure (offer,
+    /// connect, subscribe). The join itself is never blocked by these.
     pub transport: GroupTransport,
-    /// Phase C2g: screen-share presentation state (see [`ScreenShare`]).
-    /// Its error is kept apart from the transport's: a failed share leaves
+    /// Screen-share presentation: the `startGroupCallScreenSharing`
+    /// handshake, then the connected presentation.
+    pub screen_share: GroupScreenShare,
+    /// Your shared window is hidden, so the share is paused (the driver
+    /// sent `toggleGroupCallScreenSharingIsPaused`). Your own tile shows
+    /// the paused state at once, before the participant update.
+    pub screen_share_paused: bool,
+    /// The last screen share's failure (its offer, start, connect or
+    /// stop). Kept apart from `transport_error`: a failed share leaves
     /// the call itself working.
-    pub screen_share: ScreenShare,
+    pub screen_share_error: Option<String>,
     /// Speaker and listener links from `getVideoChatInviteLink`,
     /// fetched on demand (`crate::calls::share_links`).
     pub share_links: crate::calls::share_links::VideoChatShareLinks,
@@ -407,13 +414,12 @@ pub struct ActiveGroupCall {
     /// (`record_duration` seconds, 0 = not recording).
     pub record_duration: i32,
     pub is_video_recorded: bool,
-    /// "Join as" choices from `getVideoChatAvailableParticipants` (empty
-    /// until loaded, or when the call has no alternatives to offer).
-    pub join_as_options: Vec<MessageSender>,
+    /// "Join as" choices from `getVideoChatAvailableParticipants`: asked
+    /// once per tracked call (a failure leaves the picker out, the join
+    /// goes ahead as yourself); empty when there are no alternatives.
+    pub join_as_options: crate::state::fetch::Fetch<Vec<MessageSender>>,
     /// The identity the next join uses; `None` joins as yourself.
     pub join_as: Option<MessageSender>,
-    /// The options request was sent (once per tracked call).
-    pub join_as_requested: bool,
     /// How the joined call carries media, from the engine after the
     /// native connect (`CallEngine::group_call_mode`). Stream modes get their
     /// segments from TDLib (`calls::engine::StreamFeeder`).
@@ -438,202 +444,6 @@ pub struct ActiveGroupCall {
     /// for a video chat, or a conference this session didn't join.
     pub conference: Option<ConferenceCall>,
 }
-
-/// The native group transport of a group call, with the last error it
-/// had. The join answer, the ready mark and the error are one value:
-/// the pump finishes a handshake only from `Handshake`, a call is ready
-/// only after it, and the error never outlives a join that starts over.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum GroupTransport {
-    /// No join answer yet (the join went out with the honest no-device
-    /// params, or its answer is still in flight), or the answer was spent
-    /// by a failed handshake. `error` is the last failure.
-    NotJoined { error: Option<String> },
-    /// The `joinVideoChat` answer is stored; Phase C2g consumes it in the
-    /// driver pump to finish the native group handshake
-    /// (`connect_group_call`).
-    Handshake {
-        payload: String,
-        error: Option<String>,
-    },
-    /// The handshake completed. `error`: a later engine failure (mute,
-    /// camera, subscribe) that left the call itself working.
-    Ready { error: Option<String> },
-}
-
-impl Default for GroupTransport {
-    fn default() -> Self {
-        Self::NotJoined { error: None }
-    }
-}
-
-impl GroupTransport {
-    pub fn is_ready(&self) -> bool {
-        matches!(self, Self::Ready { .. })
-    }
-
-    /// The join answer waiting for the pump.
-    pub fn payload(&self) -> Option<&str> {
-        match self {
-            Self::Handshake { payload, .. } => Some(payload),
-            _ => None,
-        }
-    }
-
-    pub fn error(&self) -> Option<&str> {
-        match self {
-            Self::NotJoined { error } | Self::Handshake { error, .. } | Self::Ready { error } => {
-                error.as_deref()
-            }
-        }
-    }
-
-    /// Record `message` as the last error, whatever the stage.
-    pub fn set_error(&mut self, message: impl Into<String>) {
-        let message = Some(message.into());
-        match self {
-            Self::NotJoined { error } | Self::Handshake { error, .. } | Self::Ready { error } => {
-                *error = message
-            }
-        }
-    }
-
-    pub fn clear_error(&mut self) {
-        match self {
-            Self::NotJoined { error } | Self::Handshake { error, .. } | Self::Ready { error } => {
-                *error = None
-            }
-        }
-    }
-
-    /// The `joinVideoChat` answer arrived. An empty one is no answer, and
-    /// a connected transport keeps its state (the answer predates it).
-    pub fn store_payload(&mut self, payload: String) {
-        let error = self.error().map(str::to_string);
-        match self {
-            Self::Ready { .. } => {}
-            _ if payload.is_empty() => *self = Self::NotJoined { error },
-            _ => *self = Self::Handshake { payload, error },
-        }
-    }
-
-    /// The handshake completed: ready, the old error gone.
-    pub fn connected(&mut self) {
-        *self = Self::Ready { error: None };
-    }
-
-    /// The handshake failed: the answer is spent (only a rejoin or the
-    /// Join button brings a new one), and the call says why.
-    pub fn handshake_failed(&mut self, message: impl Into<String>) {
-        *self = Self::NotJoined {
-            error: Some(message.into()),
-        };
-    }
-
-    /// A fresh native context must run the join handshake again: no
-    /// answer, not ready (the error stays).
-    pub fn reset(&mut self) {
-        let error = self.error().map(str::to_string);
-        *self = Self::NotJoined { error };
-    }
-}
-
-/// Phase C2g: the group call's screen-share presentation.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ScreenShare {
-    /// Not sharing. `error`: the last share's failure (its offer, start,
-    /// connect or stop), kept until the next start.
-    Off { error: Option<String> },
-    /// The `startGroupCallScreenSharing` request is out; its answer
-    /// leaves this stage (and so do its error and the share's stop).
-    Starting,
-    /// The presentation answer is stored; the driver pump finishes the
-    /// handshake with it.
-    Answered(String),
-    /// The presentation transport connected. `paused`: your shared window
-    /// is hidden (the driver sent `toggleGroupCallScreenSharingIsPaused`);
-    /// your own tile shows it at once, before the participant update.
-    Live { paused: bool },
-}
-
-impl Default for ScreenShare {
-    fn default() -> Self {
-        Self::Off { error: None }
-    }
-}
-
-impl ScreenShare {
-    /// Sharing, or starting to: the toggle stops instead of starting.
-    pub fn is_active(&self) -> bool {
-        !matches!(self, Self::Off { .. })
-    }
-
-    /// The start request is out, or its answer waits for the pump.
-    pub fn is_pending(&self) -> bool {
-        matches!(self, Self::Starting | Self::Answered(_))
-    }
-
-    pub fn is_live(&self) -> bool {
-        matches!(self, Self::Live { .. })
-    }
-
-    pub fn is_paused(&self) -> bool {
-        matches!(self, Self::Live { paused: true })
-    }
-
-    pub fn error(&self) -> Option<&str> {
-        match self {
-            Self::Off { error } => error.as_deref(),
-            _ => None,
-        }
-    }
-
-    /// The answer waiting for the pump.
-    pub fn answer(&self) -> Option<&str> {
-        match self {
-            Self::Answered(answer) => Some(answer),
-            _ => None,
-        }
-    }
-
-    /// The start request goes out (an old error is gone).
-    pub fn begin(&mut self) {
-        *self = Self::Starting;
-    }
-
-    /// The answer arrived; only a start in flight takes it.
-    pub fn store_answer(&mut self, answer: String) {
-        if matches!(self, Self::Starting) {
-            *self = Self::Answered(answer);
-        }
-    }
-
-    /// The presentation connected.
-    pub fn connected(&mut self) {
-        *self = Self::Live { paused: false };
-    }
-
-    /// Not sharing any more, the last error kept.
-    pub fn end(&mut self) {
-        let error = self.error().map(str::to_string);
-        *self = Self::Off { error };
-    }
-
-    /// The share failed (or could not stop): not sharing, saying why.
-    pub fn fail(&mut self, message: impl Into<String>) {
-        *self = Self::Off {
-            error: Some(message.into()),
-        };
-    }
-
-    /// A paused or resumed share; only a live one has the mark.
-    pub fn set_paused(&mut self, paused: bool) {
-        if let Self::Live { paused: mark } = self {
-            *mark = paused;
-        }
-    }
-}
-
 /// Quill's own rejoin of a group call that TDLib (or a stream feeder)
 /// says needs one. One value, so "a rejoin is due" and "the banner shows"
 /// cannot drift apart: the driver sends a rejoin only from `Wanted`, and
@@ -785,7 +595,7 @@ impl ActiveGroupCall {
     /// The window offers Rejoin: the connection was lost, or the join
     /// itself failed (a failed camera on a connected call is not one).
     pub fn offers_rejoin(&self) -> bool {
-        self.reconnecting() || (self.join_failed() && !self.transport.is_ready())
+        self.reconnecting() || (self.join_failed() && !self.transport.is_connected())
     }
 
     /// Blank tracked call for a newly seen call id. Participant state
@@ -811,8 +621,10 @@ impl ActiveGroupCall {
             mute_new_participants: false,
             can_toggle_mute_new_participants: false,
             verification: None,
-            transport: GroupTransport::default(),
-            screen_share: ScreenShare::default(),
+            transport: GroupTransport::NoTransport,
+            screen_share: GroupScreenShare::Off,
+            screen_share_paused: false,
+            screen_share_error: None,
             share_links: Default::default(),
             is_rtmp_stream: false,
             scheduled_start_date: 0,
@@ -826,9 +638,8 @@ impl ActiveGroupCall {
             messages: Vec::new(),
             record_duration: 0,
             is_video_recorded: false,
-            join_as_options: Vec::new(),
+            join_as_options: Default::default(),
             join_as: None,
-            join_as_requested: false,
             stream_mode: Default::default(),
             stream: Default::default(),
             viewer_count: 0,

@@ -206,3 +206,23 @@ fn another_call_taking_the_place_drops_the_waiting_link() {
     assert_eq!(recorder.snapshot().len(), before, "nothing was offered");
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn a_failed_fetch_of_the_offered_call_drops_its_hash() {
+    let (dir, mut driver, recorder, _handle, sink, seq) = ready_group_call_driver();
+    driver.offer_call_link(ChatId(51), "AbC", false).unwrap();
+    assert!(driver.session.calls.call_link.is_some());
+    let fetch = sent_request(&recorder, "getGroupCall");
+    let json = serde_json::json!({
+        "@type": "error",
+        "@extra": fetch["@extra"],
+        "code": 400,
+        "message": "GROUPCALL_INVALID",
+    })
+    .to_string();
+    driver
+        .ingest(crate::telegram::client::copy_and_parse(&json, &seq, &sink).unwrap())
+        .unwrap();
+    assert_eq!(driver.session.calls.call_link, None);
+    let _ = std::fs::remove_dir_all(&dir);
+}

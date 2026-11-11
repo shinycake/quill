@@ -132,7 +132,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 .as_ref()
                 .is_some_and(|pending| pending.request == extra),
             OfferSend::Screen => calls.active_group_call.as_ref().is_some_and(|call| {
-                call.id == id && call.is_joined && call.screen_share.is_pending()
+                call.id == id && call.is_joined && call.screen_share.is_starting()
             }),
         }
     }
@@ -298,9 +298,9 @@ impl<S: JsonSender> ConnectDriver<S> {
             && let Some(call) = self.session.calls.group_call_mut(id)
         {
             // The share failed; the call it was for still works.
-            call.screen_share.fail(err.to_string());
+            call.screen_share_error = Some(err.to_string());
         } else if let Some(call) = self.session.calls.group_call_mut(id) {
-            call.transport.set_error(err.to_string());
+            call.transport.fail(err.to_string());
             if matches!(send, OfferSend::Rejoin { .. }) {
                 // The attempt counts: the next one is due, or none is left.
                 call.rejoin.attempt_failed(extra);
@@ -324,10 +324,8 @@ impl<S: JsonSender> ConnectDriver<S> {
                 self.forget_conference_crypto();
             }
             OfferSend::Screen => {
-                if let Some(call) = self.session.calls.group_call_mut(id)
-                    && call.screen_share.is_pending()
-                {
-                    call.screen_share.end();
+                if let Some(call) = self.session.calls.group_call_mut(id) {
+                    call.screen_share.cancel_start();
                 }
             }
         }

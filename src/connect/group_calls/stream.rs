@@ -565,7 +565,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 // rejoin is started; the failed join is what the UI shows
                 // (its Join button is the manual retry).
                 call.transport
-                    .handshake_failed(crate::lang::tr(crate::lang::keys::Q_OPS_THE_CALL_HAS_ENDED));
+                    .connect_failed(crate::lang::tr(crate::lang::keys::Q_OPS_THE_CALL_HAS_ENDED));
             }
         }
         if outcome == ReplyOutcome::Rejoin

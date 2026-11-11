@@ -473,12 +473,41 @@ pub struct PaidMessages {
     pub revenue: HashMap<i64, i64>,
     /// Channel direct messages price per supergroup id.
     pub dm_price: HashMap<i64, i64>,
-    /// The trusted prices were read from disk.
-    pub trust_loaded: bool,
-    /// The trusted prices changed and are not written yet.
-    pub trust_dirty: bool,
+    /// Where the trusted prices file stands.
+    pub trust_file: TrustFile,
     /// The Remove Fee or Direct Messages save, and what it was for.
     pub save: PaidSave,
+}
+
+/// The trusted prices file of the account: read once, written when the
+/// prices change.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum TrustFile {
+    /// Not read yet.
+    #[default]
+    NotLoaded,
+    /// Read, and the prices match the file.
+    Clean,
+    /// The prices changed and are not written yet.
+    Dirty,
+    /// The last write failed (the reason, for the person to see); the next
+    /// change writes again.
+    SaveFailed(String),
+}
+
+impl PaidMessages {
+    /// The trusted prices changed: the file is behind.
+    pub fn trust_changed(&mut self) {
+        self.trust_file = TrustFile::Dirty;
+    }
+
+    /// The reason the last write of the trusted prices failed.
+    pub fn trust_save_error(&self) -> Option<&str> {
+        match &self.trust_file {
+            TrustFile::SaveFailed(error) => Some(error),
+            _ => None,
+        }
+    }
 }
 
 /// Whom a paid-message save is for: its failure shows there only, never
@@ -657,7 +686,7 @@ impl PaidMessages {
         if !matches!(answer, CanSend::HasPaidMessages { stars } if stars > 0)
             && self.trust.forget(user_id)
         {
-            self.trust_dirty = true;
+            self.trust_changed();
         }
     }
 
@@ -926,10 +955,10 @@ mod tests {
         state.trust.trust(5, 10);
         state.record_answer(5, CanSend::HasPaidMessages { stars: 10 }, 1, false);
         assert!(state.trust.is_trusted(5, 10));
-        assert!(!state.trust_dirty);
+        assert_eq!(state.trust_file, TrustFile::NotLoaded);
         state.record_answer(5, CanSend::Ok, 2, false);
         assert!(!state.trust.is_trusted(5, 10));
-        assert!(state.trust_dirty);
+        assert_eq!(state.trust_file, TrustFile::Dirty);
     }
 
     #[test]

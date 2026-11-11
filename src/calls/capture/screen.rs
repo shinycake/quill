@@ -11,10 +11,42 @@
 //! Design: `docs/decisions/call-capture.md`.
 #![deny(clippy::indexing_slicing)]
 
-use super::{CaptureError, FrameSink, VideoFrame};
+use super::{CaptureError, CaptureEvent, FrameSink, VideoFrame};
 use crate::locks::LockExt;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
+
+/// Whether a shared window shows. The capture loops of every backend watch
+/// the window and move this; the event to push is the move.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum ShareVisibility {
+    #[default]
+    Visible,
+    /// Minimised, hidden or on another desktop: frames stop.
+    Hidden,
+}
+
+impl ShareVisibility {
+    /// The window is `visible` now (or not): the event to push when that
+    /// differs from before.
+    pub fn seen(&mut self, visible: bool) -> Option<CaptureEvent> {
+        match (*self, visible) {
+            (Self::Visible, false) => {
+                *self = Self::Hidden;
+                Some(CaptureEvent::Paused)
+            }
+            (Self::Hidden, true) => {
+                *self = Self::Visible;
+                Some(CaptureEvent::Resumed)
+            }
+            _ => None,
+        }
+    }
+
+    pub fn hidden(self) -> bool {
+        self == Self::Hidden
+    }
+}
 
 /// A screen (display) or a single window.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

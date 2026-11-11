@@ -132,7 +132,7 @@ impl QuillApp {
                 };
                 if call.is_joined && screen_source {
                     menu = menu.item(item(
-                        if call.screen_share.is_live() || call.screen_share.is_pending() { tr(keys::Q_AV_STOP_SHARING_SCREEN) } else { tr(keys::GROUP_CALL_TOOLTIP_SCREEN) },
+                        if call.screen_share.is_on() { tr(keys::Q_AV_STOP_SHARING_SCREEN) } else { tr(keys::GROUP_CALL_TOOLTIP_SCREEN) },
                         |this, _, cx| this.toggle_group_call_screen_share(cx),
                     ));
                 }

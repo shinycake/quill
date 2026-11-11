@@ -69,7 +69,7 @@ pub enum ChatListPurpose {
     ClearRecentlyFoundChats,
     /// Slice CL2: `getArchiveChatListSettings` (schema 1.8.67, line
     /// 13421). Response is `archiveChatListSettings`; stored in
-    /// `ChatListState::archive_chat_list_settings`.
+    /// `ChatListState::archive_settings`.
     GetArchiveChatListSettings,
     /// Slice CL2: `setArchiveChatListSettings` (schema 1.8.67, line
     /// 13424). Response is `ok`; the settings were flipped

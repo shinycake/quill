@@ -60,7 +60,7 @@ impl QuillApp {
                 )),
         );
         match fetch {
-            None | Some(InviteLinkFetch::Loading) => {
+            None | Some(InviteLinkFetch::Loading(_)) => {
                 section = section.child(
                     div()
                         .flex()
@@ -329,7 +329,7 @@ impl QuillApp {
         ));
         let mut section = div().flex().flex_col().w_full().gap_1().child(header);
         match fetch {
-            None | Some(JoinRequestFetch::Loading) => {
+            None | Some(JoinRequestFetch::Loading { .. }) => {
                 section = section.child(
                     div()
                         .flex()

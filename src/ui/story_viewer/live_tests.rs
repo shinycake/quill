@@ -643,7 +643,7 @@ fn a_story_stream_that_failed_offers_retry(cx: &mut TestAppContext) {
             .as_mut()
             .and_then(|s| s.calls.story_stream.as_mut())
         {
-            call.transport.set_error("another call needs it");
+            call.transport.fail("another call needs it");
         }
         cx.notify();
     });

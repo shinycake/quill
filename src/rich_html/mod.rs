@@ -26,7 +26,7 @@ pub mod worker;
 #[cfg(test)]
 mod tests;
 
-pub use handle::{RichHtmlExport, RichHtmlOutcome, RichHtmlRequest};
+pub use handle::{RichHtmlExport, RichHtmlOutcome, RichHtmlRequest, RichHtmlStage};
 pub use page::{PageLabels, page_html, title_from_page};
 
 use crate::ids::{ChatId, MessageId};

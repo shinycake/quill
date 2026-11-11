@@ -17,7 +17,9 @@ impl Session {
         ] {
             self.requests.take_purpose_for_chat(purpose, chat_id);
         }
-        self.groups.join_request_latest.remove(&chat_id.0);
+        if let Some(fetch) = self.groups.join_requests.get_mut(&chat_id.0) {
+            fetch.forget_page_in_flight();
+        }
     }
 
     /// `user_id`'s request in `chat_id` is handled (or gone): it leaves

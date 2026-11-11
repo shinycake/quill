@@ -225,7 +225,9 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Ok(());
         }
         let group_call_id = match &self.session.calls.active_group_call {
-            Some(call) if !call.is_joined && !call.join_as_requested && call.is_video_chat => {
+            Some(call)
+                if !call.is_joined && call.join_as_options.is_idle() && call.is_video_chat =>
+            {
                 call.id
             }
             _ => return Ok(()),
@@ -250,7 +252,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         // Asked once; an answered or failed request is not repeated (the
         // picker is optional, so a failure just leaves it out).
         if let Some(call) = self.session.calls.active_group_call.as_mut() {
-            call.join_as_requested = true;
+            call.join_as_options.begin();
         }
         Ok(())
     }
@@ -482,7 +484,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             // answer, and the stale screen-share state so the pump
             // doesn't drop the new `joinVideoChat` answer.
             call.transport.reset();
-            call.screen_share.end();
+            call.screen_share.stop();
         }
         match conference.flatten() {
             Some(input) => {

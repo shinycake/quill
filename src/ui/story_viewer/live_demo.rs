@@ -200,7 +200,7 @@ impl QuillApp {
             .and_then(|s| s.calls.story_stream.as_mut())
         {
             call.transport
-                .set_error("another call needs this stream's connection");
+                .fail("another call needs this stream's connection");
         }
         cx.notify();
     }

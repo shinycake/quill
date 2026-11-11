@@ -385,7 +385,7 @@ fn replay_group_call_signaling() {
     );
     let call = session.calls.active_group_call.as_ref().expect("joined");
     assert!(call.is_joined);
-    assert_eq!(call.transport.payload(), Some("JOIN_PAYLOAD_BYTES"));
+    assert_eq!(call.transport.answer(), "JOIN_PAYLOAD_BYTES");
 
     // Participants load: Alice (self), Bob (speaking), Carol (hand
     // raised + muted for all). Bob leads via recent_speakers.

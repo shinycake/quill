@@ -499,7 +499,17 @@ impl Session {
             && tracked.id == group_call_id
         {
             tracked.join_as = pick_join_as(&senders, tracked.join_as, default);
-            tracked.join_as_options = senders;
+            tracked.join_as_options.succeed(senders);
+        }
+    }
+
+    /// `getVideoChatAvailableParticipants` failed: the picker is optional,
+    /// so the call keeps no list and the join goes ahead as yourself.
+    pub(crate) fn fail_group_call_join_as_options(&mut self, group_call_id: i32, error: &str) {
+        if let Some(tracked) = self.calls.active_group_call.as_mut()
+            && tracked.id == group_call_id
+        {
+            tracked.join_as_options.fail(error);
         }
     }
 
@@ -565,7 +575,7 @@ impl Session {
             if let Some(request) = request {
                 tracked.rejoin.attempt_joined(request);
             }
-            tracked.transport.store_payload(payload);
+            tracked.transport.store_answer(payload);
         }
     }
 

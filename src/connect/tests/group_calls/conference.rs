@@ -321,7 +321,7 @@ fn a_dead_conference_gives_way_to_a_new_join() {
         .as_mut()
         .unwrap()
         .transport
-        .set_error("screen share failed");
+        .fail("screen share failed");
     assert_eq!(
         harness
             .1

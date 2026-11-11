@@ -122,7 +122,7 @@ fn join_request_search_drops_stale_replies_and_pages_with_offset() {
     rig.ingest(&requests_json(first, 9, &[1, 2]));
     assert!(matches!(
         rig.driver.session.groups.join_requests.get(&13),
-        Some(JoinRequestFetch::Loading)
+        Some(JoinRequestFetch::Loading { .. })
     ));
     rig.ingest(&requests_json(second, 3, &[5, 6]));
     let Some(JoinRequestFetch::Loaded(list)) = rig.driver.session.groups.join_requests.get(&13)
@@ -346,7 +346,7 @@ fn link_members_page_and_ignore_replies_for_a_previous_link() {
     rig.ingest(&members_json(first, 5, &[1, 2]));
     let state = &rig.driver.session.groups.invite_pages.members(13).unwrap();
     assert!(state.members.is_empty());
-    assert!(state.loading);
+    assert!(state.loading());
     rig.ingest(&members_json(second, 3, &[7, 8]));
     let state = &rig.driver.session.groups.invite_pages.members(13).unwrap();
     assert_eq!(state.invite_link, "https://t.me/+b");
@@ -646,7 +646,7 @@ fn reopening_during_a_search_shows_the_full_list_not_the_search() {
     rig.ingest(&requests_json(search, 1, &[1]));
     assert!(matches!(
         rig.driver.session.groups.join_requests.get(&13),
-        Some(JoinRequestFetch::Loading)
+        Some(JoinRequestFetch::Loading { .. })
     ));
     rig.ingest(&requests_json(fresh, 2, &[5, 6]));
     let Some(JoinRequestFetch::Loaded(list)) = rig.driver.session.groups.join_requests.get(&13)
@@ -733,7 +733,7 @@ fn a_join_request_ask_without_the_right_to_invite_fails_and_a_sent_one_loads() {
     admin.driver.ask_join_requests(ChatId(13), "", true);
     assert!(matches!(
         admin.driver.session.groups.join_requests.get(&13),
-        Some(JoinRequestFetch::Loading)
+        Some(JoinRequestFetch::Loading { .. })
     ));
 }
 

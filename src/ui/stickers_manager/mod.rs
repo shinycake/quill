@@ -127,16 +127,16 @@ impl QuillApp {
                         StickersPurpose::GetArchivedMaskSets { first_page: false }.into(),
                     )
                     || match tab {
-                        ManagerTab::Installed => !masks.installed_loaded,
-                        _ => !masks.archived_loaded,
+                        ManagerTab::Installed => masks.installed.is_idle(),
+                        _ => masks.archived.is_idle(),
                     };
                 (
                     tab,
-                    masks.installed.clone(),
+                    masks.installed.items().to_vec(),
                     Vec::new(),
-                    masks.archived.clone(),
+                    masks.archived.items().to_vec(),
                     loading,
-                    masks.failed,
+                    masks.installed.error().is_some() || masks.archived.error().is_some(),
                 )
             }
         };
@@ -220,7 +220,7 @@ impl QuillApp {
     pub(super) fn close_mask_sets(&mut self, cx: &mut Context<Self>) {
         self.finish_manager(Kind::Masks);
         if let Some(masks) = self.masks_panel_mut() {
-            masks.open = false;
+            masks.set_dialog_open(false);
             masks.confirm_remove = None;
         }
         cx.notify();
@@ -560,7 +560,10 @@ fn apply_demo_commit(
 ) {
     let sets = match kind {
         Kind::Stickers => &mut session.stickers.stickers.sets,
-        Kind::Masks => &mut session.stickers.masks.installed,
+        Kind::Masks => match session.stickers.masks.installed.data_mut() {
+            Some(sets) => sets,
+            None => return,
+        },
     };
     sets.retain(|set| !removed.contains(&set.id));
     if let Some(order) = order {
@@ -584,7 +587,7 @@ crate::ui::shell::register_dialogs! {
     /// The photo editor's "Manage masks".
     MaskSets => DialogSpec::new(
         5110,
-        |app| app.session().is_some_and(|s| s.stickers.masks.open),
+        |app| app.session().is_some_and(|s| s.stickers.masks.dialog_open()),
         QuillApp::build_mask_sets_dialog,
     )
     .close(|app, _, cx| app.close_mask_sets(cx)),
