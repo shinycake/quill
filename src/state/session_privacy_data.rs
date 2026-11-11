@@ -126,16 +126,15 @@ impl Session {
             }
             SettingsPayload::CanSendMessageToUser(answer) => {
                 if purpose == Some(RequestPurpose::CanSendMessageToUser)
-                    && let Some(user_id) = pending.and_then(|p| p.user_id)
+                    && let Some(pending) = pending
+                    && let Some(user_id) = pending.user_id
                 {
-                    if let Some(pending) = pending {
-                        self.payments.paid_messages.accept_answer(
-                            user_id,
-                            pending.id,
-                            *answer,
-                            unix_ms_now(),
-                        );
-                    }
+                    self.payments.paid_messages.accept_answer(
+                        user_id,
+                        pending.id,
+                        *answer,
+                        unix_ms_now(),
+                    );
                 }
                 true
             }
