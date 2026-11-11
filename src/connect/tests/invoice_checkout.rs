@@ -349,10 +349,27 @@ fn a_new_form_replaces_the_checkout_and_waits_out_a_verification() {
     );
     driver.session.payments.checkout = CheckoutForm::stub(InputInvoice::Name("old".into()));
     driver.session.payments.checkout.mark_verifying();
+    driver.session.payments.note = Some("the old checkout's note".into());
     assert!(
         driver
             .send_payment_form_request(InputInvoice::Name("new".into()))
             .is_err()
     );
-    assert!(driver.session.payments.checkout.is_verifying());
+    // The refused form leaves the checkout whole: its stage, its invoice
+    // and its note (the UI writes none of them before asking).
+    let checkout = &driver.session.payments.checkout;
+    assert!(checkout.is_verifying());
+    assert_eq!(
+        checkout.request().map(|r| &r.invoice),
+        Some(&InputInvoice::Name("old".into()))
+    );
+    assert!(driver.session.payments.note.is_some());
+    // Once the verification step is over a new form replaces it, note
+    // included.
+    driver.session.payments.checkout.end_verification();
+    driver
+        .send_payment_form_request(InputInvoice::Name("new".into()))
+        .unwrap();
+    assert!(driver.session.payments.checkout.is_loading());
+    assert_eq!(driver.session.payments.note, None);
 }

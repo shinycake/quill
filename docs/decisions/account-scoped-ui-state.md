@@ -8074,5 +8074,5 @@ send settles its own part, and the four-field checkout is one value.
 | 02-084 | The emoji pack title is not asked again while its request is out. |
 | 02-090 | One `createBot` at a time, refused by the driver. The stage matches by its own generation, which each create bumps once and a username check does not touch. |
 | 02-089 | A paid price is trusted only after the send left. |
-| 02-092 | `CheckoutForm` carries the invoice, order info and shipping choice (`Checkout`); `PaymentsState::{request, order_info, shipping_id}` are gone and a new form replaces the checkout whole. A new form is refused while `Verifying`. |
+| 02-092 | `CheckoutForm` carries the invoice, order info and shipping choice (`Checkout`); `PaymentsState::{request, order_info, shipping_id}` are gone and a new form replaces the checkout whole, with its note, once its request went out (`send_payment_form_request`; the UI writes nothing before asking). A new form is refused while `Verifying`, which lasts until the poll opens the verification page and closes that checkout: a form started in between would be the one that close hits. |
 | new-01 | `ClosingClient::warned` is one `CloseWait` stage (`Since` / `SlowLogged`). |

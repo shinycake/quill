@@ -52,6 +52,8 @@ impl<S: JsonSender> ConnectDriver<S> {
             request: extra,
             invoice: PaymentRequest { invoice },
         };
+        // The note was the old checkout's.
+        self.session.payments.note = None;
         Ok(sent)
     }
 
