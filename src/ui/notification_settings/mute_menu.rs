@@ -19,6 +19,7 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         self.open_mute_menu(cx);
+        // box-host: `open_mute_menu` above opened the box; this retargets it.
         self.notify.mute_box = Some(MuteBox {
             chat: Some(chat_id),
             section: if custom {
