@@ -547,12 +547,17 @@ impl QuillApp {
         let Some(session) = self.session() else {
             return;
         };
+        // Every message must be yours and still open to "delete for
+        // everyone" (TDLib refuses the whole batch otherwise).
         let all_outgoing = session.histories.get(&chat_id.0).is_some_and(|history| {
             ids.iter().all(|id| {
-                history
-                    .messages
-                    .get(&id.0)
-                    .is_some_and(|message| message.is_outgoing)
+                history.messages.get(&id.0).is_some_and(|message| {
+                    message.is_outgoing
+                        && session
+                            .messages
+                            .menu_actions
+                            .allows_revoke(chat_id, *id, true)
+                })
             })
         });
         let offer_revoke = all_outgoing && !session.is_saved_messages(chat_id);

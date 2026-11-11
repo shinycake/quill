@@ -35,7 +35,7 @@ fn outcomes_that_landed_in_the_background_are_not_drained_later() {
         .send_permission_error
         .push("no rights".into());
     session.messages.flood_notice.push("slow down".into());
-    session.bots.last_callback_answer = Some(CallbackAnswer {
+    session.bots.callback_answers.push_back(CallbackAnswer {
         answer: CallbackQueryAnswer {
             text: String::new(),
             show_alert: false,
@@ -60,7 +60,7 @@ fn outcomes_that_landed_in_the_background_are_not_drained_later() {
     assert!(session.payments.unlocked_notice.is_none());
     assert!(session.messages.send_permission_error.is_empty());
     assert!(session.messages.flood_notice.is_empty());
-    assert!(session.bots.last_callback_answer.is_none());
+    assert!(session.bots.callback_answers.is_empty());
     assert!(session.bots.last_login_url_info.is_none());
     assert!(session.bots.login_url_request.is_none());
 

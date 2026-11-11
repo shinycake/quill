@@ -71,9 +71,14 @@ impl QuillApp {
         self.message_ui.link_tooltip = None;
         // A right-click keeps the text selection; the menu then acts on it
         // (Telegram Desktop's Quote & Reply, Copy Selected Text).
+        self.message_ui.menu_selection_nth = 0;
         self.message_ui.menu_selection = super::selectable_text::selected_message_text(window, cx)
             .filter(|(key, _)| *key == (menu.chat_id.0, menu.message_id.0 as u64))
-            .map(|(_, text)| text)
+            .map(|(_, text)| {
+                self.message_ui.menu_selection_nth =
+                    super::selectable_text::selected_occurrence(window, cx, text.trim());
+                text
+            })
             // A widget's selection lives in its runtime (`widgets_ui.rs`).
             .or_else(|| {
                 let key = quill::message_widget::WidgetKey {

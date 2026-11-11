@@ -142,8 +142,8 @@ fn b1_password_callback_error_surfaces_wrong_password() {
     assert_eq!(
         session
             .bots
-            .last_callback_answer
-            .as_ref()
+            .callback_answers
+            .back()
             .map(|pressed| pressed.answer.text.as_str()),
         Some("wrong 2-step verification password")
     );
@@ -163,8 +163,8 @@ fn b1_password_callback_error_surfaces_wrong_password() {
     assert_eq!(
         session
             .bots
-            .last_callback_answer
-            .as_ref()
+            .callback_answers
+            .back()
             .map(|pressed| pressed.answer.text.as_str()),
         Some("bot did not answer")
     );
@@ -173,8 +173,8 @@ fn b1_password_callback_error_surfaces_wrong_password() {
     assert_eq!(
         session
             .bots
-            .last_callback_answer
-            .as_ref()
+            .callback_answers
+            .back()
             .and_then(|pressed| pressed.chat),
         Some(ChatId(21))
     );

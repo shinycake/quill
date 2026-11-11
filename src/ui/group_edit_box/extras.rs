@@ -221,7 +221,7 @@ impl QuillApp {
                 })),
         );
         if session.stickers.stickers.lists.installed.error().is_some()
-            || session.stickers.emoji.failed
+            || session.stickers.emoji.lists.installed.error().is_some()
         {
             section = section.child(
                 div()

@@ -19,7 +19,7 @@ use gpui_kit::component::notification::Notification;
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
-use quill::gift_market::{AuctionBoxChoice, GiftMarketState, auction_about_shown};
+use quill::gift_market::{AuctionBoxChoice, AuctionFetch, GiftMarketState, auction_about_shown};
 use quill::ids::FileId;
 use quill::lang::{keys, tr};
 use quill::local_time::now_unix;
@@ -259,12 +259,16 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         if let AuctionOpen::Waiting { from_send_box } = self.gift_market.auction_open {
-            let ready = self
-                .gift_market_mut()
-                .and_then(|market| market.auction_ready.take());
-            let loading = self
-                .session()
-                .is_some_and(|s| s.payments.gift_market.auction_loading);
+            let ready = self.gift_market_mut().and_then(|market| {
+                let AuctionFetch::Ready { gift_id } = market.auction else {
+                    return None;
+                };
+                market.auction = AuctionFetch::Idle;
+                Some(gift_id)
+            });
+            let loading = self.session().is_some_and(|s| {
+                matches!(s.payments.gift_market.auction, AuctionFetch::Loading { .. })
+            });
             let send_box_open = self
                 .session()
                 .is_some_and(|s| s.payments.gifts_manage.send.open);

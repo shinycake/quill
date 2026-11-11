@@ -307,8 +307,8 @@ fn replay_callback_query_answer_surfaced() {
     );
     let answer = session
         .bots
-        .last_callback_answer
-        .take()
+        .callback_answers
+        .pop_front()
         .expect("answer stored")
         .answer;
     assert_eq!(answer.text, "Voted!");
@@ -323,7 +323,7 @@ fn replay_callback_query_answer_surfaced() {
             r#"{"@type":"callbackQueryAnswer","@extra":"999","text":"stray","show_alert":false,"url":""}"#,
         ],
     );
-    assert!(session.bots.last_callback_answer.is_none());
+    assert!(session.bots.callback_answers.is_empty());
     // Error on the in-flight request → fallback note, no TDLib text echoed.
     let extra = session.request(
         RequestPurpose::GetCallbackQueryAnswer,
@@ -340,8 +340,8 @@ fn replay_callback_query_answer_surfaced() {
     );
     let answer = session
         .bots
-        .last_callback_answer
-        .take()
+        .callback_answers
+        .pop_front()
         .expect("fallback note")
         .answer;
     assert_eq!(answer.text, "bot did not answer");

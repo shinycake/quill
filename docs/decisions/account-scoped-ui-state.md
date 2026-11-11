@@ -5512,6 +5512,68 @@ land and the typed form was gone.
   seek is never read. 14-004's stale-cover drop has no cheap test: it needs a
   decoded video in the editor.
 
+### Sweep fixes (s4-messages-1)
+
+- **Lists and covers.** `EmojiPanel::failed` is gone: `EmojiPanel::lists` holds
+  one `Fetch<()>` per tab (installed, trending, search), begun when the request
+  goes out, ended by its answer or error whichever tab is shown, so a failure
+  stays on its tab and an unrelated request no longer clears it (02-053,
+  05-136). The group sticker box reads the installed list's error the same way.
+  Covers of emoji sets and of the sticker manager count as asked only once
+  their download went out, and the trending sets lose their unread dots only
+  once `viewTrendingStickerSets` was sent (02-054, 02-222). Suggestions that
+  wait for the installed sets stop waiting when that request fails (02-224).
+  A mask list asked before a change is dropped by the change, so it neither
+  lands as the new list nor blocks the refetch (05-138).
+- **Requests that never left, and answers.** `closeChat` of the main window and
+  of a chat window goes through `send_json_request`, which takes the request
+  back when the send is refused (02-025). A swept `searchEmojis` counts as a
+  failed attempt (03-034). Callback-button answers are a queue
+  (`BotsState::callback_answers`), so two answers between polls both show;
+  `attachment_menu_toggled` is a list whose entries name their bot, and the
+  flow waiting takes only its own (05-047, 06-007). Sticker set edits are
+  tracked by request id and their toasts are queued (05-135). `getGiftAuctionState`
+  is one `AuctionFetch` (`Idle`, `Loading { request }`, `Ready { gift_id }`);
+  the error already applied only to its request (07-004). A bot Stop is a
+  `BotStopStage` (`Running`, `Failed`, `Stopped`); sending Stop again leaves
+  `Failed` (08-018).
+- **Typing and windows.** `OutgoingTyping` holds the topic the action went to;
+  `sendChatAction` is built with it (`send_chat_action_in`), a change of topic
+  inside the chat cancels the old one and the cancel goes to the old topic
+  (07-003). Turning spell check on re-checks every window's composer
+  (07-042). The effect badge lookup covers every shown chat (05-134). A
+  macOS text replacement applies only while the composer that asked is the one
+  shown (06-049, macOS only: not built on Linux).
+- **Selections and quotes.** Delete for everyone in a selection needs every
+  message to be yours and still open to it (`allows_revoke`), in the offer and
+  in the request (02-148). The quote of a selection points at the occurrence
+  selected, not the first (`quote_for_nth`; 04-076). Two quotes on adjacent
+  lines are one quote in the document (02-098). A poll not sent yet keeps its
+  options as choices (04-029). The effect watch drops its oldest key, not
+  everything, at the cap (03-095). The reply bar's fetched copies are kept in
+  fetch order and show an edit (05-055). Chat-row animations are kept in
+  `ChatListUi` (replaced with the account). A row that no list build drew
+  between two sightings snaps when it returns; this is counted in builds
+  (`RowFxMap::begin_pass`), not seconds, so an idle list still animates a
+  change that arrives later (04-030). The quote occurrence counts
+  non-overlapping copies of the trimmed selection, as `quote_for_nth` walks
+  them.
+- **Bot boxes.** The create watcher ends when a later create starts
+  (`CreateBotState::starts`; 08-022). The edit box keeps trying to fill when no
+  window could take the texts (08-024). Its Save rejection stands only while
+  the fields hold the texts it was found for, and "Saved" only while they hold
+  what the server has (`SaveCheck`; 08-025).
+- **Skipped.** 02-005: already fixed by f86e9e7c (the deferred caption goes when
+  its message leaves the history). 02-028: a window's events run with that
+  window's view in place, and the menu is drawn only for the shown chat.
+  02-228: the Attached Stickers action takes over the one set box by design,
+  and every exit of it is wired. 05-046: one inline query per (chat, bot) is in
+  flight and the slot records its query. 05-217: already fixed by e38b4dae
+  (a `Fetch` per chat). 05-267: already fixed by f86e9e7c (`StickerLists`).
+  05-270: `search_gifs` and `show_saved_gifs` drop every in-flight page before
+  the query changes. 08-028: tdesktop closes its verify box at once and reports
+  the result as a toast, as Quill does.
+
 ### Sweep fixes (s3-stories)
 
 - **One story-page op per request.** `StoriesState::page_ops` (`StoryPageOps`)

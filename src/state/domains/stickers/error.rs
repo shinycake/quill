@@ -113,6 +113,14 @@ impl Session {
             self.stickers.emoji.mutation_failed = true;
             self.stickers.emoji.mutating_set = None;
         }
+        // Suggestions that waited for the installed sets stop waiting: the
+        // next emoji typed asks again.
+        if pending.map(|p| p.purpose) == Some(RequestPurpose::GetInstalledStickerSets)
+            && self.stickers.stickers.suggest_waiting_for_sets
+        {
+            self.stickers.stickers.suggest_waiting_for_sets = false;
+            self.stickers.stickers.suggest_for = None;
+        }
         let emoji_purpose = pending.map(|p| p.purpose);
         if emoji_purpose == Some(RequestPurpose::GetInstalledEmojiSets) {
             self.stickers.emoji.installed.fail(error_reason(err));
@@ -120,15 +128,10 @@ impl Session {
         if emoji_purpose == Some(RequestPurpose::SetEmojiStatus) {
             self.stickers.emoji.pending_status_emoji = None;
         }
-        if emoji_purpose == Some(RequestPurpose::ChangeEmojiSet)
-            || (emoji_purpose == Some(RequestPurpose::GetInstalledEmojiSets)
-                && self.stickers.emoji.tab == crate::emoji::EmojiSetTab::Installed)
-            || (emoji_purpose == Some(RequestPurpose::GetTrendingEmojiSets)
-                && self.stickers.emoji.tab == crate::emoji::EmojiSetTab::Trending)
-            || (emoji_purpose == Some(RequestPurpose::SearchEmojiSets)
-                && self.stickers.emoji.tab == crate::emoji::EmojiSetTab::Search)
-        {
-            self.stickers.emoji.failed = true;
+        if let Some(list) = emoji_purpose.and_then(|p| self.stickers.emoji.lists.for_purpose(p)) {
+            list.fail(crate::lang::tr(
+                crate::lang::keys::Q_MEDIA_COULD_NOT_UPDATE_EMOJI_PACKS,
+            ));
         }
         if matches!(
             pending.map(|p| p.purpose),
@@ -158,7 +161,7 @@ impl Session {
                 match self.stickers.stickers.lists.for_purpose(pending.purpose) {
                     Some(list) => list.fail(line),
                     None if self.stickers.manager.note_commit_failure(pending.id) => {}
-                    None => self.stickers.creator_note = Some(line),
+                    None => self.stickers.creator_notes.push_back(line),
                 }
             }
         }

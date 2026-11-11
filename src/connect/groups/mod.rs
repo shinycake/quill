@@ -38,7 +38,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(ConnectSendError::InvalidRequest);
         }
         self.session.stickers.stickers.lists.installed.clear_error();
-        self.session.stickers.emoji.failed = false;
+        self.session.stickers.emoji.lists.installed.clear_error();
         for (purpose, build) in [
             (
                 RequestPurpose::GetInstalledStickerSets,

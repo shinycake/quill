@@ -44,6 +44,17 @@ impl FlakySender {
             .nth(n)
     }
 
+    /// Every request of `type_name` taken so far, oldest first.
+    pub(crate) fn all(&self, type_name: &str) -> Vec<Value> {
+        let Ok(sent) = self.sent.lock() else {
+            return Vec::new();
+        };
+        sent.iter()
+            .filter_map(|json| serde_json::from_str::<Value>(json).ok())
+            .filter(|value| value["@type"] == type_name)
+            .collect()
+    }
+
     pub(crate) fn count(&self, type_name: &str) -> usize {
         let Ok(sent) = self.sent.lock() else {
             return 0;

@@ -290,7 +290,7 @@ fn sticker_search_and_set_management_use_latest_confirmed_state() {
             .error()
             .is_none()
     );
-    assert!(driver.session.stickers.creator_note.is_some());
+    assert!(!driver.session.stickers.creator_notes.is_empty());
     assert!(driver.session.stickers.stickers.found_sets[0].is_installed);
     driver.close_sticker_panel();
     let remove = driver
@@ -375,7 +375,7 @@ fn sticker_reordering_preserves_order_on_failure_and_refetches_on_success() {
         )
         .unwrap();
     assert_eq!(driver.session.stickers.stickers.sets, current);
-    assert!(driver.session.stickers.creator_note.is_some());
+    assert!(!driver.session.stickers.creator_notes.is_empty());
     let move_first = driver.reorder_sticker_set(33, 11).unwrap().unwrap();
     assert_eq!(
         sent_request(&recorder, "reorderInstalledStickerSets")["sticker_set_ids"],

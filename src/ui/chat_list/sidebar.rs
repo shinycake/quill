@@ -369,6 +369,7 @@ impl QuillApp {
                 })
                 .collect(),
         );
+        self.chat_list.row_fx.borrow_mut().begin_pass();
         self.chat_list.items = items;
         self.chat_list.folder_tags = folder_tags;
         list.child(self.chat_list_rows(sizes, focus_visible, window, cx))

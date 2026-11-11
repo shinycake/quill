@@ -54,7 +54,6 @@ DragSelect::pending
 Drawn::leaving
 DropTopic::load_failed
 EarnLimits::app_config_loaded
-EmojiPanel::failed
 EmojiPanel::mutation_failed
 EmojiStyleUi::started
 EmojiStyleUi::started+file_error
@@ -70,7 +69,6 @@ GifPanel::search_loading
 GiftCodeLookup::loading
 GiftCodeLookup::loading+error
 GiftManageState::collections_loading
-GiftMarketState::auction_loading
 GiftPurchase::completed
 GiftPurchase::loading
 GiftPurchase::sending
@@ -145,7 +143,6 @@ PasswordBox::sending+error
 PaymentsState::form_loading
 PaymentsState::form_loading+receipt_error
 PaymentsState::verification_started
-PendingBotMessage::stop_failed
 PhotoSources::busy
 PlayHead::started
 PlaybackHealth::output_failed

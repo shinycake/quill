@@ -53,6 +53,38 @@ impl KeywordEmojis {
     }
 }
 
+/// One fetch per tab of the Emoji Sets box.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct EmojiLists {
+    pub installed: crate::state::fetch::Fetch<()>,
+    pub trending: crate::state::fetch::Fetch<()>,
+    pub search: crate::state::fetch::Fetch<()>,
+}
+
+impl EmojiLists {
+    /// The list a request loads; `None` for every other request.
+    pub fn for_purpose(
+        &mut self,
+        purpose: crate::state::RequestPurpose,
+    ) -> Option<&mut crate::state::fetch::Fetch<()>> {
+        use crate::state::RequestPurpose;
+        match purpose {
+            RequestPurpose::GetInstalledEmojiSets => Some(&mut self.installed),
+            RequestPurpose::GetTrendingEmojiSets => Some(&mut self.trending),
+            RequestPurpose::SearchEmojiSets => Some(&mut self.search),
+            _ => None,
+        }
+    }
+
+    pub fn of(&self, tab: EmojiSetTab) -> &crate::state::fetch::Fetch<()> {
+        match tab {
+            EmojiSetTab::Installed => &self.installed,
+            EmojiSetTab::Trending => &self.trending,
+            EmojiSetTab::Search => &self.search,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct EmojiPanel {
     pub mutating_set: Option<(i64, bool)>,
@@ -66,7 +98,9 @@ pub struct EmojiPanel {
     /// answered, failed or given up ([`custom_lookup`]).
     pub custom_lookups: CustomEmojiLookups,
     pub open: bool,
-    pub failed: bool,
+    /// Each set list's own fetch: a failure shows on its tab only, and no
+    /// other request clears it.
+    pub lists: EmojiLists,
     pub mutation_failed: bool,
     pub tab: EmojiSetTab,
     pub search_query: String,
@@ -269,9 +303,7 @@ impl Session {
         {
             set.is_installed = installed.contains(&set.id);
         }
-        if self.stickers.emoji.tab == EmojiSetTab::Installed {
-            self.stickers.emoji.failed = false;
-        }
+        self.stickers.emoji.lists.installed.succeed(());
         self.stickers.emoji.installed_sets = sets;
         self.stickers.emoji.installed.succeed(());
     }
@@ -289,9 +321,7 @@ impl Session {
     /// Slice S10: store the trending emoji sets (single-page replace, like S8).
     pub fn accept_trending_emoji_sets(&mut self, sets: Vec<StickerSetInfo>, is_premium: bool) {
         self.remember_cover_files(&sets);
-        if self.stickers.emoji.tab == EmojiSetTab::Trending {
-            self.stickers.emoji.failed = false;
-        }
+        self.stickers.emoji.lists.trending.succeed(());
         let raw_count = sets.len() as i32;
         if self.stickers.emoji.trending_offset == 0 {
             self.stickers.emoji.trending_sets.clear();
@@ -320,9 +350,7 @@ impl Session {
     /// Slice S10: store a `searchStickerSets` answer (emoji type).
     pub fn accept_found_emoji_sets(&mut self, sets: Vec<StickerSetInfo>) {
         self.remember_cover_files(&sets);
-        if self.stickers.emoji.tab == EmojiSetTab::Search {
-            self.stickers.emoji.failed = false;
-        }
+        self.stickers.emoji.lists.search.succeed(());
         self.stickers.emoji.found_sets = sets;
     }
 

@@ -294,6 +294,14 @@ impl Session {
                 edit(message);
             }
         }
+        // The copy fetched for the composer's reply bar shows an edit too.
+        if let Some(message) = self
+            .messages
+            .composer_reply_fetch
+            .loaded_mut((chat_id.0, message_id.0))
+        {
+            edit(message);
+        }
         found
     }
 
