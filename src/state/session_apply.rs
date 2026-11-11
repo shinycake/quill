@@ -22,7 +22,7 @@ impl Session {
             {
                 self.acks.settle(
                     pending.id,
-                    Answer::Failed("The answer arrived out of order".into()),
+                    Answer::Failed(crate::lang::tr(crate::lang::keys::Q_OPS_ERR_ANSWER_OUT_OF_ORDER).to_string()),
                 );
                 self.settle_lost_request(pending);
             }

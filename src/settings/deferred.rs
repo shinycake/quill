@@ -260,6 +260,11 @@ struct WriterExit<'a>(&'a DeferredWriter);
 
 impl Drop for WriterExit<'_> {
     fn drop(&mut self) {
+        // A clean exit already cleared the flag under the lock, and another
+        // writer may have started since: only an unwind acts here.
+        if !std::thread::panicking() {
+            return;
+        }
         let mut state = self.0.shared.lock();
         if let Some(path) = state.in_flight.take() {
             // Cut short inside the sink: the bytes stay queued as failed,
@@ -267,7 +272,9 @@ impl Drop for WriterExit<'_> {
             if let Some(queued) = state.pending.get_mut(&path) {
                 queued.failed = true;
             }
-            state.failure = Some(std::io::Error::other("the settings writer stopped"));
+            state.failure = Some(std::io::Error::other(crate::lang::tr(
+                crate::lang::keys::Q_OPS_ERR_SETTINGS_WRITER_STOPPED,
+            )));
             state.finished += 1;
         }
         state.writer_running = false;
@@ -544,6 +551,40 @@ mod tests {
             on_disk,
             vec![(first, b"a".to_vec()), (second, b"b".to_vec())]
         );
+    }
+
+    /// A guard dropped by a writer that finished cleanly must leave the
+    /// flag alone: another writer may have started since it cleared it.
+    #[test]
+    fn a_clean_writer_exit_leaves_the_running_flag_to_the_next_writer() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let (open, gate) = mpsc::channel::<()>();
+        let (entered_tx, entered) = mpsc::channel();
+        let (active, most) = (Arc::new(AtomicUsize::new(0)), Arc::new(AtomicUsize::new(0)));
+        let (now, peak) = (active.clone(), most.clone());
+        let gate = Mutex::new(gate);
+        let writer = DeferredWriter::new(Box::new(move |_, _| {
+            let running = now.fetch_add(1, Ordering::SeqCst) + 1;
+            peak.fetch_max(running, Ordering::SeqCst);
+            let _ = entered_tx.send(());
+            if let Ok(gate) = gate.lock() {
+                let _ = gate.recv();
+            }
+            now.fetch_sub(1, Ordering::SeqCst);
+            Ok(())
+        }));
+        writer.submit(PathBuf::from("/x/a.json"), b"a".to_vec());
+        assert!(entered.recv().is_ok(), "the writer is inside the sink");
+        // An earlier writer's guard drops cleanly while this one runs.
+        drop(super::WriterExit(&writer));
+        assert!(writer.shared.lock().writer_running, "still marked running");
+        writer.submit(PathBuf::from("/x/b.json"), b"b".to_vec());
+        for _ in 0..2 {
+            let _ = open.send(());
+        }
+        writer.flush(super::STALL_BUDGET);
+        assert_eq!(most.load(Ordering::SeqCst), 1, "one writer at a time");
+        assert_eq!(writer.pending(Path::new("/x/b.json")), None);
     }
 
     #[test]

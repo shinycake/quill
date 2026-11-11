@@ -1139,6 +1139,8 @@
 "qll_ops_err_not_found" = "not found";
 "qll_ops_err_not_authorized" = "not authorized";
 "qll_ops_err_invalid_request" = "invalid request";
+"qll_ops_err_answer_out_of_order" = "The answer arrived out of order";
+"qll_ops_err_settings_writer_stopped" = "the settings writer stopped";
 "qll_ops_err_ai_limit" = "AI request limit reached";
 "qll_ops_err_req_flood_later" = "too many requests — try again later";
 "qll_ops_err_error_code" = "error {code}";

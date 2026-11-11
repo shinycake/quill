@@ -5523,6 +5523,16 @@ land and the typed form was gone.
   flush already retry, the failure is shown once, and tdesktop does not
   retry either. 04-096: when the "started" write fails nothing durable can
   tell an install from an upgrade; only the log line was added.
+- **Review fixes.** The settings writer's exit guard acts only when the
+  thread unwinds: a clean exit already cleared `writer_running` under the
+  lock, and clearing it again after another thread spawned a new writer
+  allowed two writers at once (a stale batch landing after a newer one, an
+  early `flush`). A created call discarded because the slot was taken is
+  recorded in `busy_declined_calls` through the same
+  `remember_busy_declined` as `queue_busy_decline`, so its end shows no
+  "Missed call" and a late `Pending` cannot take the call window. The
+  out-of-order answer and the writer-stopped texts go through lang keys.
+
 ### Sweep fixes (s3-stories)
 
 - **One story-page op per request.** `StoriesState::page_ops` (`StoryPageOps`)
