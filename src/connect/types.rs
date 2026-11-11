@@ -366,13 +366,6 @@ pub struct ConnectDriver<S: JsonSender> {
     pub(crate) custom_emoji_hold: Option<std::time::Instant>,
     /// R5: when the stale-request sweep last scanned the registry.
     pub(crate) last_request_sweep: Option<std::time::Instant>,
-    /// The last "Use system proxy settings" step sent and when; a step
-    /// TDLib refused is not sent again until the OS setting changes or
-    /// `system_proxy::RETRY` passes.
-    pub(crate) system_proxy_sent: Option<crate::system_proxy::SentStep>,
-    /// Who the proxy mutation being sent is for (set only while the
-    /// system step's tick sends it).
-    pub(crate) proxy_by: ProxyBy,
     pub(crate) system_proxy_asked: Option<std::time::Instant>,
     pub(crate) network_seen: Option<super::ticks::Reach>,
     /// Where this client's web proxy carriers run (`connect::proxy_carrier`);
@@ -411,14 +404,4 @@ pub enum DraftSaveOutcome {
 pub(crate) enum ToggleSessionKind {
     SecretChats,
     Calls,
-}
-
-/// Who a proxy mutation is for: the user (the proxy box, a rotation, a
-/// mirror of the account on screen) or the "Use system proxy settings"
-/// step, whose outcome is tracked apart from the box's error line.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub(crate) enum ProxyBy {
-    #[default]
-    User,
-    SystemStep,
 }

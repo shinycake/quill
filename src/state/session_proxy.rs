@@ -37,7 +37,6 @@ impl Session {
         proxy.list = Some(list);
         proxy.loading = false;
         proxy.stale = false;
-        proxy.error = None;
     }
 
     /// `updateWebProxyCarrierOpened`: host it, or refuse it when this
@@ -99,12 +98,15 @@ impl Session {
     }
 
     fn proxy_mutation_succeeded(&mut self, pending: Option<&PendingRequest>) {
-        if let Some(pending) = pending {
-            self.settings.proxy.system_step.answered(pending.id, false);
+        let proxy = &mut self.settings.proxy;
+        let system = pending.is_some_and(|p| proxy.system_step.answered(p.id, false));
+        proxy.mutating = false;
+        proxy.stale = true;
+        // The box's error line is the user's: the system step's success
+        // does not wipe the error of the user's own failed change.
+        if !system {
+            proxy.error = None;
         }
-        self.settings.proxy.mutating = false;
-        self.settings.proxy.stale = true;
-        self.settings.proxy.error = None;
     }
 
     /// Whether `pending` is the ping its slot waits for: the latest one

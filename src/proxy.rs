@@ -598,28 +598,52 @@ pub enum RotationAction {
 /// Where the "Use system proxy settings" step sent last stands. Its answer
 /// is matched by request id, so it is never read off [`ProxyState::error`],
 /// which belongs to what the user did in the proxy box.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default)]
 pub enum SystemStepState {
+    /// No step has gone out (or the OS now wants nothing).
     #[default]
     Idle,
     /// Sent as this request, not answered.
-    InFlight(crate::ids::RequestId),
-    /// Answered; `refused` when TDLib answered with an error.
-    Answered {
+    InFlight {
+        step: crate::system_proxy::SystemProxyStep,
+        at: std::time::Instant,
         request: crate::ids::RequestId,
-        refused: bool,
+    },
+    /// TDLib accepted it.
+    Accepted {
+        step: crate::system_proxy::SystemProxyStep,
+        at: std::time::Instant,
+    },
+    /// TDLib answered with an error, or the step never left: it waits
+    /// `system_proxy::RETRY` before it is sent again.
+    Refused {
+        step: crate::system_proxy::SystemProxyStep,
+        at: std::time::Instant,
     },
 }
 
 impl SystemStepState {
     /// The answer for `request`, when it is the step in flight. Returns
-    /// whether it was.
+    /// whether it was; any other request (the user's own change) leaves
+    /// the stage alone.
     pub fn answered(&mut self, request: crate::ids::RequestId, refused: bool) -> bool {
-        if *self == SystemStepState::InFlight(request) {
-            *self = SystemStepState::Answered { request, refused };
-            true
-        } else {
-            false
+        match std::mem::take(self) {
+            SystemStepState::InFlight {
+                step,
+                at,
+                request: sent,
+            } if sent == request => {
+                *self = if refused {
+                    SystemStepState::Refused { step, at }
+                } else {
+                    SystemStepState::Accepted { step, at }
+                };
+                true
+            }
+            other => {
+                *self = other;
+                false
+            }
         }
     }
 }

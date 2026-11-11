@@ -438,6 +438,58 @@ fn the_users_failed_proxy_change_is_not_taken_for_the_system_steps() {
     assert_eq!(rig.count("addProxy"), 2, "the step was not resent");
 }
 
+fn user_draft(server: &str) -> crate::proxy::ProxyDraft {
+    let mut draft = crate::proxy::ProxyDraft::empty(crate::calls::proxy::ProxyKind::Socks5);
+    draft.server = server.into();
+    draft.port = 1080;
+    draft
+}
+
+/// Sweep 06-033: the system step's success is not the user's success. The
+/// error of the user's own failed change stays for the box.
+#[test]
+fn a_system_step_succeeding_keeps_the_users_failed_change_error() {
+    let mut rig = Rig::new();
+    rig.load_list(&[]);
+    rig.driver
+        .add_proxy(&user_draft("mine.lan"), false, "")
+        .unwrap();
+    rig.answer(
+        "addProxy",
+        json!({"@type": "error", "code": 400, "message": "Wrong server name"}),
+    );
+    assert!(rig.driver.session.settings.proxy.error.is_some());
+    assert!(rig.driver.system_proxy_tick(&detected("sys.lan")));
+    rig.answer("addProxy", system_entry(5, "sys.lan", true));
+    assert!(
+        rig.driver.session.settings.proxy.error.is_some(),
+        "the step's success leaves the user's error"
+    );
+}
+
+/// Sweep 02-187: a refused system step stays refused when the user changes
+/// a proxy before the list is refetched; it is not sent again at once.
+#[test]
+fn a_user_change_does_not_make_a_refused_system_step_look_accepted() {
+    let mut rig = Rig::new();
+    rig.load_list(&[]);
+    assert!(rig.driver.system_proxy_tick(&detected("bad.lan")));
+    rig.answer(
+        "addProxy",
+        json!({"@type": "error", "code": 400, "message": "Wrong server name"}),
+    );
+    rig.driver
+        .add_proxy(&user_draft("mine.lan"), false, "")
+        .unwrap();
+    rig.answer("addProxy", json!({"@type": "proxy", "id": 6}));
+    rig.answer("getProxies", proxies_json(&[(6, false)]));
+    assert!(
+        !rig.driver.system_proxy_tick(&detected("bad.lan")),
+        "the refusal still holds"
+    );
+    assert_eq!(rig.count("addProxy"), 2, "the step was not resent");
+}
+
 #[test]
 fn without_a_carrier_host_a_web_proxy_carrier_is_refused() {
     let mut rig = Rig::new();

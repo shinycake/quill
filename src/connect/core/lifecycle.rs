@@ -86,8 +86,6 @@ impl<S: JsonSender> ConnectDriver<S> {
             flood_attempts: HashMap::new(),
             custom_emoji_hold: None,
             last_request_sweep: None,
-            system_proxy_sent: None,
-            proxy_by: ProxyBy::default(),
             system_proxy_asked: None,
             network_seen: None,
             carrier_host: None,

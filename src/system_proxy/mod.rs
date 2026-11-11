@@ -44,19 +44,6 @@ use std::time::{Duration, Instant};
 /// How long a step TDLib refused waits before it is sent again.
 pub const RETRY: std::time::Duration = std::time::Duration::from_secs(300);
 
-/// A step the connection driver sent, until its answer is known.
-#[derive(Debug, Clone)]
-pub struct SentStep {
-    pub step: SystemProxyStep,
-    pub at: std::time::Instant,
-    /// The request it went out as; `None` when the send failed.
-    pub request: Option<crate::ids::RequestId>,
-    /// TDLib's answer came back as an error (or the send never left).
-    pub refused: bool,
-    /// The answer came back.
-    pub settled: bool,
-}
-
 pub const SYSTEM_PROXY_COMMENT: &str = "Quill: system proxy";
 
 const REREAD_EVERY: Duration = Duration::from_secs(15);
