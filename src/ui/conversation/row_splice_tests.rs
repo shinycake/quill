@@ -192,7 +192,7 @@ fn compare_with_full_build(
     });
     assert_eq!(listed, rows, "{name}: scroller in step");
     app.update(cx, |app, cx| {
-        app.history.rows_key = None;
+        app.history.invalidate_rows();
         cx.notify();
     });
     frames(cx);

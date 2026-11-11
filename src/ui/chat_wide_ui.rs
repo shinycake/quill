@@ -101,7 +101,7 @@ impl QuillApp {
                                     // what the rows draw, not the rows: their
                                     // heights are measured again below.
                                     if layout_changed {
-                                        this.history.rows_key = None;
+                                        this.history.invalidate_rows();
                                     }
                                     this.history
                                         .scroller
@@ -129,7 +129,7 @@ impl QuillApp {
                 .label(tr(keys::SETTINGS_ADAPTIVE_WIDE))
                 .on_click(cx.listener(|this, &on, _, cx| {
                     this.set_appearance(cx, |a| a.adaptive_for_wide = on);
-                    this.history.rows_key = None;
+                    this.history.invalidate_rows();
                     this.history
                         .scroller
                         .update(cx, |state, cx| state.remeasure(cx));

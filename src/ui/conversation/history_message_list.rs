@@ -728,7 +728,7 @@ impl QuillApp {
             None => element,
         };
         let has_day = row.day_label().is_some();
-        let covered = self.history.scroll_date.covered_row == Some(ix);
+        let covered = self.history.scroll_date.covered_row() == Some(ix);
         // The wide layout centres dates and the unread label in its column.
         let wide = self.chat_wide();
         let bar_probe = self.history.bar_probe.clone();
