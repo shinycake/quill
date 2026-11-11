@@ -45,10 +45,7 @@ enum AddressStage {
     Resolving(GeoPoint),
     /// The address for `point`. While the pin is lifted ([`Pin::Moving`])
     /// it is kept but not drawn, for a return to the same place.
-    Shown {
-        point: GeoPoint,
-        text: String,
-    },
+    Shown { point: GeoPoint, text: String },
 }
 
 impl AddressStage {

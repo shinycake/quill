@@ -98,7 +98,11 @@ fn a_failed_bot_lookup_is_asked_again_by_the_next_picker() {
         Some(VenueList::Failed)
     );
     sharing.retry_venues();
-    assert_eq!(sharing.next_requests(), vec![resolve()], "Retry looks again");
+    assert_eq!(
+        sharing.next_requests(),
+        vec![resolve()],
+        "Retry looks again"
+    );
     sharing.close();
     sharing.open(ChatId(3), None);
     sharing.geolocated(GeoOutcome::Found(point(10., 21.)));
