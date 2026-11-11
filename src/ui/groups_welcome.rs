@@ -160,7 +160,7 @@ impl QuillApp {
             .is_some_and(|(id, chat_id)| {
                 self.session()
                     .and_then(|s| s.groups.welcome_messages.get(&chat_id.0))
-                    .is_some_and(|messages| !messages.iter().any(|m| m.id == id))
+                    .is_some_and(|messages| !messages.items().iter().any(|m| m.id == id))
             });
         if edit_gone && let Some(dialog) = self.admin.welcome_dialog.as_mut() {
             dialog.editing = None;

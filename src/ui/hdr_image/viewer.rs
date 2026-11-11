@@ -77,7 +77,7 @@ enum Outcome {
 /// draw in extended range and left it, so frames aim at standard range
 /// until the viewer shows no HDR frame (on Windows the check runs again
 /// after that; on macOS the loss is for good).
-#[derive(Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 enum Edr {
     #[default]
     Off,
