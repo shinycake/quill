@@ -593,3 +593,8 @@ display list (`docs/decisions/launch-time-macos-appkit.md`): `src/window.rs`
 adds `Window::display_id`, the id the window already keeps, for callers that
 need only the id. `Window::display` lists every display through the platform,
 a WindowServer round trip on macOS.
+
+The Quill project added `App::active_drag_is::<T>()` in `src/app.rs` in 2026:
+whether the active drag's payload is a `T`, so a lifted message drag is told
+from any other drag by its payload type instead of by a marker global kept
+in step with the drag by hand.
