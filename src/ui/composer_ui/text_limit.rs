@@ -1,7 +1,7 @@
 use super::*;
 use quill::lang::{keys, tr_with};
 use quill::text_split::{split_markup_text, units_over_limit};
-use std::cell::Cell;
+use std::cell::RefCell;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum TextLimitNote {
@@ -39,31 +39,49 @@ struct TextLimitKey {
 }
 
 /// The note of the text at the last counted revision, which only ever answers
-/// for that revision of that field.
+/// for that revision of that field. One value: a count in flight keeps the
+/// last answer beside it, and dropping the value cancels the count.
 #[derive(Default)]
-struct TextLimitCount {
-    known: Cell<Option<(TextLimitKey, TextLimitNote)>>,
-    running: Cell<Option<(TextLimitKey, Task<()>)>>,
+enum TextLimitCount {
+    #[default]
+    Idle,
+    Known(TextLimitKey, TextLimitNote),
+    Counting {
+        key: TextLimitKey,
+        _task: Task<()>,
+        last: Option<(TextLimitKey, TextLimitNote)>,
+    },
 }
 
 #[derive(Default)]
-pub(in crate::ui) struct TextLimitMemo(Box<TextLimitCount>);
+pub(in crate::ui) struct TextLimitMemo(Box<RefCell<TextLimitCount>>);
 
 impl TextLimitMemo {
     fn known(&self) -> Option<(TextLimitKey, TextLimitNote)> {
-        self.0.known.get()
+        match &*self.0.borrow() {
+            TextLimitCount::Idle => None,
+            TextLimitCount::Known(key, note) => Some((*key, *note)),
+            TextLimitCount::Counting { last, .. } => *last,
+        }
     }
 
+    /// An answer: any count in flight is over.
     fn set(&self, key: TextLimitKey, note: TextLimitNote) {
-        self.0.known.set(Some((key, note)));
-        self.0.running.take();
+        *self.0.borrow_mut() = TextLimitCount::Known(key, note);
     }
 
     fn is_counting(&self, key: TextLimitKey) -> bool {
-        let running = self.0.running.take();
-        let same = running.as_ref().is_some_and(|(known, _)| *known == key);
-        self.0.running.set(running);
-        same
+        matches!(&*self.0.borrow(), TextLimitCount::Counting { key: counting, .. } if *counting == key)
+    }
+
+    /// A count for `key` runs as `task`; an earlier count is dropped.
+    fn start(&self, key: TextLimitKey, task: Task<()>) {
+        let last = self.known();
+        *self.0.borrow_mut() = TextLimitCount::Counting {
+            key,
+            _task: task,
+            last,
+        };
     }
 }
 
@@ -106,7 +124,7 @@ impl QuillApp {
                 })
                 .ok();
             });
-            memo.0.running.set(Some((key, task)));
+            memo.start(key, task);
         }
         TextLimitNote::Counting
     }
