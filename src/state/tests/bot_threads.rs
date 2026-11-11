@@ -119,8 +119,7 @@ fn an_at_search_ends_only_for_its_own_chat() {
     session.messages.mention_search = Some(MentionSearch {
         chat_id: ChatId(41),
         query: "a".into(),
-        user_ids: vec![5],
-        request: None,
+        members: crate::state::fetch::Fetch::Ready(vec![5]),
     });
     // Another window's menu closing leaves this search alone.
     session.end_mention_search(ChatId(99));
