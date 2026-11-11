@@ -14,10 +14,11 @@ pub enum TonWalletPurpose {
     LoadState,
     /// `getCurrencyExchangeRates`.
     ExchangeRates,
-    /// `getTonWalletTransactions`; `append` = a follow-up page.
-    Transactions { append: bool },
-    /// `getTonWalletNfts`; `append` = a follow-up page.
-    Nfts { append: bool },
+    /// `getTonWalletTransactions`; the list knows whether the page
+    /// follows another (`Paged::Loading`).
+    Transactions,
+    /// `getTonWalletNfts`.
+    Nfts,
     /// `getUserTonWalletAddresses` for one profile (the user id is on the
     /// pending request).
     UserAddress,

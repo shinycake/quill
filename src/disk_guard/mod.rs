@@ -176,24 +176,82 @@ impl DiskState {
     }
 }
 
-impl DiskState {
-    /// [`Self::next`], where a first reading below close only arms
-    /// `below_once`, and Full needs the next reading to agree. Returns the
-    /// state and the new `below_once`.
-    pub fn confirmed(
-        self,
-        free: Option<u64>,
-        floors: &DiskFloors,
-        below_once: bool,
-    ) -> (Self, bool) {
+/// The calm states a first reading below close can interrupt.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Calm {
+    Healthy,
+    Low,
+}
+
+/// The disk between readings: the state clients go by, and the stages
+/// around Full that a reading alone cannot tell apart.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum DiskStage {
+    #[default]
+    Healthy,
+    Low,
+    /// The last reading was below close and the next one decides: it
+    /// agrees (`Full`) or not (back to the calm state it came from).
+    Doubt(Calm),
+    Full,
+    /// Full, and a call keeps the on-screen client open. The first
+    /// reading after the call ends closes it; leaving Full ends this.
+    FullHeld,
+}
+
+impl DiskStage {
+    /// The state the clients go by. A doubted reading changes nothing yet.
+    pub fn state(self) -> DiskState {
+        match self {
+            Self::Healthy | Self::Doubt(Calm::Healthy) => DiskState::Healthy,
+            Self::Low | Self::Doubt(Calm::Low) => DiskState::Low,
+            Self::Full | Self::FullHeld => DiskState::Full,
+        }
+    }
+
+    pub fn is_doubt(self) -> bool {
+        matches!(self, Self::Doubt(_))
+    }
+
+    /// At Full, a call kept the on-screen client open.
+    pub fn held_for_call(self) -> bool {
+        self == Self::FullHeld
+    }
+
+    /// A call keeps (or no longer keeps) the on-screen client open. Only
+    /// Full is ever held.
+    pub fn hold_for_call(self, held: bool) -> Self {
+        match (self, held) {
+            (Self::Full, true) => Self::FullHeld,
+            (Self::FullHeld, false) => Self::Full,
+            (other, _) => other,
+        }
+    }
+
+    /// A reading of `free`: the state it brings and the stage to hold from
+    /// here. [`DiskState::next`], where a first reading below close only
+    /// arms a doubt and Full needs the next reading to agree. A reading
+    /// that knows nothing changes nothing.
+    pub fn read(self, free: Option<u64>, floors: &DiskFloors) -> (DiskState, Self) {
         if free.is_none() {
-            return (self, below_once);
+            return (self.state(), self);
         }
-        let after = self.next(free, floors);
-        if after != Self::Full || self == Self::Full || below_once {
-            return (after, false);
+        let before = self.state();
+        let after = before.next(free, floors);
+        if after == DiskState::Full && before != DiskState::Full && !self.is_doubt() {
+            let calm = match before {
+                DiskState::Low => Calm::Low,
+                _ => Calm::Healthy,
+            };
+            return (before, Self::Doubt(calm));
         }
-        (self, true)
+        let next = match after {
+            DiskState::Healthy => Self::Healthy,
+            DiskState::Low => Self::Low,
+            DiskState::Full if self == Self::FullHeld => Self::FullHeld,
+            DiskState::Full => Self::Full,
+        };
+        (after, next)
     }
 }
 

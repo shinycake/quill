@@ -84,14 +84,13 @@ impl<S: JsonSender> ConnectDriver<S> {
             .threads
             .thread
             .as_ref()
-            .filter(|thread| thread.needs_chat_switch)
+            .filter(|thread| thread.status.needs_chat_switch())
             .map(|thread| thread.chat_id)
         else {
             return Ok(None);
         };
         if !self.session.chats.contains_key(&chat_id.0) {
             if let Some(thread) = self.session.threads.thread.as_mut() {
-                thread.needs_chat_switch = false;
                 thread.status = ThreadStatus::Failed("The discussion group is unavailable.".into());
             }
             return Ok(None);
@@ -102,7 +101,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         let _ = self.settle_pending_draft();
         self.session.open_chat(chat_id);
         if let Some(thread) = self.session.threads.thread.as_mut() {
-            thread.needs_chat_switch = false;
+            thread.status = ThreadStatus::Starting;
         }
         if let Err(err) = self.send_open_chat(chat_id) {
             // TDLib never heard of the chat: it is not open here either
@@ -122,7 +121,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .threads
             .thread
             .as_ref()
-            .filter(|thread| !thread.needs_chat_switch && thread.thread_id != 0)
+            .filter(|thread| !thread.status.needs_chat_switch() && thread.thread_id != 0)
             .map(|thread| thread.chat_id)
         else {
             return Ok(None);
@@ -137,7 +136,9 @@ impl<S: JsonSender> ConnectDriver<S> {
     fn begin_thread_reading(&mut self, chat_id: ChatId) {
         self.session.prepare_thread_marks(chat_id);
         if let Some(thread) = self.session.threads.thread.as_mut() {
-            thread.reading_started = true;
+            if thread.status.needs_start() {
+                thread.status = ThreadStatus::LoadingHistory;
+            }
         }
     }
 
@@ -146,8 +147,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     pub fn thread_needs_start(&self) -> bool {
         self.session.threads.thread.as_ref().is_some_and(|thread| {
             thread.thread_id != 0
-                && matches!(thread.status, ThreadStatus::LoadingHistory)
-                && !thread.reading_started
+                && (thread.status.needs_chat_switch() || thread.status.needs_start())
         })
     }
 
@@ -199,7 +199,9 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(err);
         }
         if let Some(thread) = self.session.threads.thread.as_mut() {
-            thread.reload_needed = false;
+            if thread.status == ThreadStatus::ReloadNeeded {
+                thread.status = ThreadStatus::Ready;
+            }
         }
         Ok(Some(extra))
     }
@@ -268,11 +270,9 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// The reducer replaced the thread window (an own send while newer
     /// replies were unloaded) and the newest page is still to be requested.
     pub fn thread_needs_reload(&self) -> bool {
-        self.session
-            .threads
-            .thread
-            .as_ref()
-            .is_some_and(|thread| thread.thread_id != 0 && thread.reload_needed)
+        self.session.threads.thread.as_ref().is_some_and(|thread| {
+            thread.thread_id != 0 && thread.status == ThreadStatus::ReloadNeeded
+        })
     }
 
     /// Leave the thread view, back to where it was opened from. Returns the

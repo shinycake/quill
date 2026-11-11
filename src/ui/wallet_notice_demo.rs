@@ -88,8 +88,8 @@ impl QuillApp {
             wallet
                 .money
                 .history
-                .apply(vec![demo_tx()], String::new(), false);
-            wallet.money.nfts.apply(
+                .set_ready(vec![demo_tx()], String::new());
+            wallet.money.nfts.set_ready(
                 vec![WalletNft {
                     address: "EQnft".into(),
                     name: "Cat #7".into(),
@@ -97,7 +97,6 @@ impl QuillApp {
                     ..WalletNft::default()
                 }],
                 String::new(),
-                false,
             );
             if mode == "chat" {
                 add_service(

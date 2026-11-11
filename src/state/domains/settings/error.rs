@@ -68,7 +68,9 @@ impl Session {
                 }
             }
             Some(RequestPurpose::GetAutoDownloadSettingsPresets) => {
-                self.settings.auto_download_presets_loading = false;
+                if self.settings.data_storage.seeded.is_in_flight() {
+                    self.settings.data_storage.seeded = crate::data_settings::Seed::Unseeded;
+                }
                 self.settings.data_storage_error = Some(format!(
                     "Couldn't load auto-download settings: {}",
                     error_reason(err)
@@ -139,7 +141,10 @@ impl Session {
             // in-flight flag so the overlay shows "No storage data
             // yet." instead of spinning forever.
             Some(RequestPurpose::GetStorageStatistics) => {
-                self.settings.storage_stats_loading = false;
+                self.settings.storage_stats.fail(format!(
+                    "Couldn't load storage usage: {}",
+                    error_reason(err)
+                ));
             }
             // Slice A3: a failed sessions fetch or terminate
             // clears the in-flight flags and parks the honest,

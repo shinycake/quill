@@ -114,9 +114,10 @@ pub struct SettingsState {
     /// Phase S2: cached `getStorageStatistics` answer (aggregated by file
     /// type, TGX `TGStorageStats` style); drives the storage-usage overlay,
     /// including the "Secret media and files" category.
-    pub storage_stats: Option<StorageStats>,
-    /// Phase S2: a `getStorageStatistics` round trip is in flight.
-    pub storage_stats_loading: bool,
+    /// A `getStorageStatistics` round trip in flight is `Loading`; its
+    /// error leaves `Failed` (the overlay draws it, the next open asks
+    /// again).
+    pub storage_stats: crate::state::fetch::Fetch<StorageStats>,
     /// Slice S4: per-network auto-download settings, the local source of
     /// truth (TDLib has no getter for the current values). Loaded from
     /// `data_storage.json` at session setup; seeded once from
@@ -126,8 +127,6 @@ pub struct SettingsState {
     /// persists it on the next ingest (the reducer cannot touch the
     /// filesystem).
     pub data_storage_dirty: bool,
-    /// Slice S4: a `getAutoDownloadSettingsPresets` round trip is in flight.
-    pub auto_download_presets_loading: bool,
     /// Slice S4: last Data & Storage failure, shown on the screen
     /// (failures surface there, never as toasts — the S3 pattern).
     pub data_storage_error: Option<String>,
@@ -138,9 +137,6 @@ pub struct SettingsState {
     pub storage_clearing: bool,
     /// Batch 6: the local storage limits TDLib reports (`updateOption`).
     pub storage_limits: crate::storage_limits::StorageLimits,
-    /// This session sent the first cache limits; the account counts as
-    /// seeded once TDLib echoes them (`storage_limits.chosen()`).
-    pub storage_limits_seed_sent: bool,
     /// B13: new-chat privacy, inactive-session TTL, 18+ option, network
     /// usage and the remember-password check.
     pub privacy_data: PrivacyData,
@@ -370,17 +366,14 @@ impl SettingsState {
             reaction_notification_settings: None,
             scope_saves: Default::default(),
             reaction_saves: Default::default(),
-            storage_stats: None,
-            storage_stats_loading: false,
+            storage_stats: Default::default(),
             data_storage: DataStoragePrefs::default(),
             data_storage_dirty: false,
-            auto_download_presets_loading: false,
             auto_download_answer: None,
             data_storage_error: None,
             storage_freed: None,
             storage_clearing: false,
             storage_limits: Default::default(),
-            storage_limits_seed_sent: false,
             privacy_data: Default::default(),
             notices: AccountNotices::default(),
             sessions: Fetch::Idle,

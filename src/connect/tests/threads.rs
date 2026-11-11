@@ -84,8 +84,7 @@ fn comments_thread_open_load_send_and_close() {
         let thread = driver.session.threads.thread.as_ref().unwrap();
         assert_eq!(thread.chat_id, ChatId(14));
         assert_eq!(thread.thread_id, 501);
-        assert_eq!(thread.status, ThreadStatus::LoadingHistory);
-        assert!(thread.needs_chat_switch);
+        assert_eq!(thread.status, ThreadStatus::SwitchingChat);
         assert_eq!(thread.subtitle(), "3 comments");
         assert_eq!(thread.unread_anchor, Some(MessageId(502)));
         assert_eq!(thread.root_message().unwrap().id, MessageId(501));
@@ -257,7 +256,7 @@ fn group_reply_thread_pages_older_and_fails_with_retry() {
         ),
     );
     let thread = driver.session.threads.thread.as_ref().unwrap();
-    assert!(!thread.needs_chat_switch, "same chat");
+    assert_eq!(thread.status, ThreadStatus::Starting, "same chat");
     assert!(!thread.is_comments());
     assert_eq!(thread.subtitle(), "1 reply");
     let page = driver

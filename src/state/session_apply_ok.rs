@@ -219,7 +219,7 @@ impl Session {
         })) = pending.map(|p| p.purpose)
         {
             *self.settings.data_storage.for_network_mut(network) = settings;
-            self.settings.data_storage.seeded = true;
+            self.settings.data_storage.seeded = crate::data_settings::Seed::Seeded;
             self.settings.data_storage_error = None;
             self.settings.data_storage_dirty = true;
             self.settings.auto_download_answer = extra.map(AutoDownloadAnswer::Saved);
@@ -361,7 +361,7 @@ impl Session {
         }
         self.finish_mask_mutation(pending.map(|p| p.purpose));
         // Slice S10: emoji mutations invalidate emoji caches (see emoji.rs).
-        self.invalidate_emoji_caches(pending.map(|p| p.purpose));
+        self.invalidate_emoji_caches(pending.map(|p| p.purpose), pending.map(|p| p.id));
         // Slice S9: a saved-GIF mutation (`addSavedAnimation` /
         // `removeSavedAnimation`) succeeded — drop the saved list so
         // the panel refetches the server-confirmed list instead of

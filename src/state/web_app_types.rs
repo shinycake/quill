@@ -132,9 +132,10 @@ pub struct WebApps {
     pub custom_requests: HashMap<u64, String>,
     /// One-shot: custom request answers.
     pub custom_replies: Vec<CustomRequestReply>,
-    /// Apps tab: `getGrossingWebAppBots` bot ids (`None` until loaded).
-    pub grossing_bots: Option<Vec<i64>>,
-    pub grossing_loading: bool,
+    /// Apps tab: `getGrossingWebAppBots` bot ids. One request at a time,
+    /// so its answer and its error need no key; a failure is drawn with
+    /// the tab's reopen as the retry.
+    pub grossing: crate::state::fetch::Fetch<Vec<i64>>,
     /// One-shot: `sendWebAppData` outcome (`Ok` or a failure message).
     pub data_sent: Option<Result<(), String>>,
     /// One-shot: the contact card sent for `web_app_request_phone` was

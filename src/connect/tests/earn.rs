@@ -162,8 +162,7 @@ fn megagroup_without_ton_ads_hides_the_ton_part() {
         .unwrap();
     error(&mut p, "getChatRevenueStatistics", "BROADCAST_REQUIRED");
     let page = p.0.session.payments.earn.page.as_ref().unwrap();
-    assert!(page.ton_unavailable);
-    assert_eq!(page.ton, Load::Idle);
+    assert_eq!(page.ton, Load::Unavailable);
 }
 
 #[test]
@@ -230,14 +229,12 @@ fn withdrawal_asks_without_password_then_with_it() {
     // Any other error → the password box.
     error(&mut p, "getStarWithdrawalUrl", "PASSWORD_HASH_INVALID");
     let withdraw = p.0.session.payments.earn.withdraw.clone().unwrap();
-    assert_eq!(
-        withdraw.step,
-        WithdrawStep::Password {
-            sending: false,
-            error: None
-        }
-    );
+    assert_eq!(withdraw.step, WithdrawStep::Password { error: None });
     p.0.submit_withdrawal_password("hunter2").unwrap();
+    assert_eq!(
+        p.0.session.payments.earn.withdraw.as_ref().unwrap().step,
+        WithdrawStep::PasswordSending
+    );
     assert_eq!(
         sent_request(&p.1, "getStarWithdrawalUrl")["password"],
         "hunter2"
@@ -246,7 +243,7 @@ fn withdrawal_asks_without_password_then_with_it() {
     error(&mut p, "getStarWithdrawalUrl", "PASSWORD_HASH_INVALID");
     assert!(matches!(
         p.0.session.payments.earn.withdraw.as_ref().unwrap().step,
-        WithdrawStep::Password { error: Some(_), .. }
+        WithdrawStep::Password { error: Some(_) }
     ));
     p.0.submit_withdrawal_password("right").unwrap();
     answer(
@@ -410,7 +407,7 @@ fn options_set_the_limits() {
         json!({"@type": "updateOption", "name": "affiliate_program_commission_per_mille_max",
             "value": {"@type": "optionValueInteger", "value": "900"}}),
     );
-    let limits = p.0.session.payments.earn.limits;
+    let limits = p.0.session.payments.earn.limits.clone();
     assert_eq!(limits.withdrawal_min(), 500);
     assert_eq!(limits.commission_range(), (1, 900));
 }
@@ -433,7 +430,7 @@ fn setup_starts_updates_and_ends_a_program() {
     answer(&mut p, "setChatAffiliateProgram", json!({"@type": "ok"}));
     let earn = &p.0.session.payments.earn;
     assert!(earn.setup.is_none());
-    assert!(earn.setup_closed);
+    assert_eq!(earn.effects, vec![EarnEffect::SetupDone]);
     assert!(earn.notes[0].starts_with("Affiliate program started."));
 
     p.0.open_starref_setup(BOT).unwrap();
@@ -457,7 +454,7 @@ fn a_reopened_setup_page_stays_open_for_an_earlier_save() {
     p.0.open_starref_setup(BOT).unwrap();
     answer(&mut p, "setChatAffiliateProgram", json!({"@type": "ok"}));
     let earn = &p.0.session.payments.earn;
-    assert!(earn.setup.is_some() && !earn.setup_closed);
+    assert!(earn.setup.is_some() && earn.effects.is_empty());
 
     p.0.end_starref_program().unwrap();
     p.0.session.payments.earn.setup = None;

@@ -82,14 +82,17 @@ fn custom_emoji_pack_search_paging_previews_and_mutation_races() {
     assert!(!driver.session.stickers.emoji.trending_has_more); // Raw page length, not deduped count.
     assert!(driver.session.stickers.stickers.stickers.is_empty());
     let remove = driver.set_emoji_pack_installed(1, false).unwrap().unwrap();
-    assert_eq!(driver.session.stickers.emoji.mutating_set, Some((1, false)));
+    assert_eq!(
+        driver.session.stickers.emoji.mutation.running(),
+        Some((1, false))
+    );
     assert!(driver.set_emoji_pack_installed(2, true).unwrap().is_none());
     ingest(
         &mut driver,
         json!({"@type":"error","@extra":remove.as_extra(),"code":500,"message":"test"}),
     );
     assert_eq!(driver.session.stickers.emoji.installed_sets.len(), 1);
-    assert!(driver.session.stickers.emoji.mutation_failed);
+    assert!(driver.session.stickers.emoji.mutation.is_failed());
     assert!(
         driver
             .session
@@ -100,12 +103,15 @@ fn custom_emoji_pack_search_paging_previews_and_mutation_races() {
             .all(|s| s.id == 1)
     );
     let install = driver.set_emoji_pack_installed(2, true).unwrap().unwrap();
-    assert_eq!(driver.session.stickers.emoji.mutating_set, Some((2, true)));
+    assert_eq!(
+        driver.session.stickers.emoji.mutation.running(),
+        Some((2, true))
+    );
     ingest(
         &mut driver,
         json!({"@type":"error","@extra":install.as_extra(),"code":500,"message":"test"}),
     );
-    assert_eq!(driver.session.stickers.emoji.mutating_set, None);
+    assert_eq!(driver.session.stickers.emoji.mutation.running(), None);
     let remove = driver.set_emoji_pack_installed(1, false).unwrap().unwrap();
     // An installed list issued before mutation success must not restore removed entries later.
     let stale = driver
@@ -116,7 +122,7 @@ fn custom_emoji_pack_search_paging_previews_and_mutation_races() {
         &mut driver,
         json!({"@type":"ok","@extra":remove.as_extra()}),
     );
-    assert!(!driver.session.stickers.emoji.mutation_failed);
+    assert!(!driver.session.stickers.emoji.mutation.is_failed());
     assert!(driver.session.stickers.emoji.installed_sets.is_empty());
     ingest(
         &mut driver,

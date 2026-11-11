@@ -486,8 +486,7 @@ impl QuillApp {
             live.driver.refresh_storage_statistics();
             let _ = live.driver.maybe_fetch_storage_statistics();
         } else if let Some(session) = self.demo_session.as_mut() {
-            session.settings.storage_stats = Some(demo_storage_stats());
-            session.settings.storage_stats_loading = false;
+            session.settings.storage_stats.succeed(demo_storage_stats());
         }
         cx.notify();
     }
