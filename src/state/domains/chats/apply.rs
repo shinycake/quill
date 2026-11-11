@@ -3,6 +3,48 @@ use crate::state::*;
 use crate::telegram::envelope::ChatsPayload;
 
 impl Session {
+    /// The `ok` of a wallpaper removal: the entry leaves where the server
+    /// removed it. A refused request left everything in place.
+    pub(crate) fn apply_backgrounds_ok(&mut self, pending: Option<&PendingRequest>) {
+        let Some(pending) = pending else { return };
+        match pending.purpose {
+            RequestPurpose::Chats(ChatsPurpose::DeleteDefaultBackground { for_dark_theme }) => {
+                self.chats_state.default_backgrounds.remove(&for_dark_theme);
+            }
+            RequestPurpose::Chats(ChatsPurpose::RemoveInstalledBackground { background_id }) => {
+                if let Some(list) = self.chats_state.installed_backgrounds.data_mut() {
+                    list.retain(|b| b.id != background_id);
+                }
+            }
+            RequestPurpose::DeleteChatBackground => {
+                if let Some(chat_id) = pending.chat_id {
+                    self.set_chat_background(chat_id.0, None);
+                }
+            }
+            _ => {}
+        }
+        self.file_appearance_answer(Some(pending), Ok(()));
+    }
+
+    /// The answer of an Appearance box request (name, profile, status, or
+    /// the group's emoji pack), filed under the request that asked.
+    pub(crate) fn file_appearance_answer(
+        &mut self,
+        pending: Option<&PendingRequest>,
+        answer: Result<(), String>,
+    ) {
+        let Some(pending) = pending else { return };
+        if matches!(
+            pending.purpose,
+            RequestPurpose::SetChatAccentColor
+                | RequestPurpose::SetChatProfileAccentColor
+                | RequestPurpose::SetChatEmojiStatus
+                | RequestPurpose::SetSupergroupCustomEmojiStickerSet
+        ) {
+            self.chats_state.appearance_answers.push(pending.id, answer);
+        }
+    }
+
     /// Applies one chats payload; called by
     /// [`Session::apply_payload`].
     pub(crate) fn apply_chats_payload(
@@ -427,6 +469,11 @@ impl Session {
                         self.chats_state
                             .default_backgrounds
                             .insert(self.chats_state.background_set_for_dark, background);
+                        if let Some(id) = pending.map(|p| p.id) {
+                            self.chats_state
+                                .background_answers
+                                .push(id, Ok(BackgroundOutcome::Applied));
+                        }
                     }
                     Some(RequestPurpose::SearchBackground)
                         if self
@@ -461,12 +508,17 @@ impl Session {
             ChatsPayload::UpdateDefaultBackground {
                 for_dark_theme,
                 background,
-            } => {
-                self.upsert_background_files(&background);
-                self.chats_state
-                    .default_backgrounds
-                    .insert(for_dark_theme, background);
-            }
+            } => match background {
+                Some(background) => {
+                    self.upsert_background_files(&background);
+                    self.chats_state
+                        .default_backgrounds
+                        .insert(for_dark_theme, background);
+                }
+                None => {
+                    self.chats_state.default_backgrounds.remove(&for_dark_theme);
+                }
+            },
             ChatsPayload::ChatPhotos {
                 total_count,
                 photos,

@@ -2,13 +2,6 @@
 use super::*;
 
 impl Session {
-    pub(crate) fn privacy_roundtrip_done(&mut self) {
-        self.calls.privacy_pending = self.calls.privacy_pending.saturating_sub(1);
-        if self.calls.privacy_pending == 0 {
-            self.calls.privacy_error = false;
-        }
-    }
-
     pub fn new(account: AccountKey, diagnostics: Arc<dyn DiagnosticSink>) -> Self {
         let auth = AuthorizationState::WaitTdlibParameters;
         Self {
@@ -16,6 +9,7 @@ impl Session {
             account_generation: AccountGeneration(1),
             auth_view: view_for(&auth),
             auth,
+            sign_in_origin: crate::account_data::SignInOrigin::Resumed,
             connection: ConnectionState::Initial,
             chats: HashMap::new(),
             main_order: Vec::new(),
@@ -44,6 +38,7 @@ impl Session {
             threads: Box::new(ThreadsState::new()),
             view_generation: ViewGeneration(1),
             requests: RequestRegistry::default(),
+            acks: RequestAcks::default(),
             shutdown: ShutdownPhase::Running,
             last_seq: 0,
             bots: Box::new(BotsState::new()),

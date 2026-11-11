@@ -147,6 +147,11 @@ impl RenderOnce for StopsSlider {
                     let value = value_for(stops, position.end());
                     if value != *release_reported.read(cx) {
                         on_change(value, cx);
+                        // The caller may not have taken the stop (the save
+                        // was refused): the next frame puts the thumb back
+                        // on the caller's value.
+                        release_reported.update(cx, |reported, _| *reported = i32::MIN);
+                        cx.refresh_windows();
                     }
                 }
             })

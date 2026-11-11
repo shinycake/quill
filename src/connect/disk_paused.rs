@@ -4,7 +4,7 @@
 //! message each came from is saved per account and finds them again.
 use super::*;
 use crate::ids::FileId;
-use crate::state::{MediaPurpose, RequestPurpose};
+use crate::state::{DiskSearch, MediaPurpose, RequestPurpose};
 use crate::telegram::requests::search_active_file_downloads;
 
 /// More than any Downloads list a disk pause leaves behind.
@@ -35,12 +35,10 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// by an earlier TDLib instance, so the Downloads list is searched for
     /// them, once per session.
     pub(super) fn search_disk_paused_elsewhere(&mut self) -> Result<(), ConnectSendError> {
-        let media = &mut self.session.media;
-        if media.disk_resume_searched || self.session.settings.data_storage.disk_paused.is_empty() {
+        let keys = self.session.settings.data_storage.disk_paused.clone();
+        if self.session.media.disk_search != DiskSearch::NotAsked || keys.is_empty() {
             return Ok(());
         }
-        media.disk_resume_searched = true;
-        media.disk_search_keys = self.session.settings.data_storage.disk_paused.clone();
         let extra = self.session.request(
             RequestPurpose::Media(MediaPurpose::SearchDiskPausedDownloads),
             None,
@@ -50,21 +48,30 @@ impl<S: JsonSender> ConnectDriver<S> {
             .send_json(&search_active_file_downloads(extra, SEARCH_LIMIT))
         {
             self.session.requests.take(extra);
-            self.session.media.disk_resume_searched = false;
             return Err(err);
         }
+        self.session.media.disk_search = DiskSearch::Asked {
+            request: extra,
+            keys,
+        };
         Ok(())
     }
 
     /// After an ingest: resume what that search found, and save the
     /// pauses when they changed.
     pub(crate) fn resume_disk_paused_found(&mut self) -> Result<(), ConnectSendError> {
-        let due = std::mem::take(&mut self.session.media.disk_resume_due);
-        for id in due {
-            self.toggle_download_paused(FileId(id), false)?;
+        let mut due = std::mem::take(&mut self.session.media.disk_resume_due);
+        let mut result = Ok(());
+        while let Some(id) = due.pop() {
+            if let Err(err) = self.toggle_download_paused(FileId(id), false) {
+                due.push(id);
+                result = Err(err);
+                break;
+            }
         }
+        self.session.media.disk_resume_due.extend(due);
         self.save_disk_pauses_if_changed();
-        Ok(())
+        result
     }
 
     pub(super) fn save_disk_pauses_if_changed(&mut self) {

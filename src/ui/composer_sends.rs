@@ -15,6 +15,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
+use super::composer_state::DraftClear;
 use quill::composer::{
     ComposerAttachment, ComposerScheduling, DraftKey, LinkPreviewChoice, PreviewMediaSize,
 };
@@ -148,11 +149,16 @@ struct AccountSends {
     /// `default_disable_notification`, per chat (tdesktop's silent toggle
     /// is the channel's own setting).
     silent: HashMap<ChatId, bool>,
+    /// The sends whose acknowledgement clears their slot's draft, one per
+    /// slot, whichever window sent them (a slot is one chat and topic of
+    /// this account). An entry goes with its ack; a newer send of the slot
+    /// replaces it; the account's goes with it.
+    draft_clears: HashMap<DraftKey, DraftClear>,
 }
 
 impl AccountSends {
     fn is_empty(&self) -> bool {
-        self.slots.is_empty() && self.silent.is_empty()
+        self.slots.is_empty() && self.silent.is_empty() && self.draft_clears.is_empty()
     }
 }
 
@@ -164,6 +170,8 @@ pub(crate) struct ComposerSends {
     /// The media sends being prepared, of every window and account
     /// (`send_prep`): one guard per slot whichever window shows it.
     pub(super) prep: super::send_prep::SendPrepState,
+    /// What was read about the files of every tray (`send_box_state`).
+    pub(super) reads: super::send_box_state::TrayReads,
 }
 
 impl ComposerSends {
@@ -287,6 +295,59 @@ impl ComposerSends {
         }
     }
 
+    /// A send of `slot` was made: its ack clears the slot's draft. `None`
+    /// when the send leaves the draft alone, which also drops an earlier
+    /// send's entry of the slot.
+    pub(super) fn set_draft_clear(&mut self, slot: &SendSlot, clear: Option<DraftClear>) {
+        match clear {
+            Some(clear) => {
+                self.accounts
+                    .entry(slot.account.clone())
+                    .or_default()
+                    .draft_clears
+                    .insert(slot.draft, clear);
+            }
+            None => {
+                if let Some(account) = self.accounts.get_mut(&slot.account) {
+                    account.draft_clears.remove(&slot.draft);
+                }
+                self.drop_if_empty(&slot.account);
+            }
+        }
+    }
+
+    /// The pending clear for an ack of `draft` in `account`: the slot's own,
+    /// else the one of another topic of the same chat (the ack names the
+    /// message's topic, which can differ from the composer's slot).
+    pub(super) fn take_draft_clear(
+        &mut self,
+        account: &AccountKey,
+        draft: DraftKey,
+    ) -> Option<DraftClear> {
+        let sends = self.accounts.get_mut(account)?;
+        let key = if sends.draft_clears.contains_key(&draft) {
+            Some(draft)
+        } else {
+            sends
+                .draft_clears
+                .keys()
+                .find(|key| key.chat_id == draft.chat_id)
+                .copied()
+        };
+        let clear = key.and_then(|key| sends.draft_clears.remove(&key));
+        self.drop_if_empty(account);
+        clear
+    }
+
+    /// Whether `slot` has a send waiting for its ack to clear the draft.
+    #[cfg(test)]
+    #[cfg(feature = "demo-capture")]
+    pub(super) fn has_draft_clear(&self, slot: &SendSlot) -> bool {
+        self.accounts
+            .get(&slot.account)
+            .is_some_and(|account| account.draft_clears.contains_key(&slot.draft))
+    }
+
     /// The account logged out or was removed: its choices go with it.
     /// Hands back the trays it held.
     pub(super) fn forget_account(&mut self, account: &AccountKey) -> Vec<ComposerAttachment> {
@@ -337,6 +398,14 @@ fn session_ended(prev: &AuthorizationState, now: &AuthorizationState) -> bool {
 }
 
 impl QuillApp {
+    /// The send just made from the composer in place clears its slot's draft
+    /// when it is acknowledged (`finish_successful_sends`).
+    pub(super) fn expect_draft_clear(&mut self, clear: DraftClear) {
+        if let Some(slot) = self.send_slot() {
+            self.composer_sends.set_draft_clear(&slot, Some(clear));
+        }
+    }
+
     /// The one-time options of the send being made now.
     pub(super) fn send_once(&self) -> SendOnce {
         SendOnce {
@@ -517,16 +586,16 @@ impl QuillApp {
         self.forget_tray_checks(&dropped);
     }
 
-    /// These attachments left their tray: forget what this window read
+    /// These attachments left their tray: forget what was read
     /// about their files, unless another tray still holds the same file.
     pub(super) fn forget_tray_checks(&mut self, dropped: &[ComposerAttachment]) {
-        let sends = &self.composer_sends;
-        self.screen.composer_ui.send_box.forget(
-            dropped
-                .iter()
-                .map(|attachment| attachment.path.as_path())
-                .filter(|path| !sends.holds(path)),
-        );
+        let sends = &mut self.composer_sends;
+        let gone: Vec<&std::path::Path> = dropped
+            .iter()
+            .map(|attachment| attachment.path.as_path())
+            .filter(|path| !sends.holds(path))
+            .collect();
+        sends.reads.forget(gone.into_iter());
     }
 
     /// Whether the next send from the open chat goes without sound: the

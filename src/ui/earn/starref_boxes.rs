@@ -115,6 +115,11 @@ fn opened_through(users: i64, app: &str) -> String {
 impl QuillApp {
     /// Close every earn box whose state is the session's (a switch).
     pub(in crate::ui) fn close_earn_boxes(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        // A join box still waiting for the recipients must not open later,
+        // unasked, in the next account or after the layer was left.
+        if let Some(earn) = self.earn_mut() {
+            earn.pending_join = None;
+        }
         let Some(earn) = self.earn_state() else {
             return;
         };
@@ -512,7 +517,7 @@ impl QuillApp {
             let list = if join.choose_recipient {
                 recipient_list(
                     session,
-                    earn.recipients.as_deref().unwrap_or(&[]),
+                    earn.recipients.list().unwrap_or(&[]),
                     join.bot_user_id,
                     join.recipient,
                 )

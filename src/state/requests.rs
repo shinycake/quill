@@ -126,6 +126,7 @@ impl RequestPurpose {
                 | RequestPurpose::SearchPublicChats
                 | RequestPurpose::GetSharedMedia { .. }
                 | RequestPurpose::Media(MediaPurpose::GetSharedMediaMore { .. })
+                | RequestPurpose::Media(MediaPurpose::SearchDiskPausedDownloads)
                 | RequestPurpose::GetPinnedMessages
                 | RequestPurpose::GetUserFullInfo
                 | RequestPurpose::GetSupergroupFullInfo
@@ -157,19 +158,6 @@ impl Session {
             Some(extra),
             seq,
         );
-    }
-
-    /// The account is going away (logout, close): no answer can land any
-    /// more, so settle every pending lookup the way a failure would and
-    /// forget the stale-window marks. User actions (sends, edits, ...) are
-    /// dropped without a failure notice about a session the user left.
-    pub(crate) fn settle_account_requests(&mut self) {
-        for pending in self.requests.drain_all() {
-            if !super::session_apply_error::is_user_action(pending.purpose) {
-                self.settle_lost_request(pending);
-            }
-        }
-        self.stale_history_requests.clear();
     }
 }
 
@@ -538,6 +526,8 @@ pub struct RequestRegistry {
     /// In-flight `DownloadFile` requests per file id, so the
     /// already-downloading check does not scan `pending`.
     downloads: HashMap<i32, u32>,
+    /// The last requests TDLib refused (`Submit` reads them).
+    pub(super) failures: super::submit::Failures,
 }
 
 impl RequestRegistry {

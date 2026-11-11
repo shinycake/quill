@@ -4,7 +4,7 @@
 use super::*;
 use crate::ids::RequestId;
 use crate::passkeys::{
-    PasskeysPurpose, add_login_passkey, get_login_passkeys, get_passkey_parameters,
+    PasskeyAdd, PasskeysPurpose, add_login_passkey, get_login_passkeys, get_passkey_parameters,
     remove_login_passkey,
 };
 use crate::state::{RequestPurpose, SettingsPurpose};
@@ -16,8 +16,12 @@ fn purpose(purpose: PasskeysPurpose) -> RequestPurpose {
 }
 
 impl<S: JsonSender> ConnectDriver<S> {
-    fn passkeys_in_flight(&self, passkeys: PasskeysPurpose) -> bool {
-        self.session.requests.has_purpose(purpose(passkeys))
+    fn list_in_flight(&self) -> bool {
+        self.session
+            .requests
+            .has_purpose(purpose(PasskeysPurpose::List(
+                self.session.settings.passkeys.generation,
+            )))
     }
 
     /// A look at the passkeys (the Privacy and Security screen or the
@@ -31,16 +35,21 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         let _ = self.ensure_earn_app_config();
         let state = &self.session.settings.passkeys;
-        if !state.wants_fetch(Instant::now()) || self.passkeys_in_flight(PasskeysPurpose::List) {
+        if !state.wants_fetch(Instant::now()) || self.list_in_flight() {
             return Ok(None);
         }
-        let extra = self.session.request(purpose(PasskeysPurpose::List), None);
+        let generation = state.generation;
+        let extra = self
+            .session
+            .request(purpose(PasskeysPurpose::List(generation)), None);
+        let sent = self.send_json_request(extra, &get_login_passkeys(extra))?;
+        // Only a look that went out counts: a failed send leaves the list
+        // stale and the throttle open for the next try, and the answer
+        // (not the send) clears the stale mark.
         let state = &mut self.session.settings.passkeys;
         state.requested_at = Some(Instant::now());
-        state.stale = false;
         state.error = None;
-        self.send_json_request(extra, &get_login_passkeys(extra))
-            .map(Some)
+        Ok(Some(sent))
     }
 
     /// `removeLoginPasskey` for a passkey in the list, one at a time. The
@@ -66,40 +75,54 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// "Create Passkey" (tdesktop `Passkeys::initRegistration`): the
     /// creation options, reused while still within their timeout, else
     /// `getPasskeyParameters`. Once they are known the state holds them
-    /// in `ceremony` for the dialog to start. `Ok(None)` when no request
-    /// was needed.
+    /// in `add` for the dialog to start. `Ok(None)` when no request was
+    /// needed.
     pub fn begin_register(&mut self) -> Result<Option<RequestId>, ConnectSendError> {
         let state = &self.session.settings.passkeys;
-        if !self.chats_path_active() || !state.can_register() || state.adding {
+        if !self.chats_path_active()
+            || !state.can_register()
+            || matches!(state.add, PasskeyAdd::Sending(_))
+        {
             return Err(ConnectSendError::InvalidRequest);
         }
-        if let Some(pending) = &state.registration
-            && pending.fresh(Instant::now())
-        {
-            let options = pending.options.clone();
-            self.session.settings.passkeys.ceremony = Some(options);
-            return Ok(None);
-        }
-        if self.passkeys_in_flight(PasskeysPurpose::Parameters) {
-            return Ok(None);
+        match &state.add {
+            PasskeyAdd::FetchingOptions(_) => return Ok(None),
+            PasskeyAdd::Starting(pending) | PasskeyAdd::Cached(pending)
+                if pending.fresh(Instant::now()) =>
+            {
+                let pending = pending.clone();
+                let state = &mut self.session.settings.passkeys;
+                state.add = PasskeyAdd::Starting(pending);
+                return Ok(None);
+            }
+            _ => {}
         }
         let extra = self
             .session
             .request(purpose(PasskeysPurpose::Parameters), None);
+        let sent = self.send_json_request(extra, &get_passkey_parameters(extra))?;
+        // Options left over (answered after the lock, expired) are
+        // replaced: the fresh ones start the ceremony, not a second system
+        // sheet after an expired one. The request id is what the answer is
+        // matched to, so the answer of a box closed earlier is ignored.
         let state = &mut self.session.settings.passkeys;
-        state.registration = None;
-        // Options left from a request answered after the lock (nothing
-        // ticked to start them) are stale: the fresh ones start the
-        // ceremony, not a second system sheet after an expired one.
-        state.ceremony = None;
+        state.add = PasskeyAdd::FetchingOptions(sent);
         state.error = None;
-        self.send_json_request(extra, &get_passkey_parameters(extra))
-            .map(Some)
+        Ok(Some(sent))
     }
 
     /// Whether "Create Passkey" is waiting for the server's options.
     pub fn passkey_parameters_pending(&self) -> bool {
-        self.passkeys_in_flight(PasskeysPurpose::Parameters)
+        matches!(
+            self.session.settings.passkeys.add,
+            PasskeyAdd::FetchingOptions(_)
+        )
+    }
+
+    /// The ceremony box was closed before it finished: options still on
+    /// their way are not started for it.
+    pub fn cancel_register(&mut self) {
+        self.session.settings.passkeys.cancel_register();
     }
 
     /// The ceremony finished: `addLoginPasskey` with its client data and
@@ -108,18 +131,17 @@ impl<S: JsonSender> ConnectDriver<S> {
         &mut self,
         registration: &Registration,
     ) -> Result<RequestId, ConnectSendError> {
-        if !self.chats_path_active() || self.session.settings.passkeys.adding {
+        if !self.chats_path_active()
+            || matches!(self.session.settings.passkeys.add, PasskeyAdd::Sending(_))
+        {
             return Err(ConnectSendError::InvalidRequest);
         }
         let extra = self.session.request(purpose(PasskeysPurpose::Add), None);
+        let sent = self.send_json_request(extra, &add_login_passkey(extra, registration))?;
         let state = &mut self.session.settings.passkeys;
-        state.adding = true;
+        state.add = PasskeyAdd::Sending(sent);
         state.error = None;
-        let sent = self.send_json_request(extra, &add_login_passkey(extra, registration));
-        if sent.is_err() {
-            self.session.settings.passkeys.adding = false;
-        }
-        sent
+        Ok(sent)
     }
 
     /// After each ingest: on the sign-in screens ask for the app config

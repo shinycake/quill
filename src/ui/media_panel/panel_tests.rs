@@ -76,11 +76,10 @@ fn category(name: &str, source: EmojiCategorySource) -> EmojiCategory {
 fn seed(app: &mut QuillApp, premium: bool) {
     let session = app.demo_session.as_mut().expect("demo session");
     session.payments.premium_option = Some(premium);
-    session.stickers.emoji.sticker_categories_asked = true;
-    session.stickers.emoji.sticker_categories = vec![
+    session.stickers.emoji.sticker_categories.succeed(vec![
         category("Premium", EmojiCategorySource::Premium),
         category("Smile", EmojiCategorySource::Search(vec!["😀".into()])),
-    ];
+    ]);
     session.stickers.stickers.found_stickers = vec![sticker(1, true), sticker(2, false)];
     // What the Premium category asked for (a demo has no client to ask).
     session.stickers.stickers.searched = StickerSearch::Category(EmojiCategorySource::Premium);

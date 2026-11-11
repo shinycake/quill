@@ -58,14 +58,29 @@ impl QuillApp {
         // `getDeepLinkInfo` once auth is Ready, then follow-ups / dialog /
         // deferred chat open from each terminal session state.
         self.pump_deep_link(cx);
+        // A box that sent its request closes on the answer (`box_submits`).
+        self.settle_box_submits(cx);
         // M1 fix-up: a "Share link" gated off by
         // `messageProperties.can_get_link` (or a failed `getMessageLink`)
         // and a failed `resendMessages` surface here instead of silently
         // doing nothing.
-        if let Some(err) = self
+        for err in self
             .live
             .as_mut()
-            .and_then(|live| live.driver.session.messages.message_link_error.take())
+            .map(|live| live.driver.session.messages.message_link_error.take_all())
+            .unwrap_or_default()
+        {
+            self.set_note(StatusNote::error(err));
+            progressed = true;
+        }
+        // A profile change that failed after Save closed its dialog has
+        // no box to show the error in: it surfaces as a note, so the user
+        // does not believe the profile changed.
+        if self.dialogs.edit_profile_dialog.is_none()
+            && let Some(err) = self
+                .live
+                .as_mut()
+                .and_then(|live| live.driver.session.users_state.profile_edit_error.take())
         {
             self.set_note(StatusNote::error(err));
             progressed = true;
@@ -102,10 +117,17 @@ impl QuillApp {
         // MED2 fix-up: a refused `recognizeSpeech` surfaces in the status
         // note instead of silently doing nothing after
         // "transcription requested".
-        if let Some(err) = self
+        for err in self
             .live
             .as_mut()
-            .and_then(|live| live.driver.session.messages.recognize_speech_error.take())
+            .map(|live| {
+                live.driver
+                    .session
+                    .messages
+                    .recognize_speech_error
+                    .take_all()
+            })
+            .unwrap_or_default()
         {
             self.set_note(StatusNote::error(err));
             progressed = true;
@@ -113,18 +135,20 @@ impl QuillApp {
         // Slice msg-richtext-ai-tools: a failed AI request surfaces in
         // the status note instead of silently doing nothing after "AI
         // working…".
-        if let Some(err) = self
+        for err in self
             .live
             .as_mut()
-            .and_then(|live| live.driver.session.messages.ai_error.take())
+            .map(|live| live.driver.session.messages.ai_error.take_all())
+            .unwrap_or_default()
         {
             self.set_note(StatusNote::error(err));
             progressed = true;
         }
-        if let Some(err) = self
+        for err in self
             .live
             .as_mut()
-            .and_then(|live| live.driver.session.messages.resend_error.take())
+            .map(|live| live.driver.session.messages.resend_error.take_all())
+            .unwrap_or_default()
         {
             self.set_note(StatusNote::error(err));
             progressed = true;
@@ -152,10 +176,11 @@ impl QuillApp {
         }
         // Ban / delete-all / report-spam from the delete box, and "Save to
         // Profile": their outcome lands in the status note.
-        if let Some(note) = self
+        for note in self
             .live
             .as_mut()
-            .and_then(|live| live.driver.session.messages.message_action_note.take())
+            .map(|live| live.driver.session.messages.message_action_note.take_all())
+            .unwrap_or_default()
         {
             self.set_note(StatusNote::info(note));
             progressed = true;
@@ -260,6 +285,18 @@ impl QuillApp {
             self.set_note(StatusNote::error(err));
             progressed = true;
         }
+        let notices = self
+            .live
+            .as_mut()
+            .map(|live| std::mem::take(&mut live.driver.session.payments.notices))
+            .unwrap_or_default();
+        for notice in notices {
+            self.set_note(match notice.kind {
+                quill::state::NoticeKind::Info => StatusNote::info(notice.text),
+                quill::state::NoticeKind::Error => StatusNote::error(notice.text),
+            });
+            progressed = true;
+        }
         if let Some(note) = self
             .live
             .as_mut()
@@ -268,18 +305,26 @@ impl QuillApp {
             self.set_note(StatusNote::info(note));
             progressed = true;
         }
-        if let Some(notice) = self
+        for notice in self
             .live
             .as_mut()
-            .and_then(|live| live.driver.session.messages.send_permission_error.take())
+            .map(|live| {
+                live.driver
+                    .session
+                    .messages
+                    .send_permission_error
+                    .take_all()
+            })
+            .unwrap_or_default()
         {
             self.set_note(StatusNote::error(notice));
             progressed = true;
         }
-        if let Some(notice) = self
+        for notice in self
             .live
             .as_mut()
-            .and_then(|live| live.driver.session.messages.flood_notice.take())
+            .map(|live| live.driver.session.messages.flood_notice.take_all())
+            .unwrap_or_default()
         {
             self.set_note(StatusNote::error(notice));
             progressed = true;
@@ -298,11 +343,15 @@ impl QuillApp {
         }
         self.poll_folder_new_chats();
         self.prune_drop_topic();
-        if self.drain_folder_share(cx)
+        if self.settle_folder_share(cx)
+            | self.settle_recommended_adds(cx)
+            | self.settle_add_contact(cx)
+            | self.settle_edit_contact(cx)
             | self.drive_folder_invite(cx)
             | self.drain_folder_limit(cx)
             | self.drain_chat_look(cx)
             | self.drain_wallpaper_preview(cx)
+            | self.drain_chat_appearance(cx)
             | self.drain_earn(cx)
             | self.drain_language(cx)
             | self.drain_peer_qr(cx)

@@ -92,6 +92,15 @@ pub struct SettingsState {
     /// Parity slice: `updateReactionNotificationSettings` cache. No getter
     /// exists — this stays `None` until the first update arrives.
     pub reaction_notification_settings: Option<ReactionNotificationSettings>,
+    /// `setScopeNotificationSettings` saves in flight: the edit shows at
+    /// once (the next edit starts from it) and the answer confirms or
+    /// undoes it.
+    pub scope_saves: crate::state::optimistic::OptimisticSaves<
+        NotificationSettingsScope,
+        ScopeNotificationSettings,
+    >,
+    /// The same for `setReactionNotificationSettings`.
+    pub reaction_saves: crate::state::optimistic::OptimisticSaves<(), ReactionNotificationSettings>,
     /// Phase S2: cached `getStorageStatistics` answer (aggregated by file
     /// type, TGX `TGStorageStats` style); drives the storage-usage overlay,
     /// including the "Secret media and files" category.
@@ -204,6 +213,10 @@ pub struct SettingsState {
     /// `total_count` from the last `messageSenders` answer; more pages
     /// exist while `blocked_senders.len() < blocked_total`.
     pub blocked_total: i32,
+    /// Changes whenever the blocked list restarts or is dropped. A page
+    /// answers under the generation it was asked in and only extends that
+    /// list.
+    pub blocked_generation: u32,
     /// MED1: local media preferences (remember-media-grouping),
     /// persisted via `settings::MediaPrefs`. Loaded at startup like
     /// `call_prefs`; the UI saves on toggle.
@@ -258,6 +271,36 @@ pub struct SettingsState {
 }
 
 impl SettingsState {
+    /// The blocked list starts over (a fresh fetch, or its data was
+    /// dropped): pages asked for the old one no longer apply.
+    pub fn restart_blocked_list(&mut self) {
+        self.blocked_generation = self.blocked_generation.wrapping_add(1);
+    }
+
+    /// One blocked-senders page. Page 0 replaces the list; a later page
+    /// extends the list it was asked for, without ids already there. A page
+    /// of an older list, or one with no list left to extend, is dropped and
+    /// changes nothing (not even the total).
+    pub fn apply_blocked_page(
+        &mut self,
+        offset: i32,
+        generation: u32,
+        total_count: i32,
+        sender_ids: Vec<i64>,
+    ) {
+        if generation != self.blocked_generation {
+            return;
+        }
+        if offset == 0 {
+            self.blocked_total = total_count;
+            self.blocked_senders
+                .succeed(dedup_ids(Vec::new(), sender_ids));
+        } else if let Some(list) = self.blocked_senders.take_data() {
+            self.blocked_total = total_count;
+            self.blocked_senders.succeed(dedup_ids(list, sender_ids));
+        }
+    }
+
     pub fn export_links(&self) -> impl Iterator<Item = &crate::export::handle::WorkerLink> {
         let chat = self.chat_export.iter().map(|export| &export.link);
         let account = self.account_export.iter().map(|export| &export.link);
@@ -290,6 +333,8 @@ impl SettingsState {
             notification_exceptions: HashMap::new(),
             scope_settings_loading: HashSet::new(),
             reaction_notification_settings: None,
+            scope_saves: Default::default(),
+            reaction_saves: Default::default(),
             storage_stats: None,
             storage_stats_loading: false,
             data_storage: DataStoragePrefs::default(),
@@ -324,6 +369,7 @@ impl SettingsState {
             read_date_stage: ReadDateStage::Idle,
             blocked_senders: Fetch::Idle,
             blocked_total: 0,
+            blocked_generation: 0,
             media_prefs: MediaPrefs::default(),
             contact_prefs: ContactPrefs::default(),
             badge_prefs: BadgePrefs::default(),
@@ -339,4 +385,14 @@ impl SettingsState {
             language: LanguageState::default(),
         }
     }
+}
+
+/// `list` followed by the ids of `more` it does not hold yet.
+fn dedup_ids(mut list: Vec<i64>, more: Vec<i64>) -> Vec<i64> {
+    for id in more {
+        if !list.contains(&id) {
+            list.push(id);
+        }
+    }
+    list
 }

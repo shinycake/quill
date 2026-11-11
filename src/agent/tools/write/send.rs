@@ -17,11 +17,12 @@ fn sent_output(
     ctx: &Ctx,
     target: &Target,
     verb: &str,
-    sent: &[Value],
+    sent: &common::Batch,
     scheduled: bool,
 ) -> ToolOutput {
     let mut names = Names::new(ctx);
     let shaped: Vec<Value> = sent
+        .messages
         .iter()
         .map(|m| messages::shape(m, target.me, Detail::Full, &mut names))
         .collect();
@@ -31,9 +32,10 @@ fn sent_output(
         text.push_str(&messages::line(message));
         text.push('\n');
     }
+    text.push_str(&sent.caveats());
     ToolOutput {
         text,
-        data: json!({"chat": target.summary(), "messages": shaped, "scheduled": scheduled}),
+        data: json!({"chat": target.summary(), "messages": shaped, "scheduled": scheduled, "failed": sent.failures}),
     }
 }
 

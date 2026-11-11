@@ -6,6 +6,7 @@
 //! uninstalled first, then the order of the rest is sent. The queue here
 //! does the same one step at a time, because TDLib answers a reorder with
 //! the installed list as it was when the request went out.
+use crate::ids::RequestId;
 use std::collections::{HashSet, VecDeque};
 
 /// One closed box's changes, waiting to be sent.
@@ -17,6 +18,9 @@ pub struct ManagerCommit {
     pub removals: VecDeque<i64>,
     /// The order of the sets that stay, sent after the last removal.
     pub order: Option<Vec<i64>>,
+    /// The request of the step on its way: only its failure is this
+    /// change's (a set box's `changeStickerSet` that fails is not).
+    pub sent: Option<RequestId>,
 }
 
 /// What the manager box needs from the driver.
@@ -28,6 +32,39 @@ pub struct StickersManager {
     pub covers_requested: HashSet<i64>,
     /// Saved changes not yet sent, oldest first.
     pub commits: VecDeque<ManagerCommit>,
+    /// A step of a saved change that did not go through (a refused
+    /// request, a client that could not send): the box is closed by then,
+    /// so the UI says so once.
+    pub failure: Option<CommitFailure>,
+}
+
+/// A saved change of the manager box that was lost on the way.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CommitFailure {
+    /// The change was for mask sets, not regular sticker sets.
+    pub masks: bool,
+}
+
+impl StickersManager {
+    /// The request `failed` was answered with an error: it is a failure of
+    /// the oldest saved change only when it was that change's own step.
+    /// True when it was (the failure is then reported by the manager).
+    pub fn note_commit_failure(&mut self, failed: RequestId) -> bool {
+        if let Some(front) = self.commits.front()
+            && front.sent == Some(failed)
+        {
+            self.failure = Some(CommitFailure { masks: front.masks });
+            return true;
+        }
+        false
+    }
+
+    /// A step of the oldest saved change could not go out at all.
+    pub fn note_send_failure(&mut self) {
+        if let Some(front) = self.commits.front() {
+            self.failure = Some(CommitFailure { masks: front.masks });
+        }
+    }
 }
 
 /// What a commit does next.
@@ -62,6 +99,7 @@ mod tests {
             masks: false,
             removals: VecDeque::from([4, 5]),
             order: Some(vec![3, 1, 2]),
+            sent: None,
         };
         assert_eq!(commit.next_step(), CommitStep::Remove(4));
         assert_eq!(commit.next_step(), CommitStep::Remove(5));
@@ -75,6 +113,7 @@ mod tests {
             masks: true,
             removals: VecDeque::new(),
             order: Some(vec![1]),
+            sent: None,
         };
         assert_eq!(commit.next_step(), CommitStep::Done);
     }

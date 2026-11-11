@@ -464,7 +464,13 @@ impl QuillApp {
     /// notifications. Returns whether a budget left updates queued.
     fn poll_background(&mut self, cx: &mut Context<Self>) -> bool {
         let notify_from_all = self.background.notify_from_all;
-        let app_active = self.frame.window_active.get();
+        // A background account's chats are never the open one, so Quill is
+        // never looking at them, focused or not. tdesktop's
+        // `System::computeSkipState` has no window-focus test: only the open
+        // chat of the active window drops its notifications
+        // (`clearFromHistory`), so a message for another account while Quill
+        // has the focus still rings. (`looked_at` is for the account on screen.)
+        let app_active = false;
         let now = Instant::now();
         let mut backlog = false;
         let mut changed = false;

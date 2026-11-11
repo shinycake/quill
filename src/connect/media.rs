@@ -82,6 +82,9 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// answered file then downloads like a photo thumbnail.
     fn maybe_request_map_thumbs(&mut self) -> Result<Vec<RequestId>, ConnectSendError> {
         let mut extras = Vec::new();
+        if let Some(open) = self.session.open_chat {
+            self.session.media.map_thumbs.retry_failed_outside(open);
+        }
         for (key, chat_id) in self.session.map_thumbs_to_request() {
             let extra = self
                 .session
@@ -417,14 +420,24 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Ok(0);
         }
         if state == DiskState::Healthy {
-            let paused: Vec<i32> = self.session.media.disk_paused.drain().collect();
+            let paused: Vec<i32> = self.session.media.disk_paused.iter().copied().collect();
+            let mut failed = None;
             for id in paused {
-                self.forget_disk_pause(id);
-                if self.session.media.downloads.is_paused(id) {
-                    self.toggle_download_paused(FileId(id), false)?;
+                if self.session.media.downloads.is_paused(id)
+                    && let Err(err) = self.toggle_download_paused(FileId(id), false)
+                {
+                    // This one and the rest stay in the set for the next
+                    // healthy reading.
+                    failed = Some(err);
+                    break;
                 }
+                self.session.media.disk_paused.remove(&id);
+                self.forget_disk_pause(id);
             }
-            let searched = self.search_disk_paused_elsewhere();
+            let searched = match failed {
+                Some(err) => Err(err),
+                None => self.search_disk_paused_elsewhere(),
+            };
             self.save_disk_pauses_if_changed();
             searched?;
             return Ok(0);
@@ -445,15 +458,22 @@ impl<S: JsonSender> ConnectDriver<S> {
             })
             .collect();
         let mut repaused = 0;
+        let mut failed = None;
         for id in over {
+            if let Err(err) = self.toggle_download_paused(FileId(id), true) {
+                failed = Some(err);
+                break;
+            }
             if !self.session.media.disk_paused.insert(id) {
                 repaused += 1;
             }
             self.save_disk_pause(id);
-            self.toggle_download_paused(FileId(id), true)?;
         }
         self.save_disk_pauses_if_changed();
-        Ok(repaused)
+        match failed {
+            Some(err) => Err(err),
+            None => Ok(repaused),
+        }
     }
 
     /// Whether `file_id` has room to finish above the close floor while the

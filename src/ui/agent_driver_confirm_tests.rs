@@ -207,7 +207,7 @@ fn a_prompt_hidden_behind_another_dialog_neither_lets_it_drive_nor_eats_a_pause(
     let _guard = quill::locks::lock_or_recover(&TEST_LOCK);
     let (app, mut vcx, _presence) = setup(cx);
     let vcx = &mut vcx;
-    grants::update(&AccountKey::primary(), |g| {
+    let _ = grants::update(&AccountKey::primary(), |g| {
         g.all_chats = Some(Scope::ReadWrite)
     });
     // A slow runner must not let the session's hold run out before the
@@ -232,6 +232,6 @@ fn a_prompt_hidden_behind_another_dialog_neither_lets_it_drive_nor_eats_a_pause(
     vcx.simulate_click(point(px(600.), px(400.)), Modifiers::none());
     settle(vcx);
     assert!(takeover::paused(), "a real press still pauses");
-    grants::update(&AccountKey::primary(), |g| g.all_chats = None);
+    let _ = grants::update(&AccountKey::primary(), |g| g.all_chats = None);
     takeover::reset_for_test();
 }

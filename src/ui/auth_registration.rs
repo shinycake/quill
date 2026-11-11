@@ -84,7 +84,7 @@ impl QuillApp {
         .into_any_element()
     }
 
-    fn submit_registration(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    fn submit_registration(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
         let Some(live) = self.live.as_mut() else {
             return;
         };
@@ -113,16 +113,9 @@ impl QuillApp {
         self.screen.connection.set_note_for(
             &self.screen.windows,
             match result {
+                // The name and the accepted terms stay until the step is done
+                // (`sync_auth_forms`; the poll drops the terms with it).
                 Ok(_) => {
-                    self.screen
-                        .auth_ui
-                        .registration_first_input
-                        .update(cx, |input, cx| input.set_value("", window, cx));
-                    self.screen
-                        .auth_ui
-                        .registration_last_input
-                        .update(cx, |input, cx| input.set_value("", window, cx));
-                    self.screen.auth_ui.accepted_registration_terms = None;
                     StatusNote::silent(tr(keys::Q_MISC_REGISTRATION_SUBMITTED_WAITING_FOR_TELEGRAM))
                 }
                 Err(_) => StatusNote::error(tr(keys::Q_MISC_COULD_NOT_REGISTER_CHECK_YOUR)),

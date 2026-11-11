@@ -60,8 +60,6 @@ pub(crate) struct MessageUi {
     pub(super) collapsed_keyboards: std::collections::HashSet<(i64, i64)>,
     /// A bot request button's share dialog (`DialogKind::RequestShare`).
     pub(super) request_share: Option<super::request_share::RequestShare>,
-    /// The location lookup behind a bot's location request.
-    pub(super) request_locate: Option<Task<()>>,
     /// "About These Ads" box (`DialogKind::SponsoredAbout`) is open.
     pub(super) sponsored_about: Option<super::sponsored_about::SponsoredAbout>,
     /// Sponsored message ids painted inside the history's viewport last
@@ -79,6 +77,9 @@ pub(crate) struct MessageUi {
     pub(super) poll_add_option: Option<PollAddOption>,
     /// The message menu's "Add Fact Check" / "Edit Fact Check" dialog.
     pub(super) fact_check_dialog: Option<super::fact_check::FactCheckDialog>,
+    /// Saved Messages: "Add Name" / "Edit Name" for a tag, in the window
+    /// whose tag menu asked.
+    pub(super) saved_tag_dialog: Option<super::saved_sublists::SavedTagDialog>,
 }
 
 impl MessageUi {
@@ -105,7 +106,6 @@ impl MessageUi {
             dismissed_keyboards: std::collections::HashSet::new(),
             collapsed_keyboards: std::collections::HashSet::new(),
             request_share: None,
-            request_locate: None,
             sponsored_about: None,
             rendered_sponsored: Default::default(),
             custom_emoji_card_seen: None,
@@ -113,6 +113,7 @@ impl MessageUi {
             poll_voters_dialog: None,
             poll_add_option: None,
             fact_check_dialog: None,
+            saved_tag_dialog: None,
         }
     }
 }

@@ -141,6 +141,14 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.custom_emoji_hold = None;
             changed = true;
         }
+        // A ringing conference invitation whose settling update never came.
+        if self
+            .session
+            .expire_conference_invite(crate::local_time::now_unix())
+        {
+            self.send_conference_declines();
+            changed = true;
+        }
         let sweep_due = self
             .last_request_sweep
             .is_none_or(|last| now.saturating_duration_since(last) >= SWEEP_EVERY);
@@ -192,8 +200,14 @@ impl<S: JsonSender> ConnectDriver<S> {
             .as_ref()
             .and_then(|live| live.pending_reaction.as_ref())
             .map(|pending| Duration::from_millis(pending.commit_at_ms.saturating_sub(now_ms)));
+        // A ringing conference invitation's last second.
+        let ring = self
+            .session
+            .conference_invite_rings_for(crate::local_time::now_unix())
+            .and_then(|secs| u64::try_from(secs).ok())
+            .map(Duration::from_secs);
         [
-            retry, emoji_hold, bot, levels, hint, level, microphone, paid, live_stars,
+            retry, emoji_hold, bot, levels, hint, level, microphone, paid, live_stars, ring,
         ]
         .into_iter()
         .flatten()

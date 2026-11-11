@@ -13,11 +13,18 @@ impl Session {
         _seq: u64,
     ) {
         self.apply_profile_music_error(err, pending);
+        // The saved-pause search failed: the next healthy reading asks again.
+        if let Some(pending) = pending
+            && pending.purpose == RequestPurpose::Media(MediaPurpose::SearchDiskPausedDownloads)
+            && matches!(&self.media.disk_search, DiskSearch::Asked { request, .. } if *request == pending.id)
+        {
+            self.media.disk_search = DiskSearch::NotAsked;
+        }
         // A place without a tile keeps the coordinate card.
         if let Some(pending) = pending
             && pending.purpose == RequestPurpose::GetMapThumbnailFile
         {
-            self.media.map_thumbs.failed(pending.id);
+            self.media.map_thumbs.failed(pending.id, pending.chat_id);
         }
         if let Some(pending) = pending
             && let RequestPurpose::Media(MediaPurpose::LocationPicker(purpose)) = pending.purpose

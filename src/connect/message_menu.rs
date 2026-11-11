@@ -88,22 +88,22 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.session.chats.contains_key(&chat_id.0) {
             return Err(ConnectSendError::InvalidRequest);
         }
-        if option_id.is_empty() && text.is_empty() {
-            self.session
-                .begin_message_report(chat_id, message_ids.to_vec());
-        } else {
-            self.session.message_report_sending(chosen);
-        }
         let extra = self
             .session
             .request(RequestPurpose::ReportMessages, Some(chat_id));
+        if option_id.is_empty() && text.is_empty() {
+            self.session
+                .begin_message_report(chat_id, message_ids.to_vec(), extra);
+        } else {
+            self.session.message_report_sending(extra, chosen);
+        }
         let json = report_chat_messages(extra, chat_id, option_id, message_ids, text);
         match self.sender.send_json(&json) {
             Ok(()) => Ok(extra),
             Err(err) => {
                 self.session.requests.take(extra);
                 self.session
-                    .fail_message_report(chat_id, "Could not send the report.".into());
+                    .fail_message_report(extra, "Could not send the report.".into());
                 Err(err)
             }
         }
@@ -458,8 +458,9 @@ impl<S: JsonSender> ConnectDriver<S> {
         let allowed = self
             .session
             .messages
-            .message_menu_actions
-            .is_some_and(|(c, m, a)| c == chat_id && m == message_id && a.can_delete_reactions);
+            .menu_actions
+            .get(chat_id, message_id)
+            .is_some_and(|a| a.can_delete_reactions);
         if !allowed {
             return Ok(None);
         }

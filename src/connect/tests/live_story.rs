@@ -121,7 +121,7 @@ fn the_join_answer_asks_for_streamer_donors_and_senders_together() {
     );
     let live = h.driver.session.stories.live.clone().unwrap();
     assert_eq!(live.stars_total(), 120);
-    assert_eq!(live.message_senders.map(|s| s.len()), Some(2));
+    assert_eq!(live.message_senders.data().map(|s| s.len()), Some(2));
     // The streamer is a channel: its video is subscribed anyway, and the
     // native call is keyed by the poster's chat.
     let sources = h.driver.live_story_video_sources(4242);
@@ -638,7 +638,9 @@ fn joined_answer(h: &mut Harness) {
 
 fn rejoin(h: &mut Harness) {
     if let Some(live) = h.driver.session.stories.live.as_mut() {
-        live.extras_requested = false;
+        live.streamer = Default::default();
+        live.donors = Default::default();
+        live.message_senders = Default::default();
     }
     h.ingest(&LIVE_CALL.replace("JOINED", "true"));
 }
@@ -703,4 +705,24 @@ fn live_story_stars_commit_from_the_poll_with_no_viewer() {
     h.driver
         .poll_ticks(TickScope::Background, std::time::Instant::now(), network);
     assert_eq!(h.sent("commitPendingLiveStoryReactions"), 1);
+}
+
+#[test]
+fn a_failed_extra_waits_for_the_next_join_and_is_not_asked_every_update() {
+    let mut h = watching();
+    joined_answer(&mut h);
+    assert_eq!(h.sent("getLiveStoryStreamer"), 1);
+    h.answer(
+        "getLiveStoryStreamer",
+        r#"{"@type":"error","code":500,"message":"x"}"#,
+    );
+    let live = h.driver.session.stories.live.clone().unwrap();
+    assert!(live.streamer.error().is_some());
+    // Later updates do not ask again.
+    h.ingest(&LIVE_CALL.replace("JOINED", "true"));
+    assert_eq!(h.sent("getLiveStoryStreamer"), 1);
+    // The next Join does.
+    h.driver.join_live_story(ChatId(7), 6).unwrap();
+    h.ingest(&LIVE_CALL.replace("JOINED", "true"));
+    assert_eq!(h.sent("getLiveStoryStreamer"), 2);
 }

@@ -71,6 +71,7 @@ where
     let mut resampled = Vec::new();
     let needs_resampling = rate != EXTERNAL_AUDIO_RATE;
     let mut errors = StreamErrors::new("system audio");
+    let failures = mix.clone();
     device
         .build_input_stream(
             config,
@@ -84,11 +85,14 @@ where
                     mix.push(&mono);
                 }
             },
-            // A lost output device just stops the system audio; the
-            // screen and the microphone keep going. The error only goes to
-            // the debug log.
+            // A lost output device ends the system audio, not the screen
+            // or the microphone: the driver reads the failure from the mix
+            // and turns the audio share off.
             move |err| {
-                let _ = errors.check(err);
+                if let Some(err) = errors.check(err) {
+                    failures.fail(format!("System audio stopped: {err}"));
+                    crate::wake::UPDATES.poke();
+                }
             },
             None,
         )

@@ -46,6 +46,29 @@ pub(super) fn split_ready(
     (ready, waiting)
 }
 
+/// What to write as the account's saved windows: the windows open now, plus
+/// the saved ones a restore has not brought back yet (still waiting for
+/// their chats, or for the answer to the offer), so a save in the middle of
+/// a restore never forgets the windows that have not opened. `None` while
+/// nothing was looked at yet: the file stays as it is.
+pub(super) fn windows_to_save(
+    open: Vec<SavedChatWindow>,
+    restore: &Restore,
+) -> Option<Vec<SavedChatWindow>> {
+    let not_back = match restore {
+        Restore::Pending => return None,
+        Restore::Offered(saved) | Restore::Opening(saved) => saved.as_slice(),
+        Restore::Done => &[],
+    };
+    let mut all = open;
+    for window in not_back {
+        if !all.iter().any(|open| open.chat_id == window.chat_id) {
+            all.push(window.clone());
+        }
+    }
+    Some(all)
+}
+
 fn bounds_of(window: &SavedChatWindow) -> Bounds<Pixels> {
     Bounds {
         origin: point(px(window.x), px(window.y)),
@@ -133,6 +156,9 @@ impl QuillApp {
                 .sanitized()
             })
             .collect();
+        let Some(windows) = windows_to_save(windows, &self.windows.restore) else {
+            return;
+        };
         let mut state = load_chat_windows();
         state.set_windows_of(&account, windows);
         save_chat_windows(&state);
@@ -230,7 +256,7 @@ impl QuillApp {
 #[cfg(test)]
 mod tests {
     // Not a glob: `gpui_kit::*` would shadow the built-in `#[test]`.
-    use super::{split_ready, to_restore};
+    use super::{Restore, split_ready, to_restore, windows_to_save};
     use gpui_kit::{point, px, size};
     use quill::ids::ChatId;
     use quill::settings::{ChatWindowsState, SavedChatWindow};
@@ -270,5 +296,32 @@ mod tests {
         assert_eq!(ready[0].1.size, size(px(700.), px(500.)));
         assert_eq!(waiting.len(), 1);
         assert_eq!(waiting[0].chat_id, 2);
+    }
+
+    #[test]
+    fn a_save_in_the_middle_of_a_restore_keeps_the_windows_not_back_yet() {
+        let chats = |windows: Option<Vec<SavedChatWindow>>| {
+            windows.map(|all| all.iter().map(|w| w.chat_id).collect::<Vec<_>>())
+        };
+        let waiting = vec![saved(1), saved(2), saved(3)];
+        // Chat 1 is open; 2 and 3 still wait for their chats.
+        let opening = Restore::Opening(waiting.clone());
+        assert_eq!(
+            chats(windows_to_save(vec![saved(1)], &opening)),
+            Some(vec![1, 2, 3])
+        );
+        // Not answered yet: the offered windows are not forgotten either.
+        let offered = Restore::Offered(waiting);
+        assert_eq!(
+            chats(windows_to_save(Vec::new(), &offered)),
+            Some(vec![1, 2, 3])
+        );
+        // Not looked at: the file stays as it is.
+        assert_eq!(windows_to_save(vec![saved(1)], &Restore::Pending), None);
+        // Done: what is open is what is saved.
+        assert_eq!(
+            chats(windows_to_save(vec![saved(1)], &Restore::Done)),
+            Some(vec![1])
+        );
     }
 }

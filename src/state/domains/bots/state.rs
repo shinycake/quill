@@ -80,11 +80,13 @@ pub struct BotsState {
     /// (then `getLoginUrl`) is in flight so an error can degrade to a plain
     /// URL button press.
     pub login_url_request: Option<LoginUrlRequest>,
-    /// B1: force-reply target set when an incoming message carrying
+    /// B1: force-reply targets set when an incoming message carrying
     /// force-reply markup (`replyMarkupForceReply`, or `force_reply` on an
-    /// inline / show-keyboard markup) arrives. The UI drains it on the
-    /// next render: composer gets the reply-to and focus.
-    pub pending_force_reply: Option<ForceReplyTarget>,
+    /// inline / show-keyboard markup) arrives, one per chat (a newer
+    /// message of the chat replaces the older). Each window arms its own
+    /// chat's on a frame: composer gets the reply-to and focus; the other
+    /// chats' wait until a window shows them.
+    pub pending_force_replies: std::collections::HashMap<crate::ids::ChatId, ForceReplyTarget>,
     /// Bot reply keyboards as TDLib reports them, and recent inline bots.
     pub reply_keyboards: ReplyKeyboardState,
     /// Bots slice: the single active `getInlineQueryResults` fetch (the
@@ -123,7 +125,7 @@ impl BotsState {
             web_apps: WebApps::default(),
             last_login_url_info: None,
             login_url_request: None,
-            pending_force_reply: None,
+            pending_force_replies: std::collections::HashMap::new(),
             reply_keyboards: ReplyKeyboardState::default(),
             inline_query: None,
             inline_bot_resolve: None,

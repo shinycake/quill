@@ -375,6 +375,60 @@ fn link_json(link: &str, revoked: bool, primary: bool) -> String {
     )
 }
 
+/// Sweep 05-197: a created link does not turn a list that was never
+/// fetched (or failed) into a loaded one holding just that link.
+#[test]
+fn a_created_link_does_not_fake_an_unfetched_or_failed_list() {
+    let mut rig = Rig::new(false, ADMIN);
+    let create = rig
+        .driver
+        .create_chat_invite_link(ChatId(13), "", 0, 0, false)
+        .unwrap()
+        .unwrap();
+    rig.ingest(&link_answer(create, "https://t.me/+new"));
+    assert!(
+        !rig.driver.session.groups.invite_links.contains_key(&13),
+        "never fetched stays unfetched"
+    );
+    let list = rig
+        .driver
+        .fetch_chat_invite_links(ChatId(13))
+        .unwrap()
+        .unwrap();
+    rig.ingest(&format!(
+        r#"{{"@type":"error","@extra":"{}","code":500,"message":"Timeout"}}"#,
+        list.0
+    ));
+    let create = rig
+        .driver
+        .create_chat_invite_link(ChatId(13), "", 0, 0, false)
+        .unwrap()
+        .unwrap();
+    rig.ingest(&link_answer(create, "https://t.me/+newer"));
+    assert!(
+        !matches!(
+            rig.driver.session.groups.invite_links.get(&13),
+            Some(InviteLinkFetch::Loaded(_))
+        ),
+        "a failed list is not loaded by one link"
+    );
+    assert!(
+        rig.driver
+            .fetch_chat_invite_links(ChatId(13))
+            .unwrap()
+            .is_some(),
+        "the list is fetched again"
+    );
+}
+
+fn link_answer(extra: RequestId, link: &str) -> String {
+    link_json(link, false, false).replacen(
+        r#"{"@type":"chatInviteLink""#,
+        &format!(r#"{{"@type":"chatInviteLink","@extra":"{}""#, extra.0),
+        1,
+    )
+}
+
 #[test]
 fn revoke_moves_the_link_and_deletes_remove_it_from_the_revoked_list() {
     let mut rig = Rig::new(false, ADMIN);
@@ -492,6 +546,17 @@ fn subscription_links_are_for_channel_admins_and_use_the_monthly_period() {
             .unwrap()
             .is_none()
     );
+    // The list is fetched first: a created link is only merged into one
+    // that is loaded.
+    let list = channel
+        .driver
+        .fetch_chat_invite_links(ChatId(13))
+        .unwrap()
+        .unwrap();
+    channel.ingest(&format!(
+        r#"{{"@type":"chatInviteLinks","@extra":"{}","total_count":0,"invite_links":[]}}"#,
+        list.0
+    ));
     let extra = channel
         .driver
         .create_chat_subscription_invite_link(ChatId(13), "VIP", 250)
@@ -580,4 +645,85 @@ fn reopening_during_a_search_shows_the_full_list_not_the_search() {
         panic!("loaded");
     };
     assert_eq!(list.total_count, 2);
+}
+
+/// Round 10, 042: a fetch that cannot be sent leaves a failed entry (drawn
+/// with its Retry), not nothing, which a page draws as a spinner.
+#[test]
+fn a_fetch_that_cannot_be_sent_is_a_failed_page_with_a_retry() {
+    use crate::state::{AdminListFetch, JoinRequestFetch};
+    let mut rig = Rig::new(false, ADMIN);
+    rig.recorder.refuse(Some("getChatInviteLinks"));
+    assert!(rig.driver.fetch_chat_invite_links(ChatId(13)).is_err());
+    assert!(matches!(
+        rig.driver.session.groups.invite_links.get(&13),
+        Some(InviteLinkFetch::Failed(_))
+    ));
+    rig.recorder.refuse(Some("getChatJoinRequests"));
+    assert!(rig.driver.fetch_chat_join_requests(ChatId(13)).is_err());
+    assert!(matches!(
+        rig.driver.session.groups.join_requests.get(&13),
+        Some(JoinRequestFetch::Failed(_))
+    ));
+    let mut rig = Rig::new(false, CREATOR);
+    rig.recorder.refuse(Some("getChatAdministrators"));
+    assert!(rig.driver.fetch_chat_administrators(ChatId(13)).is_err());
+    assert!(matches!(
+        rig.driver.session.groups.admin_lists.get(&13),
+        Some(AdminListFetch::Failed(_))
+    ));
+    // Retry (refresh) sends again once the client is back.
+    rig.recorder.refuse(None);
+    assert!(
+        rig.driver
+            .refresh_chat_administrators(ChatId(13))
+            .unwrap()
+            .is_some()
+    );
+}
+
+#[test]
+fn a_join_request_ask_that_cannot_go_out_fails_instead_of_loading() {
+    // Not connected: the send is refused.
+    let (dir, prepared) = prepared_tmp(&MemorySecretStore::new());
+    let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+    let recorder = Arc::new(RecordingSender::new());
+    let session = crate::state::Session::new(crate::ids::AccountKey::primary(), sink.clone());
+    let mut driver = ConnectDriver::new(session, recorder, test_credentials(), prepared);
+    driver.ask_join_requests(ChatId(13), "", true);
+    assert!(matches!(
+        driver.session.groups.join_requests.get(&13),
+        Some(JoinRequestFetch::Failed(_))
+    ));
+    driver.ask_join_requests(ChatId(13), "an", false);
+    assert!(matches!(
+        driver.session.groups.join_requests.get(&13),
+        Some(JoinRequestFetch::Failed(_))
+    ));
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn a_join_request_ask_without_the_right_to_invite_fails_and_a_sent_one_loads() {
+    // A plain member cannot see the requests: nothing is sent, the box says so.
+    let mut member = Rig::new(false, MEMBER);
+    member.driver.ask_join_requests(ChatId(13), "", true);
+    assert!(matches!(
+        member.driver.session.groups.join_requests.get(&13),
+        Some(JoinRequestFetch::Failed(_))
+    ));
+    assert!(
+        member
+            .recorder
+            .snapshot()
+            .iter()
+            .all(|r| !r.contains("getChatJoinRequests"))
+    );
+    // An administrator's ask is sent and loads.
+    let mut admin = Rig::new(false, ADMIN);
+    admin.driver.ask_join_requests(ChatId(13), "", true);
+    assert!(matches!(
+        admin.driver.session.groups.join_requests.get(&13),
+        Some(JoinRequestFetch::Loading)
+    ));
 }

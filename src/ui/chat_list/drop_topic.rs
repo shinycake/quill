@@ -240,10 +240,9 @@ impl QuillApp {
             cx.notify();
             return;
         }
-        self.chat_list.drop_topic = None;
-        cx.notify();
         // What was dropped rides with the open, to the window that shows
-        // the chat.
+        // the chat. The chooser, which holds the payload, stays until the
+        // open went through.
         let mut open = crate::ui::chat_window::ChatOpen::new(chat_id);
         match payload {
             DropPayload::Files { paths, kind } => {
@@ -260,12 +259,20 @@ impl QuillApp {
             if let Some(topic) = topic {
                 open = open.in_topic(topic);
             }
+            self.chat_list.drop_topic = None;
+            cx.notify();
             self.select_chat_request(open, window, cx);
             return;
         }
         let carry = std::mem::take(&mut open.carry);
         if self.enter_drop_topic(chat_id, topic, window, cx) {
+            self.chat_list.drop_topic = None;
+            cx.notify();
             self.apply_open_carry(chat_id, carry, Some(window), cx);
+        } else {
+            // The chat did not open (refused, or no longer there): what
+            // was dropped is still in the chooser, and the person is told.
+            cx.notify();
         }
     }
 
@@ -281,6 +288,7 @@ impl QuillApp {
     ) -> bool {
         self.select_listed_chat(chat_id, window, cx);
         if self.session().and_then(|s| s.open_chat) != Some(chat_id) {
+            self.set_note(StatusNote::error(tr(keys::Q_PEOPLE_COULD_NOT_OPEN_TOPIC)));
             return false;
         }
         match topic {

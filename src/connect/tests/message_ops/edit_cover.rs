@@ -83,3 +83,53 @@ fn driver_edit_cover_resends_existing_video_with_new_cover() {
     assert_eq!(v["@type"], "editMessageCaption");
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn a_replacement_video_goes_with_the_probe_taken_when_it_was_staged() {
+    use crate::composer::{EditMediaKind, EditMediaReplacement, ReplacementProbe};
+    let store = MemorySecretStore::new();
+    let (dir, prepared) = prepared_tmp(&store);
+    let sink = Arc::new(MemorySink::new());
+    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+    let recorder = Arc::new(RecordingSender::new());
+    let session = Session::new(AccountKey::primary(), dyn_sink.clone());
+    let mut driver = ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
+    let seq = AtomicU64::new(0);
+    seed_ready_alice(&mut driver, &seq, &dyn_sink);
+    driver
+        .ingest(copy_and_parse(VIDEO_MESSAGE, &seq, &dyn_sink).expect("parse"))
+        .expect("ingest");
+    // Not a real video: saving must not run ffprobe on the caller's thread.
+    let file = dir.join("new.mp4");
+    std::fs::write(&file, [1u8]).unwrap();
+    let file = std::fs::canonicalize(&file).unwrap();
+    let mut edit = video_edit(&driver);
+    edit.media_edit.replacement = Some(EditMediaReplacement {
+        path: file,
+        file_name: "new.mp4".into(),
+        kind: EditMediaKind::Video,
+        spoiler: false,
+        cover: None,
+        video_extras: Default::default(),
+        probe: ReplacementProbe::Probing,
+    });
+    let sent = recorder.snapshot().len();
+    assert!(driver.edit_snapshot(&edit, "clip").is_err());
+    assert_eq!(recorder.snapshot().len(), sent);
+    if let Some(rep) = edit.media_edit.replacement.as_mut() {
+        rep.probe = ReplacementProbe::Ready(crate::video::VideoProbe {
+            duration: 11,
+            width: 320,
+            height: 240,
+            supports_streaming: true,
+        });
+    }
+    driver.edit_snapshot(&edit, "clip").unwrap();
+    let json = recorder.snapshot().last().cloned().expect("request");
+    let v: Value = serde_json::from_str(&json).unwrap();
+    let video = &v["input_message_content"]["video"];
+    assert_eq!(video["duration"], 11);
+    assert_eq!(video["width"], 320);
+    assert_eq!(video["height"], 240);
+    let _ = std::fs::remove_dir_all(&dir);
+}

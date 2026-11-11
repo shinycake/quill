@@ -3,7 +3,7 @@
 //! feature for gpui-kit's test support).
 use crate::ui::app::QuillApp;
 use crate::ui::keybindings::bind_keys;
-use crate::ui::request_share::RequestShareKind;
+use crate::ui::request_share::{Locate, RequestShareKind};
 use crate::ui::screenshot_demo::ScreenshotDemo;
 use crate::ui::shell::{DialogKind, QuillShell};
 use gpui_kit::component::Root;
@@ -51,7 +51,10 @@ fn pressing_the_button_opens_the_box_and_the_location_arrives(cx: &mut TestAppCo
             share.kind,
             RequestShareKind::Location { one_time: true }
         ));
-        assert!(matches!(share.locate, Some(GeoOutcome::Found(_))));
+        assert!(matches!(
+            share.locate,
+            Some(Locate::Done(GeoOutcome::Found(_)))
+        ));
     });
 }
 
@@ -67,4 +70,34 @@ fn a_chat_that_is_not_a_bot_opens_no_box(cx: &mut TestAppContext) {
     app.read_with(vcx, |app, _| {
         assert!(app.message_ui.request_share.is_none())
     });
+}
+
+#[gpui_kit::test]
+fn closing_the_box_drops_its_lookup(cx: &mut TestAppContext) {
+    let (app, _shell, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    app.update_in(vcx, |app, _, cx| {
+        app.press_request_location(ChatId(21), MessageId(307), true, cx);
+    });
+    // The lookup has not answered yet: the box is in its searching stage.
+    let lookup = app.read_with(vcx, |app, _| {
+        match app
+            .message_ui
+            .request_share
+            .as_ref()
+            .and_then(|share| share.locate.as_ref())
+        {
+            Some(Locate::Searching(task)) => std::rc::Rc::downgrade(task),
+            _ => panic!("the box is searching"),
+        }
+    });
+    assert!(lookup.upgrade().is_some());
+    app.update(vcx, |app, cx| {
+        app.message_ui.request_share = None;
+        cx.notify();
+    });
+    assert!(
+        lookup.upgrade().is_none(),
+        "the lookup the user cancelled is dropped with the box"
+    );
 }

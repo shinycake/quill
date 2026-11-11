@@ -109,8 +109,7 @@ impl QuillApp {
         if let Some(wallet) = self.ton_wallet_mut() {
             wallet.money.selected_tx = None;
             wallet.money.selected_nft = None;
-            wallet.money.tx_error = None;
-            wallet.money.tx_loading = false;
+            wallet.money.tx_lookup = quill::ton_wallet::TxLookup::Idle;
         }
         cx.notify();
     }
@@ -202,8 +201,8 @@ impl QuillApp {
                 super::ton_wallet_details::tx_details(session, tx, &roots, cx)
             } else if let Some(nft) = money.selected_nft() {
                 super::ton_wallet_details::nft_details(session, nft, &roots, cx)
-            } else if money.tx_loading || money.tx_error.is_some() {
-                super::ton_wallet_details::tx_lookup_state(money.tx_error.as_deref(), cx)
+            } else if money.tx_lookup != quill::ton_wallet::TxLookup::Idle {
+                super::ton_wallet_details::tx_lookup_state(money.tx_error(), cx)
             } else {
                 overview(session, &roots, cx)
             };

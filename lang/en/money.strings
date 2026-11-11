@@ -469,6 +469,10 @@
 "qll_money_could_not_open_the_collection" = "could not open the collection";
 "qll_money_could_not_re_enable_the" = "Couldn't re-enable the subscription";
 "qll_money_could_not_reassign_the_boost" = "Couldn't reassign the boost";
+"qll_money_could_not_load_the_collectible" = "Couldn't load the details";
+"qll_money_could_not_load_this_list" = "Couldn't load this list.";
+"qll_money_couldnt_start_the_purchase" = "Couldn't start the purchase";
+"qll_money_couldnt_send_the_stars" = "Couldn't send the Stars";
 "qll_money_could_not_rejoin_the_subscription" = "Couldn't rejoin the subscription";
 "qll_money_could_not_save_the_collection" = "could not save the collection";
 "qll_money_could_not_save_the_currency" = "Couldn't save the currency";
@@ -909,3 +913,20 @@
 "qll_money_statistics_unavailable" = "Statistics are not available for this chat.";
 "qll_money_statistics_send_failed" = "Could not send the statistics request.";
 "qll_money_statistics_info_failed" = "Could not load the chat's details.";
+"qll_money_countries_failed" = "Couldn't load the countries.";
+
+"qll_marketplace_comment_unchecked" = "Could not check the comment length. Retry.";
+"qll_marketplace_comment_too_long" = "The comment is too long.";
+"qll_web_app_no_address" = "The bot returned no app address.";
+
+"qll_money_payment_success_note" = "Payment successful";
+"qll_money_payment_failed" = "Payment failed";
+"qll_money_payment_failed_reason" = "Payment failed: {reason}";
+"qll_money_gift_sent" = "Gift sent.";
+"qll_money_could_not_load_gifts_reason" = "Couldn't load gifts: {reason}";
+"qll_money_could_not_load_stars_history" = "Couldn't load the Stars history";
+"qll_money_could_not_load_the_subscriptions" = "Couldn't load the subscriptions";
+"qll_money_could_not_load_revenue" = "Couldn't load the revenue";
+"qll_money_could_not_load_revenue_reason" = "Couldn't load the revenue: {reason}";
+"qll_money_stars_not_sent" = "Stars were not sent";
+"qll_money_stars_not_sent_reason" = "Stars were not sent: {reason}";

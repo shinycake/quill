@@ -1,5 +1,6 @@
 //! Connect driver: administrators, the admin event log and admin rights.
 use super::*;
+use crate::state::send_failed_line;
 
 impl<S: JsonSender> ConnectDriver<S> {
     /// Phase D3b: `getChatAdministrators` (TDLib 1.8.67,
@@ -41,7 +42,10 @@ impl<S: JsonSender> ConnectDriver<S> {
             .send_json(&get_chat_administrators(extra, chat_id.0))
         {
             self.session.requests.take(extra);
-            self.session.groups.admin_lists.remove(&chat_id.0);
+            self.session.groups.admin_lists.insert(
+                chat_id.0,
+                AdminListFetch::Failed(send_failed_line("Could not load administrators")),
+            );
             return Err(err);
         }
         Ok(Some(extra))

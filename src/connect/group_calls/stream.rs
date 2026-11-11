@@ -249,6 +249,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             eprintln!("quill: warning: {line}");
             crate::advanced::debug_mode::debug_log(&line);
             if let Err(err) = engine.reopen_stream_sound(group_call_id) {
+                watch.reopen_failed(now);
                 eprintln!(
                     "quill: reopening the stream sound output for group call {group_call_id} failed: {err}"
                 );
@@ -559,6 +560,11 @@ impl<S: JsonSender> ConnectDriver<S> {
             if let Some(call) = self.session.calls.group_call_mut(group_call_id) {
                 call.transport_ready = false;
                 call.join_payload.clear();
+                // The call is gone for good (`GROUPCALL_INVALID`), so no
+                // rejoin is started; the failed join is what the UI shows
+                // (its Join button is the manual retry).
+                call.transport_error =
+                    Some(crate::lang::tr(crate::lang::keys::Q_OPS_THE_CALL_HAS_ENDED).to_string());
             }
         }
         if outcome == ReplyOutcome::Rejoin

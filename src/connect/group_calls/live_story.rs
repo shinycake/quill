@@ -34,6 +34,18 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.send_json_request(extra, &json)
     }
 
+    /// A request did not go out: its stage goes back, so the next ingest
+    /// asks again.
+    fn live_story_unsent(
+        &mut self,
+        group_call_id: i32,
+        back: impl FnOnce(&mut crate::state::LiveStoryState),
+    ) {
+        if let Some(live) = self.session.live_story_mut(group_call_id) {
+            back(live);
+        }
+    }
+
     fn watched_live_call(&self) -> Option<&crate::state::ActiveGroupCall> {
         let live = self.session.stories.live.as_ref()?;
         self.session
@@ -61,22 +73,53 @@ impl<S: JsonSender> ConnectDriver<S> {
         let Some(live) = self.session.live_story_mut(group_call_id) else {
             return Ok(());
         };
-        if live.extras_requested {
+        // Each is asked while idle; a failed one waits for the next Join,
+        // and one whose send failed is idle again, for the next ingest.
+        let want = (
+            !is_rtmp && live.streamer.is_idle(),
+            live.donors.is_idle(),
+            live.message_senders.is_idle(),
+        );
+        if !(want.0 || want.1 || want.2) {
             return Ok(());
         }
-        live.extras_requested = true;
-        if !is_rtmp {
-            self.live_story_request(LiveStoryPurpose::GetStreamer { group_call_id }, |extra| {
-                get_live_story_streamer(extra, group_call_id)
-            })?;
+        if want.0 {
+            live.streamer.begin();
+            let sent = self
+                .live_story_request(LiveStoryPurpose::GetStreamer { group_call_id }, |extra| {
+                    get_live_story_streamer(extra, group_call_id)
+                });
+            if let Err(err) = sent {
+                self.live_story_unsent(group_call_id, |live| live.streamer.cancel());
+                return Err(err);
+            }
         }
-        self.live_story_request(LiveStoryPurpose::GetTopDonors { group_call_id }, |extra| {
-            get_live_story_top_donors(extra, group_call_id)
-        })?;
-        self.live_story_request(
-            LiveStoryPurpose::GetMessageSenders { group_call_id },
-            |extra| get_live_story_available_message_senders(extra, group_call_id),
-        )?;
+        if want.1 {
+            if let Some(live) = self.session.live_story_mut(group_call_id) {
+                live.donors.begin();
+            }
+            let sent = self
+                .live_story_request(LiveStoryPurpose::GetTopDonors { group_call_id }, |extra| {
+                    get_live_story_top_donors(extra, group_call_id)
+                });
+            if let Err(err) = sent {
+                self.live_story_unsent(group_call_id, |live| live.donors.cancel());
+                return Err(err);
+            }
+        }
+        if want.2 {
+            if let Some(live) = self.session.live_story_mut(group_call_id) {
+                live.message_senders.begin();
+            }
+            let sent = self.live_story_request(
+                LiveStoryPurpose::GetMessageSenders { group_call_id },
+                |extra| get_live_story_available_message_senders(extra, group_call_id),
+            );
+            if let Err(err) = sent {
+                self.live_story_unsent(group_call_id, |live| live.message_senders.cancel());
+                return Err(err);
+            }
+        }
         self.maybe_fetch_live_bursts()
     }
 
@@ -104,7 +147,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .live
             .as_ref()
             .filter(|live| live.group_call_id == group_call_id)
-            .and_then(|live| live.streamer.as_ref())
+            .and_then(|live| live.streamer.data())
         else {
             return Vec::new();
         };
@@ -296,7 +339,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .stories
             .live
             .as_ref()
-            .and_then(|live| live.message_senders.as_ref())
+            .and_then(|live| live.message_senders.data())
             .is_some_and(|senders| senders.iter().any(|s| s.sender == sender));
         if !offered {
             return Err(ConnectSendError::InvalidRequest);
@@ -477,7 +520,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 chat_id: live.chat_id,
             });
         }
-        let streamer = live.streamer.as_ref()?;
+        let streamer = live.streamer.data()?;
         let user_id = match streamer.participant_id {
             MessageSender::User { user_id } => user_id,
             MessageSender::Chat { chat_id } => chat_id,

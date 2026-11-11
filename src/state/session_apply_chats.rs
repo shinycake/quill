@@ -230,6 +230,9 @@ impl Session {
         self.replace_avatar(old_photo_file_id, photo_file_id);
         // `updateSupergroup` precedes `updateNewChat`: adopt its status now.
         self.adopt_supergroup_status_for_chat(chat_id);
+        // A story of this poster that `getStory` refused before the chat was
+        // known is asked for again.
+        self.stories.poster_chat_known(chat_id.0);
     }
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn apply_update_supergroup(
@@ -429,20 +432,19 @@ impl Session {
                                 }
                             }
                         }
-                        fetch => {
-                            *fetch = InviteLinkFetch::Loaded(InviteLinkList {
-                                total_count: 1,
-                                links: vec![link],
-                            });
+                        // The list is still on its way: its answer is the
+                        // whole list, this link included once the server
+                        // has it. Nothing is invented from one entry.
+                        InviteLinkFetch::Loading => {}
+                        // A failed list is dropped so the next fetch asks
+                        // again, instead of showing one link as the list.
+                        InviteLinkFetch::Failed(_) => {
+                            entry.remove();
                         }
                     }
                 }
-                std::collections::hash_map::Entry::Vacant(entry) => {
-                    entry.insert(InviteLinkFetch::Loaded(InviteLinkList {
-                        total_count: 1,
-                        links: vec![link],
-                    }));
-                }
+                // Never fetched: the first fetch gets the whole list.
+                std::collections::hash_map::Entry::Vacant(_) => {}
             }
         }
     }
@@ -662,6 +664,11 @@ impl Session {
         if pending.map(|p| p.purpose) == Some(RequestPurpose::GetChatFolderNewChats)
             && let Some(folder_id) = pending.and_then(|p| p.folder_id)
         {
+            // Asked now that it answered: a request that never left is
+            // asked again, one that answered waits out the update period.
+            self.chat_list
+                .folder_new_chats_asked
+                .insert(folder_id, std::time::Instant::now());
             let ids: Vec<i64> = chat_ids.iter().map(|id| id.0).collect();
             if ids.is_empty() {
                 self.chat_list.folder_new_chats.remove(&folder_id);
@@ -674,8 +681,11 @@ impl Session {
             && let Some(folder_id) = pending.and_then(|p| p.folder_id)
         {
             self.chat_list
-                .folder_link_chats
-                .insert(folder_id, chat_ids.iter().map(|id| id.0).collect());
+                .folder_shares
+                .entry(folder_id)
+                .or_default()
+                .chats
+                .succeed(chat_ids.iter().map(|id| id.0).collect());
         }
         // B10: profile panel lists (groups in common, similar channels,
         // personal channel candidates).
@@ -689,6 +699,7 @@ impl Session {
         // search branch below consumes `chat_ids`.
         if pending.map(|p| p.purpose) == Some(RequestPurpose::GetChatsToPostStories) {
             self.stories.post_as_chats = chat_ids.iter().map(|id| id.0).collect();
+            self.stories.post.post_as_error = None;
         }
         // Parity slice: `getChatNotificationSettingsExceptions`
         // answer — the scope is correlated via `pending.scope`

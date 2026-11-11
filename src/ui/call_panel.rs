@@ -18,14 +18,13 @@ use super::call_panel_backdrop::connecting_arc;
 use super::call_panel_button::{ButtonLook, call_button};
 use super::call_panel_devices::{self as devices, DeviceMenuTarget};
 use super::call_panel_notices as notices;
-use super::calls::call_video::{CallPicture, CallWindowRoot};
+use super::calls::call_video::CallPicture;
 use super::chat_row::chat_avatar;
 use super::frame_clock::follow_app;
 use super::nested_click::SwallowPress;
 use crate::ui::app_theme::call_chrome;
-use crate::ui::status_note::StatusNote;
 use gpui_kit::assets::IconName;
-use gpui_kit::component::{ActiveTheme, Icon, Root, Sizable};
+use gpui_kit::component::{ActiveTheme, Icon, Sizable};
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::calls::engine::TransportState;
@@ -260,7 +259,12 @@ impl QuillApp {
             .is_some_and(|(_, at)| busy || at.elapsed() < ENDED_LINGER);
         let wanted = call_id.filter(|id| {
             (!ended || lingering)
-                && (self.call_screen.window_closed_by_user != Some(*id) || second.is_some())
+                && window_allowed(
+                    *id,
+                    self.call_screen.window_closed_by_user,
+                    self.call_screen.window_open_failed,
+                    second.is_some(),
+                )
         });
         match (wanted, self.calls.window) {
             (Some(_), Some(handle)) => {
@@ -303,6 +307,7 @@ impl QuillApp {
     /// window does not draw, and an incoming call still needs its window
     /// while you work in a chat window.
     pub(in crate::ui) fn sync_call_windows(&mut self, cx: &mut Context<Self>) {
+        self.take_offered_call_link(cx);
         self.sync_call_window(cx);
         self.sync_group_call_window(cx);
         self.sync_screen_share_call(cx);
@@ -311,7 +316,7 @@ impl QuillApp {
     /// The call the 1:1 window shows: the active call, its ended summary,
     /// or a ringing conference invite; with the call that rings in (if
     /// any), whether it has ended, and whether the other side was busy.
-    fn call_window_target(&self) -> (Option<i32>, Option<i32>, bool, bool) {
+    pub(in crate::ui) fn call_window_target(&self) -> (Option<i32>, Option<i32>, bool, bool) {
         match self.session() {
             Some(session) => match (
                 &session.calls.active_call,
@@ -332,72 +337,6 @@ impl QuillApp {
             },
             None => (None, None, false, false),
         }
-    }
-
-    fn open_call_window(&mut self, call_id: i32, cx: &mut Context<Self>) {
-        if self.calls.window_opening {
-            return;
-        }
-        self.calls.window_opening = true;
-        self.calls.raised_for = None;
-        let owner = cx.entity();
-        // screen-scope: the call window is the app's; its failure note goes to whichever account is on screen.
-        cx.defer(move |cx| {
-            let weak = owner.downgrade();
-            let render_owner = owner.clone();
-            let panel_view = owner.read(cx).calls.panel_view.clone();
-            let bounds = Bounds::centered(None, size(px(720.), px(540.)), cx);
-            let result = cx.open_window(
-                WindowOptions {
-                    window_bounds: Some(WindowBounds::Windowed(bounds)),
-                    window_min_size: Some(size(px(380.), px(520.))),
-                    titlebar: Some(TitlebarOptions {
-                        title: Some(tr(keys::PROFILE_ACTION_SHORT_CALL).into()),
-                        appears_transparent: true,
-                        traffic_light_position: Some(point(px(12.), px(12.))),
-                    }),
-                    focus: true,
-                    show: true,
-                    ..Default::default()
-                },
-                move |window, cx| {
-                    window.activate_window();
-                    let gone = weak.clone();
-                    window.on_window_should_close(cx, move |_, cx| {
-                        let _ = weak.update(cx, |app, cx| {
-                            app.calls.forget_window();
-                            // The window is reused for later calls: it
-                            // closes on the one it shows now.
-                            let (shown, ..) = app.call_window_target();
-                            app.call_screen.window_closed_by_user = shown.or(Some(call_id));
-                            cx.notify();
-                        });
-                        true
-                    });
-                    let from = window.window_handle();
-                    super::window_control::when_window_goes(window, cx, move |cx| {
-                        let _ = gone.update(cx, |app, cx| {
-                            if app.calls.window == Some(from) {
-                                app.calls.forget_window();
-                                cx.notify();
-                            }
-                        });
-                    });
-                    let view = cx.new(|cx| CallWindowRoot::new(&render_owner, &panel_view, cx));
-                    cx.new(|cx| Root::new(view, window, cx))
-                },
-            );
-            owner.update(cx, |app, cx| {
-                app.calls.window_opening = false;
-                match result {
-                    Ok(handle) => app.calls.window = Some(handle.into()),
-                    Err(_) => app.set_note(StatusNote::error(tr(
-                        keys::Q_OPS_COULDNT_OPEN_THE_CALL_WINDOW,
-                    ))),
-                }
-                cx.notify();
-            });
-        });
     }
 
     /// tdesktop `Calls::TopBar`: while a call runs, a 38 pt bar over the
@@ -511,6 +450,7 @@ impl QuillApp {
     /// Bring the call window back (the call bar's click).
     pub(super) fn show_call_window(&mut self, cx: &mut Context<Self>) {
         self.call_screen.window_closed_by_user = None;
+        self.call_screen.window_open_failed = None;
         match self.calls.window {
             Some(handle) => {
                 let _ = handle.update(cx, |_, window, _| window.activate_window());
@@ -998,3 +938,31 @@ impl Render for CallPanel {
 #[cfg(test)]
 #[path = "call_panel_tests.rs"]
 mod tests;
+
+/// Whether the call's window may open: not after you closed it (a second
+/// call ringing reopens it for its Decline and End & Answer), and not for
+/// a call whose window already failed to open.
+pub(super) fn window_allowed(
+    call: i32,
+    closed_by_user: Option<i32>,
+    open_failed: Option<i32>,
+    second_ringing: bool,
+) -> bool {
+    open_failed != Some(call) && (closed_by_user != Some(call) || second_ringing)
+}
+
+#[cfg(test)]
+mod window_allowed_tests {
+    use super::window_allowed;
+
+    #[test]
+    fn a_second_call_reopens_a_closed_window_but_not_a_failed_one() {
+        assert!(window_allowed(1, None, None, false));
+        assert!(!window_allowed(1, Some(1), None, false));
+        assert!(window_allowed(1, Some(1), None, true));
+        assert!(!window_allowed(1, None, Some(1), true));
+        assert!(!window_allowed(1, Some(1), Some(1), true));
+        // Another call's failure does not hold this one back.
+        assert!(window_allowed(2, None, Some(1), false));
+    }
+}

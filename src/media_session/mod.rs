@@ -64,9 +64,22 @@ static LAST: Mutex<Option<(NowPlaying, Instant)>> = Mutex::new(None);
 /// Queue a command (called by backends from any thread).
 #[cfg(all(feature = "ui", any(target_os = "macos", target_os = "linux", windows)))]
 pub(crate) fn push_command(command: Command) {
+    if enqueue(command) {
+        // The player's progress tick, asleep while a track is paused.
+        crate::wake::CHROME.poke();
+    }
+}
+
+/// Queue `command` for the player that owns the session: the one that
+/// published what plays. With none, a key pressed would sit in the queue
+/// and be replayed on the next track, so it is dropped.
+#[cfg(all(feature = "ui", any(target_os = "macos", target_os = "linux", windows)))]
+fn enqueue(command: Command) -> bool {
+    if LAST.lock_or_recover().is_none() {
+        return false;
+    }
     COMMANDS.lock_or_recover().push(command);
-    // The player's progress tick, asleep while a track is paused.
-    crate::wake::CHROME.poke();
+    true
 }
 
 /// Drain the commands received since the last call.
@@ -141,15 +154,25 @@ mod tests {
     #[cfg(all(feature = "ui", any(target_os = "macos", target_os = "linux", windows)))]
     #[test]
     fn a_key_is_queued_and_wakes_a_paused_tick() {
-        use super::{Command, clear, push_command, take_commands};
+        use super::{Command, LAST, clear, enqueue, push_command, take_commands};
+        use crate::locks::LockExt;
+        use std::time::Instant;
+        // One test for the queue and the owner: tests run in parallel and
+        // share them. The owner is set directly, not through `publish`,
+        // which would reach the OS widget.
+        *LAST.lock_or_recover() = Some((playing(0.0), Instant::now()));
         let seen = crate::wake::CHROME.epoch();
         push_command(Command::Play);
         assert_ne!(crate::wake::CHROME.epoch(), seen);
         assert_eq!(take_commands(), [Command::Play]);
-        // One test for the queue: tests run in parallel and share it.
         // A key pressed before an account switch applies to nothing after.
         push_command(Command::Toggle);
+        *LAST.lock_or_recover() = None;
         clear();
+        assert_eq!(take_commands(), []);
+        // With no player owning the session a key is dropped, not kept for
+        // the next track.
+        assert!(!enqueue(Command::Next));
         assert_eq!(take_commands(), []);
     }
 

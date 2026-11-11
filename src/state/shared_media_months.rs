@@ -96,11 +96,7 @@ impl Session {
             gallery.active_tab,
         );
         let media = calendar_media(tab)?;
-        let generation = self
-            .search
-            .history_calendar
-            .as_ref()
-            .map_or(1, |c| c.generation.saturating_add(1));
+        let generation = self.next_calendar_generation();
         self.search.date_jump_note = None;
         let mut calendar = HistoryCalendar::new(chat_id, media, now, generation);
         calendar.shared_tab = Some(tab);

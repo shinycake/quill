@@ -79,6 +79,15 @@ impl QuillApp {
                 return dialog.on_close(on_close);
             };
             let can_save = this.profile_form_can_save(cx);
+            let saving = this
+                .dialogs
+                .edit_profile_dialog
+                .as_ref()
+                .is_some_and(|dialog| {
+                    dialog
+                        .save
+                        .is_sending(this.session().map(|session| &session.requests))
+                });
             let footer = div()
                 .flex()
                 .justify_end()
@@ -96,7 +105,8 @@ impl QuillApp {
                     Button::new("edit-profile-save")
                         .label(tr(keys::SETTINGS_SAVE))
                         .primary()
-                        .disabled(!can_save)
+                        .loading(saving)
+                        .disabled(!can_save || saving)
                         .on_click(cx.listener(|this, _, window, cx| {
                             this.save_profile_form(cx);
                             this.close_kit_dialog_if_done(DialogKind::EditProfile, window, cx);
@@ -538,7 +548,15 @@ impl QuillApp {
         // kit Phase 2 (redo): plain form content — the kit `Dialog`
         // provides the title, padding, and chrome via `.title()`.
         let mut panel = div().id("edit-profile-panel").flex().flex_col().gap_3();
-        if let Some(error) = error {
+        // The reason the last Save was refused, when the session kept none.
+        let refused = match &dialog.save {
+            quill::state::Submit::Failed(reason) => Some(quill::lang::tr_with(
+                keys::Q_PEOPLE_COULDNT_SAVE_REASON,
+                &[("reason", reason)],
+            )),
+            _ => None,
+        };
+        if let Some(error) = error.or(refused) {
             panel = panel.child(div().text_sm().text_color(danger()).child(error));
         }
         panel = panel

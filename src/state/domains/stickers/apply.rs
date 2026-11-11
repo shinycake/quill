@@ -12,6 +12,12 @@ impl Session {
         _extra: Option<RequestId>,
         _seq: u64,
     ) {
+        // An answer ends its list's fetch; an update carries no request.
+        if let Some(pending) = pending
+            && let Some(list) = self.stickers.stickers.lists.for_purpose(pending.purpose)
+        {
+            list.succeed(());
+        }
         match payload {
             StickersPayload::UpdateActiveEmojiReactions { emojis } => {
                 self.stickers.active_reactions = emojis.clone();
@@ -278,7 +284,7 @@ impl Session {
                     self.accept_library_set(set_id, stickers);
                 } else if pending.map(|p| p.purpose) == Some(RequestPurpose::GetStickerSet) {
                     self.remember_files(&files);
-                    self.accept_sticker_set(id, stickers);
+                    self.accept_sticker_set(pending.map(|p| p.id), id, stickers);
                 }
             }
             StickersPayload::Animations { animations, files } => {

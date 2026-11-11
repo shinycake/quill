@@ -104,6 +104,9 @@ impl QuillApp {
         }
         let channel = self.is_channel_chat(chat_id);
         if view == GroupSettingsView::RecentActions {
+            // A fresh open asks for older events again where it left off
+            // short (`event_log_list_view`).
+            self.admin.event_log_autoload.set(None);
             self.start_event_log_poll(chat_id, cx);
             self.hook_event_log_scroll(cx);
         }
@@ -118,7 +121,8 @@ impl QuillApp {
                     .and_then(|_| driver.fetch_chat_invite_link_counts(chat_id))
                     .map(|_| ()),
                 GroupSettingsView::JoinRequests => {
-                    driver.fetch_chat_join_requests(chat_id).map(|_| ())
+                    driver.ask_join_requests(chat_id, "", true);
+                    Ok(())
                 }
                 GroupSettingsView::Administrators => {
                     driver.fetch_chat_administrators(chat_id).map(|_| ())

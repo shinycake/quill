@@ -6,7 +6,7 @@
 //! editor's Masks tab and a two-tab manage box (Masks, Archived). This is
 //! the same split: a `MasksPanel` that never shares a slot with the regular
 //! sticker panel.
-use crate::state::{RequestPurpose, Session, StickersPurpose};
+use crate::state::{PendingRequest, RequestPurpose, Session, StickersPurpose};
 use crate::telegram::envelope::{StickerItem, StickerSetInfo};
 use std::collections::HashMap;
 
@@ -122,7 +122,8 @@ impl Session {
 
     /// A mask list or change request failed. A single set that won't load
     /// is not worth a banner; the strip skips it (it stays in `set_requested`).
-    pub(crate) fn fail_mask_request(&mut self, purpose: Option<RequestPurpose>) {
+    pub(crate) fn fail_mask_request(&mut self, pending: Option<&PendingRequest>) {
+        let purpose = pending.map(|p| p.purpose);
         if let Some(RequestPurpose::Stickers(
             StickersPurpose::GetInstalledMaskSets
             | StickersPurpose::GetArchivedMaskSets { .. }
@@ -131,6 +132,9 @@ impl Session {
         )) = purpose
         {
             self.stickers.masks.failed = true;
+            if let Some(pending) = pending {
+                let _ = self.stickers.manager.note_commit_failure(pending.id);
+            }
         }
     }
 }

@@ -34,7 +34,16 @@ impl<S: JsonSender> ConnectDriver<S> {
             if let Some(edit) = self.session.bots.owned.edit.as_mut() {
                 edit.loads.push(extra);
             }
-            self.send_json_request(extra, &json)?;
+            if let Err(err) = self.send_json_request(extra, &json) {
+                // Half a load never answers: drop the dialog's state and
+                // the load that did go out (the caller says it failed).
+                if let Some(edit) = self.session.bots.owned.edit.take() {
+                    for load in edit.loads {
+                        self.session.requests.take(load);
+                    }
+                }
+                return Err(err);
+            }
         }
         Ok(())
     }

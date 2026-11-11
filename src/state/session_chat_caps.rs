@@ -579,7 +579,7 @@ impl Session {
         match scheduling {
             ComposerScheduling::None => {
                 self.messages.scheduled_messages.retain(|m| !is_it(m));
-                self.messages.message_action_note = Some("message sent".into());
+                self.messages.note_action("message sent");
             }
             ComposerScheduling::SendAtDate(send_date) => {
                 if let Some(message) = self
@@ -594,7 +594,7 @@ impl Session {
                         repeat_period: 0,
                     });
                 }
-                self.messages.message_action_note = Some("message rescheduled".into());
+                self.messages.note_action("message rescheduled");
             }
             ComposerScheduling::SendWhenOnline => {
                 if let Some(message) = self
@@ -605,7 +605,7 @@ impl Session {
                 {
                     message.scheduling_state = Some(MessageSchedulingState::SendWhenOnline);
                 }
-                self.messages.message_action_note = Some("message rescheduled".into());
+                self.messages.note_action("message rescheduled");
             }
         }
     }

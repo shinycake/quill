@@ -499,12 +499,16 @@ impl QuillApp {
     }
 
     /// `joinChat` for the open public channel. Demo sessions flip the status
-    /// locally (no live driver).
-    pub(in crate::ui) fn join_channel(&mut self, chat_id: ChatId, cx: &mut Context<Self>) {
+    /// locally (no live driver). Returns whether the join was sent (or done
+    /// in a demo session), so a caller words its own note only then.
+    pub(in crate::ui) fn join_channel(&mut self, chat_id: ChatId, cx: &mut Context<Self>) -> bool {
+        let mut sent = false;
         if let Some(live) = self.live.as_mut() {
+            let result = live.driver.join_channel(chat_id);
+            sent = result.is_ok();
             self.screen.connection.set_note_for(
                 &self.screen.windows,
-                match live.driver.join_channel(chat_id) {
+                match result {
                     Ok(()) => StatusNote::silent(tr(keys::Q_PEOPLE_JOINING_CHANNEL)),
                     Err(_) => StatusNote::error(tr(keys::Q_PEOPLE_COULD_NOT_JOIN_CHANNEL)),
                 },
@@ -514,8 +518,10 @@ impl QuillApp {
                 chat.set_member_status(ChannelMemberStatus::Member, None);
             }
             self.set_note(StatusNote::silent(tr(keys::Q_PEOPLE_JOINED_CHANNEL_DEMO)));
+            sent = true;
         }
         cx.notify();
+        sent
     }
 
     /// `leaveChat` for the open channel. Demo sessions flip the status locally.
@@ -524,7 +530,7 @@ impl QuillApp {
             self.screen.connection.set_note_for(
                 &self.screen.windows,
                 match live.driver.leave_channel(chat_id) {
-                    Ok(()) => StatusNote::silent(tr(keys::Q_PEOPLE_LEAVING_CHANNEL)),
+                    Ok(_) => StatusNote::silent(self.leaving_line(chat_id)),
                     Err(_) => StatusNote::error(tr(keys::Q_PEOPLE_COULD_NOT_LEAVE_CHANNEL)),
                 },
             );

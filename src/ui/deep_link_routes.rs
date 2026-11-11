@@ -202,6 +202,15 @@ impl QuillApp {
         else {
             return;
         };
+        // The reader left the chat before the message loaded: nothing is
+        // played or opened over the chat they moved to.
+        if !self
+            .session()
+            .is_some_and(|session| session.chat_is_shown(chat_id))
+        {
+            self.playback.pending_media_seek = None;
+            return;
+        }
         let loaded = self.session().is_some_and(|session| {
             session
                 .histories

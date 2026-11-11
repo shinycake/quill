@@ -170,7 +170,7 @@ impl QuillApp {
         let Some(target) = self.begin_recording_send(&caption, cx) else {
             return;
         };
-        let play_once = self.recording.once;
+        let play_once = self.recording.once && self.once_allowed_in(Some(target.chat_id));
         let Some(capture) = self.recording.take_voice() else {
             return;
         };
@@ -252,8 +252,7 @@ impl QuillApp {
             );
             if sent.is_ok() {
                 self.set_note(StatusNote::silent(tr(keys::Q_MISC_SENDING_VOICE_NOTE)));
-                self.composer_ui.clear_draft_on_success =
-                    Some(DraftClear::whole_composer(target.chat_id));
+                self.expect_draft_clear(DraftClear::whole_composer(target.chat_id));
             } else {
                 let _ = std::fs::remove_file(&draft.path);
                 self.restore_composer_after_failed_send(target, window, cx);
@@ -360,8 +359,7 @@ impl QuillApp {
             );
             if sent.is_ok() {
                 self.set_note(StatusNote::silent(tr(keys::Q_MISC_SENDING_VIDEO_NOTE)));
-                self.composer_ui.clear_draft_on_success =
-                    Some(DraftClear::whole_composer(target.chat_id));
+                self.expect_draft_clear(DraftClear::whole_composer(target.chat_id));
             } else {
                 let _ = std::fs::remove_file(&draft.path);
                 self.restore_composer_after_failed_send(target, window, cx);

@@ -168,9 +168,24 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Ok(None);
         }
         let purpose = RequestPurpose::SetChatPermissions;
-        if self.session.requests.has_purpose_for_chat(purpose, chat_id) {
-            return Ok(None);
-        }
+        // A save while an earlier one is out sends too (TDLib applies them
+        // in order, the later one wins); its rollback restores the values
+        // from before the first, not the ones the first showed. When the
+        // first succeeds, the later rollbacks take its values
+        // (`Session::settle_permissions_save`).
+        let original = self
+            .session
+            .requests
+            .pending_extra_for(purpose, Some(chat_id))
+            .and_then(|id| self.session.requests.pending_mut(id))
+            .and_then(|pending| match &pending.rollback {
+                Some(RequestRollback::ChatPermissions {
+                    previous,
+                    previous_can_send,
+                    ..
+                }) => Some((*previous, *previous_can_send)),
+                _ => None,
+            });
         let extra = self.session.request(purpose, Some(chat_id));
         if let Err(err) = self.sender.send_json(&set_chat_permissions(
             extra,
@@ -184,9 +199,12 @@ impl<S: JsonSender> ConnectDriver<S> {
         // The pre-request values ride on the pending entry so the error
         // arm can roll back.
         if let Some(chat) = self.session.chats.get_mut(&chat_id.0) {
+            let (previous, previous_can_send) =
+                original.unwrap_or((chat.permissions, chat.can_send_basic_messages));
             let rollback = RequestRollback::ChatPermissions {
-                previous: chat.permissions,
-                previous_can_send: chat.can_send_basic_messages,
+                previous,
+                previous_can_send,
+                sent: *permissions,
             };
             chat.permissions = Some(*permissions);
             chat.can_send_basic_messages = permissions.can_send_basic_messages;

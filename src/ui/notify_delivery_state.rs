@@ -25,6 +25,11 @@ pub(crate) struct NotifyDelivery {
     /// that message (`quill::notify::plan_inline_reply`).
     pub(super) reply_targets:
         std::collections::HashMap<(quill::ids::AccountKey, ChatId), quill::ids::MessageId>,
+    /// A reply typed into a notification that could not be sent (no
+    /// rights, a closed topic, a channel), by the account it was typed
+    /// for and the chat. The chat opens instead and the text goes into its
+    /// composer there (`QuillApp::compose_unsent_reply`).
+    pub(super) unsent_replies: std::collections::HashMap<(quill::ids::AccountKey, ChatId), String>,
     /// Notifications waiting for their photo (`notifications::photo_preview`),
     /// by the account they are for and the chat. A newer notification for
     /// the chat, or its dismissal, removes the entry and the wait ends
@@ -45,6 +50,7 @@ impl NotifyDelivery {
             notify_clicks: Arc::new(Mutex::new(Vec::new())),
             notify_inflight: Arc::new(AtomicUsize::new(0)),
             reply_targets: std::collections::HashMap::new(),
+            unsent_replies: std::collections::HashMap::new(),
             preview_waits: std::collections::HashMap::new(),
             next_preview_wait: 0,
             notification_sounds: super::audio::NotificationSounds::new(audio_output.clone()),

@@ -160,9 +160,13 @@ impl RetryStash {
 #[derive(Default)]
 pub struct RecordingSender {
     pub sent: Mutex<Vec<String>>,
+    /// The `@type` whose sends fail (a client that closed between two
+    /// sends); nothing by default.
+    refused: Mutex<Option<&'static str>>,
     stash: RetryStash,
     guard: crate::paid_messages_guard::PaidGuard,
     agent: AgentScreen,
+    refuse: std::sync::atomic::AtomicBool,
 }
 
 impl RecordingSender {
@@ -170,15 +174,35 @@ impl RecordingSender {
         Self::default()
     }
 
+    /// Makes every later send fail (a closed client), or lets them through
+    /// again.
+    pub fn refuse_sends(&self, refuse: bool) {
+        self.refuse
+            .store(refuse, std::sync::atomic::Ordering::Relaxed);
+    }
+
     pub fn snapshot(&self) -> Vec<String> {
         self.sent.lock_or_recover().clone()
+    }
+
+    /// Make every later send of `type_name` fail (`None` stops).
+    pub fn refuse(&self, type_name: Option<&'static str>) {
+        *self.refused.lock_or_recover() = type_name;
     }
 }
 
 impl JsonSender for RecordingSender {
     fn send_json(&self, request: &str) -> Result<(), ConnectSendError> {
+        if self.refuse.load(std::sync::atomic::Ordering::Relaxed) {
+            return Err(ConnectSendError::Native);
+        }
         // The same agent screen as the live sender (a no-op unless a test
         // injects).
+        if let Some(type_name) = *self.refused.lock_or_recover()
+            && request.contains(&format!(r#""@type":"{type_name}""#))
+        {
+            return Err(ConnectSendError::Native);
+        }
         if !self.agent.screen(request)? {
             return Ok(());
         }

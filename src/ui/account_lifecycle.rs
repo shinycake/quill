@@ -267,7 +267,16 @@ impl QuillApp {
     /// on Closed so the user lands back on the login screen. The
     /// Account dialog closes — the blocking "Signing out" auth view
     /// takes over.
-    pub(crate) fn submit_logout(&mut self, cx: &mut Context<Self>) {
+    ///
+    /// `true` when the request went out (the demo has nothing to send):
+    /// the caller closes its box then. `false` leaves it open, with the
+    /// error note, so the user does not believe the log-out started.
+    pub(crate) fn submit_logout(&mut self, cx: &mut Context<Self>) -> bool {
+        if self.live.is_none() && self.demo_session.is_none() {
+            self.set_note(StatusNote::error(tr(keys::Q_NOTES_FAILED_LOG_OUT)));
+            cx.notify();
+            return false;
+        }
         if let Some(live) = self.live.as_mut()
             && let Err(err) = live.driver.request_logout()
         {
@@ -279,11 +288,12 @@ impl QuillApp {
                 &err,
             )));
             cx.notify();
-            return;
+            return false;
         }
         self.account_boxes.lifecycle.confirm_logout = false;
         self.account_boxes.lifecycle.open = false;
         cx.notify();
+        true
     }
 
     /// Slice A9: the Account dialog, hosted in a kit `Dialog` via

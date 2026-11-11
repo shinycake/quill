@@ -1,4 +1,5 @@
 use super::*;
+use crate::ids::RequestId;
 use crate::premium_hub::{StarAmount, TxFilter};
 use serde_json::json;
 
@@ -6,12 +7,18 @@ use serde_json::json;
 fn a_failed_page_is_not_asked_again_by_itself() {
     let mut list: ProgramList<FoundProgram> = ProgramList::default();
     assert!(!list.load.has_first_page());
-    list.load.start(false);
+    list.load.start(false, RequestId(1));
     list.next_offset = "next".into();
     list.load = PageLoad::Ready;
     assert!(list.may_page(), "a list with more pages asks at the end");
-    list.load.start(true);
-    assert_eq!(list.load, PageLoad::Loading { more: true });
+    list.load.start(true, RequestId(2));
+    assert_eq!(
+        list.load,
+        PageLoad::Loading {
+            more: true,
+            request: RequestId(2)
+        }
+    );
     assert!(!list.may_page());
     // The next page's error arm (or its send) fails it: the offset stays
     // for the Retry, and the end of the list asks nothing.
@@ -20,15 +27,27 @@ fn a_failed_page_is_not_asked_again_by_itself() {
     assert!(!list.may_page(), "no request every frame after an error");
     assert!(list.load.has_first_page());
     // Retry asks that page again.
-    list.load.start(true);
-    assert_eq!(list.load, PageLoad::Loading { more: true });
+    list.load.start(true, RequestId(2));
+    assert_eq!(
+        list.load,
+        PageLoad::Loading {
+            more: true,
+            request: RequestId(2)
+        }
+    );
 }
 
 #[test]
 fn a_failed_first_page_retries_from_the_start() {
     let mut load = PageLoad::Unasked;
-    load.start(true);
-    assert_eq!(load, PageLoad::Loading { more: false });
+    load.start(true, RequestId(3));
+    assert_eq!(
+        load,
+        PageLoad::Loading {
+            more: false,
+            request: RequestId(3)
+        }
+    );
     load.fail();
     assert_eq!(load, PageLoad::Failed { more: false });
 }

@@ -223,8 +223,11 @@ impl Render for ChatWindowView {
             app.viewer_follow_window_fullscreen(window);
             app.seed_history_width(f32::from(window.viewport_size().width));
             // The window's half of the frame upkeep, with its state in
-            // place (a window whose view is gone runs none of it).
+            // place (a window whose view is gone runs none of it). Its
+            // viewer may draw an HDR frame: this window goes to extended
+            // range for it, as the main window does.
             if app.windows.scope == Some(chat_id) {
+                app.sync_viewer_hdr(window);
                 app.per_window_upkeep(window, cx);
             }
             let body = app.chat_window_body(chat_id, window, cx);

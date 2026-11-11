@@ -742,6 +742,16 @@ pub fn parse_premium_state(value: &Value) -> PremiumStateInfo {
     }
 }
 
+/// The `/start` the Premium subscribe button queued for the bot's chat.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PremiumAutoStart {
+    /// Lowercase username of the bot.
+    pub username: String,
+    pub start_ref: String,
+    /// The deep-link flow (`ChatsState::deep_link_seq`) resolving the bot.
+    pub generation: u64,
+}
+
 /// Per-surface state of the hub dialogs. Lives in `Session` so the poll loop
 /// and reducer own every transition (the Subscriptions-dialog pattern).
 #[derive(Debug, Clone, Default)]
@@ -786,9 +796,10 @@ pub struct PremiumHub {
     pub collectible: Option<crate::collectible_info::CollectibleLookup>,
     /// The ref the Premium dialog was opened with (tdesktop `ShowPremium`).
     pub premium_ref: String,
-    /// Lowercase username of the Premium bot the subscribe button opened,
-    /// and the ref; opening that chat sends `/start <ref>` by itself.
-    pub auto_start: Option<(String, String)>,
+    /// The Premium bot the subscribe button opened; opening that chat sends
+    /// `/start <ref>` by itself. Tied to the link's resolve (`generation`):
+    /// that resolve failing drops it.
+    pub auto_start: Option<PremiumAutoStart>,
     pub premium: Option<PremiumInfo>,
     pub premium_state: Option<PremiumStateInfo>,
     pub premium_loading: bool,
@@ -842,7 +853,11 @@ impl PremiumHub {
         self.gifts_loading = false;
         self.gifts_error = None;
         self.gifts_loaded = true;
-        self.gifts_stale = false;
+        // Only a first page answers a refetch; an appended page of the old
+        // list leaves the list stale.
+        if !append {
+            self.gifts_stale = false;
+        }
         self.gifts_total = page.total_count;
         self.gifts_offset = page.next_offset;
         if append {

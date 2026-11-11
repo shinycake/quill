@@ -40,6 +40,17 @@ pub(super) enum RequestShareKind {
     Chat(RequestChatSpec),
 }
 
+/// Where a location request's lookup stands. The lookup task lives in the
+/// stage, so closing the box (which drops the `RequestShare`) cancels it.
+#[derive(Clone)]
+pub(super) enum Locate {
+    /// The platform is looking. The handle is shared only so the box's
+    /// frame snapshot can clone; the last owner dropping it cancels.
+    Searching(#[allow(dead_code)] Rc<Task<()>>),
+    /// What the platform said.
+    Done(GeoOutcome),
+}
+
 #[derive(Clone)]
 pub(super) struct RequestShare {
     chat_id: ChatId,
@@ -49,8 +60,9 @@ pub(super) struct RequestShare {
     selected: Vec<ChatId>,
     /// The confirmation page (after picking).
     confirm: bool,
-    /// Location request: what the platform said; `None` while it looks.
-    pub(super) locate: Option<GeoOutcome>,
+    /// Location request: the lookup and what the platform said (`None`
+    /// before one started, or when the request is not a location).
+    pub(super) locate: Option<Locate>,
 }
 
 impl QuillApp {
@@ -119,15 +131,17 @@ impl QuillApp {
         if quill::agent::ui_driver::guard::refuse_if_injecting("look up the device location") {
             return;
         }
-        if let Some(share) = self.message_ui.request_share.as_mut() {
-            share.locate = None;
-        }
-        self.message_ui.request_locate = Some(self.locate_then(cx, |this, outcome, cx| {
-            if let Some(share) = this.message_ui.request_share.as_mut() {
-                share.locate = Some(outcome);
+        let lookup = self.locate_then(cx, |this, outcome, cx| {
+            if let Some(share) = this.message_ui.request_share.as_mut()
+                && matches!(share.locate, Some(Locate::Searching(_)))
+            {
+                share.locate = Some(Locate::Done(outcome));
             }
             cx.notify();
-        }));
+        });
+        if let Some(share) = self.message_ui.request_share.as_mut() {
+            share.locate = Some(Locate::Searching(Rc::new(lookup)));
+        }
     }
 
     /// Facts about a chat for the request filters.
@@ -228,7 +242,7 @@ impl QuillApp {
                 .share_phone_number(share.chat_id, *bot_user_id)
                 .map(|_| ()),
             RequestShareKind::Location { one_time } => match share.locate {
-                Some(GeoOutcome::Found(point)) => {
+                Some(Locate::Done(GeoOutcome::Found(point))) => {
                     let reply_to = Some(SendReply {
                         message_id: share.message_id,
                         quote: None,
@@ -322,18 +336,20 @@ impl QuillApp {
                 }
                 (RequestShareKind::Location { .. }, _) => {
                     let (text, retry) = match share.locate {
-                        None => (tr(keys::Q_LOCATION_REQUEST_LOCATING).to_string(), false),
-                        Some(GeoOutcome::Found(_)) => (
+                        None | Some(Locate::Searching(_)) => {
+                            (tr(keys::Q_LOCATION_REQUEST_LOCATING).to_string(), false)
+                        }
+                        Some(Locate::Done(GeoOutcome::Found(_))) => (
                             tr_with(
                                 keys::Q_LOCATION_REQUEST_TEXT,
                                 &[("bot_name", &share.bot_name)],
                             ),
                             false,
                         ),
-                        Some(GeoOutcome::Denied) => {
+                        Some(Locate::Done(GeoOutcome::Denied)) => {
                             (tr(keys::Q_LOCATION_REQUEST_DENIED).to_string(), true)
                         }
-                        Some(GeoOutcome::Unavailable) => {
+                        Some(Locate::Done(GeoOutcome::Unavailable)) => {
                             (tr(keys::Q_LOCATION_REQUEST_UNAVAILABLE).to_string(), true)
                         }
                     };
@@ -351,7 +367,7 @@ impl QuillApp {
                             ),
                         );
                     }
-                    ready = matches!(share.locate, Some(GeoOutcome::Found(_)));
+                    ready = matches!(share.locate, Some(Locate::Done(GeoOutcome::Found(_))));
                     (
                         tr(keys::Q_LOCATION_REQUEST_TITLE),
                         Some(tr(keys::BACKGROUND_SHARE)),

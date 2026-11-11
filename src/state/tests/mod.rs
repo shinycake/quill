@@ -1,6 +1,7 @@
 //! Unit tests for the session reducer, grouped by area.
 use super::*;
 
+mod background_removals;
 mod boost_level;
 mod boosts;
 mod bot_threads;
@@ -43,6 +44,7 @@ mod masks;
 mod message_story;
 mod messages;
 mod messages_more;
+mod notification_saves;
 mod notifications;
 mod notify_os;
 mod payments;
@@ -53,6 +55,7 @@ mod profile_panels;
 mod redraw;
 mod requests;
 mod requests_download_index;
+mod screen_outcomes;
 mod search;
 mod search_upgrades;
 mod send_permissions;
@@ -67,8 +70,12 @@ mod stickers;
 mod stories;
 mod stories_more;
 mod story_insights;
+mod story_manage;
+mod story_missing;
+mod story_page_ops;
 mod story_tray_load;
 mod subsection_tabs;
+mod sweep_payments_2;
 mod threads;
 mod topic_load;
 mod topic_window_cap;

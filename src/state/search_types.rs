@@ -384,6 +384,28 @@ impl SearchState {
         self.chats = Leg::Idle;
     }
 
+    /// Put a recent chat back where `remove_recent` took it from (the
+    /// server refused the removal), unless the list has moved on.
+    pub fn restore_recent(&mut self, chat_id: ChatId, index: usize) {
+        if !self.recents || self.chat_ids.contains(&chat_id) {
+            return;
+        }
+        self.chat_ids
+            .insert(index.min(self.chat_ids.len()), chat_id);
+        if self.chats == Leg::Idle {
+            self.chats = Leg::Done;
+        }
+    }
+
+    /// Put a frequent contact back (the server refused `removeTopChat`).
+    pub fn restore_top_chat(&mut self, chat_id: ChatId, index: usize) {
+        if self.top_chats_disabled || self.top_chats.contains(&chat_id) {
+            return;
+        }
+        self.top_chats
+            .insert(index.min(self.top_chats.len()), chat_id);
+    }
+
     /// Drop one frequent contact (`removeTopChat`).
     pub fn remove_top_chat(&mut self, chat_id: ChatId) -> bool {
         let before = self.top_chats.len();
@@ -571,7 +593,9 @@ pub struct ChatSearchState {
     pub status: SearchStatus,
     pub hits: Vec<SearchMessageHit>,
     pub total_count: i32,
-    pub next_from_message_id: MessageId,
+    /// The older pages: where they continue from, and whether one is in
+    /// flight or failed.
+    pub paging: ChatSearchPaging,
     pub selected: Option<usize>,
     pub jump: ChatSearchJump,
     /// Bumped by every jump request, so the UI can restart its highlight
@@ -583,8 +607,35 @@ pub struct ChatSearchState {
     pub media: crate::search_filters::SearchMediaKind,
     /// The member picker replacing the results while choosing a sender.
     pub from_picker: Option<FromPicker>,
-    /// An older page is in flight.
-    pub loading_more: bool,
+}
+
+/// The older pages of an in-chat search (`foundChatMessages` pages by
+/// `next_from_message_id`, 0 = no more). A failed page waits for a Retry
+/// instead of ending the results.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ChatSearchPaging {
+    /// No older page (the server sent cursor 0, or nothing is loaded).
+    #[default]
+    End,
+    /// An older page can be asked from this cursor.
+    More { from: MessageId },
+    /// The page from this cursor is in flight.
+    Loading { from: MessageId },
+    /// The page from this cursor failed; asking again is the user's Retry.
+    Failed { from: MessageId },
+}
+
+impl ChatSearchPaging {
+    /// The page after the server's answer: its cursor, 0 ending the list.
+    fn after(next_from_message_id: MessageId) -> Self {
+        if next_from_message_id.0 == 0 {
+            Self::End
+        } else {
+            Self::More {
+                from: next_from_message_id,
+            }
+        }
+    }
 }
 
 /// The "From:" picker: group members filtered by the field's text
@@ -608,14 +659,13 @@ impl Default for ChatSearchState {
             status: SearchStatus::Closed,
             hits: Vec::new(),
             total_count: 0,
-            next_from_message_id: MessageId(0),
+            paging: ChatSearchPaging::End,
             selected: None,
             jump: ChatSearchJump::None,
             jump_serial: 0,
             sender: None,
             media: crate::search_filters::SearchMediaKind::All,
             from_picker: None,
-            loading_more: false,
         }
     }
 }
@@ -631,9 +681,41 @@ impl ChatSearchState {
     /// An older page can be fetched (the results are a partial first page).
     pub fn can_load_more(&self) -> bool {
         self.open
-            && !self.loading_more
-            && self.next_from_message_id.0 != 0
+            && matches!(self.paging, ChatSearchPaging::More { .. })
             && (self.hits.len() as i32) < self.total_count
+    }
+
+    /// The cursor of the page to ask: the next one, or the failed one the
+    /// user retries.
+    pub fn page_to_ask(&self) -> Option<MessageId> {
+        match self.paging {
+            ChatSearchPaging::More { from } if self.can_load_more() => Some(from),
+            ChatSearchPaging::Failed { from } if self.open => Some(from),
+            _ => None,
+        }
+    }
+
+    /// The page from `from` goes out.
+    pub(crate) fn begin_more(&mut self, from: MessageId) {
+        self.paging = ChatSearchPaging::Loading { from };
+    }
+
+    /// The page that was going out never left, or failed: back to waiting
+    /// for the user's Retry.
+    pub(crate) fn fail_more(&mut self) {
+        if let ChatSearchPaging::Loading { from } = self.paging {
+            self.paging = ChatSearchPaging::Failed { from };
+        }
+    }
+
+    /// An older page is in flight.
+    pub fn loading_more(&self) -> bool {
+        matches!(self.paging, ChatSearchPaging::Loading { .. })
+    }
+
+    /// The last older page failed (the Retry strip shows).
+    pub fn more_failed(&self) -> bool {
+        matches!(self.paging, ChatSearchPaging::Failed { .. })
     }
 
     /// Append an older page (deduped; `selected` stays on its message).
@@ -643,14 +725,13 @@ impl ChatSearchState {
         total_count: i32,
         next_from_message_id: MessageId,
     ) {
-        self.loading_more = false;
         for hit in hits {
             if !self.hits.iter().any(|h| h.message_id == hit.message_id) {
                 self.hits.push(hit);
             }
         }
         self.total_count = total_count.max(self.hits.len() as i32);
-        self.next_from_message_id = next_from_message_id;
+        self.paging = ChatSearchPaging::after(next_from_message_id);
     }
 
     pub fn open_for(&mut self, chat_id: ChatId) {
@@ -703,10 +784,9 @@ impl ChatSearchState {
     pub(crate) fn clear_results(&mut self) {
         self.hits.clear();
         self.total_count = 0;
-        self.next_from_message_id = MessageId(0);
+        self.paging = ChatSearchPaging::End;
         self.selected = None;
         self.jump = ChatSearchJump::None;
-        self.loading_more = false;
     }
 
     pub(crate) fn matches_generation(&self, pending: Option<&PendingRequest>) -> bool {
@@ -726,7 +806,7 @@ impl ChatSearchState {
     ) {
         self.hits = hits;
         self.total_count = total_count;
-        self.next_from_message_id = next_from_message_id;
+        self.paging = ChatSearchPaging::after(next_from_message_id);
         self.selected = if self.hits.is_empty() { None } else { Some(0) };
         self.jump = ChatSearchJump::None;
         self.status = if !self.hits.is_empty() {

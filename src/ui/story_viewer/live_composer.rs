@@ -317,7 +317,13 @@ impl QuillApp {
     /// shows the send-as button for two or more senders); a click opens
     /// "Send message as...".
     fn live_send_as_button(&self, session: &Session, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let senders = session.stories.live.as_ref()?.message_senders.clone()?;
+        let senders = session
+            .stories
+            .live
+            .as_ref()?
+            .message_senders
+            .data()
+            .cloned()?;
         if senders.len() < 2 {
             return None;
         }

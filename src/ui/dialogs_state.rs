@@ -50,6 +50,11 @@ pub(crate) struct DialogUi {
     pub(super) chat_look_dialog: Option<super::chat_look_ui::ChatLookDialog>,
     /// The account wallpaper preview (gallery, `bg/` link, file).
     pub(super) wallpaper_preview: Option<super::wallpaper_preview::WallpaperPreview>,
+    /// `setDefaultBackground` requests sent by Apply, still unanswered.
+    /// They outlive the preview box (it closes at Apply, like tdesktop's),
+    /// so the answer still flips the appearance; the account leaving the
+    /// screen drops them with this struct.
+    pub(super) wallpaper_applies: Vec<quill::ids::RequestId>,
     /// An installed wallpaper waiting for "Delete" to be confirmed.
     pub(super) wallpaper_remove: Option<i64>,
     /// The "Export chat history" box.
@@ -61,14 +66,9 @@ pub(crate) struct DialogUi {
     pub(super) chat_export_seen: Option<quill::export::Progress>,
     /// The "Export Telegram data" box (full account export).
     pub(super) account_export_dialog: Option<super::account_export_box::AccountExportDraft>,
-    /// The running account export's progress is not on screen; its result
-    /// shows as a note instead.
-    pub(super) account_export_progress_hidden: bool,
     /// Last account export progress drawn.
     pub(super) account_export_seen: Option<quill::export::account::AccountProgress>,
     pub(super) export_stop: Option<super::export_quit::ExitAfterStop>,
-    /// Saved Messages: "Add Name" / "Edit Name" for a tag.
-    pub(super) saved_tag_dialog: Option<super::saved_sublists::SavedTagDialog>,
     /// The Saved Messages sublist list, which pages near its end
     /// (`scroll_load`).
     pub(super) saved_scroll: ScrollHandle,
@@ -83,6 +83,8 @@ pub(crate) struct DialogUi {
     pub(super) business_hours: super::profile_business::BusinessHoursUi,
     /// The Disable Sharing box for this private chat.
     pub(super) disable_sharing: Option<quill::ids::ChatId>,
+    /// The Add-bot and Share-game boxes waiting for their request's answer.
+    pub(super) box_send: super::bots_box_send::BoxSend,
 }
 
 /// The Business page saves its edits through the old client before it
@@ -128,6 +130,7 @@ impl DialogUi {
             bot_verify_dialog: None,
             bot_edit_dialog: None,
             bot_create_dialog: None,
+            box_send: Default::default(),
             quick_replies_dialog: None,
             business_dialog: None,
             edit_profile_dialog: None,
@@ -140,15 +143,14 @@ impl DialogUi {
             block_bar_dialog: None,
             chat_look_dialog: None,
             wallpaper_preview: None,
+            wallpaper_applies: Vec::new(),
             wallpaper_remove: None,
             chat_export_dialog: None,
             chat_export_progress_hidden: false,
             chat_export_seen: None,
             account_export_dialog: None,
-            account_export_progress_hidden: false,
             account_export_seen: None,
             export_stop: None,
-            saved_tag_dialog: None,
             saved_scroll: ScrollHandle::new(),
             saved_asked: Default::default(),
             rating_detail: None,

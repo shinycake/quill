@@ -165,7 +165,8 @@ impl QuillApp {
             let passkeys = &mut session.settings.passkeys;
             passkeys.finish_remove(&id);
             let list = std::mem::take(&mut passkeys.list);
-            passkeys.accept_list(list);
+            let generation = passkeys.generation;
+            passkeys.accept_list(list, generation);
         }
         cx.notify();
     }
@@ -697,7 +698,8 @@ impl QuillApp {
         if let Some(session) = self.demo_session.as_mut() {
             let passkeys = &mut session.settings.passkeys;
             passkeys.display_allowed = true;
-            passkeys.accept_list(demo_passkeys_list());
+            let generation = passkeys.generation;
+            passkeys.accept_list(demo_passkeys_list(), generation);
         }
     }
 

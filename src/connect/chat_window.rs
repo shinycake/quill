@@ -26,8 +26,14 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(ConnectSendError::InvalidRequest);
         }
         let in_main = self.session.open_chat == Some(chat_id);
-        if self.session.open_window_chat(chat_id) && !in_main {
-            self.send_open_chat(chat_id)?;
+        if self.session.open_window_chat(chat_id)
+            && !in_main
+            && let Err(err) = self.send_open_chat(chat_id)
+        {
+            // The window's chat never opened in TDLib: drop its view so a
+            // retry opens it again.
+            self.session.close_window_chat(chat_id);
+            return Err(err);
         }
         if in_main {
             return self.fetch_history_for(chat_id);
@@ -119,11 +125,17 @@ impl<S: JsonSender> ConnectDriver<S> {
         // else would save it, and its slot would stay dirty (ignoring the
         // drafts other devices save) until something stored it.
         let flushed = self.flush_pending_draft();
-        self.cancel_outgoing_typing()?;
-        self.close_open_chat()?;
+        // The goodbyes to TDLib are best effort: the local teardown below
+        // runs whatever they answer, or the session would keep treating the
+        // chat as shown (and read its new messages) after the main window
+        // cleared it.
+        let typing = self.cancel_outgoing_typing();
+        let closed = self.close_open_chat();
         self.draft_clock = DraftSaveClock::idle();
         self.pending_draft = None;
         self.session.leave_open_chat();
+        typing?;
+        closed?;
         flushed.map(|_| ())
     }
 

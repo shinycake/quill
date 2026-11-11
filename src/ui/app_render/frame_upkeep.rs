@@ -10,7 +10,7 @@
 use super::*;
 use crate::ui::status_note::StatusNote;
 use quill::lang::{keys, tr};
-use quill::state::{StoryManageOutcome, StoryPostOutcome};
+use quill::state::StoryManageOutcome;
 
 impl QuillApp {
     pub(super) fn frame_upkeep(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -51,8 +51,17 @@ impl QuillApp {
         // main-only: the story tray, viewer and composer are the main
         // window's (`story_frame_upkeep`).
         self.story_frame_upkeep(cx);
+        // main-only: the Masks strip's gate is the session's, wanted by
+        // whichever window's editor is in Stickers mode.
+        self.sync_editor_masks();
+        // main-only: the story page is the main window's overlay.
+        self.story_page_upkeep(window, cx);
         // main-only: the sign-in screen is the main window's.
         self.sync_signin(window, cx);
+        // main-only: the sign-in forms are the main window's.
+        self.sync_auth_forms(window, cx);
+        // main-only: the two-step boxes open in the main window.
+        self.sync_twofa_forms(window, cx);
         // main-only: the chat list and its multi-select are the main
         // window's (chat windows have none).
         self.end_selection_left_list();
@@ -71,45 +80,12 @@ impl QuillApp {
                 let _ = live.driver.get_chat_active_stories(ChatId(chat_id));
             }
         }
-        // Phase 9.3: the composer sent `canPostStory` — once the answer
-        // lands, either post (eligible) or surface the reason in the
-        // composer. Eligibility is re-checked on every Post press.
-        if self.stories.composer.check_sent {
-            let answered = self.session().is_some_and(|session| {
-                session.stories.post.eligibility.is_some()
-                    || session.stories.post.check_error.is_some()
-            });
-            if answered {
-                self.stories.composer.check_sent = false;
-                self.story_composer_after_check(cx);
-            }
-        }
-        // Phase 9.3: `postStory` was sent (`post_sent`) — once its
-        // answer moves `story_post.outcome` out of `None` the outcome
-        // owns the busy state again and the flag clears.
-        if self.stories.composer.post_sent
-            && self.session().is_some_and(|session| {
-                !matches!(session.stories.post.outcome, StoryPostOutcome::None)
-            })
-        {
-            self.stories.composer.post_sent = false;
-        }
-        // Phase 9.5: `editStory` was sent (`save_sent`) — once
-        // `story_manage.pending` clears, success closes the composer
-        // (the edited story arrives via `updateStory`); failure
-        // surfaces `story_manage.error` in the composer.
-        if self.stories.composer.save_sent
-            && self
-                .session()
-                .is_some_and(|session| !session.stories.manage.pending)
-        {
-            self.stories.composer.save_sent = false;
-            let failed = self.session().and_then(|s| s.stories.manage.error.clone());
-            match failed {
-                Some(error) => self.stories.composer.local_error = Some(error),
-                None => self.close_story_composer(cx),
-            }
-        }
+        // The composer's Post and Save presses, each answered by its own
+        // request (`story_composer_stage.rs`).
+        self.story_composer_upkeep(cx);
+        // A cover picker opened on a clip still downloading reads it once
+        // it is local (`story_albums/cover_strip.rs`).
+        self.cover_upkeep(cx);
         // Phase 9.5: the viewer cover editor / privacy editor sent a
         // management call. Its own answer (matched by request id) closes
         // the panel on success or leaves it open showing the error; a
@@ -120,8 +96,13 @@ impl QuillApp {
                     .map(|session| session.stories.manage.outcome(id))
             })
         };
-        let cover = outcome(self, self.stories.viewer_ui().cover_request);
+        let cover_request = self.stories.viewer_ui().cover_request;
+        let cover = outcome(self, cover_request);
         if let Some(done) = cover.filter(|o| *o != StoryManageOutcome::InFlight) {
+            if let (StoryManageOutcome::Failed, Some(request)) = (done, cover_request) {
+                let story = self.open_cover_story();
+                self.show_story_manage_failure(request, story);
+            }
             self.stories.with_viewer_ui(|open| {
                 open.cover_request = None;
                 if done == StoryManageOutcome::Saved {
@@ -129,8 +110,18 @@ impl QuillApp {
                 }
             });
         }
-        let privacy = outcome(self, self.stories.viewer_ui().privacy_request);
+        let privacy_request = self.stories.viewer_ui().privacy_request;
+        let privacy = outcome(self, privacy_request);
         if let Some(done) = privacy.filter(|o| *o != StoryManageOutcome::InFlight) {
+            if let (StoryManageOutcome::Failed, Some(request)) = (done, privacy_request) {
+                let story = self
+                    .stories
+                    .viewer_ui()
+                    .privacy_edit
+                    .as_ref()
+                    .map(|edit| (edit.chat_id, edit.story_id));
+                self.show_story_manage_failure(request, story);
+            }
             self.stories.with_viewer_ui(|open| {
                 open.privacy_request = None;
                 if done == StoryManageOutcome::Saved {

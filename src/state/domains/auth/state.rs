@@ -6,8 +6,10 @@ use crate::state::*;
 pub struct AuthState {
     /// Last classified error for phone / code / password submit. Never a secret.
     pub last_auth_error: Option<AuthRequestError>,
-    /// `getCountries` rows for the sign-in picker (`None` until answered).
-    pub countries: Option<Vec<crate::phone::Country>>,
+    /// `getCountries` rows for the sign-in picker and the country boxes:
+    /// never asked, in flight, answered or failed (a box then says so and
+    /// offers Retry).
+    pub countries: crate::state::fetch::Fetch<Vec<crate::phone::Country>>,
     /// Uppercase ISO code from `getCountryCode`: the default country guess.
     pub guessed_country_iso: Option<String>,
     /// Slice A8: the target number a change-number code was sent to
@@ -52,7 +54,7 @@ impl AuthState {
     pub(crate) fn new() -> Self {
         Self {
             last_auth_error: None,
-            countries: None,
+            countries: crate::state::fetch::Fetch::Idle,
             guessed_country_iso: None,
             change_number_phone: None,
             change_number_timeout: None,

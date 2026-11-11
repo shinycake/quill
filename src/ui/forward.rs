@@ -114,7 +114,7 @@ impl QuillApp {
                 draft.toggle(chat_id, topic, message_id, pending);
                 if draft.is_empty() {
                     self.share.forward = ForwardStage::None;
-                    self.chat_ui.selection_focus = None;
+                    self.chat_ui.focus.clear_row();
                 }
             }
             None => {
@@ -178,7 +178,7 @@ impl QuillApp {
 
     pub(super) fn clear_forward(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let _ = cancel_forward_draft(self.share.forward.take_draft());
-        self.chat_ui.selection_focus = None;
+        self.chat_ui.focus.clear_row();
         self.share.selection.clear();
         self.share
             .search_input
@@ -208,7 +208,7 @@ impl QuillApp {
                 .is_some_and(|draft| !draft.is_from(chat_id, topic))
         {
             self.share.forward = ForwardStage::None;
-            self.chat_ui.selection_focus = None;
+            self.chat_ui.focus.clear_row();
         }
     }
 

@@ -89,6 +89,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 masks,
                 removals: removed.into_iter().filter(|id| *id > 0).collect(),
                 order,
+                sent: None,
             });
         self.advance_manager_commit()
     }
@@ -141,12 +142,21 @@ impl<S: JsonSender> ConnectDriver<S> {
                     }),
             };
             return match sent {
-                Ok(Some(_)) => Ok(()),
+                Ok(Some(id)) => {
+                    if let Some(front) = self.session.stickers.manager.commits.front_mut() {
+                        front.sent = Some(id);
+                    }
+                    Ok(())
+                }
                 // Nothing went out (the same change was already pending):
                 // go on with the next step.
                 Ok(None) => continue,
+                // Only the step that did not go out is lost (`next_step` took
+                // it off its commit), as with a refused answer; the saved
+                // changes behind it stay queued and go out with the next
+                // answer. The failure is reported once (`manager.failure`).
                 Err(err) => {
-                    self.session.stickers.manager.commits.clear();
+                    self.session.stickers.manager.note_send_failure();
                     Err(err)
                 }
             };
@@ -155,7 +165,9 @@ impl<S: JsonSender> ConnectDriver<S> {
 
     /// Called after every answer: thumbnails and the saved changes.
     pub(crate) fn pump_sticker_manager(&mut self) {
-        let _ = self.advance_manager_commit();
+        if self.advance_manager_commit().is_err() {
+            self.session.stickers.manager.note_send_failure();
+        }
         if self.session.stickers.manager.open {
             let _ = self.ensure_manager_covers();
         }

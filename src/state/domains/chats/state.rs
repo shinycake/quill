@@ -1,8 +1,18 @@
 //! Chat-level look and actions: backgrounds, themes, accents, action bars, deep links, reactions, send-as: the `chats` domain's share of `Session`.
 //! Added to by features in this domain only; `Session::new` builds it
 //! with `new`.
+use crate::state::answers::Answers;
 use crate::state::*;
 use crate::telegram::envelope::{ChatAccent, ChatBackground, EmojiChatTheme};
+
+/// What a wallpaper preview request came back with.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BackgroundOutcome {
+    /// `setDefaultBackground` was accepted.
+    Applied,
+    /// `getBackgroundUrl`: the `bg/` link.
+    Link(String),
+}
 
 /// Where the link preview's `searchBackground` for a `bg/` link stands.
 /// Only the search it waits for lands, so a late answer (or failure) for an
@@ -52,15 +62,12 @@ pub struct ChatsState {
     pub emoji_chat_themes: Vec<EmojiChatTheme>,
     /// The link preview's `searchBackground` ([`BackgroundSearch`]).
     pub background_search: BackgroundSearch,
-    /// One-shot `getBackgroundUrl` answer: the link the wallpaper preview
-    /// copies.
-    pub background_url: Option<String>,
+    /// Answers of the requests the wallpaper preview waits for
+    /// (`setDefaultBackground`, `getBackgroundUrl`), each under the
+    /// request that asked. The preview takes its own and drops the rest.
+    pub background_answers: Answers<BackgroundOutcome>,
     /// One-shot: a wallpaper request failed; shown in Appearance.
     pub background_error: Option<String>,
-    /// Acknowledged (`ok`) chat-look requests (`setChatTheme`,
-    /// `setChatBackground`, `deleteChatBackground`); the chat colors dialog
-    /// waits for them before it closes.
-    pub chat_look_oks: u32,
     /// `updateChatOnlineMemberCount`, keyed by chat id.
     pub chat_online_counts: HashMap<i64, i32>,
     /// Slice CL1: one-shot error from a refused chat-list action
@@ -68,8 +75,9 @@ pub struct ChatsState {
     /// `deleteChatHistory`). The UI drains it into the status note so a
     /// refused action never looks like it worked.
     pub chat_action_error: Option<String>,
-    /// Why the last channel or group appearance change was refused.
-    pub appearance_error: Option<String>,
+    /// Answers of the Appearance box's requests (name, profile, status
+    /// and emoji pack), under the request that asked.
+    pub appearance_answers: Answers<()>,
     /// Slice CL3: one-shot `reportChat` outcome (`reportChatResultOk`
     /// vs option/text/messages required). The UI drains it into the
     /// status note next to `chat_action_error`.
@@ -77,8 +85,9 @@ pub struct ChatsState {
     /// `chat.message_sender_id` / `updateChatMessageSender`: the "send as"
     /// identity selected per chat (absent when the user cannot change it).
     pub chat_message_sender: HashMap<i64, MessageSender>,
-    /// `getChatAvailableMessageSenders` answers per chat.
-    pub send_as_options: HashMap<i64, Vec<AvailableMessageSender>>,
+    /// `getChatAvailableMessageSenders` per chat: asked, answered or failed
+    /// (the picker shows a spinner, the list or a Retry).
+    pub send_as_options: HashMap<i64, crate::state::fetch::Fetch<Vec<AvailableMessageSender>>>,
     /// Batch 8: `chat.action_bar` / `updateChatActionBar` per chat — the
     /// Add contact / Block / Report spam / Share phone strip.
     pub chat_action_bars: HashMap<i64, ChatActionBar>,
@@ -140,12 +149,11 @@ impl ChatsState {
             chat_gift_themes: HashMap::new(),
             emoji_chat_themes: Vec::new(),
             background_search: BackgroundSearch::Idle,
-            background_url: None,
+            background_answers: Answers::default(),
             background_error: None,
-            chat_look_oks: 0,
             chat_online_counts: HashMap::new(),
             chat_action_error: None,
-            appearance_error: None,
+            appearance_answers: Answers::default(),
             report_chat_outcome: None,
             chat_message_sender: HashMap::new(),
             send_as_options: HashMap::new(),

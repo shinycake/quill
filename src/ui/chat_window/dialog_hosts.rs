@@ -216,6 +216,26 @@ impl ChatWindows {
         }
     }
 
+    /// The window that asked for `kind`, else the one that asked for
+    /// `fallback` (the box `kind` follows from), else the window of the last
+    /// press. A result of the follow-up box goes to the window of the box
+    /// that started it, not to whichever window was pressed last.
+    pub(in crate::ui) fn window_of_box_or(
+        &self,
+        kind: DialogKind,
+        fallback: DialogKind,
+    ) -> Option<ChatId> {
+        match self
+            .dialogs
+            .hosts
+            .get(&kind)
+            .or_else(|| self.dialogs.hosts.get(&fallback))
+        {
+            Some(owner) => owner.window(),
+            None => self.last_press,
+        }
+    }
+
     /// Whether the window `host` (`None`: the main window) may show the
     /// kit dialog `kind` when its flag is set with that window's state in
     /// place: any window for a per-window kind, else the window that asked
@@ -246,6 +266,26 @@ impl ChatWindows {
     /// ask from another window, or one still waiting for its answer, stays.
     pub(in crate::ui) fn dialog_closed_in(&mut self, kind: DialogKind, host: Option<ChatId>) {
         if self.dialogs.hosts.get(&kind) == Some(&Host::Shown(host)) {
+            self.dialogs.hosts.remove(&kind);
+        }
+    }
+
+    /// The session-wide boxes a window asked for whose flag no answer set
+    /// yet.
+    pub(in crate::ui) fn asked_dialogs(&self) -> Vec<DialogKind> {
+        self.dialogs
+            .hosts
+            .iter()
+            .filter(|(_, owner)| matches!(owner, Host::Asked(_)))
+            .map(|(kind, _)| *kind)
+            .collect()
+    }
+
+    /// The ask for `kind` ended with no box: its request settled (answered
+    /// without opening it, failed, or was cancelled), so the next open of
+    /// that kind goes to the window of its own ask, not to this one.
+    pub(in crate::ui) fn dialog_ask_expired(&mut self, kind: DialogKind) {
+        if matches!(self.dialogs.hosts.get(&kind), Some(Host::Asked(_))) {
             self.dialogs.hosts.remove(&kind);
         }
     }

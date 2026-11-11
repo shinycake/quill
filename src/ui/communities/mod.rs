@@ -32,6 +32,7 @@ mod tests;
 
 use super::app::QuillApp;
 use super::*;
+use crate::ui::shell::QuillShell;
 use crate::ui::status_note::StatusNote;
 use crate::ui::user_error::user_error;
 use gpui_kit::component::dialog::DialogContent;
@@ -141,6 +142,9 @@ pub(crate) struct PendingBan {
     pub(crate) community_id: i64,
     pub(crate) member: CommunityMember,
     pub(crate) name: String,
+    /// The box that was open when Ban was pressed (`open_dialog_name`):
+    /// the warning opens only while it is still the one on screen.
+    pub(crate) over: Option<&'static str>,
 }
 
 impl CommunitiesUi {
@@ -246,6 +250,35 @@ impl QuillApp {
             .and_then(|s| s.groups.communities.get(&community_id))
             .map(|community| community.name.clone())
             .unwrap_or_else(|| tr(keys::COMMUNITY_TITLE).to_string())
+    }
+
+    /// Whether a community step's send went. `Ok(None)` is a refusal (the
+    /// community or chat is gone, or the person lost access), told in a
+    /// note: the step is never shown as done. The one exception is a step
+    /// already out for a community still there, which is that step.
+    pub(super) fn community_step_went(
+        &mut self,
+        community_id: Option<i64>,
+        sent: Result<Option<quill::ids::RequestId>, quill::connect::ConnectSendError>,
+    ) -> bool {
+        match sent {
+            Ok(Some(_)) => true,
+            Ok(None) => {
+                let accessible = community_id.is_some_and(|id| {
+                    self.session()
+                        .and_then(|s| s.groups.communities.get(&id))
+                        .is_some_and(|community| community.have_access)
+                });
+                if !accessible {
+                    self.set_note(StatusNote::error(tr(keys::Q_COMMUNITY_STEP_UNAVAILABLE)));
+                }
+                accessible
+            }
+            Err(err) => {
+                self.set_note(StatusNote::error(user_error(&err)));
+                false
+            }
+        }
     }
 
     pub(super) fn show_community_box(&mut self, open: CommunityBox, cx: &mut Context<Self>) {
@@ -360,12 +393,11 @@ impl QuillApp {
         hidden: bool,
         cx: &mut Context<Self>,
     ) {
-        if let Some(live) = self.live.as_mut()
-            && let Err(err) = live
+        if let Some(live) = self.live.as_mut() {
+            let sent = live
                 .driver
-                .add_community_chat(community_id, chat_id, hidden)
-        {
-            self.set_note(StatusNote::error(user_error(&err)));
+                .add_community_chat(community_id, chat_id, hidden);
+            self.community_step_went(Some(community_id), sent);
         }
         cx.notify();
     }
@@ -396,10 +428,9 @@ impl QuillApp {
         else {
             return;
         };
-        if let Some(live) = self.live.as_mut()
-            && let Err(err) = live.driver.remove_community_chat(community_id, chat_id)
-        {
-            self.set_note(StatusNote::error(user_error(&err)));
+        if let Some(live) = self.live.as_mut() {
+            let sent = live.driver.remove_community_chat(community_id, chat_id);
+            self.community_step_went(Some(community_id), sent);
         }
         cx.notify();
     }
@@ -437,6 +468,7 @@ impl QuillApp {
         name: String,
         cx: &mut Context<Self>,
     ) {
+        let over = QuillShell::open_dialog_name(self);
         let Some(live) = self.live.as_mut() else {
             return;
         };
@@ -450,6 +482,7 @@ impl QuillApp {
                     community_id,
                     member,
                     name,
+                    over,
                 });
             }
             ban::BanStart::Refused => {

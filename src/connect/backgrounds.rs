@@ -1,7 +1,7 @@
 //! Connect driver: installed chat backgrounds (Telegram wallpapers).
 use super::*;
 use crate::ids::{ChatId, FileId, RequestId};
-use crate::state::RequestPurpose;
+use crate::state::{ChatsPurpose, RequestPurpose};
 use crate::telegram::envelope::{Background, BackgroundType};
 use crate::telegram::requests::{
     delete_chat_background, delete_default_background, get_background_url,
@@ -97,9 +97,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        let extra = self
-            .session
-            .request(RequestPurpose::DeleteDefaultBackground, None);
+        let extra = self.session.request(
+            RequestPurpose::Chats(ChatsPurpose::DeleteDefaultBackground { for_dark_theme }),
+            None,
+        );
         if let Err(err) = self
             .sender
             .send_json(&delete_default_background(extra, for_dark_theme))
@@ -107,14 +108,11 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session.requests.take(extra);
             return Err(err);
         }
-        self.session
-            .chats_state
-            .default_backgrounds
-            .remove(&for_dark_theme);
         Ok(extra)
     }
 
-    /// `removeInstalledBackground`; the entry leaves the list at once.
+    /// `removeInstalledBackground`; the entry leaves the list when the
+    /// server confirms.
     pub fn remove_installed_background(
         &mut self,
         background_id: i64,
@@ -122,18 +120,16 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        let extra = self
-            .session
-            .request(RequestPurpose::RemoveInstalledBackground, None);
+        let extra = self.session.request(
+            RequestPurpose::Chats(ChatsPurpose::RemoveInstalledBackground { background_id }),
+            None,
+        );
         if let Err(err) = self
             .sender
             .send_json(&remove_installed_background(extra, background_id))
         {
             self.session.requests.take(extra);
             return Err(err);
-        }
-        if let Some(list) = self.session.chats_state.installed_backgrounds.data_mut() {
-            list.retain(|b| b.id != background_id);
         }
         Ok(extra)
     }
@@ -181,7 +177,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     }
 
     /// `getBackgroundUrl`: the shareable link; the answer lands in
-    /// `Session::chats_state.background_url`.
+    /// `Session::chats_state.background_answers`, under the returned request.
     pub fn get_background_url(
         &mut self,
         name: &str,
@@ -190,7 +186,6 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() || name.is_empty() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        self.session.chats_state.background_url = None;
         let extra = self.session.request(RequestPurpose::GetBackgroundUrl, None);
         if let Err(err) = self
             .sender
@@ -258,7 +253,8 @@ impl<S: JsonSender> ConnectDriver<S> {
         Ok(extra)
     }
 
-    /// `deleteChatBackground`; the wallpaper leaves the chat at once.
+    /// `deleteChatBackground`; the wallpaper leaves the chat when the server
+    /// confirms.
     pub fn delete_chat_background(
         &mut self,
         chat_id: ChatId,
@@ -277,7 +273,6 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session.requests.take(extra);
             return Err(err);
         }
-        self.session.set_chat_background(chat_id.0, None);
         Ok(extra)
     }
 

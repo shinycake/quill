@@ -98,8 +98,12 @@ pub enum PageLoad {
     /// Nothing asked yet.
     #[default]
     Unasked,
-    /// A page is on its way; `more` when it follows pages already in.
-    Loading { more: bool },
+    /// A page is on its way under `request`; `more` when it follows pages
+    /// already in. Only that request's answer or error settles it.
+    Loading {
+        more: bool,
+        request: crate::ids::RequestId,
+    },
     /// Every page asked for is in.
     Ready,
     /// The last page failed (its error arm, or the send). Nothing asks
@@ -116,7 +120,7 @@ impl PageLoad {
     pub fn has_first_page(self) -> bool {
         matches!(
             self,
-            Self::Loading { more: true } | Self::Ready | Self::Failed { .. }
+            Self::Loading { more: true, .. } | Self::Ready | Self::Failed { .. }
         )
     }
 
@@ -124,10 +128,12 @@ impl PageLoad {
         matches!(self, Self::Failed { .. })
     }
 
-    /// A page was asked for; `append` when it is the next page.
-    pub fn start(&mut self, append: bool) {
+    /// A page was asked for under `request`; `append` when it is the next
+    /// page.
+    pub fn start(&mut self, append: bool, request: crate::ids::RequestId) {
         *self = Self::Loading {
             more: append && self.has_first_page(),
+            request,
         };
     }
 
@@ -136,9 +142,23 @@ impl PageLoad {
         *self = Self::Failed {
             more: matches!(
                 self,
-                Self::Loading { more: true } | Self::Failed { more: true }
+                Self::Loading { more: true, .. } | Self::Failed { more: true }
             ),
         };
+    }
+
+    /// `request` is the page this list waits for: an older page's answer
+    /// (before a sort change or a restart) is not this one's.
+    pub fn waits_for(self, request: Option<crate::ids::RequestId>) -> bool {
+        matches!(self, Self::Loading { request: waiting, .. } if Some(waiting) == request)
+    }
+
+    /// The error of `request`: fails the list only when it is the page the
+    /// list waits for.
+    pub fn fail_request(&mut self, request: Option<crate::ids::RequestId>) {
+        if self.waits_for(request) {
+            self.fail();
+        }
     }
 
     /// Whether a scroll near the end may ask the next page: only once the
@@ -440,6 +460,36 @@ pub struct RevokeBox {
     pub sending: bool,
 }
 
+/// Who may receive commissions, as the two list requests settle it.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum Recipients {
+    #[default]
+    Unasked,
+    /// The channel and bot lists are out; `found` is what answered so far.
+    Loading {
+        waiting: Vec<crate::ids::RequestId>,
+        found: Vec<EarnPeer>,
+    },
+    Ready(Vec<EarnPeer>),
+    /// A send failed. Answers of the abandoned attempt are dropped and the
+    /// next ask starts over.
+    Failed,
+}
+
+impl Recipients {
+    pub fn is_loading(&self) -> bool {
+        matches!(self, Self::Loading { .. })
+    }
+
+    /// The list, once both requests answered.
+    pub fn list(&self) -> Option<&[EarnPeer]> {
+        match self {
+            Self::Ready(list) => Some(list),
+            _ => None,
+        }
+    }
+}
+
 /// Everything the revenue and affiliate screens keep.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct EarnState {
@@ -451,8 +501,9 @@ pub struct EarnState {
     pub ton_balances: HashMap<EarnPeer, TonAmounts>,
     /// Stars balances per peer: `updateStarRevenueStatus` and answers.
     pub star_balances: HashMap<EarnPeer, StarAmount>,
-    /// Peers whose balances were asked for (once per session).
-    pub balances_asked: Vec<EarnPeer>,
+    /// Where each peer's profile balances stand (asked once per session
+    /// unless they failed).
+    pub balance_asks: HashMap<EarnPeer, crate::state::fetch::BatchAsk>,
     pub setup: Option<SetupPage>,
     pub join: Option<JoinPage>,
     pub join_box: Option<JoinBox>,
@@ -463,8 +514,7 @@ pub struct EarnState {
     pub programs_box: Option<ProgramList<FoundProgram>>,
     /// Who may receive commissions: the user, owned public channels the
     /// user can post in, and owned bots (tdesktop `ResolveRecipients`).
-    pub recipients: Option<Vec<EarnPeer>>,
-    pub recipients_loading: u8,
+    pub recipients: Recipients,
     /// A join box that opens once the recipients arrive.
     pub pending_join: Option<JoinBox>,
     /// Set when the setup page saved or ended the program: the UI goes
@@ -480,6 +530,34 @@ pub struct EarnState {
 }
 
 impl EarnState {
+    /// A Collect or Withdraw whose first request has not answered.
+    pub fn is_checking_withdrawal(&self) -> bool {
+        self.withdraw
+            .as_ref()
+            .is_some_and(|w| w.step == WithdrawStep::Checking)
+    }
+
+    /// A balance answer of `request`.
+    pub fn settle_balance(&mut self, peer: EarnPeer, request: Option<crate::ids::RequestId>) {
+        if let Some(ask) = self.balance_asks.get_mut(&peer) {
+            ask.settle(request);
+        }
+    }
+
+    /// A balance request of `request` failed.
+    pub fn fail_balance(&mut self, peer: EarnPeer, request: Option<crate::ids::RequestId>) {
+        if let Some(ask) = self.balance_asks.get_mut(&peer) {
+            ask.fail(request);
+        }
+    }
+
+    /// A failed balance ask is forgotten, so the next profile open asks
+    /// again (a failure never asks again by itself).
+    pub fn forget_failed_balances(&mut self) {
+        self.balance_asks
+            .retain(|_, ask| !matches!(ask, crate::state::fetch::BatchAsk::Failed));
+    }
+
     pub fn note(&mut self, text: impl Into<String>) {
         self.notes.push(text.into());
     }

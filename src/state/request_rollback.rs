@@ -6,11 +6,15 @@ use super::*;
 /// the error arm below restores it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RequestRollback {
-    /// `setChatPermissions`: the chat's previous permission block and
-    /// `can_send_basic_messages`.
+    /// `setChatPermissions`: the permission block and
+    /// `can_send_basic_messages` a refusal puts back (what the server has
+    /// once the saves ahead of this one are settled), and the block this
+    /// save sent, which a later save's rollback takes over when this one
+    /// succeeds.
     ChatPermissions {
         previous: Option<ChatPermissions>,
         previous_can_send: bool,
+        sent: ChatPermissions,
     },
     /// `toggleSupergroupJoinByRequest`: the previous join-by-request flag
     /// (`None` = unknown, treated as disabled).
@@ -49,7 +53,30 @@ pub enum RequestRollback {
         previous: Option<bool>,
     },
     /// B7: `toggleChatHasProtectedContent`: the previous flag.
-    ProtectedContent { chat_id: i64, previous: bool },
+    /// `previous_disabled_at` is the "you disabled sharing" record the
+    /// request replaced (private chats only).
+    ProtectedContent {
+        chat_id: i64,
+        previous: bool,
+        previous_disabled_at: Option<i64>,
+    },
+    /// `setDefaultReactionType`: the quick reaction shown before the choice.
+    DefaultReaction {
+        previous: Option<crate::state::ReactionChoice>,
+    },
+    /// `deleteBusinessChatLink`: the row dropped at once and where it was.
+    ChatLinkDelete {
+        index: usize,
+        row: crate::business_chat_links::ChatLink,
+    },
+    /// Pause, resume or remove of the business bot (`previous` is the bar
+    /// before, `shown` the one drawn instead; `None` = no bar). Restored
+    /// only while the bar still shows `shown`.
+    BusinessBotBar {
+        chat_id: i64,
+        previous: Option<crate::business_bot_bar::BusinessBotManageBar>,
+        shown: Option<crate::business_bot_bar::BusinessBotManageBar>,
+    },
     /// B7: `setChatAvailableReactions`: the previous setting.
     AvailableReactions {
         chat_id: i64,
@@ -93,6 +120,25 @@ pub enum RequestRollback {
         previous: Vec<bool>,
         shown: Vec<bool>,
     },
+    /// `reorderChatFolders`: the tab order before the drag and the one it
+    /// showed instead.
+    FolderOrder {
+        previous: crate::folder_order::FolderOrder,
+        shown: crate::folder_order::FolderOrder,
+    },
+    /// `removeRecentlyFoundChat`: the entry and where it stood.
+    RecentSearchRemoved { chat_id: i64, index: usize },
+    /// `removeTopChat`: the frequent contact and where it stood.
+    TopChatRemoved { chat_id: i64, index: usize },
+    /// `setOption(disable_top_chats)`: the flag before, the one it showed,
+    /// and the strip it cleared.
+    TopChatsDisabled {
+        previous: bool,
+        shown: bool,
+        top_chats: Vec<ChatId>,
+    },
+    /// `toggleChatFolderTags`: the flag before the flip.
+    FolderTags { previous: bool, shown: bool },
 }
 
 impl Session {
@@ -115,6 +161,34 @@ impl Session {
                         }
                     });
             }
+            RequestRollback::FolderOrder { previous, shown } => {
+                if self.chat_list.folder_order() == shown {
+                    self.chat_list.apply_folder_order(&previous);
+                }
+            }
+            RequestRollback::RecentSearchRemoved { chat_id, index } => {
+                self.search.search.restore_recent(ChatId(chat_id), index);
+            }
+            RequestRollback::TopChatRemoved { chat_id, index } => {
+                self.search.search.restore_top_chat(ChatId(chat_id), index);
+            }
+            RequestRollback::TopChatsDisabled {
+                previous,
+                shown,
+                top_chats,
+            } => {
+                if self.search.search.top_chats_disabled == shown {
+                    self.search.search.top_chats_disabled = previous;
+                    if self.search.search.top_chats.is_empty() {
+                        self.search.search.top_chats = top_chats;
+                    }
+                }
+            }
+            RequestRollback::FolderTags { previous, shown } => {
+                if self.chat_list.are_folder_tags_enabled == shown {
+                    self.chat_list.are_folder_tags_enabled = previous;
+                }
+            }
             RequestRollback::PollVote {
                 chat_id,
                 message_id,
@@ -127,6 +201,23 @@ impl Session {
                     &previous,
                     Some(&shown),
                 );
+            }
+            RequestRollback::BusinessBotBar {
+                chat_id,
+                previous,
+                shown,
+            } => {
+                if self.chats_state.business_bot_bars.get(&chat_id) == shown.as_ref() {
+                    self.set_business_bot_bar(chat_id, previous);
+                }
+            }
+            RequestRollback::ChatLinkDelete { index, row } => {
+                let links = &mut self.settings.business_extra.chat_links;
+                if let Some(list) = links.data_mut()
+                    && !list.iter().any(|l| l.link == row.link)
+                {
+                    list.insert(index.min(list.len()), row);
+                }
             }
             _ => {}
         }

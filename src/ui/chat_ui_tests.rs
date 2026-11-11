@@ -524,3 +524,50 @@ fn a_forward_answer_keeps_a_newer_selection(cx: &mut TestAppContext) {
         assert!(app.share.forward_result.is_some(), "the answer still shows");
     });
 }
+
+/// Sweep 09-X001: the secret-chat inline-bot alert is the chat's: another
+/// chat's value starts without it, so its confirm cannot insert the query
+/// there.
+#[gpui_kit::test]
+fn another_chat_drops_the_secret_inline_bot_alert(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let other = other_chat(&app, &mut vcx);
+    open(&app, &mut vcx, CHAT);
+    app.update(&mut vcx, |app, _| {
+        app.chat_ui.pending_inline_bot_alert = Some("@bot query".into());
+    });
+    open(&app, &mut vcx, other);
+    assert!(
+        app.read_with(&vcx, |app, _| app
+            .chat_ui
+            .pending_inline_bot_alert
+            .is_none()),
+        "the alert stayed with the chat it was raised in"
+    );
+}
+
+/// TDLib answered with no identity to send as: the menu has nothing to
+/// pick and does not open (a tap, or an answer that lands while it waits).
+#[gpui_kit::test]
+fn an_answered_empty_send_as_list_opens_no_menu(cx: &mut TestAppContext) {
+    use quill::state::fetch::Fetch;
+    let (app, mut vcx) = new_app(cx);
+    open(&app, &mut vcx, CHAT);
+    app.update(&mut vcx, |app, cx| {
+        app.toggle_send_as(cx);
+        assert!(
+            app.chat_ui.send_as_open,
+            "not asked yet: it opens and waits"
+        );
+        app.toggle_send_as(cx);
+        if let Some(session) = app.demo_session.as_mut() {
+            session
+                .chats_state
+                .send_as_options
+                .insert(CHAT.0, Fetch::Ready(Vec::new()));
+        }
+        assert!(app.send_as_list_empty());
+        app.toggle_send_as(cx);
+        assert!(!app.chat_ui.send_as_open, "an empty list is not a menu");
+    });
+}

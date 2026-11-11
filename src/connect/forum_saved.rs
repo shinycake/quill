@@ -2,7 +2,7 @@
 //! sublists and tags (batch B16).
 use super::*;
 use crate::ids::{ChatId, FileId, RequestId};
-use crate::state::ThreadsPurpose;
+use crate::state::{OlderEnd, SavedPage, ThreadsPurpose};
 use crate::state::{RequestPurpose, SAVED_PAGE, SAVED_TOPICS_PAGE};
 use crate::telegram::envelope::ReactionType;
 use crate::telegram::requests::{TOPIC_ICON_COLORS, valid_topic_icon_color};
@@ -298,17 +298,36 @@ impl<S: JsonSender> ConnectDriver<S> {
         let Some(view) = self.session.threads.saved.sublist.as_ref() else {
             return Ok(None);
         };
-        if view.history.loaded_complete {
+        // A failed page waits for Retry; a page out for this view is not
+        // asked again. (A page out for a view that was left is no reason
+        // to hold this one back: its answer is dropped on arrival.)
+        if view.history.loaded_complete
+            || view.history.older == OlderEnd::Failed
+            || view.page != SavedPage::Idle
+        {
             return Ok(None);
         }
         let (topic_id, from) = (view.topic_id, view.history.next_from_message_id.0);
         let purpose = RequestPurpose::GetSavedMessagesTopicHistory { topic_id };
-        if self.session.requests.has_purpose(purpose) {
-            return Ok(None);
-        }
-        self.send_purpose(purpose, None, |extra| {
+        let sent = self.send_purpose(purpose, None, |extra| {
             get_saved_messages_topic_history(extra, topic_id, from, 0, SAVED_PAGE)
-        })
+        })?;
+        if let (Some(extra), Some(view)) = (sent, self.session.threads.saved.sublist.as_mut()) {
+            view.page = SavedPage::Asking(extra);
+        }
+        Ok(sent)
+    }
+
+    /// "Retry" over a Saved Messages view whose last older page failed.
+    pub fn retry_saved_older(&mut self) -> Sent {
+        if let Some(search) = self.session.threads.saved.tag_search.as_mut() {
+            search.history.older = OlderEnd::Open;
+            return self.fetch_saved_tag_page();
+        }
+        if let Some(view) = self.session.threads.saved.sublist.as_mut() {
+            view.history.older = OlderEnd::Open;
+        }
+        self.fetch_saved_sublist_history()
     }
 
     /// Pin or unpin a sublist (`toggleSavedMessagesTopicIsPinned`); the new
@@ -391,12 +410,12 @@ impl<S: JsonSender> ConnectDriver<S> {
         let Some(search) = self.session.threads.saved.tag_search.as_ref() else {
             return Ok(None);
         };
-        if search.history.loaded_complete {
+        if search.history.loaded_complete || search.history.older == OlderEnd::Failed {
             return Ok(None);
         }
         // A page for this filter is out. One asked for another tag does not
         // hold this one back: its answer is dropped on arrival.
-        if search.request.is_some() {
+        if search.page != SavedPage::Idle {
             return Ok(None);
         }
         let topic_id = search.topic_id;
@@ -406,8 +425,9 @@ impl<S: JsonSender> ConnectDriver<S> {
         let sent = self.send_purpose(purpose, None, |extra| {
             search_saved_messages(extra, topic_id, Some(&tag), "", from, SAVED_PAGE)
         })?;
-        if let Some(search) = self.session.threads.saved.tag_search.as_mut() {
-            search.request = sent;
+        if let (Some(extra), Some(search)) = (sent, self.session.threads.saved.tag_search.as_mut())
+        {
+            search.page = SavedPage::Asking(extra);
         }
         Ok(sent)
     }

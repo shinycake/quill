@@ -27,9 +27,25 @@ pub struct ArchiveMute {
     /// The server reported the setting on this session, so the switch
     /// stays offered after it is turned off.
     pub seen_on: bool,
+    /// The reload the suggestion asks for.
+    pub reload: ArchiveReload,
+}
+
+/// Where the reload of the archive settings stands after the server
+/// suggested "Hide new chats?". Every stage has a way out: the answer
+/// (`note_settings`), the error answer and a send that never left
+/// (`note_reload_failed`).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum ArchiveReload {
+    /// Nothing asked, or the last reload answered.
+    #[default]
+    Idle,
     /// The suggestion arrived and the setting is being reloaded; the box
     /// waits for the fresh answer.
-    pub reload_pending: bool,
+    Reloading,
+    /// The reload failed. The cached copy (if any) decides the box, and
+    /// the next suggestion reloads again.
+    Failed,
 }
 
 impl ArchiveMute {
@@ -43,14 +59,22 @@ impl ArchiveMute {
     /// Notes the settings the server reported.
     pub fn note_settings(&mut self, settings: &ArchiveChatListSettings) {
         self.seen_on |= settings.archive_and_mute_new_chats_from_unknown_users;
-        self.reload_pending = false;
+        self.reload = ArchiveReload::Idle;
+    }
+
+    /// The reload failed (an error answer, or the request could not be
+    /// sent): stop waiting for it.
+    pub fn note_reload_failed(&mut self) {
+        if self.reload == ArchiveReload::Reloading {
+            self.reload = ArchiveReload::Failed;
+        }
     }
 
     /// Folds the actions `updateSuggestedActions` added: a new
     /// archive-and-mute suggestion waits for the setting to reload.
     pub fn note_suggested(&mut self, added: &[String]) {
         if added.iter().any(|action| action == ACTION) {
-            self.reload_pending = true;
+            self.reload = ArchiveReload::Reloading;
         }
     }
 
@@ -70,7 +94,7 @@ impl ArchiveMute {
         actions: &BTreeSet<String>,
         settings: Option<&ArchiveChatListSettings>,
     ) -> bool {
-        !self.reload_pending
+        self.reload != ArchiveReload::Reloading
             && actions.contains(ACTION)
             && settings
                 .is_some_and(|settings| !settings.archive_and_mute_new_chats_from_unknown_users)
@@ -129,11 +153,31 @@ mod tests {
     }
 
     #[test]
+    fn a_failed_reload_stops_waiting_and_the_next_suggestion_asks_again() {
+        let actions: BTreeSet<String> = [ACTION.to_string()].into();
+        let mut state = ArchiveMute::default();
+        state.note_suggested(&[ACTION.to_string()]);
+        assert!(!state.suggestion_due(&actions, Some(&settings(false))));
+        state.note_reload_failed();
+        assert_eq!(state.reload, ArchiveReload::Failed);
+        assert!(
+            state.suggestion_due(&actions, Some(&settings(false))),
+            "the cached copy decides once the reload failed"
+        );
+        state.note_suggested(&[ACTION.to_string()]);
+        assert_eq!(state.reload, ArchiveReload::Reloading);
+    }
+
+    #[test]
     fn a_new_suggestion_waits_for_a_fresh_copy() {
         let actions: BTreeSet<String> = [ACTION.to_string()].into();
         let mut state = ArchiveMute::default();
         state.note_suggested(&["suggestedActionUpgradePremium".to_string()]);
-        assert!(!state.reload_pending, "other actions don't wait");
+        assert_eq!(
+            state.reload,
+            ArchiveReload::Idle,
+            "other actions don't wait"
+        );
         state.note_suggested(&[ACTION.to_string()]);
         assert!(
             !state.suggestion_due(&actions, Some(&settings(false))),

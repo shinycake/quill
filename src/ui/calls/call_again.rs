@@ -19,10 +19,12 @@ impl QuillApp {
     /// open in the main window, hidden behind the call window that just
     /// closed, or not drawn under the lock.
     pub(in crate::ui) fn redial(&mut self, user_id: i64, is_video: bool, cx: &mut Context<Self>) {
-        self.dismiss_call_summary(cx);
-        if self.refuse_offline_call(cx) {
+        // The summary (its rating and uploads) goes only once the dial is
+        // accepted; a refusal leaves it to be answered.
+        if self.refuse_without_call_engine(cx) || self.refuse_offline_call(cx) {
             return;
         }
+        self.dismiss_call_summary(cx);
         self.dial_user(user_id, is_video, cx);
     }
 
@@ -49,7 +51,7 @@ impl QuillApp {
         is_video: bool,
         cx: &mut Context<Self>,
     ) {
-        if self.refuse_offline_call(cx) {
+        if self.refuse_without_call_engine(cx) || self.refuse_offline_call(cx) {
             return;
         }
         let confirm = self

@@ -48,6 +48,17 @@ pub(crate) struct DirectMessagesBox {
     /// The slider starts from the channel's price, not the default shown
     /// while that price was still being fetched.
     pub(super) seeded: bool,
+    pub(super) stage: DirectStage,
+}
+
+/// Where Save stands. The box stays open through `Saving` and closes from
+/// the answer; a refusal returns to `Editing` with the error in the box.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum DirectStage {
+    Editing,
+    /// `setChatDirectMessagesGroup` is out; the session's `PaidSave` says
+    /// how it ended.
+    Saving,
 }
 
 pub(crate) struct PaidMessagesUi {

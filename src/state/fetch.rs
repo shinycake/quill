@@ -25,6 +25,12 @@ impl<T> Fetch<T> {
         matches!(self, Self::Idle)
     }
 
+    /// Whether a once-per-session request may go out: never asked, or the
+    /// last try failed. A request in flight or an answer is not asked again.
+    pub fn can_ask(&self) -> bool {
+        matches!(self, Self::Idle | Self::Failed { .. })
+    }
+
     pub fn is_loading(&self) -> bool {
         matches!(self, Self::Loading { .. })
     }
@@ -135,9 +141,85 @@ impl<T> Fetch<T> {
     }
 }
 
+/// Several requests that answer one question (a peer's TON and Stars
+/// balances, the gift limit options): asked together, settled when every
+/// one has answered, failed when any send or answer fails. A failed batch
+/// is never asked again by itself; its owner forgets it at a transition
+/// (an open) so the next one asks.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum BatchAsk {
+    #[default]
+    Unasked,
+    /// These requests are out. Each answer takes its own off.
+    Asking {
+        waiting: Vec<crate::ids::RequestId>,
+    },
+    Answered,
+    Failed,
+}
+
+impl BatchAsk {
+    /// The batch after its sends: `Failed` when one was refused, else
+    /// `Asking` the requests that went out (`Answered` when none were
+    /// needed).
+    pub fn sent(waiting: Vec<crate::ids::RequestId>, refused: bool) -> Self {
+        if refused {
+            Self::Failed
+        } else if waiting.is_empty() {
+            Self::Answered
+        } else {
+            Self::Asking { waiting }
+        }
+    }
+
+    /// Nothing is out, so the owner may ask: never asked, or failed since.
+    pub fn may_ask(&self) -> bool {
+        matches!(self, Self::Unasked | Self::Failed)
+    }
+
+    /// `request` answered: the batch is `Answered` once none is left.
+    pub fn settle(&mut self, request: Option<crate::ids::RequestId>) {
+        let Self::Asking { waiting } = self else {
+            return;
+        };
+        waiting.retain(|id| Some(*id) != request);
+        if waiting.is_empty() {
+            *self = Self::Answered;
+        }
+    }
+
+    /// `request` failed: the batch fails when it was one of its own.
+    pub fn fail(&mut self, request: Option<crate::ids::RequestId>) {
+        if let Self::Asking { waiting } = self
+            && request.is_some_and(|id| waiting.contains(&id))
+        {
+            *self = Self::Failed;
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::Fetch;
+    use super::{BatchAsk, Fetch};
+    use crate::ids::RequestId;
+
+    #[test]
+    fn a_batch_settles_when_every_request_answered_and_fails_on_one() {
+        let mut batch = BatchAsk::sent(vec![RequestId(1), RequestId(2)], false);
+        assert!(!batch.may_ask());
+        batch.settle(Some(RequestId(1)));
+        assert!(matches!(batch, BatchAsk::Asking { .. }));
+        batch.settle(Some(RequestId(2)));
+        assert_eq!(batch, BatchAsk::Answered);
+
+        let mut batch = BatchAsk::sent(vec![RequestId(3), RequestId(4)], false);
+        batch.fail(Some(RequestId(9)));
+        assert!(matches!(batch, BatchAsk::Asking { .. }), "not its request");
+        batch.fail(Some(RequestId(4)));
+        assert_eq!(batch, BatchAsk::Failed);
+        assert!(batch.may_ask());
+        assert_eq!(BatchAsk::sent(Vec::new(), true), BatchAsk::Failed);
+    }
 
     #[test]
     fn a_fresh_fetch_is_idle_with_nothing() {

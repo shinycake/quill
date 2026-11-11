@@ -28,6 +28,60 @@ pub(crate) const PINNED_LEFT_SKIP: f64 = PINNED_SPACE / 2.;
 /// tdesktop `kMaxStickerSets`: the installed sets the sticker scrubber lists.
 pub(crate) const MAX_STICKER_SETS: usize = 5;
 
+/// Qt's start drag distance: a touch that moves less than this (pt) is a
+/// tap; further, it drags a pinned chat.
+pub(crate) const DRAG_START: f64 = 10.;
+
+/// A touch on a pinned chat: pressed, or moved far enough to drag it. No
+/// touch at all is `None` in the holder. Only an Ended touch in `Dragging`
+/// saves the order; a cancelled or failed one moves the pictures back.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) enum PinTouch {
+    Pressed { index: usize, start_x: f64 },
+    Dragging { index: usize, start_x: f64 },
+}
+
+/// What a touch that ended asks for.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) enum TouchEnd {
+    /// A tap on the chat at `index`.
+    Open(usize),
+    /// A drag let go at the end x: drop into its slot and save.
+    Drop {
+        index: usize,
+        start_x: f64,
+    },
+    /// A drag the system took away: back to the old slots, nothing saved.
+    SnapBack,
+    Nothing,
+}
+
+impl PinTouch {
+    /// The touch moved to `x`. `movable`: the chat may be dragged (a pinned
+    /// one, with another to swap with).
+    pub(crate) fn moved(self, x: f64, movable: bool) -> Self {
+        match self {
+            Self::Pressed { index, start_x } if movable && (x - start_x).abs() >= DRAG_START => {
+                Self::Dragging { index, start_x }
+            }
+            other => other,
+        }
+    }
+
+    /// The touch ended at `x`; `ended` is false when the system cancelled
+    /// it or the recognizer failed.
+    pub(crate) fn end(self, x: f64, ended: bool) -> TouchEnd {
+        match self {
+            Self::Dragging { index, start_x } if ended => TouchEnd::Drop { index, start_x },
+            Self::Dragging { .. } => TouchEnd::SnapBack,
+            Self::Pressed { index, start_x } if ended && (x - start_x).abs() < DRAG_START => {
+                TouchEnd::Open(index)
+            }
+            Self::Pressed { .. } => TouchEnd::Nothing,
+        }
+    }
+}
+
 /// What a picture in the pinned chats panel stands for.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum PinKind {

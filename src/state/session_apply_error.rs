@@ -1,4 +1,5 @@
 //! Error routing: maps TDLib errors onto per-purpose handlers.
+use super::request_kind::RequestKind;
 use super::*;
 
 impl Session {
@@ -10,8 +11,17 @@ impl Session {
         extra: Option<RequestId>,
         seq: u64,
     ) {
+        if let Some(pending) = pending {
+            self.requests.record_failure(pending.id, error_reason(&err));
+        }
         self.settle_own_reaction(extra, true);
         self.fail_own_full_info(&err, pending);
+        if let Some(id) = extra {
+            self.users_state.saves.failed(id, error_reason(&err));
+        }
+        if let Some(slot) = extra.and_then(|id| self.groups.new_chats.type_saves.get_mut(&id)) {
+            *slot = TypeSave::Failed(super::request_errors::error_reason(&err));
+        }
         if matches!(
             pending.map(|p| p.purpose),
             Some(
@@ -23,15 +33,15 @@ impl Session {
             )
         ) && let Some(notice) = err.send_permission_notice()
         {
-            self.messages.send_permission_error = Some(notice.into());
+            self.messages.send_permission_error.push(notice.into());
         }
         // Q1: a rate-limited user action says so (tdesktop's
         // `lng_flood_error`); background lookups were already retried by
         // the driver and stay quiet.
         if let Some(notice) = err.flood_notice()
-            && pending.is_some_and(|p| is_user_action(p.purpose))
+            && pending.is_some_and(|p| p.purpose.kind() == RequestKind::UserAction)
         {
-            self.messages.flood_notice = Some(notice);
+            self.messages.flood_notice.push(notice);
         }
         // Slice G1: roll back optimistic mutations the server
         // rejected — the pre-request value rides on
@@ -40,8 +50,16 @@ impl Session {
             Some(RequestRollback::ChatPermissions {
                 previous,
                 previous_can_send,
+                ..
             }) => {
+                // A save still out after this one decides what the box
+                // shows (its rollback holds the same values, or this
+                // chain's last confirmed ones).
                 if let Some(chat_id) = pending.and_then(|p| p.chat_id)
+                    && self
+                        .requests
+                        .pending_extra_for(RequestPurpose::SetChatPermissions, Some(chat_id))
+                        .is_none()
                     && let Some(chat) = self.chats.get_mut(&chat_id.0)
                 {
                     chat.permissions = previous;
@@ -134,8 +152,18 @@ impl Session {
                 toggle,
                 previous,
             }) => self.restore_group_toggle(supergroup_id, toggle, previous),
-            Some(RequestRollback::ProtectedContent { chat_id, previous }) => {
+            Some(RequestRollback::ProtectedContent {
+                chat_id,
+                previous,
+                previous_disabled_at,
+            }) => {
                 self.set_chat_protected(chat_id, previous);
+                self.groups
+                    .private_sharing
+                    .restore_disabled(ChatId(chat_id), previous_disabled_at);
+            }
+            Some(RequestRollback::DefaultReaction { previous }) => {
+                self.stickers.default_reaction = previous;
             }
             Some(RequestRollback::AvailableReactions { chat_id, previous }) => match previous {
                 Some(setting) => {
@@ -188,7 +216,14 @@ impl Session {
             }
             Some(
                 rollback @ (RequestRollback::ForumTopicMute { .. }
-                | RequestRollback::PollVote { .. }),
+                | RequestRollback::PollVote { .. }
+                | RequestRollback::BusinessBotBar { .. }
+                | RequestRollback::ChatLinkDelete { .. }
+                | RequestRollback::FolderOrder { .. }
+                | RequestRollback::FolderTags { .. }
+                | RequestRollback::RecentSearchRemoved { .. }
+                | RequestRollback::TopChatRemoved { .. }
+                | RequestRollback::TopChatsDisabled { .. }),
             ) => self.restore_optimistic(rollback),
             None => {}
         }
@@ -261,26 +296,4 @@ impl Session {
             });
         }
     }
-}
-
-/// Q1: whether a request is something the user did on purpose (send,
-/// edit, join, ...), as opposed to a background lookup, a view/online
-/// ping or a login submit (which has its own error line).
-pub(crate) fn is_user_action(purpose: RequestPurpose) -> bool {
-    if is_auth_submit(purpose) || purpose.is_sweepable() {
-        return false;
-    }
-    let debug = format!("{purpose:?}");
-    ![
-        "Get",
-        "Load",
-        "Search",
-        "Download",
-        "View",
-        "Open",
-        "Close",
-        "SetOnline",
-    ]
-    .iter()
-    .any(|prefix| debug.starts_with(prefix))
 }

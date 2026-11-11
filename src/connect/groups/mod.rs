@@ -37,7 +37,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() || !self.session.chat_can_set_sticker_set(chat_id) {
             return Err(ConnectSendError::InvalidRequest);
         }
-        self.session.stickers.stickers.failed = false;
+        self.session.stickers.stickers.lists.installed.clear_error();
         self.session.stickers.emoji.failed = false;
         for (purpose, build) in [
             (
@@ -205,7 +205,7 @@ impl<S: JsonSender> ConnectDriver<S> {
 
     /// `leaveChat` for a channel. Own membership updates arrive via
     /// `updateChatMember`; the `ok` response flips status optimistically.
-    pub fn leave_channel(&mut self, chat_id: ChatId) -> Result<(), ConnectSendError> {
+    pub fn leave_channel(&mut self, chat_id: ChatId) -> Result<RequestId, ConnectSendError> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
@@ -216,7 +216,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session.requests.take(extra);
             return Err(err);
         }
-        Ok(())
+        Ok(extra)
     }
 
     /// Phase B4: `setChatMessageAutoDeleteTime` (TDLib 1.8.67,
@@ -501,7 +501,13 @@ impl<S: JsonSender> ConnectDriver<S> {
         if self.session.requests.has_purpose_for_chat(purpose, chat_id) {
             return Ok(None);
         }
-        self.session.chat_list.chat_preview_fetch = None;
+        // Peeks are kept by chat; a handful stay, the rest of the old ones
+        // go.
+        let previews = &mut self.session.chat_list.chat_preview_fetch;
+        if previews.len() >= 8 {
+            previews.clear();
+        }
+        previews.entry(chat_id).or_default().begin();
         let extra = self.session.request(purpose, Some(chat_id));
         if let Err(err) = self.sender.send_json(&get_chat_history(
             extra,
@@ -512,6 +518,12 @@ impl<S: JsonSender> ConnectDriver<S> {
             false,
         )) {
             self.session.requests.take(extra);
+            self.session
+                .chat_list
+                .chat_preview_fetch
+                .entry(chat_id)
+                .or_default()
+                .fail_dropping_data(err.stage_line());
             return Err(err);
         }
         Ok(Some(extra))

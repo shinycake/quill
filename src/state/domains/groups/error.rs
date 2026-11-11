@@ -151,6 +151,7 @@ impl Session {
                 RequestPurpose::SetSupergroupStickerSet
                 | RequestPurpose::SetSupergroupCustomEmojiStickerSet,
             ) => {
+                self.file_appearance_answer(pending, Err(error_reason(err)));
                 self.chats_state.chat_action_error = Some(call_request_error_line(
                     err,
                     "Could not change the group's sticker pack",
@@ -282,7 +283,9 @@ impl Session {
                 }
                 self.groups.invite_link_error = Some(call_request_error_line(
                     err,
-                    "Could not load more join requests",
+                    crate::lang::tr(
+                        crate::lang::keys::Q_INVITE_LINK_COULD_NOT_LOAD_MORE_JOIN_REQUESTS,
+                    ),
                 ));
             }
             Some(RequestPurpose::Groups(GroupsPurpose::ProcessAllChatJoinRequests { .. })) => {
@@ -363,11 +366,10 @@ impl Session {
                 if let Some(pending) = pending
                     && let Some(chat_id) = pending.chat_id
                     && let Some(state) = self.groups.chat_boost_lists.get_mut(&chat_id.0)
-                    && state.request == Some(pending.id)
+                    && state.waits_for(pending.id)
                 {
-                    state.loading = false;
-                    state.request = None;
-                    state.error = Some(call_request_error_line(err, "Could not load boosts"));
+                    state.stage =
+                        BoostsStage::Failed(call_request_error_line(err, "Could not load boosts"));
                 }
             }
             Some(RequestPurpose::GetChatBoostLink) => {
@@ -418,32 +420,21 @@ impl Session {
             Some(RequestPurpose::Groups(GroupsPurpose::SetChatMemberStatus { .. })) => {
                 if let Some(chat_id) = pending.and_then(|p| p.chat_id) {
                     let line = call_request_error_line(err, "Could not update member status");
-                    // Slice G1: the member-management dialog reads
-                    // the member-list fetch states, not
-                    // `admin_lists`, so the failure is also parked
-                    // where the action was taken.
-                    self.groups
-                        .member_action_error
-                        .insert(chat_id.0, line.clone());
-                    self.groups
-                        .admin_lists
-                        .insert(chat_id.0, AdminListFetch::Failed(line));
+                    // The member-management dialog and the Administrators
+                    // page both show it from here; the loaded administrators
+                    // list stays as it was (a refused change is not a
+                    // failed load).
+                    self.groups.member_action_error.insert(chat_id.0, line);
                 }
             }
             // Slice G1: failed `setChatMemberTag` (custom title)
-            // surfaces as an admin-list error so the info panel
-            // shows it, and in `member_action_error` so the
-            // member-management dialog (which launched the
-            // action) shows it too.
+            // surfaces in `member_action_error`, which the
+            // member-management dialog and the Administrators page
+            // show; the loaded list stays.
             Some(RequestPurpose::Groups(GroupsPurpose::SetChatMemberTag { .. })) => {
                 if let Some(chat_id) = pending.and_then(|p| p.chat_id) {
                     let line = call_request_error_line(err, "Could not set custom title");
-                    self.groups
-                        .member_action_error
-                        .insert(chat_id.0, line.clone());
-                    self.groups
-                        .admin_lists
-                        .insert(chat_id.0, AdminListFetch::Failed(line));
+                    self.groups.member_action_error.insert(chat_id.0, line);
                 }
             }
             Some(RequestPurpose::GetBasicGroupFullInfo) => {

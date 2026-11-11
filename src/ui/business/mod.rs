@@ -116,6 +116,7 @@ impl QuillApp {
             note: None,
         });
         self.open_box(crate::ui::shell::DialogKind::Business);
+        self.reset_link_save();
         if let Some(live) = self.live.as_mut() {
             live.driver.session.settings.business.error = None;
             let _ = live.driver.ensure_quick_reply_shortcuts();
@@ -146,19 +147,52 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
-        let Some(view) = self.dialogs.business_dialog.as_ref().map(|d| d.view) else {
+        let Some((view, picker)) = self
+            .dialogs
+            .business_dialog
+            .as_ref()
+            .map(|d| (d.view, d.picker.as_ref().map(|p| p.target)))
+        else {
             return true;
         };
-        if let Leave::Stay = self.business_leave(view, window, cx) {
-            if can_stay {
-                return false;
+        // A sub-screen (a day, the picker, the sticker panel) hangs from
+        // the screen that holds the draft: closing saves that screen.
+        let saving = if view.saves_on_leave() {
+            view
+        } else {
+            view.parent(picker)
+        };
+        match self.business_leave(saving, window, cx) {
+            Leave::Stay => {
+                if can_stay {
+                    return false;
+                }
+                if let Some(line) = self.business_mut().and_then(|d| d.local_error.take()) {
+                    self.set_note(StatusNote::error(line));
+                }
             }
-            if let Some(line) = self.business_mut().and_then(|d| d.local_error.take()) {
-                self.set_note(StatusNote::error(line));
-            }
+            // The box is going, so the line a leave would show on the next
+            // screen (a refused send, "stays off") goes to the status line.
+            Leave::Go(Some(line)) => self.set_note(StatusNote::error(line)),
+            Leave::Go(None) => {}
         }
         self.close_business(cx);
         true
+    }
+
+    /// A save TDLib refused after the box was closed: its line goes to the
+    /// status line instead of waiting, unseen, for the next open.
+    pub(in crate::ui) fn business_closed_error_upkeep(&mut self) {
+        if self.dialogs.business_dialog.is_some() {
+            return;
+        }
+        let Some(line) = self
+            .session_mut()
+            .and_then(|session| session.settings.business.error.take())
+        else {
+            return;
+        };
+        self.set_note(StatusNote::error(line));
     }
 
     pub(super) fn business_mut(&mut self) -> Option<&mut BusinessDialog> {
@@ -297,6 +331,7 @@ impl QuillApp {
         if self.business_waits_for_info(view) && self.business_fill_draft(view, window, cx) {
             cx.notify();
         }
+        self.business_link_save_upkeep(window, cx);
     }
 
     /// Why the own full info a waiting screen needs did not come, when

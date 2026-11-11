@@ -7,7 +7,7 @@
 //! and for how much, with a "Learn More" button to Fragment.
 #![deny(clippy::indexing_slicing)]
 
-use crate::ids::ChatId;
+use crate::ids::{ChatId, RequestId};
 use serde_json::Value;
 
 /// A username or a phone number.
@@ -73,10 +73,23 @@ pub struct CollectibleLookup {
     pub owner_chat: Option<ChatId>,
     /// What "Copy Link" copies; empty for phone numbers.
     pub copy_text: String,
-    pub info: Option<CollectibleInfo>,
-    pub loading: bool,
+    pub stage: LookupStage,
+}
+
+/// Where a lookup is. An answer or an error applies only to the `Loading`
+/// stage whose request it answers, so a lookup replaced by another one never
+/// takes the earlier one's result.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LookupStage {
+    /// Built, not sent yet. `request_collectible_info` replaces it with
+    /// `Loading` before the lookup is stored, and drops the lookup when the
+    /// send fails.
+    Unsent,
+    /// `getCollectibleItemInfo` is out under this request.
+    Loading(RequestId),
+    Ready(CollectibleInfo),
     /// The TDLib error of a failed lookup, until the UI has dealt with it.
-    pub failed: Option<String>,
+    Failed(String),
 }
 
 impl CollectibleLookup {
@@ -92,9 +105,44 @@ impl CollectibleLookup {
             owner_name: owner_name.to_string(),
             owner_chat,
             copy_text,
-            info: None,
-            loading: true,
-            failed: None,
+            stage: LookupStage::Unsent,
+        }
+    }
+
+    pub fn info(&self) -> Option<&CollectibleInfo> {
+        match &self.stage {
+            LookupStage::Ready(info) => Some(info),
+            _ => None,
+        }
+    }
+
+    pub fn failure(&self) -> Option<&str> {
+        match &self.stage {
+            LookupStage::Failed(reason) => Some(reason),
+            _ => None,
+        }
+    }
+
+    pub fn is_loading(&self) -> bool {
+        matches!(self.stage, LookupStage::Unsent | LookupStage::Loading(_))
+    }
+
+    /// The answer of `request`: taken only while that request is the one
+    /// the lookup waits for.
+    pub fn answer(&mut self, request: Option<RequestId>, info: CollectibleInfo) {
+        if let (Some(request), LookupStage::Loading(waiting)) = (request, &self.stage)
+            && *waiting == request
+        {
+            self.stage = LookupStage::Ready(info);
+        }
+    }
+
+    /// The error of `request`, under the same rule as [`Self::answer`].
+    pub fn fail(&mut self, request: Option<RequestId>, reason: String) {
+        if let (Some(request), LookupStage::Loading(waiting)) = (request, &self.stage)
+            && *waiting == request
+        {
+            self.stage = LookupStage::Failed(reason);
         }
     }
 }

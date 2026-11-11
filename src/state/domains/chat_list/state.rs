@@ -3,6 +3,16 @@
 //! with `new`.
 use crate::state::*;
 
+/// The Share Folder box's data for one folder: what each of its two
+/// fetches stands at, with the answer inside (`Fetch`).
+#[derive(Debug, Default)]
+pub struct FolderShare {
+    /// `getChatFolderInviteLinks` (creates and edits are applied on top).
+    pub links: crate::state::fetch::Fetch<Vec<ChatFolderInviteLink>>,
+    /// `getChatsForChatFolderInviteLink`: the chats a link may include.
+    pub chats: crate::state::fetch::Fetch<Vec<i64>>,
+}
+
 pub struct ChatListState {
     /// Phase 7.1: folder list from `updateChatFolders` (schema 1.8.67 line
     /// 10606). Empty until TDLib pushes the update (after authorization).
@@ -33,7 +43,7 @@ pub struct ChatListState {
     /// Parity slice: `getChatListsToAddChat` results per chat id — the chat
     /// lists a chat may be added to. Drives the per-chat folder picker as
     /// the schema intends (`:13347` doc comment).
-    pub chat_lists_for_add: HashMap<i64, Vec<ChatList>>,
+    pub chat_lists_for_add: HashMap<i64, crate::state::fetch::Fetch<Vec<ChatList>>>,
     /// Parity slice: folder ids whose `loadChats(chatListFolder)` paging hit
     /// 404 — no "load more" for these folders.
     pub folder_chats_exhausted: HashSet<i32>,
@@ -48,32 +58,14 @@ pub struct ChatListState {
     /// Parity slice: `getChatFolderChatsToLeave` results per folder id —
     /// chats the delete-confirm dialog offers to leave with the folder.
     pub folder_chats_to_leave: HashMap<i32, Vec<i64>>,
-    /// `getChatFolderInviteLinks` results (and creates/edits applied on top)
-    /// per folder id — the Share Folder dialog's link list.
-    pub folder_invite_links: HashMap<i32, Vec<ChatFolderInviteLink>>,
-    /// `getChatsForChatFolderInviteLink` results per folder id — the chats a
-    /// link may include.
-    pub folder_link_chats: HashMap<i32, Vec<i64>>,
+    /// The Share Folder box's data per folder id: the invite links and the
+    /// chats a link may include, each with its own load stage.
+    pub folder_shares: HashMap<i32, FolderShare>,
     /// `getRecommendedChatFolders` result; `None` until fetched.
     pub recommended_folders: Option<Vec<RecommendedChatFolder>>,
-    /// One-shot: a folder link create/edit was applied (the dialog returns
-    /// to its list). Drained by the UI.
-    pub folder_link_saved: bool,
-    /// One-shot: a Share Folder / recommended-folder request failed; the
-    /// text is shown in the dialog. Drained by the UI.
-    pub folder_share_error: Option<String>,
-    /// The `addlist` link being checked by the "Add folder" dialog.
-    pub folder_invite_link: Option<String>,
-    /// `checkChatFolderInviteLink` answer for `folder_invite_link`.
-    pub folder_invite_info: Option<ChatFolderInviteLinkInfo>,
-    /// The "Add folder" dialog's failure text (check or add).
-    pub folder_invite_error: Option<String>,
-    /// `addChatFolderByInviteLink` confirmed.
-    pub folder_invite_done: bool,
-    /// The check or add the "Add folder" dialog waits for. Only its answer
-    /// or error lands: one for an earlier link must not fill the dialog of
-    /// the link open now.
-    pub(crate) folder_invite_request: Option<RequestId>,
+    /// What the requests a folder or contact box waits on ended in, by
+    /// request id ([`DialogAnswers`]).
+    pub dialog_answers: DialogAnswers,
     /// `getChatFolderNewChats` answers per shared folder: chats its owner
     /// added since the user last looked (the "N new chats" bar).
     pub folder_new_chats: HashMap<i32, Vec<i64>>,
@@ -82,9 +74,10 @@ pub struct ChatListState {
     pub folder_new_chats_asked: HashMap<i32, std::time::Instant>,
     /// Folder limits from TDLib options and `getPremiumLimit`.
     pub folder_limits: crate::folder_limits::FolderLimits,
-    /// One-shot: a folder request failed on a limit; the UI shows the box.
-    /// Drained by the UI.
-    pub folder_limit_hit: Option<crate::folder_limits::FolderLimitKind>,
+    /// One-shot: a folder request failed on a limit; the UI shows the box
+    /// in the window of the box that sent the request (its id). Drained by
+    /// the UI.
+    pub folder_limit_hit: Option<(crate::folder_limits::FolderLimitKind, Option<RequestId>)>,
     /// Slice CL1: `getOption("pinned_chat_count_max")` /
     /// `getOption("pinned_archived_chat_count_max")` via `updateOption`
     /// (schema 1.8.67, line 13674). Defaults 5 / 100 are TDLib's
@@ -127,7 +120,7 @@ pub struct ChatListState {
     pub archive_mute: crate::archive_mute::ArchiveMute,
     /// Slice CL: chat-list peek preview — the latest `getChatHistory`
     /// result for one unopened chat (`parity:chatlist-chat-preview`).
-    pub chat_preview_fetch: Option<PreviewHistoryFetch>,
+    pub chat_preview_fetch: HashMap<ChatId, crate::state::fetch::Fetch<Vec<ParsedMessage>>>,
     /// Chats TDLib placed in the main list as a promotion
     /// (`chatPosition.source`: a proxy sponsor or a public service
     /// announcement), tdesktop's `useTopPromotion`.
@@ -195,16 +188,6 @@ impl ChatListState {
             .extend(self.folder_specs.keys().copied());
     }
 
-    /// Whether `pending` is the check or add the "Add folder" dialog waits
-    /// for; settles it when it is.
-    pub(crate) fn take_folder_invite_answer(&mut self, pending: Option<&PendingRequest>) -> bool {
-        let answers = pending.is_some_and(|p| self.folder_invite_request == Some(p.id));
-        if answers {
-            self.folder_invite_request = None;
-        }
-        answers
-    }
-
     /// The wait after a chat-list page failed: one second, doubling per
     /// failure up to five minutes.
     pub(crate) fn next_page_retry(
@@ -230,16 +213,9 @@ impl ChatListState {
             folder_remove_queue: Vec::new(),
             delete_after_leave: Vec::new(),
             folder_chats_to_leave: HashMap::new(),
-            folder_invite_links: HashMap::new(),
-            folder_link_chats: HashMap::new(),
+            folder_shares: HashMap::new(),
             recommended_folders: None,
-            folder_link_saved: false,
-            folder_share_error: None,
-            folder_invite_link: None,
-            folder_invite_info: None,
-            folder_invite_error: None,
-            folder_invite_done: false,
-            folder_invite_request: None,
+            dialog_answers: DialogAnswers::default(),
             folder_new_chats: HashMap::new(),
             folder_new_chats_asked: HashMap::new(),
             folder_limits: crate::folder_limits::FolderLimits::default(),
@@ -260,7 +236,7 @@ impl ChatListState {
             archive_settings_loading: false,
             archive_settings_open: false,
             archive_mute: Default::default(),
-            chat_preview_fetch: None,
+            chat_preview_fetch: HashMap::new(),
             promoted_chats: HashMap::new(),
             psa_labels: crate::promotion::PsaLabels::default(),
             psa_about: crate::psa_about::PsaAbout::default(),

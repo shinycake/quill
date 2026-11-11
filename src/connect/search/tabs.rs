@@ -88,6 +88,11 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// `next_offset`. One page at a time; nothing once the list ended.
     pub fn load_more_search_results(&mut self) -> Result<Option<RequestId>, ConnectSendError> {
         if !self.chats_path_active() {
+            // Refused, not asked: it waits for the user's retry, instead of
+            // the list asking again on every frame.
+            if self.session.search.search.tabs.has_more() {
+                self.session.search.search.fail_page();
+            }
             return Err(ConnectSendError::InvalidRequest);
         }
         let Some(offset) = self.session.search.search.tabs.begin_more() else {

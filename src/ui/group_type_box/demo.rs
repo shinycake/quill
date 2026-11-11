@@ -9,7 +9,7 @@ use crate::ui::status_note::StatusNote;
 use gpui_kit::*;
 use quill::diagnostics::{DiagnosticSink, MemorySink};
 use quill::ids::ChatId;
-use quill::state::{InviteLinkFetch, InviteLinkList, Session, UsernameVerdict};
+use quill::state::{InviteLinkFetch, InviteLinkList, Session, UsernameCheck, UsernameVerdict};
 use quill::telegram::client::copy_and_parse;
 use quill::telegram::envelope::{ParsedChatInviteLink, UsernameCheckResult};
 use std::sync::Arc;
@@ -157,7 +157,7 @@ impl QuillApp {
         result: UsernameCheckResult,
     ) {
         if let Some(session) = self.demo_session.as_mut() {
-            session.groups.group_type.check = Some(UsernameVerdict {
+            session.groups.group_type.check = UsernameCheck::Verdict(UsernameVerdict {
                 chat_id,
                 username: username.to_string(),
                 result,

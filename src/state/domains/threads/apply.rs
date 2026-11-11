@@ -61,6 +61,10 @@ impl Session {
             ThreadsPayload::ForumTopic { chat_id, info } => match pending.map(|p| p.purpose) {
                 Some(RequestPurpose::CreateForumTopic) => {
                     self.threads.forum_topics.remove(&chat_id);
+                    // The chat list's row asks for the list again: it
+                    // would read "Loading..." for good otherwise.
+                    self.threads.forum_row_asked.remove(&chat_id);
+                    self.threads.forum_topics_failed.remove(&chat_id);
                 }
                 // The new thread joins the tabs now, so the view can open
                 // it before any refetch.

@@ -5,6 +5,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
+use super::recording_state::PermissionAsk;
 use crate::ui::status_note::StatusNote;
 use gpui_kit::*;
 use quill::lang::{keys, tr, tr_with};
@@ -117,6 +118,10 @@ fn denied_note(camera: bool) -> String {
     )
 }
 
+/// What runs once access is granted: it carries what asked, so an answer
+/// to one prompt never starts another request's work.
+type AfterAccess = Box<dyn FnOnce(&mut QuillApp, &mut Context<QuillApp>)>;
+
 impl QuillApp {
     /// Run `start` once the devices a recording needs are allowed: the
     /// microphone, plus the camera for a video message. Asks for any not
@@ -124,39 +129,52 @@ impl QuillApp {
     pub(super) fn with_capture_access(
         &mut self,
         camera: bool,
-        start: fn(&mut Self, &mut Context<Self>),
+        start: impl FnOnce(&mut Self, &mut Context<Self>) + 'static,
         cx: &mut Context<Self>,
     ) {
         let devices: &'static [bool] = if camera { &[true, false] } else { &[false] };
-        self.with_device_access(devices, start, cx);
+        self.with_device_access(devices, Box::new(start), cx);
     }
 
     /// Run `start` once the camera is allowed (a call turning it on), or
     /// say why it can't be used.
     pub(super) fn with_camera_access(
         &mut self,
-        start: fn(&mut Self, &mut Context<Self>),
+        start: impl FnOnce(&mut Self, &mut Context<Self>) + 'static,
         cx: &mut Context<Self>,
     ) {
-        self.with_device_access(&[true], start, cx);
+        self.with_device_access(&[true], Box::new(start), cx);
     }
 
     /// `devices`: `true` for the camera, `false` for the microphone.
     fn with_device_access(
         &mut self,
         devices: &'static [bool],
-        start: fn(&mut Self, &mut Context<Self>),
+        start: AfterAccess,
         cx: &mut Context<Self>,
     ) {
         for &device in devices {
             match access(device) {
                 Access::Granted => {}
+                // A prompt already up belongs to an earlier press: this one
+                // must not wipe it, or that prompt's Allow would be ignored.
                 Access::Denied => {
                     self.set_note(StatusNote::error(denied_note(device)));
                     cx.notify();
                     return;
                 }
                 Access::Undetermined => {
+                    // The system prompt is up for an earlier press: this one
+                    // would only queue a second start behind it.
+                    if self.recording.permission != PermissionAsk::Idle {
+                        return;
+                    }
+                    let call = self.active_call_id();
+                    let ask = PermissionAsk::Asking {
+                        id: self.next_permission_ask(),
+                        call,
+                    };
+                    self.recording.permission = ask;
                     self.set_note(StatusNote::silent(tr(if device {
                         keys::Q_LEFTOVERS_ALLOW_CAMERA
                     } else {
@@ -180,6 +198,15 @@ impl QuillApp {
                             }
                         };
                         let _ = this.update(cx, |this, cx| {
+                            if this.recording.permission != ask {
+                                return;
+                            }
+                            this.recording.permission = PermissionAsk::Idle;
+                            // The call the press was for ended or changed
+                            // while the prompt was up: nothing to start.
+                            if call.is_some() && this.active_call_id() != call {
+                                return;
+                            }
                             if granted {
                                 this.with_device_access(devices, start, cx);
                             } else {
@@ -194,5 +221,17 @@ impl QuillApp {
             }
         }
         start(self, cx);
+    }
+
+    /// The id of the call on screen, if any.
+    fn active_call_id(&self) -> Option<i32> {
+        self.live
+            .as_ref()
+            .and_then(|live| live.driver.session.calls.active_call.as_ref())
+            .map(|call| call.id)
+    }
+
+    fn next_permission_ask(&mut self) -> u64 {
+        self.recording.next_permission_ask()
     }
 }

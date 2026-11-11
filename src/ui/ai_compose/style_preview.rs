@@ -4,7 +4,7 @@
 //! hotkey and Add Style, or Remove / Delete Style once it is saved.
 
 use super::card::section_title;
-use super::style_menu::{ai_apply_shortcut_text, bound_to, set_bound_style};
+use super::style_menu::ai_apply_shortcut_text;
 use super::style_notices::text_toast;
 use super::{attention_button, pill_radius, session_mut};
 use crate::ui::ai_compose_state::{AiStylePreview, PreviewStage};
@@ -194,16 +194,13 @@ impl QuillApp {
         preview.example_asked_at = Some(Instant::now());
         let name = preview.name.clone();
         cx.notify();
-        let Some(live) = self.live.as_mut() else {
-            return;
-        };
         let number = i32::try_from(number).unwrap_or(i32::MAX);
-        if live
-            .driver
-            .get_text_composition_style_example(&name, number, token)
-            .is_err()
-            && let Some(preview) = self.ai_compose.preview.as_mut()
-        {
+        let sent = self.live.as_mut().is_some_and(|live| {
+            live.driver
+                .get_text_composition_style_example(&name, number, token)
+                .is_ok()
+        });
+        if !sent && let Some(preview) = self.ai_compose.preview.as_mut() {
             preview.examples.failed();
             preview.example_asked_at = None;
             self.push_ai_toast(text_toast(""), window, cx);
@@ -313,12 +310,12 @@ impl QuillApp {
                                 keys::AI_COMPOSE_BIND_USE_HOTKEY,
                                 &[("keys", &shortcut)],
                             ))
-                            .checked(bound_to(&name))
-                            .on_click(cx.listener(move |_, checked: &bool, _, cx| {
+                            .checked(self.ai_style_bound(&name))
+                            .on_click(cx.listener(move |this, checked: &bool, _, cx| {
                                 if *checked {
-                                    set_bound_style(Some(&name));
-                                } else if bound_to(&name) {
-                                    set_bound_style(None);
+                                    this.bind_ai_style(Some(&name));
+                                } else if this.ai_style_bound(&name) {
+                                    this.bind_ai_style(None);
                                 }
                                 cx.notify();
                             })),

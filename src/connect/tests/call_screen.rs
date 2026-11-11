@@ -401,6 +401,28 @@ fn mic_mix(controls: &Mutex<Option<Arc<MicControls>>>) -> Option<Arc<SystemAudio
 }
 
 #[test]
+fn a_lost_output_device_turns_the_audio_share_off_and_keeps_the_screen() {
+    let (dir, mut driver, loopbacks, controls) = audio_driver();
+    pump_until_mic_answers(&mut driver);
+    driver.choose_call_screen_source(SourceId("display:1".into()), true);
+    pump_until_screen_answers(&mut driver);
+    assert!(driver.call_screen().sharing_audio());
+    let mix = loopbacks.started.lock().unwrap()[0].clone();
+    // The loopback's error callback reports the device gone.
+    mix.fail("System audio stopped: device lost".into());
+    driver.pump_call_screen(std::time::Instant::now());
+    assert!(!driver.call_screen().sharing_audio(), "audio is off");
+    assert!(!driver.call_screen().with_audio(), "no retry every pump");
+    assert!(driver.call_screen().error.is_some());
+    assert!(
+        driver.call_screen().target().is_some(),
+        "the screen goes on"
+    );
+    assert!(mic_mix(&controls).is_none(), "the microphone mixes nothing");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn shared_system_audio_reaches_the_microphone_while_the_share_runs() {
     let (dir, mut driver, loopbacks, controls) = audio_driver();
     pump_until_mic_answers(&mut driver);
@@ -498,7 +520,7 @@ fn a_slow_screen_capture_does_not_hold_the_pump() {
     driver.session.calls.active_group_call = Some(sharing_group_call());
     driver.choose_call_screen_source(SourceId("display:1".into()), false);
 
-    driver.pump_call_screen();
+    driver.pump_call_screen(std::time::Instant::now());
 
     assert!(driver.call_screen().opening());
     assert_eq!(driver.call_screen().target(), None);
@@ -526,7 +548,7 @@ fn a_window_hidden_while_its_share_opens_stays_paused() {
     }));
     driver.session.calls.active_group_call = Some(sharing_group_call());
     driver.choose_call_screen_source(SourceId("window:42".into()), false);
-    driver.pump_call_screen();
+    driver.pump_call_screen(std::time::Instant::now());
 
     sink.recv().unwrap().push_event(CaptureEvent::Paused);
     release.send(()).unwrap();

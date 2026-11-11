@@ -24,6 +24,9 @@ pub struct Session {
     pub account: AccountKey,
     pub account_generation: AccountGeneration,
     pub auth: AuthorizationState,
+    /// Resumed from TDLib's database, or signed in by a step taken in this
+    /// process (`set_auth`); `account_data::claim` tells them apart.
+    pub sign_in_origin: crate::account_data::SignInOrigin,
     pub auth_view: AuthView,
     pub connection: ConnectionState,
     pub chats: HashMap<i64, ChatSummary>,
@@ -91,6 +94,8 @@ pub struct Session {
     pub threads: Box<ThreadsState>,
     pub view_generation: ViewGeneration,
     pub requests: RequestRegistry,
+    /// The answer to each request a surface waits on, per request id.
+    pub acks: RequestAcks,
     pub shutdown: ShutdownPhase,
     pub last_seq: u64,
     /// Bots: info, commands, games, inline queries, callback answers, login URLs, mini apps, reply keyboards.

@@ -102,7 +102,9 @@ impl SendGiftState {
 #[derive(Debug, Clone, Default)]
 pub struct GiftManageState {
     pub limits: GiftLimits,
-    pub limits_asked: bool,
+    /// The `getOption` batch behind `limits`: a failed one is asked again
+    /// at the next gifts open.
+    pub limits_ask: crate::state::fetch::BatchAsk,
     pub collections: Vec<GiftCollection>,
     pub collections_loading: bool,
     pub collections_stale: bool,
@@ -119,10 +121,6 @@ pub struct GiftManageState {
     pub send: SendGiftState,
     /// A finished transfer, for the toast and the recipient's chat.
     pub transferred: Option<GiftTransferred>,
-    /// The transfer on its way, with who it goes to as the user confirmed
-    /// it: only that request's answer reports it, whatever the picker shows
-    /// by then.
-    pub transferring: Option<(crate::ids::RequestId, GiftTransferred)>,
     /// Fragment's export page from `getUpgradedGiftWithdrawalUrl`, waiting
     /// for the UI to open it.
     pub export_url: Option<String>,
@@ -169,5 +167,9 @@ impl GiftManageState {
         self.flow = None;
         self.deleting = None;
         self.note = None;
+        // A result nobody took belongs to the list that was closed.
+        self.deleted = false;
+        self.transferred = None;
+        self.export_url = None;
     }
 }

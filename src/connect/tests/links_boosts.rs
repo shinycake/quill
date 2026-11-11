@@ -177,12 +177,25 @@ fn a_stale_admin_reply_is_dropped_after_switching_admin() {
 }
 
 #[test]
+fn deleting_revoked_links_asked_about_one_admin_is_refused_for_another_page() {
+    let mut rig = Rig::new(CREATOR);
+    rig.driver.open_admin_invite_links(ChatId(13), 10).unwrap();
+    // The box asked about admin 9; the page open now is admin 10's.
+    assert_eq!(
+        rig.driver
+            .delete_all_revoked_admin_links(ChatId(13), 9)
+            .unwrap(),
+        None
+    );
+}
+
+#[test]
 fn deleting_an_admins_revoked_links_sends_their_id_and_clears_only_their_list() {
     let mut rig = Rig::new(CREATOR);
     rig.driver.open_admin_invite_links(ChatId(13), 9).unwrap();
     let extra = rig
         .driver
-        .delete_all_revoked_admin_links(ChatId(13))
+        .delete_all_revoked_admin_links(ChatId(13), 9)
         .unwrap()
         .unwrap();
     assert_eq!(
@@ -353,6 +366,23 @@ fn boosts_page_with_the_server_offset_and_switch_tabs() {
         .unwrap()
         .unwrap();
     assert_eq!(rig.last_sent("getChatBoosts")["offset"], "n1");
+    // A double click on "Show more" while the page is in flight sends
+    // nothing and the button shows progress.
+    assert!(
+        rig.driver
+            .load_more_chat_boosts(ChatId(13))
+            .unwrap()
+            .is_none()
+    );
+    assert!(
+        rig.driver
+            .session
+            .groups
+            .chat_boost_lists
+            .get(&13)
+            .unwrap()
+            .loading()
+    );
     rig.ingest(&boosts_json(more.0, 3, "", &[7]));
     let state = rig.driver.session.groups.chat_boost_lists.get(&13).unwrap();
     assert_eq!(state.boosts.len(), 3);
@@ -391,7 +421,7 @@ fn boosts_page_with_the_server_offset_and_switch_tabs() {
             .chat_boost_lists
             .get(&13)
             .unwrap()
-            .loading
+            .loading()
     );
 }
 

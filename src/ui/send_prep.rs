@@ -299,9 +299,22 @@ impl QuillApp {
             Ok(snaps) => self.deliver_live_send(origin, snaps, window, cx),
             Err(err) => {
                 // Nothing was taken from the composer: the draft stays.
-                self.set_note(StatusNote::error(user_error(&err)));
+                self.note_for_send_origin(&origin, StatusNote::error(user_error(&err)));
                 cx.notify();
             }
+        }
+    }
+
+    /// A note about a send of `origin`'s account. Notes are the screen's:
+    /// the send of an account in the background (its files were still
+    /// being prepared when another account came on screen) has no screen
+    /// to tell, and its error must not read as the account on screen's.
+    fn note_for_send_origin(&mut self, origin: &SendOrigin, note: StatusNote) {
+        let on_screen = self
+            .session()
+            .is_some_and(|session| session.account == origin.slot.account);
+        if on_screen {
+            self.set_note(note);
         }
     }
 
@@ -321,7 +334,10 @@ impl QuillApp {
             .session()
             .is_some_and(|session| session.account == origin.slot.account);
         let (Some(live), Some(first)) = (self.live_of(&origin.slot.account), snaps.first()) else {
-            self.set_note(StatusNote::error(tr(keys::Q_CHAT_COULD_NOT_SEND_MESSAGE)));
+            self.note_for_send_origin(
+                &origin,
+                StatusNote::error(tr(keys::Q_CHAT_COULD_NOT_SEND_MESSAGE)),
+            );
             cx.notify();
             return;
         };
@@ -450,9 +466,11 @@ impl QuillApp {
         self.chat_ui.schedule_popup_open = false;
         self.chat_ui.set_reply(None);
         self.clear_suggest_bar_after_send(chat_id);
-        self.composer_ui.clear_draft_on_success = plan
-            .clears_draft_on_ack(left)
-            .then(|| DraftClear::of_text(chat_id, &origin.markup));
+        self.composer_sends.set_draft_clear(
+            &origin.slot,
+            plan.clears_draft_on_ack(left)
+                .then(|| DraftClear::of_text(chat_id, &origin.markup)),
+        );
         if plan.clear_text {
             // `left`: the unsent parts of a split text, else nothing.
             if left.is_empty() {

@@ -55,6 +55,11 @@ pub struct CallCapture {
     level: Arc<LevelCell>,
     opener: Option<MicOpener>,
     failed_at: Option<Instant>,
+    /// The call refused a run of frames while this was wanted (call,
+    /// microphone, muted): reopening the same would be refused again, so
+    /// it waits until the call, the microphone or the mute changes, or the
+    /// call's transport goes down and comes back.
+    refused: Option<(CaptureTarget, Option<String>, bool)>,
     /// System audio to mix into the microphone frames, while shared.
     system_audio: Option<Arc<SystemAudioMix>>,
     /// Why the microphone could not be opened or stopped, for the call
@@ -319,7 +324,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         let landed = self.land_group_offers();
         self.key_group_call_by_chat();
         self.pump_call_capture(now);
-        self.pump_call_screen();
+        self.pump_call_screen(now);
         listed || landed || before != shown(self)
     }
 
@@ -361,18 +366,27 @@ impl<S: JsonSender> ConnectDriver<S> {
                 .take_events()
                 .into_iter()
                 .find_map(|event| match event {
-                    CaptureEvent::Failed(err) => Some(err.to_string()),
-                    CaptureEvent::Ended => Some("The microphone was disconnected.".to_string()),
+                    CaptureEvent::Failed(err) => {
+                        Some((err.to_string(), matches!(err, CaptureError::Refused(_))))
+                    }
+                    CaptureEvent::Ended => {
+                        Some(("The microphone was disconnected.".to_string(), false))
+                    }
                     CaptureEvent::Paused | CaptureEvent::Resumed => None,
                 })
         });
-        if let Some(err) = failure {
+        if let Some((err, refused)) = failure {
             capture.stop();
-            capture.failed_at = Some(now);
             capture.error = Some(err);
+            if refused {
+                capture.refused = wanted.map(|(target, muted)| (target, device.clone(), muted));
+            } else {
+                capture.failed_at = Some(now);
+            }
         }
         let Some((target, muted)) = wanted else {
             capture.failed_at = None;
+            capture.refused = None;
             capture.error = None;
             return;
         };
@@ -383,6 +397,14 @@ impl<S: JsonSender> ConnectDriver<S> {
             active.controls.set_noise_suppression(noise_suppression);
             return;
         }
+        if capture
+            .refused
+            .as_ref()
+            .is_some_and(|refused| refused.0 == target && refused.1 == device && refused.2 == muted)
+        {
+            return;
+        }
+        capture.refused = None;
         if !capture.enabled()
             || capture
                 .failed_at

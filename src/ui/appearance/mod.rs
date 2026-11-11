@@ -652,6 +652,7 @@ impl QuillApp {
 mod appearance_keybindings_section;
 mod new_accent_picker;
 mod send_to_menu_section;
+pub(in crate::ui) use send_to_menu_section::SendToMenu;
 mod telegram_wallpapers;
 
 #[cfg(test)]

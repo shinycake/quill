@@ -8,7 +8,7 @@
 
 use super::app::QuillApp;
 use super::chat_theme::fill_muted;
-use super::gift_market_state::MarketBox;
+use super::gift_market_state::{AuctionOpen, MarketBox};
 use super::premium_ui::sticker_tile;
 use super::shell::{DialogKind, QuillShell};
 use crate::ui::status_note::StatusNote;
@@ -27,6 +27,7 @@ use quill::marketplace::GiftPrice;
 use quill::premium_hub::group_digits;
 use quill::premium_hub::upgraded::Collectible;
 use quill::state::Session;
+use quill::state::fetch::Fetch;
 use quill::telegram::envelope::{MessageSender, StickerContent};
 use std::cell::RefCell;
 use std::path::PathBuf;
@@ -84,26 +85,28 @@ impl QuillApp {
         }
     }
 
-    /// Opens `next` above the current box. The first box of a visit forgets
-    /// the gifts whose variants failed last time, so they are asked again
-    /// even when an error arrived after the last box closed.
-    pub(super) fn open_market_box(&mut self, next: MarketBox) {
-        if self.gift_market.stack.is_empty() {
-            self.forget_failed_previews();
-        }
-        // box-host: every caller opens the box in its own window right after
-        self.gift_market.push(next);
-    }
-
     /// Opens `next` above the current box.
     pub(super) fn market_push(&mut self, next: MarketBox, cx: &mut Context<Self>) {
-        self.open_market_box(next);
+        self.ask_info_preview(&next);
+        self.gift_market.push(next);
         self.open_box(crate::ui::shell::DialogKind::GiftMarket);
         cx.notify();
     }
 
+    /// The auction info box's cover cycles through the gift's variants:
+    /// asked as the box opens (again after a failure), never from its
+    /// render.
+    fn ask_info_preview(&mut self, next: &MarketBox) {
+        if let MarketBox::AuctionInfo { gift_id } = next
+            && let Some(live) = self.live.as_mut()
+        {
+            let _ = live.driver.fetch_gift_upgrade_preview(*gift_id);
+        }
+    }
+
     /// Replaces the top box with `next`.
     pub(super) fn market_replace(&mut self, next: MarketBox, cx: &mut Context<Self>) {
+        self.ask_info_preview(&next);
         self.gift_market.stack.pop();
         self.gift_market.push(next);
         self.open_box(crate::ui::shell::DialogKind::GiftMarket);
@@ -160,20 +163,11 @@ impl QuillApp {
         }
         if self.gift_market.stack.is_empty() {
             self.gift_market.recipient = None;
-            self.gift_market.pending_auction = false;
+            self.gift_market.auction_open = AuctionOpen::Idle;
             // "Hide My Name" is one bid's choice, never the next auction's.
             self.gift_market.hide_name = false;
-            self.forget_failed_previews();
         }
         self.after_craft_pop();
-    }
-
-    /// The market box closed: a gift whose variants failed to load is asked
-    /// again when a box opens next, never from a render.
-    pub(super) fn forget_failed_previews(&mut self) {
-        if let Some(market) = self.gift_market_mut() {
-            market.failed_previews.clear();
-        }
     }
 
     /// Who an auction bid goes to: the chosen recipient; else the owner of
@@ -221,9 +215,10 @@ impl QuillApp {
                 .filter(|send| send.open)
                 .and_then(|send| send.recipient.clone());
         }
+        let from_send_box = self.gift_market.recipient.is_some();
         match self.live.as_mut() {
             Some(live) => match live.driver.fetch_gift_auction(auction_id) {
-                Ok(_) => self.gift_market.pending_auction = true,
+                Ok(_) => self.gift_market.auction_open = AuctionOpen::Waiting { from_send_box },
                 Err(_) => {
                     self.set_note(StatusNote::error(tr(
                         keys::Q_MONEY_COULDNT_LOAD_THE_AUCTION,
@@ -253,9 +248,7 @@ impl QuillApp {
             AuctionBoxChoice::Info => MarketBox::AuctionInfo { gift_id },
             AuctionBoxChoice::About => MarketBox::AuctionAbout { gift_id },
         };
-        self.open_market_box(next);
-        self.open_box(crate::ui::shell::DialogKind::GiftMarket);
-        cx.notify();
+        self.market_push(next, cx);
     }
 
     /// Per-frame: open an auction whose state arrived, drop a finished
@@ -265,18 +258,25 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.gift_market.pending_auction {
+        if let AuctionOpen::Waiting { from_send_box } = self.gift_market.auction_open {
             let ready = self
                 .gift_market_mut()
                 .and_then(|market| market.auction_ready.take());
             let loading = self
                 .session()
                 .is_some_and(|s| s.payments.gift_market.auction_loading);
-            if let Some(gift_id) = ready {
-                self.gift_market.pending_auction = false;
+            let send_box_open = self
+                .session()
+                .is_some_and(|s| s.payments.gifts_manage.send.open);
+            if from_send_box && !send_box_open {
+                // The send box the auction was asked from is closed: the
+                // box does not open over whatever the user does now.
+                self.gift_market.auction_open = AuctionOpen::Idle;
+            } else if let Some(gift_id) = ready {
+                self.gift_market.auction_open = AuctionOpen::Idle;
                 self.show_auction_box(gift_id, cx);
             } else if !loading {
-                self.gift_market.pending_auction = false;
+                self.gift_market.auction_open = AuctionOpen::Idle;
             }
         }
         let bought = self.gift_market.top() == Some(&MarketBox::Buy)
@@ -374,7 +374,7 @@ impl QuillApp {
                 stickers.extend(super::gift_craft_ui::craft_stickers(market));
             }
             Some(MarketBox::Variants { gift_id }) => {
-                if let Some(preview) = market.previews.get(gift_id) {
+                if let Some(preview) = market.previews.get(gift_id).and_then(Fetch::data) {
                     stickers.extend(
                         preview
                             .models

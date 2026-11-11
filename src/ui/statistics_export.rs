@@ -18,15 +18,30 @@ use quill::state::{
     StatsPage, StoryStatsFetch, private_share_count,
 };
 use quill::telegram::envelope::{ChatStatistics, ChatStatisticsObject, StatisticalGraph};
+use std::cell::Cell;
 use std::path::PathBuf;
 
-/// A graph's data: a ready one, or an async one that has loaded.
-fn resolve(session: &Session, chat_id: i64, graph: &StatisticalGraph) -> Option<StatChart> {
+/// A graph's data: a ready one, or an async one that has loaded. An async
+/// graph never asked or still loading sets `unsettled`: a workbook written
+/// without it would silently lack a chart that is on its way. A failed
+/// graph is exported without its sheet, as one the server could not build
+/// is: the page only re-asks a graph never asked, so waiting on it would
+/// block the export for good.
+fn resolve(
+    session: &Session,
+    chat_id: i64,
+    graph: &StatisticalGraph,
+    unsettled: &Cell<bool>,
+) -> Option<StatChart> {
     let json = match graph {
         StatisticalGraph::Data { json_data, .. } => json_data,
         StatisticalGraph::Async { token } => match session.groups.stats.graph(chat_id, token, 0) {
             Some(GraphFetch::Loaded(StatisticalGraph::Data { json_data, .. })) => json_data,
-            _ => return None,
+            Some(GraphFetch::Loaded(_) | GraphFetch::Failed(_)) => return None,
+            None | Some(GraphFetch::Loading) => {
+                unsettled.set(true);
+                return None;
+            }
         },
         StatisticalGraph::Error { .. } => return None,
     };
@@ -42,6 +57,19 @@ pub(super) fn page_workbook(session: &Session, chat_id: i64) -> Option<(Vec<Shee
         .unwrap_or_default();
     let now = civil_local(now_unix());
     let today = format!("{:04}-{:02}-{:02}", now.year, now.month, now.day);
+    let unsettled = Cell::new(false);
+    let workbook = page_sheets(session, chat_id, &title, &today, &unsettled)?;
+    // A graph never asked or still loading is not in the sheets: no file yet.
+    (!unsettled.get()).then_some(workbook)
+}
+
+fn page_sheets(
+    session: &Session,
+    chat_id: i64,
+    title: &str,
+    today: &str,
+    unsettled: &Cell<bool>,
+) -> Option<(Vec<Sheet>, String)> {
     let chat_stats = match session.groups.chat_statistics.get(&chat_id) {
         Some(ChatStatisticsFetch::Loaded(stats)) => Some(stats.as_ref()),
         _ => None,
@@ -49,8 +77,9 @@ pub(super) fn page_workbook(session: &Session, chat_id: i64) -> Option<(Vec<Shee
     match session.groups.stats.page(chat_id) {
         StatsPage::Overview => {
             let stats = chat_stats?;
-            let sheets = chat_statistics_sheets(stats, |graph| resolve(session, chat_id, graph));
-            Some((sheets, export_file_name(&title, None, None, &today)))
+            let sheets =
+                chat_statistics_sheets(stats, |graph| resolve(session, chat_id, graph, unsettled));
+            Some((sheets, export_file_name(title, None, None, today)))
         }
         StatsPage::Message(message_id) => {
             let state = session.groups.stats.message_for(chat_id, message_id)?;
@@ -82,7 +111,7 @@ pub(super) fn page_workbook(session: &Session, chat_id: i64) -> Option<(Vec<Shee
                 private_shares: forwards.map(|f| private_share_count(f, public)),
             };
             let poll = match session.messages.poll_stats.get(&(chat_id, message_id)) {
-                Some(PollStatsFetch::Loaded(graph)) => resolve(session, chat_id, graph),
+                Some(PollStatsFetch::Loaded(graph)) => resolve(session, chat_id, graph, unsettled),
                 _ => None,
             };
             let sheets = post_statistics_sheets(
@@ -90,18 +119,18 @@ pub(super) fn page_workbook(session: &Session, chat_id: i64) -> Option<(Vec<Shee
                 &[
                     (
                         tr(keys::Q_MONEY_INTERACTIONS),
-                        resolve(session, chat_id, &stats.interaction_graph),
+                        resolve(session, chat_id, &stats.interaction_graph, unsettled),
                     ),
                     (
                         tr(keys::Q_MONEY_REACTIONS),
-                        resolve(session, chat_id, &stats.reaction_graph),
+                        resolve(session, chat_id, &stats.reaction_graph, unsettled),
                     ),
                     (tr(keys::Q_MONEY_POLL_VOTES), poll),
                 ],
             );
             Some((
                 sheets,
-                export_file_name(&title, Some(message_id), None, &today),
+                export_file_name(title, Some(message_id), None, today),
             ))
         }
         StatsPage::Story(story_id) => {
@@ -130,18 +159,15 @@ pub(super) fn page_workbook(session: &Session, chat_id: i64) -> Option<(Vec<Shee
                 &[
                     (
                         tr(keys::Q_MONEY_INTERACTIONS),
-                        resolve(session, chat_id, &stats.interaction_graph),
+                        resolve(session, chat_id, &stats.interaction_graph, unsettled),
                     ),
                     (
                         tr(keys::Q_MONEY_REACTIONS),
-                        resolve(session, chat_id, &stats.reaction_graph),
+                        resolve(session, chat_id, &stats.reaction_graph, unsettled),
                     ),
                 ],
             );
-            Some((
-                sheets,
-                export_file_name(&title, None, Some(story_id), &today),
-            ))
+            Some((sheets, export_file_name(title, None, Some(story_id), today)))
         }
     }
 }

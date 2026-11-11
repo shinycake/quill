@@ -12,16 +12,34 @@ use crate::telegram::envelope::SettingsPayload;
 pub enum PasswordCheck {
     #[default]
     Idle,
-    Checking,
+    /// `getRecoveryEmailAddress` is out for the typed password; only its
+    /// answer settles the check, and dismissing the box drops it.
+    Checking {
+        request: RequestId,
+    },
     Remembered,
     Wrong,
     Failed,
+}
+
+impl PasswordCheck {
+    /// The check is out for this very request.
+    pub fn waits_for(self, pending: Option<&PendingRequest>) -> bool {
+        matches!(self, Self::Checking { request } if Some(request) == pending.map(|p| p.id))
+    }
+
+    pub fn is_checking(self) -> bool {
+        matches!(self, Self::Checking { .. })
+    }
 }
 
 #[derive(Debug, Clone, Default)]
 pub struct PrivacyData {
     /// `getNewChatPrivacySettings` state; `None` = never asked.
     pub new_chat: Option<NewChatPrivacyState>,
+    /// The newest save of `new_chat`. A fetch asked before it answers with
+    /// the older server value and is dropped.
+    pub new_chat_saved_at: Option<RequestId>,
     /// Days of inactivity before sessions end (`getActiveSessions`).
     pub inactive_session_ttl_days: Option<i32>,
     /// `ignore_sensitive_content_restrictions` as TDLib last reported it.
@@ -65,9 +83,18 @@ impl Session {
         let purpose = pending.map(|p| p.purpose);
         match payload {
             SettingsPayload::NewChatPrivacySettings(settings) => {
-                if purpose == Some(RequestPurpose::GetNewChatPrivacy) {
-                    self.settings.privacy_data.new_chat =
-                        Some(NewChatPrivacyState::Ready(*settings));
+                if purpose == Some(RequestPurpose::GetNewChatPrivacy)
+                    && let Some(id) = pending.map(|p| p.id)
+                {
+                    let data = &mut self.settings.privacy_data;
+                    let first = matches!(data.new_chat, Some(NewChatPrivacyState::Loading(live)) if live == id);
+                    let newer_than_save = data.new_chat_saved_at.is_none_or(|saved| id.0 > saved.0);
+                    if first
+                        || (newer_than_save
+                            && matches!(data.new_chat, Some(NewChatPrivacyState::Ready(_))))
+                    {
+                        data.new_chat = Some(NewChatPrivacyState::Ready(*settings));
+                    }
                 }
                 true
             }
@@ -75,9 +102,13 @@ impl Session {
                 if purpose == Some(RequestPurpose::CanSendMessageToUser)
                     && let Some(user_id) = pending.and_then(|p| p.user_id)
                 {
-                    self.payments
-                        .paid_messages
-                        .record_answer(user_id, *answer, unix_ms_now());
+                    let premium = self.my_is_premium();
+                    self.payments.paid_messages.record_answer(
+                        user_id,
+                        *answer,
+                        unix_ms_now(),
+                        premium,
+                    );
                 }
                 true
             }
@@ -105,7 +136,9 @@ impl Session {
                 true
             }
             SettingsPayload::RecoveryEmailAddress => {
-                if purpose == Some(RequestPurpose::CheckRememberedPassword) {
+                if purpose == Some(RequestPurpose::CheckRememberedPassword)
+                    && self.settings.privacy_data.password_check.waits_for(pending)
+                {
                     // The finish step shows until the user taps Done, which
                     // sends `hideSuggestedAction`.
                     self.settings.privacy_data.password_check = PasswordCheck::Remembered;
@@ -147,13 +180,22 @@ impl Session {
             Some(RequestPurpose::Settings(SettingsPurpose::SetInactiveSessionTtl { .. })) => {
                 self.settings.privacy_data.error = None;
             }
+            Some(RequestPurpose::Settings(SettingsPurpose::SetPrivacyRules { key })) => {
+                self.settings
+                    .finish_privacy_save(key, pending.map(|p| p.id));
+            }
             Some(RequestPurpose::AllowUnpaidMessages) => {
-                if let Some(user_id) = pending.and_then(|p| p.user_id) {
-                    self.finish_unpaid_exception(user_id);
+                if let Some(pending) = pending {
+                    self.payments.paid_messages.save.settle(pending.id);
+                    if let Some(user_id) = pending.user_id {
+                        self.finish_unpaid_exception(user_id);
+                    }
                 }
             }
             Some(RequestPurpose::SetDirectMessagesGroup) => {
-                self.payments.paid_messages.save = crate::paid_messages::PaidSave::Idle;
+                if let Some(pending) = pending {
+                    self.payments.paid_messages.save.settle(pending.id);
+                }
             }
             _ => {}
         }
@@ -190,8 +232,15 @@ impl Session {
         }
         let data = &mut self.settings.privacy_data;
         match purpose {
+            // Only the first fetch can fail the row; a refresh that fails
+            // leaves the value the row already shows.
             RequestPurpose::GetNewChatPrivacy => {
-                data.new_chat = Some(NewChatPrivacyState::Failed);
+                if matches!(
+                    data.new_chat,
+                    Some(NewChatPrivacyState::Loading(live)) if Some(live) == pending.map(|p| p.id)
+                ) {
+                    data.new_chat = Some(NewChatPrivacyState::Failed);
+                }
             }
             RequestPurpose::Settings(SettingsPurpose::SetNewChatPrivacy {
                 previous_allow,
@@ -224,29 +273,27 @@ impl Session {
                     err,
                 ));
             }
-            RequestPurpose::CanSendMessageToUser
-            | RequestPurpose::GetPaidMessageRevenue
-            | RequestPurpose::LoadDirectMessagesChat => {
-                // Nothing to show: the chat stays free and the Remove Fee
-                // box hides the refund line.
+            RequestPurpose::CanSendMessageToUser => {
+                // The chat stays as it was; the next open asks again.
+                if let Some(user_id) = pending.and_then(|p| p.user_id) {
+                    self.payments
+                        .paid_messages
+                        .ask_failed(user_id, unix_ms_now());
+                }
+            }
+            RequestPurpose::GetPaidMessageRevenue | RequestPurpose::LoadDirectMessagesChat => {
+                // Nothing to show: the Remove Fee box hides the refund line.
             }
             RequestPurpose::AllowUnpaidMessages | RequestPurpose::SetDirectMessagesGroup => {
-                use crate::paid_messages::{PaidSave, PaidTarget};
-                let target = match purpose {
-                    RequestPurpose::AllowUnpaidMessages => {
-                        pending.and_then(|p| p.user_id).map(PaidTarget::User)
-                    }
-                    _ => pending
-                        .and_then(|p| p.chat_id)
-                        .map(|chat| PaidTarget::Channel(chat.0)),
-                };
-                self.payments.paid_messages.save = match target {
-                    Some(target) => PaidSave::Failed {
-                        target,
-                        line: sessions_error_line("change the paid message settings", err),
-                    },
-                    None => PaidSave::Idle,
-                };
+                // The failure lands on the save it answers (its target is
+                // the one that save was for); another request's error
+                // leaves the slot alone.
+                if let Some(pending) = pending {
+                    self.payments.paid_messages.save.fail(
+                        pending.id,
+                        sessions_error_line("change the paid message settings", err),
+                    );
+                }
             }
             RequestPurpose::GetNetworkStatistics => {
                 data.network_loading = false;
@@ -255,7 +302,7 @@ impl Session {
             RequestPurpose::ResetNetworkStatistics => {
                 data.error = Some(sessions_error_line("reset the network usage", err));
             }
-            RequestPurpose::CheckRememberedPassword => {
+            RequestPurpose::CheckRememberedPassword if data.password_check.waits_for(pending) => {
                 data.password_check = if err.class == ErrorClass::Invalid {
                     PasswordCheck::Wrong
                 } else {
@@ -267,10 +314,10 @@ impl Session {
     }
 
     /// `allowUnpaidMessagesFromUser` went through: the user writes for
-    /// free now, so the Remove Fee bar and the paid total go away.
+    /// free now, so the Remove Fee bar and the paid total go away. The save
+    /// slot is settled by the caller, against the request that answered.
     pub fn finish_unpaid_exception(&mut self, user_id: i64) {
         let paid = &mut self.payments.paid_messages;
-        paid.save = crate::paid_messages::PaidSave::Idle;
         paid.revenue.remove(&user_id);
         if let Some(info) = self.users_state.user_full_infos.get_mut(&user_id) {
             info.extras.incoming_paid_message_star_count = 0;

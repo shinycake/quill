@@ -38,10 +38,14 @@ impl QuillApp {
     }
 
     /// The boost check before a boosted chat's wallpaper is sent. Returns
-    /// `true` when Apply must stop; the reason shows in the dialog's error
+    /// the reason when Apply must stop; it shows in the dialog's error
     /// line. A gallery wallpaper or file is a custom background; a chat
     /// theme is a theme background; removing a wallpaper is free.
-    pub(super) fn boosted_look_blocked(&mut self, chat_id: i64, changes: &[LookChange]) -> bool {
+    pub(super) fn boosted_look_blocked(
+        &mut self,
+        chat_id: i64,
+        changes: &[LookChange],
+    ) -> Option<String> {
         let custom = changes.iter().any(|change| {
             matches!(
                 change,
@@ -52,7 +56,7 @@ impl QuillApp {
             .iter()
             .any(|change| matches!(change, LookChange::Theme(_)));
         if !custom && !theme {
-            return false;
+            return None;
         }
         let level = self
             .session()
@@ -64,7 +68,7 @@ impl QuillApp {
             (false, _, gate) => gate,
         };
         let message = match gate {
-            WallpaperGate::Allowed => return false,
+            WallpaperGate::Allowed => return None,
             WallpaperGate::LevelUnknown => {
                 if let Some(live) = self.live.as_mut() {
                     let _ = live.driver.refresh_chat_boost_level(ChatId(chat_id));
@@ -79,10 +83,7 @@ impl QuillApp {
                 ],
             ),
         };
-        if let Some(live) = self.live.as_mut() {
-            live.driver.session.chats_state.background_error = Some(message);
-        }
-        true
+        Some(message)
     }
 
     /// "Wallpaper" row: opens the chat look dialog for this chat.

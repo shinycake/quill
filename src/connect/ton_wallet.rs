@@ -12,7 +12,7 @@ use crate::telegram::requests::{
 use crate::telegram::requests_privacy::hide_suggested_action;
 use crate::ton_wallet::{
     FIRST_TRANSFER_HINT, HISTORY_PAGE, MoneyPage, MoneyTab, NFT_PAGE, ProfileAddress,
-    TonWalletPurpose, WalletPrefs, fiat,
+    TonWalletPurpose, TxLookup, WalletPrefs, fiat,
 };
 
 impl<S: JsonSender> ConnectDriver<S> {
@@ -24,15 +24,18 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        if self.session.ton_wallet.explorer_url_requested {
+        if !self.session.ton_wallet.explorer.can_ask() {
             return Ok(false);
         }
         let extra = self
             .session
             .request(RequestPurpose::GetTonExplorerUrl, None);
         let json = crate::telegram::requests::get_application_config(extra);
-        self.send_json_request(extra, &json)?;
-        self.session.ton_wallet.explorer_url_requested = true;
+        self.session.ton_wallet.explorer.begin();
+        if let Err(err) = self.send_json_request(extra, &json) {
+            self.session.ton_wallet.explorer.cancel();
+            return Err(err);
+        }
         Ok(true)
     }
 
@@ -77,17 +80,25 @@ impl<S: JsonSender> ConnectDriver<S> {
             open: true,
             ..MoneyPage::default()
         };
-        if !wallet.state_requested {
-            wallet.state_requested = true;
-            self.send_wallet(TonWalletPurpose::LoadState, None, load_ton_wallet_state)?;
+        if wallet.state_fetch.can_ask() {
+            wallet.state_fetch.begin();
+            if let Err(err) =
+                self.send_wallet(TonWalletPurpose::LoadState, None, load_ton_wallet_state)
+            {
+                self.session.ton_wallet.state_fetch.cancel();
+                return Err(err);
+            }
         }
-        if !self.session.ton_wallet.rates_requested {
-            self.session.ton_wallet.rates_requested = true;
-            self.send_wallet(
+        if self.session.ton_wallet.rates_fetch.can_ask() {
+            self.session.ton_wallet.rates_fetch.begin();
+            if let Err(err) = self.send_wallet(
                 TonWalletPurpose::ExchangeRates,
                 None,
                 get_currency_exchange_rates,
-            )?;
+            ) {
+                self.session.ton_wallet.rates_fetch.cancel();
+                return Err(err);
+            }
         }
         self.fetch_ton_explorer_url()?;
         self.fetch_wallet_history(false)
@@ -218,17 +229,16 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session.show_wallet_transaction(tx);
             return Ok(true);
         }
-        let money = &mut self.session.ton_wallet.money;
-        money.selected_tx = None;
-        money.tx_error = None;
-        money.tx_loading = true;
+        self.session.ton_wallet.money.selected_tx = None;
         let id = transaction_id.to_string();
         let sent = self.send_wallet(TonWalletPurpose::Transaction, None, |extra| {
             get_ton_wallet_transaction(extra, &id)
         });
-        if sent.is_err() {
-            self.session.ton_wallet.money.tx_loading = false;
-        }
+        let money = &mut self.session.ton_wallet.money;
+        money.tx_lookup = match &sent {
+            Ok(request) => TxLookup::Loading { request: *request },
+            Err(_) => TxLookup::Idle,
+        };
         sent.map(|_| true)
     }
 

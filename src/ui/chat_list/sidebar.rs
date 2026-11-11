@@ -9,6 +9,7 @@
 //! (docs/decisions/main-thread-stack.md).
 
 use super::*;
+use crate::ui::chat_list_state::SidebarTab;
 use crate::ui::empty_state::EmptyState;
 use gpui_kit::assets::IconName;
 use quill::community_row::{GroupedEntry, ListedChat, group_main_list};
@@ -89,7 +90,7 @@ impl QuillApp {
             .gap_2()
             .child(self.sidebar_header(mode, cx))
             .when_some(
-                (!self.chat_list.contacts_tab_open && !self.chat_list.calls_tab_open)
+                (self.chat_list.tab == SidebarTab::Chats)
                     .then(|| chat_list_caption(mode, self.session()))
                     .flatten(),
                 |this, caption| {
@@ -118,16 +119,13 @@ impl QuillApp {
         // A pinned drag lives in the chat rows, which end it on release.
         // Contacts, Calls or search in their place: the release can never
         // reach them, so the drag ends now, unsaved (round 18 B #2).
-        if self.chat_list.contacts_tab_open
-            || self.chat_list.calls_tab_open
-            || self.search_is_open()
-        {
+        if self.chat_list.tab != SidebarTab::Chats || self.search_is_open() {
             self.chat_list.pin_reorder = None;
         }
-        if self.chat_list.contacts_tab_open {
+        if self.chat_list.tab == SidebarTab::Contacts {
             return list.child(self.contacts_panel(cx));
         }
-        if self.chat_list.calls_tab_open {
+        if self.chat_list.tab == SidebarTab::Calls {
             return list.child(
                 div()
                     .id("calls-scroll")
@@ -496,7 +494,14 @@ impl QuillApp {
             .rounded_md()
             .when(focus_visible, |this| this.focus_ring_style(window, cx))
             // A mouse move takes the selection back from the keys.
-            .on_mouse_move(cx.listener(|this, _, _, cx| this.chat_list_mouse_moved(cx)))
+            .on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, _, cx| {
+                // A pointer moving with no button down: the release never
+                // reached the list (lost capture), so the drag ends unsaved.
+                if event.pressed_button != Some(MouseButton::Left) {
+                    this.cancel_pin_drag(cx);
+                }
+                this.chat_list_mouse_moved(cx)
+            }))
             // Pinned drag: the pointer position drives the live reorder; a
             // release anywhere ends it.
             .on_drag_move(

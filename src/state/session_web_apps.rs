@@ -104,20 +104,22 @@ impl Session {
             }
             return;
         };
-        self.bots.web_apps.open_result = Some(if url.is_empty() {
-            WebAppOpenResult::Failed {
-                bot_user_id,
-                message: "The bot returned no app address.".into(),
-            }
-        } else {
-            WebAppOpenResult::Opened {
-                bot_user_id,
-                chat_id,
-                source,
-                launch_id,
-                url,
-            }
-        });
+        self.bots
+            .web_apps
+            .replace_open_result(Some(if url.is_empty() {
+                WebAppOpenResult::Failed {
+                    bot_user_id,
+                    message: crate::lang::tr(crate::lang::keys::Q_WEB_APP_NO_ADDRESS).to_string(),
+                }
+            } else {
+                WebAppOpenResult::Opened {
+                    bot_user_id,
+                    chat_id,
+                    source,
+                    launch_id,
+                    url,
+                }
+            }));
     }
 
     /// The context of the open call that `request` answers.
@@ -179,10 +181,12 @@ impl Session {
             | RequestPurpose::Bots(BotsPurpose::GetWebAppLinkUrl { bot_user_id }) => {
                 // A dropped launch's failure is nobody's to report.
                 if self.take_web_app_pending(pending).is_some() {
-                    self.bots.web_apps.open_result = Some(WebAppOpenResult::Failed {
-                        bot_user_id,
-                        message: web_app_error_text(err),
-                    });
+                    self.bots
+                        .web_apps
+                        .replace_open_result(Some(WebAppOpenResult::Failed {
+                            bot_user_id,
+                            message: web_app_error_text(err),
+                        }));
                 }
             }
             RequestPurpose::Bots(BotsPurpose::SearchWebApp { bot_user_id }) => {
@@ -206,8 +210,8 @@ impl Session {
             RequestPurpose::Bots(BotsPurpose::AllowBotToSendMessages { bot_user_id }) => {
                 self.bots.web_apps.write_access = Some((bot_user_id, WriteAccessResult::Denied));
             }
-            RequestPurpose::Bots(BotsPurpose::SharePhoneWithMiniApp { bot_user_id }) => {
-                self.bots.web_apps.phone_share = Some((bot_user_id, false));
+            RequestPurpose::Bots(BotsPurpose::SharePhoneWithMiniApp { .. }) => {
+                self.bots.web_apps.phone_share = Some(PhoneShare::Refused(p.id));
             }
             RequestPurpose::Bots(BotsPurpose::ToggleBotEmojiStatusAccess {
                 bot_user_id,

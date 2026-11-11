@@ -181,7 +181,7 @@ impl QuillApp {
     /// `sendBotCommand`). An edit, a forward bar, a tray or the rich
     /// editor in the composer stay as they are; the composer's path would
     /// have made the text the edited message's, the forward's comment or
-    /// the files' caption. A one-time keyboard hides first, locally and via
+    /// the files' caption. A one-time keyboard hides once the text went, locally and via
     /// `deleteChatReplyMarkup` (schema 1.8.67, line 13183).
     pub(super) fn press_custom_keyboard_text(
         &mut self,
@@ -191,10 +191,11 @@ impl QuillApp {
         one_time: bool,
         cx: &mut Context<Self>,
     ) {
-        if one_time {
+        // Only a button whose text went out takes the keyboard with it: a
+        // held-back send (slow mode, an error) leaves it to press again.
+        if self.send_command_text(chat_id, text, cx) && one_time {
             self.dismiss_custom_keyboard(chat_id, message_id, cx);
         }
-        self.send_command_text(chat_id, text, cx);
         cx.notify();
     }
 
@@ -343,10 +344,12 @@ impl QuillApp {
             } => {
                 let lock = QuizLock::from_button(*force_regular, *force_quiz);
                 element.on_click(cx.listener(move |this, _, window, cx| {
-                    if one_time {
-                        this.dismiss_custom_keyboard(chat_id, message_id, cx);
-                    }
                     this.open_poll_dialog_locked(lock, window, cx);
+                    // A one-time keyboard hides when the poll is sent: a
+                    // cancelled box leaves it.
+                    if one_time && let Some(dialog) = this.chat_ui.poll_dialog.as_mut() {
+                        dialog.dismiss_keyboard_on_send = Some((chat_id, message_id));
+                    }
                 }))
             }
             _ => element.disabled(true),

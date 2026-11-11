@@ -217,7 +217,7 @@ fn recipient(sender: MessageSender, is_self: bool) -> GiftRecipient {
 #[test]
 fn a_premium_gift_goes_to_the_user_with_a_cut_message() {
     let user = recipient(MessageSender::User { user_id: 77 }, false);
-    let invoice = premium_gift_invoice(&gift_option(), &user, "  Enjoy it  ", 5).unwrap();
+    let invoice = premium_gift_invoice(&gift_option(), &user, "  Enjoy it  ", Some(5)).unwrap();
     assert_eq!(
         invoice,
         InputInvoice::Telegram(TelegramPaymentPurpose::PremiumGift {
@@ -231,15 +231,28 @@ fn a_premium_gift_goes_to_the_user_with_a_cut_message() {
 }
 
 #[test]
+fn a_premium_gift_message_is_kept_whole_while_the_limit_is_unknown() {
+    let user = recipient(MessageSender::User { user_id: 77 }, false);
+    let invoice = premium_gift_invoice(&gift_option(), &user, "  Enjoy it  ", None).unwrap();
+    let InputInvoice::Telegram(TelegramPaymentPurpose::PremiumGift { text, .. }) = invoice else {
+        panic!("a Premium gift");
+    };
+    assert_eq!(text, "Enjoy it");
+}
+
+#[test]
 fn premium_cannot_be_gifted_to_a_channel_or_to_yourself() {
     let channel = recipient(MessageSender::Chat { chat_id: -1001 }, false);
-    assert_eq!(premium_gift_invoice(&gift_option(), &channel, "", 0), None);
+    assert_eq!(
+        premium_gift_invoice(&gift_option(), &channel, "", Some(0)),
+        None
+    );
     let me = recipient(MessageSender::User { user_id: 1 }, true);
-    assert_eq!(premium_gift_invoice(&gift_option(), &me, "", 0), None);
+    assert_eq!(premium_gift_invoice(&gift_option(), &me, "", Some(0)), None);
     let user = recipient(MessageSender::User { user_id: 2 }, false);
     let mut free = gift_option();
     free.amount = 0;
-    assert_eq!(premium_gift_invoice(&free, &user, "", 0), None);
+    assert_eq!(premium_gift_invoice(&free, &user, "", Some(0)), None);
 }
 
 fn options() -> GiveawayOptions {
@@ -354,7 +367,7 @@ fn gifted_stars_name_the_user_and_the_pack() {
 fn a_premium_gift_paid_with_stars_uses_the_stars_currency() {
     let user = recipient(MessageSender::User { user_id: 77 }, false);
     let invoice =
-        crate::payment_invoice::premium_gift_stars_invoice(&gift_option(), &user, "Hi", 10)
+        crate::payment_invoice::premium_gift_stars_invoice(&gift_option(), &user, "Hi", Some(10))
             .unwrap();
     let purpose = invoice.to_json()["purpose"].clone();
     assert_eq!(purpose["currency"], "XTR");
@@ -364,7 +377,7 @@ fn a_premium_gift_paid_with_stars_uses_the_stars_currency() {
     let mut no_stars = gift_option();
     no_stars.star_count = 0;
     assert_eq!(
-        crate::payment_invoice::premium_gift_stars_invoice(&no_stars, &user, "", 0),
+        crate::payment_invoice::premium_gift_stars_invoice(&no_stars, &user, "", Some(0)),
         None
     );
 }

@@ -556,8 +556,9 @@ impl QuillApp {
         cx.notify();
     }
 
-    /// Poll-loop half: a request that failed on a limit opens its box and
-    /// frees the dialog that was waiting for the answer.
+    /// Poll-loop half: a request that failed on a limit opens its box, in
+    /// the window of the box that sent the request. That box's own answer
+    /// ends its wait; no other box is touched.
     pub(super) fn drain_folder_limit(&mut self, cx: &mut Context<Self>) -> bool {
         let hit = match self.live.as_mut() {
             Some(live) => live.driver.session.chat_list.folder_limit_hit.take(),
@@ -566,27 +567,48 @@ impl QuillApp {
                 .as_mut()
                 .and_then(|s| s.chat_list.folder_limit_hit.take()),
         };
-        let Some(kind) = hit else {
+        let Some((kind, request)) = hit else {
             return false;
         };
-        if let Some(dialog) = self.folders.share.as_mut() {
-            dialog.busy = false;
-        }
-        if let Some(dialog) = self.folders.invite.as_mut() {
-            dialog.adding = false;
-        }
         // The limit box goes where the box whose request hit the limit
         // is, not to the main window this poll runs in.
-        let waiting = if self.folders.invite.is_some() {
+        let waiting = self.folder_box_of_request(request);
+        let asker = self.windows.window_of_box(waiting);
+        self.as_asked_by(asker, |this| this.show_folder_limit(kind, cx));
+        true
+    }
+
+    /// The folder box that sent `request` (the one waiting on its answer).
+    /// A request no open box owns (it was closed meanwhile) goes to the
+    /// editor's window, as the limit box is the editor's follow-up.
+    fn folder_box_of_request(&self, request: Option<quill::ids::RequestId>) -> DialogKind {
+        use crate::ui::dialogs::{FolderLoad, InviteStage, LinkOp};
+        let owns = |wanted: Option<quill::ids::RequestId>| request.is_some() && request == wanted;
+        let invite = self.folders.invite.as_ref().and_then(|d| match d.stage {
+            InviteStage::Adding { request, .. } => Some(request),
+            _ => None,
+        });
+        let share = self.folders.share.as_ref().and_then(|d| match d.op {
+            LinkOp::Saving(request) => Some(request),
+            LinkOp::Idle => None,
+        });
+        let editor = self.folders.editor.as_ref().and_then(|d| match d.load {
+            FolderLoad::Saving(request) => Some(request),
+            _ => None,
+        });
+        if owns(invite) {
+            DialogKind::FolderInvite
+        } else if owns(share) {
+            DialogKind::FolderShare
+        } else if owns(editor) {
+            DialogKind::FolderEditor
+        } else if self.folders.invite.is_some() {
             DialogKind::FolderInvite
         } else if self.folders.share.is_some() {
             DialogKind::FolderShare
         } else {
             DialogKind::FolderEditor
-        };
-        let asker = self.windows.window_of_box(waiting);
-        self.as_asked_by(asker, |this| this.show_folder_limit(kind, cx));
-        true
+        }
     }
 
     pub(super) fn build_folder_limit_dialog(

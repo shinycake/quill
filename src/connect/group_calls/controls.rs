@@ -44,17 +44,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 }
                 return Ok(extra);
             }
-            let extra = self.session.request(
-                RequestPurpose::Calls(CallsPurpose::EndGroupCallScreenSharing { group_call_id }),
-                None,
-            );
-            if let Err(err) = self
-                .sender
-                .send_json(&end_group_call_screen_sharing(extra, group_call_id))
-            {
-                self.session.requests.take(extra);
-                return Err(err);
-            }
+            let extra = self.send_end_screen_sharing(group_call_id)?;
             if let Some(engine) = self.call_engine.as_deref_mut()
                 && let Err(err) = engine.stop_screen_share(group_call_id)
                 && let Some(call) = self.session.calls.active_group_call.as_mut()
@@ -101,6 +91,26 @@ impl<S: JsonSender> ConnectDriver<S> {
         Ok(extra)
     }
 
+    /// `endGroupCallScreenSharing`: tells Telegram the screen is no longer
+    /// shared (a stop, or a share whose native side could not connect).
+    pub(super) fn send_end_screen_sharing(
+        &mut self,
+        group_call_id: i32,
+    ) -> Result<RequestId, ConnectSendError> {
+        let extra = self.session.request(
+            RequestPurpose::Calls(CallsPurpose::EndGroupCallScreenSharing { group_call_id }),
+            None,
+        );
+        if let Err(err) = self
+            .sender
+            .send_json(&end_group_call_screen_sharing(extra, group_call_id))
+        {
+            self.session.requests.take(extra);
+            return Err(err);
+        }
+        Ok(extra)
+    }
+
     /// Mute or unmute yourself in the joined group call (see
     /// [`Self::set_group_call_self_mute`]).
     pub fn toggle_group_call_self_mute(&mut self) -> Result<(), SelfMuteError> {
@@ -138,7 +148,14 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !muted && call.is_force_muted() {
             return Err(SelfMuteError::NotAllowed);
         }
-        let me = me_row.map(|p| p.participant_id);
+        // Right after joining the list may not hold your row yet: you are
+        // then who you join as, or your account.
+        let me = me_row.map(|p| p.participant_id).or_else(|| {
+            call.join_as.or(self
+                .session
+                .my_user_id
+                .map(|user_id| MessageSender::User { user_id }))
+        });
         // Before the transport is up the engine only stores the state for
         // the connect; with it up the call is real and may fail.
         let making = self

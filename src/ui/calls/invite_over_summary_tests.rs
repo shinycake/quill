@@ -41,7 +41,7 @@ fn ended_without_rating(call_id: i32) -> CallSummary {
         busy: false,
         need_debug_information: false,
         need_log: false,
-        rating_sent: false,
+        rating: quill::state::CallRating::Offered,
         debug_information_sent: false,
         debug_information_error: None,
         log_sent: false,
@@ -70,6 +70,7 @@ fn an_invitation_after_an_ended_call_rings_in_the_call_window(cx: &mut TestAppCo
             user_id: 41,
             is_video: false,
             others: Vec::new(),
+            rings_until: i64::MAX,
         });
         app.sync_call_sounds();
         app.sync_call_windows(cx);
@@ -104,6 +105,7 @@ fn an_invitation_alone_keeps_the_call_tick(cx: &mut TestAppContext) {
             user_id: 41,
             is_video: false,
             others: Vec::new(),
+            rings_until: i64::MAX,
         });
         app.ensure_call_tick(cx);
         assert!(app.calls.tick_active, "the tick starts");

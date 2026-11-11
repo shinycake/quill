@@ -1,7 +1,7 @@
 //! Driver tests: voice chat, video chat and live stream links
 //! (`parity:deeplink-voice-chat`).
 use super::*;
-use crate::call_link::{CallLinkStep, LeaveKind};
+use crate::call_link::{CallLinkStage, CallLinkStep, LeaveKind};
 use crate::ids::ChatId;
 
 fn sent_types(recorder: &RecordingSender) -> Vec<String> {
@@ -97,8 +97,9 @@ fn another_joined_call_blocks_the_offer() {
     let ask = driver
         .session
         .calls
-        .call_link_confirm
-        .clone()
+        .call_link_stage
+        .confirm()
+        .cloned()
         .expect("asks");
     assert_eq!(ask.chat_id, 51);
     assert_eq!(
@@ -124,8 +125,13 @@ fn confirming_leaves_the_old_call_and_offers_the_new_one() {
         sent_request(&recorder, "getGroupCall")["group_call_id"],
         555
     );
-    assert_eq!(driver.session.calls.call_link_confirm, None);
-    assert_eq!(driver.session.calls.call_link_after_leave, None);
+    assert_eq!(
+        driver.session.calls.call_link_stage,
+        CallLinkStage::Offered(crate::call_link::OfferedCallLink {
+            group_call_id: 555,
+            live_stream: false,
+        })
+    );
     assert_eq!(
         driver
             .session
@@ -151,8 +157,52 @@ fn declining_changes_nothing() {
     driver.offer_call_link(ChatId(51), "AbC", false).unwrap();
     let before = recorder.snapshot().len();
     driver.cancel_call_link_leave();
-    assert_eq!(driver.session.calls.call_link_confirm, None);
+    assert_eq!(driver.session.calls.call_link_stage, CallLinkStage::Idle);
     assert_eq!(recorder.snapshot().len(), before);
     assert!(driver.session.calls.active_group_call.is_some());
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn a_confirmed_stream_link_keeps_its_live_stream_into_the_offer() {
+    let (dir, mut driver, _recorder, _handle, _sink, _seq) = ready_group_call_driver();
+    let mut other = tracked_group_call(false, false, false);
+    other.is_joined = true;
+    driver.session.calls.active_group_call = Some(other);
+    driver.offer_call_link(ChatId(51), "AbC", true).unwrap();
+    driver.confirm_call_link_leave().unwrap();
+    assert_eq!(
+        driver.session.calls.call_link_stage,
+        CallLinkStage::Offered(crate::call_link::OfferedCallLink {
+            group_call_id: 555,
+            live_stream: true,
+        })
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn another_call_taking_the_place_drops_the_waiting_link() {
+    let (dir, mut driver, recorder, _handle, _sink, _seq) = ready_group_call_driver();
+    let mut other = tracked_group_call(false, false, false);
+    other.is_joined = true;
+    driver.session.calls.active_group_call = Some(other);
+    driver.offer_call_link(ChatId(51), "AbC", false).unwrap();
+    let confirm = driver
+        .session
+        .calls
+        .call_link_stage
+        .take_confirm()
+        .expect("ask");
+    // The call being left is call 999; a different one is joined instead.
+    driver.session.calls.call_link_stage =
+        CallLinkStage::Leaving(crate::call_link::CallLinkLeaving {
+            link: confirm,
+            leaving: crate::call_link::LeavingCall::Group(999),
+        });
+    let before = recorder.snapshot().len();
+    driver.maybe_offer_pending_call_link().unwrap();
+    assert_eq!(driver.session.calls.call_link_stage, CallLinkStage::Idle);
+    assert_eq!(recorder.snapshot().len(), before, "nothing was offered");
     let _ = std::fs::remove_dir_all(&dir);
 }

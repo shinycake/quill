@@ -1019,3 +1019,30 @@ fn chat_action_bar_from_new_chat_and_updates() {
     );
     assert!(session.chat_action_bar(ChatId(501)).is_none());
 }
+
+#[test]
+fn a_refusal_the_edit_box_has_no_field_for_still_fails_its_save() {
+    // The registry remembers why each request failed, so the Edit box that
+    // sent it reads the refusal; a protected-content switch and a link
+    // that needs Premium both record a box error as well.
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    let chat = ChatId(13);
+    let switch = session.request(RequestPurpose::ToggleChatHasProtectedContent, Some(chat));
+    let link = session.request(RequestPurpose::SetSupergroupUsername, Some(chat));
+    for id in [switch, link] {
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"error","@extra":"{}","code":400,"message":"USERNAMES_ACTIVE_TOO_MUCH"}}"#,
+                id.0
+            ),
+        );
+    }
+    assert!(session.requests.failure(switch).is_some());
+    assert!(session.requests.failure(link).is_some());
+    let error = session.groups.info_edit_errors.get(&13).expect("an error");
+    assert_eq!(error.field, GroupInfoField::Username);
+}

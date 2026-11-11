@@ -24,6 +24,9 @@ impl QuillApp {
         let live = self.live.is_some();
         let owner = cx.entity().downgrade();
         let chat_id = chat.map(|c| c.id);
+        // What the entries were built for: a click acts on that chat on
+        // that screen, or not at all.
+        let epoch = self.screen_epoch();
         let is_secret = chat.is_some_and(|c| matches!(c.kind, ChatKind::Secret { .. }));
         let ttl_ready = chat.is_some_and(|c| {
             if is_secret {
@@ -140,9 +143,24 @@ impl QuillApp {
                     let owner = owner.clone();
                     let entry = *entry;
                     menu = menu.item(PopupMenuItem::new(label).on_click(move |_, window, cx| {
-                        let _ = owner.update(cx, |this, cx| match action {
-                            Some(action) => this.navigate(action, window, cx),
-                            None => this.run_header_entry(entry, discussion, window, cx),
+                        let _ = owner.update(cx, |this, cx| {
+                            let Some(chat_id) = chat_id else {
+                                return;
+                            };
+                            // Another chat opened (a notification, Alt+Down,
+                            // a link) or the account switched while the
+                            // popup was up: its entries are not for this one.
+                            if this.screen_epoch() != epoch
+                                || this.session().and_then(|s| s.open_chat) != Some(chat_id)
+                            {
+                                return;
+                            }
+                            match action {
+                                Some(action) => this.navigate(action, window, cx),
+                                None => {
+                                    this.run_header_entry(entry, chat_id, discussion, window, cx)
+                                }
+                            }
                         });
                     }));
                 }
@@ -155,13 +173,11 @@ impl QuillApp {
     fn run_header_entry(
         &mut self,
         entry: HeaderEntry,
+        chat_id: ChatId,
         discussion: Option<i64>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(chat_id) = self.session().and_then(|s| s.open_chat) else {
-            return;
-        };
         match entry {
             HeaderEntry::ViewProfile(_) => {
                 if let Some(target) = self.session().and_then(|s| s.chat_info_target(chat_id)) {

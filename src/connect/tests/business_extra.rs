@@ -6,6 +6,8 @@ use crate::business_bots::{BotRights, ConnectedBot};
 use crate::business_settings::BusinessRecipients;
 use crate::diagnostics::{DiagnosticSink, MemorySink};
 use crate::platform::MemorySecretStore;
+use crate::state::ChatLinkSave;
+use crate::state::fetch::Fetch;
 use crate::telegram::client::copy_and_parse;
 use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
@@ -76,7 +78,7 @@ fn chat_links_load_create_edit_and_delete() {
             .settings
             .business_extra
             .chat_links
-            .as_ref()
+            .data()
             .unwrap()
             .len(),
         1
@@ -97,10 +99,14 @@ fn chat_links_load_create_edit_and_delete() {
         .settings
         .business_extra
         .chat_links
-        .clone()
+        .data()
+        .cloned()
         .unwrap();
     assert_eq!(links[0].link, "https://t.me/m/New");
-    assert_eq!(driver.session.settings.business_extra.chat_links_saving, 0);
+    assert_eq!(
+        driver.session.settings.business_extra.chat_link_save,
+        ChatLinkSave::Saved
+    );
 
     driver
         .edit_chat_link("https://t.me/m/Ab", "Hey", "Promo 2")
@@ -119,7 +125,8 @@ fn chat_links_load_create_edit_and_delete() {
         .settings
         .business_extra
         .chat_links
-        .clone()
+        .data()
+        .cloned()
         .unwrap();
     assert_eq!(links.len(), 2);
     assert_eq!(links[1].title, "Promo 2");
@@ -131,7 +138,7 @@ fn chat_links_load_create_edit_and_delete() {
             .settings
             .business_extra
             .chat_links
-            .as_ref()
+            .data()
             .unwrap()
             .len(),
         1
@@ -143,8 +150,115 @@ fn chat_links_load_create_edit_and_delete() {
         &sink,
         &format!(r#"{{"@type":"ok","@extra":"{extra}"}}"#),
     );
+    // The row stays gone; nothing asks the list again.
     driver.ensure_chat_links().unwrap();
+    assert_eq!(count_sent(&recorder, "getBusinessChatLinks"), 1);
+    assert_eq!(
+        driver
+            .session
+            .settings
+            .business_extra
+            .chat_links
+            .data()
+            .map(Vec::len),
+        Some(1)
+    );
+}
+
+#[test]
+fn a_refused_link_delete_puts_the_row_back() {
+    let (mut driver, recorder, sink, seq) = driver_parts();
+    driver.ensure_chat_links().unwrap();
+    let extra = extra_of(&recorder, "getBusinessChatLinks");
+    feed(
+        &mut driver,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"businessChatLinks","@extra":"{extra}","links":[{{"@type":"businessChatLink",{LINK}}}]}}"#
+        ),
+    );
+    driver.delete_chat_link("https://t.me/m/Ab").unwrap();
+    let links = |driver: &ConnectDriver<_>| {
+        driver
+            .session
+            .settings
+            .business_extra
+            .chat_links
+            .data()
+            .map_or(0, Vec::len)
+    };
+    assert_eq!(links(&driver), 0);
+    let extra = extra_of(&recorder, "deleteBusinessChatLink");
+    feed(
+        &mut driver,
+        &seq,
+        &sink,
+        &format!(r#"{{"@type":"error","@extra":"{extra}","code":400,"message":"X"}}"#),
+    );
+    assert_eq!(links(&driver), 1);
+    assert!(driver.session.settings.business.error.is_some());
+}
+
+#[test]
+fn a_failed_links_load_waits_for_retry() {
+    let (mut driver, recorder, sink, seq) = driver_parts();
+    driver.ensure_chat_links().unwrap();
+    let extra = extra_of(&recorder, "getBusinessChatLinks");
+    feed(
+        &mut driver,
+        &seq,
+        &sink,
+        &format!(r#"{{"@type":"error","@extra":"{extra}","code":500,"message":"X"}}"#),
+    );
+    assert!(
+        driver
+            .session
+            .settings
+            .business_extra
+            .chat_links
+            .error()
+            .is_some()
+    );
+    // Opening the screen again does not ask on its own; Retry does.
+    driver.ensure_chat_links().unwrap();
+    assert_eq!(count_sent(&recorder, "getBusinessChatLinks"), 1);
+    driver.retry_chat_links().unwrap();
     assert_eq!(count_sent(&recorder, "getBusinessChatLinks"), 2);
+    assert!(
+        driver
+            .session
+            .settings
+            .business_extra
+            .chat_links
+            .is_loading()
+    );
+}
+
+#[test]
+fn a_failed_bot_load_waits_for_retry() {
+    let (mut driver, recorder, sink, seq) = driver_parts();
+    driver.ensure_connected_bot().unwrap();
+    let extra = extra_of(&recorder, "getBusinessConnectedBot");
+    feed(
+        &mut driver,
+        &seq,
+        &sink,
+        &format!(r#"{{"@type":"error","@extra":"{extra}","code":500,"message":"X"}}"#),
+    );
+    assert!(
+        driver
+            .session
+            .settings
+            .business_extra
+            .connected_bot
+            .error()
+            .is_some()
+    );
+    driver.ensure_connected_bot().unwrap();
+    assert_eq!(count_sent(&recorder, "getBusinessConnectedBot"), 1);
+    driver.retry_connected_bot().unwrap();
+    assert_eq!(count_sent(&recorder, "getBusinessConnectedBot"), 2);
 }
 
 #[test]
@@ -160,7 +274,7 @@ fn no_connected_bot_is_a_404() {
     );
     assert_eq!(
         driver.session.settings.business_extra.connected_bot,
-        Some(None)
+        Fetch::Ready(None)
     );
     assert!(driver.session.settings.business.error.is_none());
 }
@@ -196,7 +310,7 @@ fn a_bot_is_saved_and_asked_for_again() {
     );
     assert_eq!(
         driver.session.settings.business_extra.connected_bot,
-        Some(None)
+        Fetch::Ready(None)
     );
 }
 
@@ -218,7 +332,10 @@ fn a_refused_bot_save_is_forgotten_and_asked_for_again() {
         &sink,
         &format!(r#"{{"@type":"error","@extra":"{extra}","code":400,"message":"BOT_INVALID"}}"#),
     );
-    assert_eq!(driver.session.settings.business_extra.connected_bot, None);
+    assert_eq!(
+        driver.session.settings.business_extra.connected_bot,
+        Fetch::Idle
+    );
     driver.ensure_connected_bot().unwrap();
     assert_eq!(count_sent(&recorder, "getBusinessConnectedBot"), 1);
 }
@@ -308,4 +425,65 @@ fn start_page_and_ads_requests() {
         sent_request(&recorder, "toggleHasSponsoredMessagesEnabled")["has_sponsored_messages_enabled"],
         true
     );
+}
+
+#[test]
+fn a_refused_link_save_goes_back_to_idle_and_only_its_own_answer_counts() {
+    let (mut driver, recorder, sink, seq) = driver_parts();
+    let save = |driver: &ConnectDriver<_>| driver.session.settings.business_extra.chat_link_save;
+    driver.create_chat_link("Hello", "").unwrap();
+    assert!(matches!(save(&driver), ChatLinkSave::Saving(_)));
+    let first = extra_of(&recorder, "createBusinessChatLink");
+    // The box was closed and a new one opened: the old save no longer drives it.
+    driver.session.settings.business_extra.chat_link_save = ChatLinkSave::Idle;
+    assert_eq!(save(&driver), ChatLinkSave::Idle);
+    feed(
+        &mut driver,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"businessChatLink","@extra":"{first}","link":"https://t.me/m/Old","text":{{"@type":"formattedText","text":"Hello","entities":[]}},"title":"","view_count":0}}"#
+        ),
+    );
+    assert_eq!(save(&driver), ChatLinkSave::Idle);
+
+    driver.create_chat_link("Again", "").unwrap();
+    let second = recorder
+        .snapshot()
+        .iter()
+        .filter_map(|j| serde_json::from_str::<serde_json::Value>(j).ok())
+        .filter(|v| v["@type"] == "createBusinessChatLink")
+        .filter_map(|v| v["@extra"].as_str().map(str::to_string))
+        .next_back()
+        .unwrap();
+    feed(
+        &mut driver,
+        &seq,
+        &sink,
+        &format!(r#"{{"@type":"error","@extra":"{second}","code":400,"message":"X"}}"#),
+    );
+    assert_eq!(save(&driver), ChatLinkSave::Idle);
+    assert!(driver.session.settings.business.error.is_some());
+}
+
+#[test]
+fn a_links_or_bot_load_that_cannot_be_sent_fails_with_retry_not_a_spinner() {
+    let (mut driver, recorder, _sink, _seq) = driver_parts();
+    recorder.refuse(Some("getBusinessChatLinks"));
+    assert!(driver.ensure_chat_links().is_err());
+    let state = &driver.session.settings.business_extra;
+    assert!(state.chat_links.error().is_some(), "Failed, not Idle");
+    // A render's ensure does not ask again; Retry does, and can succeed.
+    assert!(driver.ensure_chat_links().is_ok());
+    assert_eq!(count_sent(&recorder, "getBusinessChatLinks"), 0);
+    recorder.refuse(None);
+    assert!(driver.retry_chat_links().is_ok());
+    assert_eq!(count_sent(&recorder, "getBusinessChatLinks"), 1);
+
+    recorder.refuse(Some("getBusinessConnectedBot"));
+    assert!(driver.ensure_connected_bot().is_err());
+    let state = &driver.session.settings.business_extra;
+    assert!(state.connected_bot.error().is_some());
+    assert!(driver.ensure_connected_bot().is_ok());
+    assert_eq!(count_sent(&recorder, "getBusinessConnectedBot"), 0);
 }

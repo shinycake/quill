@@ -127,6 +127,17 @@ pub(super) mod palette {
     }
 }
 
+/// The still cutter: one cut runs at a time and the latest wish follows it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum StillCut {
+    Idle,
+    /// A cut with this token is running; `next` is the time wanted after it.
+    Cutting {
+        token: u64,
+        next: Option<i64>,
+    },
+}
+
 pub(super) struct VideoEditorDialog {
     pub(super) target: EditorTarget,
     /// The file the edits start from.
@@ -140,9 +151,9 @@ pub(super) struct VideoEditorDialog {
     /// the picture when the video can't play here, and the cover bubble.
     pub(super) preview: Option<PathBuf>,
     pub(super) still: Option<super::owned_image::OwnedImage>,
-    /// A still is being cut; one more is wanted at this time after it.
-    pub(super) still_busy: bool,
-    pub(super) still_wanted: Option<i64>,
+    /// The cover still's cutter, matched by its own token so an encode's
+    /// serial bump does not orphan a cut.
+    pub(super) still_cut: StillCut,
     /// Bumped by every probe and encode; late answers are dropped.
     pub(super) serial: u64,
     /// The edited copy is being encoded.
@@ -225,13 +236,12 @@ impl QuillApp {
         else {
             return;
         };
-        let source = edit
-            .media_edit
+        let source = replacement
             .video_extras
             .source
             .clone()
             .unwrap_or_else(|| replacement.path.clone());
-        let initial = edit.media_edit.video_extras.edits;
+        let initial = replacement.video_extras.edits;
         self.open_video_editor(EditorTarget::MessageEdit, source, initial, window, cx);
     }
 
@@ -252,8 +262,7 @@ impl QuillApp {
             timeline: None,
             preview: None,
             still: None,
-            still_busy: false,
-            still_wanted: None,
+            still_cut: StillCut::Idle,
             serial,
             busy: false,
             note: Some(tr(keys::Q_AV_READING_THE_VIDEO).into()),
@@ -372,13 +381,15 @@ impl QuillApp {
         let Some(editor) = self.composer_ui.send_box.video_editor.as_mut() else {
             return;
         };
-        if editor.still_busy {
-            editor.still_wanted = Some(at_ms);
+        if let StillCut::Cutting { token, .. } = editor.still_cut {
+            editor.still_cut = StillCut::Cutting {
+                token,
+                next: Some(at_ms),
+            };
             return;
         }
-        editor.still_busy = true;
-        editor.still_wanted = None;
-        let serial = editor.serial;
+        let token = next_editor_serial();
+        editor.still_cut = StillCut::Cutting { token, next: None };
         let source = editor.source.clone();
         let (turns, flipped) = (editor.edits.turns, editor.edits.flipped);
         let worker = cx.background_spawn(async move {
@@ -394,14 +405,17 @@ impl QuillApp {
                     .send_box
                     .video_editor
                     .as_mut()
-                    .filter(|editor| editor.serial == serial)
+                    .filter(|editor| matches!(editor.still_cut, StillCut::Cutting { token: t, .. } if t == token))
                 else {
                     if let Ok((frame, _)) = result {
                         let _ = std::fs::remove_file(frame);
                     }
                     return;
                 };
-                editor.still_busy = false;
+                let next = match std::mem::replace(&mut editor.still_cut, StillCut::Idle) {
+                    StillCut::Cutting { next, .. } => next,
+                    StillCut::Idle => None,
+                };
                 match result {
                     Ok((frame, still)) => {
                         if let Some(old) = editor.preview.replace(frame) {
@@ -413,7 +427,7 @@ impl QuillApp {
                     }
                     Err(note) => editor.note = Some(note),
                 }
-                if let Some(next) = editor.still_wanted.take() {
+                if let Some(next) = next {
                     this.refresh_video_preview(next, cx);
                 }
                 cx.notify();
@@ -506,6 +520,7 @@ impl QuillApp {
                             editor.busy = false;
                             editor.note = Some(note);
                         }
+                        this.start_video_editor_player(cx);
                         cx.notify();
                     }
                     Err(_) => {}
@@ -589,9 +604,11 @@ impl QuillApp {
                     replacement.file_name = mp4_name(&replacement.file_name);
                 }
                 replacement.path = output;
+                replacement.probe = quill::composer::ReplacementProbe::for_kind(replacement.kind);
                 extras.gif = false;
                 extras.sound_removed = false;
-                edit.media_edit.video_extras = extras;
+                replacement.video_extras = extras;
+                self.probe_edit_replacement(cx);
                 tr(keys::Q_AV_VIDEO_EDITS_SAVED)
             }
             Some(EditorTarget::Set { .. } | EditorTarget::Avatar) | None => return,

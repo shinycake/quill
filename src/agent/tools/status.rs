@@ -22,7 +22,7 @@ fn window_state() -> Option<WindowState> {
     }
     match bridge::send(&super::current_agent(), UiCommand::State, WINDOW_WAIT) {
         Ok(UiReply::State(state)) => Some(state.window),
-        Err(BridgeError::Timeout) => Some(WindowState::NotAnswering),
+        Err(BridgeError::Timeout | BridgeError::RanNoAnswer) => Some(WindowState::NotAnswering),
         Ok(_) | Err(BridgeError::Busy) => None,
     }
 }

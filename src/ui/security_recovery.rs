@@ -164,14 +164,13 @@ impl QuillApp {
             cx.notify();
             return;
         }
-        self.twofa.notice = None;
-        if let Some(live) = self.live.as_mut() {
-            let _ = live.driver.check_recovery_email_code(&code);
-        }
+        let sent = match self.live.as_mut() {
+            Some(live) => live.driver.check_recovery_email_code(&code).is_ok(),
+            None => true,
+        };
         code.zeroize();
-        self.twofa
-            .code
-            .update(cx, |input, cx| input.set_value("", window, cx));
+        self.twofa.notice = (!sent).then(|| tr(keys::Q_OPS_REQUEST_NOT_SENT).to_string());
+        let _ = window;
         cx.notify();
     }
 
@@ -497,19 +496,52 @@ impl QuillApp {
             cx.notify();
             return;
         }
-        self.twofa.notice = None;
-        if let Some(live) = self.live.as_mut() {
-            let _ = live.driver.recover_twofa_password(&code, &new, &hint);
-        }
+        // The fields keep what was typed until the step is done
+        // (`sync_twofa_forms`): a rejected code or password is corrected,
+        // not retyped, and a request the driver refused says so.
+        let sent = match self.live.as_mut() {
+            Some(live) => live
+                .driver
+                .recover_twofa_password(&code, &new, &hint)
+                .is_ok(),
+            None => true,
+        };
         code.zeroize();
         new.zeroize();
-        for input in [&self.twofa.code, &self.twofa.new_password] {
-            input.update(cx, |input, cx| input.set_value("", window, cx));
-        }
-        self.twofa
-            .hint
-            .update(cx, |input, cx| input.set_value("", window, cx));
+        self.twofa.notice = (!sent).then(|| tr(keys::Q_OPS_REQUEST_NOT_SENT).to_string());
+        let _ = window;
         cx.notify();
+    }
+
+    /// Per frame: a two-step form whose step is over is emptied. A finished
+    /// step reports on the status screen; a login email whose code was sent
+    /// moves on to the code field.
+    pub(super) fn sync_twofa_forms(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(flow) = self.session().map(|s| &s.auth_state.twofa_flow) else {
+            return;
+        };
+        let finished = flow.notice.is_some();
+        let code_sent = flow.login_email_code_sent_to.is_some();
+        let twofa = &self.twofa;
+        let lines = [
+            (finished, twofa.code.clone()),
+            (finished, twofa.new_password.clone()),
+            (finished, twofa.current_password.clone()),
+        ];
+        let areas = [
+            (finished, twofa.hint.clone()),
+            (finished || code_sent, twofa.email.clone()),
+        ];
+        for (stale, input) in lines {
+            if stale && !input.read(cx).value().is_empty() {
+                input.update(cx, |input, cx| input.set_value("", window, cx));
+            }
+        }
+        for (stale, input) in areas {
+            if stale && !input.read(cx).value().is_empty() {
+                input.update(cx, |input, cx| input.set_value("", window, cx));
+            }
+        }
     }
 
     /// Login email: new address, then the code sent to it.
@@ -601,13 +633,12 @@ impl QuillApp {
             cx.notify();
             return;
         }
-        self.twofa.notice = None;
-        if let Some(live) = self.live.as_mut() {
-            let _ = live.driver.set_login_email(&email);
-        }
-        self.twofa
-            .email
-            .update(cx, |input, cx| input.set_value("", window, cx));
+        let sent = match self.live.as_mut() {
+            Some(live) => live.driver.set_login_email(&email).is_ok(),
+            None => true,
+        };
+        self.twofa.notice = (!sent).then(|| tr(keys::Q_OPS_REQUEST_NOT_SENT).to_string());
+        let _ = window;
         cx.notify();
     }
 
@@ -618,14 +649,13 @@ impl QuillApp {
             cx.notify();
             return;
         }
-        self.twofa.notice = None;
-        if let Some(live) = self.live.as_mut() {
-            let _ = live.driver.check_login_email_code(&code);
-        }
+        let sent = match self.live.as_mut() {
+            Some(live) => live.driver.check_login_email_code(&code).is_ok(),
+            None => true,
+        };
         code.zeroize();
-        self.twofa
-            .code
-            .update(cx, |input, cx| input.set_value("", window, cx));
+        self.twofa.notice = (!sent).then(|| tr(keys::Q_OPS_REQUEST_NOT_SENT).to_string());
+        let _ = window;
         cx.notify();
     }
 

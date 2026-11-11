@@ -198,7 +198,7 @@ fn custom_mute_applies_the_total_and_closes_the_panel(cx: &mut TestAppContext) {
     vcx.update(|window, cx| window.click("mute-custom-apply", cx));
     frames(vcx);
     app.read_with(vcx, |app, _| {
-        assert!(!app.notify.mute_menu_open);
+        assert!(app.notify.mute_box.is_none());
         let Some(chat) = app.session().and_then(|s| s.chats.get(&chat_id.0)) else {
             panic!("chat missing");
         };
@@ -228,7 +228,7 @@ fn the_mute_box_keeps_the_chat_it_was_opened_for(cx: &mut TestAppContext) {
     frames(&mut vcx);
     app.read_with(&vcx, |app, _| {
         assert_eq!(app.session().and_then(|s| s.open_chat), Some(other));
-        assert_eq!(app.notify.mute_chat, Some(first), "the box's own chat");
+        assert_eq!(app.notify.mute_chat(), Some(first), "the box's own chat");
     });
 }
 

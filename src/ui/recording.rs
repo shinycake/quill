@@ -323,8 +323,14 @@ impl QuillApp {
 
     /// Self-destructing messages exist only in private chats.
     fn once_allowed(&self) -> bool {
+        let recording_chat = self.recording.origin().flatten().or(self.viewed_chat());
+        self.once_allowed_in(recording_chat)
+    }
+
+    /// Whether `chat` takes a play-once voice message.
+    pub(super) fn once_allowed_in(&self, chat: Option<ChatId>) -> bool {
         self.session()
-            .and_then(|session| session.chats.get(&session.open_chat?.0))
+            .and_then(|session| session.chats.get(&chat?.0))
             .is_some_and(|chat| {
                 matches!(
                     chat.kind,
@@ -478,11 +484,14 @@ impl QuillApp {
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_millis() as u64)
             .unwrap_or(0);
+        // The recording's own window decides the chat, not the main
+        // window's open chat.
+        let origin = self.recording.origin().flatten();
         if let Some(live) = self.live.as_mut() {
             if video {
-                let _ = live.driver.sync_video_note_recording(true, now_ms);
+                let _ = live.driver.sync_video_note_recording(origin, true, now_ms);
             } else {
-                let _ = live.driver.sync_voice_recording(voice, now_ms);
+                let _ = live.driver.sync_voice_recording(origin, voice, now_ms);
             }
         }
     }

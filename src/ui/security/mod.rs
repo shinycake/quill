@@ -642,7 +642,7 @@ impl QuillApp {
     /// change/disable a leftover email would put the request into
     /// pending-confirmation and silently not apply (schema 1.8.67, line
     /// 11434). The fields are cleared and the password strings zeroized
-    /// immediately after the send; the status view shows TDLib's
+    /// after the driver took the request; the status view shows TDLib's
     /// authoritative answer when it arrives.
     pub(super) fn submit_twofa_password(
         &mut self,
@@ -671,7 +671,36 @@ impl QuillApp {
             cx.notify();
             return;
         }
+        // The form stays until the driver took the request: one it refused
+        // (not connected, shutting down) keeps what was typed and says so.
+        let sent = match self.live.as_mut() {
+            Some(live) => {
+                let email_opt = if include_email && !email.is_empty() {
+                    Some(email.as_str())
+                } else {
+                    None
+                };
+                live.driver
+                    .set_two_step_password(&current, &new, &hint, email_opt)
+                    .is_ok()
+            }
+            None => true,
+        };
+        current.zeroize();
+        new.zeroize();
+        if !sent {
+            self.twofa.notice = Some(tr(keys::Q_OPS_REQUEST_NOT_SENT).to_string());
+            cx.notify();
+            return;
+        }
         self.twofa.notice = None;
+        self.clear_twofa_inputs(window, cx);
+        self.goto_twofa_view(TwofaView::Status);
+        cx.notify();
+    }
+
+    /// Empty every field of the two-step forms.
+    fn clear_twofa_inputs(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.twofa
             .current_password
             .update(cx, |input, cx| input.set_value("", window, cx));
@@ -684,20 +713,6 @@ impl QuillApp {
         self.twofa
             .email
             .update(cx, |input, cx| input.set_value("", window, cx));
-        if let Some(live) = self.live.as_mut() {
-            let email_opt = if include_email && !email.is_empty() {
-                Some(email.as_str())
-            } else {
-                None
-            };
-            let _ = live
-                .driver
-                .set_two_step_password(&current, &new, &hint, email_opt);
-        }
-        current.zeroize();
-        new.zeroize();
-        self.goto_twofa_view(TwofaView::Status);
-        cx.notify();
     }
 
     /// Slice A2: one `setRecoveryEmailAddress` round-trip. Requires the
@@ -721,17 +736,18 @@ impl QuillApp {
             cx.notify();
             return;
         }
-        self.twofa.notice = None;
-        self.twofa
-            .current_password
-            .update(cx, |input, cx| input.set_value("", window, cx));
-        self.twofa
-            .email
-            .update(cx, |input, cx| input.set_value("", window, cx));
-        if let Some(live) = self.live.as_mut() {
-            let _ = live.driver.set_recovery_email(&current, &email);
-        }
+        let sent = match self.live.as_mut() {
+            Some(live) => live.driver.set_recovery_email(&current, &email).is_ok(),
+            None => true,
+        };
         current.zeroize();
+        if !sent {
+            self.twofa.notice = Some(tr(keys::Q_OPS_REQUEST_NOT_SENT).to_string());
+            cx.notify();
+            return;
+        }
+        self.twofa.notice = None;
+        self.clear_twofa_inputs(window, cx);
         self.goto_twofa_view(TwofaView::Status);
         cx.notify();
     }

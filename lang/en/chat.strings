@@ -598,3 +598,9 @@
 "lng_context_hide_psa" = "Hide this announcement";
 "qll_chat_could_not_hide_the_announcement" = "Could not hide the announcement";
 "qll_chat_sticker_suggestions_close" = "Close sticker suggestions";
+"qll_chat_preparing_the_video" = "Preparing the video…";
+
+"qll_chat_could_not_load_join_requests" = "Couldn't load join requests.";
+"qll_chat_send_or_remove_the_attachments_before" = "Send or remove the attachments before editing a message.";
+"qll_chat_the_draft_changed_the_ai_answer" = "The draft changed, so the AI answer was not applied.";
+"qll_chat_emoji_word_lookup_failed" = "Couldn't look up emoji for that word.";

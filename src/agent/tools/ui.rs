@@ -222,6 +222,9 @@ pub(super) fn bridge_error(error: BridgeError) -> ToolError {
         BridgeError::Timeout => ToolError::new(
             "Quill's window did not answer within 15 seconds. Make sure Quill's window is open and not minimised, then retry.",
         ),
+        BridgeError::RanNoAnswer => ToolError::new(
+            "Quill's window ran this command but did not answer within 15 seconds, so the result is lost. Do NOT repeat it: call read_ui_tree to see what it did.",
+        ),
     }
 }
 
@@ -322,8 +325,9 @@ fn finish_ui_send(send: UiSend) -> Result<String, ToolError> {
         ))));
     }
     common::confirm(&ctx, &target, "ui_send", &send.text).map_err(keep_draft)?;
-    let sent =
-        common::send(&ctx, &target, "ui_send", &send.text, send.request, 1).map_err(keep_draft)?;
+    let sent = common::send(&ctx, &target, "ui_send", &send.text, send.request, 1)
+        .map_err(keep_draft)?
+        .messages;
     let _ = bridge::post(
         &current_agent(),
         UiCommand::ComposerSent {

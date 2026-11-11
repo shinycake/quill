@@ -50,6 +50,19 @@ impl<S: JsonSender> ConnectDriver<S> {
         let extra = self
             .session
             .request(RequestPurpose::GetChatJoinRequests, Some(chat_id));
+        let previous = (
+            self.session.groups.join_requests.get(&chat_id.0).cloned(),
+            self.session
+                .groups
+                .join_request_queries
+                .get(&chat_id.0)
+                .cloned(),
+            self.session
+                .groups
+                .join_request_latest
+                .get(&chat_id.0)
+                .copied(),
+        );
         self.session
             .groups
             .join_request_latest
@@ -66,10 +79,62 @@ impl<S: JsonSender> ConnectDriver<S> {
             get_chat_join_requests_page(extra, chat_id.0, "", &query, None, INVITE_ADMIN_PAGE_SIZE);
         let sent = self.send_invite_admin(extra, &payload);
         if sent.is_err() {
-            self.session.groups.join_request_latest.remove(&chat_id.0);
-            self.session.groups.join_requests.remove(&chat_id.0);
+            // A search that never left keeps the list it was going to
+            // replace, with its own query.
+            let groups = &mut self.session.groups;
+            let (list, old_query, latest) = previous;
+            match list {
+                Some(list) => {
+                    groups.join_requests.insert(chat_id.0, list);
+                }
+                None => {
+                    groups.join_requests.remove(&chat_id.0);
+                }
+            }
+            match old_query {
+                Some(old) => {
+                    groups.join_request_queries.insert(chat_id.0, old);
+                }
+                None => {
+                    groups.join_request_queries.remove(&chat_id.0);
+                }
+            }
+            match latest {
+                Some(id) => {
+                    groups.join_request_latest.insert(chat_id.0, id);
+                }
+                None => {
+                    groups.join_request_latest.remove(&chat_id.0);
+                }
+            }
         }
         sent
+    }
+
+    /// Ask for the join-request list: `query` empty and `refresh` set re-sends
+    /// the whole list, anything else searches. A request that cannot go out
+    /// (not connected, no right to invite, a refused send) leaves the list
+    /// `Failed`, which the box draws with Retry; `None` never means "being
+    /// asked".
+    pub fn ask_join_requests(&mut self, chat_id: ChatId, query: &str, refresh: bool) {
+        let sent = if query.is_empty() && refresh {
+            self.refresh_chat_join_requests(chat_id)
+        } else {
+            self.search_chat_join_requests(chat_id, query)
+        };
+        let settled = matches!(
+            self.session.groups.join_requests.get(&chat_id.0),
+            Some(JoinRequestFetch::Loading | JoinRequestFetch::Loaded(_))
+        );
+        if !settled && !matches!(sent, Ok(Some(_))) {
+            self.session.groups.join_requests.insert(
+                chat_id.0,
+                JoinRequestFetch::Failed(
+                    crate::lang::tr(crate::lang::keys::Q_CHAT_COULD_NOT_LOAD_JOIN_REQUESTS)
+                        .to_string(),
+                ),
+            );
+        }
     }
 
     /// Next page of the (possibly searched) join-request list, appended.
@@ -291,7 +356,21 @@ impl<S: JsonSender> ConnectDriver<S> {
         );
         let sent = self.send_invite_admin(extra, &payload);
         if sent.is_err() {
-            self.session.groups.invite_pages.close_members(chat_id.0);
+            // The members already loaded stay when only the next page did
+            // not leave; a first page has nothing to keep.
+            match self.session.groups.invite_pages.members_mut(chat_id.0) {
+                Some(state) if append && !state.members.is_empty() => {
+                    state.loading = false;
+                    state.request = None;
+                    state.error = Some(
+                        crate::lang::tr(
+                            crate::lang::keys::Q_INVITE_LINK_COULD_NOT_LOAD_MORE_MEMBERS,
+                        )
+                        .into(),
+                    );
+                }
+                _ => self.session.groups.invite_pages.close_members(chat_id.0),
+            }
         }
         sent
     }

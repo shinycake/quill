@@ -4,6 +4,8 @@
 use crate::state::*;
 
 pub struct UsersState {
+    /// The requests the profile boxes wait on before they close.
+    pub saves: SaveWatch,
     /// B10: chat-id lists behind the profile panels, keyed by
     /// `(kind, user/chat id)`: groups in common, similar channels and
     /// the suitable personal channels. Chat objects themselves arrive via
@@ -40,9 +42,11 @@ pub struct UsersState {
     /// The option `replies_bot_chat_id`: the Replies chat (it differs on
     /// the test environment).
     pub replies_bot_chat_id: Option<i64>,
-    /// Phase 6: cached `getUserFullInfo` bios, keyed by user id. Presence
-    /// records "fetched" so the driver never refetches.
-    pub user_full_infos: HashMap<i64, UserFullInfoData>,
+    /// Phase 6: cached `getUserFullInfo` bios, one `Fetch` per user.
+    /// Presence records "fetched" so the driver never refetches; a failed
+    /// ask is kept so `ensure_user_full_info` (the ask a render makes) does
+    /// not repeat it; an explicit `fetch_user_full_info` does.
+    pub user_full_infos: UserFullInfos,
     /// `(user id, photo id)` whose full info was asked for to learn the
     /// clips of a video userpic (`Session::take_userpic_full_info_ask`).
     pub userpic_full_info_asked: std::collections::HashSet<(i64, i64)>,
@@ -149,6 +153,7 @@ impl UsersState {
 
     pub(crate) fn new() -> Self {
         Self {
+            saves: SaveWatch::default(),
             profile_chat_lists: HashMap::new(),
             common_groups_paging: HashMap::new(),
             similar_chat_totals: HashMap::new(),
@@ -160,7 +165,7 @@ impl UsersState {
             contacts_notice: None,
             replies_block: None,
             replies_bot_chat_id: None,
-            user_full_infos: HashMap::new(),
+            user_full_infos: UserFullInfos::default(),
             userpic_full_info_asked: Default::default(),
             username_check: None,
             username_check_pending: None,

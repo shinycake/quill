@@ -105,7 +105,7 @@ fn an_allowed_delete_sends_the_request_and_a_failure_leaves_a_note() {
             delete.0
         ),
     );
-    assert!(driver.session.messages.message_action_note.is_some());
+    assert!(!driver.session.messages.message_action_note.is_empty());
     let _ = std::fs::remove_dir_all(&dir);
 }
 

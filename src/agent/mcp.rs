@@ -10,7 +10,7 @@ use super::link::SharedStream;
 use super::server::code;
 use crate::single_instance::{Connection, Endpoint};
 use serde_json::{Value, json};
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::io::{self, BufRead, BufReader, Write};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -116,6 +116,7 @@ fn friendly_client_name(name: &str) -> String {
 pub fn run() -> i32 {
     let out: Out = Arc::new(Mutex::new(io::stdout()));
     let mut link: Option<Link> = None;
+    let mut subscribed: BTreeSet<String> = BTreeSet::new();
     let stdin = io::stdin();
     for line in stdin.lock().lines() {
         let Ok(line) = line else {
@@ -159,7 +160,14 @@ pub fn run() -> i32 {
                 | "resources/read"
                 | "resources/subscribe"
                 | "resources/unsubscribe"),
-            ) => forward(&out, &mut link, &id, method == "tools/call", line),
+            ) => forward(
+                &out,
+                &mut link,
+                &mut subscribed,
+                &id,
+                (method, &params),
+                line,
+            ),
             Some(other) => emit(
                 &out,
                 &error(&id, code::NO_METHOD, &format!("Unknown method {other}.")),
@@ -170,7 +178,52 @@ pub fn run() -> i32 {
     0
 }
 
-fn forward(out: &Out, link: &mut Option<Link>, id: &Value, is_tool: bool, line: &str) {
+/// Id prefix of the subscribe requests the bridge replays on a new link; the
+/// agent never sent them, so their answers are not passed on.
+const RESUBSCRIBE_ID: &str = "quill-resubscribe-";
+
+/// The `resources/subscribe` lines that restore `subscribed` on a new link.
+fn resubscribe_lines(subscribed: &BTreeSet<String>) -> Vec<String> {
+    subscribed
+        .iter()
+        .enumerate()
+        .map(|(n, uri)| {
+            json!({
+                "jsonrpc": "2.0",
+                "id": format!("{RESUBSCRIBE_ID}{n}"),
+                "method": "resources/subscribe",
+                "params": {"uri": uri},
+            })
+            .to_string()
+        })
+        .collect()
+}
+
+/// Remember or forget the subscription `method` made, after it was sent.
+fn note_subscription(subscribed: &mut BTreeSet<String>, method: &str, params: &Value) {
+    let Some(uri) = params.get("uri").and_then(Value::as_str) else {
+        return;
+    };
+    match method {
+        "resources/subscribe" => {
+            subscribed.insert(uri.to_string());
+        }
+        "resources/unsubscribe" => {
+            subscribed.remove(uri);
+        }
+        _ => {}
+    }
+}
+
+fn forward(
+    out: &Out,
+    link: &mut Option<Link>,
+    subscribed: &mut BTreeSet<String>,
+    id: &Value,
+    (method, params): (&str, &Value),
+    line: &str,
+) {
+    let is_tool = method == "tools/call";
     if link
         .as_ref()
         .is_none_or(|l| !l.alive.load(Ordering::SeqCst))
@@ -181,6 +234,16 @@ fn forward(out: &Out, link: &mut Option<Link>, id: &Value, is_tool: bool, line: 
             Err(message) => {
                 emit(out, &failure(id, is_tool, &message));
                 return;
+            }
+        }
+        // The old watcher stopped with its connection: watch again.
+        if let Some(live) = link.as_mut() {
+            for resubscribe in resubscribe_lines(subscribed) {
+                let _ = live
+                    .send
+                    .write_all(resubscribe.as_bytes())
+                    .and_then(|()| live.send.write_all(b"\n"))
+                    .and_then(|()| live.send.flush());
             }
         }
     }
@@ -200,6 +263,8 @@ fn forward(out: &Out, link: &mut Option<Link>, id: &Value, is_tool: bool, line: 
             out,
             &failure(id, is_tool, "Lost the connection to Quill. Retry."),
         );
+    } else {
+        note_subscription(subscribed, method, params);
     }
 }
 
@@ -244,6 +309,9 @@ fn relay(recv: SharedStream, out: &Out, alive: &AtomicBool, pending: &Pending) {
         if let Ok(answer) = serde_json::from_str::<Value>(&line)
             && let Some(id) = answer.get("id")
         {
+            if id.as_str().is_some_and(|s| s.starts_with(RESUBSCRIBE_ID)) {
+                continue;
+            }
             crate::locks::lock_or_recover(pending).remove(&id.to_string());
         }
         emit_raw(out, &line);
@@ -267,8 +335,22 @@ fn relay(recv: SharedStream, out: &Out, alive: &AtomicBool, pending: &Pending) {
 
 #[cfg(test)]
 mod tests {
-    use super::{failure, initialize};
+    use super::{failure, initialize, note_subscription, resubscribe_lines};
     use serde_json::json;
+    use std::collections::BTreeSet;
+
+    #[test]
+    fn a_new_link_replays_the_subscriptions_the_agent_made() {
+        let mut subscribed = BTreeSet::new();
+        let params = json!({"uri": "quill://unread"});
+        note_subscription(&mut subscribed, "resources/subscribe", &params);
+        note_subscription(&mut subscribed, "tools/call", &json!({"uri": "x"}));
+        let lines = resubscribe_lines(&subscribed);
+        assert_eq!(lines.len(), 1);
+        assert!(lines[0].contains("resources/subscribe") && lines[0].contains("quill://unread"));
+        note_subscription(&mut subscribed, "resources/unsubscribe", &params);
+        assert!(resubscribe_lines(&subscribed).is_empty());
+    }
 
     #[test]
     fn initialize_echoes_a_supported_version_and_orients() {

@@ -84,12 +84,20 @@ impl<S: JsonSender> ConnectDriver<S> {
             groups,
             channels,
         };
+        let before = state.phase.clone();
         if let Some(state) = self.boost_box_for(chat) {
             state.phase = BoostPhase::Working;
             state.note = None;
             state.reassigning = Some(summary);
         }
-        self.send_boost_chat(chat, &picked)?;
+        // A click that never left puts the list back, so the user can pick
+        // again or go back instead of facing a box that is stuck working.
+        if let Err(err) = self.send_boost_chat(chat, &picked) {
+            if let Some(state) = self.boost_box_for(chat) {
+                state.phase = before;
+            }
+            return Err(err);
+        }
         Ok(true)
     }
 }

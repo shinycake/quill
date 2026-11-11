@@ -6,6 +6,7 @@
 //! list the user cannot see.
 
 use crate::ui::app::{ChatListFilter, QuillApp};
+use crate::ui::chat_list_state::SidebarTab;
 use crate::ui::chat_row::PinnedChatDrag;
 use crate::ui::screenshot_demo::ScreenshotDemo;
 use crate::ui::shell::QuillShell;
@@ -89,7 +90,7 @@ fn contacts_over_the_rows_end_a_pinned_drag_unsaved(cx: &mut TestAppContext) {
     assert!(app.read_with(&vcx, |app, _| app.chat_list.pin_reorder.is_some()));
     // Cmd+J while the button is held: the rows give way to Contacts.
     app.update(&mut vcx, |app, cx| {
-        app.chat_list.contacts_tab_open = true;
+        app.chat_list.tab = SidebarTab::Contacts;
         cx.notify();
     });
     frames(&mut vcx);
@@ -99,7 +100,7 @@ fn contacts_over_the_rows_end_a_pinned_drag_unsaved(cx: &mut TestAppContext) {
     );
     // Back to the rows: the next release on them sends nothing.
     app.update(&mut vcx, |app, cx| {
-        app.chat_list.contacts_tab_open = false;
+        app.chat_list.tab = SidebarTab::Chats;
         app.finish_pin_drag(cx);
     });
     frames(&mut vcx);
@@ -153,4 +154,61 @@ fn a_deactivated_window_ends_a_pinned_drag_unsaved(cx: &mut TestAppContext) {
         pinned,
         "the order is unchanged"
     );
+}
+
+#[gpui_kit::test]
+fn choosing_a_folder_or_a_community_leaves_the_calls_tab(cx: &mut TestAppContext) {
+    let (app, mut vcx, _pinned) = open(cx);
+    for tab in [SidebarTab::Calls, SidebarTab::Contacts] {
+        app.update(&mut vcx, |app, cx| {
+            app.chat_list.tab = tab;
+            app.open_folder_tab(None, cx);
+        });
+        assert_eq!(
+            app.read_with(&vcx, |app, _| app.chat_list.tab),
+            SidebarTab::Chats,
+            "a folder switch from {tab:?} shows the chats"
+        );
+    }
+    app.update(&mut vcx, |app, cx| {
+        app.chat_list.tab = SidebarTab::Calls;
+        app.enter_community_chat_list_mode(7, cx);
+    });
+    assert_eq!(
+        app.read_with(&vcx, |app, _| app.chat_list.tab),
+        SidebarTab::Chats,
+        "'View chats' of a community shows the chats"
+    );
+}
+
+#[gpui_kit::test]
+fn a_bulk_pin_over_the_limit_opens_the_limit_box_and_pins_nothing(cx: &mut TestAppContext) {
+    let (app, mut vcx, _pinned) = open(cx);
+    app.update(&mut vcx, |app, cx| {
+        let Some(session) = app.demo_session.as_mut() else {
+            return;
+        };
+        for chat in session.chats.values_mut() {
+            chat.is_pinned = false;
+        }
+        session.chat_list.pinned_chat_count_max = 0;
+        let ids: Vec<i64> = session
+            .chats
+            .values()
+            .filter(|chat| chat.in_main_list)
+            .map(|chat| chat.id.0)
+            .collect();
+        assert!(ids.len() >= 2, "two chats to pin");
+        app.chat_list.selected = ids.into_iter().collect();
+        app.toggle_selected_pins(cx);
+    });
+    let (pinned, limit_open) = app.read_with(&vcx, |app, _| {
+        let session = app.demo_session.as_ref().expect("a demo session");
+        (
+            session.pinned_chat_ids(false).len(),
+            session.payments.hub.limit_box.is_some() || session.payments.hub.limit_toast.is_some(),
+        )
+    });
+    assert_eq!(pinned, 0, "no free slot: nothing pinned");
+    assert!(limit_open, "the limit box says why");
 }

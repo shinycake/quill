@@ -171,6 +171,9 @@ pub enum SettingsPurpose {
     /// `messageSenders`.
     GetBlockedSenders {
         offset: i32,
+        /// The list this page extends (`SettingsState::blocked_generation`
+        /// when it was asked); a page of an older list is dropped.
+        generation: u32,
     },
     /// Slice S3: `setMessageSenderBlockList`. Response is `ok`; an
     /// unblock is applied optimistically at send time.
@@ -217,6 +220,7 @@ pub enum SettingsPurpose {
     /// new-login alert ("Yes, it's me" / "No, it's not me!").
     ReviewUnconfirmedSession {
         confirmed: bool,
+        session_id: i64,
     },
     /// Batch 4: `acceptTermsOfService`.
     AcceptTermsOfService,

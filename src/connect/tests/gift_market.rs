@@ -368,7 +368,10 @@ fn auction_link_follow_and_bids() {
     f.answer("placeGiftAuctionBid", json!({"@type": "ok"}));
     f.driver.follow_gift_auction(None).unwrap();
     assert_eq!(f.last("closeGiftAuction")["gift_id"], "800");
-    assert!(f.driver.session.payments.gift_market.followed.is_none());
+    assert_eq!(
+        f.driver.session.payments.gift_market.follow,
+        crate::gift_market::AuctionFollow::None
+    );
 }
 
 #[test]
@@ -403,13 +406,26 @@ fn acquired_and_preview_requests() {
             "unique_gift_number": 0, "text": {"text": ""}, "is_private": false}]}),
     );
     assert_eq!(
-        f.driver.session.payments.gift_market.acquired[&800].len(),
-        1
+        f.driver.session.payments.gift_market.acquired[&800]
+            .data()
+            .map(Vec::len),
+        Some(1)
     );
     f.driver.fetch_gift_upgrade_preview(800).unwrap();
     assert_eq!(f.last("getGiftUpgradePreview")["regular_gift_id"], "800");
     // Not twice while in flight.
     assert!(f.driver.fetch_gift_upgrade_preview(800).is_err());
+    // A failure is shown, and the next opening of the box asks again.
+    f.answer(
+        "getGiftUpgradePreview",
+        json!({"@type": "error", "code": 500, "message": "TIMEOUT"}),
+    );
+    assert!(
+        f.driver.session.payments.gift_market.previews[&800]
+            .error()
+            .is_some()
+    );
+    f.driver.fetch_gift_upgrade_preview(800).unwrap();
     f.answer(
         "getGiftUpgradePreview",
         json!({"@type": "giftUpgradePreview", "models": [], "symbols": [], "backdrops": [], "prices": [], "next_prices": []}),
@@ -420,7 +436,9 @@ fn acquired_and_preview_requests() {
             .payments
             .gift_market
             .previews
-            .contains_key(&800)
+            .get(&800)
+            .and_then(|preview| preview.data())
+            .is_some()
     );
 }
 
@@ -465,10 +483,10 @@ fn craft_loads_both_lists_and_crafts() {
     assert_eq!(craft.result, Some(CraftResult::Fail));
 }
 
-/// A craft box opened after the one that crafted closed shows nothing of
-/// the old craft's answer, and keeps its own guard.
+/// A craft in flight is not orphaned: a new craft box is refused until its
+/// answer lands, and the answer belongs to the session that sent it.
 #[test]
-fn a_craft_answer_belongs_to_the_box_that_sent_it() {
+fn a_new_craft_session_does_not_orphan_a_craft_in_flight() {
     let mut f = Fixture::new();
     f.driver
         .open_gift_craft(CraftGift::parse_received(&received(1)).unwrap())
@@ -483,16 +501,18 @@ fn a_craft_answer_belongs_to_the_box_that_sent_it() {
         assert!(craft.add(second));
     }
     f.driver.craft_gift().unwrap();
-    let old = f.last("craftGift");
-    f.driver
-        .open_gift_craft(CraftGift::parse_received(&received(3)).unwrap())
-        .unwrap();
-    let mut answer = json!({"@type": "craftGiftResultFail"});
-    answer["@extra"] = old["@extra"].clone();
-    f.ingest(&answer.to_string());
+    assert!(
+        f.driver
+            .open_gift_craft(CraftGift::parse_received(&received(3)).unwrap())
+            .is_err(),
+        "the forge is still out"
+    );
     let craft = f.driver.session.payments.gift_market.craft.clone().unwrap();
-    assert_eq!(craft.result, None, "the old craft's answer");
-    assert_eq!(craft.slots[0].received_gift_id, "r3");
+    assert!(craft.crafting);
+    assert_eq!(craft.slots[0].received_gift_id, "r1");
+    f.answer("craftGift", json!({"@type": "craftGiftResultFail"}));
+    let craft = f.driver.session.payments.gift_market.craft.clone().unwrap();
+    assert_eq!(craft.result, Some(CraftResult::Fail), "its outcome landed");
 }
 
 #[test]
@@ -520,20 +540,31 @@ fn craft_buys_a_listing_into_a_slot() {
     assert!(f.driver.session.take_gift_market_toasts().is_empty());
 }
 
+/// A preview in flight is not asked twice; a failed one says so, and is
+/// asked again only by a box opening or its Retry (never from a render).
 #[test]
-fn a_failed_upgrade_preview_is_not_asked_again() {
+fn a_failed_upgrade_preview_waits_for_a_user_action() {
     let mut f = Fixture::new();
     f.driver.fetch_gift_upgrade_preview(801).unwrap();
+    assert!(
+        f.driver.fetch_gift_upgrade_preview(801).is_err(),
+        "in flight"
+    );
     f.answer(
         "getGiftUpgradePreview",
         json!({"@type": "error", "code": 500, "message": "boom"}),
     );
-    assert!(f.driver.fetch_gift_upgrade_preview(801).is_err());
+    assert!(
+        f.driver.session.payments.gift_market.previews[&801]
+            .error()
+            .is_some()
+    );
     assert!(f.driver.fetch_gift_upgrade_preview(802).is_ok());
+    assert!(f.driver.fetch_gift_upgrade_preview(801).is_ok(), "Retry");
 }
 
-/// Opening a resale list while a buy's `sendResoldGift` is out keeps that
-/// buy: its answer still lands in it.
+/// Opening a resale list while a buy's `sendResoldGift` is out is refused and
+/// keeps that buy: its answer still lands in it.
 #[test]
 fn opening_the_resale_list_keeps_a_buy_that_is_out() {
     let mut f = Fixture::new();
@@ -549,7 +580,10 @@ fn opening_the_resale_list_keeps_a_buy_that_is_out() {
     f.driver
         .buy_gift_resale(GiftPrice::Stars(1500), "", false)
         .unwrap();
-    f.driver.open_gift_resale(500, "Plush Pepe").unwrap();
+    assert!(
+        f.driver.open_gift_resale(500, "Plush Pepe").is_err(),
+        "refused while the buy is out"
+    );
     let buy = f.driver.session.payments.gift_market.buy.clone();
     assert!(buy.is_some_and(|buy| buy.sending), "the buy is still out");
     f.answer(

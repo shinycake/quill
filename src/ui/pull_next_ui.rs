@@ -297,7 +297,7 @@ impl QuillApp {
                     .session()
                     .and_then(|s| s.chats.get(&next.0))
                     .is_some_and(|chat| chat.unread_count > 0);
-                if !unread || !active {
+                if !unread || !active || self.history.pull.window.is_none() {
                     return;
                 }
                 self.history.pull.machine.begin_jump();
@@ -312,13 +312,13 @@ impl QuillApp {
                         .iter()
                         .any(|topic| topic.forum_topic_id == next && topic.unread_count > 0)
                 });
+                let Some((handle, scope)) = self.history.pull.window else {
+                    return;
+                };
                 if !unread || !active || target.topic == Some(next) {
                     return;
                 }
                 self.history.pull.machine.begin_jump();
-                let Some((handle, scope)) = self.history.pull.window else {
-                    return;
-                };
                 let chat = target.chat;
                 // `crl::on_main`: on the next turn, checked again.
                 self.history.pull.jump = Some(self.spawn_screen(cx, async move |this, cx| {
@@ -331,6 +331,7 @@ impl QuillApp {
                                     SLIDE.set(Some((chat, Some(next), Instant::now())));
                                     this.select_topic_ui(next, cx);
                                 }
+                                this.pull_jump_ended(cx);
                             })
                         });
                     });
@@ -351,15 +352,27 @@ impl QuillApp {
         self.history.pull.jump = Some(self.spawn_screen(cx, async move |this, cx| {
             loop {
                 let waited = started.elapsed().as_millis() as u64;
-                let (history, pinned) = this
-                    .update(cx, |this, _| match this.live.as_ref() {
+                // Locked: nothing opens behind the lock screen, and the
+                // wait stops polling the client (`pull_jump_ended`).
+                let Ok(Some((history, pinned))) = this.update(cx, |this, _| {
+                    if this.refused_while_locked() {
+                        return None;
+                    }
+                    Some(match this.live.as_ref() {
                         Some(live) => (
                             live.driver.next_channel_history_ready(next),
                             live.driver.next_channel_pinned_ready(next),
                         ),
                         None => (true, true),
                     })
-                    .unwrap_or((true, true));
+                }) else {
+                    let _ = cx.update_window(handle, |_, _, cx| {
+                        let _ = this.update(cx, |this, cx| {
+                            this.in_window_scope(scope, cx, |this, cx| this.pull_jump_ended(cx))
+                        });
+                    });
+                    return;
+                };
                 let pinned = pinned || waited >= metrics::JUMP_PINNED_MAX_WAIT_MS;
                 if (history && pinned) || waited >= metrics::JUMP_MAX_WAIT_MS {
                     break;
@@ -371,7 +384,7 @@ impl QuillApp {
             let _ = cx.update_window(handle, |_, window, cx| {
                 let _ = this.update(cx, |this, cx| {
                     this.in_window_scope(scope, cx, |this, cx| {
-                        if this.history.pull.machine.jumping() {
+                        if this.history.pull.machine.jumping() && !this.refused_while_locked() {
                             SLIDE.set(Some((next, None, Instant::now())));
                             let open = super::chat_window::ChatOpen::new(next);
                             if !this.select_chat_request(open, window, cx) {
@@ -385,10 +398,30 @@ impl QuillApp {
                                 cx.notify();
                             }
                         }
+                        // Opened or not, the jump is over: a pull that
+                        // did not end in a new chat starts over.
+                        this.pull_jump_ended(cx);
                     })
                 });
             });
         }));
+    }
+
+    /// A jump's task is over: once the history follows the chat or topic
+    /// it opened (`pull_sync` starts the machine over), nothing is left to
+    /// do; when it never changed (the jump could not start, was refused
+    /// behind the lock, or opened nothing), the machine leaves `jumping`
+    /// instead of holding the indicator full and refusing every new pull.
+    fn pull_jump_ended(&mut self, cx: &mut Context<Self>) {
+        self.pull_sync();
+        if self.history.pull.machine.jumping() {
+            SLIDE.set(None);
+            let now = self.history.pull.now();
+            self.history.pull.machine.reset_all(now);
+            self.history.pull.next_chat = None;
+            self.history.pull.next_topic = None;
+            cx.notify();
+        }
     }
 
     /// Per render of the history: follow the shown chat, advance the

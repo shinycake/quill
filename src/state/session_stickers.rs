@@ -44,6 +44,37 @@ impl Session {
         }
     }
 
+    /// The box's change of the viewed set went out.
+    pub fn begin_set_change(&mut self, set_id: i64, change: SetChange) {
+        if let Some(view) = self.stickers.sticker_set_view.as_mut()
+            && view.set_id == set_id
+        {
+            view.change = SetChangeStage::Working(change);
+        }
+    }
+
+    /// The change box asked for answered (`ok`) or failed. Only the answer
+    /// to the change it waits on counts.
+    pub(crate) fn finish_set_change(&mut self, set_id: i64, change: SetChange, success: bool) {
+        if let Some(view) = self.stickers.sticker_set_view.as_mut()
+            && view.set_id == set_id
+            && view.change == SetChangeStage::Working(change)
+        {
+            view.change = if success {
+                SetChangeStage::Done(change)
+            } else {
+                SetChangeStage::Failed(change)
+            };
+        }
+    }
+
+    /// The box took the outcome of its change: back to idle.
+    pub fn settle_set_change(&mut self) {
+        if let Some(view) = self.stickers.sticker_set_view.as_mut() {
+            view.change = SetChangeStage::Idle;
+        }
+    }
+
     pub fn accept_archived_sticker_sets(&mut self, sets: Vec<StickerSetInfo>) {
         let next = sets.last().map(|set| set.id).unwrap_or(0);
         self.stickers.stickers.archived_has_more =
@@ -63,12 +94,9 @@ impl Session {
             .stickers
             .archived
             .extend(sets.into_iter().filter(|set| ids.insert(set.id)));
-        self.stickers.stickers.failed = false;
     }
 
     pub fn accept_installed_sticker_sets(&mut self, sets: Vec<StickerSetInfo>) {
-        self.stickers.stickers.loading_sets = false;
-        self.stickers.stickers.failed = false;
         self.stickers.stickers.sets = sets;
         self.stickers.stickers.installed_loaded = true;
         if self.stickers.stickers.tab != StickerTab::Installed {
@@ -82,7 +110,7 @@ impl Session {
         if !still_selected {
             self.stickers.stickers.selected_set_id =
                 self.stickers.stickers.sets.first().map(|set| set.id);
-            self.stickers.stickers.loaded_set_id = None;
+            self.stickers.stickers.set = StickerSetStage::Idle;
             self.stickers.stickers.stickers.clear();
         }
     }
@@ -191,7 +219,7 @@ impl Session {
         self.stickers.stickers.installed_loaded = false;
         self.stickers.stickers.sets.clear();
         self.stickers.stickers.selected_set_id = None;
-        self.stickers.stickers.loaded_set_id = None;
+        self.stickers.stickers.set = StickerSetStage::Idle;
         self.stickers.stickers.stickers.clear();
     }
 
@@ -221,16 +249,13 @@ impl Session {
             return;
         }
         self.stickers.stickers.selected_set_id = Some(set_id);
-        self.stickers.stickers.loaded_set_id = None;
+        self.stickers.stickers.set = StickerSetStage::Idle;
         self.stickers.stickers.stickers.clear();
-        self.stickers.stickers.loading_set = false;
-        self.stickers.stickers.failed = false;
-        self.stickers.stickers.failed_set_id = None;
     }
 
-    pub fn mark_sticker_set_loading(&mut self) {
-        self.stickers.stickers.loading_set = true;
-        self.stickers.stickers.failed = false;
+    /// The selected set's `getStickerSet` went out as `request`.
+    pub fn mark_sticker_set_loading(&mut self, set_id: i64, request: RequestId) {
+        self.stickers.stickers.set = StickerSetStage::Loading { set_id, request };
     }
 
     pub fn accept_saved_animations(&mut self, animations: Vec<AnimationItem>) {
@@ -280,18 +305,24 @@ impl Session {
             .keep(&gifs.search_query, &gifs.search_results);
     }
 
-    pub fn accept_sticker_set(&mut self, id: i64, stickers: Vec<StickerItem>) {
-        self.stickers.stickers.loading_set = false;
-        if self
-            .stickers
-            .stickers
-            .selected_set_id
-            .is_some_and(|selected| selected != id)
+    /// The answer of `request`; one for a set that is no longer the asked
+    /// one (the user chose another meanwhile) changes nothing.
+    pub fn accept_sticker_set(
+        &mut self,
+        request: Option<RequestId>,
+        id: i64,
+        stickers: Vec<StickerItem>,
+    ) {
+        let panel = &mut self.stickers.stickers;
+        if let StickerSetStage::Loading {
+            set_id,
+            request: asked,
+        } = panel.set
+            && Some(asked) == request
+            && set_id == id
         {
-            return;
+            panel.set = StickerSetStage::Ready { set_id };
+            panel.stickers = stickers;
         }
-        self.stickers.stickers.failed = false;
-        self.stickers.stickers.loaded_set_id = Some(id);
-        self.stickers.stickers.stickers = stickers;
     }
 }

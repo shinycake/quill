@@ -81,6 +81,7 @@
 "lng_community_ban_button" = "Ban";
 "lng_community_ban_done" = "{user} was banned from the community.";
 "qll_community_ban_unavailable" = "Couldn't ban: this community is no longer available.";
+"qll_community_step_unavailable" = "That chat or community is no longer available.";
 "lng_community_hidden_status" = "Hidden";
 "lng_community_peers_limit#one" = "Limit of {count} chat reached.";
 "lng_community_peers_limit#other" = "Limit of {count} chats reached.";

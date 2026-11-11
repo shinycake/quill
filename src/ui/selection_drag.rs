@@ -10,6 +10,7 @@
 
 use super::app::QuillApp;
 use super::autoscroll_ui::scroll_history_by;
+use super::chat_ui_state::A11yFocus;
 use crate::ui::status_note::StatusNote;
 use gpui_kit::base::{GlobalState, TextSelection};
 use gpui_kit::*;
@@ -66,7 +67,7 @@ impl QuillApp {
             // The press owns the pointer: no text selection under it.
             GlobalState::suppress_text_selection(cx);
             window.focus(&self.message_ui.history_focus, cx);
-            self.chat_ui.selection_focus = Some(message_id);
+            self.chat_ui.focus = A11yFocus::Row(message_id);
             if event.modifiers.shift
                 && let Some(anchor) = self.chat_ui.selection_anchor
             {
@@ -168,7 +169,7 @@ impl QuillApp {
                 // Drag-selecting gives the history the keyboard
                 // (`updateDragSelection` → `setFocus`).
                 window.focus(&self.message_ui.history_focus, cx);
-                self.chat_ui.selection_focus = Some(press);
+                self.chat_ui.focus = A11yFocus::Row(press);
                 range = Some(DragRange {
                     anchor: press,
                     to,
@@ -186,6 +187,16 @@ impl QuillApp {
             drag.range = range;
         }
         (beyond != 0).then(|| autoscroll_step(beyond) as f32)
+    }
+
+    /// The press ended without a release reaching the history (the button
+    /// came up outside the window, or the window lost focus): the drag is
+    /// dropped without applying its range.
+    pub(super) fn selection_drag_lost(&mut self, cx: &mut Context<Self>) {
+        if self.message_ui.selection_drag.take().is_some() {
+            self.message_ui.swipe_reply_start = None;
+            cx.notify();
+        }
     }
 
     /// The button came up (`mouseActionFinish`): a drag applies its range;
@@ -229,12 +240,12 @@ impl QuillApp {
                 // The release ends the drag, not a swipe to reply.
                 self.message_ui.swipe_reply_start = None;
                 self.chat_ui.selection_anchor = Some(range.to);
-                self.chat_ui.selection_focus = Some(range.to);
+                self.chat_ui.focus = A11yFocus::Row(range.to);
             }
             None if drag.click_toggles => {
                 self.toggle_forward_select(drag.chat, drag.press, drag.pending, cx);
                 self.chat_ui.selection_anchor = Some(drag.press);
-                self.chat_ui.selection_focus = Some(drag.press);
+                self.chat_ui.focus = A11yFocus::Row(drag.press);
             }
             None => {}
         }
@@ -258,7 +269,7 @@ impl QuillApp {
                 .is_some_and(|draft| draft.is_from(chat, topic))
             {
                 self.share.forward = crate::ui::forward_stage::ForwardStage::None;
-                self.chat_ui.selection_focus = None;
+                self.chat_ui.focus.clear_row();
             }
         } else {
             match self.share.forward.selection_mut() {
@@ -364,7 +375,12 @@ impl QuillApp {
                     break;
                 };
                 let step = this.update_in(cx, |this, window, cx| {
-                    // `None` once the drag ended: the loop stops.
+                    // `None` once the drag ended: the loop stops. A window
+                    // that lost focus holding the press never sees the
+                    // release, so the drag ends there too.
+                    if this.message_ui.selection_drag.is_some() && !window.is_window_active() {
+                        this.selection_drag_lost(cx);
+                    }
                     this.message_ui
                         .selection_drag
                         .is_some()
@@ -514,7 +530,7 @@ mod tests {
     }
 
     fn focus(app: &Entity<QuillApp>, cx: &mut VisualTestContext) -> Option<MessageId> {
-        app.read_with(cx, |app, _| app.chat_ui.selection_focus)
+        app.read_with(cx, |app, _| app.chat_ui.focus.row())
     }
 
     fn drag(cx: &mut VisualTestContext, from: Point<Pixels>, to: Point<Pixels>) {
@@ -706,5 +722,41 @@ mod tests {
         assert_eq!(step, Some(-16.));
         release(vcx, above);
         assert!(app.read_with(vcx, |app, _| app.message_ui.selection_drag.is_none()));
+    }
+
+    #[gpui_kit::test]
+    fn a_move_with_the_button_up_ends_a_press_that_never_saw_its_release(cx: &mut TestAppContext) {
+        let (app, mut vcx) = new_app(cx);
+        let vcx = &mut vcx;
+        let chat = open_chat(&app, vcx);
+        let rows = rows(&app, vcx);
+        assert!(rows.len() >= 3);
+        let (a, c) = (&rows[0], &rows[2]);
+        drag(vcx, blank_point(a), blank_point(c));
+        assert!(app.read_with(vcx, |app, _| app.selection_drag_in(chat).is_some()));
+        // The button came up outside the window: the next move reports it
+        // as up, with no release having reached the history.
+        vcx.simulate_mouse_move(blank_point(a), None, Modifiers::default());
+        assert!(app.read_with(vcx, |app, _| app.message_ui.selection_drag.is_none()));
+        assert!(selected(&app, vcx).is_empty(), "nothing was selected");
+    }
+
+    #[gpui_kit::test]
+    fn locking_ends_a_held_press(cx: &mut TestAppContext) {
+        let (app, mut vcx) = new_app(cx);
+        let vcx = &mut vcx;
+        let rows = rows(&app, vcx);
+        let a = &rows[0];
+        vcx.simulate_mouse_down(blank_point(a), MouseButton::Left, Modifiers::default());
+        assert!(app.read_with(vcx, |app, _| app.message_ui.selection_drag.is_some()));
+        // The release never reaches a locked window.
+        app.update(vcx, |app, cx| {
+            app.account.passcode.enabled = true;
+            app.lock_by_passcode(cx);
+        });
+        assert!(
+            app.read_with(vcx, |app, _| app.message_ui.selection_drag.is_none()),
+            "the lock ended the drag"
+        );
     }
 }

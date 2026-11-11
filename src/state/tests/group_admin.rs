@@ -594,6 +594,10 @@ fn refused_protected_content_and_reactions_roll_back() {
     let seq = AtomicU64::new(0);
     megagroup(&mut session, &seq, &sink, 13, CREATOR, "");
     session.set_chat_protected(13, true);
+    session
+        .groups
+        .private_sharing
+        .record_disabled(ChatId(13), 1_000);
     let extra = session.request(
         RequestPurpose::ToggleChatHasProtectedContent,
         Some(ChatId(13)),
@@ -602,6 +606,7 @@ fn refused_protected_content_and_reactions_roll_back() {
         Some(RequestRollback::ProtectedContent {
             chat_id: 13,
             previous: false,
+            previous_disabled_at: None,
         });
     apply_json(
         &mut session,
@@ -613,6 +618,8 @@ fn refused_protected_content_and_reactions_roll_back() {
         ),
     );
     assert!(!session.chat_has_protected_content(ChatId(13)));
+    // The refused turn-off leaves no "you disabled sharing" record behind.
+    assert_eq!(session.groups.private_sharing.disabled_at(ChatId(13)), None);
 
     session.chats_state.chat_available_reactions.insert(
         13,

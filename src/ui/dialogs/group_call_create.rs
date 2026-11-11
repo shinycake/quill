@@ -331,14 +331,25 @@ impl QuillApp {
         let Some(session) = session else {
             return;
         };
+        // The list belongs to the box waiting for it: a box that closed or
+        // was replaced drops it, and a box whose request is no longer the
+        // session's closes (nothing will answer it).
+        let held = session.calls.create_join_as.as_ref().map(|j| j.request);
+        let orphaned = held.is_some() && held != waiting;
+        let abandoned = waiting.is_some() && held != waiting;
         let answer = match (waiting, session.calls.create_join_as.as_ref()) {
             (Some(request), Some(join_as)) if join_as.request == request => join_as.answer.clone(),
             _ => None,
         };
-        if answer.is_some() {
+        if answer.is_some() || orphaned {
             session.calls.create_join_as = None;
         }
+
         let failed = std::mem::take(&mut session.calls.failed_creates);
+        if abandoned {
+            self.group_call_boxes.start_dialog = None;
+            cx.notify();
+        }
         if let Some(answer) = answer {
             self.accept_create_join_as(answer, window, cx);
         }

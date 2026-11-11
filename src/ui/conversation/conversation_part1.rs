@@ -222,7 +222,7 @@ impl QuillApp {
                         // Gated on the open chat still being one: a pending
                         // alert from a previous chat never renders elsewhere.
                         .when(
-                            self.composer_ui.pending_inline_bot_alert.is_some()
+                            self.chat_ui.pending_inline_bot_alert.is_some()
                                 && self.open_chat_is_secret(),
                             |this| this.child(self.inline_bot_alert_banner(cx)),
                         )
@@ -551,7 +551,7 @@ impl QuillApp {
             )
             .children(open.and_then(|chat_id| self.pinned_message_banner(chat_id, cx)))
             .children(
-                open.filter(|_| self.history.pinned_list_open)
+                open.filter(|chat| self.pinned_list_open_for(*chat))
                     .and_then(|chat_id| self.pinned_list_panel(chat_id, cx)),
             )
             .when_some(self.pending_bot_reply(cx), |this, reply| this.child(reply))
@@ -590,7 +590,11 @@ impl QuillApp {
                         cx,
                     );
                     self.history.rows_key = Some(key);
-                    list
+                    let failed = self
+                        .saved_history()
+                        .is_some_and(|(_, history)| history.older == quill::state::OlderEnd::Failed)
+                        .then_some(super::older_retry::OlderRetryFor::Saved);
+                    super::older_retry::with_older_retry(list, failed, cx)
                 } else if thread_pending {
                     self.thread_status_pane(cx)
                 } else if let Some(thread) = thread_open {

@@ -51,14 +51,16 @@ impl QuillApp {
     /// terminal session state into the next step: follow-up request,
     /// info dialog, or a deferred chat open for render.
     pub(super) fn pump_deep_link(&mut self, cx: &mut Context<Self>) {
-        self.tick_media_seek(std::time::Instant::now(), cx);
         self.pump_start_files(cx);
         // A link that arrives while Quill is locked waits for the unlock,
         // as tdesktop's start links do (`checkStartUrls`): nothing it
-        // opens may show over the lock.
+        // opens may show over the lock. A linked media timestamp waits
+        // too: its seek plays or opens media, so it stays pending (until
+        // its deadline) and runs after the unlock.
         if self.refused_while_locked() {
             return;
         }
+        self.tick_media_seek(std::time::Instant::now(), cx);
         // A link clicked in an account that left the screen goes with it:
         // it names that account's chats, bots and posts.
         let on_screen = self.session().map(|session| session.account.clone());
@@ -459,7 +461,11 @@ impl QuillApp {
                 }
                 None => {
                     let _ = self.route_chat_open(routed, cx);
-                    self.finish_typed_link(chat_id, action, window, cx);
+                    // Its thread and media timestamp are that window's,
+                    // not the asking frame's.
+                    self.in_window_scope(Some(chat_id), cx, |app, cx| {
+                        app.finish_typed_link(chat_id, action, window, cx);
+                    });
                 }
             }
             cx.notify();

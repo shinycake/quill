@@ -111,7 +111,13 @@ impl QuillApp {
     ) {
         match self.live.as_mut() {
             Some(live) => {
-                let _ = live.driver.move_profile_audio_track(from, to);
+                // A refused send puts the list back; a failure TDLib answers
+                // later lands in the session's note.
+                if live.driver.move_profile_audio_track(from, to).is_err() {
+                    self.set_note(StatusNote::error(tr(
+                        keys::Q_MISC_COULDNT_REACH_TELEGRAM_TRY_AGAIN,
+                    )));
+                }
             }
             None => {
                 if let Some(session) = self.demo_session.as_mut() {
@@ -129,22 +135,26 @@ impl QuillApp {
         cx.notify();
     }
 
-    /// Confirmed: the toast shows at once, as in tdesktop's box.
+    /// Confirmed: the toast shows at once once the request went out, as in
+    /// tdesktop's box; a request that could not be sent says so instead,
+    /// and one TDLib refuses later reports through the session's note.
     fn confirm_remove_playlist_track(&mut self, cx: &mut Context<Self>) {
         let Some(file_id) = self.playback.playlist_remove.take() else {
             return;
         };
-        self.set_note(StatusNote::silent(removed_toast()));
-        match self.live.as_mut() {
-            Some(live) => {
-                let _ = live.driver.remove_profile_audio_track(file_id);
-            }
+        let note = match self.live.as_mut() {
+            Some(live) => match live.driver.remove_profile_audio_track(file_id) {
+                Ok(()) => StatusNote::silent(removed_toast()),
+                Err(_) => StatusNote::error(tr(keys::Q_MISC_COULDNT_REACH_TELEGRAM_TRY_AGAIN)),
+            },
             None => {
                 if let Some(session) = self.demo_session.as_mut() {
                     session.local_remove_profile_audio(file_id);
                 }
+                StatusNote::silent(removed_toast())
             }
-        }
+        };
+        self.set_note(note);
         cx.notify();
     }
 

@@ -19,4 +19,6 @@ pub struct PermissionsDialog {
     /// The locked row the viewer last clicked; its reason shows under it
     /// (tdesktop shows it as a toast).
     pub(crate) lock_hint: Option<Permission>,
+    /// The last Save: the box closes on its answer, stays on its error.
+    pub(crate) submit: quill::state::Submit,
 }

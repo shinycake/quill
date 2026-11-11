@@ -24,9 +24,23 @@ impl<S: JsonSender> ConnectDriver<S> {
         let group_call = self.pump_group_call_transport(group_calls_before);
         self.pump_call_media(std::time::Instant::now());
         let parameters = self.maybe_send_parameters();
-        let membership = self.maybe_probe_channel_membership();
+        let membership = self.probe_membership_everywhere();
         self.claim_account_owner();
         call.and(group_call).and(parameters).and(membership)
+    }
+
+    /// The own membership probe for the main window's chat and for every
+    /// chat window's, each under its own view (a window's probe waits for
+    /// `getMe` like the main one, and runs on whatever answered).
+    fn probe_membership_everywhere(&mut self) -> Result<(), ConnectSendError> {
+        let mut result = self.maybe_probe_channel_membership();
+        let windows: Vec<ChatId> = self.session.window_chats.iter().copied().collect();
+        for chat_id in windows {
+            let probe =
+                self.with_window_chat(chat_id, |driver| driver.maybe_probe_channel_membership());
+            result = result.and(probe);
+        }
+        result
     }
 
     /// The account's user id is known: a folder last signed in as someone
@@ -43,6 +57,16 @@ impl<S: JsonSender> ConnectDriver<S> {
         let Some(app_root) = self.paths.root.parent().and_then(std::path::Path::parent) else {
             return;
         };
-        crate::account_data::claim(app_root, &self.session.account, me);
+        let claimed = crate::account_data::claim(
+            app_root,
+            &self.session.account,
+            me,
+            self.session.sign_in_origin,
+        );
+        if let Some(err) = claimed.owner_error {
+            // Not silent: without the owner file the next start cannot tell
+            // whose the folder is, so it drops what is in it.
+            eprintln!("quill: could not save the account owner: {err}");
+        }
     }
 }

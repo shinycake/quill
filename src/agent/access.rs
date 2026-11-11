@@ -429,7 +429,7 @@ mod tests {
         super::set_ui_driver(true);
         super::set_raw_calls(false);
         super::set_takeover_effect(TakeoverEffect::StillGlow);
-        grants::update(&account, |g| g.contacts = true);
+        let _ = grants::update(&account, |g| g.contacts = true);
         activity::record(activity::Action {
             id: 0,
             time: 0,
@@ -469,7 +469,7 @@ mod tests {
         super::set_ui_driver(false);
         super::set_raw_calls(true);
         super::set_takeover_effect(TakeoverEffect::Automatic);
-        grants::update(&account, |g| g.contacts = false);
+        let _ = grants::update(&account, |g| g.contacts = false);
         super::set_enabled(false);
     }
 

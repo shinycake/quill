@@ -320,20 +320,22 @@ impl QuillApp {
         cx.notify();
     }
 
-    /// Add or remove the user's `choice` on a message.
+    /// Add or remove the user's `choice` on a message. `true` when the
+    /// change went out (or, in the demo, was applied): `false` when
+    /// Premium opened instead or the request could not be sent.
     pub(super) fn toggle_reaction(
         &mut self,
         chat_id: ChatId,
         message_id: MessageId,
         choice: ReactionChoice,
         cx: &mut Context<Self>,
-    ) {
+    ) -> bool {
         if let Some(feature) = self
             .session()
             .and_then(|s| s.react_premium_feature(chat_id, message_id, &choice))
         {
             self.open_premium_at(feature, cx);
-            return;
+            return false;
         }
         // The reaction flies up from the message when it is added.
         let adding = self
@@ -350,18 +352,20 @@ impl QuillApp {
             });
         }
         if let Some(live) = self.live.as_mut() {
+            let sent = live
+                .driver
+                .toggle_reaction_choice(chat_id, message_id, &choice)
+                .is_ok();
             self.screen.connection.set_note_for(
                 &self.screen.windows,
-                match live
-                    .driver
-                    .toggle_reaction_choice(chat_id, message_id, &choice)
-                {
-                    Ok(_) => StatusNote::silent(tr(keys::Q_MISC_UPDATING_REACTION)),
-                    Err(_) => StatusNote::error(tr(keys::Q_MISC_COULD_NOT_UPDATE_REACTION)),
+                if sent {
+                    StatusNote::silent(tr(keys::Q_MISC_UPDATING_REACTION))
+                } else {
+                    StatusNote::error(tr(keys::Q_MISC_COULD_NOT_UPDATE_REACTION))
                 },
             );
             cx.notify();
-            return;
+            return sent;
         }
         match choice {
             ReactionChoice::Emoji(emoji) => {
@@ -372,6 +376,7 @@ impl QuillApp {
                 cx.notify();
             }
         }
+        true
     }
 
     pub(super) fn toggle_emoji_reaction(

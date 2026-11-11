@@ -418,13 +418,39 @@ struct Reply<W: Write> {
     id: Value,
     conn: Conn,
     line: Option<String>,
+    /// The call is a tool that changes things: a result it finished is
+    /// sent even when access went off meanwhile, so the agent is never told
+    /// a sent message did not run.
+    writes: bool,
+}
+
+/// `line`, a finished tool result, with a note that access went off.
+fn with_access_off_note(line: &str, message: &str) -> String {
+    let Ok(mut answer) = serde_json::from_str::<Value>(line) else {
+        return line.to_string();
+    };
+    let note = json!({
+        "type": "text",
+        "text": format!("This call finished before it stopped: {message}"),
+    });
+    match answer
+        .pointer_mut("/result/content")
+        .and_then(Value::as_array_mut)
+    {
+        Some(content) => content.push(note),
+        None => return line.to_string(),
+    }
+    answer.to_string()
 }
 
 impl<W: Write> Drop for Reply<W> {
     fn drop(&mut self) {
         self.in_flight.fetch_sub(1, Ordering::SeqCst);
         let line = if let Some(message) = self.conn.ended() {
-            error_line(&self.id, code::ACCESS_OFF, message)
+            match self.line.take().filter(|_| self.writes) {
+                Some(done) => with_access_off_note(&done, message),
+                None => error_line(&self.id, code::ACCESS_OFF, message),
+            }
         } else {
             self.line.take().unwrap_or_else(|| {
                 error_line(
@@ -490,6 +516,11 @@ fn dispatch<W: Write + Send + 'static>(
     let mut reply = Reply {
         send: send.clone(),
         in_flight: in_flight.clone(),
+        writes: request.get("method").and_then(Value::as_str) == Some("tools/call")
+            && request
+                .pointer("/params/name")
+                .and_then(Value::as_str)
+                .is_some_and(super::tools::changes_things),
         id,
         conn,
         line: None,

@@ -54,7 +54,7 @@ fn fix_text_with_ai_applies_fixed_text() {
     driver.ingest(owned).expect("ingest fixedText");
     assert_eq!(
         driver.session.messages.ai_composer_text,
-        Some((ChatId(7), "the draft".to_string()))
+        Some((None, ChatId(7), "the draft".to_string()))
     );
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -77,7 +77,7 @@ fn create_rich_message_with_ai_round_trips_blocks() {
     );
     let owned = copy_and_parse(&json, &seq, &dyn_sink).expect("parse richMessage");
     driver.ingest(owned).expect("ingest richMessage");
-    let (chat_id, rich, note) = driver
+    let (_, chat_id, rich, note) = driver
         .session
         .messages
         .ai_composer_blocks
@@ -132,7 +132,7 @@ fn rich_ai_draft_notes_match_the_method() {
             .messages
             .ai_composer_blocks
             .as_ref()
-            .map(|(_, _, note)| *note),
+            .map(|(_, _, _, note)| *note),
         Some("AI fixed the draft")
     );
 
@@ -146,7 +146,7 @@ fn rich_ai_draft_notes_match_the_method() {
             .messages
             .ai_composer_blocks
             .as_ref()
-            .map(|(_, _, note)| *note),
+            .map(|(_, _, _, note)| *note),
         Some("AI rewrote the draft")
     );
     let _ = std::fs::remove_dir_all(&dir);
@@ -226,7 +226,9 @@ fn ai_flood_premium_error_surfaces_premium_line() {
         .session
         .messages
         .ai_error
-        .take()
+        .take_all()
+        .into_iter()
+        .next()
         .expect("AI error stored");
     assert!(err.contains("Premium"), "premium line surfaced, got: {err}");
     // Never applied as a success.

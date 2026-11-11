@@ -8,13 +8,13 @@ impl Session {
         &mut self,
         err: &TdError,
         pending: Option<&PendingRequest>,
-        _extra: Option<RequestId>,
+        extra: Option<RequestId>,
         _seq: u64,
     ) {
         if self.apply_quick_replies_error(err, pending.map(|p| p.purpose))
             || self.apply_business_error(err, pending.map(|p| p.purpose))
-            || self.apply_business_extra_error(err, pending.map(|p| p.purpose))
-            || self.apply_passkeys_error(err, pending.map(|p| p.purpose))
+            || self.apply_business_extra_error(err, pending.map(|p| p.purpose), extra)
+            || self.apply_passkeys_error(err, pending.map(|p| (p.id, p.purpose)))
             || self.apply_tone_upload_error(err, pending.map(|p| p.purpose))
         {
             return;
@@ -47,17 +47,19 @@ impl Session {
             // presence check sends it again.
             Some(RequestPurpose::SetOnline) => {}
             Some(RequestPurpose::Settings(SettingsPurpose::ReviewUnconfirmedSession {
-                confirmed,
+                session_id,
+                ..
             })) => {
                 self.finish_login_review(
-                    confirmed,
+                    session_id,
                     Some(sessions_error_line("review the new login", err)),
                 );
             }
             Some(RequestPurpose::AcceptTermsOfService) => {
-                self.settings.notices.terms_in_flight = false;
-                self.settings.notices.terms_error =
-                    Some(sessions_error_line("accept the terms of service", err));
+                self.settings
+                    .notices
+                    .terms_accept
+                    .fail(sessions_error_line("accept the terms of service", err));
             }
             Some(RequestPurpose::GetAutoDownloadSettingsPresets) => {
                 self.settings.auto_download_presets_loading = false;
@@ -70,10 +72,26 @@ impl Session {
             // on the Privacy screen (the UI reads the state),
             // never as toasts.
             Some(RequestPurpose::Settings(SettingsPurpose::GetPrivacyRules { key })) => {
-                self.settings.privacy.insert(key, PrivacyKeyState::Failed);
+                // Only the key's live load fails it; a save or an update
+                // since then already settled the key.
+                let live = matches!(
+                    self.settings.privacy.get(&key),
+                    Some(PrivacyKeyState::Loading(id)) if Some(*id) == pending.map(|p| p.id)
+                );
+                if live {
+                    self.settings.privacy.insert(key, PrivacyKeyState::Failed);
+                }
             }
+            // A refused save puts back what the server kept (and the call
+            // rules mirrored from it) and says why in the editor.
             Some(RequestPurpose::Settings(SettingsPurpose::SetPrivacyRules { key })) => {
-                self.settings.privacy.insert(key, PrivacyKeyState::Failed);
+                let error = sessions_error_line("save the privacy setting", err);
+                if let Some(kept) =
+                    self.settings
+                        .fail_privacy_save(key, pending.map(|p| p.id), error)
+                {
+                    self.mirror_call_privacy(key, &kept);
+                }
             }
             Some(RequestPurpose::GetReadDatePrivacy) => {
                 if pending
@@ -92,14 +110,21 @@ impl Session {
                     self.settings.read_date_show = None;
                 }
             }
-            Some(RequestPurpose::Settings(SettingsPurpose::GetBlockedSenders { .. })) => {
-                self.settings
-                    .blocked_senders
-                    .fail(sessions_error_line("load the blocked users", err));
+            Some(RequestPurpose::Settings(SettingsPurpose::GetBlockedSenders {
+                generation,
+                ..
+            })) => {
+                // A page of an older list failing says nothing about this one.
+                if generation == self.settings.blocked_generation {
+                    self.settings
+                        .blocked_senders
+                        .fail(sessions_error_line("load the blocked users", err));
+                }
             }
             Some(RequestPurpose::Settings(SettingsPurpose::SetSenderBlockList { .. })) => {
                 // Drop the optimistic list; the next fetch
                 // restores the truth.
+                self.settings.restart_blocked_list();
                 self.settings
                     .blocked_senders
                     .fail_dropping_data(sessions_error_line("change the block list", err));
@@ -238,6 +263,7 @@ impl Session {
             }
             _ => {}
         }
+        self.settle_notification_save(pending, true);
         // Parity slice: a failed `getScopeNotificationSettings` must
         // not leave the scope in `scope_settings_loading` — otherwise
         // `maybe_fetch_scope_notification_settings` skips it on every

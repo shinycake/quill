@@ -67,11 +67,25 @@ impl Session {
                         call.state = hang_up.resume;
                     }
                     self.calls.second_call.back_to_prompt();
+                    // The call stays up, so no link waits for it to end.
+                    self.calls
+                        .call_link_stage
+                        .drop_waiting_for(crate::call_link::LeavingCall::Private(hang_up.call_id));
+                    self.calls.error =
+                        Some(call_request_error_line(err, "Could not hang up the call"));
                 }
-                self.calls.error = Some(call_request_error_line(err, "Could not hang up the call"));
             }
+            // The card comes back with the error; an answer for a rating
+            // that is no longer the one in flight is dropped.
             Some(RequestPurpose::SendCallRating) => {
-                self.calls.error = Some(call_request_error_line(err, "Could not send the rating"));
+                if let Some(summary) = self.calls.summary.as_mut()
+                    && extra.is_some_and(|extra| summary.rating == CallRating::Sending(extra))
+                {
+                    summary.rating = CallRating::Failed(call_request_error_line(
+                        err,
+                        "Could not send the rating",
+                    ));
+                }
             }
             Some(RequestPurpose::SendCallDebugInformation) => {
                 if let Some(summary) = self.calls.summary.as_mut() {
@@ -93,20 +107,25 @@ impl Session {
                 self.chats_state.chat_action_error =
                     Some(crate::chatlist_calls::clear_failed(err.code));
             }
-            Some(RequestPurpose::Calls(CallsPurpose::GetCallPrivacyRules { .. })) => {
-                self.privacy_roundtrip_done();
-                self.calls.privacy_error = true;
+            Some(RequestPurpose::Calls(CallsPurpose::GetCallPrivacyRules { setting })) => {
+                if let Some(pending) = pending {
+                    self.calls.privacy_asks.failed_by(setting, pending.id);
+                }
             }
             // Phase C2i: a failed `setUserPrivacySettingRules`
             // clears the optimistic value (the next fetch
             // restores the truth) and flags the error.
             Some(RequestPurpose::Calls(CallsPurpose::SetCallPrivacyRules { setting })) => {
-                match setting {
-                    CallPrivacySetting::AllowCalls => self.calls.privacy_allow_calls = None,
-                    CallPrivacySetting::PeerToPeer => self.calls.privacy_p2p = None,
+                // Only the set the rule waits for: an earlier one that
+                // fails after a later one was sent clears nothing.
+                if let Some(pending) = pending
+                    && self.calls.privacy_asks.failed_by(setting, pending.id)
+                {
+                    match setting {
+                        CallPrivacySetting::AllowCalls => self.calls.privacy_allow_calls = None,
+                        CallPrivacySetting::PeerToPeer => self.calls.privacy_p2p = None,
+                    }
                 }
-                self.privacy_roundtrip_done();
-                self.calls.privacy_error = true;
             }
             Some(RequestPurpose::SendCallLog) => {
                 if let Some(summary) = self.calls.summary.as_mut() {

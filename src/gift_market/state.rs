@@ -6,6 +6,7 @@ use super::{
 };
 use crate::gift_manage::GiftRecipient;
 use crate::marketplace::GiftPrice;
+use crate::state::fetch::Fetch;
 use std::collections::HashMap;
 
 /// One resale search: the resale box, or the market list of the craft
@@ -233,12 +234,12 @@ pub struct GiftMarketState {
     pub auctions: HashMap<i64, AuctionState>,
     /// The auctions with a bid of the user (`updateActiveGiftAuctions`).
     pub active: Vec<AuctionState>,
-    pub acquired: HashMap<i64, Vec<AcquiredGift>>,
-    pub previews: HashMap<i64, UpgradePreview>,
-    /// Gifts whose preview request failed: not asked again from a render.
-    pub failed_previews: std::collections::BTreeSet<i64>,
+    /// "N items bought" per auction: a failed list says so and offers Retry.
+    pub acquired: HashMap<i64, Fetch<Vec<AcquiredGift>>>,
+    /// The upgrade preview per gift (the cover cycle, the craftable models).
+    pub previews: HashMap<i64, Fetch<UpgradePreview>>,
     /// The auction `openGiftAuction` follows.
-    pub followed: Option<i64>,
+    pub follow: AuctionFollow,
     /// A `getGiftAuctionState` the UI waits for (a link or a tile) and
     /// the gift it resolved to.
     pub auction_request: u64,
@@ -253,6 +254,33 @@ pub struct GiftMarketState {
     pub toasts: Vec<(String, String)>,
     /// A paid request was refused for too few Stars.
     pub balance_low: bool,
+}
+
+/// The auction a bid box follows (`openGiftAuction`).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum AuctionFollow {
+    #[default]
+    None,
+    /// The open request went out as `request`; updates arrive for it.
+    Following { gift_id: i64, request: u64 },
+    /// The open request was refused or could not be sent. It is not asked
+    /// again while the same box shows (that would be a request every
+    /// frame); closing the box and opening it again follows afresh.
+    Failed(i64),
+}
+
+impl AuctionFollow {
+    /// The auction this follow is for, followed or failed.
+    pub fn gift_id(self) -> Option<i64> {
+        match self {
+            Self::None => None,
+            Self::Following { gift_id, .. } | Self::Failed(gift_id) => Some(gift_id),
+        }
+    }
+
+    pub fn is_following(self, gift_id: i64) -> bool {
+        matches!(self, Self::Following { gift_id: id, .. } if id == gift_id)
+    }
 }
 
 impl GiftMarketState {

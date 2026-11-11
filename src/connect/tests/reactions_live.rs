@@ -136,7 +136,7 @@ fn default_reaction_is_kept_and_set() {
     );
     assert_eq!(driver.session.stickers.active_reactions, vec!["👍", "❤"]);
 
-    driver
+    let request = driver
         .set_default_reaction(&ReactionChoice::Emoji("🔥".into()))
         .unwrap();
     let sent = sent_request(&recorder, "setDefaultReactionType");
@@ -144,6 +144,20 @@ fn default_reaction_is_kept_and_set() {
     assert_eq!(
         driver.session.stickers.default_reaction,
         Some(ReactionChoice::Emoji("🔥".into()))
+    );
+    // TDLib refuses it: the choice shown goes back to the one before.
+    feed(
+        &mut driver,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"error","@extra":"{}","code":400,"message":"REACTION_INVALID"}}"#,
+            request.0
+        ),
+    );
+    assert_eq!(
+        driver.session.stickers.default_reaction,
+        Some(ReactionChoice::Emoji("❤".into()))
     );
 }
 

@@ -144,7 +144,8 @@ fn a_failed_spec_fetch_drops_the_removal_instead_of_asking_again() {
 }
 
 #[test]
-fn an_add_folder_answer_for_an_earlier_link_is_dropped() {
+fn an_add_folder_box_takes_only_the_answer_of_its_own_request() {
+    use crate::state::DialogAnswer;
     let mut rig = Rig::new();
     let first = rig
         .driver
@@ -161,18 +162,17 @@ fn an_add_folder_answer_for_an_earlier_link_is_dropped() {
         )
     };
     rig.ingest(&info(first, 41));
-    assert!(rig.driver.session.chat_list.folder_invite_info.is_none());
-    rig.ingest(&format!(
-        r#"{{"@type":"error","@extra":"{}","code":400,"message":"INVITE_SLUG_EXPIRED"}}"#,
-        first.0
-    ));
-    assert!(rig.driver.session.chat_list.folder_invite_error.is_none());
     rig.ingest(&info(second, 42));
-    let shown = rig.driver.session.chat_list.folder_invite_info.as_ref();
-    assert_eq!(shown.map(|i| i.missing_chat_ids.clone()), Some(vec![42]));
+    // The box open now waits for `second`: `first`'s answer is not its.
+    let Some(DialogAnswer::Checked(shown)) =
+        rig.driver.session.chat_list.dialog_answers.take(second)
+    else {
+        panic!("the check answers its own box");
+    };
+    assert_eq!(shown.missing_chat_ids, vec![42]);
 
     // Confirm for this link, then another link opens before the answer:
-    // the join does not say "done" in the new link's dialog.
+    // the join's `ok` is for the first box, not the new link's.
     let add = rig
         .driver
         .add_folder_by_invite_link("https://t.me/addlist/bbb", &[42])
@@ -182,14 +182,20 @@ fn an_add_folder_answer_for_an_earlier_link_is_dropped() {
         .check_folder_invite_link("https://t.me/addlist/ccc")
         .unwrap();
     rig.ingest(&format!(r#"{{"@type":"ok","@extra":"{}"}}"#, add.0));
-    assert!(!rig.driver.session.chat_list.folder_invite_done);
+    assert_eq!(
+        rig.driver.session.chat_list.dialog_answers.take(third),
+        None,
+        "the new link's box has no answer yet"
+    );
     rig.ingest(&info(third, 43));
-    let add = rig
-        .driver
-        .add_folder_by_invite_link("https://t.me/addlist/ccc", &[43])
-        .unwrap();
-    rig.ingest(&format!(r#"{{"@type":"ok","@extra":"{}"}}"#, add.0));
-    assert!(rig.driver.session.chat_list.folder_invite_done);
+    assert!(matches!(
+        rig.driver.session.chat_list.dialog_answers.take(third),
+        Some(DialogAnswer::Checked(_))
+    ));
+    assert_eq!(
+        rig.driver.session.chat_list.dialog_answers.take(add),
+        Some(DialogAnswer::Done)
+    );
 }
 
 #[test]

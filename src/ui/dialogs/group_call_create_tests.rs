@@ -544,3 +544,25 @@ fn a_refused_create_toasts_and_drops_the_join(cx: &mut TestAppContext) {
         "no error left for the next call"
     );
 }
+
+#[gpui_kit::test]
+fn a_join_as_list_nobody_waits_for_is_dropped(cx: &mut TestAppContext) {
+    let (app, mut main) = open_main(cx);
+    // The box was closed before the list answered: nothing waits for it.
+    app.update_in(&mut main, |app, _, _| {
+        if let Some(session) = app.demo_session.as_deref_mut() {
+            session.calls.create_join_as = Some(quill::calls::group_call_create::CreateJoinAs {
+                chat_id: CHANNEL,
+                request: RequestId(9),
+                answer: Some(Ok(vec![ME])),
+            });
+        }
+    });
+    frames(&mut main);
+    let held = app.update_in(&mut main, |app, _, _| {
+        app.demo_session
+            .as_deref()
+            .is_some_and(|session| session.calls.create_join_as.is_some())
+    });
+    assert!(!held, "the answer went with the box that asked");
+}

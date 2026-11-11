@@ -203,8 +203,20 @@ impl ScreenBackend for MacScreen {
         });
         // SAFETY: the stream is configured; the block only sends.
         unsafe { stream.startCaptureWithCompletionHandler(Some(&block)) };
-        rx.recv_timeout(REPLY_TIMEOUT)
-            .map_err(|_| CaptureError::Device("Screen capture did not start.".into()))??;
+        let started = rx
+            .recv_timeout(REPLY_TIMEOUT)
+            .map_err(|_| CaptureError::Device("Screen capture did not start.".into()))
+            .and_then(|reply| reply);
+        if let Err(err) = started {
+            // A start that answered late (or with an error) may still be
+            // running: stop it, or the system keeps capturing, with its
+            // recording indicator on, for a share Quill reports as failed.
+            shared.stopped.store(true, Ordering::Release);
+            // SAFETY: stopping a stream that may have started; no handler
+            // needed.
+            unsafe { stream.stopCaptureWithCompletionHandler(None) };
+            return Err(err);
+        }
         let monitor = window_number(source)
             .and_then(|window| WindowMonitor::start(window, sink.clone(), shared.clone()).ok());
         Ok(Box::new(MacCapture {

@@ -501,12 +501,15 @@ impl QuillApp {
     /// asked, which is gone.
     pub(in crate::ui) fn put_on_screen(&mut self, mut live: LiveConnect) {
         live.driver.session.communities.forget_outcomes();
+        live.driver.session.forget_screen_outcomes();
         debug_assert!(self.live.is_none(), "a client is already on screen");
         debug_assert!(
             !self.screen.goodbyes_due,
             "a client is put on screen before the last one's goodbyes ran"
         );
         self.screen.client_filled = true;
+        // The private media scratch is this account's from here on.
+        quill::local_path::set_media_cache_scope(&live.driver.session.account);
         self.live = Some(live);
     }
 }

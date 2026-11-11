@@ -208,10 +208,10 @@ impl QuillApp {
     /// way, or the ceremony open).
     pub(in crate::ui) fn passkey_creation_busy(&self) -> bool {
         self.privacy.passkeys.ceremony.is_some()
-            || self.live.as_ref().is_some_and(|live| {
-                live.driver.passkey_parameters_pending()
-                    || live.driver.session.settings.passkeys.adding
-            })
+            || self
+                .live
+                .as_ref()
+                .is_some_and(|live| live.driver.session.settings.passkeys.add_busy())
     }
 
     pub(in crate::ui) fn run_passkey_ticker(
@@ -260,9 +260,9 @@ impl QuillApp {
             Some(live) => {
                 let state = &mut live.driver.session.settings.passkeys;
                 (
-                    state.ceremony.take(),
+                    state.take_starting(),
                     state.login.ceremony.take(),
-                    std::mem::take(&mut state.added),
+                    state.take_added(),
                 )
             }
             None => (None, None, false),
@@ -352,8 +352,10 @@ impl QuillApp {
                 let ui = self.privacy.passkeys.ceremony.take();
                 if ui.is_some_and(|ui| ui.mode == CeremonyMode::Register)
                     && let Some(live) = self.live.as_mut()
+                    && live.driver.finish_register(&registration).is_err()
                 {
-                    let _ = live.driver.finish_register(&registration);
+                    // The key was touched for nothing: say so.
+                    self.set_note(StatusNote::error(tr(keys::PASSKEY_ERROR_REGISTER)));
                 }
             }
             CeremonyEvent::SignedIn(assertion) => {
@@ -362,8 +364,9 @@ impl QuillApp {
                 let ui = self.privacy.passkeys.ceremony.take();
                 if ui.is_some_and(|ui| ui.mode == CeremonyMode::Login)
                     && let Some(live) = self.live.as_mut()
+                    && live.driver.finish_login(&assertion).is_err()
                 {
-                    let _ = live.driver.finish_login(&assertion);
+                    self.set_note(StatusNote::error(tr(keys::PASSKEY_ERROR_LOGIN)));
                 }
             }
             CeremonyEvent::Failed(CeremonyError::Cancelled) => {
@@ -453,6 +456,9 @@ impl QuillApp {
         {
             ceremony.cancel();
         }
+        if let Some(live) = self.live.as_mut() {
+            live.driver.cancel_register();
+        }
         if let Some(input) = self.privacy.passkeys.pin_input.clone() {
             input.update(cx, |input, cx| input.set_value("", window, cx));
         }
@@ -475,7 +481,7 @@ impl QuillApp {
         self.privacy.passkeys.ticker = None;
         if let Some(live) = self.live.as_mut() {
             let state = &mut live.driver.session.settings.passkeys;
-            state.ceremony = None;
+            state.cancel_register();
             state.login.ceremony = None;
         }
     }

@@ -16,7 +16,7 @@ fn known(list: Vec<Passkey>) -> PasskeysState {
         display_allowed: true,
         ..Default::default()
     };
-    state.accept_list(list);
+    state.accept_list(list, 0);
     state
 }
 
@@ -39,7 +39,10 @@ fn parses_the_list_and_skips_passkeys_without_an_id() {
     );
     assert_eq!(first.last_usage_date, 1_790_100_000);
     assert_eq!(list.get(1).unwrap().title(), "Passkey");
-    assert!(parse_payload("passkey", &value).is_none());
+    assert_eq!(
+        parse_payload("passkey", &value),
+        Some(PasskeysPayload::AddedUnreadable)
+    );
 }
 
 #[test]
@@ -104,30 +107,75 @@ fn registering_stops_at_the_passkey_limit() {
     assert!(!state.can_register());
 }
 
+const OPTIONS: &str =
+    r#"{"publicKey":{"rp":{"id":"telegram.org"},"challenge":"AQ","timeout":1000}}"#;
+
 #[test]
 fn parameters_start_the_ceremony_and_the_added_passkey_joins_the_list() {
     let mut state = known(vec![key("a", "x")]);
     let now = Instant::now();
-    assert!(!state.accept_parameters("{}", now));
-    assert!(state.ceremony.is_none());
-    let json = r#"{"publicKey":{"rp":{"id":"telegram.org"},"challenge":"AQ","timeout":1000}}"#;
-    assert!(state.accept_parameters(json, now));
-    let options = state.ceremony.take().unwrap();
+    state.add = PasskeyAdd::FetchingOptions(RequestId(1));
+    assert!(!state.accept_parameters(Some(RequestId(1)), "{}", now));
+    assert!(matches!(state.add, PasskeyAdd::Idle));
+    state.add = PasskeyAdd::FetchingOptions(RequestId(2));
+    assert!(state.accept_parameters(Some(RequestId(2)), OPTIONS, now));
+    let options = state.take_starting().unwrap();
     assert_eq!(options.rp_id, "telegram.org");
     // The options stay fresh for their own timeout.
-    let pending = state.registration.clone().unwrap();
+    let PasskeyAdd::Cached(pending) = state.add.clone() else {
+        panic!("options not kept");
+    };
     assert!(pending.fresh(now + Duration::from_millis(999)));
     assert!(!pending.fresh(now + Duration::from_millis(1000)));
-    state.adding = true;
+    state.add = PasskeyAdd::Sending(RequestId(3));
     state.accept_added(key("n", "YubiKey"));
     assert_eq!(state.list.len(), 2);
     assert_eq!(state.list.last().unwrap().id, "n");
-    assert!(state.added && !state.adding && state.registration.is_none());
+    assert!(state.take_added());
+    assert!(matches!(state.add, PasskeyAdd::Idle) && !state.take_added());
     let value = serde_json::json!({"@type": "passkey", "id": "n", "name": "YubiKey"});
     assert!(matches!(
         parse_payload("passkey", &value),
         Some(PasskeysPayload::Added(p)) if p.id == "n"
     ));
+}
+
+#[test]
+fn options_that_arrive_after_the_box_closed_start_nothing() {
+    let mut state = known(vec![]);
+    let now = Instant::now();
+    state.add = PasskeyAdd::FetchingOptions(RequestId(1));
+    state.cancel_register();
+    assert!(state.accept_parameters(Some(RequestId(1)), OPTIONS, now));
+    assert!(state.take_starting().is_none());
+    assert!(!state.add_busy());
+    // A newer ask is not answered by the older request.
+    state.add = PasskeyAdd::FetchingOptions(RequestId(2));
+    assert!(state.accept_parameters(Some(RequestId(1)), OPTIONS, now));
+    assert!(state.take_starting().is_none());
+    assert!(state.add_busy());
+}
+
+#[test]
+fn a_failed_or_unreadable_add_leaves_the_sending_stage() {
+    let mut state = known(vec![]);
+    state.add = PasskeyAdd::Sending(RequestId(5));
+    assert!(!state.fail_register(Some(RequestId(4))));
+    assert!(state.add_busy());
+    assert!(state.fail_register(Some(RequestId(5))));
+    assert!(!state.add_busy());
+}
+
+#[test]
+fn a_list_asked_before_a_removal_does_not_bring_the_passkey_back() {
+    let mut state = known(vec![key("a", "x"), key("b", "y")]);
+    let asked = state.generation;
+    state.finish_remove("a");
+    state.accept_list(vec![key("a", "x"), key("b", "y")], asked);
+    assert_eq!(state.list.len(), 1);
+    assert!(state.stale);
+    state.accept_list(vec![key("b", "y")], state.generation);
+    assert!(!state.stale && state.known);
 }
 
 #[test]

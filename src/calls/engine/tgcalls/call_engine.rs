@@ -255,7 +255,7 @@ impl CallEngine for TgcallsEngine {
         group_call_id: i32,
         answer_payload: &str,
         camera: Option<&str>,
-    ) -> Result<(), EngineError> {
+    ) -> Result<Option<EngineError>, EngineError> {
         self.connect_group(group_call_id, answer_payload, camera)
     }
 

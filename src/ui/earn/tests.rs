@@ -281,3 +281,71 @@ fn the_setup_button_stays_pinned_under_the_page(cx: &mut TestAppContext) {
     // tdesktop `setupBottom`: below the scrolling part, not inside it.
     assert!(save.origin.y >= page.bottom());
 }
+
+fn park_a_join_box(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) {
+    app.update(vcx, |app, _| {
+        let Some(session) = app.demo_session.as_mut() else {
+            return;
+        };
+        session.payments.earn.pending_join = Some(quill::earn::JoinBox {
+            bot_user_id: 5,
+            info: Default::default(),
+            recipient: quill::earn::EarnPeer::User(1),
+            choose_recipient: true,
+            joining: false,
+        });
+    });
+}
+
+fn parked_join_box(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> bool {
+    app.read_with(vcx, |app, _| {
+        app.demo_session
+            .as_ref()
+            .is_some_and(|s| s.payments.earn.pending_join.is_some())
+    })
+}
+
+#[gpui_kit::test]
+fn leaving_the_layer_drops_a_join_box_parked_for_the_recipients(cx: &mut TestAppContext) {
+    let (app, _shell, mut vcx) = open_demo(cx, "ready-earn-monetization");
+    let vcx = &mut vcx;
+    park_a_join_box(&app, vcx);
+    click(vcx, "earn-layer-close");
+    frames(vcx);
+    assert!(
+        !parked_join_box(&app, vcx),
+        "it does not open later, unasked"
+    );
+}
+
+#[gpui_kit::test]
+fn the_switch_farewell_drops_a_join_box_parked_for_the_recipients(cx: &mut TestAppContext) {
+    let (app, _shell, mut vcx) = open_demo(cx, "ready-earn-monetization");
+    let vcx = &mut vcx;
+    park_a_join_box(&app, vcx);
+    assert!(parked_join_box(&app, vcx));
+    app.update_in(vcx, |app, window, cx| app.close_earn_boxes(window, cx));
+    assert!(!parked_join_box(&app, vcx));
+}
+
+#[gpui_kit::test]
+fn a_withdrawal_larger_than_the_balance_is_brought_down_to_it(cx: &mut TestAppContext) {
+    let (app, _shell, mut vcx) = open_demo(cx, "ready-earn-bot-stars");
+    let vcx = &mut vcx;
+    app.update_in(vcx, |app, window, cx| {
+        app.earn.scroll.set_offset(point(px(0.), px(-100_000.)));
+        app.earn
+            .amount
+            .update(cx, |input, cx| input.set_value("999999999", window, cx));
+        cx.notify();
+    });
+    frames(vcx);
+    click(vcx, "earn-withdraw");
+    let (typed, available) = app.read_with(vcx, |app, cx| {
+        let available = app
+            .earn_state()
+            .and_then(|earn| Some(earn.page.as_ref()?.stars.ready()?.status.available.stars));
+        (app.earn.amount.read(cx).value().to_string(), available)
+    });
+    assert_eq!(Some(typed.parse::<i64>().unwrap_or(-1)), available);
+}

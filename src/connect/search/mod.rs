@@ -2,7 +2,9 @@
 use super::*;
 use crate::ids::{ChatId, MessageId, RequestId, TopicId};
 use crate::search_filters::{SearchMediaKind, YearMonth};
-use crate::state::{ChatSearchJumpNeed, RequestPurpose, SearchStatus, SharedMediaTab};
+use crate::state::{
+    ChatSearchJumpNeed, RequestPurpose, RequestRollback, SearchStatus, SharedMediaTab,
+};
 use crate::state::{DateJumpMode, HistoryOpen};
 use crate::state::{MediaPurpose, SearchPurpose};
 use crate::telegram::envelope::ChatKind;
@@ -362,6 +364,13 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
+        let index = self
+            .session
+            .search
+            .search
+            .chat_ids
+            .iter()
+            .position(|id| *id == chat_id);
         if !self.session.search.search.remove_recent(chat_id) {
             return Ok(None);
         }
@@ -373,7 +382,16 @@ impl<S: JsonSender> ConnectDriver<S> {
             .send_json(&remove_recently_found_chat(extra, chat_id))
         {
             self.session.requests.take(extra);
+            if let Some(index) = index {
+                self.session.search.search.restore_recent(chat_id, index);
+            }
             return Err(err);
+        }
+        if let (Some(index), Some(pending)) = (index, self.session.requests.pending_mut(extra)) {
+            pending.rollback = Some(RequestRollback::RecentSearchRemoved {
+                chat_id: chat_id.0,
+                index,
+            });
         }
         Ok(Some(extra))
     }
@@ -411,6 +429,13 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
+        let index = self
+            .session
+            .search
+            .search
+            .top_chats
+            .iter()
+            .position(|id| *id == chat_id);
         if !self.session.search.search.remove_top_chat(chat_id) {
             return Ok(None);
         }
@@ -422,7 +447,16 @@ impl<S: JsonSender> ConnectDriver<S> {
             .send_json(&remove_top_chat_users(extra, chat_id))
         {
             self.session.requests.take(extra);
+            if let Some(index) = index {
+                self.session.search.search.restore_top_chat(chat_id, index);
+            }
             return Err(err);
+        }
+        if let (Some(index), Some(pending)) = (index, self.session.requests.pending_mut(extra)) {
+            pending.rollback = Some(RequestRollback::TopChatRemoved {
+                chat_id: chat_id.0,
+                index,
+            });
         }
         Ok(Some(extra))
     }
@@ -447,9 +481,19 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session.requests.take(extra);
             return Err(err);
         }
+        let previous = self.session.search.search.top_chats_disabled;
+        let top_chats = if disabled {
+            std::mem::take(&mut self.session.search.search.top_chats)
+        } else {
+            Vec::new()
+        };
         self.session.search.search.top_chats_disabled = disabled;
-        if disabled {
-            self.session.search.search.top_chats.clear();
+        if let Some(pending) = self.session.requests.pending_mut(extra) {
+            pending.rollback = Some(RequestRollback::TopChatsDisabled {
+                previous,
+                shown: disabled,
+                top_chats,
+            });
         }
         Ok(extra)
     }

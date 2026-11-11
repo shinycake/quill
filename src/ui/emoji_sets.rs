@@ -35,7 +35,14 @@ const COVER_SIZE: f32 = 28.;
 const TABS: [EmojiSetTab; 2] = [EmojiSetTab::Installed, EmojiSetTab::Trending];
 
 impl QuillApp {
-    pub(super) fn open_emoji_sets(&mut self, cx: &mut Context<Self>) {
+    pub(super) fn open_emoji_sets(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        // The box opens on Installed with an empty field, as its list does:
+        // a search typed in an earlier visit does not stay in the field
+        // (and a search still waiting on its pause does not fire).
+        self.pickers.emoji_set_keystroke = self.pickers.emoji_set_keystroke.wrapping_add(1);
+        self.pickers
+            .emoji_set_search_input
+            .update(cx, |input, cx| input.set_value("", window, cx));
         self.pickers.emoji_set_return_tab = EmojiSetTab::Installed;
         self.open_box(DialogKind::EmojiSets);
         if let Some(live) = self.live.as_mut() {

@@ -153,6 +153,7 @@ impl Session {
         self.threads.saved.sublist = Some(SavedSublistView {
             topic_id,
             history: TopicHistory::default(),
+            page: SavedPage::Idle,
         });
         self.view_generation.bump();
     }
@@ -170,7 +171,7 @@ impl Session {
             tag,
             history: TopicHistory::default(),
             loaded: false,
-            request: None,
+            page: SavedPage::Idle,
         });
         self.view_generation.bump();
     }
@@ -183,19 +184,32 @@ impl Session {
     ) -> Option<&mut SavedTagSearch> {
         let pending = pending?;
         let search = self.threads.saved.tag_search.as_mut()?;
-        if search.request != Some(pending.id) {
+        if search.page != SavedPage::Asking(pending.id) {
             return None;
         }
-        search.request = None;
+        search.page = SavedPage::Idle;
         Some(search)
     }
 
-    /// A `searchSavedMessages` page failed: the filter stops paging (the
-    /// error line says why) instead of waiting on it.
+    /// A `searchSavedMessages` page failed: the filter stops paging and
+    /// offers Retry. It is not complete: only TDLib saying so ends it.
     pub(crate) fn fail_saved_tag_page(&mut self, pending: Option<&PendingRequest>) {
         if let Some(search) = self.awaiting_saved_tag_search(pending) {
-            search.loaded = true;
-            search.history.loaded_complete = true;
+            search.history.older = OlderEnd::Failed;
+        }
+    }
+
+    /// A `getSavedMessagesTopicHistory` page failed: the sublist stops
+    /// paging (no re-ask on every scroll) and offers Retry.
+    pub(crate) fn fail_saved_topic_page(&mut self, pending: Option<&PendingRequest>) {
+        let Some(pending) = pending else {
+            return;
+        };
+        if let Some(view) = self.threads.saved.sublist.as_mut()
+            && view.page == SavedPage::Asking(pending.id)
+        {
+            view.page = SavedPage::Idle;
+            view.history.older = OlderEnd::Failed;
         }
     }
 
@@ -220,31 +234,29 @@ impl Session {
             self.remember_files(&message.files);
             self.index_poll_parsed(message);
         }
+        // Only the page this view asked for: the same sublist entered
+        // again asked another, and a duplicate would add no rows.
         let Some(view) = self
             .threads
             .saved
             .sublist
             .as_mut()
             .filter(|view| view.topic_id == topic_id)
+            .filter(|view| pending.is_some_and(|p| view.page == SavedPage::Asking(p.id)))
         else {
             return;
         };
+        view.page = SavedPage::Idle;
         let empty = messages.is_empty();
         let mut oldest: Option<i64> = None;
-        let mut added = 0usize;
         for message in messages {
             let id = message.id.0;
             oldest = Some(oldest.map_or(id, |old| old.min(id)));
-            if view
-                .history
+            view.history
                 .messages
-                .insert(id, history_message(message, false))
-                .is_none()
-            {
-                added += 1;
-            }
+                .insert(id, history_message(message, false));
         }
-        if empty || added == 0 {
+        if empty {
             view.history.loaded_complete = true;
         }
         if let Some(oldest) = oldest {

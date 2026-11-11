@@ -95,6 +95,7 @@ impl crate::ui::on_screen::Farewell for PaymentUi {
         app.close_subscriptions(cx);
         app.close_stars(cx);
         app.close_premium(cx);
+        app.drop_premium_auto_start();
         app.cancel_grams_withdraw(window, cx);
         app.close_grams(cx);
         app.dismiss_premium_limit();

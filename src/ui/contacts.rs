@@ -6,6 +6,8 @@ use super::chat_row::chat_avatar;
 use super::pressable::PressableDiv;
 use super::shell::{DialogKind, QuillShell};
 use super::*;
+use crate::ui::chat_list_state::SidebarTab;
+use crate::ui::dialogs::ContactSave;
 use crate::ui::status_note::StatusNote;
 use crate::ui::user_error::user_error_for;
 use gpui_kit::component::button::*;
@@ -185,12 +187,32 @@ impl QuillApp {
                     cx,
                 ))
                 .into_any_element();
+            let save = dialog_state.save.clone();
+            let saving = matches!(save, ContactSave::Saving(_));
+            let body = match save {
+                ContactSave::Failed(line) => div()
+                    .flex()
+                    .flex_col()
+                    .gap_2()
+                    .child(
+                        div()
+                            .id("add-contact-error")
+                            .text_xs()
+                            .text_color(danger_dark())
+                            .child(line),
+                    )
+                    .child(body)
+                    .into_any_element(),
+                _ => body,
+            };
             let footer = div()
                 .flex()
                 .gap_2()
                 .child(
                     Button::new("add-contact-submit")
                         .label(tr(keys::Q_PEOPLE_ADD_CONTACT))
+                        .loading(saving)
+                        .disabled(saving)
                         .on_click(cx.listener(|this, _, window, cx| {
                             this.submit_add_contact_dialog(window, cx);
                             this.close_kit_dialog_if_done(DialogKind::AddContact, window, cx);
@@ -234,7 +256,7 @@ impl QuillApp {
     /// flight. Without sync the tab keeps its last list, but it still
     /// needs one. A send that fails ends the loading with Retry.
     pub(in crate::ui) fn refetch_open_contacts(&mut self) {
-        if !self.chat_list.contacts_tab_open {
+        if self.chat_list.tab != SidebarTab::Contacts {
             return;
         }
         if let Some(live) = self.live.as_mut() {
@@ -498,6 +520,40 @@ impl QuillApp {
         cx.notify();
     }
 
+    /// Poll-loop half: the Add Contact box's request answered. The box
+    /// closes when the contact is added and shows the refusal when it is not.
+    pub(super) fn settle_add_contact(&mut self, cx: &mut Context<Self>) -> bool {
+        let Some(ContactSave::Saving(request)) = self
+            .dialogs
+            .add_contact_dialog
+            .as_ref()
+            .map(|d| d.save.clone())
+        else {
+            return false;
+        };
+        let answer = self
+            .session_mut()
+            .and_then(|s| s.chat_list.dialog_answers.take(request));
+        let Some(answer) = answer else {
+            return false;
+        };
+        match answer {
+            quill::state::DialogAnswer::Failed(line) => {
+                if let Some(dialog) = self.dialogs.add_contact_dialog.as_mut() {
+                    dialog.save = ContactSave::Failed(line);
+                }
+            }
+            quill::state::DialogAnswer::Done
+            | quill::state::DialogAnswer::Checked(_)
+            | quill::state::DialogAnswer::LimitHit => {
+                self.dialogs.add_contact_dialog = None;
+                self.set_note(StatusNote::silent(tr(keys::Q_PEOPLE_CONTACT_ADD_REQUESTED)));
+            }
+        }
+        cx.notify();
+        true
+    }
+
     pub(super) fn close_add_contact_dialog(&mut self, cx: &mut Context<Self>) {
         self.dialogs.add_contact_dialog = None;
         if let Some(live) = self.live.as_mut() {
@@ -524,11 +580,22 @@ impl QuillApp {
             cx.notify();
             return;
         };
+        if let Some(dialog) = self.dialogs.add_contact_dialog.as_ref()
+            && matches!(dialog.save, ContactSave::Saving(_))
+        {
+            // The first Add is still waiting for its answer.
+            return;
+        }
         if let Some(live) = self.live.as_mut() {
             match live.driver.add_contact(user_id, &phone, &first, &last) {
-                Ok(_) => {
+                // The box stays until its own request answers.
+                Ok(Some(request)) => {
+                    if let Some(dialog) = self.dialogs.add_contact_dialog.as_mut() {
+                        dialog.save = ContactSave::Saving(request);
+                    }
+                }
+                Ok(None) => {
                     self.dialogs.add_contact_dialog = None;
-                    self.set_note(StatusNote::silent(tr(keys::Q_PEOPLE_CONTACT_ADD_REQUESTED)));
                 }
                 Err(err) => {
                     self.set_note(StatusNote::error(user_error_for(

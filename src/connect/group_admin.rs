@@ -239,6 +239,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             // request: the chat stays protected until TDLib says otherwise.
             return Ok(Some(extra));
         }
+        let previous_disabled_at = self.session.groups.private_sharing.disabled_at(chat_id);
         if private {
             self.session
                 .groups
@@ -251,6 +252,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             pending.rollback = Some(RequestRollback::ProtectedContent {
                 chat_id: chat_id.0,
                 previous,
+                previous_disabled_at,
             });
         }
         Ok(Some(extra))
@@ -479,7 +481,9 @@ impl<S: JsonSender> ConnectDriver<S> {
             }
             AdminFollowup::PermissionsAfterUpgrade { old, save } => {
                 match self.session.upgraded_chat_for(old) {
-                    Some(new) => self.send_permissions_save(new, save),
+                    Some(new) => self.send_permissions_save(new, save).map(|sent| {
+                        matches!(sent, crate::permissions_box::PermissionsSent::Sent(_))
+                    }),
                     None => Ok(false),
                 }
             }

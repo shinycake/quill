@@ -94,6 +94,12 @@ impl QuillApp {
         // A chat with a window of its own takes the click (Telegram
         // Desktop `windowForShowingHistory`); the main window stays behind.
         if self.routed_to_chat_window(chat_id, cx) {
+            // The text typed into the toast goes to that window's composer.
+            if let Some(account) = self.current_account() {
+                self.in_window_scope(Some(chat_id), cx, |app, cx| {
+                    app.compose_unsent_reply(&account, chat_id, None, cx);
+                });
+            }
             return;
         }
         cx.activate(true);
@@ -104,6 +110,9 @@ impl QuillApp {
         }
         self.select_listed_chat(chat_id, window, cx);
         // A kit dialog keeps the keys until it closes.
+        if let Some(account) = self.current_account() {
+            self.compose_unsent_reply(&account, chat_id, Some(window), cx);
+        }
         if self.open_chat_id() == Some(chat_id) && !self.kit_dialog_open() {
             self.focus_opened_chat(window, cx);
         }
@@ -153,6 +162,21 @@ impl QuillApp {
             .cloned()
             .or_else(|| self.session().map(|s| s.account.clone()))
             .unwrap_or_else(AccountKey::primary)
+    }
+
+    /// Whether `account`'s notifications show no sender or text right now:
+    /// Quill is locked, or that account turned "Show sender name" off.
+    pub(in crate::ui) fn notifications_hidden_now(&self, account: &AccountKey) -> bool {
+        let session = match self.session() {
+            Some(session) if session.account == *account => Some(session),
+            _ => self
+                .background
+                .client(account)
+                .and_then(|client| client.live.as_ref())
+                .map(|live| &live.driver.session),
+        };
+        self.account.passcode.is_locked()
+            || session.is_some_and(|s| !s.settings.notify_view.shows_name())
     }
 
     /// Linux: `CloseNotification` for the chat's toast on a worker thread,
@@ -388,8 +412,14 @@ impl QuillApp {
         let composer_idle = !self.chat_ui.is_editing()
             && self.chat_ui.reply().is_none()
             && self.composer.read(cx).value().trim().is_empty();
+        let Some(account) = self.session().map(|session| session.account.clone()) else {
+            return;
+        };
         for (chat_id, topic) in clears {
-            let Some(flag) = self.composer_ui.clear_draft_on_success.clone() else {
+            let Some(flag) = self
+                .composer_sends
+                .take_draft_clear(&account, topic.key(chat_id.0))
+            else {
                 continue;
             };
             let stored = self
@@ -399,7 +429,6 @@ impl QuillApp {
             if !flag.matches(chat_id, stored.as_deref()) {
                 continue;
             }
-            self.composer_ui.clear_draft_on_success = None;
             let idle = if open_chat == Some(chat_id) {
                 composer_idle
             } else {

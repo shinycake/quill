@@ -3,7 +3,7 @@
 //! chosen in the existing-sticker chooser (`handleChosenGifs` →
 //! `AdaptGifToSet`). Both open the video editor on the file, which encodes
 //! the sticker and hands it to the "New Sticker" box.
-use super::state::{PendingVideo, PickExisting};
+use super::state::{PendingVideo, PickExisting, PickedFile};
 use super::*;
 use quill::ids::FileId;
 use quill::telegram::envelope::AnimationItem;
@@ -74,12 +74,20 @@ impl QuillApp {
         self.sticker_box.pick = None;
         self.sticker_box.pending_still = None;
         let Some(path) = self.local_media_path(file_id) else {
-            if let Some(live) = self.live.as_mut() {
-                let _ = live.driver.download_file(file_id, 16);
+            if let Some(live) = self.live.as_mut()
+                && live.driver.download_file(file_id, 16).is_err()
+            {
+                // Nothing was asked for, so nothing will arrive.
+                self.set_note(StatusNote::error(tr(
+                    keys::Q_OPS_COULD_NOT_DOWNLOAD_PLEASE_TRY,
+                )));
+                cx.notify();
+                return;
             }
             self.sticker_box.pending_video = Some(PendingVideo {
                 pick,
                 file_id,
+                file: PickedFile::Video,
                 emoji,
                 window: self.windows.scope,
             });

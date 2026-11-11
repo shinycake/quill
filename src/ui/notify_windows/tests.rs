@@ -310,3 +310,31 @@ fn clicking_a_notification_window_opens_the_chat(cx: &mut TestAppContext) {
     popup.simulate_keystrokes("a escape up");
     popup.run_until_parked();
 }
+
+#[gpui_kit::test]
+fn the_corner_preview_ends_with_the_page_that_showed_it(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    app.update(vcx, |app, cx| {
+        app.notify_corner_preview(Some(quill::notify::custom::ScreenCorner::TopLeft), cx);
+    });
+    app.read_with(vcx, |app, _| {
+        assert!(
+            app.delivery.windows.demo.to.abs() < f32::EPSILON,
+            "the real notifications dim while a corner is previewed"
+        );
+    });
+    // Leaving the Notifications page ends it; no hover-out is needed.
+    app.update(vcx, |app, _| app.leave_notification_settings());
+    app.read_with(vcx, |app, _| {
+        assert!((app.delivery.windows.demo.to - 1.0).abs() < f32::EPSILON);
+        assert!(
+            app.delivery
+                .windows
+                .samples
+                .iter()
+                .all(|(_, popup)| popup.hiding),
+            "the sample windows are going"
+        );
+    });
+}

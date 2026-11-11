@@ -87,3 +87,65 @@ fn switching_sets_draws_emoji_from_sprites(cx: &mut TestAppContext) {
     assert_eq!(load_current(&root), EmojiSetId::System);
     assert!(emoji_sprites::pieces("hi 😀").is_none());
 }
+
+/// Sweep 09-X043: any new choice replaces the stage, which stops a download
+/// in flight, so a download that lands later cannot switch away from the
+/// set the user picked last.
+#[gpui_kit::test]
+fn a_new_choice_stops_the_download_in_flight(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    vcx.run_until_parked();
+    let progress = std::sync::Arc::new(quill::spell_download::Progress::default());
+    let held = progress.clone();
+    app.update(&mut vcx, |app, cx| {
+        let task = cx.spawn(async move |_, _| {});
+        app.preferences.emoji_style.stage = super::SetStage::Downloading {
+            id: EmojiSetId::Twemoji,
+            progress: held,
+            task,
+        };
+        // The set in use is the system font; choosing it again is the
+        // choice that leaves the download.
+        app.choose_emoji_set(EmojiSetId::System, cx);
+    });
+    assert!(progress.is_cancelled(), "the download was told to stop");
+    app.read_with(&vcx, |app, _| {
+        assert!(app.preferences.emoji_style.stage.is_idle());
+    });
+}
+
+/// Sweep 09-087: a pack that was just installed and does not load is a
+/// failure the row shows, and no second download starts; one that loaded
+/// before and no longer does is downloaded again.
+#[gpui_kit::test]
+fn a_fresh_pack_that_does_not_load_fails_instead_of_downloading_again(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    vcx.run_until_parked();
+    // Twemoji has no files in the fixture root, so it cannot load.
+    app.update(&mut vcx, |app, cx| {
+        app.preferences
+            .emoji_style
+            .ready
+            .insert(EmojiSetId::Twemoji);
+        app.switch_emoji_set(EmojiSetId::Twemoji, true, cx);
+    });
+    vcx.run_until_parked();
+    app.read_with(&vcx, |app, _| {
+        assert!(
+            matches!(
+                &app.preferences.emoji_style.stage,
+                super::SetStage::Failed {
+                    id: EmojiSetId::Twemoji,
+                    ..
+                }
+            ),
+            "the failure stays on the row"
+        );
+        assert!(
+            !app.preferences
+                .emoji_style
+                .ready
+                .contains(&EmojiSetId::Twemoji)
+        );
+    });
+}

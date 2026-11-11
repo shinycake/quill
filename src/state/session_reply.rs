@@ -15,7 +15,14 @@ pub enum ReplyTarget {
     Loaded(Box<HistoryMessage>),
     /// TDLib said it does not exist (deleted, or no access).
     Missing,
+    /// The ask failed with an error that may pass (network, timeout, rate
+    /// limit, a 500): the strip keeps loading, and the row is asked for
+    /// again once `until` is over.
+    Retry { until: std::time::Instant },
 }
+
+/// The wait before a failed `getRepliedMessage` is asked again.
+pub const REPLY_RETRY_WAIT: std::time::Duration = std::time::Duration::from_secs(10);
 
 pub const MAX_REPLY_TARGETS_OUTSIDE_WINDOW: usize = 256;
 
@@ -537,12 +544,14 @@ impl Session {
             if reply.story_id != 0 {
                 continue;
             }
-            if self
+            match self
                 .messages
                 .reply_targets
-                .contains_key(&(message.chat_id.0, message.id.0))
+                .get(&(message.chat_id.0, message.id.0))
             {
-                continue;
+                None => {}
+                Some(ReplyTarget::Retry { until }) if std::time::Instant::now() >= *until => {}
+                Some(_) => continue,
             }
             let target_chat = if reply.chat_id.0 == 0 {
                 message.chat_id
@@ -639,11 +648,26 @@ impl Session {
         }
     }
 
-    /// `getRepliedMessage` failed: the original is gone or unreachable.
-    pub(crate) fn reject_replied_message(&mut self, chat_id: ChatId, message_id: MessageId) {
+    /// `getRepliedMessage` failed with `code`. Only a not-found or invalid
+    /// answer means the original is gone; any other error is asked for
+    /// again after a wait, and the strip keeps loading meanwhile.
+    pub(crate) fn reject_replied_message(
+        &mut self,
+        chat_id: ChatId,
+        message_id: MessageId,
+        code: i32,
+        now: std::time::Instant,
+    ) {
+        let target = if matches!(code, 400 | 404) {
+            ReplyTarget::Missing
+        } else {
+            ReplyTarget::Retry {
+                until: now.checked_add(REPLY_RETRY_WAIT).unwrap_or(now),
+            }
+        };
         self.messages
             .reply_targets
-            .insert((chat_id.0, message_id.0), ReplyTarget::Missing);
+            .insert((chat_id.0, message_id.0), target);
     }
 
     /// Whether a shown chat's row replies to `message_id` of `chat_id`, a

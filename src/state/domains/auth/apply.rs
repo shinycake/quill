@@ -16,7 +16,7 @@ impl Session {
             AuthPayload::UpdateAuthorizationState(state) => self.set_auth(state),
             AuthPayload::UpdateTermsOfService { terms } => {
                 self.settings.notices.terms = Some(terms);
-                self.settings.notices.terms_error = None;
+                self.settings.notices.terms_accept = crate::state::fetch::Fetch::Idle;
             }
             AuthPayload::EmailCodeInfo { pattern, .. } => {
                 // Batch 6: only our own in-flight 2FA step takes the
@@ -56,10 +56,12 @@ impl Session {
             // `startGroupCallScreenSharing` returns `text` — the
             // presentation answer, consumed by the driver pump.
             AuthPayload::Countries { countries } => {
-                if pending.map(|p| p.purpose) == Some(RequestPurpose::GetCountries)
-                    && !countries.is_empty()
-                {
-                    self.auth_state.countries = Some(countries);
+                if pending.map(|p| p.purpose) == Some(RequestPurpose::GetCountries) {
+                    if countries.is_empty() {
+                        self.auth_state.countries.fail("empty list");
+                    } else {
+                        self.auth_state.countries.succeed(countries);
+                    }
                 }
             }
         }

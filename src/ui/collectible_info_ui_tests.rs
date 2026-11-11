@@ -45,7 +45,7 @@ fn the_box_opens_with_the_answer_and_closes_with_the_lookup(cx: &mut TestAppCont
     app.update_in(vcx, |app, _, cx| {
         let session = app.demo_session.as_mut().expect("demo session");
         let mut lookup = CollectibleLookup::new("durov", "Pavel", None, String::new());
-        lookup.info = Some(CollectibleInfo {
+        lookup.stage = quill::collectible_info::LookupStage::Ready(CollectibleInfo {
             purchase_date: 1_700_000_000,
             currency: "USD".into(),
             amount: 1250,

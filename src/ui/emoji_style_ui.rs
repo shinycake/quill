@@ -40,9 +40,49 @@ const PREVIEW: [&str; 4] = ["\u{1f603}", "\u{1f609}", "\u{1f614}", "\u{1f630}"];
 const PREVIEW_EMOJI: f32 = 22.;
 const PREVIEW_BOX: f32 = 48.;
 
-struct ActiveDownload {
-    id: EmojiSetId,
-    progress: Arc<Progress>,
+/// What the set choice is doing now, one value. A new choice replaces it,
+/// which stops the one before: a dropped `Task` is cancelled, and a download
+/// is told to stop. A task acts only while its own stage is the one in place,
+/// so a download that lands after the user chose another set changes
+/// nothing.
+#[derive(Default)]
+enum SetStage {
+    #[default]
+    Idle,
+    /// Loading an installed pack to draw with. The task knows the set and
+    /// whether it was just installed (a pack that does not load then is a
+    /// failure to show, not a reason to download again).
+    Switching { task: Task<()> },
+    Downloading {
+        id: EmojiSetId,
+        progress: Arc<Progress>,
+        task: Task<()>,
+    },
+    /// The last download (or a fresh install that does not load) failed.
+    Failed { id: EmojiSetId, why: String },
+}
+
+impl SetStage {
+    /// A new stage replaces this one and stops its work.
+    fn replace(&mut self, next: SetStage) {
+        if let Self::Downloading { progress, .. } = self {
+            progress.cancel();
+        }
+        *self = next;
+    }
+
+    /// The stage's own task is done: leave it running to its end instead of
+    /// dropping (cancelling) it from inside itself.
+    fn finish(&mut self, next: SetStage) {
+        match std::mem::replace(self, next) {
+            Self::Switching { task, .. } | Self::Downloading { task, .. } => task.detach(),
+            Self::Idle | Self::Failed { .. } => {}
+        }
+    }
+
+    fn is_idle(&self) -> bool {
+        matches!(self, Self::Idle)
+    }
 }
 
 /// The box and the set choice, on `SettingsUi`.
@@ -55,10 +95,9 @@ pub(super) struct EmojiStyleUi {
     current: EmojiSetId,
     /// Sets whose pack is installed.
     ready: HashSet<EmojiSetId>,
-    download: Option<ActiveDownload>,
-    download_task: Option<Task<()>>,
-    switch_task: Option<Task<()>>,
-    failed: Option<(EmojiSetId, String)>,
+    stage: SetStage,
+    /// Reading the saved choice at startup.
+    startup_task: Option<Task<()>>,
     /// "Install from file…": the task, and why the last file was refused.
     file_task: Option<Task<()>>,
     file_error: Option<String>,
@@ -153,7 +192,7 @@ impl QuillApp {
             }
             loaded
         });
-        self.preferences.emoji_style.switch_task = Some(cx.spawn(async move |this, cx| {
+        self.preferences.emoji_style.startup_task = Some(cx.spawn(async move |this, cx| {
             let loaded = load.await;
             let _ = this.update(cx, |this, cx| this.apply_emoji_state(loaded, cx));
         }));
@@ -162,7 +201,9 @@ impl QuillApp {
     fn apply_emoji_state(&mut self, loaded: Loaded, cx: &mut Context<Self>) {
         let state = &mut self.preferences.emoji_style;
         state.ready = loaded.ready;
-        let download_fallback = loaded.fallback;
+        // A choice made while this loaded wins over the saved one and over
+        // the startup fallback download.
+        let download_fallback = loaded.fallback.filter(|_| state.stage.is_idle());
         let changed =
             state.current != loaded.current || super::emoji_sprites::active_set() != loaded.current;
         state.current = loaded.current;
@@ -193,11 +234,14 @@ impl QuillApp {
 
     fn emoji_set_state(&self, id: EmojiSetId) -> SetState {
         let state = &self.preferences.emoji_style;
-        let loading = state
-            .download
-            .as_ref()
-            .map(|d| (d.id, d.progress.received()));
-        let failed = state.failed.as_ref().map(|(id, why)| (*id, why.as_str()));
+        let loading = match &state.stage {
+            SetStage::Downloading { id, progress, .. } => Some((*id, progress.received())),
+            _ => None,
+        };
+        let failed = match &state.stage {
+            SetStage::Failed { id, why } => Some((*id, why.as_str())),
+            _ => None,
+        };
         SetState::of(
             id,
             state.current,
@@ -210,37 +254,65 @@ impl QuillApp {
     /// A row was clicked (tdesktop `Row::setupHandler`).
     pub(super) fn choose_emoji_set(&mut self, id: EmojiSetId, cx: &mut Context<Self>) {
         match self.emoji_set_state(id) {
-            SetState::Ready => self.switch_emoji_set(id, cx),
+            SetState::Ready => self.switch_emoji_set(id, false, cx),
             SetState::Available(_) | SetState::Failed(_) => self.download_emoji_set(id, cx),
-            SetState::Active | SetState::Loading { .. } => {}
+            // Choosing the set in use again leaves a download of another
+            // one: the choice is what it was.
+            SetState::Active => {
+                let state = &mut self.preferences.emoji_style;
+                if matches!(state.stage, SetStage::Downloading { .. }) {
+                    state.stage.replace(SetStage::Idle);
+                    cx.notify();
+                }
+            }
+            SetState::Loading { .. } => {}
         }
     }
 
     /// tdesktop `SwitchToSet`: load the pack off the UI thread, then draw
     /// with it. A pack that no longer loads is downloaded again.
-    fn switch_emoji_set(&mut self, id: EmojiSetId, cx: &mut Context<Self>) {
+    fn switch_emoji_set(&mut self, id: EmojiSetId, after_download: bool, cx: &mut Context<Self>) {
         let Some(root) = app_root() else {
             return;
         };
-        // The choice is saved off the UI thread too, once the pack loads.
-        let load = cx.background_spawn(async move {
-            let loaded = load_state(&root, Some(id));
-            if loaded.current == id {
-                let _ = save_current(&root, id);
-            }
-            loaded
-        });
-        self.preferences.emoji_style.switch_task = Some(cx.spawn(async move |this, cx| {
+        let saved_root = root.clone();
+        let load = cx.background_spawn(async move { load_state(&root, Some(id)) });
+        let task = cx.spawn(async move |this, cx| {
             let loaded = load.await;
             let _ = this.update(cx, |this, cx| {
                 if loaded.current == id {
+                    this.preferences.emoji_style.stage.finish(SetStage::Idle);
+                    // The choice is saved off the UI thread, and only by the
+                    // switch still in place: an older one never writes over
+                    // a newer choice.
+                    cx.background_spawn(async move {
+                        let _ = save_current(&saved_root, id);
+                    })
+                    .detach();
                     this.apply_emoji_state(loaded, cx);
-                } else {
+                } else if after_download {
+                    // A pack that was just installed and still does not load
+                    // (a version mismatch, an unwritable folder): say so and
+                    // stop, instead of downloading it again for ever.
                     this.preferences.emoji_style.ready.remove(&id);
+                    this.preferences.emoji_style.stage.finish(SetStage::Failed {
+                        id,
+                        why: tr(keys::Q_MEDIA_COULDNT_LOAD_THE_EMOJI_SET).to_string(),
+                    });
+                } else {
+                    // It loaded before and no longer does: install it again.
+                    this.preferences.emoji_style.ready.remove(&id);
+                    this.preferences.emoji_style.stage.finish(SetStage::Idle);
                     this.download_emoji_set(id, cx);
                 }
+                cx.notify();
             });
-        }));
+        });
+        self.preferences
+            .emoji_style
+            .stage
+            .replace(SetStage::Switching { task });
+        cx.notify();
     }
 
     /// tdesktop `LoadAndSwitchTo`: one download at a time; a new one
@@ -250,24 +322,17 @@ impl QuillApp {
             return;
         };
         let state = &mut self.preferences.emoji_style;
-        if let Some(previous) = state.download.take() {
-            previous.progress.cancel();
-        }
-        state.failed = None;
         state.file_error = None;
         let progress = Arc::new(Progress::default());
-        state.download = Some(ActiveDownload {
-            id,
-            progress: progress.clone(),
-        });
         let worker_progress = progress.clone();
         let worker = cx.background_spawn(async move {
             let result = quill::emoji_sets_style::download::download(&root, id, &worker_progress);
             worker_progress.finish();
             result
         });
-        state.download_task = Some(cx.spawn(async move |this, cx| {
-            while !progress.is_finished() {
+        let watched = progress.clone();
+        let task = cx.spawn(async move |this, cx| {
+            while !watched.is_finished() {
                 cx.background_executor()
                     .timer(Duration::from_millis(120))
                     .await;
@@ -276,20 +341,28 @@ impl QuillApp {
             let result = worker.await;
             let _ = this.update(cx, |this, cx| {
                 let state = &mut this.preferences.emoji_style;
-                if state.download.as_ref().is_some_and(|d| d.id == id) {
-                    state.download = None;
+                // Only while this download is still the stage in place: a
+                // set chosen since replaced it (and dropped this task).
+                if !matches!(&state.stage, SetStage::Downloading { id: d, .. } if *d == id) {
+                    return;
                 }
                 match result {
                     Ok(()) => {
                         state.ready.insert(id);
-                        this.switch_emoji_set(id, cx);
+                        state.stage.finish(SetStage::Idle);
+                        this.switch_emoji_set(id, true, cx);
                     }
-                    Err(message) if message == "Cancelled." => {}
-                    Err(message) => state.failed = Some((id, message)),
+                    Err(message) if message == "Cancelled." => {
+                        state.stage.finish(SetStage::Idle);
+                    }
+                    Err(message) => state.stage.finish(SetStage::Failed { id, why: message }),
                 }
                 cx.notify();
             });
-        }));
+        });
+        state
+            .stage
+            .replace(SetStage::Downloading { id, progress, task });
         cx.notify();
     }
 
@@ -327,14 +400,9 @@ impl QuillApp {
                         let state = &mut this.preferences.emoji_style;
                         // The file wins over a download in flight, which
                         // would switch sets again when it lands.
-                        if let Some(previous) = state.download.take() {
-                            previous.progress.cancel();
-                        }
+                        state.stage.replace(SetStage::Idle);
                         state.ready.insert(id);
-                        if state.failed.as_ref().is_some_and(|(f, _)| *f == id) {
-                            state.failed = None;
-                        }
-                        this.switch_emoji_set(id, cx);
+                        this.switch_emoji_set(id, true, cx);
                     }
                     Err(message) => this.preferences.emoji_style.file_error = Some(message),
                 }

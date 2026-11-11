@@ -79,8 +79,7 @@ impl QuillApp {
                 this.close_live_stars_box(cx);
             });
         app.update(cx, |this, cx| {
-            let (Some(session), Some(boxed)) =
-                (this.session(), this.stories.live.stars_box.as_ref())
+            let (Some(session), Some(boxed)) = (this.session(), this.stories.live.stars.boxed())
             else {
                 return dialog.on_close(on_close);
             };
@@ -136,11 +135,7 @@ impl QuillApp {
                 )
                 .child(div().text_sm().text_center().child(about));
             if mode != StarsBoxMode::Comment
-                && let Some(donors) = session
-                    .stories
-                    .live
-                    .as_ref()
-                    .and_then(|l| l.donors.as_ref())
+                && let Some(donors) = session.stories.live.as_ref().and_then(|l| l.donors.data())
                 && !donors.top_donors.is_empty()
             {
                 body = body.child(
@@ -372,7 +367,7 @@ crate::ui::shell::register_dialogs! {
     /// The live story's Stars box.
     LiveStoryStars => DialogSpec::new(
         3852,
-        |app| app.stories.live.stars_box.is_some(),
+        |app| app.stories.live.stars.boxed().is_some(),
         QuillApp::build_live_stars_dialog,
     )
     .close(|app, _, cx| app.close_live_stars_box(cx)),

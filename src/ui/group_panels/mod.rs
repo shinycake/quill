@@ -248,13 +248,7 @@ impl QuillApp {
         // filter lives in the session and follows the chat.
         self.ensure_event_log_search(window, cx);
         if let Some(chat_id) = invite_panel_chat_id {
-            let query = self
-                .session()
-                .and_then(|session| session.groups.event_log_queries.get(&chat_id.0).cloned())
-                .unwrap_or_default();
-            if let Some(input) = self.admin.event_log_search.clone() {
-                input.update(cx, |state, cx| state.set_value(&query, window, cx));
-            }
+            self.show_event_log_query(chat_id, window, cx);
         }
         self.inline_members_opened(target, window, cx);
         cx.notify();
@@ -267,6 +261,8 @@ impl QuillApp {
             session.users_state.open_info_panel = None;
         }
         self.common_groups.close();
+        // The members block belongs to the panel that closed.
+        self.inline_members.reset(None);
         cx.notify();
     }
 

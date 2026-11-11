@@ -3,7 +3,7 @@
 use super::*;
 use crate::ids::{ChatId, FileId, MessageId, RequestId};
 use crate::state::{MessagesPurpose, StickersPurpose};
-use crate::state::{ReactionChoice, RequestPurpose};
+use crate::state::{ReactionChoice, RequestPurpose, RequestRollback};
 use crate::telegram::requests::{
     get_installed_sticker_sets, get_message_available_reactions, get_recent_stickers,
     get_sticker_set, reaction_type_custom_emoji, reaction_type_emoji, set_message_reaction,
@@ -173,13 +173,15 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        self.session.messages.message_menu_actions = None;
+        self.session
+            .messages
+            .menu_actions
+            .forget(chat_id, message_id);
         self.ask_message_menu_actions(chat_id, message_id)
     }
 
-    /// Like [`Self::fetch_message_menu_actions`] but leaves the shared answer
-    /// slot as it is, so an open message menu keeps what it knows while a
-    /// gallery row asks about its own message.
+    /// Like [`Self::fetch_message_menu_actions`] but keeps the answer
+    /// already held for the message while asking again (a gallery row).
     pub fn refresh_message_menu_actions(
         &mut self,
         chat_id: ChatId,
@@ -239,7 +241,14 @@ impl<S: JsonSender> ConnectDriver<S> {
                 extra, value,
             )) {
             Ok(()) => {
-                self.session.stickers.default_reaction = Some(choice.clone());
+                let previous = self
+                    .session
+                    .stickers
+                    .default_reaction
+                    .replace(choice.clone());
+                if let Some(pending) = self.session.requests.pending_mut(extra) {
+                    pending.rollback = Some(RequestRollback::DefaultReaction { previous });
+                }
                 Ok(extra)
             }
             Err(err) => {

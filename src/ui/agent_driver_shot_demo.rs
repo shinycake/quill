@@ -96,7 +96,7 @@ fn demo_screenshot(app: &mut QuillApp, window: &mut Window, cx: &mut Context<Qui
     let everything =
         std::env::var("QUILL_DEMO_SHOT_SCOPE").is_ok_and(|scope| scope == "everything");
     let keys = demo_keys();
-    grants::update(&account, |g| {
+    let _ = grants::update(&account, |g| {
         if everything {
             g.all_chats = Some(Scope::Read);
         }

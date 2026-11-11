@@ -23,13 +23,30 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        self.session.settings.privacy_data.new_chat = Some(NewChatPrivacyState::Loading);
+        // One fetch at a time. A value already shown stays (and keeps
+        // taking saves) while the refresh is out.
+        if self
+            .session
+            .requests
+            .has_purpose(RequestPurpose::GetNewChatPrivacy)
+        {
+            return Ok(());
+        }
         let extra = self
             .session
             .request(RequestPurpose::GetNewChatPrivacy, None);
+        let showing = matches!(
+            self.session.settings.privacy_data.new_chat,
+            Some(NewChatPrivacyState::Ready(_))
+        );
+        if !showing {
+            self.session.settings.privacy_data.new_chat = Some(NewChatPrivacyState::Loading(extra));
+        }
         if let Err(err) = self.sender.send_json(&get_new_chat_privacy_settings(extra)) {
             self.session.requests.take(extra);
-            self.session.settings.privacy_data.new_chat = Some(NewChatPrivacyState::Failed);
+            if !showing {
+                self.session.settings.privacy_data.new_chat = Some(NewChatPrivacyState::Failed);
+            }
             return Err(err);
         }
         Ok(())
@@ -83,6 +100,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(err);
         }
         self.session.set_new_chat_privacy_local(next);
+        self.session.settings.privacy_data.new_chat_saved_at = Some(extra);
         Ok(extra)
     }
 
@@ -218,10 +236,11 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() || password.is_empty() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        self.session.settings.privacy_data.password_check = crate::state::PasswordCheck::Checking;
         let extra = self
             .session
             .request(RequestPurpose::CheckRememberedPassword, None);
+        self.session.settings.privacy_data.password_check =
+            crate::state::PasswordCheck::Checking { request: extra };
         if let Err(err) = self
             .sender
             .send_json(&get_recovery_email_address(extra, password))

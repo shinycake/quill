@@ -175,7 +175,7 @@ impl QuillApp {
             // Infinite scroll: look again once this frame is laid out, so a
             // page that left the list short of the viewport asks for more.
             let tabs = &search.tabs;
-            if tabs.has_more() && !tabs.loading_more && !tabs.more_failed {
+            if tabs.has_more() && !tabs.loading_more() && !tabs.more_failed() {
                 self.defer_screen(cx, move |this, cx| {
                     this.maybe_load_more_search(cx);
                 });

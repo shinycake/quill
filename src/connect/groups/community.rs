@@ -2,6 +2,14 @@
 use super::*;
 
 impl<S: JsonSender> ConnectDriver<S> {
+    /// A `createCommunity` for this chat is out (a second Create is that
+    /// one, not a lost chat).
+    pub fn community_create_out(&self, chat_id: ChatId) -> bool {
+        self.session
+            .requests
+            .has_purpose_for_chat(RequestPurpose::CreateCommunity, chat_id)
+    }
+
     /// Slice (communities backend core): `createCommunity` (schema 1.8.67,
     /// line 11806) — creates a community from an owned chat (owned basic
     /// group / supergroup / channel, or a chat with an owned bot; basic

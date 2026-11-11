@@ -6,6 +6,7 @@ use super::*;
 use crate::ui::status_note::StatusNote;
 use quill::ids::ChatId;
 use quill::lang::{keys, tr};
+use quill::premium_hub::PremiumAutoStart;
 use quill::premium_hub::promo::PromoPage;
 use quill::premium_hub::purchase::{PremiumPurchaseRoute, purchase_route};
 use quill::state::DeepLinkAction;
@@ -39,20 +40,27 @@ impl QuillApp {
                 username,
                 start_ref,
             } => {
-                if let Some(hub) = self.hub_mut() {
-                    hub.auto_start = Some((username.to_lowercase(), start_ref.clone()));
-                }
                 self.close_premium(cx);
+                let auto_start = (username.to_lowercase(), start_ref.clone());
                 let sent = self.resolve_deep_link_here(DeepLinkAction::OpenUsername {
                     domain: username,
                     start_param: Some(start_ref),
                     post: None,
                     story_id: None,
                 });
-                if sent == Some(false) {
+                if sent != Some(false) {
+                    // Offline (demos) nothing is sent and nothing answers.
+                    // Tied to the resolve just sent: its error drops it.
+                    let generation = self.session().map_or(0, |s| s.chats_state.deep_link_seq);
                     if let Some(hub) = self.hub_mut() {
-                        hub.auto_start = None;
+                        hub.auto_start = Some(PremiumAutoStart {
+                            username: auto_start.0,
+                            start_ref: auto_start.1,
+                            generation,
+                        });
                     }
+                }
+                if sent == Some(false) {
                     self.set_status_note(
                         StatusNote::error(tr(keys::Q_MONEY_COULDNT_REACH_TELEGRAM_TRY_AGAIN)),
                         cx,
@@ -73,6 +81,15 @@ impl QuillApp {
                     cx,
                 );
             }
+        }
+    }
+
+    /// Forget the `/start` the subscribe button queued for the Premium
+    /// bot: the account left the screen (its session stays in the
+    /// background) before the bot's chat opened.
+    pub(in crate::ui) fn drop_premium_auto_start(&mut self) {
+        if let Some(hub) = self.hub_mut() {
+            hub.auto_start = None;
         }
     }
 
@@ -97,15 +114,19 @@ impl QuillApp {
             .hub
             .auto_start
             .as_ref()
-            .is_some_and(|(name, _)| name.eq_ignore_ascii_case(domain));
+            .is_some_and(|auto| auto.username.eq_ignore_ascii_case(domain));
         if !matches_bot {
+            // Another link opened a chat: the Premium link's flow is over,
+            // and its `/start` must not wait for a later visit to the bot.
+            session.payments.hub.auto_start = None;
             return false;
         }
         let bot_id = match session.chats.get(&chat_id.0).map(|chat| &chat.kind) {
             Some(ChatKind::Private { user_id }) => user_id.0,
             _ => return false,
         };
-        let Some((_, start_ref)) = session.payments.hub.auto_start.take() else {
+        let Some(PremiumAutoStart { start_ref, .. }) = session.payments.hub.auto_start.take()
+        else {
             return false;
         };
         self.press_bot_start(chat_id, bot_id, start_ref, cx);

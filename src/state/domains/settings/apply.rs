@@ -43,7 +43,11 @@ impl Session {
             SettingsPayload::UserPrivacySettingRules { rules } => {
                 if let Some(purpose) = pending.map(|p| p.purpose) {
                     match purpose {
-                        RequestPurpose::Calls(CallsPurpose::GetCallPrivacyRules { setting }) => {
+                        RequestPurpose::Calls(CallsPurpose::GetCallPrivacyRules { setting })
+                            if pending.is_some_and(|p| {
+                                self.calls.privacy_asks.answered(setting, p.id)
+                            }) =>
+                        {
                             let names: Vec<String> = rules.iter().map(|r| r.name.clone()).collect();
                             let who = PrivacyWho::from_rule_names(&names);
                             match setting {
@@ -52,14 +56,16 @@ impl Session {
                                 }
                                 CallPrivacySetting::PeerToPeer => self.calls.privacy_p2p = who,
                             }
-                            self.privacy_roundtrip_done();
                         }
                         RequestPurpose::Settings(SettingsPurpose::GetPrivacyRules { key }) => {
                             let detail = PrivacyRuleDetail::from_rules(&rules);
-                            self.mirror_call_privacy(key, &detail);
-                            self.settings
-                                .privacy
-                                .insert(key, PrivacyKeyState::Ready(detail));
+                            if self.settings.finish_privacy_load(
+                                key,
+                                pending.map(|p| p.id),
+                                detail.clone(),
+                            ) {
+                                self.mirror_call_privacy(key, &detail);
+                            }
                         }
                         _ => {}
                     }
@@ -74,10 +80,18 @@ impl Session {
                     .into_iter()
                     .find(|k| k.td_type() == setting)
                 {
-                    self.mirror_call_privacy(key, &detail);
-                    self.settings
-                        .privacy
-                        .insert(key, PrivacyKeyState::Ready(detail));
+                    // A save of ours in flight is settled by its own answer;
+                    // this update is mostly its echo.
+                    let saving = matches!(
+                        self.settings.privacy.get(&key),
+                        Some(PrivacyKeyState::Saving { .. })
+                    );
+                    if !saving {
+                        self.mirror_call_privacy(key, &detail);
+                        self.settings
+                            .privacy
+                            .insert(key, PrivacyKeyState::Ready(detail));
+                    }
                 }
             }
             // Slice S3: `readDatePrivacySettings` answer.
@@ -117,15 +131,11 @@ impl Session {
                     }
                 } else if let Some(RequestPurpose::Settings(SettingsPurpose::GetBlockedSenders {
                     offset,
+                    generation,
                 })) = pending.map(|p| p.purpose)
                 {
-                    self.settings.blocked_total = total_count;
-                    if offset == 0 {
-                        self.settings.blocked_senders.succeed(sender_ids);
-                    } else if let Some(mut list) = self.settings.blocked_senders.take_data() {
-                        list.extend(sender_ids);
-                        self.settings.blocked_senders.succeed(list);
-                    }
+                    self.settings
+                        .apply_blocked_page(offset, generation, total_count, sender_ids);
                 }
             }
             SettingsPayload::NotificationSounds { sounds } => {
@@ -338,22 +348,28 @@ impl Session {
             }
             SettingsPayload::UpdateScopeNotificationSettings { scope, settings } => {
                 // Parity slice: scope defaults changed (or our own
-                // `setScopeNotificationSettings` was confirmed).
-                self.settings
-                    .scope_notification_settings
-                    .insert(scope, settings);
+                // `setScopeNotificationSettings` was confirmed). While a save
+                // of ours is out the update is its echo, and what shows is
+                // already the newest edit.
+                if !self.settings.scope_saves.is_saving(&scope) {
+                    self.settings
+                        .scope_notification_settings
+                        .insert(scope, settings);
+                }
                 self.settings.scope_settings_loading.remove(&scope);
             }
             SettingsPayload::UpdateReactionNotificationSettings { settings } => {
                 // Parity slice: no getter exists — the update stream is the
                 // source of truth (it also confirms our own
                 // `setReactionNotificationSettings`).
-                self.settings.reaction_notification_settings = Some(settings);
+                if !self.settings.reaction_saves.is_saving(&()) {
+                    self.settings.reaction_notification_settings = Some(settings);
+                }
             }
             SettingsPayload::QuickReplies(update) => self.apply_quick_replies(update),
             SettingsPayload::TimeZones(zones) => self.apply_time_zones(zones),
             SettingsPayload::BusinessChatLinks(links) => self.apply_chat_links(links),
-            SettingsPayload::BusinessChatLink(link) => self.apply_chat_link(link),
+            SettingsPayload::BusinessChatLink(link) => self.apply_chat_link(link, extra),
             SettingsPayload::BusinessConnectedBot(bot) => self.apply_connected_bot(bot),
         }
     }

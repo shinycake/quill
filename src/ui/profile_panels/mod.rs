@@ -431,6 +431,7 @@ pub(in crate::ui) mod common_groups;
 pub(in crate::ui) mod contact_photo_rows;
 mod details_card;
 mod disable_sharing;
+mod edit_contact_save;
 mod main_profile_tab_dialog;
 mod more_menu;
 mod photo_delete;
@@ -439,6 +440,7 @@ pub(in crate::ui) use photo_viewer::PendingGallery;
 #[cfg(test)]
 #[cfg(feature = "demo-capture")]
 mod edit_contact_note_tests;
+mod profile_saving;
 mod sharing_request_box;
 mod submit_personal_photo;
 

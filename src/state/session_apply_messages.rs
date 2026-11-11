@@ -76,11 +76,13 @@ impl Session {
             && pending.purpose == RequestPurpose::GetChatPreview
             && let Some(chat_id) = pending.chat_id
         {
-            self.chat_list.chat_preview_fetch = Some(PreviewHistoryFetch {
-                chat_id,
-                messages: messages.to_vec(),
-                failed: None,
-            });
+            // By chat: a late answer for another chat's peek never
+            // replaces the one on screen.
+            self.chat_list
+                .chat_preview_fetch
+                .entry(chat_id)
+                .or_default()
+                .succeed(messages.to_vec());
             return;
         }
         if let Some(pending) = pending
@@ -485,6 +487,15 @@ impl Session {
             }
         });
         let (chat_id, topic_id) = (message.chat_id, message.topic_id);
+        // Inline buttons ride the message and leave the chat's keyboard alone
+        // (tdesktop `definesReplyKeyboard()` is false for them).
+        let has_markup = message.reply_markup.as_ref().is_some_and(|markup| {
+            !matches!(
+                markup,
+                crate::telegram::envelope::ReplyMarkup::InlineKeyboard(_)
+            )
+        });
+        let is_outgoing_msg = message.is_outgoing;
         if self.route_new_message_into_window(&message) {
             self.upsert_message(message, false);
         } else {
@@ -504,8 +515,16 @@ impl Session {
             }
         }
         self.trim_live_windows(chat_id, topic_id);
+        // A later bot message carrying keyboard markup replaces the chat's
+        // keyboard, so a force reply still waiting for its chat is gone
+        // (tdesktop takes it from the chat's current keyboard on open).
+        if !is_outgoing_msg && has_markup {
+            self.bots.pending_force_replies.remove(&chat_id);
+        }
         if let Some(target) = force_reply {
-            self.bots.pending_force_reply = Some(target);
+            self.bots
+                .pending_force_replies
+                .insert(target.chat_id, target);
         }
         if let Some(notification) = notification {
             self.queue_notification_with_sound(notification, sound, photo);

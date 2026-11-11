@@ -6,7 +6,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
-use super::confirm_boxes::{Ask, confirm_box};
+use super::confirm_boxes::{Ask, confirm_box_sending};
 use super::dialog_focus::focus_after_mount;
 use super::dialogs::{AdminDialog, AdminDialogKind};
 use super::shell::{DialogKind, QuillShell};
@@ -15,6 +15,7 @@ use gpui_kit::component::dialog::Dialog;
 use gpui_kit::component::*;
 use gpui_kit::*;
 use quill::lang::{keys, tr, tr_with};
+use quill::state::Submit;
 
 /// tdesktop `boxWideWidth`: two columns of rights checkboxes.
 const BOX_WIDTH: f32 = 440.;
@@ -34,6 +35,11 @@ impl QuillApp {
     /// Cancel and the primary button under the box. Promote stays disabled
     /// until a member is picked.
     fn admin_box_footer(&self, label: SharedString, ready: bool, cx: &mut Context<Self>) -> Div {
+        let sending = self.admin.admin_dialog.as_ref().is_some_and(|dialog| {
+            dialog
+                .submit
+                .is_sending(self.session().map(|session| &session.requests))
+        });
         div()
             .flex()
             .justify_end()
@@ -48,7 +54,8 @@ impl QuillApp {
                 Button::new("admin-box-submit")
                     .label(label)
                     .primary()
-                    .disabled(!ready)
+                    .loading(sending)
+                    .disabled(!ready || sending)
                     .on_click(cx.listener(|this, _, _, cx| this.submit_admin_dialog(cx))),
             )
     }
@@ -101,8 +108,12 @@ impl QuillApp {
     }
 
     fn admin_box_body(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let AdminDialog { chat_id, kind } = self.admin.admin_dialog.as_ref()?;
-        Some(match kind {
+        let AdminDialog {
+            chat_id,
+            kind,
+            submit,
+        } = self.admin.admin_dialog.as_ref()?;
+        let body = match kind {
             AdminDialogKind::Promote {
                 search_input,
                 rights,
@@ -121,7 +132,27 @@ impl QuillApp {
                 self.rights_editor_panel(*chat_id, *user_id, *rights, cx)
             }
             AdminDialogKind::DemoteConfirm { .. } => return None,
-        })
+        };
+        let Submit::Failed(reason) = submit else {
+            return Some(body);
+        };
+        let line = div()
+            .id("admin-box-refused")
+            .text_xs()
+            .text_color(cx.theme().danger)
+            .child(tr_with(
+                keys::Q_PEOPLE_COULDNT_SAVE_REASON,
+                &[("reason", reason)],
+            ));
+        Some(
+            div()
+                .flex()
+                .flex_col()
+                .gap_2()
+                .child(body)
+                .child(line)
+                .into_any_element(),
+        )
     }
 
     fn build_admin_promote_dialog(
@@ -177,16 +208,35 @@ impl QuillApp {
         };
         let ask = Ask {
             title: tr_with(keys::Q_PEOPLE_DEMOTE, &[("name", &name)]).into(),
-            text: tr(keys::Q_PEOPLE_THEY_WILL_BECOME_A_REGULAR).into(),
+            text: match this
+                .admin
+                .admin_dialog
+                .as_ref()
+                .map(|dialog| &dialog.submit)
+            {
+                Some(Submit::Failed(reason)) => format!(
+                    "{}\n{}",
+                    tr(keys::Q_PEOPLE_THEY_WILL_BECOME_A_REGULAR),
+                    tr_with(keys::Q_PEOPLE_COULDNT_SAVE_REASON, &[("reason", reason)]),
+                )
+                .into(),
+                _ => tr(keys::Q_PEOPLE_THEY_WILL_BECOME_A_REGULAR).into(),
+            },
             confirm: tr(keys::Q_PEOPLE_DEMOTE_2).into(),
         };
-        confirm_box(
+        let sending = this.admin.admin_dialog.as_ref().is_some_and(|dialog| {
+            dialog
+                .submit
+                .is_sending(this.session().map(|s| &s.requests))
+        });
+        confirm_box_sending(
             app,
             shell,
             dialog,
             DialogKind::AdminDemote,
             ask,
             (Self::close_admin_dialog, Self::submit_admin_dialog),
+            sending,
             cx,
         )
     }

@@ -23,6 +23,7 @@ use crate::telegram::requests::{
 use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
 
+mod answer_captures;
 pub(crate) mod batch;
 mod lifecycle;
 mod pumps;
@@ -77,6 +78,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .filter(|_| ok)
             .and_then(crate::state::story_list_of);
         let main_was_exhausted = self.session.chat_list.chats_exhausted;
+        let had_topic_icons = !self.session.threads.forum_topic_icons.is_empty();
         // Parity slice: a folder `loadChats` page completing with ok pages
         // on (until a 404 marks the folder exhausted in the reducer).
         // Captured before `apply` takes the pending request.
@@ -259,7 +261,8 @@ impl<S: JsonSender> ConnectDriver<S> {
         // chat id rides `PendingRequest::chat_id` (the purposes are unit
         // variants); the UI drains `Session::ai_composer_text` into the
         // composer draft.
-        let ai_text_answer: Option<(ChatId, String)> = match &owned.envelope.payload {
+        let ai_text_answer: Option<(Option<ChatId>, ChatId, String)> = match &owned.envelope.payload
+        {
             EnvelopePayload::Messages(MessagesPayload::AiCompose(
                 AiComposePayload::FixedText { text, .. },
             ))
@@ -273,7 +276,11 @@ impl<S: JsonSender> ConnectDriver<S> {
                         RequestPurpose::FixTextWithAi | RequestPurpose::ComposeTextWithAi
                     )
                 })
-                .and_then(|pending| pending.chat_id.map(|chat_id| (chat_id, text.clone()))),
+                .and_then(|pending| {
+                    pending
+                        .chat_id
+                        .map(|chat_id| (pending.window, chat_id, text.clone()))
+                }),
             _ => None,
         };
         // Slice msg-richtext-ai-tools: capture AI rich-message answers
@@ -282,7 +289,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         // the pending request. Same drain contract as the text answers.
         // The UI serializes the blocks back to editor markup; the note
         // records which method answered.
-        let ai_rich_answer: Option<(ChatId, RichMessageContent, &'static str)> =
+        let ai_rich_answer: Option<(Option<ChatId>, ChatId, RichMessageContent, &'static str)> =
             match &owned.envelope.payload {
                 EnvelopePayload::Messages(MessagesPayload::RichMessage { rich }) => owned
                     .envelope
@@ -298,7 +305,9 @@ impl<S: JsonSender> ConnectDriver<S> {
                     })
                     .and_then(|pending| {
                         let note = ai_rich_draft_note(pending.purpose);
-                        pending.chat_id.map(|chat_id| (chat_id, rich.clone(), note))
+                        pending
+                            .chat_id
+                            .map(|chat_id| (pending.window, chat_id, rich.clone(), note))
                     }),
                 _ => None,
             };
@@ -359,26 +368,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         // `Session::instant_view` into the IV reader. The URL rides
         // `Session::instant_view_urls` (the purpose stays `Copy`).
         // The reader opens in the window that asked (`SessionView`).
-        let instant_view_answer: Option<(Option<ChatId>, String, RichMessageContent)> =
-            match &owned.envelope.payload {
-                EnvelopePayload::Messages(MessagesPayload::WebPageInstantView { rich }) => owned
-                    .envelope
-                    .extra
-                    .and_then(|id| {
-                        let pending = self.session.requests.get(id)?;
-                        (pending.purpose == RequestPurpose::GetWebPageInstantView)
-                            .then_some((id, pending.window))
-                    })
-                    .and_then(|(id, window)| {
-                        let messages = &mut self.session.messages;
-                        messages.instant_view_agent_requests.remove(&id);
-                        messages
-                            .instant_view_urls
-                            .remove(&id)
-                            .map(|url| (window, url, rich.clone()))
-                    }),
-                _ => None,
-            };
+        let instant_view_answer = self.take_instant_view_answer(&owned.envelope);
         // MED4: a failed `getWebPageInstantView` (TDLib 404 = the page has
         // no Instant View) falls back to the browser like TGX — the URL
         // is stashed for the UI drain, never rendered as a reader.
@@ -387,29 +377,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         // the pending request; the composer chip reads
         // `Session::composer_previews`. A late answer for a URL no longer
         // kept is dropped.
-        let link_preview_answer: Option<ComposerLinkPreview> = match &owned.envelope.payload {
-            EnvelopePayload::Messages(MessagesPayload::LinkPreview { preview }) => owned
-                .envelope
-                .extra
-                .and_then(|id| {
-                    (self.session.requests.purpose(id) == Some(RequestPurpose::GetLinkPreview))
-                        .then_some(id)
-                })
-                .and_then(|id| {
-                    self.session
-                        .messages
-                        .composer_preview_urls
-                        .remove(&id)
-                        .map(|url| ComposerLinkPreview {
-                            url,
-                            fetch: match preview.clone() {
-                                Some(preview) => LinkPreviewFetch::Loaded(Box::new(preview)),
-                                None => LinkPreviewFetch::NotFound,
-                            },
-                        })
-                }),
-            _ => None,
-        };
+        let link_preview_answer = self.take_link_preview_answer(&owned.envelope);
         // MED4b: a 404/400 or an empty answer is "no link info" (TGX
         // `isNotFound`); any other error is `Failed`, asked again when the URL
         // is typed again. Every answer ends "Getting link info".
@@ -558,12 +526,72 @@ impl<S: JsonSender> ConnectDriver<S> {
         let edit_after_upgrade = self.capture_edit_after_upgrade(&owned);
         let new_chat_created = self.capture_new_chat(&owned);
         let paid_prices_change = Self::changes_paid_prices(&owned.envelope.payload);
+        let premium_change = Self::changes_viewer_premium(&owned.envelope.payload);
         let send_outcome = Self::send_outcome(&owned.envelope.payload);
         self.session.apply(owned);
         self.run_deferred_caption(send_outcome);
+        // The answers captured above are stashed before any step that can
+        // fail: a send error later in this ingest returns early with `?`,
+        // and the composer chip, copied link, AI text, username verdict
+        // or instant view they feed must not be lost with it.
+        // M2: full rich blocks replace the partial message's blocks in
+        // history. Only `RichMessage` rows are touched — an unrelated
+        // response can never clobber a different content kind.
+        if let Some((chat_id, message_id, rich)) = full_rich_answer
+            && let Some(history) = self.session.histories.get_mut(&chat_id.0)
+            && let Some(message) = history.messages.get_mut(&message_id.0)
+            && let MessageContent::RichMessage(existing) = &mut message.content
+        {
+            *existing = rich;
+        }
+        // M1: stash the `getMessageLink` answer for the UI clipboard drain.
+        if let Some((link, is_public)) = message_link_answer {
+            self.session.messages.message_link_result = Some(link);
+            self.session.messages.message_link_public = is_public;
+        }
+        // Slice msg-richtext-ai-tools: stash AI answers for the composer
+        // drain. A late answer for a chat the user has since left is
+        // dropped by the UI (chat-id check), never applied blindly.
+        if let Some((window, chat_id, text)) = ai_text_answer {
+            self.session.messages.ai_composer_text = Some((window, chat_id, text));
+        }
+        if let Some((window, chat_id, rich, note)) = ai_rich_answer {
+            self.session.messages.ai_composer_blocks = Some((window, chat_id, rich, note));
+        }
+        // A5: stash the `checkChatUsername` verdict for the
+        // edit-profile dialog.
+        if let Some((username, result)) = username_check_answer {
+            self.session.users_state.username_check = Some((username, result));
+        }
+        // MED4: stash the `getWebPageInstantView` answer (success →
+        // reader in the asking window, unless it closed; error → browser).
+        if let Some((window, url, rich)) = instant_view_answer {
+            let _ = self.session.with_view(window, |session| {
+                session.messages.instant_view = Some(InstantViewPage { url, rich });
+            });
+        }
+        if let Some(fallback) = instant_view_fallback {
+            self.session.messages.instant_view_fallbacks.push(fallback);
+        }
+        // MED4b: stash the `getLinkPreview` answer for the composer
+        // chip; a 404 becomes "no link info" (`Some(None)`); answers for
+        // superseded URLs are dropped.
+        if let Some(answer) = link_preview_answer {
+            self.session
+                .messages
+                .composer_previews
+                .answered(&answer.url, answer.fetch);
+        }
+        if let Some((url, miss)) = link_preview_failed {
+            self.session.messages.composer_previews.answered(&url, miss);
+        }
         if paid_prices_change {
             self.sync_paid_guard();
             self.resume_waiting_statistics();
+        }
+        if premium_change {
+            // The open chat's gate was given under the old Premium.
+            let _ = self.maybe_fetch_paid_messages_info();
         }
         if let Some((followups, ok)) = admin_followup {
             self.run_admin_followups(followups, ok);
@@ -704,6 +732,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         // `getChatFolder` spec arrives.
         self.maybe_finish_folder_removals()?;
         self.maybe_finish_leave_deletes()?;
+        // The topic icon picker's thumbnails come once, when the list lands.
+        if !had_topic_icons && !self.session.threads.forum_topic_icons.is_empty() {
+            self.download_forum_topic_icons();
+        }
         if became_ready {
             // Phase 9.1: the story tray needs `updateChatActiveStories`
             // updates, which only cover what `loadActiveStories` reached.
@@ -752,16 +784,6 @@ impl<S: JsonSender> ConnectDriver<S> {
         if view_after {
             self.sync_shown_views()?;
         }
-        // M2: full rich blocks replace the partial message's blocks in
-        // history. Only `RichMessage` rows are touched — an unrelated
-        // response can never clobber a different content kind.
-        if let Some((chat_id, message_id, rich)) = full_rich_answer
-            && let Some(history) = self.session.histories.get_mut(&chat_id.0)
-            && let Some(message) = history.messages.get_mut(&message_id.0)
-            && let MessageContent::RichMessage(existing) = &mut message.content
-        {
-            *existing = rich;
-        }
         // Corner "@" / heart buttons and jump to date: run in the window
         // that asked, for its chat. A failed jump (closed chat) drops it.
         let unread = self.session.messages.unread_jump.take();
@@ -771,47 +793,6 @@ impl<S: JsonSender> ConnectDriver<S> {
         {
             let _ = self.run_view_jump(jump);
         }
-        // M1: stash the `getMessageLink` answer for the UI clipboard drain.
-        if let Some((link, is_public)) = message_link_answer {
-            self.session.messages.message_link_result = Some(link);
-            self.session.messages.message_link_public = is_public;
-        }
-        // Slice msg-richtext-ai-tools: stash AI answers for the composer
-        // drain. A late answer for a chat the user has since left is
-        // dropped by the UI (chat-id check), never applied blindly.
-        if let Some((chat_id, text)) = ai_text_answer {
-            self.session.messages.ai_composer_text = Some((chat_id, text));
-        }
-        if let Some((chat_id, rich, note)) = ai_rich_answer {
-            self.session.messages.ai_composer_blocks = Some((chat_id, rich, note));
-        }
-        // A5: stash the `checkChatUsername` verdict for the
-        // edit-profile dialog.
-        if let Some((username, result)) = username_check_answer {
-            self.session.users_state.username_check = Some((username, result));
-        }
-        // MED4: stash the `getWebPageInstantView` answer (success →
-        // reader in the asking window, unless it closed; error → browser).
-        if let Some((window, url, rich)) = instant_view_answer {
-            let _ = self.session.with_view(window, |session| {
-                session.messages.instant_view = Some(InstantViewPage { url, rich });
-            });
-        }
-        if let Some(fallback) = instant_view_fallback {
-            self.session.messages.instant_view_fallbacks.push(fallback);
-        }
-        // MED4b: stash the `getLinkPreview` answer for the composer
-        // chip; a 404 becomes "no link info" (`Some(None)`); answers for
-        // superseded URLs are dropped.
-        if let Some(answer) = link_preview_answer {
-            self.session
-                .messages
-                .composer_previews
-                .answered(&answer.url, answer.fetch);
-        }
-        if let Some((url, miss)) = link_preview_failed {
-            self.session.messages.composer_previews.answered(&url, miss);
-        }
         // M1 fix-up: "Share link" gate — chain to `getMessageLink` only
         // when `messageProperties.can_get_link` passed; otherwise tell
         // the user instead of silently doing nothing.
@@ -819,8 +800,10 @@ impl<S: JsonSender> ConnectDriver<S> {
             if can_get_link {
                 let _ = self.send_message_link_request(chat_id, message_id);
             } else {
-                self.session.messages.message_link_error =
-                    Some("message link not available for this message".into());
+                self.session
+                    .messages
+                    .message_link_error
+                    .push("message link not available for this message".into());
             }
         }
         if let Some((chat_id, message_id, actions)) = audience_gate {
@@ -919,7 +902,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                         .requests
                         .take_purpose(RequestPurpose::GetStickerSet),
                 );
-                self.session.stickers.stickers.loading_set = false;
+                self.session.stickers.stickers.set = crate::state::StickerSetStage::Idle;
                 self.fetch_archived_stickers(false)?;
             }
         }

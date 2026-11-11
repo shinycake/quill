@@ -281,7 +281,7 @@ impl QuillApp {
         if !tabs.has_more() {
             return None;
         }
-        if tabs.more_failed {
+        if tabs.more_failed() {
             return Some(
                 list_controls("search-load-more-controls")
                     .justify_center()
@@ -296,7 +296,7 @@ impl QuillApp {
                     .into_any_element(),
             );
         }
-        if tabs.loading_more {
+        if tabs.loading_more() {
             return Some(
                 div()
                     .id("search-loading-more")
@@ -331,7 +331,7 @@ impl QuillApp {
         let Some(tabs) = self.session().map(|s| &s.search.search.tabs) else {
             return;
         };
-        if !tabs.has_more() || tabs.loading_more || tabs.more_failed {
+        if !tabs.has_more() || tabs.loading_more() || tabs.more_failed() {
             return;
         }
         // Not laid out yet: nothing to measure.

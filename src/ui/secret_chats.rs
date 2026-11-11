@@ -18,7 +18,7 @@ impl QuillApp {
     /// `SecretChatFeatureUnsupported` gate (round videos need layer ≥ 66).
     pub(super) fn open_secret_chat_peer_layer(&self) -> Option<(String, i32)> {
         let session = self.session()?;
-        let open = session.open_chat?;
+        let open = self.viewed_chat()?;
         let chat = session.chats.get(&open.0)?;
         let secret_chat_id = chat.secret_chat_id()?;
         let record = session

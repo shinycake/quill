@@ -76,3 +76,30 @@ fn join_shows_on_an_unjoined_channel_and_goes_once_joined(cx: &mut TestAppContex
     frames(vcx);
     assert!(top(vcx, "info-panel-channel-join").is_none());
 }
+
+/// Sweep 08-012: the add-bot box says so when the bot's details cannot load,
+/// with Retry, instead of "Loading…" for good; Join says whether it went.
+#[gpui_kit::test]
+fn the_add_bot_box_offers_retry_when_the_bots_details_did_not_load(cx: &mut TestAppContext) {
+    use quill::bot_invite::Invite;
+    let (app, mut vcx) = open_demo(cx, "ready-info-bot");
+    let vcx = &mut vcx;
+    app.update(vcx, |app, cx| {
+        let invite = Invite {
+            scope: Default::default(),
+            requested_rights: None,
+            start_parameter: String::new(),
+        };
+        app.open_add_bot_dialog(900_001, invite, cx);
+    });
+    frames(vcx);
+    let retry = vcx.update(|window, _| window.try_find("add-bot-retry").is_some());
+    assert!(retry, "no request is in flight and no details came");
+}
+
+#[gpui_kit::test]
+fn join_reports_that_it_went(cx: &mut TestAppContext) {
+    let (app, mut vcx) = open_demo(cx, "ready-info-channel-left");
+    let sent = vcx.update(|_, cx| app.update(cx, |app, cx| app.join_channel(ChatId(73), cx)));
+    assert!(sent, "the demo applies the join");
+}

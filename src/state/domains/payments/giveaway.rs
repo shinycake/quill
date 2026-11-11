@@ -58,42 +58,56 @@ pub enum GiveawayLaunch {
     #[default]
     Idle,
     /// `launchPrepaidGiveaway` `request` is in flight for the boosted
-    /// chat. Only its answer ends it: a form opened since starts `Idle`,
-    /// and the old launch's answer does not land in it.
-    Launching {
-        chat_id: i64,
-        request: u64,
-    },
-    Launched,
+    /// chat `chat_id`. Only its answer ends it, so a form opened for
+    /// another chat keeps it (see [`GiveawayLaunch::for_form`]): that form
+    /// and the driver compare `chat_id`, and coming back to this chat's form
+    /// still shows the launch in flight.
+    Launching { chat_id: i64, request: u64 },
+    /// The prepaid giveaway of `chat_id` started.
+    Launched { chat_id: i64 },
     /// A new giveaway for `chat_id` was paid for. Its form is done: Start
     /// must not buy the same giveaway again.
-    Paid {
-        chat_id: i64,
-    },
+    Paid { chat_id: i64 },
     /// The payment of a new giveaway for `chat_id` waits on the provider's
     /// verification page (3-D Secure). The form stays done: Start must not
     /// buy a second one while that is pending. It ends with the form.
-    Verifying {
-        chat_id: i64,
-    },
-    Failed(String),
+    Verifying { chat_id: i64 },
+    /// The launch for `chat_id` failed, with the line its form shows.
+    Failed { chat_id: i64, reason: String },
 }
 
 impl GiveawayLaunch {
     /// The giveaway of `chat_id` is created or paid for.
     pub fn is_done_for(&self, chat_id: i64) -> bool {
         match self {
-            Self::Launched => true,
-            Self::Paid { chat_id: paid } | Self::Verifying { chat_id: paid } => *paid == chat_id,
+            Self::Launched { chat_id: done }
+            | Self::Paid { chat_id: done }
+            | Self::Verifying { chat_id: done } => *done == chat_id,
             _ => false,
         }
     }
-}
 
-impl GiveawayState {
-    /// Whether `request` is the launch in flight.
-    fn launching(&self, request: u64) -> bool {
-        matches!(self.launch, GiveawayLaunch::Launching { request: r, .. } if r != 0 && r == request)
+    /// Whether a `launchPrepaidGiveaway` for `chat_id` is in flight.
+    pub fn is_launching_for(&self, chat_id: i64) -> bool {
+        matches!(self, Self::Launching { chat_id: c, .. } if *c == chat_id)
+    }
+
+    /// Why the launch for `chat_id` failed, if it did.
+    pub fn failure_for(&self, chat_id: i64) -> Option<&str> {
+        match self {
+            Self::Failed { chat_id: c, reason } if *c == chat_id => Some(reason),
+            _ => None,
+        }
+    }
+
+    /// What a form starts from when it opens or closes. A launch still in
+    /// flight is never forgotten: only its answer ends it, and the form of
+    /// its chat must keep Start disabled. An answer already seen is.
+    pub fn for_form(self) -> Self {
+        match self {
+            Self::Launching { .. } => self,
+            _ => Self::Idle,
+        }
     }
 }
 
@@ -188,8 +202,11 @@ impl Session {
             self.groups.chat_boost_status.remove(&chat_id.0);
             self.groups.chat_boost_details.remove(&chat_id.0);
         }
-        if self.payments.giveaway.launching(pending.id.0) {
-            self.payments.giveaway.launch = GiveawayLaunch::Launched;
+        if let GiveawayLaunch::Launching { chat_id, request } = self.payments.giveaway.launch
+            && request != 0
+            && request == pending.id.0
+        {
+            self.payments.giveaway.launch = GiveawayLaunch::Launched { chat_id };
         }
     }
 
@@ -215,11 +232,16 @@ impl Session {
                 state.options.stars_loading = false;
                 state.options.stars_error = Some(reason);
             }
-            Some(RequestPurpose::LaunchPrepaidGiveaway)
-                if state.launching(pending.map_or(0, |p| p.id.0)) =>
-            {
-                state.launch =
-                    GiveawayLaunch::Failed(format!("Couldn't start the giveaway: {reason}"));
+            Some(RequestPurpose::LaunchPrepaidGiveaway) => {
+                if let GiveawayLaunch::Launching { chat_id, request } = state.launch
+                    && request != 0
+                    && Some(request) == pending.map(|p| p.id.0)
+                {
+                    state.launch = GiveawayLaunch::Failed {
+                        chat_id,
+                        reason: format!("Couldn't start the giveaway: {reason}"),
+                    };
+                }
             }
             _ => {}
         }

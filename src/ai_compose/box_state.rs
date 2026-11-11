@@ -50,7 +50,10 @@ pub enum CardState {
         token: u64,
     },
     Ready(AiResult),
-    Failed,
+    /// The request failed; the error stays with the card so the footer can
+    /// follow it ([`AiBoxError::FloodPremium`] shows "Increase Limit") and
+    /// the next request or accepted result leaves it.
+    Failed(AiBoxError),
 }
 
 /// What to send. `text` is the box's source text: composer markup, sent as
@@ -121,7 +124,6 @@ pub struct AiComposeBox {
     style: StyleChoice,
     add_emojis: bool,
     card: CardState,
-    premium_flooded: bool,
     original_expanded: bool,
 }
 
@@ -138,7 +140,6 @@ impl AiComposeBox {
             style: StyleChoice::None,
             add_emojis: false,
             card: CardState::Waiting,
-            premium_flooded: false,
             original_expanded: false,
         }
     }
@@ -151,7 +152,13 @@ impl AiComposeBox {
 
     pub fn set_mode(&mut self, mode: AiComposeMode) -> Option<AiSend> {
         if self.mode == mode {
-            return None;
+            // A failed request is asked again by clicking its tab, as in
+            // tdesktop's tab buttons.
+            return if matches!(self.card, CardState::Failed(_)) {
+                self.request()
+            } else {
+                None
+            };
         }
         if mode != AiComposeMode::Style {
             self.style = StyleChoice::None;
@@ -216,8 +223,9 @@ impl AiComposeBox {
             return None;
         }
         if result.text.is_empty() {
-            self.card = CardState::Failed;
-            return Some(AiBoxError::Other(String::new()));
+            let error = AiBoxError::Other(String::new());
+            self.card = CardState::Failed(error.clone());
+            return Some(error);
         }
         self.card = CardState::Ready(result);
         None
@@ -228,10 +236,7 @@ impl AiComposeBox {
         if self.card != (CardState::Loading { token }) {
             return None;
         }
-        self.card = CardState::Failed;
-        if error == AiBoxError::FloodPremium {
-            self.premium_flooded = true;
-        }
+        self.card = CardState::Failed(error.clone());
         Some(error)
     }
 
@@ -264,7 +269,7 @@ impl AiComposeBox {
     }
 
     pub fn premium_flooded(&self) -> bool {
-        self.premium_flooded
+        matches!(self.card, CardState::Failed(AiBoxError::FloodPremium))
     }
 
     pub fn original_expanded(&self) -> bool {
@@ -313,7 +318,7 @@ impl AiComposeBox {
     pub fn footer(&self) -> FooterAction {
         let style = self.mode == AiComposeMode::Style;
         let ready = self.result().is_some();
-        if self.premium_flooded {
+        if self.premium_flooded() {
             FooterAction::IncreaseLimit
         } else if style && self.style == StyleChoice::None && !ready {
             FooterAction::SelectStyle

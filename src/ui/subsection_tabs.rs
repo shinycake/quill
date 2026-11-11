@@ -621,7 +621,7 @@ impl QuillApp {
             }
             // The card is the topic's: take the new topic's `ChatUi` first,
             // so the next frame's sync does not drop the card with the old.
-            self.sync_chat_ui();
+            self.sync_chat_ui(cx);
             self.chat_ui.topic_info_open = true;
             cx.notify();
             return;

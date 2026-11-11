@@ -296,7 +296,7 @@ pub enum ChatStatisticsFetch {
         is_dark: bool,
     },
     Loading,
-    Loaded(Box<ChatStatistics>),
+    Loaded(std::sync::Arc<ChatStatistics>),
     Failed(String),
 }
 
@@ -538,15 +538,6 @@ pub enum WelcomeMessagesFetch {
     Loading,
     Loaded,
     Failed(String),
-}
-
-/// Slice CL: the chat-list peek preview result — the latest
-/// `getChatHistory` answer for one unopened chat.
-#[derive(Debug, Clone, PartialEq)]
-pub struct PreviewHistoryFetch {
-    pub chat_id: ChatId,
-    pub messages: Vec<ParsedMessage>,
-    pub failed: Option<String>,
 }
 
 /// Phase D3c: relative timestamp for admin-log rows. The log only

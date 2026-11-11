@@ -246,6 +246,13 @@ impl SpellBackend for WindowsSpellBackend {
     }
 
     fn is_correct(&self, word: &str) -> bool {
+        self.judge(word).unwrap_or(true)
+    }
+
+    /// `None` when the spelling thread did not answer in time (a cold
+    /// dictionary loading, or a backlog of jobs): the word is neither
+    /// flagged nor remembered as correct.
+    fn judge(&self, word: &str) -> Option<bool> {
         let tags = self.tags_for(word);
         let word = word.to_string();
         self.run_within(CHECK_WAIT, move |c| {
@@ -281,7 +288,6 @@ impl SpellBackend for WindowsSpellBackend {
             }
             !judged
         })
-        .unwrap_or(true)
     }
 
     fn suggestions(&self, word: &str, limit: usize) -> Vec<String> {

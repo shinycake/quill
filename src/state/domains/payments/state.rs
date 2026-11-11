@@ -44,6 +44,59 @@ impl OrderInfoStage {
     }
 }
 
+/// How a [`PaymentNotice`] reads.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NoticeKind {
+    Info,
+    Error,
+}
+
+/// The outcome of a payment, a gift or a reaction whose box is gone (closed
+/// while the request was out), for the status bar. The poll drains the
+/// queue; Stars may have moved, so the user is always told.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PaymentNotice {
+    pub kind: NoticeKind,
+    pub text: String,
+}
+
+impl PaymentNotice {
+    pub fn new(kind: NoticeKind, text: impl Into<String>) -> Self {
+        Self {
+            kind,
+            text: text.into(),
+        }
+    }
+}
+
+/// The receipt dialog's stage.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub enum ReceiptStage {
+    #[default]
+    Closed,
+    /// `getPaymentReceipt` is out under this request.
+    Loading(RequestId),
+    Open(PaymentReceiptData),
+}
+
+impl ReceiptStage {
+    pub fn is_open(&self) -> bool {
+        matches!(self, Self::Open(_))
+    }
+
+    pub fn data(&self) -> Option<&PaymentReceiptData> {
+        match self {
+            Self::Open(data) => Some(data),
+            _ => None,
+        }
+    }
+
+    /// `request` is the receipt this dialog asked for.
+    pub(crate) fn waits_for(&self, request: Option<RequestId>) -> bool {
+        matches!((self, request), (Self::Loading(waiting), Some(id)) if *waiting == id)
+    }
+}
+
 /// A payment's verification step (`paymentResult.verification_url`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PaymentVerification {
@@ -68,10 +121,10 @@ pub struct PaymentsState {
     pub order_info: OrderInfoStage,
     /// Slice P1: the chosen shipping option id (default: the first).
     pub shipping_id: Option<String>,
-    /// Slice P1: the fetched `paymentReceipt`, shown in the receipt dialog.
-    pub receipt: Option<PaymentReceiptData>,
-    /// Slice P1: receipt dialog visibility.
-    pub receipt_open: bool,
+    /// The receipt dialog: closed, waiting for the `getPaymentReceipt` it
+    /// asked, or showing the answer. Closing it forgets the request, so a
+    /// late answer cannot reopen it.
+    pub receipt: ReceiptStage,
     /// Slice P1: latest payment error / outcome note, shown in the
     /// checkout dialog (never a secret — order fields and credentials are
     /// never echoed here).
@@ -94,6 +147,8 @@ pub struct PaymentsState {
     /// "Media Unlocked" note after a paid-media purchase, drained into the
     /// status bar by the UI poll.
     pub unlocked_notice: Option<String>,
+    /// Outcomes nobody on screen would see, drained into the status bar.
+    pub notices: Vec<PaymentNotice>,
     /// Slice P1: a failed `getPaymentReceipt`, drained into the status
     /// note by `poll_live` — the checkout dialog (which renders
     /// `payment_note`) may be closed when the receipt fetch fails.
@@ -117,7 +172,9 @@ pub struct PaymentsState {
     pub star_subscriptions: Option<StarSubscriptionsData>,
     /// Slice `parity:bots-payment-recurring`: `getStarSubscriptions` is in
     /// flight (dialog shows a spinner).
-    pub star_subscriptions_loading: bool,
+    /// The `getStarSubscriptions` page in flight: only its answer or error
+    /// lands (a stale refetch and an appended page never mix).
+    pub star_subscriptions_request: Option<RequestId>,
     /// Slice `parity:bots-payment-recurring`: latest subscriptions error,
     /// shown in the dialog (never a secret — ids are opaque TDLib strings).
     pub star_subscriptions_error: Option<String>,
@@ -180,6 +237,11 @@ pub struct PaymentInFlight {
 }
 
 impl PaymentsState {
+    /// A subscriptions page is in flight.
+    pub fn star_subscriptions_loading(&self) -> bool {
+        self.star_subscriptions_request.is_some()
+    }
+
     /// The checkout on screen is being paid: its invoice has a
     /// `sendPaymentForm` in flight.
     pub fn checkout_sending(&self) -> bool {
@@ -208,6 +270,14 @@ impl PaymentsState {
             .is_some_and(|request| &request.invoice == invoice)
     }
 
+    /// Queue an outcome for the status bar.
+    pub fn notify(&mut self, kind: NoticeKind, text: impl Into<String>) {
+        self.notices.push(PaymentNotice {
+            kind,
+            text: text.into(),
+        });
+    }
+
     /// The payment `request_id` answered: it leaves the in-flight list.
     pub(crate) fn take_paying(&mut self, request_id: Option<RequestId>) -> Option<PaymentInFlight> {
         let index = self
@@ -222,9 +292,35 @@ impl PaymentsState {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BankCardLookup {
     pub number: String,
-    /// `None` while loading or after a failure.
-    pub info: Option<BankCardInfoData>,
-    pub loading: bool,
+    pub stage: BankCardStage,
+}
+
+/// Where a bank card lookup is. The answer is applied only while the stage
+/// is `Loading` for the request that answers, so a lookup of an earlier
+/// number never lands in a later one.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BankCardStage {
+    Loading {
+        request: RequestId,
+    },
+    Ready(BankCardInfoData),
+    /// No card info: the menu keeps only "Copy Card Number".
+    Failed,
+}
+
+impl BankCardLookup {
+    /// The looked-up card info, once it arrived.
+    pub fn info(&self) -> Option<&BankCardInfoData> {
+        match &self.stage {
+            BankCardStage::Ready(info) => Some(info),
+            _ => None,
+        }
+    }
+
+    /// Whether `request` is the lookup this card waits for.
+    pub(crate) fn waits_for(&self, request: Option<RequestId>) -> bool {
+        request.is_some_and(|id| self.stage == BankCardStage::Loading { request: id })
+    }
 }
 
 impl PaymentsState {
@@ -235,13 +331,13 @@ impl PaymentsState {
             form_loading: false,
             order_info: OrderInfoStage::Unvalidated,
             shipping_id: None,
-            receipt: None,
-            receipt_open: false,
+            receipt: ReceiptStage::Closed,
             note: None,
             form_request: None,
             paying: Vec::new(),
             form_paid: false,
             unlocked_notice: None,
+            notices: Vec::new(),
             receipt_error: None,
             verification_url: None,
             verification_started: false,
@@ -250,7 +346,7 @@ impl PaymentsState {
             poll_countries_max: None,
             poll_open_period_max: None,
             star_subscriptions: None,
-            star_subscriptions_loading: false,
+            star_subscriptions_request: None,
             star_subscriptions_error: None,
             star_subscriptions_offset: String::new(),
             star_subscriptions_stale: false,

@@ -12,7 +12,7 @@ use super::shot::{Shot, ShotOptions};
 use super::tree::{UiNode, UiTree};
 use serde_json::Value;
 use std::collections::VecDeque;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, SyncSender};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -199,8 +199,34 @@ pub enum UiReply {
 pub struct Pending {
     pub request: UiRequest,
     reply: SyncSender<UiReply>,
-    /// Set when the tool stopped waiting: the UI must not inject any more.
-    cancelled: Arc<AtomicBool>,
+    /// How far the command got, shared with the tool waiting on it.
+    stage: Arc<Mutex<Stage>>,
+}
+
+/// How far one command got. The tool and the UI thread move it under one
+/// lock, so "the tool gave up" and "the UI injected input" can't both be
+/// true of the same moment: whichever comes first decides.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Stage {
+    /// In the queue; the UI has not taken it.
+    Queued,
+    /// The UI took it; no input went in yet.
+    Running,
+    /// The UI injected input (a click, keys, text) for it.
+    Injected,
+    /// The tool stopped waiting before any input went in.
+    GaveUp,
+    /// The tool stopped waiting after input went in: the command ran, its
+    /// answer is lost.
+    GaveUpAfterInjecting,
+}
+
+impl Stage {
+    fn change(stage: &Mutex<Stage>, next: impl FnOnce(Stage) -> Stage) -> Stage {
+        let mut stage = crate::locks::lock_or_recover(stage);
+        *stage = next(*stage);
+        *stage
+    }
 }
 
 impl Pending {
@@ -211,7 +237,21 @@ impl Pending {
     /// Whether the tool gave up on this command (a retry may be on its way,
     /// so injecting now would act twice).
     pub fn cancelled(&self) -> bool {
-        self.cancelled.load(Ordering::SeqCst)
+        matches!(
+            *crate::locks::lock_or_recover(&self.stage),
+            Stage::GaveUp | Stage::GaveUpAfterInjecting
+        )
+    }
+
+    /// The UI is about to inject input for this command. `false` when the
+    /// tool gave up first, and nothing may be injected; otherwise the
+    /// command counts as run, so a timeout after this is reported as such.
+    pub fn begin_input(&self) -> bool {
+        let now = Stage::change(&self.stage, |stage| match stage {
+            Stage::Queued | Stage::Running | Stage::Injected => Stage::Injected,
+            gave_up => gave_up,
+        });
+        now == Stage::Injected
     }
 }
 
@@ -219,8 +259,11 @@ impl Pending {
 pub enum BridgeError {
     /// Too many commands wait already.
     Busy,
-    /// The UI thread did not answer in time.
+    /// The UI thread did not answer in time and ran nothing.
     Timeout,
+    /// The UI ran the command (input went in) but its answer did not come
+    /// in time: it must not be sent again.
+    RanNoAnswer,
 }
 
 static QUEUE: Mutex<VecDeque<Pending>> = Mutex::new(VecDeque::new());
@@ -249,7 +292,7 @@ pub fn send_with_shot(
 pub struct Ticket {
     id: u64,
     rx: Receiver<UiReply>,
-    cancelled: Arc<AtomicBool>,
+    stage: Arc<Mutex<Stage>>,
 }
 
 impl Ticket {
@@ -264,9 +307,18 @@ impl Ticket {
         if let Ok(reply) = self.rx.recv_timeout(timeout) {
             return Ok(reply);
         }
-        self.cancelled.store(true, Ordering::SeqCst);
+        let ran = Stage::change(&self.stage, |stage| match stage {
+            Stage::Injected | Stage::GaveUpAfterInjecting => Stage::GaveUpAfterInjecting,
+            _ => Stage::GaveUp,
+        }) == Stage::GaveUpAfterInjecting;
         withdraw(self.id);
-        self.rx.try_recv().map_err(|_| BridgeError::Timeout)
+        self.rx.try_recv().map_err(|_| {
+            if ran {
+                BridgeError::RanNoAnswer
+            } else {
+                BridgeError::Timeout
+            }
+        })
     }
 }
 
@@ -287,7 +339,7 @@ pub fn post_with_shot(
     }
     let id = NEXT_ID.fetch_add(1, Ordering::SeqCst).wrapping_add(1);
     let (reply, rx) = mpsc::sync_channel(1);
-    let cancelled = Arc::new(AtomicBool::new(false));
+    let stage = Arc::new(Mutex::new(Stage::Queued));
     queue.push_back(Pending {
         request: UiRequest {
             id,
@@ -296,11 +348,11 @@ pub fn post_with_shot(
             shot,
         },
         reply,
-        cancelled: cancelled.clone(),
+        stage: stage.clone(),
     });
     drop(queue);
     crate::wake::AGENT.poke();
-    Ok(Ticket { id, rx, cancelled })
+    Ok(Ticket { id, rx, stage })
 }
 
 fn withdraw(id: u64) {
@@ -309,7 +361,14 @@ fn withdraw(id: u64) {
 
 /// Every command waiting, oldest first. The UI thread answers each.
 pub fn take() -> Vec<Pending> {
-    crate::locks::lock_or_recover(&QUEUE).drain(..).collect()
+    let taken: Vec<Pending> = crate::locks::lock_or_recover(&QUEUE).drain(..).collect();
+    for pending in &taken {
+        Stage::change(&pending.stage, |stage| match stage {
+            Stage::Queued => Stage::Running,
+            other => other,
+        });
+    }
+    taken
 }
 
 /// How many commands wait for the UI.
@@ -396,6 +455,25 @@ mod tests {
     /// these tests take turns with the switch-turning tests.
     fn lock() -> std::sync::MutexGuard<'static, ()> {
         crate::locks::lock_or_recover(&crate::agent::access::TEST_LOCK)
+    }
+
+    #[test]
+    fn a_timeout_after_input_went_in_says_it_ran() {
+        let _guard = lock();
+        // Taken, no input yet: giving up is a plain timeout and the UI may
+        // not inject afterwards.
+        let ticket = post("Test", UiCommand::State).unwrap_or_else(|e| panic!("post: {e:?}"));
+        let pending = take().pop().unwrap_or_else(|| panic!("queued"));
+        assert_eq!(ticket.wait(Duration::ZERO), Err(BridgeError::Timeout));
+        assert!(pending.cancelled());
+        assert!(!pending.begin_input(), "nothing injects after a give-up");
+        // Input went in first: the tool is told the command ran.
+        let ticket = post("Test", UiCommand::State).unwrap_or_else(|e| panic!("post: {e:?}"));
+        let pending = take().pop().unwrap_or_else(|| panic!("queued"));
+        assert!(pending.begin_input());
+        assert_eq!(ticket.wait(Duration::ZERO), Err(BridgeError::RanNoAnswer));
+        assert!(pending.cancelled(), "later steps stop");
+        assert!(!pending.begin_input());
     }
 
     #[test]

@@ -141,9 +141,10 @@ fn load_registry(app_root: &Path) -> AccountRegistry {
     {
         return last.registry.clone();
     }
-    let parsed = std::fs::read(&path)
-        .ok()
-        .map(|bytes| serde_json::from_slice::<AccountRegistry>(&bytes));
+    let bytes = std::fs::read(&path).ok();
+    let parsed = bytes
+        .as_deref()
+        .map(serde_json::from_slice::<AccountRegistry>);
     let (registry, keep) = match parsed {
         Some(Ok(registry)) => {
             let settled = stamp.is_some_and(|(modified, _)| {
@@ -152,8 +153,23 @@ fn load_registry(app_root: &Path) -> AccountRegistry {
             (tidy_registry(registry), settled)
         }
         Some(Err(_)) => {
+            // What the user asked to wipe is still owed: the default
+            // registry carries it, saved before any client opens a folder.
+            let owed = bytes
+                .as_deref()
+                .map(recover_pending_deletes)
+                .unwrap_or_default();
             quarantine_registry(&path);
-            return AccountRegistry::default();
+            let registry = AccountRegistry {
+                pending_deletes: owed,
+                ..AccountRegistry::default()
+            };
+            if !registry.pending_deletes.is_empty()
+                && let Err(err) = save_registry(app_root, &registry)
+            {
+                eprintln!("quill: could not keep the pending account wipes: {err}");
+            }
+            return registry;
         }
         // No file, before and at the read: the default is kept until one
         // appears. (A file that appeared in between was read, and isn't
@@ -174,6 +190,26 @@ fn load_registry(app_root: &Path) -> AccountRegistry {
         });
     }
     registry
+}
+
+/// The `pending_deletes` of an `accounts.json` that no longer parses as a
+/// whole (truncated, a stray byte): the array itself is read on its own
+/// when it is still intact.
+fn recover_pending_deletes(bytes: &[u8]) -> Vec<AccountKey> {
+    let text = String::from_utf8_lossy(bytes);
+    let Some((_, after)) = text.split_once("\"pending_deletes\"") else {
+        return Vec::new();
+    };
+    let Some((_, array)) = after.split_once('[') else {
+        return Vec::new();
+    };
+    let Some((array, _)) = array.split_once(']') else {
+        return Vec::new();
+    };
+    let mut keys: Vec<AccountKey> = serde_json::from_str(&format!("[{array}]")).unwrap_or_default();
+    let mut seen = std::collections::HashSet::new();
+    keys.retain(|key| AccountKey::new(&key.0).is_some() && seen.insert(key.clone()));
+    keys
 }
 
 fn tidy_registry(mut registry: AccountRegistry) -> AccountRegistry {
@@ -520,6 +556,27 @@ mod account_registry_tests {
         assert_eq!(backups.len(), 1);
         assert_eq!(std::fs::read(&backups[0]).unwrap(), b"not json{{");
         assert!(!root.join("accounts.json").exists());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn corrupt_registry_keeps_the_wipes_the_user_asked_for() {
+        let root = tmp_root("corrupt-wipes");
+        std::fs::create_dir_all(&root).unwrap();
+        // Cut off after the pending list, as a crash mid-write leaves it.
+        std::fs::write(
+            root.join("accounts.json"),
+            br#"{"accounts":[{"key":"primary","display_name":"P"}],"pending_deletes":["primary","account-2","../x"],"act"#,
+        )
+        .unwrap();
+        assert_eq!(
+            pending_deletes(&root),
+            vec![AccountKey::primary(), AccountKey::new("account-2").unwrap()]
+        );
+        // Kept on disk for the next start, not only in this run.
+        assert_eq!(corrupt_backups(&root).len(), 1);
+        assert!(root.join("accounts.json").exists());
+        assert_eq!(pending_deletes(&root).len(), 2);
         let _ = std::fs::remove_dir_all(&root);
     }
 

@@ -146,6 +146,21 @@ impl QuillApp {
                 .unwrap_or_default();
             let _ = this.update(cx, |app, cx| {
                 for item in std::iter::once(first).chain(rest) {
+                    // The lock may have engaged during the decode: what was
+                    // built while unlocked (sender, text, picture) is not
+                    // shown, the locked form is.
+                    let account = app.notification_account(item.account.as_ref());
+                    if !item.locked && app.notifications_hidden_now(&account) {
+                        app.show_notification_as(
+                            item.account.as_ref(),
+                            item.notification.hidden(),
+                            None,
+                            None,
+                            true,
+                            cx,
+                        );
+                        continue;
+                    }
                     app.show_notification_as(
                         item.account.as_ref(),
                         item.notification,

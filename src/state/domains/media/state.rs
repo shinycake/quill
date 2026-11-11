@@ -15,10 +15,7 @@ pub struct MediaState {
     pub disk_paused: HashSet<i32>,
     /// The search for downloads paused by the disk before this TDLib
     /// instance went out (once per session).
-    pub disk_resume_searched: bool,
-    /// The saved pauses that search asks about. One saved after it went out
-    /// is not part of its answer.
-    pub disk_search_keys: std::collections::BTreeSet<(i64, i64)>,
+    pub disk_search: DiskSearch,
     /// Downloads that search found, waiting for their resume.
     pub disk_resume_due: Vec<i32>,
     /// `settings.data_storage.disk_paused` changed and needs saving.
@@ -65,6 +62,22 @@ pub struct MediaState {
     pub(crate) profile_thumbs_due: Vec<FileId>,
 }
 
+/// The once-per-session search for downloads an earlier TDLib instance's
+/// disk pause left. A failed search goes back to `NotAsked`, so the next
+/// healthy reading asks again.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub enum DiskSearch {
+    #[default]
+    NotAsked,
+    /// Out, as `request`. `keys` are the saved pauses it asks about: one
+    /// saved after it went out is not part of its answer.
+    Asked {
+        request: RequestId,
+        keys: BTreeSet<(i64, i64)>,
+    },
+    Done,
+}
+
 impl MediaState {
     pub(crate) fn new() -> Self {
         Self {
@@ -73,8 +86,7 @@ impl MediaState {
             disk_holds_auto_downloads: false,
             disk_room: None,
             disk_paused: HashSet::new(),
-            disk_resume_searched: false,
-            disk_search_keys: Default::default(),
+            disk_search: DiskSearch::NotAsked,
             disk_resume_due: Vec::new(),
             disk_paused_saved_changed: false,
             downloads: DownloadIntents::default(),

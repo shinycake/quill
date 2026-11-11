@@ -191,10 +191,10 @@ fn new_login_review_error_keeps_the_alert() {
             r#"{{"@type":"error","code":400,"message":"SESSION_NOT_FOUND","@extra":"{extra}"}}"#
         ),
     );
-    assert!(f.1.session.settings.notices.review_error.is_some());
+    assert!(f.1.session.settings.notices.review.error().is_some());
     assert!(f.1.session.settings.notices.review_outcome.is_none());
     assert_eq!(f.1.session.settings.notices.unconfirmed_count, 1);
-    assert_eq!(f.1.session.settings.notices.review_pending, 0);
+    assert!(!f.1.session.settings.notices.review.busy());
     cleanup(f);
 }
 
@@ -266,7 +266,7 @@ fn terms_of_service_accept_round_trip() {
     let request = last_request(&f.2);
     assert_eq!(request["@type"], "acceptTermsOfService");
     assert_eq!(request["terms_of_service_id"], "tos-1");
-    assert!(f.1.session.settings.notices.terms_in_flight);
+    assert!(f.1.session.settings.notices.terms_accept.is_loading());
     assert_invalid(f.1.accept_terms());
     let extra = request["@extra"].as_str().unwrap().to_string();
     ingest(
@@ -276,7 +276,7 @@ fn terms_of_service_accept_round_trip() {
         &format!(r#"{{"@type":"ok","@extra":"{extra}"}}"#),
     );
     assert!(f.1.session.settings.notices.terms.is_none());
-    assert!(!f.1.session.settings.notices.terms_in_flight);
+    assert!(f.1.session.settings.notices.terms_accept.is_idle());
     cleanup(f);
 }
 
@@ -298,8 +298,7 @@ fn terms_accept_failure_keeps_the_prompt_with_an_error() {
         &format!(r#"{{"@type":"error","code":500,"message":"x","@extra":"{extra}"}}"#),
     );
     assert!(f.1.session.settings.notices.terms.is_some());
-    assert!(!f.1.session.settings.notices.terms_in_flight);
-    assert!(f.1.session.settings.notices.terms_error.is_some());
+    assert!(f.1.session.settings.notices.terms_accept.error().is_some());
     cleanup(f);
 }
 
@@ -795,4 +794,75 @@ fn a_later_start_or_an_earlier_choice_is_left_alone() {
     );
     assert!(f.1.session.settings.data_storage.storage_limits_seeded);
     cleanup(f);
+}
+
+/// Two unconfirmed sessions, one review fails: the retry names only the
+/// one that is still unreviewed, and the places of both reach the box.
+#[test]
+fn a_retried_review_skips_the_sessions_already_reviewed() {
+    use crate::state::{ReviewStage, UnconfirmedEntry};
+    let mut f = fixture();
+    unconfirmed_alert(&mut f);
+    let entry = |id| UnconfirmedEntry {
+        id,
+        device: format!("Device {id}"),
+        location: format!("City {id}"),
+    };
+    let notices = &mut f.1.session.settings.notices;
+    notices.unconfirmed_entries = vec![entry(5), entry(6)];
+    f.1.review_unconfirmed_sessions(false).unwrap();
+    let sent: Vec<_> = requests_of(&f.2, "terminateSession");
+    assert_eq!(sent.len(), 2);
+    let session = &mut f.1.session;
+    session.finish_login_review(5, None);
+    session.finish_login_review(6, Some("Could not review the new login.".into()));
+    let notices = &f.1.session.settings.notices;
+    assert!(matches!(notices.review, ReviewStage::Failed { .. }));
+    assert_eq!(notices.unconfirmed_entries, vec![entry(6)]);
+    f.1.review_unconfirmed_sessions(false).unwrap();
+    let sent = requests_of(&f.2, "terminateSession");
+    assert_eq!(sent.len(), 3, "only session 6 is sent again");
+    assert_eq!(sent[2]["session_id"], 6);
+    f.1.session.finish_login_review(6, None);
+    assert_eq!(
+        f.1.session.settings.notices.review_outcome,
+        Some(LoginReview::Prevented {
+            places: vec!["City 5 (Device 5)".into(), "City 6 (Device 6)".into()]
+        })
+    );
+    cleanup(f);
+}
+
+/// The terms box cannot be closed: a press that cannot be sent says so
+/// instead of doing nothing.
+#[test]
+fn terms_accept_that_cannot_be_sent_says_so() {
+    let store = MemorySecretStore::new();
+    let (dir, prepared) = prepared_tmp(&store);
+    let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+    let session = crate::state::Session::new(crate::ids::AccountKey::primary(), sink);
+    let mut driver = ConnectDriver::new(
+        session,
+        Arc::new(RecordingSender::new()),
+        test_credentials(),
+        prepared,
+    );
+    driver.session.settings.notices.terms = Some(crate::telegram::envelope::TermsOfService {
+        id: "tos-1".into(),
+        text: "Be nice.".into(),
+        min_user_age: 0,
+        show_popup: true,
+    });
+    assert_invalid(driver.accept_terms());
+    assert!(
+        driver
+            .session
+            .settings
+            .notices
+            .terms_accept
+            .error()
+            .is_some()
+    );
+    drop(driver);
+    std::fs::remove_dir_all(dir).unwrap();
 }

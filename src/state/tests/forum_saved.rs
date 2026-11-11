@@ -151,12 +151,20 @@ fn my_notes_and_hidden_author_use_tdesktop_names() {
     assert_eq!(titles, vec!["My Notes", "Author Hidden"]);
 }
 
+/// The open sublist waits for `extra`, as the driver records it on send.
+fn ask_sublist(session: &mut Session, extra: RequestId) {
+    if let Some(view) = session.threads.saved.sublist.as_mut() {
+        view.page = SavedPage::Asking(extra);
+    }
+}
+
 #[test]
 fn sublist_history_pages_and_follows_deletes_and_edits() {
     let (mut session, sink, seq) = saved_session();
     session.open_saved_sublist(77);
     let purpose = RequestPurpose::GetSavedMessagesTopicHistory { topic_id: 77 };
     let extra = session.request(purpose, None);
+    ask_sublist(&mut session, extra);
     apply_json(
         &mut session,
         &seq,
@@ -174,6 +182,7 @@ fn sublist_history_pages_and_follows_deletes_and_edits() {
     assert!(!view.history.loaded_complete);
     // An empty page ends the history.
     let extra = session.request(purpose, None);
+    ask_sublist(&mut session, extra);
     apply_json(
         &mut session,
         &seq,
@@ -196,6 +205,7 @@ fn sublist_history_pages_and_follows_deletes_and_edits() {
     // A page answered for another sublist is dropped.
     session.open_saved_sublist(5);
     let extra = session.request(purpose, None);
+    ask_sublist(&mut session, extra);
     apply_json(
         &mut session,
         &seq,
@@ -223,6 +233,7 @@ fn sublist_history_pages_and_follows_deletes_and_edits() {
         RequestPurpose::GetSavedMessagesTopicHistory { topic_id: 77 },
         None,
     );
+    ask_sublist(&mut session, extra);
     apply_json(
         &mut session,
         &seq,
@@ -301,7 +312,7 @@ fn tag_search_pages_land_in_the_filter() {
     session.begin_saved_tag_search(0, tag.clone());
     let extra = session.request(RequestPurpose::SearchSavedMessages { topic_id: 0 }, None);
     if let Some(search) = session.threads.saved.tag_search.as_mut() {
-        search.request = Some(extra);
+        search.page = SavedPage::Asking(extra);
     }
     apply_json(
         &mut session,

@@ -12,14 +12,13 @@ impl Session {
         _seq: u64,
     ) {
         match pending.map(|p| p.purpose) {
-            // A refused appearance change shows in the Appearance box.
+            // A refused appearance change shows in the Appearance box that
+            // sent it, by the request.
             Some(
                 RequestPurpose::SetChatAccentColor
                 | RequestPurpose::SetChatProfileAccentColor
                 | RequestPurpose::SetChatEmojiStatus,
-            ) => {
-                self.chats_state.appearance_error = Some(error_reason(err));
-            }
+            ) => self.file_appearance_answer(pending, Err(error_reason(err))),
             // Only the search the link preview waits for: an earlier
             // link's failure never shows under a later one.
             Some(RequestPurpose::SearchBackground) => {
@@ -37,18 +36,37 @@ impl Session {
                 self.chats_state.background_error = Some(reason.clone());
                 self.chats_state.installed_backgrounds.fail(reason);
             }
+            // The preview that asked reads its own answer, matched by the
+            // request; the page-level line stays for the pages.
             Some(
                 RequestPurpose::SetDefaultBackground
-                | RequestPurpose::DeleteDefaultBackground
-                | RequestPurpose::RemoveInstalledBackground
                 | RequestPurpose::SetDefaultBackgroundLocal
-                | RequestPurpose::SetChatBackground
-                | RequestPurpose::DeleteChatBackground
-                | RequestPurpose::SetChatTheme
                 | RequestPurpose::GetBackgroundUrl,
+            ) => {
+                let reason = error_reason(err);
+                if let Some(id) = pending.map(|p| p.id) {
+                    self.chats_state
+                        .background_answers
+                        .push(id, Err(reason.clone()));
+                }
+                self.chats_state.background_error = Some(reason);
+            }
+            // A refused delete changed nothing locally: the wallpaper
+            // stays where the server kept it (removals apply on `ok`).
+            Some(
+                RequestPurpose::Chats(ChatsPurpose::DeleteDefaultBackground { .. })
+                | RequestPurpose::Chats(ChatsPurpose::RemoveInstalledBackground { .. }),
             ) => {
                 self.chats_state.background_error = Some(error_reason(err));
             }
+            // The chat look dialog settles each of its requests on its own
+            // answer (`Session::acks`); the error is not the Appearance
+            // page's.
+            Some(
+                RequestPurpose::SetChatBackground
+                | RequestPurpose::DeleteChatBackground
+                | RequestPurpose::SetChatTheme,
+            ) => {}
             // Slice CL3: refused report / block surfaces in the
             // status note — never shown as success.
             Some(RequestPurpose::ReportChat) => {
@@ -117,9 +135,16 @@ impl Session {
                             ChatsPurpose::DeepLinkInternalType { .. }
                         ))
                     ) && crate::text::openable_http_url(&self.chats_state.deep_link_original);
-                // The Premium bot's `/start` was for the link that failed:
-                // a later link to the bot must not send it unasked.
-                if !stale {
+                // The Premium bot's `/start` was for the link that failed
+                // (stale or not): a later link to the bot must not send it
+                // unasked. Another flow's failure leaves it alone.
+                if self
+                    .payments
+                    .hub
+                    .auto_start
+                    .as_ref()
+                    .is_some_and(|auto| auto.generation == generation)
+                {
                     self.payments.hub.auto_start = None;
                 }
                 if limit_box {

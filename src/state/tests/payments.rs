@@ -162,6 +162,7 @@ fn payment_receipt_opens_dialog() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
     let extra = session.request(RequestPurpose::GetPaymentReceipt, Some(ChatId(51)));
+    session.payments.receipt = ReceiptStage::Loading(extra);
     apply_json(
         &mut session,
         &seq,
@@ -171,11 +172,11 @@ fn payment_receipt_opens_dialog() {
             extra.0
         ),
     );
-    let receipt = session.payments.receipt.as_ref().expect("receipt");
+    let receipt = session.payments.receipt.data().expect("receipt");
     assert_eq!(receipt.product_title, "Time machine");
     assert_eq!(receipt.total_amount, 1999);
     assert_eq!(receipt.credentials_title, "Visa •• 4242");
-    assert!(session.payments.receipt_open);
+    assert!(session.payments.receipt.is_open());
 }
 
 #[test]
@@ -195,7 +196,7 @@ fn star_subscriptions_apply_only_to_own_request() {
         RequestPurpose::Payments(PaymentsPurpose::GetStarSubscriptions { append: false }),
         None,
     );
-    session.payments.star_subscriptions_loading = true;
+    session.payments.star_subscriptions_request = Some(extra);
     apply_json(&mut session, &seq, &sink, &subs_json(&extra.0.to_string()));
     let subs = session
         .payments
@@ -205,7 +206,7 @@ fn star_subscriptions_apply_only_to_own_request() {
     assert_eq!(subs.subscriptions.len(), 1);
     assert_eq!(subs.subscriptions[0].id, "sub1");
     assert_eq!(subs.star_amount, 500);
-    assert!(!session.payments.star_subscriptions_loading);
+    assert!(!session.payments.star_subscriptions_loading());
 }
 
 #[test]
@@ -224,6 +225,7 @@ fn star_subscriptions_append_page_merges() {
         RequestPurpose::Payments(PaymentsPurpose::GetStarSubscriptions { append: false }),
         None,
     );
+    session.payments.star_subscriptions_request = Some(extra);
     apply_json(
         &mut session,
         &seq,
@@ -235,6 +237,7 @@ fn star_subscriptions_append_page_merges() {
         RequestPurpose::Payments(PaymentsPurpose::GetStarSubscriptions { append: true }),
         None,
     );
+    session.payments.star_subscriptions_request = Some(extra);
     apply_json(
         &mut session,
         &seq,
@@ -282,7 +285,7 @@ fn star_subscriptions_error_surfaces() {
         RequestPurpose::Payments(PaymentsPurpose::GetStarSubscriptions { append: false }),
         None,
     );
-    session.payments.star_subscriptions_loading = true;
+    session.payments.star_subscriptions_request = Some(extra);
     apply_json(
         &mut session,
         &seq,
@@ -292,7 +295,7 @@ fn star_subscriptions_error_surfaces() {
             extra.0
         ),
     );
-    assert!(!session.payments.star_subscriptions_loading);
+    assert!(!session.payments.star_subscriptions_loading());
     // `error_reason` never echoes the native TDLib message (it can
     // contain secrets) — the classified reason surfaces instead.
     let err = session
@@ -312,32 +315,47 @@ fn bank_card_info_applies_only_to_own_request_and_clears_on_error() {
             r#"{{"@type":"bankCardInfo","@extra":"{extra}","title":"Example Bank","actions":[{{"@type":"bankCardActionOpenUrl","text":"Website","url":"https://bank.example"}}]}}"#
         )
     };
+    let error_json = |extra: u64| {
+        format!(
+            r#"{{"@type":"error","@extra":"{extra}","code":400,"message":"BANK_CARD_NUMBER_INVALID"}}"#
+        )
+    };
+    let first = session.request(RequestPurpose::GetBankCardInfo, None);
     session.payments.bank_card = Some(BankCardLookup {
         number: "4242424242424242".into(),
-        info: None,
-        loading: true,
+        stage: BankCardStage::Loading { request: first },
     });
     apply_json(&mut session, &seq, &sink, &info_json("999"));
-    assert!(session.payments.bank_card.as_ref().unwrap().info.is_none());
-    let extra = session.request(RequestPurpose::GetBankCardInfo, None);
-    apply_json(&mut session, &seq, &sink, &info_json(&extra.0.to_string()));
-    let lookup = session.payments.bank_card.as_ref().unwrap();
-    assert!(!lookup.loading);
-    assert_eq!(lookup.info.as_ref().unwrap().title, "Example Bank");
-
-    let extra = session.request(RequestPurpose::GetBankCardInfo, None);
-    session.payments.bank_card.as_mut().unwrap().loading = true;
-    apply_json(
-        &mut session,
-        &seq,
-        &sink,
-        &format!(
-            r#"{{"@type":"error","@extra":"{}","code":400,"message":"BANK_CARD_NUMBER_INVALID"}}"#,
-            extra.0
-        ),
+    assert!(
+        session
+            .payments
+            .bank_card
+            .as_ref()
+            .unwrap()
+            .info()
+            .is_none()
     );
+    // The user taps a second card before the first answers.
+    let second = session.request(RequestPurpose::GetBankCardInfo, None);
+    session.payments.bank_card = Some(BankCardLookup {
+        number: "5555555555554444".into(),
+        stage: BankCardStage::Loading { request: second },
+    });
+    apply_json(&mut session, &seq, &sink, &info_json(&first.0.to_string()));
     let lookup = session.payments.bank_card.as_ref().unwrap();
-    assert!(!lookup.loading && lookup.info.is_none());
+    assert_eq!(lookup.stage, BankCardStage::Loading { request: second });
+    apply_json(&mut session, &seq, &sink, &error_json(first.0));
+    let lookup = session.payments.bank_card.as_ref().unwrap();
+    assert_eq!(lookup.stage, BankCardStage::Loading { request: second });
+    apply_json(&mut session, &seq, &sink, &info_json(&second.0.to_string()));
+    let lookup = session.payments.bank_card.as_ref().unwrap();
+    assert_eq!(lookup.info().unwrap().title, "Example Bank");
+
+    let third = session.request(RequestPurpose::GetBankCardInfo, None);
+    session.payments.bank_card.as_mut().unwrap().stage = BankCardStage::Loading { request: third };
+    apply_json(&mut session, &seq, &sink, &error_json(third.0));
+    let lookup = session.payments.bank_card.as_ref().unwrap();
+    assert_eq!(lookup.stage, BankCardStage::Failed);
 }
 
 #[test]

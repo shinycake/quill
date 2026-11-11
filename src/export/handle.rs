@@ -260,6 +260,42 @@ pub(crate) fn publish<P>(slot: &Mutex<P>, wake: &Signal, change: impl FnOnce(&mu
     wake.poke();
 }
 
+/// Settles an export whose worker thread panicked: the thread body holds
+/// one, and when it unwinds before the final stage was published, this
+/// publishes `Failed`, so the progress box gets its Done button, a new
+/// export is not refused as "already running", and Quit stops asking.
+pub(crate) struct SettleOnPanic<P> {
+    slot: Arc<Mutex<P>>,
+    is_settled: fn(&P) -> bool,
+    fail: fn(&mut P, String),
+}
+
+impl<P> SettleOnPanic<P> {
+    pub(crate) fn new(
+        slot: &Arc<Mutex<P>>,
+        is_settled: fn(&P) -> bool,
+        fail: fn(&mut P, String),
+    ) -> Self {
+        Self {
+            slot: slot.clone(),
+            is_settled,
+            fail,
+        }
+    }
+}
+
+impl<P> Drop for SettleOnPanic<P> {
+    fn drop(&mut self) {
+        if (self.is_settled)(&self.slot.lock_or_recover()) {
+            return;
+        }
+        let fail = self.fail;
+        publish(&self.slot, &crate::wake::UPDATES, |slot| {
+            fail(slot, "The export stopped unexpectedly.".into())
+        });
+    }
+}
+
 pub struct ChatExport {
     pub link: WorkerLink,
     progress: Arc<Mutex<Progress>>,
@@ -284,6 +320,10 @@ impl ChatExport {
         let worker_progress = progress.clone();
         let worker_folder = folder.clone();
         crate::thread_guard::spawn_guarded("quill-export", move || {
+            let _settle =
+                SettleOnPanic::new(&worker_progress, Progress::is_settled, |progress, why| {
+                    progress.stage = Stage::Failed(why)
+                });
             let report = |progress: Progress| {
                 publish(&worker_progress, &crate::wake::UPDATES, |slot| {
                     *slot = progress;

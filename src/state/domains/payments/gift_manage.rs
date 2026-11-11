@@ -17,6 +17,10 @@ impl Session {
             pending.map(|p| p.purpose)
         {
             self.payments.gifts_manage.limits.set(option, value);
+            self.payments
+                .gifts_manage
+                .limits_ask
+                .settle(pending.map(|p| p.id));
         }
     }
 
@@ -29,7 +33,13 @@ impl Session {
             return;
         };
         match (payload, purpose) {
-            (GiftManagePayload::Collections(list), PaymentsPurpose::GetGiftCollections) => {
+            (
+                GiftManagePayload::Collections(list),
+                PaymentsPurpose::GetGiftCollections { owner },
+            ) => {
+                if self.payments.hub.gifts_owner != Some(owner) {
+                    return;
+                }
                 let files: Vec<ParsedFile> =
                     list.iter().flat_map(|c| c.files.iter().cloned()).collect();
                 self.remember_files(&files);
@@ -117,8 +127,8 @@ impl Session {
                 hub.tx_loaded = false;
                 // tdesktop `ShowGiftTransferredToast`, then the recipient's
                 // chat (`showPeerHistory`).
-                manage.transferred = match manage.transferring.take() {
-                    Some((request, done)) if Some(request) == pending.map(|p| p.id) => Some(done),
+                manage.transferred = match (manage.transfer(), pending.map(|p| p.id)) {
+                    (Some(picker), Some(request)) => picker.transferred_by(request),
                     _ => None,
                 };
                 manage.flow = None;
@@ -144,13 +154,23 @@ impl Session {
             PaymentsPurpose::SendStarGift => {
                 // Stars were spent whichever dialog asked.
                 hub.tx_loaded = false;
-                if !manage.send.waits_for(pending) {
+                let ours = manage.send.waits_for(pending);
+                if ours {
+                    manage.send.request = None;
+                }
+                // A box closed or rebuilt for another recipient while it was
+                // out has nobody to show it: Stars moved, so say so.
+                if !ours || !manage.send.open {
+                    self.payments.notices.push(PaymentNotice::new(
+                        NoticeKind::Info,
+                        crate::lang::tr(crate::lang::keys::Q_MONEY_GIFT_SENT),
+                    ));
                     return;
                 }
-                manage.send.request = None;
                 manage.send.error = None;
                 manage.send.selected = None;
-                manage.send.done = Some("Gift sent.".into());
+                manage.send.done =
+                    Some(crate::lang::tr(crate::lang::keys::Q_MONEY_GIFT_SENT).into());
             }
             _ => {}
         }
@@ -300,8 +320,12 @@ impl Session {
         let reason = error_reason(err);
         let manage = &mut self.payments.gifts_manage;
         match purpose {
-            PaymentsPurpose::GetGiftOption(_) => {}
-            PaymentsPurpose::GetGiftCollections => manage.collections_loading = false,
+            PaymentsPurpose::GetGiftOption(_) => manage.limits_ask.fail(pending.map(|p| p.id)),
+            PaymentsPurpose::GetGiftCollections { owner } => {
+                if self.payments.hub.gifts_owner == Some(owner) {
+                    manage.collections_loading = false;
+                }
+            }
             PaymentsPurpose::GetAvailableGifts if !manage.send.asked_gifts(pending) => {}
             PaymentsPurpose::GetPremiumGiftOptions if !manage.send.asked_premium(pending) => {}
             PaymentsPurpose::GetAvailableGifts => {
@@ -310,6 +334,15 @@ impl Session {
             }
             PaymentsPurpose::GetPremiumGiftOptions => {
                 manage.send.premium_fetch = GiftListFetch::Failed;
+            }
+            PaymentsPurpose::TransferGift => {
+                if let (Some(picker), Some(request)) =
+                    (manage.transfer_mut(), pending.map(|p| p.id))
+                {
+                    picker
+                        .transfer_failed(request, format!("Couldn't transfer the gift: {reason}"));
+                }
+                self.payments.hub.gift_mutating = false;
             }
             PaymentsPurpose::DeleteGift => {
                 manage.deleting = None;
@@ -324,13 +357,18 @@ impl Session {
             }
             PaymentsPurpose::GiftExportProbe => self.apply_gift_export_probe_error(err),
             PaymentsPurpose::SendStarGift => {
-                if !manage.send.waits_for(pending) {
-                    return;
+                let ours = manage.send.waits_for(pending);
+                if ours {
+                    manage.send.request = None;
                 }
-                manage.send.request = None;
-                manage.send.error = Some(format!(
-                    "Couldn't send the gift: {reason}. The gift may be sold out."
-                ));
+                let text = format!("Couldn't send the gift: {reason}. The gift may be sold out.");
+                if ours && manage.send.open {
+                    manage.send.error = Some(text);
+                } else {
+                    self.payments
+                        .notices
+                        .push(PaymentNotice::new(NoticeKind::Error, text));
+                }
             }
             _ => {
                 self.payments.hub.gift_mutating = false;

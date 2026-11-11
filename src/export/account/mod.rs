@@ -19,6 +19,6 @@ pub mod worker;
 #[cfg(test)]
 mod tests;
 
-pub use handle::AccountExport;
+pub use handle::{AccountExport, ExportView};
 pub use settings::{AccountSettings, Section, Sections};
 pub use worker::{AccountProgress, AccountStage, AccountSummary};

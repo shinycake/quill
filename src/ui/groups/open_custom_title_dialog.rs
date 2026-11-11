@@ -3,8 +3,23 @@
 use super::*;
 use crate::ui::status_note::StatusNote;
 use quill::lang::{keys, tr, tr_with, trn_with};
+use quill::state::{Submit, SubmitView};
 
 impl QuillApp {
+    /// "Leaving group…" or "Leaving channel…", by the chat's kind.
+    pub(in crate::ui) fn leaving_line(&self, chat_id: ChatId) -> String {
+        let channel = self
+            .session()
+            .and_then(|session| session.chats.get(&chat_id.0))
+            .is_none_or(|chat| chat.is_channel());
+        tr(if channel {
+            keys::Q_PEOPLE_LEAVING_CHANNEL
+        } else {
+            keys::Q_PEOPLE_LEAVING_GROUP
+        })
+        .to_string()
+    }
+
     /// Slice G1: admin custom-title prompt (`setChatMemberTag`, schema
     /// 1.8.67, line 13598 — the setter Telegram X's `EditRightsController`
     /// drives for "Custom title"). Basic groups and supergroups only.
@@ -34,20 +49,24 @@ impl QuillApp {
     }
 
     pub(in crate::ui) fn submit_username_dialog(&mut self, cx: &mut Context<Self>) {
-        let Some(dialog) = self.admin.username_dialog.take() else {
+        let requests = self.session().map(|session| &session.requests);
+        let Some(dialog) = self.admin.username_dialog.as_ref() else {
             return;
         };
+        if dialog.submit.is_sending(requests) {
+            return;
+        }
         let value = dialog.input.read(cx).value().trim().to_string();
         let (kind, chat_id) = (dialog.kind, dialog.chat_id);
-        let note: String = match kind {
+        // The request, or the note that says why none was sent; the box
+        // stays either way until TDLib answers.
+        let sent: Result<RequestId, StatusNote> = match kind {
             TextPromptKind::CustomTitle { user_id } => {
                 // 0-16 characters, no emoji — schema line 13597, TGX
                 // `EditRightsController` enforces the same client-side.
                 let too_long = !quill::admin_extras::custom_title_fits(&value);
                 let has_emoji = value.chars().any(looks_like_emoji);
                 if too_long || has_emoji {
-                    // box-host: put back after a failed submit; it stays where it shows
-                    self.admin.username_dialog = Some(dialog);
                     self.set_note(if too_long {
                         StatusNote::silent(tr(keys::Q_PEOPLE_CUSTOM_TITLE_MUST_BE_AT))
                     } else {
@@ -58,24 +77,14 @@ impl QuillApp {
                 }
                 match self.live.as_mut() {
                     Some(live) => match live.driver.set_chat_member_tag(chat_id, user_id, &value) {
-                        Ok(_) => {
-                            if value.is_empty() {
-                                tr(keys::Q_PEOPLE_CUSTOM_TITLE_REMOVED).into()
-                            } else {
-                                tr(keys::Q_PEOPLE_CUSTOM_TITLE_UPDATED).into()
-                            }
-                        }
-                        Err(_) => {
-                            // box-host: put back after a failed submit; it stays where it shows
-                            self.admin.username_dialog = Some(dialog);
-                            tr(keys::Q_PEOPLE_COULD_NOT_SET_CUSTOM_TITLE).into()
-                        }
+                        Ok(Some(id)) => Ok(id),
+                        Ok(None) | Err(_) => Err(StatusNote::error(tr(
+                            keys::Q_PEOPLE_COULD_NOT_SET_CUSTOM_TITLE,
+                        ))),
                     },
-                    None => {
-                        // box-host: put back after a failed submit; it stays where it shows
-                        self.admin.username_dialog = Some(dialog);
-                        tr(keys::Q_PEOPLE_CUSTOM_TITLES_NEED_A_LIVE).into()
-                    }
+                    None => Err(StatusNote::info(tr(
+                        keys::Q_PEOPLE_CUSTOM_TITLES_NEED_A_LIVE,
+                    ))),
                 }
             }
             // Slice G10: `setCommunityName` (schema 1.8.67, line 11811;
@@ -83,8 +92,6 @@ impl QuillApp {
             // optimistic — the new name arrives via `updateCommunity`.
             TextPromptKind::CommunityName { community_id } => {
                 if value.is_empty() {
-                    // box-host: put back after a failed submit; it stays where it shows
-                    self.admin.username_dialog = Some(dialog);
                     self.set_note(StatusNote::error(tr(
                         keys::Q_PEOPLE_COMMUNITY_NAME_CANNOT_BE_EMPTY,
                     )));
@@ -93,23 +100,65 @@ impl QuillApp {
                 }
                 match self.live.as_mut() {
                     Some(live) => match live.driver.set_community_name(community_id, &value) {
-                        Ok(_) => tr(keys::Q_PEOPLE_COMMUNITY_NAME_UPDATED).into(),
-                        Err(_) => {
-                            // box-host: put back after a failed submit; it stays where it shows
-                            self.admin.username_dialog = Some(dialog);
-                            tr(keys::Q_PEOPLE_COULD_NOT_UPDATE_COMMUNITY_NAME).into()
-                        }
+                        Ok(Some(id)) => Ok(id),
+                        Ok(None) | Err(_) => Err(StatusNote::error(tr(
+                            keys::Q_PEOPLE_COULD_NOT_UPDATE_COMMUNITY_NAME,
+                        ))),
                     },
-                    None => {
-                        // box-host: put back after a failed submit; it stays where it shows
-                        self.admin.username_dialog = Some(dialog);
-                        tr(keys::Q_PEOPLE_RENAMING_COMMUNITIES_NEEDS_A_LIVE).into()
-                    }
+                    None => Err(StatusNote::info(tr(
+                        keys::Q_PEOPLE_RENAMING_COMMUNITIES_NEEDS_A_LIVE,
+                    ))),
                 }
             }
         };
-        self.set_note(StatusNote::info(note));
+        match sent {
+            Ok(id) => {
+                if let Some(dialog) = self.admin.username_dialog.as_mut() {
+                    dialog.submit = Submit::sent(vec![id]);
+                }
+            }
+            Err(note) => self.set_note(note),
+        }
         cx.notify();
+    }
+
+    /// The custom title and community name box leaves its Sending stage on
+    /// TDLib's answer: it closes with its note, or stays with the reason.
+    pub(in crate::ui) fn settle_username_dialog(&mut self, cx: &mut Context<Self>) {
+        let requests = self.session().map(|session| &session.requests);
+        let Some(view) = self
+            .admin
+            .username_dialog
+            .as_ref()
+            .map(|dialog| dialog.submit.view(requests))
+        else {
+            return;
+        };
+        match view {
+            SubmitView::Done => {
+                let Some(dialog) = self.admin.username_dialog.take() else {
+                    return;
+                };
+                let removed = dialog.input.read(cx).value().trim().is_empty();
+                let key = match dialog.kind {
+                    TextPromptKind::CustomTitle { .. } if removed => {
+                        keys::Q_PEOPLE_CUSTOM_TITLE_REMOVED
+                    }
+                    TextPromptKind::CustomTitle { .. } => keys::Q_PEOPLE_CUSTOM_TITLE_UPDATED,
+                    TextPromptKind::CommunityName { .. } => keys::Q_PEOPLE_COMMUNITY_NAME_UPDATED,
+                };
+                self.set_note(StatusNote::info(tr(key)));
+                cx.notify();
+            }
+            SubmitView::Failed(reason) => {
+                if let Some(dialog) = self.admin.username_dialog.as_mut()
+                    && dialog.submit.keep_failure(reason)
+                {
+                    cx.notify();
+                }
+            }
+            SubmitView::Editing | SubmitView::Sending => {}
+        }
     }
 
     pub(in crate::ui) fn open_group_confirm(
@@ -184,17 +233,24 @@ impl QuillApp {
                     quill::telegram::envelope::ChatKind::BasicGroup { .. }
                 )
             });
+        // Delete and Leave: the request the Edit box waits on, so the box
+        // goes when the chat does and stays when TDLib refuses.
+        let mut exit_request = None;
         let note = match self.live.as_mut() {
             Some(live) => {
                 let result = match dialog.action {
-                    GroupConfirmAction::DeleteChat => live
-                        .driver
-                        .delete_chat(dialog.chat_id)
-                        .map(|sent| sent_note(sent, tr(keys::Q_PEOPLE_CHAT_DELETED))),
-                    GroupConfirmAction::LeaveChat => live
-                        .driver
-                        .leave_channel(dialog.chat_id)
-                        .map(|_| tr(keys::Q_PEOPLE_LEFT_THE_CHAT).to_string()),
+                    GroupConfirmAction::DeleteChat => {
+                        live.driver.delete_chat(dialog.chat_id).map(|sent| {
+                            exit_request = sent;
+                            sent_note(sent, tr(keys::Q_PEOPLE_DELETING_CHAT))
+                        })
+                    }
+                    GroupConfirmAction::LeaveChat => {
+                        live.driver.leave_channel(dialog.chat_id).map(|id| {
+                            exit_request = Some(id);
+                            self.leaving_line(dialog.chat_id)
+                        })
+                    }
                     // Handled above; never reaches the driver.
                     GroupConfirmAction::BroadcastIntro => Ok("".to_string()),
                     GroupConfirmAction::BroadcastUpgrade => live
@@ -335,14 +391,14 @@ impl QuillApp {
                 };
                 match result {
                     Ok(note) => {
-                        // The chat goes: its Edit box goes with it.
-                        if matches!(
-                            dialog.action,
-                            GroupConfirmAction::DeleteChat
-                                | GroupConfirmAction::LeaveChat
-                                | GroupConfirmAction::RemoveFromList
-                        ) {
-                            self.close_group_edit_box_for(dialog.chat_id, cx);
+                        // The chat goes: its Edit box goes with it, when
+                        // TDLib has answered (`track_chat_exit`).
+                        match (&dialog.action, exit_request) {
+                            (GroupConfirmAction::RemoveFromList, _) => {
+                                self.close_group_edit_box_for(dialog.chat_id, cx);
+                            }
+                            (_, Some(id)) => self.track_chat_exit(dialog.chat_id, id),
+                            _ => {}
                         }
                         note
                     }
@@ -445,7 +501,28 @@ impl QuillApp {
                             )
                         }),
                 )
+                .when_some(
+                    match &dialog_state.submit {
+                        Submit::Failed(reason) => Some(reason.clone()),
+                        _ => None,
+                    },
+                    |body, reason| {
+                        body.child(
+                            div()
+                                .id("g1-username-refused")
+                                .text_xs()
+                                .text_color(cx.theme().danger)
+                                .child(tr_with(
+                                    keys::Q_PEOPLE_COULDNT_SAVE_REASON,
+                                    &[("reason", &reason)],
+                                )),
+                        )
+                    },
+                )
                 .into_any_element();
+            let sending = dialog_state
+                .submit
+                .is_sending(this.session().map(|session| &session.requests));
             let footer = div()
                 .flex()
                 .justify_end()
@@ -462,6 +539,8 @@ impl QuillApp {
                 .child(
                     Button::new("g1-username-submit")
                         .label(tr(keys::SETTINGS_SAVE))
+                        .loading(sending)
+                        .disabled(sending)
                         .on_click(cx.listener(|this, _, window, cx| {
                             this.submit_username_dialog(cx);
                             this.close_kit_dialog_if_done(DialogKind::Username, window, cx);

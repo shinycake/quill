@@ -32,6 +32,8 @@ pub struct EditContactDialog {
     /// the note (`setUserNote` and `addContact` take the whole note).
     pub(crate) note: ContactNote,
     pub(crate) share_phone: bool,
+    /// The `addContact` Save waits on, and its refusal.
+    pub(crate) save: super::ContactSave,
 }
 
 /// The edit-contact box's private note, by whether it is known.
@@ -57,6 +59,16 @@ pub struct BirthdayDialog {
 /// B10: the one dialog behind the profile and contact panels. Only one is
 /// open at a time.
 pub enum ProfileDialog {
+    /// A box that sent its one request and waits for the answer: `dialog`
+    /// is the box as it was (kept to come back to on a refusal),
+    /// `request` the watched request (`SaveWatch`), `saved` the toast the
+    /// answer earns. The answer closes it; a refusal puts `dialog` back,
+    /// the error beside it; closing it stops the wait.
+    Saving {
+        dialog: Box<ProfileDialog>,
+        request: quill::ids::RequestId,
+        saved: crate::ui::status_note::StatusNote,
+    },
     EditContact(EditContactDialog),
     Birthday(BirthdayDialog),
     /// Pick (or remove) the personal channel.
@@ -122,6 +134,7 @@ impl EditContactDialog {
                 None => ContactNote::Waiting,
             },
             share_phone: false,
+            save: super::ContactSave::Idle,
         }
     }
 }

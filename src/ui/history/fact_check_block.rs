@@ -30,7 +30,7 @@ pub(crate) fn about_text(country: &str) -> String {
 /// loaded, else the ISO code (tdesktop `LookupFactcheckCountryName`).
 pub(crate) fn country_name(session: Option<&Session>, iso2: &str) -> String {
     session
-        .and_then(|session| session.auth_state.countries.as_ref())
+        .and_then(|session| session.auth_state.countries.data())
         .and_then(|countries| {
             countries
                 .iter()

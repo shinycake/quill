@@ -264,35 +264,40 @@ impl QuillApp {
     }
 
     /// Send `text` (a `/command`) to `chat_id`, unless slow mode holds it
-    /// back; a demo session applies it locally.
+    /// back; a demo session applies it locally. Whether the text went out
+    /// (or was applied in a demo session).
     pub(in crate::ui) fn send_command_text(
         &mut self,
         chat_id: ChatId,
         text: &str,
         cx: &mut Context<Self>,
-    ) {
+    ) -> bool {
         let session = self.live.as_ref().map(|live| &live.driver.session);
         let session = session.or(self.demo_session.as_deref());
         let Some(view_generation) = session.map(|session| session.view_generation) else {
-            return;
+            return false;
         };
         if self.slow_mode_blocked(chat_id, cx) {
-            return;
+            return false;
         }
         if let Some(live) = self.live.as_mut() {
             let snapshot = ComposerSnapshot::capture(chat_id, view_generation, text);
+            let sent = live.driver.send_snapshot(&snapshot).is_ok();
             self.screen.connection.set_note_for(
                 &self.screen.windows,
-                match live.driver.send_snapshot(&snapshot) {
-                    Ok(_) => StatusNote::silent(tr(keys::Q_OPS_SENDING)),
-                    Err(_) => StatusNote::error(tr(keys::Q_OPS_COULD_NOT_SEND_THE_COMMAND)),
+                if sent {
+                    StatusNote::silent(tr(keys::Q_OPS_SENDING))
+                } else {
+                    StatusNote::error(tr(keys::Q_OPS_COULD_NOT_SEND_THE_COMMAND))
                 },
             );
+            sent
         } else {
             self.apply_demo_outgoing(text, None, None);
             self.set_note(StatusNote::silent(tr(
                 keys::Q_OPS_DEMO_SEND_APPLIED_LOCALLY_NO,
             )));
+            true
         }
     }
 
@@ -491,7 +496,7 @@ impl QuillApp {
                 .bank_card
                 .as_ref()
                 .filter(|lookup| &lookup.number == number)
-                .and_then(|lookup| lookup.info.as_ref())
+                .and_then(|lookup| lookup.info())
                 .map(|info| (info.title.clone(), info.actions.clone()))
                 .unwrap_or_default(),
             _ => Default::default(),

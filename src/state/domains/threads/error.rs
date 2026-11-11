@@ -83,8 +83,9 @@ impl Session {
                 }
             }
             Some(RequestPurpose::GetForumTopicLink) => {
-                self.messages.message_link_error =
-                    Some(call_request_error_line(err, "Could not get the topic link"));
+                self.messages
+                    .message_link_error
+                    .push(call_request_error_line(err, "Could not get the topic link"));
             }
             Some(
                 RequestPurpose::ToggleChatViewAsTopics
@@ -111,6 +112,12 @@ impl Session {
             Some(RequestPurpose::SearchSavedMessages { .. })
         ) {
             self.fail_saved_tag_page(pending);
+        }
+        if matches!(
+            pending.map(|p| p.purpose),
+            Some(RequestPurpose::GetSavedMessagesTopicHistory { .. })
+        ) {
+            self.fail_saved_topic_page(pending);
         }
         // A failed thread request marks the open thread view.
         self.fail_thread(

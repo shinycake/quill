@@ -118,7 +118,10 @@ impl QuillApp {
             MenuAction::Tool(EditMediaTool::EditCover) => self.pick_edit_cover(cx),
             MenuAction::ClearCover => {
                 if let Some(edit) = self.chat_ui.pending_edit_mut() {
-                    edit.media_edit.cover = None;
+                    match edit.media_edit.replacement.as_mut() {
+                        Some(replacement) => replacement.cover = None,
+                        None => edit.media_edit.cover = None,
+                    }
                 }
                 self.set_note(StatusNote::silent(tr(keys::Q_MISC_COVER_CLEARED)));
                 cx.notify();
@@ -142,13 +145,22 @@ impl QuillApp {
             self.request_edit_image_download(cx);
             return;
         };
+        let asked_for = (edit.chat_id, edit.message_id);
         self.decode_image_then(
             source,
-            |this, result, cx| {
+            move |this, result, cx| {
+                // The edit it was started for is gone or another one now.
+                if this.edited_message() != Some(asked_for) {
+                    return;
+                }
                 match result {
                     Ok(pixels) => {
                         if this.viewer.photo_editor.is_none() {
-                            this.viewer.photo_editor = Some(PhotoEditor::for_message_edit(pixels));
+                            this.viewer.photo_editor = Some(PhotoEditor::for_message_edit(
+                                asked_for.0,
+                                asked_for.1,
+                                pixels,
+                            ));
                         }
                     }
                     Err(_) => this.set_note(StatusNote::error(tr(
@@ -217,6 +229,11 @@ impl QuillApp {
 
     /// "Edit Cover": choose an image (tdesktop `VideoCoverUploader::choose`).
     fn pick_edit_cover(&mut self, cx: &mut Context<Self>) {
+        // The edit the cover is for: a picker that returns after the edit
+        // ended or moved to another message drops its answer.
+        let Some(asked_for) = self.edited_message() else {
+            return;
+        };
         let picker = cx.prompt_for_paths(PathPromptOptions {
             files: true,
             directories: false,
@@ -227,7 +244,11 @@ impl QuillApp {
             if let Ok(Ok(Some(paths))) = picker.await
                 && let Some(path) = paths.first().cloned()
             {
-                let _ = this.update(cx, |this, cx| this.set_edit_cover(&path, cx));
+                let _ = this.update(cx, |this, cx| {
+                    if this.edited_message() == Some(asked_for) {
+                        this.set_edit_cover(&path, cx);
+                    }
+                });
             }
         })
         .detach();
@@ -247,7 +268,11 @@ impl QuillApp {
                         &[("shown_name", &(shown_name(&cover)).to_string())],
                     )),
                 );
-                edit.media_edit.cover = Some(cover);
+                // A staged replacement video carries its own cover.
+                match edit.media_edit.replacement.as_mut() {
+                    Some(replacement) => replacement.cover = Some(cover),
+                    None => edit.media_edit.cover = Some(cover),
+                }
             }
             None => self.set_note(StatusNote::silent(EDIT_MEDIA_INVALID_FILE)),
         }

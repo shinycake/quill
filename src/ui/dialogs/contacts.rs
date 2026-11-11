@@ -19,6 +19,17 @@ pub struct AddContactDialog {
     /// New Contact box: the phone is not on Telegram (tdesktop's
     /// `_retrying` state).
     pub(crate) not_joined: bool,
+    /// Add Contact box (`user_id != 0`): the `addContact` it waits on.
+    pub(crate) save: ContactSave,
+}
+
+/// Where the Add Contact box's save stands: the box closes on the answer
+/// to its own request, and shows the refusal when there is one.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ContactSave {
+    Idle,
+    Saving(quill::ids::RequestId),
+    Failed(String),
 }
 
 /// Slice A6: vCard import dialog — the user chooses a `.vcf` file and
@@ -74,6 +85,7 @@ impl AddContactDialog {
             sent_name: None,
             sent_request: None,
             not_joined: false,
+            save: ContactSave::Idle,
         }
     }
 

@@ -20,6 +20,9 @@ pub struct DeferredCaption {
     pub message_id: MessageId,
     pub text: String,
     pub caption_above: bool,
+    /// The caption the row showed before the first choice, put back when
+    /// the edit cannot be sent.
+    pub previous: String,
 }
 
 /// Whether `content` is media whose caption can be edited (tdesktop

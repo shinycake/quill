@@ -486,6 +486,35 @@ impl QuillApp {
                     }),
                 )),
         );
+        // A refused change (remove, restrict, custom title): its line sits
+        // above the list, which stays as it was.
+        let action_error = self
+            .session()
+            .and_then(|session| session.groups.member_action_error.get(&chat_id.0))
+            .cloned();
+        if let Some(line) = action_error {
+            section = section.child(
+                div()
+                    .flex()
+                    .items_center()
+                    .w_full()
+                    .gap_1()
+                    .child(
+                        div()
+                            .flex_1()
+                            .text_sm()
+                            .text_color(cx.theme().danger)
+                            .child(line),
+                    )
+                    .child(ghost_text_button(
+                        "admin-action-error-dismiss",
+                        tr(keys::CLOSE),
+                        cx.listener(move |this, _, _, cx| {
+                            this.dismiss_member_action_error(chat_id, cx);
+                        }),
+                    )),
+            );
+        }
         match fetch {
             None | Some(AdminListFetch::Loading) => {
                 section = section.child(

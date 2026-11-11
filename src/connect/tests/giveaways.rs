@@ -228,13 +228,94 @@ fn a_prepaid_giveaway_launches_only_on_the_explicit_call() {
     );
     assert_eq!(
         driver.session.payments.giveaway.launch,
-        GiveawayLaunch::Launched
+        GiveawayLaunch::Launched { chat_id: -100 }
     );
     // The cached boost numbers are dropped so the page asks again.
     assert!(!driver.session.groups.chat_boost_status.contains_key(&-100));
     for ty in ["getPaymentForm", "sendPaymentForm"] {
         assert_eq!(count_sent(&recorder, ty), 0);
     }
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+/// Start in chat A, open B's form while the launch is out: B's form shows
+/// neither the launch in flight nor its answer or error; A's cached boost
+/// status is still dropped.
+#[test]
+fn a_launch_answer_for_one_chat_does_not_land_in_another_chats_form() {
+    for fail in [false, true] {
+        let (dir, prepared) = prepared_tmp(&MemorySecretStore::new());
+        let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+        let recorder = Arc::new(RecordingSender::new());
+        let seq = AtomicU64::new(0);
+        let mut driver = ready_driver(&recorder, prepared, &sink, &seq);
+        driver.session.groups.chat_boost_status.insert(-100, (1, 2));
+        driver.session.groups.chat_boost_status.insert(-200, (3, 4));
+        let extra = driver
+            .launch_prepaid_giveaway(&prepaid_draft(), NOW)
+            .unwrap();
+        // The form for chat B opens (what `open_giveaway_form` does).
+        let giveaway = &mut driver.session.payments.giveaway;
+        giveaway.launch = std::mem::take(&mut giveaway.launch).for_form();
+        assert!(!giveaway.launch.is_launching_for(-200));
+        let answer = if fail {
+            json!({"@type":"error","@extra":extra.as_extra(),"code":400,"message":"GIVEAWAY_ID_INVALID"})
+        } else {
+            json!({"@type":"ok","@extra":extra.as_extra()})
+        };
+        feed(&mut driver, &seq, &sink, answer);
+        let launch = &driver.session.payments.giveaway.launch;
+        assert!(
+            !launch.is_done_for(-200) && launch.failure_for(-200).is_none(),
+            "B's form shows nothing of A's launch"
+        );
+        assert_eq!(launch.is_done_for(-100), !fail);
+        assert_eq!(launch.failure_for(-100).is_some(), fail);
+        assert_eq!(
+            driver.session.groups.chat_boost_status.contains_key(&-100),
+            fail,
+            "A's boost status is dropped when its launch succeeded"
+        );
+        assert!(driver.session.groups.chat_boost_status.contains_key(&-200));
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+}
+
+/// Start in chat A, open B's form, then A's again while the launch is
+/// out: A's launch is still in flight there, so its Start stays disabled
+/// and a second press sends nothing.
+#[test]
+fn going_back_to_a_chat_keeps_its_launch_in_flight() {
+    let (dir, prepared) = prepared_tmp(&MemorySecretStore::new());
+    let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+    let recorder = Arc::new(RecordingSender::new());
+    let seq = AtomicU64::new(0);
+    let mut driver = ready_driver(&recorder, prepared, &sink, &seq);
+    let extra = driver
+        .launch_prepaid_giveaway(&prepaid_draft(), NOW)
+        .unwrap();
+    // A's form closes, B's opens and closes, A's opens again (what
+    // `close_giveaway_form` and `open_giveaway_form` do each time).
+    for _ in 0..4 {
+        let giveaway = &mut driver.session.payments.giveaway;
+        giveaway.launch = std::mem::take(&mut giveaway.launch).for_form();
+    }
+    let launch = &driver.session.payments.giveaway.launch;
+    assert!(launch.is_launching_for(-100), "A's Start stays disabled");
+    assert!(!launch.is_launching_for(-200), "B's Start is not");
+    assert!(
+        driver
+            .launch_prepaid_giveaway(&prepaid_draft(), NOW)
+            .is_err()
+    );
+    assert_eq!(count_sent(&recorder, "launchPrepaidGiveaway"), 1);
+    feed(
+        &mut driver,
+        &seq,
+        &sink,
+        json!({"@type":"ok","@extra":extra.as_extra()}),
+    );
+    assert!(driver.session.payments.giveaway.launch.is_done_for(-100));
     std::fs::remove_dir_all(dir).unwrap();
 }
 
@@ -256,7 +337,7 @@ fn a_failed_launch_reports_the_reason() {
     );
     assert!(matches!(
         driver.session.payments.giveaway.launch,
-        GiveawayLaunch::Failed(ref text) if text.starts_with("Couldn't start")
+        GiveawayLaunch::Failed { chat_id: -100, ref reason } if reason.starts_with("Couldn't start")
     ));
     // After a failure the user can try again.
     assert!(

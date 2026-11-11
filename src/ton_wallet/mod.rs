@@ -40,6 +40,7 @@ pub use notice::{OFFICIAL_APPS_URL, WalletSurface};
 pub use own::{NftPage, OwnWallet, TxKind, TxPage, WalletNft, WalletTx};
 pub use payload::{TonWalletPayload, TonWalletPurpose, parse_payload};
 
+use crate::state::fetch::Fetch;
 use std::collections::HashMap;
 
 /// The "Telegram" service-notifications chat (user 777000). Transfers
@@ -171,15 +172,41 @@ pub struct MoneyPage {
     pub selected_tx: Option<WalletTx>,
     /// The NFT whose details are shown (by address).
     pub selected_nft: Option<String>,
-    /// A clicked transfer card's transaction is being looked up.
-    pub tx_loading: bool,
-    /// The lookup failed: the text shown instead of the details.
-    pub tx_error: Option<String>,
+    /// The lookup of a clicked transfer card's transaction.
+    pub tx_lookup: TxLookup,
     /// The "Your first Grams!" info is up over the details.
     pub hint_open: bool,
 }
 
+/// A clicked transfer card's transaction lookup. The answer shows the
+/// details only while the lookup is `Loading` for the request that answers;
+/// "back" or another click replaces it, so a late answer for an earlier
+/// card is dropped.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum TxLookup {
+    #[default]
+    Idle,
+    Loading {
+        request: crate::ids::RequestId,
+    },
+    /// The text shown instead of the details.
+    Failed(String),
+}
+
 impl MoneyPage {
+    /// Whether the card lookup waits for the answer of `request`.
+    pub fn tx_lookup_waits_for(&self, request: Option<crate::ids::RequestId>) -> bool {
+        request.is_some_and(|id| self.tx_lookup == TxLookup::Loading { request: id })
+    }
+
+    /// The text of a failed lookup.
+    pub fn tx_error(&self) -> Option<&str> {
+        match &self.tx_lookup {
+            TxLookup::Failed(text) => Some(text),
+            _ => None,
+        }
+    }
+
     /// The NFT whose details are shown.
     pub fn selected_nft(&self) -> Option<&WalletNft> {
         let address = self.selected_nft.as_deref()?;
@@ -194,9 +221,9 @@ pub struct TonWalletState {
     /// `ton_blockchain_explorer_url` from `getApplicationConfig`, once
     /// known; [`address::DEFAULT_EXPLORER_URL`] is used until then.
     pub explorer_url: Option<String>,
-    /// A `getApplicationConfig` for the explorer address is in flight or
-    /// done, so it is asked once per session.
-    pub explorer_url_requested: bool,
+    /// The `getApplicationConfig` for the explorer address: asked once per
+    /// session, again after it failed.
+    pub explorer: Fetch<()>,
     /// The `can_use_ton_wallet` option: when false nothing wallet-related
     /// is shown and no wallet getter is sent.
     pub can_use: bool,
@@ -204,12 +231,13 @@ pub struct TonWalletState {
     pub ton_usd_rate: Option<f64>,
     /// The own wallet, from `updateTonWalletState`.
     pub own: Option<OwnWallet>,
-    /// `loadTonWalletState` was sent this session.
-    pub state_requested: bool,
+    /// `loadTonWalletState`: sent once per session, again after it failed.
+    pub state_fetch: Fetch<()>,
     /// `currencyExchangeRates`: `(code, units per USD)`.
     pub rates: Vec<(String, f64)>,
-    /// `getCurrencyExchangeRates` is in flight or done.
-    pub rates_requested: bool,
+    /// `getCurrencyExchangeRates`: asked once per session, again after it
+    /// failed.
+    pub rates_fetch: Fetch<()>,
     /// The fiat currency the user picked; `None` until the account's prefs
     /// are read ([`fiat::DEFAULT_CURRENCY`] is used meanwhile).
     pub currency: Option<String>,
@@ -260,7 +288,7 @@ impl TonWalletState {
         self.can_use = on;
         if !on {
             self.own = None;
-            self.state_requested = false;
+            self.state_fetch = Fetch::Idle;
             self.money = MoneyPage::default();
             self.profile_addresses.clear();
         }

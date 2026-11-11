@@ -29,9 +29,9 @@ fn forwardable(session: &Session, chat: ChatId, id: MessageId) -> bool {
         && !session.is_secret_chat(chat)
         && session
             .messages
-            .message_menu_actions
-            .filter(|(menu_chat, menu_id, _)| *menu_chat == chat && *menu_id == id)
-            .is_none_or(|(_, _, actions)| actions.can_be_forwarded)
+            .menu_actions
+            .get(chat, id)
+            .is_none_or(|actions| actions.can_be_forwarded)
 }
 
 /// The drag a press on `pressed` in `chat` starts, or `None` when the chat

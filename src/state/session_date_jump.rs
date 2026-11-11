@@ -13,18 +13,52 @@ impl Session {
             } else {
                 SearchMediaKind::All
             };
-        let generation = self
-            .search
-            .history_calendar
-            .as_ref()
-            .map_or(1, |c| c.generation.saturating_add(1));
+        let generation = self.next_calendar_generation();
         self.search.date_jump_note = None;
         self.search.history_calendar = Some(HistoryCalendar::new(chat_id, media, now, generation));
         self.search.history_calendar.as_ref()
     }
 
+    /// The generation for a calendar being opened: one more than the last
+    /// one opened, closed or not.
+    pub(crate) fn next_calendar_generation(&mut self) -> u64 {
+        self.search.calendar_generation = self.search.calendar_generation.saturating_add(1);
+        self.search.calendar_generation
+    }
+
     pub fn close_history_calendar(&mut self) {
         self.search.history_calendar = None;
+    }
+
+    /// The date-jump UI goes with its chat (or with the account leaving the
+    /// screen): the calendar box, a resolved jump nobody started and the
+    /// "nothing found" note. `chat` limits it to that chat's pieces
+    /// (`None`: all of them).
+    pub fn clear_date_jump_ui(&mut self, chat: Option<ChatId>) {
+        let is_chat = |id: ChatId| chat.is_none_or(|chat| chat == id);
+        if self
+            .search
+            .history_calendar
+            .as_ref()
+            .is_some_and(|calendar| is_chat(calendar.chat_id))
+        {
+            self.search.history_calendar = None;
+        }
+        if self
+            .search
+            .date_jump
+            .is_some_and(|jump| jump.window.is_none() && is_chat(jump.chat_id))
+        {
+            self.search.date_jump = None;
+        }
+        if self
+            .search
+            .date_jump_pending
+            .is_some_and(|(pending_chat, ..)| is_chat(pending_chat))
+        {
+            self.search.date_jump_pending = None;
+        }
+        self.search.date_jump_note = None;
     }
 
     pub(crate) fn apply_message_calendar(

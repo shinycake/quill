@@ -32,6 +32,14 @@ impl QuillApp {
         self.account.passcode.is_locked()
     }
 
+    /// The one rule for `session.app_active` (docs/decisions/
+    /// lock-is-a-render-state.md section 4): a locked Quill is not looked
+    /// at, whichever window has the focus. The on-screen account and the
+    /// background accounts both take it from here.
+    pub(in crate::ui) fn looked_at(&self, window_focused: bool) -> bool {
+        window_focused && !self.refused_while_locked()
+    }
+
     /// Locked: the pumps that turn a stored request or answer into
     /// something shown or started do not run, and what they would drain
     /// stays where it is for the first pass after the unlock. The main
@@ -50,6 +58,12 @@ impl QuillApp {
         quill::wake::CHROME.poke();
         if !locked {
             quill::wake::LINKS.poke();
+        }
+        if locked {
+            // The lock layer draws no toast, so none can report its hover end.
+            self.connection
+                .toasts
+                .pointer_gone(std::time::Instant::now());
         }
         super::lock_layer::publish(locked, cx);
         // The demo apps share the process with the tests: only a real
@@ -113,9 +127,16 @@ impl QuillApp {
             }
             // Every window's context menus go too.
             app.dismiss_context_menus(cx);
+            // A held press on a history row never sees its release behind
+            // the lock screen: its drag ends here, and its poll loop with it.
+            app.message_ui.selection_drag = None;
             // And its inline clips: a locked chat window runs no frame
             // upkeep, so a round video playing there kept its sound.
             app.players.inline_videos.leave_window(app.windows.scope);
+            // Its message widgets too: a locked window draws no history
+            // pass to say they left, so their runtimes would keep running
+            // and their public data being polled behind the lock screen.
+            app.widgets_left_window(app.windows.scope);
         });
         // A clip parked to play goes with the clips; a voice note or song
         // parked for its download plays on, as tdesktop's player does.

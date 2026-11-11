@@ -292,6 +292,39 @@ fn user_full_info_fetched_once_per_user() {
 }
 
 #[test]
+fn a_failed_user_full_info_is_asked_again_only_by_the_explicit_retry() {
+    let store = MemorySecretStore::new();
+    let (dir, prepared) = prepared_tmp(&store);
+    let sink = Arc::new(MemorySink::new());
+    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+    let recorder = Arc::new(RecordingSender::new());
+    let seq = AtomicU64::new(0);
+    let mut driver = ready_driver(&recorder, prepared, &dyn_sink, &seq);
+    let extra = driver
+        .ensure_user_full_info(31)
+        .unwrap()
+        .expect("getUserFullInfo sent");
+    driver
+        .ingest(
+            copy_and_parse(
+                &format!(
+                    r#"{{"@type":"error","@extra":"{}","code":400,"message":"X"}}"#,
+                    extra.0
+                ),
+                &seq,
+                &dyn_sink,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+    // A render asks again: nothing goes.
+    assert_eq!(driver.ensure_user_full_info(31).unwrap(), None);
+    // The explicit retry asks once more.
+    assert!(driver.fetch_user_full_info(31).unwrap().is_some());
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn supergroup_full_info_fetched_once() {
     // Phase 6: `fetch_supergroup_full_info` sends `getSupergroupFullInfo`
     // once per supergroup; the id-less `supergroupFullInfo` response

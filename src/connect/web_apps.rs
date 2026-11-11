@@ -5,7 +5,7 @@
 use super::*;
 use crate::composer::SendOptions;
 use crate::ids::{ChatId, RequestId};
-use crate::state::{BotsPurpose, RequestPurpose, WebAppOpenResult, WebAppPending};
+use crate::state::{BotsPurpose, RequestPurpose, WebAppPending};
 use crate::telegram::requests::{
     ContactShare, allow_bot_to_send_messages, can_bot_send_messages, close_web_app,
     get_attachment_menu_bot, get_grossing_web_app_bots, get_main_web_app, get_web_app_link_url,
@@ -43,7 +43,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             chat_id: chat_id.map(|id| id.0),
             source,
         });
-        self.session.bots.web_apps.open_result = None;
+        self.session.bots.web_apps.replace_open_result(None);
     }
 
     /// Send an open call marked pending: a send that fails leaves no
@@ -188,9 +188,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     pub fn forget_web_app_launches(&mut self) {
         let apps = &mut self.session.bots.web_apps;
         apps.pending.clear();
-        if let Some(WebAppOpenResult::Opened { launch_id, .. }) = apps.open_result.take() {
-            apps.dropped_launches.push(launch_id);
-        }
+        apps.replace_open_result(None);
         self.close_dropped_web_apps();
     }
 
@@ -293,11 +291,24 @@ impl<S: JsonSender> ConnectDriver<S> {
             None,
         )?;
         self.session.bots.web_apps.emoji_access = None;
-        if let Some(Some(info)) = self.session.bots.bot_info.get_mut(&bot_user_id) {
-            info.can_manage_emoji_status = allowed;
-        }
+        let before = match self.session.bots.bot_info.get_mut(&bot_user_id) {
+            Some(Some(info)) => Some(std::mem::replace(
+                &mut info.can_manage_emoji_status,
+                allowed,
+            )),
+            _ => None,
+        };
         let json = toggle_bot_can_manage_emoji_status(extra, bot_user_id, allowed);
-        self.send_json_request(extra, &json)
+        let sent = self.send_json_request(extra, &json);
+        // A send that never left has no answer to put the switch back: do
+        // it here.
+        if sent.is_err()
+            && let (Some(before), Some(Some(info))) =
+                (before, self.session.bots.bot_info.get_mut(&bot_user_id))
+        {
+            info.can_manage_emoji_status = before;
+        }
+        sent
     }
 
     /// `getAttachmentMenuBot`: the terms of adding a bot to the menu.

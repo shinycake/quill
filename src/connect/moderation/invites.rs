@@ -1,5 +1,6 @@
 //! Connect driver: chat invite links and join requests.
 use super::*;
+use crate::state::send_failed_line;
 
 impl<S: JsonSender> ConnectDriver<S> {
     /// Phase D3a: `getChatInviteLinks` (TDLib 1.8.67, `schema/td_api.tl:14138`).
@@ -43,7 +44,10 @@ impl<S: JsonSender> ConnectDriver<S> {
             extra, chat_id.0, creator, false, 0, "", 100,
         )) {
             self.session.requests.take(extra);
-            self.session.groups.invite_links.remove(&chat_id.0);
+            self.session.groups.invite_links.insert(
+                chat_id.0,
+                InviteLinkFetch::Failed(send_failed_line("Could not load invite links")),
+            );
             return Err(err);
         }
         Ok(Some(extra))
@@ -217,7 +221,10 @@ impl<S: JsonSender> ConnectDriver<S> {
             .send_json(&get_chat_join_requests(extra, chat_id.0, "", "", 50))
         {
             self.session.requests.take(extra);
-            self.session.groups.join_requests.remove(&chat_id.0);
+            self.session.groups.join_requests.insert(
+                chat_id.0,
+                JoinRequestFetch::Failed(send_failed_line("Could not load join requests")),
+            );
             return Err(err);
         }
         // The unfiltered list is what the box waits for now: a search

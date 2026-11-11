@@ -8,6 +8,7 @@ use super::app::QuillApp;
 use super::chat_theme::{danger, success, text_muted};
 use super::stat_chart::{StatChartView, ZoomedDay, parsed_chart};
 use crate::ui::status_note::StatusNote;
+use gpui_kit::component::button::*;
 use gpui_kit::component::*;
 use gpui_kit::*;
 use quill::ids::ChatId;
@@ -97,6 +98,55 @@ impl QuillApp {
         }
     }
 
+    /// The section of a graph whose load failed: its title, the reason and
+    /// a Retry that asks again.
+    fn failed_graph_section(
+        &self,
+        chat_id: i64,
+        id: &str,
+        title: &str,
+        message: &str,
+        token: String,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        div()
+            .id(format!("stat-graph-failed-{id}"))
+            .flex()
+            .flex_col()
+            .gap_1()
+            .child(div().text_sm().font_semibold().child(title.to_string()))
+            .child(
+                div()
+                    .text_xs()
+                    .text_color(danger())
+                    .child(message.to_string()),
+            )
+            .child(
+                Button::new(format!("stat-graph-retry-{id}"))
+                    .label(tr(keys::Q_MONEY_RETRY))
+                    .small()
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.retry_stat_graph(chat_id, &token, cx);
+                    })),
+            )
+            .into_any_element()
+    }
+
+    /// Retry a graph that failed to load.
+    fn retry_stat_graph(&mut self, chat_id: i64, token: &str, cx: &mut Context<Self>) {
+        if let Some(live) = self.live.as_mut()
+            && live
+                .driver
+                .load_stat_graph(ChatId(chat_id), token, 0)
+                .is_err()
+        {
+            self.set_note(StatusNote::error(tr(
+                keys::Q_MONEY_COULD_NOT_LOAD_THE_CHART,
+            )));
+        }
+        cx.notify();
+    }
+
     /// A chart section for `graph` of `chat_id`; `None` while an async
     /// graph loads, for a graph the server could not build, or for JSON
     /// that does not parse (tdesktop leaves those out too).
@@ -124,6 +174,18 @@ impl QuillApp {
                 None => {
                     request_graph(self, chat_id, token.clone(), cx);
                     return None;
+                }
+                // A failed load stays on the page with its reason and a
+                // Retry, not silently out of it.
+                Some(GraphFetch::Failed(message)) => {
+                    return Some(self.failed_graph_section(
+                        chat_id,
+                        id,
+                        title,
+                        message,
+                        token.clone(),
+                        cx,
+                    ));
                 }
                 _ => return None,
             },

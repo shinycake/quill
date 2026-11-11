@@ -629,3 +629,30 @@ fn share_hides_the_box_under_the_chat_chooser_until_cancelled(cx: &mut TestAppCo
 }
 
 mod theme;
+
+/// A pick saved as the box closes answers after the box is gone: a failure
+/// reaches the app's note instead of being dropped, so the person is not
+/// left believing the share theme was saved.
+#[gpui_kit::test]
+fn a_save_that_fails_after_the_box_closed_is_told(cx: &mut TestAppContext) {
+    use quill::peer_qr::state::SaveTicket;
+    let (app, _, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    frames(vcx);
+    close_box(&app, vcx);
+    app.update(vcx, |app, cx| {
+        if let Some(session) = app.demo_session.as_mut() {
+            session.users_state.peer_qr.fail_save(
+                SaveTicket {
+                    box_id: 1,
+                    serial: 1,
+                },
+                "Too many requests".into(),
+            );
+        }
+        app.drain_peer_qr(cx);
+    });
+    app.read_with(vcx, |app, _| {
+        assert_eq!(app.connection.status_note(), "Too many requests");
+    });
+}

@@ -367,7 +367,7 @@ fn box_errors_map_to_box_error_kinds() {
         assert_eq!(answer.token, 41);
         assert_eq!(answer.outcome, Err(expected), "{message}");
     }
-    assert!(h.driver.session.messages.ai_error.is_none());
+    assert!(h.driver.session.messages.ai_error.is_empty());
 }
 
 #[test]

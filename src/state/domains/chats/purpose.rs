@@ -50,11 +50,12 @@ pub enum ChatsPurpose {
     /// `setDefaultBackground`. Response is `background`
     /// (`Session::default_backgrounds`).
     SetDefaultBackground,
-    /// `deleteDefaultBackground`. Response is `ok`.
-    DeleteDefaultBackground,
+    /// `deleteDefaultBackground`. Response is `ok`; the wallpaper leaves
+    /// `default_backgrounds` when it arrives.
+    DeleteDefaultBackground { for_dark_theme: bool },
     /// `removeInstalledBackground`. Response is `ok`; the entry leaves the
-    /// list optimistically at send time.
-    RemoveInstalledBackground,
+    /// list when it arrives.
+    RemoveInstalledBackground { background_id: i64 },
     /// `setDefaultBackground` with a local image (`inputBackgroundLocal`).
     /// Response is `background`, stored like `SetDefaultBackground`.
     SetDefaultBackgroundLocal,
@@ -64,7 +65,8 @@ pub enum ChatsPurpose {
     /// `setChatBackground`. Response is `ok`; `updateChatBackground`
     /// carries the new wallpaper.
     SetChatBackground,
-    /// `deleteChatBackground`. Response is `ok`.
+    /// `deleteChatBackground`. Response is `ok`; the wallpaper leaves the
+    /// chat when it arrives.
     DeleteChatBackground,
     /// `setChatTheme`. Response is `ok`; `updateChatTheme` carries it.
     SetChatTheme,
@@ -91,8 +93,6 @@ flat_purposes!(Chats(ChatsPurpose) {
     EnsurePrivateChat,
     GetInstalledBackgrounds,
     SetDefaultBackground,
-    DeleteDefaultBackground,
-    RemoveInstalledBackground,
     SetDefaultBackgroundLocal,
     SearchBackground,
     SetChatBackground,

@@ -355,7 +355,7 @@ impl QuillApp {
                     .primary()
                     .disabled(selected == 0)
                     .on_click(cx.listener(|this, _, window, cx| {
-                        this.submit_share(ShareSend::Normal, cx);
+                        this.submit_share(ShareSend::Normal, window, cx);
                         this.close_kit_dialog_if_done(DialogKind::ForwardBox, window, cx);
                     })),
             )
@@ -428,7 +428,7 @@ impl QuillApp {
                         PopupMenuItem::new(tr(keys::Q_OPS_SEND_WITHOUT_SOUND))
                             .disabled(selected == 0)
                             .on_click(act(&owner, |this, window, cx| {
-                                this.submit_share(ShareSend::Silent, cx);
+                                this.submit_share(ShareSend::Silent, window, cx);
                                 this.close_kit_dialog_if_done(DialogKind::ForwardBox, window, cx);
                             })),
                     )

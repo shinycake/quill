@@ -90,15 +90,24 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// collections.
     pub(super) fn begin_gift_manage(&mut self, owner: MessageSender) {
         self.session.payments.gifts_manage.reset_for_owner();
-        if !self.session.payments.gifts_manage.limits_asked {
-            self.session.payments.gifts_manage.limits_asked = true;
+        if self.session.payments.gifts_manage.limits_ask.may_ask() {
+            let mut waiting = Vec::new();
+            let mut refused = false;
             for option in GiftOption::ALL {
                 let extra = self.session.request(
                     RequestPurpose::Payments(PaymentsPurpose::GetGiftOption(option)),
                     None,
                 );
-                let _ = self.send_json_request(extra, &rq::get_option(extra, option.name()));
+                match self.send_json_request(extra, &rq::get_option(extra, option.name())) {
+                    Ok(_) => waiting.push(extra),
+                    Err(_) => {
+                        refused = true;
+                        break;
+                    }
+                }
             }
+            self.session.payments.gifts_manage.limits_ask =
+                crate::state::fetch::BatchAsk::sent(waiting, refused);
         }
         let _ = self.fetch_gift_collections(owner);
     }
@@ -108,7 +117,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         owner: MessageSender,
     ) -> Result<RequestId, ConnectSendError> {
         let extra = self.session.request(
-            RequestPurpose::Payments(PaymentsPurpose::GetGiftCollections),
+            RequestPurpose::Payments(PaymentsPurpose::GetGiftCollections { owner }),
             None,
         );
         self.session.payments.gifts_manage.collections_loading = true;
@@ -237,8 +246,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     pub fn transfer_picked_gift(&mut self) -> Result<RequestId, ConnectSendError> {
         let Some(TransferPicker {
             id,
-            gift_name,
-            stage: TransferStage::ConfirmPeer { user_id, name },
+            stage: TransferStage::ConfirmPeer { user_id, .. },
             ..
         }) = self.session.payments.gifts_manage.transfer().cloned()
         else {
@@ -262,18 +270,15 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(ConnectSendError::InvalidRequest);
         }
         let to = MessageSender::User { user_id };
-        let extra = self.mutate_own_gifts(PaymentsPurpose::TransferGift, |extra, _| {
+        let sent = self.mutate_own_gifts(PaymentsPurpose::TransferGift, |extra, _| {
             rq::transfer_gift(extra, &id, to, star_count)
         })?;
-        self.session.payments.gifts_manage.transferring = Some((
-            extra,
-            crate::gift_manage::GiftTransferred {
-                gift_name,
-                recipient: name,
-                user_id,
-            },
-        ));
-        Ok(extra)
+        // The confirmation holds until this request's answer: Cancel and
+        // Esc wait, and only its ok or error moves the picker on.
+        if let Some(picker) = self.session.payments.gifts_manage.transfer_mut() {
+            picker.begin_transfer(sent);
+        }
+        Ok(sent)
     }
 
     /// Whether the export of gift `id` may be asked for now: an unlocked

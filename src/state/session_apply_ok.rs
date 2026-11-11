@@ -26,6 +26,7 @@ impl Session {
         self.apply_gift_code_ok(pending);
         self.apply_giveaway_ok(pending);
         self.apply_gift_manage_ok(pending);
+        self.apply_ton_wallet_ok(pending);
         self.apply_earn_ok(pending);
         self.apply_paid_reaction_ok(pending);
         self.apply_passkeys_ok(pending);
@@ -45,12 +46,10 @@ impl Session {
         self.apply_ai_compose_ok(pending);
         self.apply_hang_up_ok(pending);
         self.apply_communities_ok(pending);
+        self.settle_permissions_save(pending);
+        self.apply_backgrounds_ok(pending);
+        self.settle_notification_save(pending, false);
         match pending.map(|p| p.purpose) {
-            Some(
-                RequestPurpose::SetChatTheme
-                | RequestPurpose::SetChatBackground
-                | RequestPurpose::DeleteChatBackground,
-            ) => self.chats_state.chat_look_oks = self.chats_state.chat_look_oks.wrapping_add(1),
             Some(RequestPurpose::Messages(MessagesPurpose::EditMessageSchedulingState {
                 message_id,
                 scheduling,
@@ -66,10 +65,14 @@ impl Session {
                 self.calls.recent_calls_request = None;
             }
             Some(RequestPurpose::DeleteChatMessagesBySender) => {
-                self.messages.message_action_note = Some("messages deleted".into());
+                self.messages
+                    .message_action_note
+                    .push("messages deleted".into());
             }
             Some(RequestPurpose::ReportSupergroupSpam) => {
-                self.messages.message_action_note = Some("spam reported".into());
+                self.messages
+                    .message_action_note
+                    .push("spam reported".into());
             }
             // Forum extras and Saved Messages sublists (batch B16).
             Some(RequestPurpose::Threads(ThreadsPurpose::DeleteSavedMessagesTopicHistory {
@@ -95,7 +98,9 @@ impl Session {
                 message_id,
                 sender,
             })) => {
-                self.messages.message_action_note = Some("reaction deleted".into());
+                self.messages
+                    .message_action_note
+                    .push("reaction deleted".into());
                 if let Some(chat_id) = pending.and_then(|p| p.chat_id) {
                     self.drop_reactor_from_audience(chat_id, MessageId(message_id), sender);
                 }
@@ -221,10 +226,11 @@ impl Session {
         // Batch 4: a `confirmSession` / `terminateSession` for the
         // new-login alert succeeded.
         if let Some(RequestPurpose::Settings(SettingsPurpose::ReviewUnconfirmedSession {
-            confirmed,
+            session_id,
+            ..
         })) = pending.map(|p| p.purpose)
         {
-            self.finish_login_review(confirmed, None);
+            self.finish_login_review(session_id, None);
         }
         // Batch 4: terms accepted.
         if matches!(
@@ -232,8 +238,7 @@ impl Session {
             Some(RequestPurpose::AcceptTermsOfService)
         ) {
             self.settings.notices.terms = None;
-            self.settings.notices.terms_in_flight = false;
-            self.settings.notices.terms_error = None;
+            self.settings.notices.terms_accept = crate::state::fetch::Fetch::Idle;
         }
         // Batch 6: a 2FA step answered `ok` (cancel reset, login email
         // code check).
@@ -319,10 +324,11 @@ impl Session {
         if let Some(RequestPurpose::Stickers(StickersPurpose::ManageStickerSet {
             set_id,
             installed,
-            ..
+            archived,
         })) = pending.map(|p| p.purpose)
         {
             self.finish_sticker_batch_item(set_id, true);
+            self.finish_set_change(set_id, SetChange::of(installed, archived), true);
             for sets in [
                 &mut self.stickers.stickers.trending,
                 &mut self.stickers.stickers.found_sets,
@@ -338,7 +344,7 @@ impl Session {
             self.stickers.stickers.archived_next_offset = 0;
             if self.stickers.stickers.tab == StickerTab::Archived {
                 self.stickers.stickers.selected_set_id = None;
-                self.stickers.stickers.loaded_set_id = None;
+                self.stickers.stickers.set = StickerSetStage::Idle;
                 self.stickers.stickers.stickers.clear();
             }
         }
@@ -524,15 +530,21 @@ impl Session {
             summary.log_sent = true;
             summary.log_error = None;
         }
+        // `sendCallRating` confirmed: the card says thanks.
+        if let Some(RequestPurpose::SendCallRating) = pending.map(|p| p.purpose)
+            && let Some(summary) = self.calls.summary.as_mut()
+            && let Some(pending) = pending
+            && summary.rating == CallRating::Sending(pending.id)
+        {
+            summary.rating = CallRating::Sent;
+        }
         // Phase C2i: `setUserPrivacySettingRules` confirmed (the
         // new value was applied optimistically at send time).
-        if matches!(
-            pending.map(|p| p.purpose),
-            Some(RequestPurpose::Calls(
-                CallsPurpose::SetCallPrivacyRules { .. }
-            ))
-        ) {
-            self.privacy_roundtrip_done();
+        if let Some(pending) = pending
+            && let RequestPurpose::Calls(CallsPurpose::SetCallPrivacyRules { setting }) =
+                pending.purpose
+        {
+            self.calls.privacy_asks.answered(setting, pending.id);
         }
         // Slice S3: `setReadDatePrivacySettings` confirmed — clear
         // the optimistic spinner (the value itself was set at
@@ -568,25 +580,26 @@ impl Session {
             self.chat_list.folder_specs.remove(&folder_id);
             self.chat_list.folder_chats_exhausted.remove(&folder_id);
         }
+        if pending.map(|p| p.purpose) == Some(RequestPurpose::ProcessChatFolderNewChats)
+            && let Some(folder_id) = pending.and_then(|p| p.folder_id)
+        {
+            // The offer is answered (joined or hidden): the bar goes.
+            self.chat_list.folder_new_chats.remove(&folder_id);
+        }
         if pending.map(|p| p.purpose) == Some(RequestPurpose::AddChatToList) {
             // "Add to folder" changed some folder's chats; the answer
             // does not say which, so every cached spec is refetched.
             self.chat_list.mark_specs_stale();
-        }
-        if pending.map(|p| p.purpose) == Some(RequestPurpose::AddChatFolderByInviteLink)
-            && self.chat_list.take_folder_invite_answer(pending)
-        {
-            self.chat_list.folder_invite_done = true;
         }
         if pending.map(|p| p.purpose) == Some(RequestPurpose::ToggleHasSponsoredMessagesEnabled)
             && let Some(chat_id) = pending.and_then(|p| p.chat_id)
         {
             self.accept_sponsored_hidden(chat_id);
         }
-        if pending.map(|p| p.purpose) == Some(RequestPurpose::ViewMessages)
-            && let Some(chat_id) = pending.and_then(|p| p.chat_id)
+        if let Some(viewed) = pending.filter(|p| p.purpose == RequestPurpose::ViewMessages)
+            && let Some(chat_id) = viewed.chat_id
         {
-            self.commit_viewed(chat_id);
+            self.commit_viewed(chat_id, viewed.id);
         }
         // Phase D3b: `setChatMemberStatus` confirmed. TDLib sends
         // `updateChatMember` to bots only (td_api.tl), so the change
@@ -827,6 +840,35 @@ impl Session {
         }
         if pending.is_some_and(|p| is_auth_submit(p.purpose)) {
             self.auth_state.last_auth_error = None;
+        }
+    }
+}
+
+impl Session {
+    /// A `setChatPermissions` the server accepted: saves still out for the
+    /// chat now roll back to its values, not to the ones from before it.
+    fn settle_permissions_save(&mut self, pending: Option<&PendingRequest>) {
+        let Some(pending) = pending else {
+            return;
+        };
+        let (Some(RequestRollback::ChatPermissions { sent, .. }), Some(chat_id)) =
+            (&pending.rollback, pending.chat_id)
+        else {
+            return;
+        };
+        let sent = *sent;
+        for later in self.requests.pending.values_mut().filter(|p| {
+            p.purpose == RequestPurpose::SetChatPermissions && p.chat_id == Some(chat_id)
+        }) {
+            if let Some(RequestRollback::ChatPermissions {
+                previous,
+                previous_can_send,
+                ..
+            }) = &mut later.rollback
+            {
+                *previous = Some(sent);
+                *previous_can_send = sent.can_send_basic_messages;
+            }
         }
     }
 }

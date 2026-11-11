@@ -96,17 +96,14 @@ impl QuillApp {
         // tdesktop asks for the microphone (and the camera for video)
         // before calling, so a refusal never becomes a silent call.
         if self.live.is_some() {
-            self.call_boxes.dialing = Some((user_id, is_video));
-            self.with_capture_access(is_video, Self::dial_allowed, cx);
+            self.with_capture_access(
+                is_video,
+                move |this, cx| this.send_dial(user_id, is_video, cx),
+                cx,
+            );
             return;
         }
         self.send_dial(user_id, is_video, cx);
-    }
-
-    fn dial_allowed(&mut self, cx: &mut Context<Self>) {
-        if let Some((user_id, is_video)) = self.call_boxes.dialing.take() {
-            self.send_dial(user_id, is_video, cx);
-        }
     }
 
     fn send_dial(&mut self, user_id: i64, is_video: bool, cx: &mut Context<Self>) {

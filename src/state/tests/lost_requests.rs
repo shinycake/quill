@@ -49,13 +49,13 @@ fn sweeping_an_in_chat_search_page_clears_its_loading_flag() {
     let generation = session.search.chat_search.generation;
     session.search.chat_search.open = true;
     session.search.chat_search.chat_id = Some(chat);
-    session.search.chat_search.next_from_message_id = MessageId(9);
-    session.search.chat_search.loading_more = true;
+    session.search.chat_search.begin_more(MessageId(9));
     session.request_chat_search(RequestPurpose::SearchChatMessagesMore, chat, generation);
 
     assert!(sweep(&mut session));
 
-    assert!(!session.search.chat_search.loading_more);
+    assert!(!session.search.chat_search.loading_more());
+    assert!(session.search.chat_search.more_failed(), "Retry is offered");
 }
 
 #[test]
@@ -99,21 +99,23 @@ fn account_loss_resets_the_loading_flags_of_pending_lookups() {
     let mut session = ready_session();
     session.settings.privacy_data.network_loading = true;
     session.request(RequestPurpose::GetNetworkStatistics, None);
-    session.payments.star_subscriptions_loading = true;
-    session.request(
+    let subscriptions = session.request(
         RequestPurpose::Payments(PaymentsPurpose::GetStarSubscriptions { append: false }),
         None,
     );
+    session.payments.star_subscriptions_request = Some(subscriptions);
     session.payments.hub.tx_loading = true;
-    session.request(
+    let history = session.request(
         RequestPurpose::Payments(PaymentsPurpose::GetStarTransactions { append: false }),
         None,
     );
+    session.payments.hub.tx_request = history.0;
     session.payments.hub.gifts_loading = true;
-    session.request(
+    let gifts = session.request(
         RequestPurpose::Payments(PaymentsPurpose::GetReceivedGifts { append: false }),
         None,
     );
+    session.payments.hub.gifts_request = gifts.0;
     session.media.playlists.entry(9).or_default().loading = true;
     session.request_for_user(
         RequestPurpose::Media(MediaPurpose::GetProfileAudios { append: false }),
@@ -125,11 +127,46 @@ fn account_loss_resets_the_loading_flags_of_pending_lookups() {
     session.begin_logout();
 
     assert!(!session.settings.privacy_data.network_loading);
-    assert!(!session.payments.star_subscriptions_loading);
+    assert!(!session.payments.star_subscriptions_loading());
     assert!(!session.payments.hub.tx_loading);
     assert!(!session.payments.hub.gifts_loading);
     assert!(!session.media.playlists[&9].loading);
     assert!(session.requests.is_empty());
     assert!(session.requests.get(user_action).is_none());
     assert!(session.stale_history_requests.is_empty());
+}
+
+/// Sweep 05-200: a request dropped by logout settles (its busy marker
+/// clears) without leaving a failure note that shows during logout or after
+/// the next login.
+#[test]
+fn logout_does_not_leave_failure_notes_of_dropped_user_actions() {
+    let mut session = ready_session();
+    session
+        .messages
+        .message_action_note
+        .push("earlier note".into());
+    session.request(RequestPurpose::SetChatMessageSender, Some(ChatId(5)));
+    session.request(RequestPurpose::SendMessage, Some(ChatId(5)));
+
+    session.begin_logout();
+
+    assert!(session.requests.is_empty());
+    assert_eq!(
+        session.messages.message_action_note.last(),
+        Some("earlier note"),
+        "no 'could not change the sender' note from the dropped request"
+    );
+    assert!(session.messages.flood_notice.is_empty());
+}
+
+/// A request lost to its TTL is the user's to hear about; only logout is
+/// quiet.
+#[test]
+fn a_swept_user_action_still_says_it_failed() {
+    let mut session = ready_session();
+    let id = session.request(RequestPurpose::SetChatMessageSender, Some(ChatId(5)));
+    let pending = session.requests.take(id).expect("registered");
+    session.settle_lost_request(pending);
+    assert!(!session.messages.message_action_note.is_empty());
 }

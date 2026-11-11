@@ -277,7 +277,7 @@ impl QuillApp {
                     .on_close(on_close);
             };
             let kind = create.kind;
-            let encoding = this.sticker_box.encoding.is_some();
+            let encoding = this.sticker_box.encoding.is_running();
             let preview = this.create_preview_path();
             let search = this.sticker_box.emoji_search.clone();
             let query = search.read(cx).value().trim().to_string();

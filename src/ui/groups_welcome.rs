@@ -11,8 +11,8 @@ use gpui_kit::component::input::Textarea;
 use gpui_kit::component::*;
 use gpui_kit::*;
 use quill::ids::ChatId;
-use quill::lang::{keys, tr};
-use quill::state::WelcomeMessagesFetch;
+use quill::lang::{keys, tr, tr_with};
+use quill::state::{Submit, SubmitView, WelcomeMessagesFetch};
 use quill::telegram::envelope::ParsedWelcomeMessage;
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -42,9 +42,17 @@ impl QuillApp {
     }
 
     /// Slice G2: add the welcome message typed in the dialog
-    /// (`addChatWelcomeMessage`); empty text is refused up front.
-    pub(super) fn submit_welcome_add(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    /// (`addChatWelcomeMessage`); empty text is refused up front. The text
+    /// stays in the field until TDLib answers (`settle_welcome_dialog`).
+    pub(super) fn submit_welcome_add(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
         let (chat_id, text) = match self.admin.welcome_dialog.as_ref() {
+            Some(dialog)
+                if dialog
+                    .add
+                    .is_sending(self.session().map(|session| &session.requests)) =>
+            {
+                return;
+            }
             Some(dialog) => (
                 dialog.chat_id,
                 dialog.new_input.read(cx).value().trim().to_string(),
@@ -58,38 +66,45 @@ impl QuillApp {
             cx.notify();
             return;
         }
-        if let Some(live) = self.live.as_mut() {
-            match live.driver.add_chat_welcome_message(chat_id, &text) {
-                Ok(_) => {
-                    self.set_note(StatusNote::silent(tr(keys::Q_PEOPLE_WELCOME_MESSAGE_ADDED)))
-                }
-                Err(_) => self.set_note(StatusNote::error(tr(
+        let sent = match self.live.as_mut() {
+            Some(live) => match live.driver.add_chat_welcome_message(chat_id, &text) {
+                Ok(Some(id)) => Ok(id),
+                _ => Err(StatusNote::error(tr(
                     keys::Q_PEOPLE_COULD_NOT_ADD_WELCOME_MESSAGE,
                 ))),
-            }
-        } else {
-            self.set_note(StatusNote::info(tr(
+            },
+            None => Err(StatusNote::info(tr(
                 keys::Q_PEOPLE_WELCOME_MESSAGES_NEED_A_LIVE,
-            )));
-        }
-        if let Some(dialog) = self.admin.welcome_dialog.as_mut() {
-            dialog.new_input.update(cx, |input, cx| {
-                input.set_value("", window, cx);
-            });
+            ))),
+        };
+        match sent {
+            Ok(id) => {
+                if let Some(dialog) = self.admin.welcome_dialog.as_mut() {
+                    dialog.add = Submit::sent(vec![id]);
+                }
+            }
+            Err(note) => self.set_note(note),
         }
         cx.notify();
     }
 
-    /// Slice G2: submit the inline welcome-message edit.
+    /// Slice G2: submit the inline welcome-message edit. The row stays
+    /// open, saving, until TDLib answers.
     pub(super) fn submit_welcome_edit(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
         let (chat_id, welcome_id, text) = match self.admin.welcome_dialog.as_ref() {
             Some(dialog) => match dialog.editing {
-                Some(welcome_id) => (
-                    dialog.chat_id,
-                    welcome_id,
-                    dialog.edit_input.read(cx).value().trim().to_string(),
-                ),
-                None => return,
+                Some(welcome_id)
+                    if !dialog
+                        .save
+                        .is_sending(self.session().map(|session| &session.requests)) =>
+                {
+                    (
+                        dialog.chat_id,
+                        welcome_id,
+                        dialog.edit_input.read(cx).value().trim().to_string(),
+                    )
+                }
+                _ => return,
             },
             None => return,
         };
@@ -100,27 +115,80 @@ impl QuillApp {
             cx.notify();
             return;
         }
-        if let Some(live) = self.live.as_mut() {
-            match live
+        let sent = match self.live.as_mut() {
+            Some(live) => match live
                 .driver
                 .edit_chat_welcome_message(chat_id, welcome_id, &text)
             {
-                Ok(_) => self.set_note(StatusNote::silent(tr(
-                    keys::Q_PEOPLE_WELCOME_MESSAGE_UPDATED,
-                ))),
-                Err(_) => self.set_note(StatusNote::error(tr(
+                Ok(Some(id)) => Ok(id),
+                _ => Err(StatusNote::error(tr(
                     keys::Q_PEOPLE_COULD_NOT_EDIT_WELCOME_MESSAGE,
                 ))),
-            }
-        } else {
-            self.set_note(StatusNote::info(tr(
+            },
+            None => Err(StatusNote::info(tr(
                 keys::Q_PEOPLE_WELCOME_MESSAGES_NEED_A_LIVE,
-            )));
-        }
-        if let Some(dialog) = self.admin.welcome_dialog.as_mut() {
-            dialog.editing = None;
+            ))),
+        };
+        match sent {
+            Ok(id) => {
+                if let Some(dialog) = self.admin.welcome_dialog.as_mut() {
+                    dialog.save = Submit::sent(vec![id]);
+                }
+            }
+            Err(note) => self.set_note(note),
         }
         cx.notify();
+    }
+
+    /// The Add and the row Save leave their Sending stage on TDLib's
+    /// answer; needs the window that shows the box (to clear its field).
+    pub(super) fn settle_welcome_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let requests = self.session().map(|session| &session.requests);
+        let Some((add, save)) = self
+            .admin
+            .welcome_dialog
+            .as_ref()
+            .map(|dialog| (dialog.add.view(requests), dialog.save.view(requests)))
+        else {
+            return;
+        };
+        let mut note = None;
+        if let Some(dialog) = self.admin.welcome_dialog.as_mut() {
+            match add {
+                SubmitView::Done => {
+                    dialog.add = Submit::Editing;
+                    dialog.new_input.update(cx, |input, cx| {
+                        input.set_value("", window, cx);
+                    });
+                    note = Some(StatusNote::silent(tr(keys::Q_PEOPLE_WELCOME_MESSAGE_ADDED)));
+                }
+                SubmitView::Failed(reason) => {
+                    if dialog.add.keep_failure(reason) {
+                        cx.notify();
+                    }
+                }
+                SubmitView::Editing | SubmitView::Sending => {}
+            }
+            match save {
+                SubmitView::Done => {
+                    dialog.save = Submit::Editing;
+                    dialog.editing = None;
+                    note = Some(StatusNote::silent(tr(
+                        keys::Q_PEOPLE_WELCOME_MESSAGE_UPDATED,
+                    )));
+                }
+                SubmitView::Failed(reason) => {
+                    if dialog.save.keep_failure(reason) {
+                        cx.notify();
+                    }
+                }
+                SubmitView::Editing | SubmitView::Sending => {}
+            }
+        }
+        if let Some(note) = note {
+            self.set_note(note);
+            cx.notify();
+        }
     }
 
     /// Slice G2: delete one welcome message (`deleteChatWelcomeMessage`).
@@ -170,6 +238,8 @@ impl QuillApp {
             };
             let chat_id = dialog_state.chat_id;
             let editing = dialog_state.editing;
+            let requests = this.session().map(|session| &session.requests);
+            let adding = dialog_state.add.is_sending(requests);
             let fetch = this.session().and_then(|session| {
                 session
                     .groups
@@ -196,12 +266,24 @@ impl QuillApp {
                     .child(
                         Button::new("g2-welcome-add")
                             .label(tr(keys::SETTINGS_CHANNEL_ADD))
+                            .loading(adding)
+                            .disabled(adding)
                             .on_click(cx.listener(|this, _, window, cx| {
                                 this.submit_welcome_add(window, cx);
                                 this.close_kit_dialog_if_done(DialogKind::Welcome, window, cx);
                             })),
                     ),
             );
+            for (id, submit) in [
+                ("g2-welcome-add-refused", &dialog_state.add),
+                ("g2-welcome-save-refused", &dialog_state.save),
+            ] {
+                if let Submit::Failed(reason) = submit {
+                    body = body.child(div().id(id).text_xs().text_color(cx.theme().danger).child(
+                        tr_with(keys::Q_PEOPLE_COULDNT_SAVE_REASON, &[("reason", reason)]),
+                    ));
+                }
+            }
             match fetch {
                 Some(WelcomeMessagesFetch::Failed(error)) => {
                     body = body.child(
@@ -301,6 +383,11 @@ impl QuillApp {
             .gap_1()
             .child(div().text_sm().child(text));
         if editing == Some(welcome_id) {
+            let saving = self.admin.welcome_dialog.as_ref().is_some_and(|dialog| {
+                dialog
+                    .save
+                    .is_sending(self.session().map(|session| &session.requests))
+            });
             let edit_input = self
                 .admin
                 .welcome_dialog
@@ -320,6 +407,8 @@ impl QuillApp {
                 .child(
                     Button::new(format!("g2-welcome-save-{welcome_id}"))
                         .label(tr(keys::SETTINGS_SAVE))
+                        .loading(saving)
+                        .disabled(saving)
                         .on_click(cx.listener(|this, _, window, cx| {
                             this.submit_welcome_edit(window, cx);
                         })),
@@ -331,6 +420,7 @@ impl QuillApp {
                         .on_click(cx.listener(|this, _, _, cx| {
                             if let Some(dialog) = this.admin.welcome_dialog.as_mut() {
                                 dialog.editing = None;
+                                dialog.save = Submit::Editing;
                             }
                             cx.notify();
                         })),
@@ -359,6 +449,7 @@ impl QuillApp {
                                     .unwrap_or_default();
                                 if let Some(dialog) = this.admin.welcome_dialog.as_mut() {
                                     dialog.editing = Some(welcome_id);
+                                    dialog.save = Submit::Editing;
                                     dialog.edit_input.update(cx, |input, cx| {
                                         input.set_value(&text, window, cx);
                                     });

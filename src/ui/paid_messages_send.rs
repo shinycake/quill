@@ -177,7 +177,10 @@ impl QuillApp {
             && next.total() <= budget
         {
             budget -= next.total();
-            let _ = live.driver.release_paid_send(false);
+            // A refused send stays held: stop, or this would not end.
+            if live.driver.release_paid_send(false).is_err() {
+                break;
+            }
         }
         cx.notify();
     }
@@ -312,6 +315,7 @@ impl QuillApp {
                 )));
             }
         } else if let Some(demo) = self.demo_session.as_mut() {
+            demo.payments.paid_messages.save = quill::paid_messages::PaidSave::Idle;
             demo.finish_unpaid_exception(boxed.user_id);
         }
         cx.notify();

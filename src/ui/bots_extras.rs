@@ -5,6 +5,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
+use super::bots_box_send::BoxKind;
 use super::dialogs::ProfileDialog;
 use super::groups::{ADMIN_RIGHT_LABELS, admin_right_get, admin_right_set};
 use super::message_payments::button_is_pressable;
@@ -16,11 +17,23 @@ use gpui_kit::component::button::*;
 use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::switch::Switch;
 use gpui_kit::component::*;
+use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::bot_invite::{BotFacts, ChatFacts, Invite, Plan, choices, invite_about, invite_label};
 use quill::ids::ChatId;
 use quill::lang::{keys, tr, tr_with};
+use quill::state::RequestPurpose;
 use quill::telegram::envelope::{ChatAdminRights, ChatKind, ReplyMarkup};
+
+/// What pressing the box's button did.
+enum Submitted {
+    /// The request is on its way: the box stays until its answer.
+    Sending,
+    /// No client (the demo): nothing to wait for, the box goes.
+    NoClient,
+    /// TDLib was not asked (or the send failed): the box stays.
+    Refused,
+}
 
 impl QuillApp {
     /// A digit key in an empty, focused composer presses the matching inline
@@ -223,6 +236,14 @@ impl QuillApp {
         cx.notify();
     }
 
+    /// Retry from the box's error line: ask for the bot's full info again.
+    fn retry_add_bot_info(&mut self, bot_id: i64, cx: &mut Context<Self>) {
+        if let Some(live) = self.live.as_mut() {
+            let _ = live.driver.fetch_user_full_info(bot_id);
+        }
+        cx.notify();
+    }
+
     /// The groups and channels the person could add the bot to, by title.
     fn add_bot_chat_facts(&self) -> Vec<ChatFacts> {
         let Some(session) = self.session() else {
@@ -261,25 +282,23 @@ impl QuillApp {
         rights: ChatAdminRights,
         start_parameter: &str,
         cx: &mut Context<Self>,
-    ) -> bool {
+    ) -> Submitted {
         let Some(live) = self.live.as_mut() else {
             self.set_note(StatusNote::info(tr(keys::Q_MEDIA_DEMO_MODE_ADDING_A_BOT)));
             cx.notify();
-            return true;
+            return Submitted::NoClient;
         };
         let chat = ChatId(chat_id);
+        // The start payload of an administrator goes after the promotion's
+        // answer, not right behind its request.
+        let mut then_start = None;
         let sent = match plan {
             Plan::Admin(_) => {
                 let rights = quill::bot_invite::mask_rights(rights, is_channel);
-                let sent = live.driver.promote_chat_member(chat, bot_id, &rights);
-                // tdesktop sends the link's start payload once the bot is
-                // an administrator.
-                if matches!(sent, Ok(Some(_))) && !start_parameter.is_empty() {
-                    let _ = live
-                        .driver
-                        .send_bot_start_message(chat, bot_id, start_parameter);
+                if !start_parameter.is_empty() {
+                    then_start = Some((bot_id, start_parameter.to_string()));
                 }
-                sent
+                live.driver.promote_chat_member(chat, bot_id, &rights)
             }
             // A start payload replaces the plain add: the start message
             // puts the bot in the group (tdesktop `AddBotToGroup`).
@@ -305,7 +324,13 @@ impl QuillApp {
             Err(_) => StatusNote::error(tr(keys::Q_MEDIA_COULDNT_REACH_TELEGRAM_TRY_AGAIN)),
         });
         cx.notify();
-        matches!(sent, Ok(Some(_)))
+        match sent {
+            Ok(Some(request)) => {
+                self.begin_box_send(BoxKind::AddBot, request, chat, then_start);
+                Submitted::Sending
+            }
+            _ => Submitted::Refused,
+        }
     }
 
     /// Title, body and footer of the "add a bot" dialog: a chat picker, then
@@ -332,16 +357,35 @@ impl QuillApp {
             .map(|user| user.display_name())
             .unwrap_or_else(|| tr(keys::Q_MEDIA_THE_BOT).into());
         let Some(facts) = self.bot_invite_facts(bot_id) else {
-            // The bot's full info (its requested rights) is still loading.
-            let footer = div().flex().gap_2().child(
-                Button::new("add-bot-cancel")
-                    .label(tr(keys::CANCEL))
-                    .ghost()
-                    .on_click(cx.listener(|this, _, window, cx| {
-                        this.close_profile_dialog(cx);
-                        this.close_kit_dialog_if_done(DialogKind::ProfilePanel, window, cx);
-                    })),
-            );
+            // The bot's full info (its requested rights) loads while its
+            // request is in flight; with none in flight and no info, it
+            // failed: say so, with Retry, instead of waiting for good.
+            let loading = self.session().is_some_and(|session| {
+                session
+                    .requests
+                    .has_purpose_for_user(RequestPurpose::GetUserFullInfo, bot_id)
+            });
+            let footer = div()
+                .flex()
+                .gap_2()
+                .child(
+                    Button::new("add-bot-cancel")
+                        .label(tr(keys::CANCEL))
+                        .ghost()
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            this.close_profile_dialog(cx);
+                            this.close_kit_dialog_if_done(DialogKind::ProfilePanel, window, cx);
+                        })),
+                )
+                .when(!loading, |footer| {
+                    footer.child(
+                        Button::new("add-bot-retry")
+                            .label(tr(keys::Q_MEDIA_RETRY))
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.retry_add_bot_info(bot_id, cx);
+                            })),
+                    )
+                });
             return Some((
                 tr_with(
                     keys::Q_MEDIA_ADD_TO_A_CHAT,
@@ -350,7 +394,11 @@ impl QuillApp {
                 div()
                     .text_sm()
                     .text_color(muted)
-                    .child(tr(keys::Q_MEDIA_LOADING))
+                    .child(if loading {
+                        tr(keys::Q_MEDIA_LOADING)
+                    } else {
+                        tr(keys::Q_MEDIA_COULDNT_LOAD_THE_BOT_INFO)
+                    })
                     .into_any_element(),
                 footer.into_any_element(),
             ));
@@ -415,6 +463,7 @@ impl QuillApp {
                 }
             }
             let plan = row.plan.clone();
+            let sending = self.box_sending();
             let start_parameter = invite.start_parameter.clone();
             let back_invite = invite.clone();
             let footer = div()
@@ -423,15 +472,22 @@ impl QuillApp {
                 .child(
                     Button::new("add-bot-confirm")
                         .label(confirm_label)
+                        .disabled(sending)
                         .on_click(cx.listener(move |this, _, window, cx| {
-                            if this.submit_add_bot(
-                                bot_id,
-                                chat_id,
-                                is_channel,
-                                &plan,
-                                rights,
-                                &start_parameter,
-                                cx,
+                            if this.box_sending() {
+                                return;
+                            }
+                            if matches!(
+                                this.submit_add_bot(
+                                    bot_id,
+                                    chat_id,
+                                    is_channel,
+                                    &plan,
+                                    rights,
+                                    &start_parameter,
+                                    cx,
+                                ),
+                                Submitted::NoClient
                             ) {
                                 this.close_profile_dialog(cx);
                                 this.select_listed_chat(ChatId(chat_id), window, cx);
@@ -594,28 +650,28 @@ impl QuillApp {
         game_short_name: &str,
         chat_id: i64,
         cx: &mut Context<Self>,
-    ) -> bool {
+    ) -> Submitted {
         let Some(live) = self.live.as_mut() else {
             self.set_note(StatusNote::info(tr(
                 keys::Q_MEDIA_DEMO_MODE_SHARING_NEEDS_A,
             )));
             cx.notify();
-            return true;
+            return Submitted::NoClient;
         };
         match live
             .driver
             .send_game_message(ChatId(chat_id), bot_id, game_short_name)
         {
-            Ok(_) => {
-                self.set_note(StatusNote::silent(tr(keys::Q_MEDIA_GAME_SENT)));
-                true
+            Ok(request) => {
+                self.begin_box_send(BoxKind::ShareGame, request, ChatId(chat_id), None);
+                Submitted::Sending
             }
             Err(_) => {
                 self.set_note(StatusNote::error(tr(
                     keys::Q_MEDIA_COULDNT_SEND_THE_GAME_HERE,
                 )));
                 cx.notify();
-                false
+                Submitted::Refused
             }
         }
     }
@@ -657,14 +713,22 @@ impl QuillApp {
                 .child(quill::game_share::confirm_text(&title, is_private));
             let send_name = game_short_name.clone();
             let back_name = game_short_name;
+            let sending = self.box_sending();
             let footer = div()
                 .flex()
                 .gap_2()
                 .child(
                     Button::new("share-game-send")
                         .label(tr(keys::Q_MEDIA_SEND))
+                        .disabled(sending)
                         .on_click(cx.listener(move |this, _, window, cx| {
-                            if this.send_shared_game(bot_id, &send_name, chat_id, cx) {
+                            if this.box_sending() {
+                                return;
+                            }
+                            if matches!(
+                                this.send_shared_game(bot_id, &send_name, chat_id, cx),
+                                Submitted::NoClient
+                            ) {
                                 this.close_profile_dialog(cx);
                                 this.select_listed_chat(ChatId(chat_id), window, cx);
                             }

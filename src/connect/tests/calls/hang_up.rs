@@ -68,3 +68,36 @@ fn closing_the_client_hangs_the_engine_up_at_once() {
     assert_eq!(handle.hung_up_calls(), vec![77]);
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// A link waiting for the call to end is dropped when TDLib refuses the
+/// hang-up, or a later normal hang-up would offer it.
+#[test]
+fn a_hang_up_tdlib_refuses_drops_the_link_waiting_for_it() {
+    use crate::call_link::{
+        CallLinkConfirm, CallLinkLeaving, CallLinkStage, LeaveKind, LeavingCall,
+    };
+    let (dir, mut driver, _handle, sink, seq) = ready_call_driver();
+    ingest_call_json(&mut driver, &seq, &sink, READY_CALL_JSON);
+    let request = driver.discard_call().expect("hang up");
+    driver.session.calls.call_link_stage = CallLinkStage::Leaving(CallLinkLeaving {
+        link: CallLinkConfirm {
+            chat_id: 51,
+            invite_hash: "AbC".into(),
+            live_stream: false,
+            target_is_channel: false,
+            leave: LeaveKind::PrivateCall,
+        },
+        leaving: LeavingCall::Private(77),
+    });
+    ingest_call_json(
+        &mut driver,
+        &seq,
+        &sink,
+        &answer(
+            request,
+            r#"{"@type":"error","@extra":"EXTRA","code":400,"message":"CALL_PEER_INVALID"}"#,
+        ),
+    );
+    assert_eq!(driver.session.calls.call_link_stage, CallLinkStage::Idle);
+    let _ = std::fs::remove_dir_all(&dir);
+}

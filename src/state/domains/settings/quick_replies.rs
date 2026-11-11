@@ -29,6 +29,12 @@ pub struct QuickRepliesState {
     pub message_count_max: Option<usize>,
     /// Counter for `sendQuickReplyShortcutMessages.sending_id`.
     pub next_sending_id: i32,
+    /// The shortcuts being sent, by request: pruned once the request is
+    /// answered, so a double tap sends once.
+    pub sending: HashMap<RequestId, (ChatId, i32)>,
+    /// The changes (add, edit, rename, delete) on their way, by request,
+    /// each as the request it sent without its id.
+    pub changing: HashMap<RequestId, String>,
 }
 
 impl QuickRepliesState {

@@ -186,27 +186,31 @@ impl QuillApp {
     pub(super) fn switch_debug_mode(&mut self, cx: &mut Context<Self>) {
         let root = safe_app_root();
         let api = quill::telegram::hub::TdHub::shared_api();
-        if debug_mode::enabled() {
+        let was_on = debug_mode::enabled();
+        if was_on {
             debug_mode::debug_log(tr(keys::Q_OPS_DEBUG_LOGS_STOPPED));
-            debug_mode::set_enabled(false);
-            if let Some(api) = api {
-                let _ = debug_mode::stop_tdlib_log(&api);
+        }
+        // The flag moves only once TDLib's native stream has answered.
+        let state = debug_mode::switch(was_on, |turn_on| match (api, root.as_deref()) {
+            (Some(api), Some(root)) if turn_on => debug_mode::start_tdlib_log(&api, root),
+            (Some(api), _) if !turn_on => {
+                debug_mode::stop_tdlib_log(&api).map_err(|error| format!("{error:?}"))
             }
-        } else {
-            debug_mode::set_enabled(true);
-            if let (Some(api), Some(root)) = (api, root.as_deref())
-                && let Err(error) = debug_mode::start_tdlib_log(&api, root)
-            {
-                self.set_note(StatusNote::error(tr_with(
-                    keys::Q_OPS_TDLIB_DEBUG_LOG_DID_NOT,
-                    &[("error", &error.to_string())],
-                )));
-            }
+            _ => Ok(()),
+        });
+        debug_mode::set_enabled(state.flag());
+        if let debug_mode::DebugLog::TdlibRefused { error, .. } = &state {
+            self.set_note(StatusNote::error(tr_with(
+                keys::Q_OPS_TDLIB_DEBUG_LOG_DID_NOT,
+                &[("error", error)],
+            )));
+        }
+        if !was_on {
             debug_mode::debug_log(tr(keys::Q_OPS_DEBUG_LOGS_STARTED));
             self.close_settings();
         }
         if let Some(root) = root.as_deref()
-            && let Err(error) = debug_mode::persist(root, debug_mode::enabled())
+            && let Err(error) = debug_mode::persist(root, state.flag())
         {
             self.set_note(StatusNote::error(tr_with(
                 keys::Q_OPS_COULD_NOT_REMEMBER_THE_DEBUG,

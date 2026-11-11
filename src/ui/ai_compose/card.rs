@@ -291,7 +291,7 @@ impl QuillApp {
                 .child(Skeleton::new().h(px(12.)).w(relative(0.6)).bg(line))
                 .into_any_element(),
             CardState::Ready(result) => self.ai_compose_result(ai.mode(), result, font, cx),
-            CardState::Waiting | CardState::Failed => {
+            CardState::Waiting | CardState::Failed(_) => {
                 div().text_size(font).child(original).into_any_element()
             }
         };

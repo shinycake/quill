@@ -673,6 +673,9 @@ fn cancelling_stops_the_export_and_removes_the_spool() {
     assert!(matches!(run.result, Err(ExportError::Cancelled)));
     assert!(!run.root.join(".spool").exists());
     assert!(!run.root.join("export_results.html").exists());
+    // No `result.json` cut off mid-array: the partial one says it is.
+    assert!(!run.root.join("result.json").exists());
+    assert!(run.root.join("result.json.part").exists());
     assert_eq!(account.calls.len(), 61);
     let _ = std::fs::remove_dir_all(&dir);
 }

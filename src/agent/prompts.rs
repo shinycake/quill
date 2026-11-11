@@ -75,6 +75,8 @@ pub enum Decision {
 struct Pending {
     prompt: Prompt,
     reply: SyncSender<Decision>,
+    /// The agent connection whose call is waiting (0 when none).
+    conn: u64,
 }
 
 static QUEUE: Mutex<VecDeque<Pending>> = Mutex::new(VecDeque::new());
@@ -107,6 +109,7 @@ pub fn file(
             reason,
         },
         reply,
+        conn: super::tools::current_conn(),
     });
     drop(queue);
     crate::wake::AGENT.poke();
@@ -127,6 +130,17 @@ pub fn wait(id: u64, rx: &Receiver<Decision>, timeout: Duration) -> Option<Decis
 /// Take prompt `id` off the screen without an answer.
 pub fn withdraw(id: u64) {
     crate::locks::lock_or_recover(&QUEUE).retain(|p| p.prompt.id != id);
+    crate::wake::AGENT.poke();
+}
+
+/// Connection `conn` went away: its prompts come off the screen. Their
+/// waiting calls hear the channel close and stop at once, so an Allow
+/// clicked later cannot send for a call nobody waits on.
+pub(crate) fn withdraw_connection(conn: u64) {
+    if conn == 0 {
+        return;
+    }
+    crate::locks::lock_or_recover(&QUEUE).retain(|p| p.conn != conn);
     crate::wake::AGENT.poke();
 }
 

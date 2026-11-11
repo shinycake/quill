@@ -44,6 +44,34 @@ pub(super) fn preview_stickers(
         .take(super::preview::STICKER_TILES)
 }
 
+/// The `(file id, priority)` pairs the shown preview draws: the promotion
+/// clip once the Premium state is known, and the example stickers once
+/// their answer is in. It is a function of the state alone, with no
+/// deadline: an answer that comes late is downloaded when it comes.
+pub(super) fn preview_downloads(hub: &quill::premium_hub::PremiumHub) -> Vec<(i32, i32)> {
+    let PromoPage::Preview { feature, .. } = hub.promo_page else {
+        return Vec::new();
+    };
+    if !hub.premium_open {
+        return Vec::new();
+    }
+    let clip = hub
+        .premium_state
+        .as_ref()
+        .and_then(|state| animation_for(&state.animations, feature))
+        .map(|animation| (animation.file_id, 32));
+    let stickers: Vec<(i32, i32)> =
+        if feature == PromoFeature::Premium(PremiumFeature::UniqueStickers) {
+            preview_stickers(hub)
+                .filter_map(|sticker| sticker.display_file_id())
+                .map(|id| (id.0, 16))
+                .collect()
+        } else {
+            Vec::new()
+        };
+    clip.into_iter().chain(stickers).collect()
+}
+
 fn feature_icon(index: usize) -> Div {
     let (from, to) = ICON_TINTS
         .get(index % ICON_TINTS.len())
@@ -130,29 +158,9 @@ impl QuillApp {
         let Some(session) = self.session() else {
             return;
         };
-        let hub = &session.payments.hub;
-        let PromoPage::Preview { feature, .. } = hub.promo_page else {
-            return;
-        };
-        if !hub.premium_open {
-            return;
-        }
-        let clip = hub
-            .premium_state
-            .as_ref()
-            .and_then(|state| animation_for(&state.animations, feature))
-            .map(|animation| (animation.file_id, 32));
-        let stickers: Vec<(i32, i32)> =
-            if feature == PromoFeature::Premium(PremiumFeature::UniqueStickers) {
-                preview_stickers(hub)
-                    .filter_map(|sticker| sticker.display_file_id())
-                    .map(|id| (id.0, 16))
-                    .collect()
-            } else {
-                Vec::new()
-            };
+        let downloads = preview_downloads(&session.payments.hub);
         if let Some(live) = self.live.as_mut() {
-            for (id, priority) in clip.into_iter().chain(stickers) {
+            for (id, priority) in downloads {
                 let _ = live.driver.download_file(FileId(id), priority);
             }
         }
@@ -397,3 +405,8 @@ impl QuillApp {
         )
     }
 }
+
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+#[path = "promo_tests.rs"]
+mod tests;

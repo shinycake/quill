@@ -372,6 +372,16 @@ pub fn map_keychain_get_error(code: i32) -> Result<Option<DatabaseKey>, SecretSt
     }
 }
 
+/// Map a Keychain delete failure: an item that is already gone is a
+/// success; a locked or refused delete is not, or the wipe would believe the
+/// database key is gone while it stays in the keychain.
+pub fn map_keychain_delete_error(code: i32) -> Result<(), SecretStoreError> {
+    match classify_keychain_status(code) {
+        Err(SecretStoreError::Missing) | Ok(()) => Ok(()),
+        Err(other) => Err(other),
+    }
+}
+
 // Apple OSStatus values (Security.framework). Kept as integers so Linux tests
 // can prove Locked vs Missing without linking the macOS SDK.
 const ERR_SEC_ITEM_NOT_FOUND: i32 = -25300;
@@ -474,7 +484,7 @@ pub mod keychain {
             let item = account_item_name(account);
             match delete_generic_password(KEYCHAIN_SERVICE, &item) {
                 Ok(()) => Ok(()),
-                Err(_) => Ok(()),
+                Err(err) => map_keychain_delete_error(err.code()),
             }
         }
     }
@@ -1018,6 +1028,15 @@ mod tests {
     #[test]
     fn keychain_missing_is_not_locked() {
         assert!(matches!(map_keychain_get_error(-25300), Ok(None)));
+        assert!(map_keychain_delete_error(-25300).is_ok(), "already gone");
+        assert!(matches!(
+            map_keychain_delete_error(-25308),
+            Err(SecretStoreError::Locked)
+        ));
+        assert!(matches!(
+            map_keychain_delete_error(-50),
+            Err(SecretStoreError::Platform)
+        ));
         assert_eq!(
             classify_keychain_status(-25300),
             Err(SecretStoreError::Missing)

@@ -384,7 +384,7 @@ impl QuillApp {
                     let _ = live.driver.search_award_members(ChatId(chat), "");
                 }
                 GiveawayPage::Countries => {
-                    let _ = live.driver.fetch_countries();
+                    let _ = live.driver.retry_countries();
                 }
                 GiveawayPage::Form => {}
             }
@@ -568,7 +568,7 @@ impl QuillApp {
                         ("len", &(draft.country_codes.len()).to_string()),
                     ],
                 )));
-                match session.auth_state.countries.as_ref() {
+                match session.auth_state.countries.data() {
                     Some(countries) => {
                         let mut list: Vec<&quill::phone::Country> = countries
                             .iter()
@@ -596,6 +596,9 @@ impl QuillApp {
                                     })),
                                 );
                         }
+                    }
+                    None if session.auth_state.countries.error().is_some() => {
+                        body = body.child(self.countries_failed_row("giveaway", cx));
                     }
                     None => {
                         body = body.child(
@@ -636,7 +639,7 @@ fn country_name(session: &Session, code: &str) -> String {
     session
         .auth_state
         .countries
-        .as_ref()
+        .data()
         .and_then(|list| list.iter().find(|c| c.iso == code))
         .map(|c| c.name.clone())
         .unwrap_or_else(|| code.to_string())

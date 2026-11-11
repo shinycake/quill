@@ -513,3 +513,22 @@ fn choosing_on_a_forum_that_went_away_drops_the_chooser_and_does_nothing(cx: &mu
     assert_eq!(open_chat(&app, vcx), chat);
     assert_eq!(attached(&app, vcx), 0);
 }
+
+#[gpui_kit::test]
+fn a_refused_open_keeps_the_drop_in_the_chooser_with_a_note(cx: &mut TestAppContext) {
+    let (app, mut vcx) = open(cx, "ready-forum-row-topics");
+    let vcx = &mut vcx;
+    let chat = open_chat(&app, vcx);
+    drop_file_on(vcx, 71);
+    assert!(chooser_open(&app, vcx));
+    // An agent driving the window may open granted chats only: the open of
+    // the forum is refused, and the dropped file is not thrown away.
+    quill::agent::ui_driver::guard::set_injecting(true);
+    choose(&app, vcx, Some(4));
+    quill::agent::ui_driver::guard::set_injecting(false);
+    assert!(chooser_open(&app, vcx), "the chooser still holds the file");
+    assert_eq!(open_chat(&app, vcx), chat);
+    assert_eq!(attached(&app, vcx), 0);
+    let noted = app.read_with(vcx, |app, _| !app.connection.note().text().is_empty());
+    assert!(noted, "the person is told");
+}

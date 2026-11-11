@@ -22,12 +22,51 @@ use std::rc::Rc;
 
 /// Where the terms prompt is (tdesktop: the box, its "sorry" confirm and
 /// the final "delete" warning).
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub(crate) enum TermsStep {
-    #[default]
-    Terms,
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum TermsStage {
+    /// The terms text; the age line is ticked, or asked for after a press
+    /// without it.
+    Terms {
+        age_ok: bool,
+        age_error: bool,
+    },
     DeclineSorry,
     DeleteWarning,
+}
+
+impl Default for TermsStage {
+    fn default() -> Self {
+        Self::Terms {
+            age_ok: false,
+            age_error: false,
+        }
+    }
+}
+
+/// The prompt for one version of the terms (`terms_id`). Another version,
+/// or none, replaces it whole: it opens on the terms text with nothing
+/// ticked.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct TermsPrompt {
+    terms_id: String,
+    stage: TermsStage,
+}
+
+impl QuillApp {
+    /// The stage of the prompt for terms `terms_id`.
+    fn terms_stage(&self, terms_id: &str) -> TermsStage {
+        match &self.auth_ui.terms_prompt {
+            Some(prompt) if prompt.terms_id == terms_id => prompt.stage,
+            _ => TermsStage::default(),
+        }
+    }
+
+    fn set_terms_stage(&mut self, terms_id: &str, stage: TermsStage) {
+        self.auth_ui.terms_prompt = Some(TermsPrompt {
+            terms_id: terms_id.to_string(),
+            stage,
+        });
+    }
 }
 
 /// Which notice the dialog shows now, most important first.
@@ -72,6 +111,14 @@ impl QuillApp {
     /// Take the finished new-login review out of the reducer: "Yes" is a
     /// toast, "No" a box (tdesktop `ShowAuthToast`).
     pub(crate) fn drain_account_notices(&mut self) {
+        // Terms accepted (here or on another device): the prompt is over.
+        if self.auth_ui.terms_prompt.is_some()
+            && self
+                .session()
+                .is_none_or(|session| session.settings.notices.terms.is_none())
+        {
+            self.auth_ui.terms_prompt = None;
+        }
         let outcome = self
             .live
             .as_mut()
@@ -110,8 +157,8 @@ impl QuillApp {
             return None;
         }
         let message = unconfirmed_login_message(&notices.unconfirmed_entries);
-        let busy = notices.review_pending > 0;
-        let error = notices.review_error.clone();
+        let busy = notices.review.busy();
+        let error = notices.review.error().map(str::to_string);
         Some(
             div()
                 .id("unconfirmed-login-banner")
@@ -188,9 +235,19 @@ impl QuillApp {
     pub(crate) fn dismiss_account_notice(&mut self, cx: &mut Context<Self>) {
         match self.account_notice() {
             Some(AccountNotice::Service) => {
-                if let Some(live) = self.live.as_mut() {
+                // A force-logout notice ends in Log out and nothing else:
+                // no close, Esc or backdrop pops it.
+                let forced = self.session().is_some_and(|session| {
+                    session
+                        .settings
+                        .notices
+                        .service
+                        .front()
+                        .is_some_and(|notice| notice.is_force_logout())
+                });
+                if !forced && let Some(live) = self.live.as_mut() {
                     live.driver.session.dismiss_service_notice();
-                } else if let Some(demo) = self.demo_session.as_mut() {
+                } else if !forced && let Some(demo) = self.demo_session.as_mut() {
                     demo.dismiss_service_notice();
                 }
             }
@@ -269,18 +326,19 @@ impl QuillApp {
         };
         let in_flight = session
             .as_ref()
-            .is_some_and(|s| s.settings.notices.terms_in_flight);
+            .is_some_and(|s| s.settings.notices.terms_accept.is_loading());
         let error = session
             .as_ref()
-            .and_then(|s| s.settings.notices.terms_error.clone());
+            .and_then(|s| s.settings.notices.terms_accept.error().map(str::to_string));
+        let terms_id = terms.id.clone();
         let busy_delete = session
             .as_ref()
             .is_some_and(|s| s.settings.account_mutating);
         let account_error = session
             .as_ref()
             .and_then(|s| s.settings.account_error.clone());
-        match self.auth_ui.terms_step {
-            TermsStep::Terms => {
+        match self.terms_stage(&terms.id) {
+            TermsStage::Terms { age_ok, age_error } => {
                 let min_age = terms.min_user_age;
                 let mut body = div().flex().flex_col().gap_3().child(
                     div()
@@ -297,14 +355,22 @@ impl QuillApp {
                                 keys::Q_OPS_I_CONFIRM_THAT_I_AM,
                                 &[("min_age", &min_age.to_string())],
                             ))
-                            .checked(self.auth_ui.terms_age_ok)
-                            .on_click(cx.listener(|this, &on: &bool, _, cx| {
-                                this.auth_ui.terms_age_ok = on;
-                                this.auth_ui.terms_age_error = false;
-                                cx.notify();
-                            })),
+                            .checked(age_ok)
+                            .on_click({
+                                let terms_id = terms_id.clone();
+                                cx.listener(move |this, &on: &bool, _, cx| {
+                                    this.set_terms_stage(
+                                        &terms_id,
+                                        TermsStage::Terms {
+                                            age_ok: on,
+                                            age_error: false,
+                                        },
+                                    );
+                                    cx.notify();
+                                })
+                            }),
                     );
-                    if self.auth_ui.terms_age_error {
+                    if age_error {
                         body = body.child(
                             div()
                                 .text_xs()
@@ -325,10 +391,13 @@ impl QuillApp {
                             .label(tr(keys::CALL_DECLINE))
                             .ghost()
                             .disabled(in_flight)
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.auth_ui.terms_step = TermsStep::DeclineSorry;
-                                cx.notify();
-                            })),
+                            .on_click({
+                                let terms_id = terms_id.clone();
+                                cx.listener(move |this, _, _, cx| {
+                                    this.set_terms_stage(&terms_id, TermsStage::DeclineSorry);
+                                    cx.notify();
+                                })
+                            }),
                     )
                     .child(
                         Button::new("terms-agree")
@@ -339,16 +408,27 @@ impl QuillApp {
                             })
                             .primary()
                             .disabled(in_flight)
-                            .on_click(cx.listener(move |this, _, _, cx| {
-                                if min_age > 0 && !this.auth_ui.terms_age_ok {
-                                    this.auth_ui.terms_age_error = true;
-                                } else if let Some(live) = this.live.as_mut() {
-                                    let _ = live.driver.accept_terms();
-                                } else if let Some(demo) = this.demo_session.as_mut() {
-                                    demo.settings.notices.terms = None;
-                                }
-                                cx.notify();
-                            })),
+                            .on_click({
+                                let terms_id = terms_id.clone();
+                                cx.listener(move |this, _, _, cx| {
+                                    if min_age > 0 && !age_ok {
+                                        this.set_terms_stage(
+                                            &terms_id,
+                                            TermsStage::Terms {
+                                                age_ok,
+                                                age_error: true,
+                                            },
+                                        );
+                                    } else if let Some(live) = this.live.as_mut() {
+                                        // A failed send lands in `terms_accept`,
+                                        // which the box draws.
+                                        let _ = live.driver.accept_terms();
+                                    } else if let Some(demo) = this.demo_session.as_mut() {
+                                        demo.settings.notices.terms = None;
+                                    }
+                                    cx.notify();
+                                })
+                            }),
                     );
                 (
                     tr(keys::Q_OPS_TERMS_OF_SERVICE).into(),
@@ -357,7 +437,7 @@ impl QuillApp {
                     true,
                 )
             }
-            TermsStep::DeclineSorry => {
+            TermsStage::DeclineSorry => {
                 let body = div().text_sm().child(terms_sorry());
                 let footer = div()
                     .flex()
@@ -367,19 +447,25 @@ impl QuillApp {
                         Button::new("terms-sorry-back")
                             .label(tr(keys::Q_OPS_BACK))
                             .primary()
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.auth_ui.terms_step = TermsStep::Terms;
-                                cx.notify();
-                            })),
+                            .on_click({
+                                let terms_id = terms_id.clone();
+                                cx.listener(move |this, _, _, cx| {
+                                    this.set_terms_stage(&terms_id, TermsStage::default());
+                                    cx.notify();
+                                })
+                            }),
                     )
                     .child(
                         Button::new("terms-sorry-delete")
                             .label(tr(keys::Q_OPS_DECLINE_DELETE))
                             .ghost()
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.auth_ui.terms_step = TermsStep::DeleteWarning;
-                                cx.notify();
-                            })),
+                            .on_click({
+                                let terms_id = terms_id.clone();
+                                cx.listener(move |this, _, _, cx| {
+                                    this.set_terms_stage(&terms_id, TermsStage::DeleteWarning);
+                                    cx.notify();
+                                })
+                            }),
                     );
                 (
                     tr(keys::Q_OPS_TERMS_OF_SERVICE).into(),
@@ -388,7 +474,7 @@ impl QuillApp {
                     true,
                 )
             }
-            TermsStep::DeleteWarning => {
+            TermsStage::DeleteWarning => {
                 let mut body = div()
                     .flex()
                     .flex_col()
@@ -406,10 +492,13 @@ impl QuillApp {
                             .label(tr(keys::Q_OPS_BACK))
                             .primary()
                             .disabled(busy_delete)
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.auth_ui.terms_step = TermsStep::DeclineSorry;
-                                cx.notify();
-                            })),
+                            .on_click({
+                                let terms_id = terms_id.clone();
+                                cx.listener(move |this, _, _, cx| {
+                                    this.set_terms_stage(&terms_id, TermsStage::DeclineSorry);
+                                    cx.notify();
+                                })
+                            }),
                     )
                     .child(
                         Button::new("terms-delete-now")
@@ -467,9 +556,28 @@ impl QuillApp {
                     .label(tr(keys::Q_OPS_LOG_OUT))
                     .primary()
                     .on_click(cx.listener(|this, _, _, cx| {
-                        if let Some(live) = this.live.as_mut() {
-                            live.driver.session.dismiss_service_notice();
-                            let _ = live.driver.request_logout();
+                        // The notice goes once the logout is on its way; a
+                        // logout that could not be sent leaves it, with the
+                        // reason, so the user can press again.
+                        // An account that is no longer signed in (already
+                        // logging out, closed) has nothing to log out of:
+                        // the notice goes, or it could never be dismissed.
+                        let sent = this.live.as_mut().map(|live| {
+                            if !matches!(
+                                live.driver.session.auth,
+                                quill::telegram::envelope::AuthorizationState::Ready
+                            ) {
+                                live.driver.session.dismiss_service_notice();
+                                return Ok(());
+                            }
+                            let sent = live.driver.request_logout().map(|_| ());
+                            if sent.is_ok() {
+                                live.driver.session.dismiss_service_notice();
+                            }
+                            sent
+                        });
+                        if sent.is_some_and(|sent| sent.is_err()) {
+                            this.set_note(StatusNote::error(tr(keys::Q_OPS_LOGOUT_FAILED)));
                         }
                         cx.notify();
                     })),
@@ -548,3 +656,8 @@ crate::ui::shell::register_dialogs! {
     )
     .close(|app, _, cx| app.dismiss_account_notice(cx)),
 }
+
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+#[path = "account_notices_tests.rs"]
+mod tests;

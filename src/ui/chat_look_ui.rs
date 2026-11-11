@@ -35,6 +35,9 @@ mod apply;
 #[cfg(feature = "demo-capture")]
 mod apply_tests;
 mod demo;
+mod stage;
+
+use stage::{LookSend, LookStage, SendStage};
 
 /// What the dialog is for.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -62,38 +65,9 @@ pub(super) struct ChatLookDialog {
     pub remove_wallpaper: bool,
     /// Also set the wallpaper for the other person (Premium only).
     pub both: bool,
-    /// Requests Apply has sent and is waiting on; the dialog stays open
-    /// until they are acknowledged, and shows the error if one fails.
-    pub awaiting: Option<LookWait>,
-}
-
-/// Apply's in-flight requests: `sent` of them, counted from the session's
-/// acknowledgement counter `base`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) struct LookWait {
-    pub base: u32,
-    pub sent: u32,
-}
-
-/// Where an Apply stands, from the session's counters.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) enum LookProgress {
-    Waiting,
-    Done,
-    Failed(String),
-}
-
-/// Whether Apply's requests are acknowledged, still pending or failed. An
-/// error wins over acknowledgements: the dialog stays open to show it.
-pub(super) fn look_progress(wait: LookWait, oks: u32, error: Option<&str>) -> LookProgress {
-    if let Some(error) = error {
-        return LookProgress::Failed(error.to_owned());
-    }
-    if oks.wrapping_sub(wait.base) >= wait.sent {
-        LookProgress::Done
-    } else {
-        LookProgress::Waiting
-    }
+    /// Where Apply stands: the dialog stays open until every change it sent
+    /// is acknowledged, and shows the error of one that failed.
+    pub stage: LookStage,
 }
 
 /// One change `Apply` sends.
@@ -204,7 +178,7 @@ impl QuillApp {
             dimming_slider: Some(slider),
             remove_wallpaper: false,
             both: false,
-            awaiting: None,
+            stage: LookStage::Editing,
         });
         self.open_box(DialogKind::ChatLook);
         self.retry_failed_wallpapers();
@@ -248,12 +222,16 @@ impl QuillApp {
     }
 
     pub(super) fn close_chat_look_dialog(&mut self, cx: &mut Context<Self>) {
-        self.dialogs.chat_look_dialog = None;
-        if let Some(session) = match self.live.as_mut() {
-            Some(live) => Some(&mut live.driver.session),
-            None => self.demo_session.as_deref_mut(),
-        } {
-            session.chats_state.background_error = None;
+        let waiting = self
+            .dialogs
+            .chat_look_dialog
+            .take()
+            .map(|d| d.stage.in_flight())
+            .unwrap_or_default();
+        if let Some(live) = self.live.as_mut() {
+            for id in waiting {
+                live.driver.session.acks.forget(id);
+            }
         }
         cx.notify();
     }
@@ -274,7 +252,21 @@ impl QuillApp {
         let premium = self.session().is_some_and(|s| s.my_is_premium());
         // Boosted chats set the wallpaper for everyone, never for self only.
         let only_for_self = !boosted && !(dialog.both && premium);
-        if dialog.awaiting.is_some() || (boosted && self.boosted_look_blocked(chat_id, &changes)) {
+        if dialog.stage.applying() {
+            cx.notify();
+            return;
+        }
+        // What an earlier Apply already got acknowledged is not sent again;
+        // a failed change is planned again like any other.
+        let done = dialog.stage.done();
+        let changes: Vec<LookChange> = changes
+            .into_iter()
+            .filter(|change| !done.iter().any(|send| send.change == *change))
+            .collect();
+        if boosted && let Some(why) = self.boosted_look_blocked(chat_id, &changes) {
+            if let Some(d) = self.screen.dialogs.chat_look_dialog.as_mut() {
+                d.stage = LookStage::Blocked(why);
+            }
             cx.notify();
             return;
         }
@@ -284,24 +276,22 @@ impl QuillApp {
                     self.close_chat_look_dialog(cx);
                     return;
                 }
-                live.driver.session.chats_state.background_error = None;
-                let base = live.driver.session.chats_state.chat_look_oks;
-                let mut sent = 0u32;
+                let mut sends = done;
                 for change in changes {
                     let result =
-                        match change {
+                        match &change {
                             LookChange::Theme(name) => {
-                                live.driver.set_chat_look_theme(ChatId(chat_id), &name)
+                                live.driver.set_chat_look_theme(ChatId(chat_id), name)
                             }
                             LookChange::Wallpaper { id, dimming } => live
                                 .driver
-                                .set_chat_background(ChatId(chat_id), id, dimming, only_for_self),
+                                .set_chat_background(ChatId(chat_id), *id, *dimming, only_for_self),
                             LookChange::WallpaperFile { path, dimming } => {
                                 live.driver.set_chat_background_local(
                                     ChatId(chat_id),
                                     &path.to_string_lossy(),
                                     false,
-                                    dimming,
+                                    *dimming,
                                     only_for_self,
                                 )
                             }
@@ -309,21 +299,17 @@ impl QuillApp {
                                 live.driver.delete_chat_background(ChatId(chat_id), false)
                             }
                         };
-                    match result {
-                        Ok(_) => sent += 1,
-                        Err(err) => {
-                            live.driver.session.chats_state.background_error =
-                                Some(user_error(&err));
+                    let stage = match result {
+                        Ok(id) => {
+                            live.driver.session.acks.expect(id);
+                            SendStage::InFlight(id)
                         }
-                    }
+                        Err(err) => SendStage::Failed(user_error(&err)),
+                    };
+                    sends.push(LookSend { change, stage });
                 }
                 if let Some(d) = self.screen.dialogs.chat_look_dialog.as_mut() {
-                    d.awaiting = (sent > 0).then_some(LookWait { base, sent });
-                }
-                // Nothing in flight and no error: nothing to wait for.
-                if sent == 0 && live.driver.session.chats_state.background_error.is_none() {
-                    self.close_chat_look_dialog(cx);
-                    return;
+                    d.stage = LookStage::Sent(sends);
                 }
                 cx.notify();
                 return;
@@ -366,34 +352,23 @@ impl QuillApp {
         self.close_chat_look_dialog(cx);
     }
 
-    /// Poll-loop half of Apply: close the dialog once its requests are
-    /// acknowledged; on a failure keep it open (the error shows inline).
+    /// Poll-loop half of Apply: settle each change on its own answer, close
+    /// the dialog once all are acknowledged; on a failure keep it open (the
+    /// error shows inline, the next Apply sends only what failed).
     pub(super) fn drain_chat_look(&mut self, cx: &mut Context<Self>) -> bool {
-        let Some(wait) = self
-            .dialogs
-            .chat_look_dialog
-            .as_ref()
-            .and_then(|d| d.awaiting)
-        else {
+        let Some(live) = self.live.as_mut() else {
             return false;
         };
-        let Some(session) = self.session() else {
+        let Some(dialog) = self.screen.dialogs.chat_look_dialog.as_mut() else {
             return false;
         };
-        match look_progress(
-            wait,
-            session.chats_state.chat_look_oks,
-            session.chats_state.background_error.as_deref(),
-        ) {
-            LookProgress::Waiting => false,
-            LookProgress::Done => {
+        match dialog.stage.settle(&mut live.driver.session.acks) {
+            None => false,
+            Some(true) => {
                 self.close_chat_look_dialog(cx);
                 true
             }
-            LookProgress::Failed(_) => {
-                if let Some(d) = self.dialogs.chat_look_dialog.as_mut() {
-                    d.awaiting = None;
-                }
+            Some(false) => {
                 cx.notify();
                 true
             }
@@ -802,9 +777,7 @@ impl QuillApp {
                             })),
                         );
                     }
-                    if let Some(error) =
-                        session.and_then(|s| s.chats_state.background_error.clone())
-                    {
+                    if let Some(error) = state.stage.error() {
                         wall = wall.child(
                             div()
                                 .id("chat-look-error")
@@ -812,11 +785,11 @@ impl QuillApp {
                                 .text_color(super::danger_dark())
                                 .child(tr_with(
                                     keys::Q_MISC_COULDNT_CHANGE_THE_CHAT_LOOK,
-                                    &[("error", &error.to_string())],
+                                    &[("error", error)],
                                 )),
                         );
                     }
-                    let applying = state.awaiting.is_some();
+                    let applying = state.stage.applying();
                     let changed = {
                         let current_theme = this
                             .session()
@@ -871,8 +844,8 @@ crate::ui::shell::register_dialogs! {
 #[cfg(test)]
 mod tests {
     use super::{
-        ChatLookDialog, LookChange, LookProgress, LookTarget, LookWait, chat_look_allowed,
-        is_wallpaper_image, look_progress, plan_changes,
+        ChatLookDialog, LookChange, LookStage, LookTarget, chat_look_allowed, is_wallpaper_image,
+        plan_changes,
     };
     use std::path::Path;
 
@@ -886,7 +859,7 @@ mod tests {
             dimming_slider: None,
             remove_wallpaper: false,
             both: false,
-            awaiting: None,
+            stage: LookStage::Editing,
         }
     }
 
@@ -960,26 +933,5 @@ mod tests {
         assert!(is_wallpaper_image(Path::new("c.webp")));
         assert!(!is_wallpaper_image(Path::new("c.gif")));
         assert!(!is_wallpaper_image(Path::new("noext")));
-    }
-
-    #[test]
-    fn apply_waits_for_every_acknowledgement() {
-        let wait = LookWait { base: 4, sent: 2 };
-        assert_eq!(look_progress(wait, 4, None), LookProgress::Waiting);
-        assert_eq!(look_progress(wait, 5, None), LookProgress::Waiting);
-        assert_eq!(look_progress(wait, 6, None), LookProgress::Done);
-    }
-
-    #[test]
-    fn a_failure_keeps_the_dialog_open_with_the_reason() {
-        let wait = LookWait { base: 0, sent: 1 };
-        assert_eq!(
-            look_progress(wait, 0, Some("BACKGROUND_INVALID")),
-            LookProgress::Failed("BACKGROUND_INVALID".into())
-        );
-        assert_eq!(
-            look_progress(wait, 1, Some("CHAT_NOT_MODIFIED")),
-            LookProgress::Failed("CHAT_NOT_MODIFIED".into())
-        );
     }
 }

@@ -4,6 +4,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
+use crate::ui::inline_members_state::Paging;
 use crate::ui::scroll_load::scrolled_near_end;
 use crate::ui::status_note::StatusNote;
 use gpui_kit::*;
@@ -80,9 +81,9 @@ impl QuillApp {
         let Some(shape) = self.inline_members_shape(target) else {
             return;
         };
-        if self.inline_members.chat != Some(shape.chat) {
-            self.inline_members.reset(Some(shape.chat));
-        }
+        // Every open starts from the first page: a failed page or the
+        // administrators fallback of an earlier visit does not stay latched.
+        self.inline_members.reset(Some(shape.chat));
         self.inline_members_fetch(shape, cx);
         cx.notify();
     }
@@ -114,7 +115,7 @@ impl QuillApp {
             return;
         };
         if stale.contains(&shape.chat.0) {
-            self.inline_members.failed_offset = None;
+            self.inline_members.paging = Paging::Idle;
             self.inline_members.admins_asked = false;
             self.inline_members_fetch(shape, cx);
             cx.notify();
@@ -173,12 +174,11 @@ impl QuillApp {
                 .retain(|(chat, _)| *chat != shape.chat.0);
             groups.member_more_failed.len() != before
         });
-        if failed_page {
-            self.inline_members.retry_at_scroll = true;
+        if failed_page && let Some(offset) = self.inline_members.paging.blocked() {
+            self.inline_members.paging = Paging::Failed { offset };
         }
-        if scrolled && self.inline_members.retry_at_scroll {
-            self.inline_members.retry_at_scroll = false;
-            self.inline_members.failed_offset = None;
+        if scrolled && matches!(self.inline_members.paging, Paging::Failed { .. }) {
+            self.inline_members.paging = Paging::Idle;
         }
         // Members hidden from the viewer: show the administrators, asked
         // once per open (or Retry), so a failing list is not asked every
@@ -215,7 +215,7 @@ impl QuillApp {
             loaded,
             total,
             in_flight,
-            self.inline_members.failed_offset,
+            self.inline_members.paging.blocked(),
         );
         match action {
             MoreAction::Nothing => {}
@@ -227,11 +227,15 @@ impl QuillApp {
                 if shape.is_basic {
                     return;
                 }
-                self.inline_members.failed_offset = Some(offset);
-                if let Some(live) = self.live.as_mut() {
-                    let _ = live
+                self.inline_members.paging = Paging::Asked { offset };
+                if let Some(live) = self.live.as_mut()
+                    && live
                         .driver
-                        .fetch_supergroup_members_more(shape.chat, filter, "", offset);
+                        .fetch_supergroup_members_more(shape.chat, filter, "", offset)
+                        .is_err()
+                {
+                    // The send failed: the next scroll asks again.
+                    self.inline_members.paging = Paging::Failed { offset };
                 }
                 cx.notify();
             }

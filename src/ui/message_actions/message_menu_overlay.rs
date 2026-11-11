@@ -35,11 +35,15 @@ impl QuillApp {
         // What TDLib says this message allows (`messageProperties`), as
         // Telegram Desktop gates its menu. Until it arrives (a local call,
         // milliseconds), channel posts offer only what any reader can do.
-        let actions = self
-            .session()
-            .and_then(|s| s.messages.message_menu_actions)
-            .filter(|(c, m, _)| *c == chat_id && *m == message_id)
-            .map(|(_, _, actions)| actions);
+        let actions = self.session().and_then(|s| {
+            let menu = &s.messages.menu_actions;
+            // A failed ask hides every gated row instead of leaving
+            // the permissive local guess.
+            menu.get(chat_id, message_id).or_else(|| {
+                menu.is_failed(chat_id, message_id)
+                    .then(quill::telegram::envelope::MessageActions::default)
+            })
+        });
         let chat_kind = self
             .session()
             .and_then(|s| s.chats.get(&chat_id.0))

@@ -44,6 +44,8 @@ pub struct CreateCommunityDialog {
     pub(crate) search_input: Entity<TextareaState>,
     pub(crate) chat_id: Option<i64>,
     pub(crate) hide_chat: bool,
+    /// The last Create: the box closes on its answer, stays on its error.
+    pub(crate) submit: quill::state::Submit,
 }
 
 impl CreateCommunityDialog {
@@ -65,6 +67,7 @@ impl CreateCommunityDialog {
             search_input,
             chat_id: None,
             hide_chat: false,
+            submit: Default::default(),
         }
     }
 }
@@ -173,6 +176,21 @@ pub fn build_create_community_dialog(
             );
         }
         body = body.child(list);
+        if let quill::state::Submit::Failed(reason) = &dialog_state.submit {
+            body = body.child(
+                div()
+                    .id("g10-create-refused")
+                    .text_xs()
+                    .text_color(cx.theme().danger)
+                    .child(quill::lang::tr_with(
+                        keys::Q_PEOPLE_COULDNT_SAVE_REASON,
+                        &[("reason", reason)],
+                    )),
+            );
+        }
+        let sending = dialog_state
+            .submit
+            .is_sending(this.session().map(|session| &session.requests));
         body = body.child(
             div()
                 .id("g10-create-hide")
@@ -207,6 +225,8 @@ pub fn build_create_community_dialog(
             .child(
                 Button::new("g10-create-submit")
                     .label(tr(keys::COMMUNITY_CREATE))
+                    .loading(sending)
+                    .disabled(sending)
                     .on_click(cx.listener(|this, _, window, cx| {
                         this.submit_create_community_dialog(cx);
                         this.close_kit_dialog_if_done(DialogKind::CommunityCreate, window, cx);

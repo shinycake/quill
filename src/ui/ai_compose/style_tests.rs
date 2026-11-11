@@ -166,7 +166,10 @@ fn the_saved_style_limit_toasts_once(cx: &mut gpui_kit::TestAppContext) {
 fn the_apply_hotkey_without_a_style_only_toasts(cx: &mut gpui_kit::TestAppContext) {
     let (app, mut main) = open_main(cx);
     close_box(&app, &mut main);
-    prefs::update(|prefs| prefs.bound_style_name = None);
+    let account = app.read_with(&main, |app, _| app.current_account());
+    if let Some(account) = account {
+        prefs::update(|prefs| prefs.bind_style(&account, None));
+    }
     main.update(|_, cx| {
         apply_custom_bindings(
             cx,

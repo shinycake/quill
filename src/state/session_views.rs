@@ -178,10 +178,16 @@ impl Session {
         }
     }
 
-    /// Messages deleted for good: an in-chat search jump of the in-place
-    /// view that waits for one of them finds it missing. Run it through
+    /// Messages of `chat_id` deleted for good: an in-chat search jump of
+    /// the in-place view over that chat that waits for one of them finds
+    /// it missing. Run it through
     /// [`Self::in_every_view`].
-    pub(crate) fn miss_search_jump(&mut self, deleted: &[MessageId]) {
+    pub(crate) fn miss_search_jump(&mut self, chat_id: ChatId, deleted: &[MessageId]) {
+        // Server message ids repeat across channels: only a deletion in the
+        // chat the search is over can take its jump's message away.
+        if self.search.chat_search.chat_id != Some(chat_id) {
+            return;
+        }
         let jump = &mut self.search.chat_search.jump;
         if let ChatSearchJump::Ready { message_id } | ChatSearchJump::Loading { message_id } = *jump
             && deleted.contains(&message_id)

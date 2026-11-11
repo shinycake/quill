@@ -95,3 +95,55 @@ fn arriving_on_the_page_again_makes_a_fresh_box(cx: &mut TestAppContext) {
         assert_eq!(open.search.read(cx).value(), "");
     });
 }
+
+fn recent_pack(id: &str) -> quill::lang::prefs::LanguageChoice {
+    quill::lang::prefs::LanguageChoice {
+        pack_id: id.into(),
+        base_pack_id: "en".into(),
+        plural_code: "en".into(),
+        is_rtl: false,
+        name: id.into(),
+        native_name: id.into(),
+    }
+}
+
+/// 10-155: a recent pack deleted in the box leaves the list at once, so a
+/// later pick that rewrites the list never writes it back; Restore puts it
+/// back where it was.
+#[gpui_kit::test]
+fn a_removed_recent_pack_stays_out_of_every_save(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    app.update_in(vcx, |app, window, cx| {
+        app.language.recent = vec![recent_pack("xa"), recent_pack("xb")];
+        app.navigate(NavigationAction::Language, window, cx);
+    });
+    vcx.run_until_parked();
+    app.update_in(vcx, |app, _, cx| {
+        app.remove_recent_language("xa", false, cx)
+    });
+    app.read_with(vcx, |app, _| {
+        let ids: Vec<&str> = app
+            .language
+            .recent
+            .iter()
+            .map(|c| c.pack_id.as_str())
+            .collect();
+        assert_eq!(ids, ["xb"], "the list a save writes has lost it");
+    });
+    // Another pick rewrites the recent list: the removed pack stays out.
+    app.update_in(vcx, |app, _, cx| app.choose_language(pack("pt-br"), cx));
+    vcx.run_until_parked();
+    app.read_with(vcx, |app, _| {
+        assert!(app.language.recent.iter().all(|c| c.pack_id != "xa"));
+        let shown = app.shown_recent_languages();
+        assert!(
+            shown.iter().any(|c| c.pack_id == "xa"),
+            "still listed, dimmed, for Restore"
+        );
+    });
+    app.update_in(vcx, |app, _, cx| app.remove_recent_language("xa", true, cx));
+    app.read_with(vcx, |app, _| {
+        assert!(app.language.recent.iter().any(|c| c.pack_id == "xa"));
+    });
+}

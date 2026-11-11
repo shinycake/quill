@@ -22,7 +22,7 @@ impl QuillApp {
             session.open_chat(quill::ids::ChatId(chat));
         }
         // The box is the chat's (`ChatUi`): the view takes the chat first.
-        self.sync_chat_ui();
+        self.sync_chat_ui(cx);
         self.open_poll_dialog(window, cx);
         let Some(dialog) = self.chat_ui.poll_dialog.as_mut() else {
             return;

@@ -113,13 +113,15 @@ pub trait CallEngine {
     /// Phase C2g: app -> engine; finish the group handshake with the
     /// `joinVideoChat` answer, then issue capture sources, sending
     /// `camera` (a device id) when one is given. Idempotent per group
-    /// call id.
+    /// call id. A camera that cannot start does not fail the join: the
+    /// call connects with audio and the camera's error is the `Ok(Some(_))`
+    /// answer (tdesktop keeps the call running when the camera fails).
     fn connect_group_call(
         &mut self,
         group_call_id: i32,
         answer_payload: &str,
         camera: Option<&str>,
-    ) -> Result<(), EngineError>;
+    ) -> Result<Option<EngineError>, EngineError>;
 
     /// Phase C2g: app -> engine; reconcile the engine's incoming-video
     /// subscriptions with the desired participant set (add new endpoints,

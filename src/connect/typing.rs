@@ -24,33 +24,38 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// While the voice bar is recording, send `chatActionRecordingVoiceNote`
     /// at most every [`OUTGOING_TYPING_INTERVAL_MS`] (Unigram record action).
     /// Stopping sends `chatActionCancel`.
+    ///
+    /// `chat` is the chat the recording belongs to (its window's chat);
+    /// `None` is the main window, whose chat is the open one.
     pub fn sync_voice_recording(
         &mut self,
+        chat: Option<ChatId>,
         active: bool,
         now_ms: u64,
     ) -> Result<(), ConnectSendError> {
-        self.sync_record_action(active, now_ms, "chatActionRecordingVoiceNote")
+        self.sync_record_action(chat, active, now_ms, "chatActionRecordingVoiceNote")
     }
 
     /// MED2: same as [`Self::sync_voice_recording`] for round video-note
     /// capture (`chatActionRecordingVideoNote`, schema 1.8.67 line 6392).
     pub fn sync_video_note_recording(
         &mut self,
+        chat: Option<ChatId>,
         active: bool,
         now_ms: u64,
     ) -> Result<(), ConnectSendError> {
-        self.sync_record_action(active, now_ms, "chatActionRecordingVideoNote")
+        self.sync_record_action(chat, active, now_ms, "chatActionRecordingVideoNote")
     }
 
     fn sync_record_action(
         &mut self,
+        chat: Option<ChatId>,
         active: bool,
         now_ms: u64,
         action: &str,
     ) -> Result<(), ConnectSendError> {
-        let chat_id = self
-            .session
-            .open_chat
+        let chat_id = chat
+            .or(self.session.open_chat)
             .filter(|id| self.typing_chat_allowed(*id));
         let Some(chat_id) = chat_id.filter(|_| active) else {
             return self.cancel_outgoing_voice();

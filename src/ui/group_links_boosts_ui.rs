@@ -133,7 +133,7 @@ impl QuillApp {
                 );
             }
             Some(state) => {
-                if !state.loading || !state.boosts.is_empty() {
+                if !state.loading() || !state.boosts.is_empty() {
                     body = body.child(
                         div()
                             .text_xs()
@@ -203,17 +203,17 @@ impl QuillApp {
                     }
                     body = body.child(row);
                 }
-                if let Some(error) = state.error.clone() {
+                if let Some(error) = state.error().map(str::to_string) {
                     body = body.child(div().text_xs().text_color(muted).child(error));
                 }
-                if state.loading && !state.boosts.is_empty() {
+                if state.loading() && !state.boosts.is_empty() {
                     body = body.child(
                         div()
                             .text_xs()
                             .text_color(muted)
                             .child(tr(keys::Q_PEOPLE_LOADING)),
                     );
-                } else if !state.next_offset.is_empty() && !state.loading {
+                } else if !state.next_offset.is_empty() && !state.loading() {
                     let left = state.total_count - state.boosts.len() as i32;
                     body = body.child(
                         Button::new("boosts-more")

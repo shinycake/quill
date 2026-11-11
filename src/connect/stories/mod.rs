@@ -4,7 +4,7 @@ use crate::ids::{ChatId, RequestId};
 use crate::state::RequestPurpose;
 use crate::state::{ActiveGroupCall, LiveStoryJoinIntent};
 use crate::story_composer::{StoryMediaKind, StoryPrivacy};
-use crate::story_page::{StoryPageOp, StoryPageOpState, story_page_op_label};
+use crate::story_page::story_page_op_label;
 use crate::telegram::envelope::{StoryContentView, StoryListView};
 use crate::telegram::requests::{
     activate_story_stealth_mode as activate_story_stealth_mode_request,
@@ -161,6 +161,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         let extra = self.fetch_group_call(group_call_id)?;
         self.session
             .begin_live_story(chat_id.0, story_id, group_call_id);
+        // A Join pressed again asks once more for what failed to load.
+        if let Some(live) = self.session.live_story_mut(group_call_id) {
+            live.retry_extras();
+        }
         self.session.calls.pending_live_story_join = Some(LiveStoryJoinIntent {
             group_call_id,
             request: extra,
@@ -475,12 +479,13 @@ impl<S: JsonSender> ConnectDriver<S> {
         match self.sender.send_json(json) {
             Ok(()) => Ok(extra),
             Err(err) => {
-                self.session.requests.take(extra);
-                self.session.stories.page_op = Some(StoryPageOp {
-                    label: story_page_op_label(purpose),
-                    state: StoryPageOpState::Failed("could not send".to_string()),
-                    request: Some(extra),
-                });
+                let chat_id = self.session.requests.take(extra).and_then(|p| p.chat_id);
+                self.session.fail_story_page_send(
+                    story_page_op_label(purpose),
+                    extra,
+                    chat_id,
+                    "could not send".to_string(),
+                );
                 Err(err)
             }
         }

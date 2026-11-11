@@ -63,13 +63,10 @@ pub(crate) struct ChatListUi {
     pub(super) archive_hint_open: bool,
     /// The main menu's My Groups (`false`) or My Channels (`true`) list is open.
     pub(super) my_chats_open: Option<bool>,
-    /// Phase 6: sidebar tab — `true` shows the contacts list instead of
-    /// the chat list.
-    pub(super) contacts_tab_open: bool,
-    /// Phase C2i: sidebar tab — `true` shows the recent-calls list +
-    /// call settings instead of the chat list. Mutually exclusive with
-    /// `contacts_tab_open`.
-    pub(super) calls_tab_open: bool,
+    /// The sidebar tab: the chat list, the contacts list, or the
+    /// recent-calls list with its call settings. One value, so a view
+    /// change sets it in one write.
+    pub(super) tab: SidebarTab,
     /// Phase B1: pending "Close secret chat" confirm for the open chat
     /// (`closeSecretChat`, schema 1.8.67 line 15242).
     pub(super) pending_close_secret_chat: Option<ChatId>,
@@ -83,6 +80,15 @@ pub(crate) struct ChatListUi {
     pub(super) drop_topic: Option<super::chat_list::DropTopic>,
     /// The keyboard selection in the list and in its search results.
     pub(super) keys: super::chat_list_keys::ChatListKeys,
+}
+
+/// Which list the sidebar shows (the tab strip under its header).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(super) enum SidebarTab {
+    #[default]
+    Chats,
+    Contacts,
+    Calls,
 }
 
 impl ChatListUi {
@@ -105,8 +111,7 @@ impl ChatListUi {
             filter: ChatListFilter::All,
             archive_hint_open: false,
             my_chats_open: None,
-            contacts_tab_open: false,
-            calls_tab_open: false,
+            tab: SidebarTab::Chats,
             pending_close_secret_chat: None,
             pending_story_open: None,
             drop_on_row: Default::default(),

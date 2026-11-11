@@ -7,7 +7,7 @@
 //! width, drawing the pictures itself.
 
 use super::super::model::{
-    self, CIRCLE_DIAMETER, Command, Pin, PinKind, drop_index, index_at, pin_x,
+    self, CIRCLE_DIAMETER, Command, Pin, PinKind, PinTouch, TouchEnd, drop_index, index_at, pin_x,
 };
 use super::super::{Palette, initials, initials_colors};
 use super::draw;
@@ -26,8 +26,6 @@ use std::time::{Duration, Instant};
 
 /// tdesktop `st::slideWrapDuration` and `st::dialogsOnlineBadgeDuration`.
 const ANIMATION: Duration = Duration::from_millis(150);
-/// Qt's start drag distance: a touch that moves less is a tap.
-const DRAG_START: f64 = 10.;
 /// tdesktop `kOnlineCircleSize`, `kOnlineCircleStrokeWidth`.
 const ONLINE_SIZE: f64 = 8.;
 const ONLINE_STROKE: f64 = 1.5;
@@ -85,19 +83,11 @@ struct Entry {
     online: Slide,
 }
 
-/// A drag in progress.
-struct Drag {
-    index: usize,
-    start_x: f64,
-    x: f64,
-    started: bool,
-}
-
 #[derive(Default)]
 pub(super) struct Ivars {
     entries: RefCell<Vec<Entry>>,
     palette: Cell<Option<Palette>>,
-    touch: RefCell<Option<Drag>>,
+    touch: RefCell<Option<PinTouch>>,
     timer: RefCell<Option<Retained<NSTimer>>>,
 }
 
@@ -231,12 +221,7 @@ impl PinnedPanel {
     fn touch_began(&self, x: f64) {
         let index = index_at(x, self.count());
         if let Ok(mut touch) = self.ivars().touch.try_borrow_mut() {
-            *touch = index.map(|index| Drag {
-                index,
-                start_x: x,
-                x,
-                started: false,
-            });
+            *touch = index.map(|index| PinTouch::Pressed { index, start_x: x });
         }
     }
 
@@ -249,18 +234,18 @@ impl PinnedPanel {
         let Some(drag) = touch.as_mut() else {
             return;
         };
-        drag.x = x;
         // Only pinned chats move, and only with another one to swap with.
-        let movable = drag.index >= first && count.saturating_sub(first) >= 2;
-        if !drag.started {
-            if !movable || (x - drag.start_x).abs() < DRAG_START {
-                return;
+        let movable = match *drag {
+            PinTouch::Pressed { index, .. } | PinTouch::Dragging { index, .. } => {
+                index >= first && count.saturating_sub(first) >= 2
             }
-            drag.started = true;
-        }
-        let (index, shift) = (drag.index, x - drag.start_x);
+        };
+        *drag = drag.moved(x, movable);
+        let PinTouch::Dragging { index, start_x } = *drag else {
+            return;
+        };
         drop(touch);
-        self.layout_drag(index, shift, first, count);
+        self.layout_drag(index, x - start_x, first, count);
     }
 
     /// The dragged picture follows the touch; the others step aside.
@@ -295,28 +280,41 @@ impl PinnedPanel {
         let Some(drag) = drag else {
             return;
         };
-        if drag.started {
-            self.finish_drag(&drag, x);
-        } else if ended && (x - drag.start_x).abs() < DRAG_START {
-            self.open(drag.index);
+        match drag.end(x, ended) {
+            TouchEnd::Drop { index, start_x } => self.finish_drag(index, start_x, x),
+            TouchEnd::SnapBack => self.cancel_drag(),
+            TouchEnd::Open(index) => self.open(index),
+            TouchEnd::Nothing => {}
         }
     }
 
+    /// A drag that did not end: the pictures slide back, nothing is sent.
+    fn cancel_drag(&self) {
+        let now = Instant::now();
+        if let Ok(mut entries) = self.ivars().entries.try_borrow_mut() {
+            for entry in entries.iter_mut() {
+                entry.shift.go(0., now, true);
+            }
+        }
+        NSView::setNeedsDisplay(self, true);
+        self.animate_if_needed();
+    }
+
     /// Drop the dragged chat into its slot and save the order.
-    fn finish_drag(&self, drag: &Drag, x: f64) {
+    fn finish_drag(&self, index: usize, start_x: f64, x: f64) {
         let now = Instant::now();
         let first = self.first_reorderable();
         let count = self.count();
-        let target = drop_index(drag.index, x - drag.start_x, first, count);
+        let target = drop_index(index, x - start_x, first, count);
         let pitch = CIRCLE_DIAMETER + model::PINNED_SPACE;
         let mut ids = None;
         if let Ok(mut entries) = self.ivars().entries.try_borrow_mut() {
             let pins: Vec<Pin> = entries.iter().map(|entry| entry.pin.clone()).collect();
-            ids = model::reordered_ids(&pins, drag.index, target);
-            if target != drag.index && drag.index < entries.len() && target < entries.len() {
+            ids = model::reordered_ids(&pins, index, target);
+            if target != index && index < entries.len() && target < entries.len() {
                 // The dragged picture lands from where the touch left it.
-                let landed = (x - drag.start_x) - (target as f64 - drag.index as f64) * pitch;
-                let moved = entries.remove(drag.index);
+                let landed = (x - start_x) - (target as f64 - index as f64) * pitch;
+                let moved = entries.remove(index);
                 entries.insert(target, moved);
                 for (i, entry) in entries.iter_mut().enumerate() {
                     if i == target {
@@ -411,10 +409,10 @@ impl PinnedPanel {
         };
         let now = Instant::now();
         let dragged = self.ivars().touch.try_borrow().ok().and_then(|touch| {
-            touch
-                .as_ref()
-                .filter(|drag| drag.started)
-                .map(|drag| drag.index)
+            touch.as_ref().and_then(|drag| match *drag {
+                PinTouch::Dragging { index, .. } => Some(index),
+                PinTouch::Pressed { .. } => None,
+            })
         });
         // The dragged picture is drawn last, over the others.
         for (i, entry) in entries.iter().enumerate() {

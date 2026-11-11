@@ -241,7 +241,6 @@
 "qll_people_channel_boosts" = "Channel boosts";
 "qll_people_channel_membership_is_unknown" = "Channel membership is unknown.";
 "qll_people_chat_actions_need_a_live" = "chat actions need a live connection (demo)";
-"qll_people_chat_deleted" = "chat deleted";
 "qll_people_check" = "Check";
 "qll_people_check_availability_first_the_text" = "Check availability first — the text changed since the last check.";
 "qll_people_checking" = "Checking…";
@@ -304,7 +303,6 @@
 "qll_people_could_not_promote_member" = "could not promote member";
 "qll_people_could_not_refresh_administrators" = "Couldn't refresh administrators";
 "qll_people_could_not_refresh_invite_links" = "Couldn't refresh invite links";
-"qll_people_could_not_refresh_join_requests" = "Couldn't refresh join requests";
 "qll_people_could_not_rename_the_tag" = "Couldn't rename the tag";
 "qll_people_could_not_revoke_invite_link" = "Couldn't revoke invite link";
 "qll_people_could_not_save_invite_link" = "Couldn't save invite link";
@@ -430,8 +428,9 @@
 "qll_people_leave_chat" = "Leave chat";
 "qll_people_leave_this_chat_you_can" = "Leave this chat? You can rejoin with an invite link.";
 "qll_people_leaving_channel" = "Leaving channel…";
+"qll_people_leaving_group" = "Leaving group…";
+"qll_people_could_not_change_photo" = "Couldn't change the photo: {reason}";
 "qll_people_left_channel_demo" = "Left channel (demo)";
-"qll_people_left_the_chat" = "left the chat";
 "qll_people_level" = "Level {level} · {boost_count_title}";
 "qll_people_level_boosts#one" = "Level {level} · {count} boost";
 "qll_people_level_boosts#other" = "Level {level} · {count} boosts";

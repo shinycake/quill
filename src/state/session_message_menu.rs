@@ -13,20 +13,28 @@ use crate::text::TextEntityKind;
 /// the last step answers `Ok`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MessageReportStage {
-    /// The first `reportChat` is in flight.
-    Checking,
+    /// The first `reportChat` (this request) is in flight.
+    Checking(RequestId),
     PickOption {
         title: String,
         options: Vec<ReportOption>,
     },
-    /// A follow-up (reason chosen or details sent) is in flight.
-    Sending,
+    /// A follow-up (reason chosen or details sent), this request, is in
+    /// flight.
+    Sending(RequestId),
     TextRequired {
         option_id: String,
         is_optional: bool,
     },
     Reported,
     Failed(String),
+}
+
+impl MessageReportStage {
+    /// Whether this stage waits for the answer to `request`.
+    fn awaits(&self, request: RequestId) -> bool {
+        matches!(self, Self::Checking(id) | Self::Sending(id) if *id == request)
+    }
 }
 
 /// The in-progress report of one or more messages of a chat.
@@ -131,6 +139,42 @@ pub struct StickerSetView {
     pub files_requested: bool,
     /// Edits of an owned set in flight and their outcome.
     pub edits: StickerSetEdits,
+    /// The box's Add / Remove / Archive of this set: asked, then answered
+    /// by TDLib (the box closes on `Done`, says so on `Failed`).
+    pub change: SetChangeStage,
+}
+
+/// What the set box asked TDLib to do with the viewed set.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SetChange {
+    Install,
+    Remove,
+    Archive,
+}
+
+impl SetChange {
+    /// The change a `changeStickerSet` with these flags is.
+    pub fn of(installed: bool, archived: bool) -> Self {
+        match (installed, archived) {
+            (true, _) => Self::Install,
+            (false, true) => Self::Archive,
+            (false, false) => Self::Remove,
+        }
+    }
+}
+
+/// How far the set box's change got. Every stage has a way out: the answer
+/// (`Done`, `Failed`), then the box takes it back to `Idle`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SetChangeStage {
+    #[default]
+    Idle,
+    /// The request went out; the box waits for its answer.
+    Working(SetChange),
+    /// TDLib applied it.
+    Done(SetChange),
+    /// TDLib refused it, or the request was lost.
+    Failed(SetChange),
 }
 
 impl StickerSetView {
@@ -141,6 +185,7 @@ impl StickerSetView {
             stage: StickerSetViewStage::Loading,
             files_requested: false,
             edits: StickerSetEdits::default(),
+            change: SetChangeStage::Idle,
         }
     }
 }
@@ -242,12 +287,18 @@ impl Session {
         }
     }
 
-    /// Start reporting `message_ids` of `chat_id`.
-    pub fn begin_message_report(&mut self, chat_id: ChatId, message_ids: Vec<MessageId>) {
+    /// Start reporting `message_ids` of `chat_id`; `request` is the first
+    /// `reportChat`, the only answer the flow takes while it checks.
+    pub fn begin_message_report(
+        &mut self,
+        chat_id: ChatId,
+        message_ids: Vec<MessageId>,
+        request: RequestId,
+    ) {
         self.messages.message_report = Some(MessageReportFlow {
             chat_id,
             message_ids,
-            stage: MessageReportStage::Checking,
+            stage: MessageReportStage::Checking(request),
             trail: Vec::new(),
             previous: Vec::new(),
         });
@@ -257,14 +308,19 @@ impl Session {
         self.messages.message_report = None;
     }
 
-    /// The follow-up `reportChat` (reason chosen or details sent) went out.
-    pub fn message_report_sending(&mut self, chosen: Option<(String, String, Vec<ReportOption>)>) {
+    /// The follow-up `reportChat` (reason chosen or details sent), `request`,
+    /// went out.
+    pub fn message_report_sending(
+        &mut self,
+        request: RequestId,
+        chosen: Option<(String, String, Vec<ReportOption>)>,
+    ) {
         if let Some(flow) = self.messages.message_report.as_mut() {
             if let Some((text, title, options)) = chosen {
                 flow.trail.push(text);
                 flow.previous.push((title, options));
             }
-            flow.stage = MessageReportStage::Sending;
+            flow.stage = MessageReportStage::Sending(request);
         }
     }
 
@@ -281,16 +337,14 @@ impl Session {
         true
     }
 
-    /// Apply a `ReportChatResult` for the flow. Stale answers (another
-    /// chat) are dropped.
+    /// Apply a `ReportChatResult` for the flow. Only the answer to the
+    /// request the flow is waiting on counts: one for a report that was
+    /// cancelled or replaced is dropped.
     pub fn accept_message_report(&mut self, pending: &PendingRequest, outcome: ReportChatOutcome) {
-        let Some(chat_id) = pending.chat_id else {
-            return;
-        };
         let Some(flow) = self.messages.message_report.as_mut() else {
             return;
         };
-        if flow.chat_id != chat_id {
+        if !flow.stage.awaits(pending.id) {
             return;
         }
         flow.stage = match outcome {
@@ -315,10 +369,11 @@ impl Session {
         };
     }
 
-    /// A raw TDLib error (or a send failure) ends the flow.
-    pub fn fail_message_report(&mut self, chat_id: ChatId, message: String) {
+    /// A raw TDLib error (or a send failure) of `request` ends the flow
+    /// that waits on it.
+    pub fn fail_message_report(&mut self, request: RequestId, message: String) {
         if let Some(flow) = self.messages.message_report.as_mut()
-            && flow.chat_id == chat_id
+            && flow.stage.awaits(request)
         {
             flow.stage = MessageReportStage::Failed(message);
         }

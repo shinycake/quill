@@ -19,7 +19,7 @@ impl Session {
             message_id,
         }) = pending.map(|p| p.purpose)
         {
-            self.reject_replied_message(chat_id, message_id);
+            self.reject_replied_message(chat_id, message_id, err.code, std::time::Instant::now());
         }
         if let Some(RequestPurpose::Messages(MessagesPurpose::GetComposerReplyTarget {
             chat_id,
@@ -45,7 +45,10 @@ impl Session {
         if let Some(RequestPurpose::Messages(MessagesPurpose::GetSharingProtection { chat_id })) =
             pending.map(|p| p.purpose)
         {
-            self.groups.private_sharing.enable = Some(EnableSharing::TurnOff(chat_id));
+            // Who protects the chat is unknown: turning protection off could
+            // send the other person a request nobody confirmed, so the
+            // "Send Request?" box asks first.
+            self.groups.private_sharing.enable = Some(EnableSharing::AskToRequest(chat_id));
         }
         match pending.map(|p| p.purpose) {
             Some(RequestPurpose::Messages(MessagesPurpose::AiCompose(purpose))) => {
@@ -53,9 +56,9 @@ impl Session {
             }
             // The message menu's Report flow and audience lists.
             Some(RequestPurpose::ReportMessages) => {
-                if let Some(chat_id) = pending.and_then(|p| p.chat_id) {
+                if let Some(pending) = pending {
                     self.fail_message_report(
-                        chat_id,
+                        pending.id,
                         format!("Reporting failed: {}", error_reason(err)),
                     );
                 }
@@ -68,26 +71,36 @@ impl Session {
                     ..
                 })),
             ) => self.fail_audience(purpose),
+            Some(RequestPurpose::GetChatAvailableMessageSenders) => {
+                if let Some(chat_id) = pending.and_then(|p| p.chat_id) {
+                    self.fail_message_senders(chat_id, error_reason(err));
+                }
+            }
+            Some(RequestPurpose::Messages(MessagesPurpose::GetMessageMenuActions {
+                chat_id,
+                message_id,
+            })) => self.messages.menu_actions.fail(chat_id, message_id),
             Some(RequestPurpose::SetChatMessageSender) => {
-                self.messages.message_action_note = Some(format!(
+                self.messages.message_action_note.push(format!(
                     "could not change the sender: {}",
                     error_reason(err)
                 ));
             }
             Some(RequestPurpose::DeleteChatMessagesBySender) => {
-                self.messages.message_action_note = Some(format!(
+                self.messages.message_action_note.push(format!(
                     "could not delete the messages: {}",
                     error_reason(err)
                 ));
             }
             Some(RequestPurpose::ReportSupergroupSpam) => {
-                self.messages.message_action_note =
-                    Some(format!("could not report the spam: {}", error_reason(err)));
+                self.messages
+                    .message_action_note
+                    .push(format!("could not report the spam: {}", error_reason(err)));
             }
             Some(RequestPurpose::Messages(MessagesPurpose::DeleteMessageReactionsFromSender {
                 ..
             })) => {
-                self.messages.message_action_note = Some(format!(
+                self.messages.message_action_note.push(format!(
                     "could not delete the reaction: {}",
                     error_reason(err)
                 ));
@@ -124,25 +137,29 @@ impl Session {
             // failure in the status note (tdesktop shows a toast:
             // `lng_polls_add_option_error`).
             Some(RequestPurpose::AddPollOption) => {
-                self.messages.message_action_note = Some(if err.code == 400 {
+                self.messages.message_action_note.push(if err.code == 400 {
                     "Could not add the option. Please try again.".to_string()
                 } else {
                     call_request_error_line(err, "Could not add the option")
                 });
             }
             Some(RequestPurpose::DeletePollOption) => {
-                self.messages.message_action_note =
-                    Some(call_request_error_line(err, "Could not delete the item"));
+                self.messages
+                    .message_action_note
+                    .push(call_request_error_line(err, "Could not delete the item"));
             }
             Some(RequestPurpose::MarkChecklistTasks) => {
-                self.messages.message_action_note = Some(call_request_error_line(
-                    err,
-                    "Could not update the checklist",
-                ));
+                self.messages
+                    .message_action_note
+                    .push(call_request_error_line(
+                        err,
+                        "Could not update the checklist",
+                    ));
             }
             Some(RequestPurpose::AddChecklistTasks) => {
-                self.messages.message_action_note =
-                    Some(call_request_error_line(err, "Could not add the tasks"));
+                self.messages
+                    .message_action_note
+                    .push(call_request_error_line(err, "Could not add the tasks"));
             }
             // B4: a failed `getPollVoters` first page lands in the
             // fetch state so the dialog shows an honest error; a
@@ -188,11 +205,14 @@ impl Session {
                 } else {
                     "Could not reschedule the message"
                 };
-                self.messages.resend_error = Some(call_request_error_line(err, action));
+                self.messages
+                    .resend_error
+                    .push(call_request_error_line(err, action));
             }
             Some(RequestPurpose::ResendMessages) => {
-                self.messages.resend_error =
-                    Some(call_request_error_line(err, "Could not retry the send"));
+                self.messages
+                    .resend_error
+                    .push(call_request_error_line(err, "Could not retry the send"));
             }
             // M1 fix-up: a failed "Share link" surfaces in the
             // status note instead of silently doing nothing.
@@ -200,18 +220,21 @@ impl Session {
                 RequestPurpose::GetMessageLink
                 | RequestPurpose::Messages(MessagesPurpose::GetMessageLinkProperties { .. }),
             ) => {
-                self.messages.message_link_error =
-                    Some(call_request_error_line(err, "Could not get message link"));
+                self.messages
+                    .message_link_error
+                    .push(call_request_error_line(err, "Could not get message link"));
             }
             // MED2 fix-up: a refused `recognizeSpeech` surfaces in
             // the status note instead of vanishing into `_ => {}` —
             // the row says "transcription requested" and the user
             // deserves an answer either way.
             Some(RequestPurpose::RecognizeSpeech) => {
-                self.messages.recognize_speech_error = Some(call_request_error_line(
-                    err,
-                    "Could not transcribe this message",
-                ));
+                self.messages
+                    .recognize_speech_error
+                    .push(call_request_error_line(
+                        err,
+                        "Could not transcribe this message",
+                    ));
             }
             // Slice msg-richtext-ai-tools: a failed AI request surfaces
             // in the status note instead of vanishing into `_ => {}` —
@@ -225,7 +248,7 @@ impl Session {
                 | RequestPurpose::CreateRichMessageWithAi
                 | RequestPurpose::FixRichMessageWithAi,
             ) => {
-                self.messages.ai_error = Some(match err.class {
+                self.messages.ai_error.push(match err.class {
                     ErrorClass::AiComposeFloodPremium => {
                         "AI limit reached — Telegram Premium is required for more requests"
                             .to_string()
@@ -235,10 +258,10 @@ impl Session {
             }
             _ => {}
         }
-        if pending.map(|p| p.purpose) == Some(RequestPurpose::ViewMessages)
-            && let Some(chat_id) = pending.and_then(|p| p.chat_id)
+        if let Some(viewed) = pending.filter(|p| p.purpose == RequestPurpose::ViewMessages)
+            && let Some(chat_id) = viewed.chat_id
         {
-            self.abort_viewing(chat_id);
+            self.abort_viewing(chat_id, viewed.id);
         }
         if let Some(pending) = pending
             && pending.purpose == RequestPurpose::GetHistoryNewer
@@ -268,8 +291,17 @@ impl Session {
         }
         if pending.map(|p| p.purpose) == Some(RequestPurpose::ReportChatSponsoredMessage) {
             // A TDLib error dismisses the option picker; no outcome is shown.
-            self.messages.sponsored_report = None;
-            self.messages.sponsored_report_target = None;
+            // Only for the request the flow waits on: a report already
+            // dismissed, or an earlier step, has nothing left to dismiss.
+            let waits = pending.is_some_and(|p| {
+                self.messages
+                    .sponsored_report_target
+                    .is_some_and(|target| target.request == Some(p.id))
+            });
+            if waits {
+                self.messages.sponsored_report = None;
+                self.messages.sponsored_report_target = None;
+            }
         }
     }
 }

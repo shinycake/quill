@@ -122,8 +122,8 @@ fn countries_and_default_code_are_fetched_once_and_stored() {
         json!({"@type":"text","@extra":code.as_extra(),"text":"gb"}),
     );
     assert_eq!(
-        driver.session.auth_state.countries.as_ref().unwrap().len(),
-        2
+        driver.session.auth_state.countries.data().map(Vec::len),
+        Some(2)
     );
     assert_eq!(
         driver.session.auth_state.guessed_country_iso.as_deref(),
@@ -137,6 +137,32 @@ fn countries_and_default_code_are_fetched_once_and_stored() {
             .requests
             .has_purpose(RequestPurpose::GetCountries)
     );
+}
+
+#[test]
+fn a_failed_country_list_is_asked_again_only_when_the_picker_retries() {
+    let (_dir, prepared) = prepared_tmp(&MemorySecretStore::new());
+    let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+    let recorder = Arc::new(RecordingSender::new());
+    let seq = AtomicU64::new(0);
+    let mut driver = ready_driver(&recorder, prepared, &sink, &seq);
+    let first = driver.fetch_countries().unwrap().unwrap();
+    ingest(
+        &mut driver,
+        &seq,
+        &sink,
+        json!({"@type":"error","@extra":first.as_extra(),"code":500,"message":"offline"}),
+    );
+    assert!(driver.session.auth_state.countries.error().is_some());
+    assert_eq!(
+        driver.fetch_countries().unwrap(),
+        None,
+        "a frame never re-asks a failed list"
+    );
+    let again = driver.retry_countries().unwrap();
+    assert!(again.is_some(), "opening the picker asks again");
+    assert!(driver.session.auth_state.countries.is_loading());
+    assert_eq!(driver.retry_countries().unwrap(), None, "one in flight");
 }
 
 #[test]
@@ -231,5 +257,39 @@ fn phone_errors_are_classified_for_the_banned_box_and_hints() {
             .unwrap()
             .user_message()
             .contains("too many times")
+    );
+}
+
+#[test]
+fn a_failed_country_list_waits_for_a_user_action_to_ask_again() {
+    let (_dir, prepared) = prepared_tmp(&MemorySecretStore::new());
+    let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+    let recorder = Arc::new(RecordingSender::new());
+    let seq = AtomicU64::new(0);
+    let mut driver = ready_driver(&recorder, prepared, &sink, &seq);
+    let first = driver.fetch_countries().unwrap().unwrap();
+    ingest(
+        &mut driver,
+        &seq,
+        &sink,
+        json!({"@type":"error","@extra":first.as_extra(),"code":500,"message":"TIMEOUT"}),
+    );
+    assert!(driver.session.auth_state.countries.error().is_some());
+    // The per-frame ask does not repeat the failed request.
+    assert_eq!(driver.fetch_countries().unwrap(), None);
+    // A user action does, and the answer lands.
+    let second = driver.retry_countries().unwrap().unwrap();
+    assert_eq!(driver.retry_countries().unwrap(), None, "one in flight");
+    ingest(
+        &mut driver,
+        &seq,
+        &sink,
+        json!({"@type":"countries","@extra":second.as_extra(),"countries":[
+            {"@type":"countryInfo","country_code":"US","name":"United States","english_name":"United States","flag_emoji":"US","is_hidden":false,"calling_codes":["1"]}
+        ]}),
+    );
+    assert_eq!(
+        driver.session.auth_state.countries.data().map(Vec::len),
+        Some(1)
     );
 }

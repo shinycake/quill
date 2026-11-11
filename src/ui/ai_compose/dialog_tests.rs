@@ -357,6 +357,8 @@ fn the_shortcuts_answer_skips_another_topic(cx: &mut TestAppContext) {
         let conversation = app.open_conversation().expect("a chat is open");
         app.ai_compose.apply_in_place = Some(ApplyInPlace {
             token: 41,
+            account: quill::ids::AccountKey::primary(),
+            field: "the topic's own draft".into(),
             conversation,
             window: None,
             selection: None,
@@ -378,4 +380,41 @@ fn the_shortcuts_answer_skips_another_topic(cx: &mut TestAppContext) {
     frames(&mut main);
     let composer = app.read_with(&main, |app, cx| app.composer.read(cx).value().to_string());
     assert_eq!(composer, "the next topic's draft");
+}
+
+/// Sweep 07-028: text typed while the answer was coming is not overwritten:
+/// the answer rewrites a range of the draft it was asked for, so it lands
+/// only while the composer still holds that draft.
+#[gpui_kit::test]
+fn the_shortcuts_answer_skips_a_draft_typed_on_meanwhile(cx: &mut TestAppContext) {
+    use crate::ui::ai_compose_state::ApplyInPlace;
+    use quill::state::ApplyInPlaceAnswer;
+    let (app, mut main) = open_main(cx);
+    close_box(&app, &mut main);
+    set_draft(&app, &mut main, "Hello there");
+    app.update(&mut main, |app, _| {
+        let conversation = app.open_conversation().expect("a chat is open");
+        app.ai_compose.apply_in_place = Some(ApplyInPlace {
+            token: 42,
+            account: quill::ids::AccountKey::primary(),
+            field: "Hello there".into(),
+            conversation,
+            window: None,
+            selection: None,
+            cursor: 0,
+        });
+    });
+    set_draft(&app, &mut main, "Typed on after pressing");
+    app.update(&mut main, |app, cx| {
+        if let Some(session) = app.demo_session.as_mut() {
+            session.messages.ai_compose.apply_in_place = Some(ApplyInPlaceAnswer {
+                token: 42,
+                outcome: Ok(("Rewritten".into(), Vec::new())),
+            });
+        }
+        cx.notify();
+    });
+    frames(&mut main);
+    let composer = app.read_with(&main, |app, cx| app.composer.read(cx).value().to_string());
+    assert_eq!(composer, "Typed on after pressing");
 }

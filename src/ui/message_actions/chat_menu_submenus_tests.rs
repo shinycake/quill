@@ -146,9 +146,9 @@ fn select_tone_opens_the_panel_for_the_row_chat_without_navigating(cx: &mut Test
     let (open_after, target, panel, picker) = app.update(vcx, |app, _| {
         (
             app.session().and_then(|s| s.open_chat),
-            app.notify.mute_chat,
-            app.notify.mute_menu_open,
-            app.notify.notif_sound_picker_open,
+            app.notify.mute_chat(),
+            app.notify.mute_box.is_some(),
+            app.notify.mute_section() == crate::ui::notify_state::MuteSection::SoundPicker,
         )
     });
     assert_eq!(open_after, open_before);

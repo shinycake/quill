@@ -182,6 +182,18 @@ impl super::ChatWindows {
         }
     }
 
+    /// Whether the photo editor of a chat window whose state is not in
+    /// place is in Stickers mode (`QuillApp::sync_editor_masks`).
+    pub(in crate::ui) fn slot_edits_stickers(&self) -> bool {
+        self.slots().any(|slot| {
+            slot.try_borrow().is_ok_and(|slot| {
+                slot.viewer.photo_editor.as_ref().is_some_and(|editor| {
+                    editor.mode == crate::ui::photo_editor::EditorMode::Stickers
+                })
+            })
+        })
+    }
+
     /// Whether the media panel of a chat window whose state is not in
     /// place shows its GIFs tab (`QuillApp::sync_gif_downloads`).
     pub(in crate::ui) fn slot_shows_gifs(&self) -> bool {

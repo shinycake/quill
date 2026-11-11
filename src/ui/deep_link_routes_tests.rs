@@ -33,11 +33,33 @@ fn a_seek_waits_for_its_message_until_its_deadline(cx: &mut TestAppContext) {
     let give_up_at = now + Duration::from_secs(12);
     vcx.update(|_, cx| {
         app.update(cx, |app, cx| {
-            app.playback.pending_media_seek = Some((ChatId(1), MessageId(2), 5, give_up_at));
+            let shown = app
+                .session()
+                .and_then(|session| session.open_chat)
+                .unwrap_or(ChatId(1));
+            app.playback.pending_media_seek = Some((shown, MessageId(2), 5, give_up_at));
             app.tick_media_seek(now, cx);
             assert!(app.playback.pending_media_seek.is_some(), "still in time");
             app.tick_media_seek(give_up_at, cx);
             assert!(app.playback.pending_media_seek.is_none(), "given up");
+        });
+    });
+}
+
+#[gpui_kit::test]
+fn a_seek_is_dropped_when_its_chat_is_no_longer_shown(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let now = Instant::now();
+    vcx.update(|_, cx| {
+        app.update(cx, |app, cx| {
+            app.playback.pending_media_seek = Some((
+                ChatId(424_242),
+                MessageId(2),
+                5,
+                now + Duration::from_secs(12),
+            ));
+            app.tick_media_seek(now, cx);
+            assert!(app.playback.pending_media_seek.is_none());
         });
     });
 }

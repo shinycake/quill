@@ -124,3 +124,30 @@ fn remove_asks_before_removing_and_a_row_opens_the_pack(cx: &mut TestAppContext)
     frames(vcx);
     assert!(app.read_with(vcx, |app, _| app.admin.group_confirm_dialog.is_some()));
 }
+
+/// Sweep 09-077: the box opens with an empty search field, as its list
+/// shows Installed.
+#[gpui_kit::test]
+fn the_box_reopens_with_an_empty_search(cx: &mut TestAppContext) {
+    let (app, _shell, mut vcx) = open_demo(cx);
+    let vcx = &mut vcx;
+    vcx.update(|window, cx| {
+        app.update(cx, |app, cx| {
+            app.pickers
+                .emoji_set_search_input
+                .update(cx, |input, cx| input.set_value("cat", window, cx));
+            app.close_emoji_sets(cx);
+            app.open_emoji_sets(window, cx);
+        });
+    });
+    frames(vcx);
+    let text = app.read_with(vcx, |app, cx| {
+        app.pickers
+            .emoji_set_search_input
+            .read(cx)
+            .value()
+            .to_string()
+    });
+    assert_eq!(text, "", "no search text left from the last visit");
+    assert_eq!(tab(&app, vcx), EmojiSetTab::Installed);
+}

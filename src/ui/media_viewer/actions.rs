@@ -268,11 +268,7 @@ impl QuillApp {
             message.is_outgoing,
             message.pending(),
         )?;
-        let actions = session
-            .messages
-            .message_menu_actions
-            .filter(|(c, m, _)| *c == chat_id && *m == item.message_id)
-            .map(|(_, _, actions)| actions);
+        let actions = session.messages.menu_actions.get(chat_id, item.message_id);
         let is_channel_post = matches!(
             session.chats.get(&chat_id.0).map(|chat| &chat.kind),
             Some(quill::telegram::envelope::ChatKind::Supergroup {

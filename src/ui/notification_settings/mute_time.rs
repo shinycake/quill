@@ -11,6 +11,10 @@ use quill::mute_menu::{CustomMute, MAX_DAYS, MAX_HOURS, MAX_MINUTES};
 
 /// The three fields of the custom duration.
 pub(in crate::ui) struct MuteTimeInputs {
+    /// The window the fields were made in (`None`: the main window): their
+    /// focus and blur subscriptions belong to it, so another window's box
+    /// makes its own.
+    window: Option<ChatId>,
     days: Entity<InputState>,
     hours: Entity<InputState>,
     minutes: Entity<InputState>,
@@ -54,18 +58,38 @@ impl QuillApp {
     /// Make the fields once a window can be reached. Openers of the Mute
     /// panel have no window in hand, so this runs after the current update.
     pub(in crate::ui) fn queue_mute_time_inputs(&mut self, cx: &mut Context<Self>) {
-        if self.notify.mute_time.is_some() {
-            return;
-        }
-        let Some(handle) = self.main_window.handle else {
+        // The window that asked for the box draws it, so the fields are
+        // made with that window: the main window when none asked, or when
+        // the asking window is gone.
+        let asked = self.asking_window_or_last_press().and_then(|chat| {
+            self.windows
+                .open_windows()
+                .find_map(|(open, handle)| (open == chat).then_some((Some(chat), handle)))
+        });
+        let Some((scope, handle)) =
+            asked.or_else(|| self.main_window.handle.map(|handle| (None, handle)))
+        else {
             return;
         };
+        if self
+            .notify
+            .mute_time
+            .as_ref()
+            .is_some_and(|inputs| inputs.window == scope)
+        {
+            return;
+        }
         let app = cx.entity().downgrade();
-        // screen-scope: the fields are reset in the same frame they were
-        // asked for, for the box on screen.
+        let screen = self.screen_epoch();
         cx.defer(move |cx| {
             let _ = handle.update(cx, |_, window, cx| {
-                let _ = app.update(cx, |this, cx| this.reset_mute_time_inputs(window, cx));
+                let _ = app.update(cx, |this, cx| {
+                    this.in_screen_scope(screen, cx, |this, cx| {
+                        this.in_window_scope(scope, cx, |this, cx| {
+                            this.reset_mute_time_inputs(window, cx)
+                        });
+                    });
+                });
             });
         });
     }
@@ -77,8 +101,9 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         let start = CustomMute::default();
+        let scope = self.windows.scope;
         match &self.notify.mute_time {
-            Some(inputs) => {
+            Some(inputs) if inputs.window == scope => {
                 for (input, value) in [
                     (&inputs.days, start.days),
                     (&inputs.hours, start.hours),
@@ -89,8 +114,9 @@ impl QuillApp {
                     });
                 }
             }
-            None => {
+            _ => {
                 self.notify.mute_time = Some(MuteTimeInputs {
+                    window: scope,
                     days: field(start.days, MAX_DAYS, window, cx),
                     hours: field(start.hours, MAX_HOURS, window, cx),
                     minutes: field(start.minutes, MAX_MINUTES, window, cx),

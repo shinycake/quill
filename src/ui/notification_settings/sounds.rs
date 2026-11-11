@@ -58,7 +58,9 @@ impl QuillApp {
         sound_id: i64,
         cx: &mut Context<Self>,
     ) {
-        self.notify.notif_sound_picker_open = false;
+        if self.notify.mute_section() == MuteSection::SoundPicker {
+            self.notify.set_mute_section(MuteSection::Collapsed);
+        }
         if let Some(live) = self.live.as_mut() {
             let result = live
                 .driver

@@ -785,18 +785,17 @@ impl QuillApp {
                 .submit_on_enter(false)
         });
         input.update(cx, |input, cx| input.set_value(current, window, cx));
-        self.dialogs.saved_tag_dialog = Some(SavedTagDialog { tag, input });
-        self.open_box(DialogKind::SavedTagName);
+        self.message_ui.saved_tag_dialog = Some(SavedTagDialog { tag, input });
         cx.notify();
     }
 
     fn close_saved_tag_dialog(&mut self, cx: &mut Context<Self>) {
-        self.dialogs.saved_tag_dialog = None;
+        self.message_ui.saved_tag_dialog = None;
         cx.notify();
     }
 
     fn submit_saved_tag_name(&mut self, cx: &mut Context<Self>) {
-        let Some(dialog) = self.dialogs.saved_tag_dialog.as_ref() else {
+        let Some(dialog) = self.message_ui.saved_tag_dialog.as_ref() else {
             return;
         };
         let tag = dialog.tag.clone();
@@ -815,7 +814,7 @@ impl QuillApp {
                 keys::Q_PEOPLE_NAMING_TAGS_NEEDS_A_LIVE,
             ))),
         }
-        self.dialogs.saved_tag_dialog = None;
+        self.message_ui.saved_tag_dialog = None;
         cx.notify();
     }
 
@@ -830,7 +829,7 @@ impl QuillApp {
                 this.close_saved_tag_dialog(cx);
             });
         app.update(cx, |this, cx| {
-            let Some(state) = this.dialogs.saved_tag_dialog.as_ref() else {
+            let Some(state) = this.message_ui.saved_tag_dialog.as_ref() else {
                 return dialog.on_close(on_close);
             };
             let premium = this
@@ -953,15 +952,17 @@ fn tag_name(choices: &[SavedMessagesTag], all: &[SavedMessagesTag], tag: &Reacti
 crate::ui::shell::register_dialogs! {
     SavedTagName => DialogSpec::new(
         5300,
-        |app| app.dialogs.saved_tag_dialog.is_some(),
+        |app| app.message_ui.saved_tag_dialog.is_some(),
         QuillApp::build_saved_tag_dialog,
     )
+    .per_window()
     .close(|app, _, cx| app.close_saved_tag_dialog(cx)),
 }
 
 #[cfg(test)]
 mod tests {
     use super::{count_line, tag_name};
+    use crate::ui::shell::{DialogKind, QuillShell};
     use quill::telegram::envelope::{ReactionType, SavedMessagesTag};
 
     #[test]
@@ -988,5 +989,10 @@ mod tests {
             tag_name(&[], &[], &ReactionType::CustomEmoji { custom_emoji_id: 5 }),
             "tag"
         );
+    }
+
+    #[test]
+    fn the_tag_name_box_opens_in_the_window_that_asked() {
+        assert!(QuillShell::is_per_window(DialogKind::SavedTagName));
     }
 }

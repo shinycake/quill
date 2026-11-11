@@ -346,11 +346,17 @@ impl<S: JsonSender> ConnectDriver<S> {
         };
         let (level, error) = (source.take_level(), source.error());
         if let Some(err) = error {
-            // The device went away: drop the tap and try again later.
+            // The device went away: drop the tap and try again later. You
+            // cannot be speaking without it: as when the tap is not wanted,
+            // the mark and the tracker reset and TDLib is told.
             self.call_audio.close();
             self.call_audio.failed_at = Some(Instant::now());
             self.call_audio.error = Some(err);
-            return Ok(false);
+            self.call_audio.speaking = false;
+            if self.call_audio.tracker.reset() && was_speaking && audio_source != 0 {
+                self.send_speaking(group_call_id, audio_source, false)?;
+            }
+            return Ok(was_speaking);
         }
         self.call_audio.read_at = Some(now);
         let now_ms = self.call_audio.ms(now);

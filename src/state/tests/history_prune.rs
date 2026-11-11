@@ -230,7 +230,7 @@ fn a_kept_tail_keeps_the_replied_messages_of_rows_paged_out() {
     // is gone.
     session.accept_replied_message(ChatId(7), MessageId(10), live(7, 3));
     session.accept_replied_message(ChatId(7), MessageId(190), live(7, 4));
-    session.reject_replied_message(ChatId(7), MessageId(50));
+    session.reject_replied_message(ChatId(7), MessageId(50), 400, std::time::Instant::now());
     switch(&mut session, 8);
     assert_eq!(len(&session, 7), CLOSED_TAIL_KEEP);
     // Coming back scrolled up pages rows 10 and 50 in again: their strips
@@ -845,6 +845,7 @@ fn a_reported_ad_stays_hidden_after_its_chat_is_dropped() {
     assert_eq!(shown(&mut session), Some(9001));
     assert!(session.begin_sponsored_report(ChatId(1), 9001).is_some());
     let report = session.request(RequestPurpose::ReportChatSponsoredMessage, Some(ChatId(1)));
+    session.note_sponsored_report_request(report);
     apply_json(
         &mut session,
         &seq,
@@ -882,6 +883,7 @@ fn a_report_answered_after_the_drop_still_hides_its_ad() {
     sponsored_answer(&mut session, &seq, &sink, 1);
     assert!(session.begin_sponsored_report(ChatId(1), 9001).is_some());
     let report = session.request(RequestPurpose::ReportChatSponsoredMessage, Some(ChatId(1)));
+    session.note_sponsored_report_request(report);
     for chat in 2..=(CLOSED_CHATS_MAX as i64 + 2) {
         switch(&mut session, chat);
         feed(&mut session, chat, 1);

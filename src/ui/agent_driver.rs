@@ -455,6 +455,11 @@ fn check_step(
             surface::changed_refusal(expected, &now)
         });
     }
+    // The last check before input: from here the command counts as run, and
+    // a tool that gives up later says so instead of asking for a retry.
+    if !pending.begin_input() {
+        return Err(policy::cancelled());
+    }
     Ok(now)
 }
 

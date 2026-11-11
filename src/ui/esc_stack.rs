@@ -175,7 +175,7 @@ pub(super) static ESC_LAYERS: &[EscLayer] = &[
         "payment-receipt",
         |app| app
             .session()
-            .is_some_and(|session| session.payments.receipt_open),
+            .is_some_and(|session| session.payments.receipt.is_open()),
         |app, _, cx| app.close_payment_receipt(cx)
     ),
     // MED2: Esc never discards a recording silently. With the confirm row
@@ -222,7 +222,7 @@ pub(super) static ESC_LAYERS: &[EscLayer] = &[
     ),
     layer!(
         "mute-menu",
-        |app| app.notify.mute_menu_open,
+        |app| app.notify.mute_box.is_some(),
         |app, _, cx| app.close_mute_menu(cx)
     ),
     // Phase B4: the TTL picker.

@@ -39,7 +39,7 @@ fn charge_in_chat(app: &mut QuillApp, stars: i64) {
     session
         .payments
         .paid_messages
-        .record_answer(11, CanSend::HasPaidMessages { stars }, 1);
+        .record_answer(11, CanSend::HasPaidMessages { stars }, 1, false);
 }
 
 #[gpui_kit::test]
@@ -126,7 +126,7 @@ fn restricted_user_replaces_the_composer_with_the_premium_bar(cx: &mut TestAppCo
         session
             .payments
             .paid_messages
-            .record_answer(11, CanSend::RestrictsNewChats, 1);
+            .record_answer(11, CanSend::RestrictsNewChats, 1, false);
         assert_eq!(session.send_gate(ChatId(11)), SendGate::PremiumRequired);
         assert_eq!(app.bottom_action(), Some(BottomBar::PremiumRequired));
     });
@@ -287,5 +287,74 @@ fn the_direct_messages_box_takes_the_price_when_it_arrives(cx: &mut TestAppConte
         let boxed = app.paid_messages.direct.as_ref().expect("still open");
         assert_eq!(boxed.price.price, 50);
         assert!(boxed.seeded && !boxed.touched);
+    });
+}
+
+/// A Remove Fee save for a user that holds the shared save slot says
+/// nothing about this channel's Direct Messages save: the box does not
+/// close as if it went through. Only the channel's own `Idle` answer does.
+#[gpui_kit::test]
+fn another_targets_save_does_not_close_the_direct_messages_box(cx: &mut TestAppContext) {
+    use crate::ui::paid_messages_state::DirectStage;
+    use quill::paid_messages::{PaidSave, PaidTarget};
+    let (app, mut vcx) = new_app(cx, "ready-chats");
+    let vcx = &mut vcx;
+    app.update_in(vcx, |app, window, cx| {
+        let session = app.demo_session.as_mut().unwrap();
+        session.chats.get_mut(&13).unwrap().my_member_status = Some(ChannelMemberStatus::Creator);
+        let supergroup = session.chat_supergroup(ChatId(13)).expect("demo channel");
+        session.groups.supergroup_full_infos.insert(
+            supergroup,
+            quill::state::SupergroupFullInfoData {
+                admin: SupergroupFullAdmin {
+                    can_enable_paid_messages: true,
+                    ..SupergroupFullAdmin::default()
+                },
+                ..quill::state::SupergroupFullInfoData::default()
+            },
+        );
+        app.open_direct_messages(ChatId(13), cx);
+        let set = |app: &mut QuillApp, save: PaidSave| {
+            if let Some(session) = app.demo_session.as_mut() {
+                session.payments.paid_messages.save = save;
+            }
+        };
+        let stage = |app: &QuillApp| app.paid_messages.direct.as_ref().map(|b| b.stage);
+        if let Some(boxed) = app.paid_messages.direct.as_mut() {
+            boxed.stage = DirectStage::Saving;
+        }
+        for other in [
+            PaidSave::Saving {
+                target: PaidTarget::User(5),
+                request: quill::ids::RequestId(1),
+            },
+            PaidSave::Failed {
+                target: PaidTarget::User(5),
+                line: "x".into(),
+            },
+            PaidSave::Saving {
+                target: PaidTarget::Channel(14),
+                request: quill::ids::RequestId(2),
+            },
+        ] {
+            set(app, other);
+            app.direct_messages_upkeep(window, cx);
+            assert_eq!(stage(app), Some(DirectStage::Saving), "still waiting");
+        }
+        set(
+            app,
+            PaidSave::Failed {
+                target: PaidTarget::Channel(13),
+                line: "no".into(),
+            },
+        );
+        app.direct_messages_upkeep(window, cx);
+        assert_eq!(stage(app), Some(DirectStage::Editing), "its own refusal");
+        if let Some(boxed) = app.paid_messages.direct.as_mut() {
+            boxed.stage = DirectStage::Saving;
+        }
+        set(app, PaidSave::Idle);
+        app.direct_messages_upkeep(window, cx);
+        assert!(app.paid_messages.direct.is_none(), "its own answer closes");
     });
 }

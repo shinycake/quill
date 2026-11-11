@@ -10,8 +10,8 @@
 //! be exercised without a Wayland desktop.
 
 use super::{KeyFilter, LinuxSession, Sink, StartError, linux_session, x11_keysym};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 use x11rb::connection::{Connection, RequestConnection};
 use x11rb::protocol::record::{self, ConnectionExt as _};
 use x11rb::protocol::xproto::ConnectionExt as _;
@@ -27,6 +27,15 @@ pub struct Handle {
     control: Arc<RustConnection>,
     context: u32,
     active: Arc<AtomicBool>,
+    /// Set by the record thread when it stops while the handle lives (the
+    /// X server went away, or the stream errored).
+    ended: Arc<Mutex<Option<String>>>,
+}
+
+impl super::HookLife for Handle {
+    fn ended(&self) -> Option<String> {
+        self.ended.lock().ok().and_then(|ended| ended.clone())
+    }
 }
 
 impl std::fmt::Debug for Handle {
@@ -118,10 +127,12 @@ pub fn start(key: &str, sink: Sink) -> Result<Handle, StartError> {
         .map_err(|_| failed("context"))?;
     let control = Arc::new(control);
     let active = Arc::new(AtomicBool::new(true));
+    let ended = Arc::new(Mutex::new(None));
     let handle = Handle {
         control: control.clone(),
         context,
         active: active.clone(),
+        ended: ended.clone(),
     };
     crate::thread_guard::spawn_guarded("quill-ptt-record", move || {
         let mut filters: Vec<(u8, KeyFilter)> = codes
@@ -129,6 +140,7 @@ pub fn start(key: &str, sink: Sink) -> Result<Handle, StartError> {
             .map(|code| (code, KeyFilter::new(u32::from(code))))
             .collect();
         let Ok(stream) = data.record_enable_context(context) else {
+            hook_ended(&active, &ended, &sink, &mut filters);
             return;
         };
         for reply in stream {
@@ -153,18 +165,39 @@ pub fn start(key: &str, sink: Sink) -> Result<Handle, StartError> {
                 }
             }
         }
-        // The stream ended (or was cut): releases may have been lost, so a
-        // held key ends here.
-        for (_, filter) in &mut filters {
-            if let Some(edge) = filter.resync() {
-                sink(edge);
-            }
-        }
+        hook_ended(&active, &ended, &sink, &mut filters);
         let _ = control.record_free_context(context);
         let _ = control.flush();
     })
     .map_err(|_| failed("thread"))?;
     Ok(handle)
+}
+
+/// The record thread stopped. While the handle is still wanted that is a
+/// failure: it says so for the controller, and releases a key that was
+/// down, or the microphone would stay open with no release ever arriving.
+fn hook_ended(
+    active: &AtomicBool,
+    ended: &Mutex<Option<String>>,
+    sink: &Sink,
+    filters: &mut [(u8, KeyFilter)],
+) {
+    // The stream ended (or was cut): releases may have been lost, so a held
+    // key ends here, once.
+    let mut released = false;
+    for (_, filter) in filters.iter_mut() {
+        released |= filter.resync().is_some();
+    }
+    if released {
+        sink(super::KeyEdge::Up);
+    }
+    if !active.load(Ordering::SeqCst) {
+        return;
+    }
+    if let Ok(mut ended) = ended.lock() {
+        *ended = Some("Lost the connection for listening to keys.".into());
+    }
+    crate::wake::UPDATES.poke();
 }
 
 pub fn static_limit() -> Option<String> {

@@ -74,8 +74,13 @@ impl<S: JsonSender> ConnectDriver<S> {
         // Channels are ungated since Phase 2.2: they follow the normal
         // openChat / history path; sponsored rows fetch for every channel.
         // A chat shown in its own window is open in TDLib already.
-        if !self.session.window_chats.contains(&chat_id) {
-            self.send_open_chat(chat_id)?;
+        if !self.session.window_chats.contains(&chat_id)
+            && let Err(err) = self.send_open_chat(chat_id)
+        {
+            // TDLib never heard of the chat: it must not stay "open" here,
+            // or selecting it again would skip `openChat` for good.
+            self.session.leave_open_chat();
+            return Err(err);
         }
         self.fetch_open_chat_extras(chat_id)?;
         self.fetch_pinned_messages(chat_id)?;
@@ -383,6 +388,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         &mut self,
     ) -> Result<Option<RequestId>, ConnectSendError> {
         if !self.chats_path_active() {
+            self.session.chat_list.archive_mute.note_reload_failed();
             return Err(ConnectSendError::InvalidRequest);
         }
         let purpose = RequestPurpose::GetArchiveChatListSettings;
@@ -395,6 +401,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .send_json(&get_archive_chat_list_settings(extra))
         {
             self.session.requests.take(extra);
+            self.session.chat_list.archive_mute.note_reload_failed();
             return Err(err);
         }
         // A cached copy stays on screen while it reloads.
@@ -582,8 +589,16 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// finished.
     pub(crate) fn maybe_finish_leave_deletes(&mut self) -> Result<(), ConnectSendError> {
         let queue = std::mem::take(&mut self.session.chat_list.delete_after_leave);
-        for chat_id in queue {
-            self.remove_chat_from_list(chat_id)?;
+        let mut queue = queue.into_iter();
+        while let Some(chat_id) = queue.next() {
+            if let Err(err) = self.remove_chat_from_list(chat_id) {
+                // The chats that did not go out wait for the next ingest,
+                // as the folder removals do.
+                let waiting = &mut self.session.chat_list.delete_after_leave;
+                waiting.push(chat_id);
+                waiting.extend(queue);
+                return Err(err);
+            }
         }
         Ok(())
     }
