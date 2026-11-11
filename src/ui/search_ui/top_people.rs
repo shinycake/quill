@@ -181,7 +181,9 @@ impl QuillApp {
             .on_mouse_down(
                 MouseButton::Right,
                 cx.listener(move |this, event: &MouseDownEvent, _, cx| {
-                    this.chat_list.menu = Some(ChatMenuState::top_person(id, event.position));
+                    this.chat_list.menu = crate::ui::chat_list_state::ContextMenu::Chat(
+                        ChatMenuState::top_person(id, event.position),
+                    );
                     cx.notify();
                 }),
             )
@@ -235,6 +237,7 @@ impl QuillApp {
         let menu_target = self
             .chat_list
             .menu
+            .chat()
             .filter(|menu| menu.top_person)
             .map(|menu| menu.chat_id);
         let tiles: Vec<Stateful<Div>> = people

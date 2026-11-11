@@ -554,7 +554,7 @@ impl Render for QuillApp {
                 },
             )
             // Slice CL1: right-click chat-row context menu.
-            .when_some(self.chat_list.menu, |this, menu| {
+            .when_some(self.chat_list.menu.chat(), |this, menu| {
                 this.child(self.chat_menu_overlay(menu, cx))
             })
             .when_some(
@@ -566,13 +566,13 @@ impl Render for QuillApp {
             .when_some(self.playback.playlist.menu(), |this, menu| {
                 this.child(self.playlist_menu_overlay(menu, cx))
             })
-            .when_some(self.chat_list.archive_menu, |this, position| {
+            .when_some(self.chat_list.menu.archive(), |this, position| {
                 this.child(self.archive_menu_overlay(position, cx))
             })
             .when_some(self.admin.community.flow.row_menu, |this, menu| {
                 this.child(self.community_row_menu_overlay(menu, cx))
             })
-            .when_some(self.folders.tab_menu, |this, menu| {
+            .when_some(self.chat_list.menu.folder_tab(), |this, menu| {
                 this.child(self.folder_tab_menu_overlay(menu, cx))
             })
             // Slice CL: floating peek preview — read-only recent

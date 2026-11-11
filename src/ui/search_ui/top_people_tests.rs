@@ -170,7 +170,7 @@ fn the_menu_removes_one_person_or_asks_before_disabling(cx: &mut TestAppContext)
     let at = vcx.debug_bounds("top-tile-32").expect("tile").center();
     vcx.simulate_mouse_down(at, MouseButton::Right, Modifiers::default());
     frames(vcx);
-    let menu = app.update(vcx, |app, _| app.chat_list.menu);
+    let menu = app.update(vcx, |app, _| app.chat_list.menu.chat());
     assert_eq!(
         menu.map(|m| (m.chat_id, m.top_person)),
         Some((ChatId(32), true))
@@ -179,7 +179,7 @@ fn the_menu_removes_one_person_or_asks_before_disabling(cx: &mut TestAppContext)
     let left = strip(&app, vcx);
     assert_eq!(left.len(), tiles.len() - 1);
     assert!(!left.contains(&ChatId(32)));
-    assert!(app.update(vcx, |app, _| app.chat_list.menu.is_none()));
+    assert!(app.update(vcx, |app, _| app.chat_list.menu.chat().is_none()));
 
     let at = vcx.debug_bounds("top-tile-31").expect("tile").center();
     vcx.simulate_mouse_down(at, MouseButton::Right, Modifiers::default());
@@ -347,5 +347,5 @@ fn the_menu_has_a_profile_row_for_everyone(cx: &mut TestAppContext) {
     frames(vcx);
     assert!(vcx.debug_bounds("top-menu-profile").is_some());
     click(vcx, "top-menu-profile");
-    assert!(app.update(vcx, |app, _| app.chat_list.menu.is_none()));
+    assert!(app.update(vcx, |app, _| app.chat_list.menu.chat().is_none()));
 }

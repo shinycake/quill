@@ -628,7 +628,8 @@ mod dispatch_tests {
                 });
             }),
             ("context-menus", |app, _, _| {
-                app.chat_list.archive_menu = Some(point(px(10.), px(10.)));
+                app.chat_list.menu =
+                    crate::ui::chat_list_state::ContextMenu::Archive(point(px(10.), px(10.)));
             }),
             ("downloads-panel", |app, _, _| {
                 app.chat_list.downloads_panel_open = true;

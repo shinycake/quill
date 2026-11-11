@@ -32,6 +32,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
+use super::chat_list_state::ContextMenu;
 use super::menu_states::ChatMenuSubmenu;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::*;
@@ -375,12 +376,10 @@ impl QuillApp {
     /// The menus only the main window draws: the chat list's row, archive
     /// and story menus, a playlist's and a folder tab's.
     fn main_menu_open(&self) -> bool {
-        self.chat_list.menu.is_some()
-            || self.chat_list.archive_menu.is_some()
+        !matches!(self.chat_list.menu, ContextMenu::None)
             || self.admin.community.flow.row_menu.is_some()
             || self.chat_list.global.story_menu.is_some()
             || self.playback.playlist.menu().is_some()
-            || self.folders.tab_menu.is_some()
     }
 
     /// Close the message menu and forget the reaction options it asked for.
@@ -404,11 +403,9 @@ impl QuillApp {
         self.close_message_menu();
         if !self.windows.in_window() {
             self.playback.playlist.close_menu();
-            self.chat_list.menu = None;
-            self.chat_list.archive_menu = None;
+            self.chat_list.menu.close();
             self.admin.community.flow.row_menu = None;
             self.chat_list.global.story_menu = None;
-            self.folders.tab_menu = None;
         }
         cx.notify();
         true
@@ -448,7 +445,10 @@ impl QuillApp {
         if self.windows.in_window() {
             return None;
         }
-        match (&self.chat_list.menu, &self.admin.community.flow.row_menu) {
+        match (
+            &self.chat_list.menu.chat(),
+            &self.admin.community.flow.row_menu,
+        ) {
             (Some(menu), _) => menu.submenu,
             (None, Some(menu)) => menu.submenu,
             (None, None) => None,

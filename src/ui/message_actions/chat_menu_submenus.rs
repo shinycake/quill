@@ -72,7 +72,7 @@ impl QuillApp {
         if self.open_community_submenu(which, cx) {
             return;
         }
-        if let Some(menu) = self.chat_list.menu.as_mut()
+        if let Some(menu) = self.chat_list.menu.chat_mut()
             && menu.submenu != Some(which)
         {
             menu.submenu = Some(which);
@@ -85,7 +85,7 @@ impl QuillApp {
         if self.close_community_submenu(cx) {
             return;
         }
-        if let Some(menu) = self.chat_list.menu.as_mut()
+        if let Some(menu) = self.chat_list.menu.chat_mut()
             && menu.submenu.take().is_some()
         {
             cx.notify();
@@ -97,7 +97,7 @@ impl QuillApp {
         if !hovered {
             return;
         }
-        if let Some(menu) = self.chat_list.menu.as_mut()
+        if let Some(menu) = self.chat_list.menu.chat_mut()
             && menu.submenu.take().is_some()
         {
             cx.notify();
@@ -105,7 +105,7 @@ impl QuillApp {
     }
 
     fn close_chat_menu(&mut self, cx: &mut Context<Self>) {
-        self.chat_list.menu = None;
+        self.chat_list.menu.close();
         cx.notify();
     }
 
@@ -117,7 +117,7 @@ impl QuillApp {
         custom: bool,
         cx: &mut Context<Self>,
     ) {
-        self.chat_list.menu = None;
+        self.chat_list.menu.close();
         self.open_mute_menu_for(chat_id, custom, cx);
     }
 
@@ -436,7 +436,7 @@ impl QuillApp {
                     GroupConfirmAction::RemoveFromList { chat_id }
                 };
                 this.open_group_confirm(action, cx);
-                this.chat_list.menu = None;
+                this.chat_list.menu.close();
                 cx.notify();
             }))
             .into_any_element(),

@@ -15,6 +15,54 @@ use std::time::Instant;
 /// A pinned-chat drag (or its release slide) and the pinned list it
 /// reorders: the main list's, or the archive's. One value, so the list
 /// can never be kept apart from the drag by hand.
+/// The chat list's context menu, one at a time: opening one replaces
+/// whatever menu was open, so no opener has to close the others.
+#[derive(Clone, Copy, Debug, Default)]
+pub(super) enum ContextMenu {
+    #[default]
+    None,
+    /// A chat row's (or a top person's) menu.
+    Chat(ChatMenuState),
+    /// The "Archived chats" row's menu, at a window position.
+    Archive(Point<Pixels>),
+    /// A folder tab's menu.
+    FolderTab(super::folder_extras::FolderTabMenu),
+}
+
+impl ContextMenu {
+    pub(super) fn chat(&self) -> Option<ChatMenuState> {
+        match self {
+            Self::Chat(menu) => Some(*menu),
+            _ => None,
+        }
+    }
+
+    pub(super) fn chat_mut(&mut self) -> Option<&mut ChatMenuState> {
+        match self {
+            Self::Chat(menu) => Some(menu),
+            _ => None,
+        }
+    }
+
+    pub(super) fn archive(&self) -> Option<Point<Pixels>> {
+        match self {
+            Self::Archive(at) => Some(*at),
+            _ => None,
+        }
+    }
+
+    pub(super) fn folder_tab(&self) -> Option<super::folder_extras::FolderTabMenu> {
+        match self {
+            Self::FolderTab(menu) => Some(*menu),
+            _ => None,
+        }
+    }
+
+    pub(super) fn close(&mut self) {
+        *self = Self::None;
+    }
+}
+
 pub(crate) struct PinDrag {
     pub(super) archived: bool,
     pub(super) reorder: quill::pin_reorder::PinReorder,
@@ -184,11 +232,9 @@ pub(crate) struct ChatListUi {
     /// snaps on first sight instead of animating from another account's
     /// state (a chat id alone does not name the same chat across accounts).
     pub(super) row_fx: std::cell::RefCell<quill::row_fx::RowFxMap>,
-    /// Slice CL1: right-click chat-row context menu target + window
-    /// position.
-    pub(super) menu: Option<ChatMenuState>,
-    /// Right-click menu of the "Archived chats" row (window position).
-    pub(super) archive_menu: Option<Point<Pixels>>,
+    /// The chat list's open right-click menu: a chat row's (target and
+    /// window position), the "Archived chats" row's, or a folder tab's.
+    pub(super) menu: ContextMenu,
     /// Contacts tab, stories menu, suggestions and search tabs.
     pub(super) global: super::chatlist_global::ChatlistGlobal,
     /// The pinned-row gesture: press, drag (or its release slide).
@@ -252,8 +298,7 @@ impl ChatListUi {
             swipe: Default::default(),
             downloads_panel_open: false,
             row_fx: Default::default(),
-            menu: None,
-            archive_menu: None,
+            menu: ContextMenu::None,
             global,
             pin: PinStage::Idle,
             peek: PeekPreview::Idle,
