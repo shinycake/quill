@@ -304,6 +304,17 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Ok(());
         }
+        let created = std::mem::take(&mut self.session.calls.created_call_discards);
+        for (call_id, is_video) in created {
+            let extra = self.session.request(RequestPurpose::DiscardCall, None);
+            if let Err(err) = self
+                .sender
+                .send_json(&discard_call_request(extra, call_id, false, 0, is_video))
+            {
+                self.session.requests.take(extra);
+                return Err(err);
+            }
+        }
         let queued: Vec<(i32, i64, bool)> =
             std::mem::take(&mut self.session.calls.busy_decline_queue);
         for (call_id, user_id, is_video) in queued {

@@ -25,6 +25,11 @@ pub struct CallsState {
     /// Entries are `(call_id, user_id, is_video)` so the decline
     /// reports the actual call kind rather than a hardcoded one.
     pub busy_decline_queue: Vec<(i32, i64, bool)>,
+    /// Outgoing calls the server created (`callId`) after another call
+    /// took the slot: the driver discards them, `(call_id, is_video)`, so
+    /// the callee is not rung to timeout. No "declined" banner: the user
+    /// placed it.
+    pub created_call_discards: Vec<(i32, bool)>,
     /// Ids of the calls declined as busy (newest last, at most 16).
     /// Their later `updateCall`s, the terminal one included, belong to no
     /// call window; the terminal one drops the id.
@@ -197,6 +202,7 @@ impl CallsState {
             error: None,
             group_call_error: None,
             busy_decline_queue: Vec::new(),
+            created_call_discards: Vec::new(),
             busy_declined_calls: std::collections::VecDeque::new(),
             busy_declined: Vec::new(),
             second_call: SecondCall::None,

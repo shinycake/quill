@@ -276,6 +276,26 @@ fn second_incoming_while_prompt_open_busy_declines() {
 }
 
 #[test]
+fn a_created_call_that_finds_the_slot_taken_is_queued_for_discard() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    let extra = session.request_for_user(
+        RequestPurpose::Calls(CallsPurpose::CreateCall { is_video: true }),
+        50,
+    );
+    // An incoming call took the slot before the `callId` answer.
+    apply_json(&mut session, &seq, &sink, &swap_active_json(77, 41));
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(r#"{{"@type":"callId","id":90,"@extra":"{}"}}"#, extra.0),
+    );
+    assert_eq!(session.calls.created_call_discards, vec![(90, true)]);
+    assert_eq!(session.calls.active_call.as_ref().map(|c| c.id), Some(77));
+}
+
+#[test]
 fn caller_hangup_clears_swap_prompt() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);

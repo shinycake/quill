@@ -647,6 +647,11 @@ fn toggle_session_secret_chats_error_surfaces_honestly() {
 #[test]
 fn is_offline_follows_connection_state() {
     let (mut session, _sink) = session();
+    assert_eq!(session.connection, ConnectionState::Initial);
+    assert!(
+        !session.is_offline(),
+        "no strip is drawn before the first update"
+    );
     session.connection = ConnectionState::Ready;
     assert!(!session.is_offline());
     session.connection = ConnectionState::Updating;

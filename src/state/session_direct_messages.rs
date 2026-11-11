@@ -271,6 +271,12 @@ impl Session {
         if let Some(topics) = self.threads.direct.topics.get_mut(&chat_id.0) {
             topics.remove(&topic_id);
         }
+        // What was told about the conversation goes with it, so a topic id
+        // that comes back does not show the old count or revenue. (The
+        // banned flag is the user's in the channel, not the conversation's.)
+        let key = (chat_id.0, topic_id);
+        self.threads.direct.message_counts.remove(&key);
+        self.threads.direct.revenue.remove(&key);
         if self.open_direct_topic(chat_id) == Some(topic_id) {
             self.select_direct_topic(chat_id, None);
         }

@@ -171,3 +171,37 @@ fn a_member_never_gets_admin_conversations() {
     assert!(!session.direct_reply_locked(direct, None));
     assert_eq!(session.direct_unread_count(direct), None);
 }
+
+#[test]
+fn a_deleted_conversation_forgets_its_count_and_revenue() {
+    let (mut session, _, _) = admin_session();
+    let chat = ChatId(DIRECT);
+    session
+        .threads
+        .direct
+        .message_counts
+        .insert((DIRECT, 501), 12);
+    session.set_direct_topic_revenue(chat, 501, 40);
+    session
+        .threads
+        .direct
+        .message_counts
+        .insert((DIRECT, 502), 3);
+    session.forget_direct_topic(chat, 501);
+    assert_eq!(session.direct_topic_revenue(chat, 501), None);
+    assert!(
+        !session
+            .threads
+            .direct
+            .message_counts
+            .contains_key(&(DIRECT, 501))
+    );
+    assert!(
+        session
+            .threads
+            .direct
+            .message_counts
+            .contains_key(&(DIRECT, 502)),
+        "another conversation's stay"
+    );
+}

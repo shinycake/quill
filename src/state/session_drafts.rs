@@ -128,6 +128,12 @@ impl Session {
         self.messages.draft_dirty.insert(topic.key(chat_id.0));
     }
 
+    /// The composer left the slot with its text unsaved (the save failed
+    /// for good, or was dropped): remote drafts may replace it again.
+    pub fn clear_draft_dirty(&mut self, chat_id: ChatId, topic: DraftTopic) {
+        self.messages.draft_dirty.remove(&topic.key(chat_id.0));
+    }
+
     pub fn draft_is_dirty(&self, chat_id: ChatId, topic: DraftTopic) -> bool {
         self.messages.draft_dirty.contains(&topic.key(chat_id.0))
     }
