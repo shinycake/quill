@@ -31,7 +31,6 @@ detached:QuillApp::spawn_passcode_tick 1
 detached:QuillApp::spawn_poll_loop 1
 detached:QuillApp::spawn_system_unlock_wait 1
 detached:QuillApp::start_connection 1
-detached:QuillApp::start_mic_test 1
 detached:QuillApp::start_update_checks 1
 detached:QuillApp::status_toast_visible 1
 detached:QuillApp::sync_call_window 1

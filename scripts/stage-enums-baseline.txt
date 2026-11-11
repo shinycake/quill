@@ -46,7 +46,6 @@ bare:CreateProgress::InFlight 1
 bare:Decoding::Running 1
 bare:DeleteStep::Asked 1
 bare:DeviceLink::Opening 1
-bare:DeviceLogin::InFlight 1
 bare:DeviceRun::Opening 1
 bare:DirectStage::Saving 1
 bare:DownloadStatus::Downloading 1
@@ -225,7 +224,6 @@ unkeyed:GiftValueStage::Loading 1
 unkeyed:GiftsRest::Waiting 1
 unkeyed:GiveawayLaunch::Verifying 1
 unkeyed:GroupScreenShare::Starting 1
-unkeyed:Host::Asked 1
 unkeyed:IconState::Requested 1
 unkeyed:IdLookup::Asking 1
 unkeyed:InlineBotResolve::Resolving 1
