@@ -48,24 +48,6 @@ impl BusinessHoursUi {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::BusinessHoursUi;
-
-    #[test]
-    fn another_profile_starts_folded_in_the_viewers_zone() {
-        let mut ui = BusinessHoursUi::default();
-        ui.update(1, |view| {
-            view.expanded = true;
-            view.business_time = true;
-        });
-        assert!(ui.of(1).expanded && ui.of(1).business_time);
-        assert_eq!(ui.of(2), Default::default());
-        ui.update(2, |view| view.expanded = true);
-        assert_eq!(ui.of(1), Default::default(), "the first one was replaced");
-    }
-}
-
 /// The note under the phone row menu for an anonymous Fragment number
 /// (`lng_info_mobile_context_menu_fragment_about`): the sentence with
 /// "Fragment" as the link to the address from the app config.
@@ -299,5 +281,23 @@ impl QuillApp {
             column = column.child(list);
         }
         column.into_any_element()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::BusinessHoursUi;
+
+    #[test]
+    fn another_profile_starts_folded_in_the_viewers_zone() {
+        let mut ui = BusinessHoursUi::default();
+        ui.update(1, |view| {
+            view.expanded = true;
+            view.business_time = true;
+        });
+        assert!(ui.of(1).expanded && ui.of(1).business_time);
+        assert_eq!(ui.of(2), Default::default());
+        ui.update(2, |view| view.expanded = true);
+        assert_eq!(ui.of(1), Default::default(), "the first one was replaced");
     }
 }
