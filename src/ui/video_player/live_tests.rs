@@ -1,5 +1,5 @@
 use super::super::backend_ffmpeg::NV12_RETRY;
-use super::super::transport::{LiveStatus, TransportMachine};
+use super::super::transport::{FeedEnd, LiveStatus, TransportMachine};
 use super::super::{PlayState, Present};
 use super::*;
 // `gpui_kit::*` above brings its own `test` attribute; these are plain.
@@ -164,7 +164,7 @@ fn an_engine_failure_fails_for_good_and_live_has_no_transport_to_drive() {
     let t0 = Instant::now();
     let mut machine = TransportMachine::live(t0);
     let failed = LiveStatus {
-        ended: Some(true),
+        end: FeedEnd::Failed,
         ..LiveStatus::default()
     };
     machine.observe_live(&failed, t0);

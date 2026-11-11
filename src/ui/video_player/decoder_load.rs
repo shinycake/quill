@@ -13,13 +13,24 @@
 //! do the first load with nothing told to redraw once it ends.
 #![deny(clippy::indexing_slicing)]
 
-use gpui_kit::{App, Global};
+use gpui_kit::{App, Global, Task};
 
-/// Whether this app has started the load (and its redraw).
+/// Where this app's load of the shim stands. The result itself is the
+/// loader's own (`quill::video_decode::available_now`), read by
+/// [`supported`]; this holds who is loading, so it is started once and
+/// its redraw is not detached.
 #[derive(Default)]
-struct Warmed(bool);
+enum DecoderLoad {
+    /// Not started.
+    #[default]
+    Idle,
+    /// Loading on the background executor; the redraw follows.
+    Loading(Task<()>),
+    /// The load ended (and the windows were told).
+    Settled,
+}
 
-impl Global for Warmed {}
+impl Global for DecoderLoad {}
 
 /// Whether clips can play in this process: always on macOS (AVPlayer);
 /// elsewhere once the bundled FFmpeg shim has loaded. In tests, also once
@@ -46,16 +57,21 @@ pub(crate) fn warm_decoder(cx: &mut App) {
 }
 
 fn warm_with(load: fn() -> bool, loaded: fn(&mut App), cx: &mut App) {
-    if std::mem::replace(&mut cx.default_global::<Warmed>().0, true) {
+    if !matches!(cx.default_global::<DecoderLoad>(), DecoderLoad::Idle) {
         return;
     }
-    cx.spawn(async move |cx| {
+    let task = cx.spawn(async move |cx| {
         let available = cx.background_executor().spawn(async move { load() }).await;
-        if available {
-            cx.update(loaded);
-        }
-    })
-    .detach();
+        cx.update(|cx| {
+            // The load is over: the stage moves on, and this task is
+            // dropped with the old value once it returns.
+            *cx.default_global::<DecoderLoad>() = DecoderLoad::Settled;
+            if available {
+                loaded(cx);
+            }
+        });
+    });
+    *cx.default_global::<DecoderLoad>() = DecoderLoad::Loading(task);
 }
 
 #[cfg(test)]
@@ -105,14 +121,17 @@ mod tests {
     #[gpui_kit::test]
     fn opening_a_player_starts_the_load(cx: &mut TestAppContext) {
         cx.update(|cx| {
-            assert!(!cx.has_global::<super::Warmed>());
+            assert!(!cx.has_global::<super::DecoderLoad>());
             let _ = super::super::VideoPlayer::open(
                 std::path::Path::new("/nonexistent/clip.mp4"),
                 super::super::Purpose::Inline { max_edge: 64 },
                 None,
                 cx,
             );
-            assert!(cx.global::<super::Warmed>().0);
+            assert!(matches!(
+                cx.global::<super::DecoderLoad>(),
+                super::DecoderLoad::Loading(_)
+            ));
         });
     }
 }

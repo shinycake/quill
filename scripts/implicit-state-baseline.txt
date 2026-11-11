@@ -5,7 +5,6 @@ ActiveGroupCall::loaded_all_participants
 AppearancePrefs::ignore_battery_saving
 
 
-BackendStatus::failed
 BarFacts::bot_start_pending
 CallSnap::connecting
 CallSummary::busy

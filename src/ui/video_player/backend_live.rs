@@ -37,7 +37,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::live_picture::{self, Prepared, Surfaces, Target};
-use super::transport::{BackendStatus, LiveStatus, Want};
+use super::transport::{BackendStatus, FeedEnd, LiveStatus, Want};
 use super::{Backend, ErrorKind, Picture, PlayerError, Present, Pulled, Purpose, VideoPlayer};
 use crate::ui::inline_video::INLINE_MAX_EDGE;
 use gpui_kit::*;
@@ -134,10 +134,11 @@ pub(super) fn live_status(snapshot: &LiveSnapshot, gaps: &ArrivalGaps, now: Inst
                 .latest
                 .is_some_and(|(_, at)| now.saturating_duration_since(at) >= gaps.stall_after()),
         sender: snapshot.state,
-        ended: snapshot
-            .end
-            .as_ref()
-            .map(|end| matches!(end, LiveEnd::Failed(_))),
+        end: match snapshot.end.as_ref() {
+            None => FeedEnd::Running,
+            Some(LiveEnd::Failed(_)) => FeedEnd::Failed,
+            Some(_) => FeedEnd::Ended,
+        },
     }
 }
 
@@ -151,7 +152,7 @@ pub(super) fn stall_check_at(
     now: Instant,
 ) -> Option<Instant> {
     let waiting = matches!(status.sender, Some(LiveState::Paused | LiveState::Inactive));
-    if status.ended.is_some() || waiting {
+    if status.end != FeedEnd::Running || waiting {
         return None;
     }
     if status.stalled {
