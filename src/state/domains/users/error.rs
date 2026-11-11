@@ -92,7 +92,11 @@ impl Session {
                     .fail_save(ticket, error_reason(err));
             }
             Some(RequestPurpose::Users(UsersPurpose::GetUserLink { free })) => {
-                self.users_state.peer_qr.fail_link(free, error_reason(err));
+                if let Some(id) = pending.map(|p| p.id) {
+                    self.users_state
+                        .peer_qr
+                        .fail_link(free, id, error_reason(err));
+                }
             }
             Some(RequestPurpose::GetBackgroundEmojiIcons) => {
                 self.users_state

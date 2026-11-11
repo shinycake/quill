@@ -181,10 +181,10 @@ fn ok_acks_refetch_and_errors_surface_without_touching_the_list() {
 fn ping_answers_and_failures_set_the_row_status() {
     let mut rig = Rig::new();
     rig.load_list(&[(1, false), (2, false)]);
-    rig.driver.ping_listed_proxy(1).unwrap();
+    let asked = rig.driver.ping_listed_proxy(1).unwrap();
     assert_eq!(
         rig.driver.session.settings.proxy.pings.get(&1),
-        Some(&PingStatus::Checking)
+        Some(&PingStatus::Checking(asked))
     );
     rig.answer("pingProxy", json!({"@type": "seconds", "seconds": 0.0423}));
     assert_eq!(

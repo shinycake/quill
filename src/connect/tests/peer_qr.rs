@@ -273,3 +273,29 @@ fn rules_landing_after_the_box_opened_ask_for_the_contact_link() {
     assert_eq!(f.2.snapshot().len(), sent + 1, "asked once");
     cleanup(f);
 }
+
+#[test]
+fn a_contact_link_answer_of_an_older_request_is_ignored() {
+    let mut f = fixture();
+    f.1.fetch_own_user_link(None).unwrap();
+    let request = last_request(&f);
+    let UserLinkFetch::Loading(asked) = f.1.session.users_state.peer_qr.contact_link.clone()
+    else {
+        panic!("asking moves the link to loading");
+    };
+    let qr = &mut f.1.session.users_state.peer_qr;
+    qr.fail_link(None, crate::ids::RequestId(asked.0 + 1000), "old".into());
+    assert_eq!(qr.contact_link, UserLinkFetch::Loading(asked));
+    ingest(
+        &mut f,
+        &format!(
+            r#"{{"@type":"userLink","@extra":"{}","url":"https://t.me/+x","expires_in":60}}"#,
+            extra_of(&request)
+        ),
+    );
+    assert!(matches!(
+        f.1.session.users_state.peer_qr.contact_link,
+        UserLinkFetch::Ready(_)
+    ));
+    cleanup(f);
+}

@@ -401,10 +401,12 @@ fn a_failed_contact_link_is_shown_and_asked_again_on_reopen(cx: &mut TestAppCont
     frames(vcx);
     app.update(vcx, |app, cx| {
         if let Some(session) = app.demo_session.as_mut() {
+            let asked = quill::ids::RequestId(7);
+            session.users_state.peer_qr.contact_link = UserLinkFetch::Loading(asked);
             session
                 .users_state
                 .peer_qr
-                .fail_link(None, "Too many requests".into());
+                .fail_link(None, asked, "Too many requests".into());
         }
         app.drain_peer_qr(cx);
     });

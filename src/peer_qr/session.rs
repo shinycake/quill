@@ -3,6 +3,7 @@
 //! current user's temporary contact link and the answers the open box
 //! has not taken yet.
 
+use crate::ids::RequestId;
 use super::free::{FreeCode, FreeResult, FreeTicket};
 use super::link::{UserLinkData, UserLinkFetch};
 use super::state::SaveTicket;
@@ -53,10 +54,20 @@ pub struct PeerQrData {
 }
 
 impl PeerQrData {
-    pub fn accept_link(&mut self, free: Option<FreeTicket>, answer: UserLinkAnswer, now: i64) {
+    pub fn accept_link(
+        &mut self,
+        free: Option<FreeTicket>,
+        request: RequestId,
+        answer: UserLinkAnswer,
+        now: i64,
+    ) {
         let link = answer.at(now);
         match free {
-            None => self.contact_link = UserLinkFetch::Ready(link),
+            None => {
+                if self.contact_link == UserLinkFetch::Loading(request) {
+                    self.contact_link = UserLinkFetch::Ready(link);
+                }
+            }
             Some(ticket) => self.free_answers.push((
                 ticket,
                 Ok(FreeCode {
@@ -68,10 +79,12 @@ impl PeerQrData {
     }
 
     /// `reason` is the error to show; empty when there is none to tell.
-    pub fn fail_link(&mut self, free: Option<FreeTicket>, reason: String) {
+    pub fn fail_link(&mut self, free: Option<FreeTicket>, request: RequestId, reason: String) {
         match free {
             None => {
-                self.contact_link = UserLinkFetch::Failed(Some(reason));
+                if self.contact_link == UserLinkFetch::Loading(request) {
+                    self.contact_link = UserLinkFetch::Failed(Some(reason));
+                }
             }
             Some(ticket) => self.free_answers.push((ticket, Err(reason))),
         }
