@@ -557,8 +557,10 @@ mod reply_tests {
     /// leaves a fresh editor of another story (or none) alone.
     #[test]
     fn a_saved_privacy_answer_closes_only_its_own_story_editor() {
-        let mut ui = StoryViewerUi::default();
-        ui.privacy_request = Some((RequestId(1), (5, 3)));
+        let mut ui = StoryViewerUi {
+            privacy_request: Some((RequestId(1), (5, 3))),
+            ..Default::default()
+        };
         ui.show(editing(5, 4));
         ui.privacy_settled(true);
         assert!(
@@ -574,8 +576,10 @@ mod reply_tests {
 
     #[test]
     fn a_refused_privacy_answer_keeps_the_editor_open() {
-        let mut ui = StoryViewerUi::default();
-        ui.privacy_request = Some((RequestId(1), (5, 3)));
+        let mut ui = StoryViewerUi {
+            privacy_request: Some((RequestId(1), (5, 3))),
+            ..Default::default()
+        };
         ui.show(editing(5, 3));
         ui.privacy_settled(false);
         assert!(ui.is_open(PanelKind::Privacy));
