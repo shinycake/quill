@@ -28,14 +28,13 @@ impl Session {
         if let Some(p) = pending
             && p.purpose == RequestPurpose::GetPinnedMessages
             && let Some(chat_id) = p.chat_id
+            && let Some(fetch) = self.messages.pinned_messages.get_mut(&chat_id.0)
         {
-            if let Some(fetch) = self.messages.pinned_messages.get_mut(&chat_id.0) {
-                fetch.failed(
-                    Some(p.id),
-                    format!("could not load the pinned messages (error {})", err.code),
-                    false,
-                );
-            }
+            fetch.failed(
+                Some(p.id),
+                format!("could not load the pinned messages (error {})", err.code),
+                false,
+            );
         }
         if let Some(RequestPurpose::GetRepliedMessage {
             chat_id,

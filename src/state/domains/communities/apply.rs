@@ -45,15 +45,9 @@ impl Session {
             CommunitiesPayload::AddChatRequests(page) => {
                 if let Some((CommunitiesPurpose::GetAddChatRequests { first_page }, community_id)) =
                     communities_purpose(pending)
+                    && let Some(pending) = pending
                 {
-                    if let Some(pending) = pending {
-                        self.apply_add_chat_requests_page(
-                            community_id,
-                            first_page,
-                            pending.id,
-                            page,
-                        );
-                    }
+                    self.apply_add_chat_requests_page(community_id, first_page, pending.id, page);
                 }
             }
             CommunitiesPayload::MemberChats(chats) => {
