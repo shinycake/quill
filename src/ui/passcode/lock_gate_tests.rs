@@ -59,6 +59,31 @@ fn lock(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) {
 }
 
 #[gpui_kit::test]
+fn the_tray_toggles_change_nothing_while_locked(cx: &mut TestAppContext) {
+    let (app, mut vcx) = open_chat(cx);
+    let both = |app: &Entity<QuillApp>, vcx: &mut VisualTestContext| {
+        app.read_with(vcx, |app, _| {
+            (
+                app.desktop_notifications_enabled(),
+                app.notification_sounds_enabled(),
+            )
+        })
+    };
+    let (notifications, sounds) = both(&app, &mut vcx);
+    app.update(&mut vcx, |app, cx| {
+        app.toggle_notifications_from_tray(cx);
+        app.toggle_sounds_from_tray(cx);
+    });
+    assert_eq!(both(&app, &mut vcx), (!notifications, !sounds), "unlocked");
+    lock(&app, &mut vcx);
+    app.update(&mut vcx, |app, cx| {
+        app.toggle_notifications_from_tray(cx);
+        app.toggle_sounds_from_tray(cx);
+    });
+    assert_eq!(both(&app, &mut vcx), (!notifications, !sounds), "locked");
+}
+
+#[gpui_kit::test]
 fn locking_stops_a_voice_recording_without_sending_it(cx: &mut TestAppContext) {
     let (app, mut vcx) = open_chat(cx);
     app.update(&mut vcx, |app, cx| {

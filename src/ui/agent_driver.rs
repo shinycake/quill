@@ -15,7 +15,7 @@
 
 use super::agent_driver_input::{self as input, Step, steps};
 use super::agent_driver_shot as driver_shot;
-use super::agent_state::active_account;
+use super::agent_state::{Driver, active_account};
 use super::app::QuillApp;
 use gpui_kit::*;
 use quill::agent::activity::{self, Action};
@@ -98,6 +98,14 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // One input command at a time: a second waits for the first to
+        // answer (`Driver`), then starts with every check made afresh.
+        if pending.request.command.is_input()
+            && let Driver::Running { waiting, .. } = &mut self.agent_bridge.driver
+        {
+            waiting.push_back(pending);
+            return;
+        }
         // Cleanup of a send the user confirmed: it clears the box even when
         // the user paused or stopped the agent meanwhile (pressing Confirm
         // may itself have been the input), so the next Enter does not send
@@ -164,192 +172,240 @@ impl QuillApp {
         // planned on this account's tree.
         let screen = self.screen_epoch();
         let before = window.a11y_tree_frame();
+        let input_id = pending
+            .request
+            .command
+            .is_input()
+            .then_some(pending.request.id);
+        if let Some(id) = input_id {
+            self.agent_bridge.driver = Driver::Running {
+                id,
+                waiting: std::collections::VecDeque::new(),
+            };
+        }
         // screen-scope: an agent's command drives whichever account is on screen when it runs.
         QuillApp::spawn_app_in(window, cx, async move |app, cx| {
             // Held until the task ends: deferred refusals until then are
             // this command's (`guard::with_injecting`).
             let _open = open;
-            let (mut surface, tree) = match wait_for_tree(&app, cx, before).await {
-                Ok(found) => found,
-                Err(refusal) => {
-                    pending.answer(UiReply::Refused(refusal));
-                    return;
-                }
-            };
-            // The user may have paused or stopped while the frame came.
-            if let Some(refusal) = takeover::refusal() {
-                pending.answer(UiReply::Refused(refusal));
-                return;
-            }
-            let command = pending.request.command.clone();
-            let agent = pending.request.agent.clone();
-            if !command.is_input() {
-                // A screenshot draws a frame of its own and answers with
-                // that frame's tree (`agent_driver_shot`).
-                let reply = match pending.request.shot {
-                    None => UiReply::Tree(tree),
-                    Some(options) => match driver_shot::capture(&app, cx, &agent, options).await {
-                        Ok((tree, shot)) => UiReply::Shot { tree, shot },
-                        Err(note) => UiReply::Refused(note),
-                    },
-                };
-                pending.answer(reply);
-                return;
-            }
-            let steps = match steps(&command) {
-                Ok(steps) => steps,
-                Err(refusal) => {
-                    pending.answer(UiReply::Refused(refusal));
-                    return;
-                }
-            };
-            let mut refusals: Vec<String> = Vec::new();
-            let mut ui_send: Option<UiSend> = None;
-            let mut stopped: Option<String> = None;
-            let mut done = 0usize;
-            // The frame the last step was injected into: a step that could
-            // activate something waits for the frame after it, so the
-            // focus and the surface it meets are the ones its predecessor
-            // left (a timer would race the redraw).
-            let mut injected_frame: Option<u64> = None;
-            for step in &steps {
-                if let Some(frame) = injected_frame
-                    && step.waits_frame()
-                    && let Err(note) = wait_for_frame(&app, cx, frame).await
-                {
-                    stopped = Some(note);
-                    break;
-                }
-                // The ghost cursor glides to where the step lands first.
-                let glides = app
-                    .update_in(cx, |_, window, cx| input::aim_step(step, &tree, window, cx))
-                    .unwrap_or(false);
-                if glides {
-                    cx.background_executor().timer(takeover::GLIDE).await;
-                }
-                // Three synchronous parts on the UI thread, nothing runs in
-                // between: the checks hold the app, the injection holds only
-                // the window (its handlers update the app themselves).
-                let outcome = app
-                    .update_in(cx, |app, window, _| {
-                        (
-                            check_step(&pending, generation, screen, &surface, app),
-                            window.a11y_tree_frame(),
-                        )
-                    })
-                    .map_err(|_| ())
-                    .map(|(checked, frame)| match checked {
-                        Ok(now) => {
-                            surface = now;
-                            injected_frame = Some(frame);
-                            perform_step(&app, cx, step, &tree, send_key_mode)
-                        }
-                        Err(refusal) => Err(refusal),
-                    });
-                refusals.extend(guard::take_refusals());
-                let send = app.update(cx, |app, _| app.agent_bridge.ui_send.take());
-                match outcome {
-                    Err(()) => {
-                        pending.answer(UiReply::Refused(policy::window_closed()));
+            let body = async {
+                let (mut surface, tree) = match wait_for_tree(&app, cx, before).await {
+                    Ok(found) => found,
+                    Err(refusal) => {
+                        pending.answer(UiReply::Refused(refusal));
                         return;
                     }
-                    Ok(Err(refusal)) => {
-                        stopped = Some(refusal);
+                };
+                // The user may have paused or stopped while the frame came.
+                if let Some(refusal) = takeover::refusal() {
+                    pending.answer(UiReply::Refused(refusal));
+                    return;
+                }
+                let command = pending.request.command.clone();
+                let agent = pending.request.agent.clone();
+                if !command.is_input() {
+                    // A screenshot draws a frame of its own and answers with
+                    // that frame's tree (`agent_driver_shot`).
+                    let reply = match pending.request.shot {
+                        None => UiReply::Tree(tree),
+                        Some(options) => {
+                            match driver_shot::capture(&app, cx, &agent, options).await {
+                                Ok((tree, shot)) => UiReply::Shot { tree, shot },
+                                Err(note) => UiReply::Refused(note),
+                            }
+                        }
+                    };
+                    pending.answer(reply);
+                    return;
+                }
+                let steps = match steps(&command) {
+                    Ok(steps) => steps,
+                    Err(refusal) => {
+                        pending.answer(UiReply::Refused(refusal));
+                        return;
+                    }
+                };
+                let mut refusals: Vec<String> = Vec::new();
+                let mut ui_send: Option<UiSend> = None;
+                let mut stopped: Option<String> = None;
+                let mut done = 0usize;
+                // The frame the last step was injected into: a step that could
+                // activate something waits for the frame after it, so the
+                // focus and the surface it meets are the ones its predecessor
+                // left (a timer would race the redraw).
+                let mut injected_frame: Option<u64> = None;
+                for step in &steps {
+                    if let Some(frame) = injected_frame
+                        && step.waits_frame()
+                        && let Err(note) = wait_for_frame(&app, cx, frame).await
+                    {
+                        stopped = Some(note);
                         break;
                     }
-                    Ok(Ok(())) => {
-                        done += 1;
-                        if step.presses() {
-                            takeover::note_press();
+                    // The ghost cursor glides to where the step lands first.
+                    let glides = app
+                        .update_in(cx, |_, window, cx| input::aim_step(step, &tree, window, cx))
+                        .unwrap_or(false);
+                    if glides {
+                        cx.background_executor().timer(takeover::GLIDE).await;
+                    }
+                    // Three synchronous parts on the UI thread, nothing runs in
+                    // between: the checks hold the app, the injection holds only
+                    // the window (its handlers update the app themselves).
+                    let outcome = app
+                        .update_in(cx, |app, window, _| {
+                            (
+                                check_step(&pending, generation, screen, &surface, app),
+                                window.a11y_tree_frame(),
+                            )
+                        })
+                        .map_err(|_| ())
+                        .map(|(checked, frame)| match checked {
+                            Ok(now) => {
+                                surface = now;
+                                injected_frame = Some(frame);
+                                perform_step(&app, cx, step, &tree, send_key_mode)
+                            }
+                            Err(refusal) => Err(refusal),
+                        });
+                    refusals.extend(guard::take_refusals());
+                    let send = app.update(cx, |app, _| app.agent_bridge.ui_send.take());
+                    match outcome {
+                        Err(()) => {
+                            pending.answer(UiReply::Refused(policy::window_closed()));
+                            return;
                         }
-                        if let Ok(Some(send)) = send {
-                            ui_send = Some(send);
+                        Ok(Err(refusal)) => {
+                            stopped = Some(refusal);
+                            break;
+                        }
+                        Ok(Ok(())) => {
+                            done += 1;
+                            if step.presses() {
+                                takeover::note_press();
+                            }
+                            if let Ok(Some(send)) = send {
+                                ui_send = Some(send);
+                            }
                         }
                     }
                 }
-            }
-            if done == 0 {
-                pending.answer(UiReply::Refused(
-                    stopped.unwrap_or_else(policy::window_closed),
-                ));
-                return;
-            }
-            let _ = app.update(cx, |app, _| {
-                app.log_agent_command(
-                    &pending.request.agent,
-                    &command,
-                    &surface,
-                    &tree,
-                    stopped.is_none(),
-                );
-            });
-            refusals.extend(stopped);
-            // A click often takes a frame to show (a dialog, a menu, focus),
-            // so the answer waits for the one after the input's own. A
-            // surface the agent may not see answers with its note instead.
-            // Paused or stopped while it came, the frame after is the
-            // user's: the agent gets the note, not the tree.
-            let mut found = wait_for_tree(&app, cx, tree.frame.saturating_add(1))
-                .await
-                .and_then(|found| takeover::refusal().map_or(Ok(found), Err));
-            // A menu opens a frame or two after the click that asks for it
-            // (the press opens it, the release lets it paint): wait for it
-            // rather than answer "no menu".
-            for _ in 0..SETTLE_FRAMES {
-                let Ok((_, after)) = &found else {
-                    break;
-                };
-                if !still_settling(&command, &after.new_since(&tree)) {
-                    break;
+                if done == 0 {
+                    pending.answer(UiReply::Refused(
+                        stopped.unwrap_or_else(policy::window_closed),
+                    ));
+                    return;
                 }
-                found = wait_for_tree(&app, cx, after.frame.saturating_add(1))
+                let _ = app.update(cx, |app, _| {
+                    app.log_agent_command(
+                        &pending.request.agent,
+                        &command,
+                        &surface,
+                        &tree,
+                        stopped.is_none(),
+                    );
+                });
+                refusals.extend(stopped);
+                // A click often takes a frame to show (a dialog, a menu, focus),
+                // so the answer waits for the one after the input's own. A
+                // surface the agent may not see answers with its note instead.
+                // Paused or stopped while it came, the frame after is the
+                // user's: the agent gets the note, not the tree.
+                let mut found = wait_for_tree(&app, cx, tree.frame.saturating_add(1))
                     .await
                     .and_then(|found| takeover::refusal().map_or(Ok(found), Err));
-            }
-            let (after, added) = match found {
-                Ok((_, after)) => {
-                    let added = after.new_since(&tree).into_iter().cloned().collect();
-                    (after, added)
+                // A menu opens a frame or two after the click that asks for it
+                // (the press opens it, the release lets it paint): wait for it
+                // rather than answer "no menu".
+                for _ in 0..SETTLE_FRAMES {
+                    let Ok((_, after)) = &found else {
+                        break;
+                    };
+                    if !still_settling(&command, &after.new_since(&tree)) {
+                        break;
+                    }
+                    found = wait_for_tree(&app, cx, after.frame.saturating_add(1))
+                        .await
+                        .and_then(|found| takeover::refusal().map_or(Ok(found), Err));
                 }
-                Err(note) => {
-                    refusals.push(note);
-                    (
-                        UiTree {
-                            width: tree.width,
-                            height: tree.height,
-                            scale: tree.scale,
-                            frame: tree.frame,
-                            ..UiTree::default()
-                        },
-                        Vec::new(),
-                    )
+                let (after, added) = match found {
+                    Ok((_, after)) => {
+                        let added = after.new_since(&tree).into_iter().cloned().collect();
+                        (after, added)
+                    }
+                    Err(note) => {
+                        refusals.push(note);
+                        (
+                            UiTree {
+                                width: tree.width,
+                                height: tree.height,
+                                scale: tree.scale,
+                                frame: tree.frame,
+                                ..UiTree::default()
+                            },
+                            Vec::new(),
+                        )
+                    }
+                };
+                // What the frames after the input refused (a link run at render).
+                for refusal in guard::take_refusals() {
+                    if !refusals.contains(&refusal) {
+                        refusals.push(refusal);
+                    }
                 }
+                let (tree, added, shot) = driver_shot::after_input(
+                    &app,
+                    cx,
+                    &agent,
+                    pending.request.shot,
+                    &tree,
+                    after,
+                    added,
+                )
+                .await;
+                pending.answer(UiReply::Done {
+                    tree,
+                    added,
+                    refusals,
+                    ui_send,
+                    shot,
+                });
             };
-            // What the frames after the input refused (a link run at render).
-            for refusal in guard::take_refusals() {
-                if !refusals.contains(&refusal) {
-                    refusals.push(refusal);
-                }
+            body.await;
+            if let Some(id) = input_id {
+                let _ = app.update_in(cx, |app, window, cx| {
+                    app.agent_command_finished(id, window, cx)
+                });
             }
-            let (tree, added, shot) = driver_shot::after_input(
-                &app,
-                cx,
-                &agent,
-                pending.request.shot,
-                &tree,
-                after,
-                added,
-            )
-            .await;
-            pending.answer(UiReply::Done {
-                tree,
-                added,
-                refusals,
-                ui_send,
-                shot,
-            });
         })
         .detach();
+    }
+
+    /// The input command `id` answered (or its task ended): the next waiting
+    /// one starts. One that refuses at once leaves the way open for the one
+    /// behind it.
+    fn agent_command_finished(&mut self, id: u64, window: &mut Window, cx: &mut Context<Self>) {
+        let Driver::Running { id: running, .. } = &self.agent_bridge.driver else {
+            return;
+        };
+        if *running != id {
+            return;
+        }
+        let Driver::Running { mut waiting, .. } =
+            std::mem::replace(&mut self.agent_bridge.driver, Driver::Idle)
+        else {
+            return;
+        };
+        while let Some(next) = waiting.pop_front() {
+            self.agent_driver_start(next, window, cx);
+            if let Driver::Running {
+                waiting: behind, ..
+            } = &mut self.agent_bridge.driver
+            {
+                behind.append(&mut waiting);
+                return;
+            }
+        }
     }
 
     /// One line in the activity log per input command: what the agent did

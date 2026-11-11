@@ -643,6 +643,75 @@ fn a_tool_that_gave_up_gets_nothing_injected(cx: &mut TestAppContext) {
     assert_eq!(value, None, "nothing was typed for a tool that gave up");
 }
 
+/// Two agents' input commands do not interleave: the second waits for the
+/// first to answer, and both do answer.
+#[gpui_kit::test]
+fn input_commands_run_one_at_a_time(cx: &mut TestAppContext) {
+    use crate::ui::agent_state::Driver;
+    let _guard = quill::locks::lock_or_recover(&TEST_LOCK);
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    turn_on();
+    grant(11, Scope::ReadWrite);
+    let _presence = activity::connect("Test agent");
+    settle(vcx);
+    let tree = read_tree(&app, vcx);
+    let search = tree
+        .nodes
+        .iter()
+        .find(|n| n.role.ends_with("Input") && n.bounds.is_some())
+        .map(|n| n.id.clone())
+        .unwrap_or_else(|| panic!("a text input"));
+    let _ = drive(&app, vcx, click(Target::Node(search.clone())));
+
+    let post = |text: &str| {
+        bridge::post("Test agent", UiCommand::TypeText { text: text.into() })
+            .unwrap_or_else(|_| panic!("posted"))
+    };
+    let (first, second) = (post("a"), post("b"));
+    vcx.update(|window, cx| {
+        app.update(cx, |app, cx| {
+            app.agent_driver_tick(window, cx);
+        })
+    });
+    let waiting = app.read_with(vcx, |app, _| match &app.agent_bridge.driver {
+        Driver::Running { waiting, .. } => Some(waiting.len()),
+        Driver::Idle => None,
+    });
+    assert_eq!(waiting, Some(1), "one runs, the other waits its turn");
+    let mut answers = (None, None);
+    for _ in 0..80 {
+        pump(&app, vcx);
+        answers.0 = answers.0.or_else(|| first.poll());
+        answers.1 = answers.1.or_else(|| second.poll());
+        if answers.0.is_some() && answers.1.is_some() {
+            break;
+        }
+    }
+    assert!(
+        matches!(answers.0, Some(UiReply::Done { .. })),
+        "{:?}",
+        answers.0
+    );
+    assert!(
+        matches!(answers.1, Some(UiReply::Done { .. })),
+        "{:?}",
+        answers.1
+    );
+    let idle = app.read_with(vcx, |app, _| {
+        matches!(app.agent_bridge.driver, Driver::Idle)
+    });
+    assert!(idle, "nothing runs once both answered");
+    let value = read_tree(&app, vcx)
+        .node(&search)
+        .and_then(|n| n.value.clone());
+    assert_eq!(
+        value.as_deref(),
+        Some("ab"),
+        "typed in order, not interleaved"
+    );
+}
+
 /// The cost of building the tree every frame, printed for the decision
 /// doc: `cargo test --features demo-capture --bin quill -- --ignored
 /// --nocapture forced_tree_frame_cost`.

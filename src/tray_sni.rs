@@ -22,7 +22,8 @@
 use crate::icon_badge::LatestSlot;
 use crate::locks::LockExt;
 use crate::tray::{
-    TrayAction, notifications_label, render_tray_icon, rgba_to_argb32, sounds_label, tray_tooltip,
+    TrayAction, TrayToggles, notifications_label, render_tray_icon, rgba_to_argb32, sounds_label,
+    tray_tooltip,
 };
 use ksni::{Handle, TrayMethods};
 use std::future::Future;
@@ -65,8 +66,8 @@ pub fn take_actions() -> Vec<TrayAction> {
 /// The StatusNotifierItem model ksni publishes over D-Bus.
 struct SniTray {
     unread: u32,
-    /// (desktop notifications on, notification sounds on) — menu labels.
-    toggles: (bool, bool),
+    /// The notification toggles' labels, or none while Quill is locked.
+    toggles: TrayToggles,
 }
 
 impl SniTray {
@@ -107,25 +108,37 @@ impl ksni::Tray for SniTray {
 
     fn menu(&self) -> Vec<ksni::MenuItem<Self>> {
         use ksni::menu::StandardItem;
-        vec![
+        let mut items: Vec<ksni::MenuItem<Self>> = vec![
             StandardItem {
                 label: "Open Quill".into(),
                 activate: Box::new(|_| push_action(TrayAction::Open)),
                 ..Default::default()
             }
             .into(),
-            StandardItem {
-                label: notifications_label(self.toggles.0).into(),
-                activate: Box::new(|_| push_action(TrayAction::ToggleNotifications)),
-                ..Default::default()
-            }
-            .into(),
-            StandardItem {
-                label: sounds_label(self.toggles.1).into(),
-                activate: Box::new(|_| push_action(TrayAction::ToggleSounds)),
-                ..Default::default()
-            }
-            .into(),
+        ];
+        if let TrayToggles::Shown {
+            notifications,
+            sounds,
+        } = self.toggles
+        {
+            items.push(
+                StandardItem {
+                    label: notifications_label(notifications).into(),
+                    activate: Box::new(|_| push_action(TrayAction::ToggleNotifications)),
+                    ..Default::default()
+                }
+                .into(),
+            );
+            items.push(
+                StandardItem {
+                    label: sounds_label(sounds).into(),
+                    activate: Box::new(|_| push_action(TrayAction::ToggleSounds)),
+                    ..Default::default()
+                }
+                .into(),
+            );
+        }
+        items.extend([
             StandardItem {
                 label: "Lock Quill".into(),
                 activate: Box::new(|_| push_action(TrayAction::Lock)),
@@ -139,24 +152,26 @@ impl ksni::Tray for SniTray {
                 ..Default::default()
             }
             .into(),
-        ]
+        ]);
+        items
     }
 }
 
 enum Phase {
     /// No attempt in flight; the next one may start at the instant.
     Idle(Instant),
-    /// A worker is registering with the watcher.
-    Connecting(Receiver<Option<Handle<SniTray>>>),
+    /// A worker is registering with the watcher, with what the item is
+    /// created showing (what it shows on landing).
+    Connecting(Receiver<Option<Handle<SniTray>>>, Shown),
     /// Registered and showing.
     Ready {
         handle: Handle<SniTray>,
         publisher: Publisher,
-        shown: (u32, (bool, bool)),
+        shown: Shown,
     },
 }
 
-type Shown = (u32, (bool, bool));
+type Shown = (u32, TrayToggles);
 
 /// Hands tray changes to a worker. `Handle::update` waits for ksni's service
 /// task, which waits on the session bus, so calling it here could hang the
@@ -255,23 +270,25 @@ impl TrayState {
     /// logic polls this to tell "no tray host" (reveal the window) from
     /// "tray still registering" without blocking the UI thread.
     pub fn registering(&self) -> bool {
-        matches!(self.phase, Phase::Connecting(_))
+        matches!(self.phase, Phase::Connecting(..))
     }
 
     /// Advance the lifecycle and publish `unread`.
-    pub fn poll(&mut self, unread: u32, toggles: (bool, bool)) {
+    pub fn poll(&mut self, unread: u32, toggles: TrayToggles) {
         match &mut self.phase {
             Phase::Idle(not_before) => {
                 if Instant::now() >= *not_before {
-                    self.phase = Phase::Connecting(start_registration(unread, toggles));
+                    self.phase =
+                        Phase::Connecting(start_registration(unread, toggles), (unread, toggles));
                 }
             }
-            Phase::Connecting(result) => match result.try_recv() {
+            Phase::Connecting(result, started_with) => match result.try_recv() {
                 Ok(Some(handle)) => {
+                    // The next poll publishes what changed while it registered.
                     self.phase = Phase::Ready {
                         publisher: spawn_publisher(&handle),
                         handle,
-                        shown: (unread, toggles),
+                        shown: *started_with,
                     }
                 }
                 Ok(None) | Err(TryRecvError::Disconnected) => {
@@ -306,7 +323,21 @@ impl Default for TrayState {
     }
 }
 
-fn start_registration(unread: u32, toggles: (bool, bool)) -> Receiver<Option<Handle<SniTray>>> {
+/// Give the registered handle to the UI thread. When nobody waits for it any
+/// more ("Show tray icon" was turned off while this registered), the worker
+/// shuts the item down itself: ksni keeps the icon until told to stop, and
+/// a dropped handle does not.
+fn hand_over<H>(
+    sender: &std::sync::mpsc::Sender<Option<H>>,
+    handle: Option<H>,
+    shut_down: impl FnOnce(H),
+) {
+    if let Err(std::sync::mpsc::SendError(Some(unsent))) = sender.send(handle) {
+        shut_down(unsent);
+    }
+}
+
+fn start_registration(unread: u32, toggles: TrayToggles) -> Receiver<Option<Handle<SniTray>>> {
     let (sender, receiver) = channel();
     // If the thread cannot spawn, `sender` is dropped with the closure and
     // the receiver reports `Disconnected`, which schedules a retry.
@@ -314,7 +345,7 @@ fn start_registration(unread: u32, toggles: (bool, bool)) -> Receiver<Option<Han
         let tray = SniTray { unread, toggles } // A Flatpak sandbox cannot own the well-known name ksni would take.
             .disable_dbus_name(crate::desktop_app_id::in_flatpak());
         let handle = within(DBUS_LIMIT, tray.spawn()).and_then(Result::ok);
-        let _ = sender.send(handle);
+        hand_over(&sender, handle, |orphan| drop(orphan.shutdown()));
     });
     receiver
 }
@@ -324,6 +355,31 @@ mod tests {
     use super::*;
     use std::sync::mpsc::sync_channel;
 
+    const SHOWN: TrayToggles = TrayToggles::Shown {
+        notifications: true,
+        sounds: true,
+    };
+    const QUIET: TrayToggles = TrayToggles::Shown {
+        notifications: false,
+        sounds: true,
+    };
+
+    /// A registration that finishes after the tray was hidden shuts its own
+    /// icon down; one somebody waits for is handed over.
+    #[test]
+    fn a_registration_nobody_waits_for_shuts_itself_down() {
+        let (sender, receiver) = channel::<Option<u8>>();
+        let mut shut = Vec::new();
+        hand_over(&sender, Some(7), |orphan| shut.push(orphan));
+        assert!(shut.is_empty(), "handed to the waiting receiver");
+        assert_eq!(receiver.try_recv().ok(), Some(Some(7)));
+        drop(receiver);
+        hand_over(&sender, Some(8), |orphan| shut.push(orphan));
+        assert_eq!(shut, [8]);
+        hand_over(&sender, None, |orphan| shut.push(orphan));
+        assert_eq!(shut, [8], "a failed registration has nothing to shut down");
+    }
+
     #[test]
     fn publishing_never_waits_for_the_tray_service() {
         let (seen_tx, seen_rx) = channel();
@@ -332,14 +388,14 @@ mod tests {
             seen_tx.send(shown).unwrap();
             std::future::ready(release_rx.recv().is_ok())
         });
-        publisher.publish((1, (true, true)));
+        publisher.publish((1, SHOWN));
         // The worker is now stuck inside the first update, like ksni on a
         // wedged bus; the UI thread still publishes without waiting.
-        assert_eq!(seen_rx.recv().unwrap(), (1, (true, true)));
-        publisher.publish((2, (true, true)));
-        publisher.publish((3, (false, true)));
+        assert_eq!(seen_rx.recv().unwrap(), (1, SHOWN));
+        publisher.publish((2, SHOWN));
+        publisher.publish((3, QUIET));
         release_tx.send(()).unwrap();
-        assert_eq!(seen_rx.recv().unwrap(), (3, (false, true)));
+        assert_eq!(seen_rx.recv().unwrap(), (3, QUIET));
         release_tx.send(()).unwrap();
         drop(publisher);
         assert!(
@@ -357,8 +413,8 @@ mod tests {
             seen_tx.send(shown).unwrap();
             std::future::pending()
         });
-        publisher.publish((1, (true, true)));
-        assert_eq!(seen_rx.recv().unwrap(), (1, (true, true)));
+        publisher.publish((1, SHOWN));
+        assert_eq!(seen_rx.recv().unwrap(), (1, SHOWN));
         // The worker gave up and dropped `apply` with it.
         assert!(seen_rx.recv().is_err());
         assert!(publisher.stopped());

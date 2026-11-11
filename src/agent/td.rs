@@ -51,7 +51,8 @@ pub enum TdError {
 
 static CLIENTS: Mutex<Vec<(AccountKey, Client)>> = Mutex::new(Vec::new());
 /// Waiting agent requests: request id → (the client it went to, its waiter).
-static PENDING: Mutex<Option<HashMap<u64, (i32, SyncSender<Value>)>>> = Mutex::new(None);
+type Waiting = HashMap<u64, (i32, SyncSender<Value>)>;
+static PENDING: Mutex<Option<Waiting>> = Mutex::new(None);
 static NEXT_ID: AtomicU64 = AtomicU64::new(0);
 
 /// Make `live` the client agents use for `account`. Called when the

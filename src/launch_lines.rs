@@ -94,6 +94,50 @@ impl LinesFile {
     }
 }
 
+/// The file this process writes its layouts to: the one of the account whose
+/// connection opened last, until that account logs out.
+#[cfg_attr(
+    not(all(target_os = "macos", feature = "ui")),
+    allow(dead_code, reason = "only the macOS line cache saves layouts")
+)]
+enum Slot {
+    /// Nothing opened yet, or no key (a locked launch).
+    Empty,
+    /// Layouts are written to this file at quit.
+    Open(LinesFile),
+    /// The opened account logged out or was removed: its layouts hold its
+    /// chat names, so none are written.
+    Forgotten,
+}
+
+#[cfg_attr(
+    not(all(target_os = "macos", feature = "ui")),
+    allow(dead_code, reason = "only the macOS line cache saves layouts")
+)]
+impl Slot {
+    /// An account's connection opened: its file is the one to write, whatever
+    /// the slot held (a switch from account A to B moves it to B's).
+    fn opened(&mut self, file: LinesFile) {
+        *self = Slot::Open(file);
+    }
+
+    /// The account whose layouts sit in `path` logged out.
+    fn forget(&mut self, path: &std::path::Path) {
+        if matches!(self, Slot::Open(open) if open.path == path) {
+            *self = Slot::Forgotten;
+        }
+    }
+
+    fn file(&self) -> Option<&LinesFile> {
+        match self {
+            Slot::Open(file) => Some(file),
+            Slot::Empty | Slot::Forgotten => None,
+        }
+    }
+}
+
+static SLOT: std::sync::Mutex<Slot> = std::sync::Mutex::new(Slot::Empty);
+
 /// The active account's database key is known (the launch's connection is
 /// being prepared, on a worker): hand the text system its saved layouts,
 /// and keep the file to write this launch's to.
@@ -103,28 +147,17 @@ pub fn open(paths: &AccountPaths, database_key: &DatabaseKey) {
         let file = LinesFile::new(paths, database_key);
         let stamp = crate::launch_prewarm::cache_stamp();
         gpui_macos::line_cache::load(file.read().as_deref(), &stamp);
-        let _ = OPENED.set(file);
+        crate::locks::lock_or_recover(&SLOT).opened(file);
     }
     #[cfg(not(all(target_os = "macos", feature = "ui")))]
     let _ = (paths, database_key);
 }
 
-#[cfg(all(target_os = "macos", feature = "ui"))]
-static OPENED: std::sync::OnceLock<LinesFile> = std::sync::OnceLock::new();
-
-/// The account [`open`] read the layouts of logged out or was removed:
-/// this launch's layouts hold its chat names, so none are written at quit.
-#[cfg(all(target_os = "macos", feature = "ui"))]
-static FORGOTTEN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-
 /// `paths`' account logged out or was removed: its saved layouts go, and
 /// when they are the ones this launch opened, none are written back.
 pub fn forget(paths: &AccountPaths) {
     let file = paths.root.join(FILE);
-    #[cfg(all(target_os = "macos", feature = "ui"))]
-    if OPENED.get().is_some_and(|opened| opened.path == file) {
-        FORGOTTEN.store(true, std::sync::atomic::Ordering::SeqCst);
-    }
+    crate::locks::lock_or_recover(&SLOT).forget(&file);
     let _ = std::fs::remove_file(file);
 }
 
@@ -135,8 +168,7 @@ pub fn save() {
     {
         let stamp = crate::launch_prewarm::cache_stamp();
         if let Some(layouts) = gpui_macos::line_cache::save(&stamp)
-            && !FORGOTTEN.load(std::sync::atomic::Ordering::SeqCst)
-            && let Some(file) = OPENED.get()
+            && let Some(file) = crate::locks::lock_or_recover(&SLOT).file()
         {
             let _ = file.write(&layouts);
         }
@@ -194,6 +226,33 @@ mod tests {
         assert_eq!(lines.read(), None);
         std::fs::write(&lines.path, MAGIC).expect("cut");
         assert_eq!(lines.read(), None);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn the_file_written_is_the_one_of_the_account_opened_last() {
+        let dir = temp("slot");
+        let first = file(&dir, 1);
+        let second = LinesFile::new(
+            &AccountPaths::for_root(&dir, &crate::ids::AccountKey("b".into())),
+            &DatabaseKey::from_bytes(vec![2; 32]).expect("key"),
+        );
+        let (first_path, second_path) = (first.path.clone(), second.path.clone());
+        let mut slot = Slot::Empty;
+        assert!(slot.file().is_none());
+        slot.opened(first);
+        slot.opened(second);
+        assert_eq!(
+            slot.file().map(|f| f.path.clone()),
+            Some(second_path.clone())
+        );
+        slot.forget(&first_path);
+        assert!(slot.file().is_some(), "another account's logout leaves it");
+        slot.forget(&second_path);
+        assert!(slot.file().is_none(), "its own logout stops the write");
+        let reopened = file(&dir, 1);
+        slot.opened(reopened);
+        assert!(slot.file().is_some(), "a later open writes again");
         let _ = std::fs::remove_dir_all(dir);
     }
 }

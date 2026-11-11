@@ -352,7 +352,7 @@ fn open_main_window(cx: &mut gpui_kit::App, launch: MainWindowLaunch) -> gpui_ki
                 let mut waited = 0u64;
                 loop {
                     let state = watch.update(cx, |this, _| {
-                        quill::tray::sync_tray(this.session());
+                        this.sync_system_tray();
                         quill::tray::tray_startup_reveal(
                             quill::tray::tray_available(),
                             quill::tray::tray_registering(),
@@ -476,7 +476,7 @@ fn install_main_window_tray(
             ui::run_chrome_loop(executor, || {
                 let alive = tray_view
                     .update(cx, |this, _| {
-                        quill::tray::sync_tray(this.session());
+                        this.sync_system_tray();
                         // parity:platform-app-icon-badge — unread
                         // badge on the app/taskbar icon
                         // (Linux LauncherEntry D-Bus signal,
@@ -497,16 +497,12 @@ fn install_main_window_tray(
                                 tray_view.update(cx, |this, cx| this.lock_from_tray(window, cx));
                         }
                         quill::tray::TrayAction::ToggleNotifications => {
-                            let _ = tray_view.update(cx, |this, cx| {
-                                let on = this.desktop_notifications_enabled();
-                                this.set_desktop_notifications(!on, cx);
-                            });
+                            let _ = tray_view
+                                .update(cx, |this, cx| this.toggle_notifications_from_tray(cx));
                         }
                         quill::tray::TrayAction::ToggleSounds => {
-                            let _ = tray_view.update(cx, |this, cx| {
-                                let on = this.notification_sounds_enabled();
-                                this.set_inapp_sounds_enabled(!on, cx);
-                            });
+                            let _ =
+                                tray_view.update(cx, |this, cx| this.toggle_sounds_from_tray(cx));
                         }
                         quill::tray::TrayAction::Quit => {
                             let _ = tray_view.update(cx, |this, cx| {
@@ -532,7 +528,7 @@ fn install_main_window_tray(
     // A shown window gets its tray from the chrome loop's first pass, once
     // it has drawn.
     if !after_first_frame {
-        view.update(cx, |this, _| quill::tray::sync_tray_startup(this.session()));
+        view.update(cx, |this, _| this.sync_system_tray_startup());
     }
 }
 

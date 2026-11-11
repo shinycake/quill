@@ -87,6 +87,7 @@ update_pill.downloading | the update is downloading
 update_pill.ready | the update is ready, and since when
 agent_bridge.activity_shown | how many agent activity events were shown
 agent_bridge.ui_send | the channel agents send UI commands on; a command stops when the screen's epoch changes (`agent_driver.rs`)
+agent_bridge.driver | the UI driver runs agents' input commands one at a time for whichever account is on screen; a command stops when the screen's epoch changes and the next one starts (`agent_driver.rs`)
 takeover.wake_at | when the takeover banner next redraws
 connect.generation | which prepared connection may open
 connect.closed_noted | the generation whose close was noted

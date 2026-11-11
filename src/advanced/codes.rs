@@ -31,6 +31,11 @@ pub struct CodeFeeder {
 }
 
 impl CodeFeeder {
+    /// Forget what was typed: the keys went into a text field, not to the codes.
+    pub fn clear(&mut self) {
+        self.secret.clear();
+    }
+
     /// Add typed text. Returns the code it completed, if any.
     pub fn feed(&mut self, text: &str) -> Option<Code> {
         for c in text.chars().flat_map(char::to_lowercase) {
@@ -90,6 +95,14 @@ mod tests {
     fn codes_ignore_case_and_accept_pasted_text() {
         let mut feeder = CodeFeeder::default();
         assert_eq!(feeder.feed("NumberButtons"), Some(Code::NumberButtons));
+    }
+
+    #[test]
+    fn clearing_forgets_a_partial_code() {
+        let mut feeder = CodeFeeder::default();
+        assert_eq!(feeder.feed("test"), None);
+        feeder.clear();
+        assert_eq!(feeder.feed("mode"), None);
     }
 
     #[test]

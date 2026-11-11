@@ -48,6 +48,17 @@ impl QuillApp {
         let Some(screen) = self.code_screen() else {
             return;
         };
+        // On the sign-in screen the keys of a text field are its own: a 2FA
+        // password or an email address that holds "testmode" must not run
+        // it. The phone step takes digits only, so letters typed there
+        // were never going into the field.
+        if screen == CodeScreen::SignIn
+            && window.focused_text_input()
+            && !matches!(self.current_auth(), AuthorizationState::WaitPhoneNumber)
+        {
+            self.preferences.advanced.codes.clear();
+            return;
+        }
         if let Some(code) = self.preferences.advanced.codes.feed(text) {
             self.in_window_scope(None, cx, |this, cx| {
                 this.run_secret_code(code, screen, window, cx)

@@ -64,12 +64,25 @@ fn reap_after_with(child: Child, grace: Duration, done: Option<SyncSender<()>>) 
 /// Collect `child` once it exits by itself, so it does not stay behind as a
 /// zombie until Quill quits. Never kills: whatever `open` or `xdg-open`
 /// started may stay in the foreground.
-pub fn wait_in_background(mut child: Child) -> Receiver<()> {
+pub fn wait_in_background(child: Child) -> Receiver<()> {
     let (done, notice) = sync_channel(1);
-    let _ = crate::thread_guard::spawn_guarded("quill-child-wait", move || {
-        let _ = child.wait();
+    let slot = Arc::new(Mutex::new(Some(child)));
+    let worker = slot.clone();
+    let spawned = crate::thread_guard::spawn_guarded("quill-child-wait", move || {
+        let child = worker.lock().ok().and_then(|mut slot| slot.take());
+        if let Some(mut child) = child {
+            let _ = child.wait();
+        }
         let _ = done.try_send(());
     });
+    if spawned.is_err() {
+        // No thread to wait on: reap it now if it already exited, and
+        // never block the caller for one that has not.
+        let child = slot.lock().ok().and_then(|mut slot| slot.take());
+        if let Some(mut child) = child {
+            let _ = child.try_wait();
+        }
+    }
     notice
 }
 

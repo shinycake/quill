@@ -50,6 +50,29 @@ pub enum TrayAction {
     Quit,
 }
 
+/// The tray menu's two notification toggles: shown with the labels of the
+/// settings they flip, or left out while Quill is locked (tdesktop hides
+/// the notifications toggle under the lock; a locked Quill changes no
+/// setting).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TrayToggles {
+    Hidden,
+    Shown { notifications: bool, sounds: bool },
+}
+
+impl TrayToggles {
+    /// The toggles for the account on screen: none while `locked`.
+    pub fn for_session(session: Option<&Session>, locked: bool) -> Self {
+        if locked {
+            return TrayToggles::Hidden;
+        }
+        TrayToggles::Shown {
+            notifications: session.is_none_or(|s| s.settings.desktop_notifications),
+            sounds: session.is_none_or(|s| s.settings.inapp_sounds_enabled),
+        }
+    }
+}
+
 /// Tray menu labels for the two notification toggles, tdesktop wording
 /// (`lng_disable_notifications_from_tray` / `lng_enable_…`).
 pub fn notifications_label(enabled: bool) -> &'static str {
@@ -548,8 +571,8 @@ pub struct Tray {
     icon: tray_icon::TrayIcon,
     notifications_item: tray_icon::menu::MenuItem,
     sounds_item: tray_icon::menu::MenuItem,
-    /// Last labels set: (notifications on, sounds on).
-    toggles_shown: Option<(bool, bool)>,
+    /// Last toggles set.
+    toggles_shown: Option<TrayToggles>,
     /// Last drawn (unread, all-muted, dark menu bar) — redraw on change.
     last_shown: Option<(u32, bool, Option<bool>)>,
 }
@@ -618,14 +641,25 @@ impl Tray {
         })
     }
 
-    fn set_toggles(&mut self, notifications: bool, sounds: bool) {
-        if self.toggles_shown == Some((notifications, sounds)) {
+    /// A menu item cannot be hidden here, so the toggles are disabled while
+    /// locked.
+    fn set_toggles(&mut self, toggles: TrayToggles) {
+        if self.toggles_shown == Some(toggles) {
             return;
         }
-        self.toggles_shown = Some((notifications, sounds));
-        self.notifications_item
-            .set_text(notifications_label(notifications));
-        self.sounds_item.set_text(sounds_label(sounds));
+        self.toggles_shown = Some(toggles);
+        if let TrayToggles::Shown {
+            notifications,
+            sounds,
+        } = toggles
+        {
+            self.notifications_item
+                .set_text(notifications_label(notifications));
+            self.sounds_item.set_text(sounds_label(sounds));
+        }
+        let enabled = matches!(toggles, TrayToggles::Shown { .. });
+        self.notifications_item.set_enabled(enabled);
+        self.sounds_item.set_enabled(enabled);
     }
 
     fn set_unread(&mut self, unread: u32, muted: bool) {
@@ -715,11 +749,10 @@ thread_local! {
 /// The muted look (tdesktop `unreadBadgeMuted`) applies when every counted
 /// unread chat is muted.
 #[cfg(all(feature = "ui", not(target_os = "linux")))]
-pub fn sync_tray(session: Option<&Session>) {
+pub fn sync_tray(session: Option<&Session>, locked: bool) {
     let total = crate::notify_accounts::total_unread(session);
     let (unread, muted) = (total.count, total.muted);
-    let notifications = session.is_none_or(|s| s.settings.desktop_notifications);
-    let sounds = session.is_none_or(|s| s.settings.inapp_sounds_enabled);
+    let toggles = TrayToggles::for_session(session, locked);
     TRAY.with(|cell| {
         let mut slot = cell.borrow_mut();
         if !tray_enabled() {
@@ -741,19 +774,16 @@ pub fn sync_tray(session: Option<&Session>) {
         }
         if let Some(tray) = slot.as_mut() {
             tray.set_unread(unread, muted);
-            tray.set_toggles(notifications, sounds);
+            tray.set_toggles(toggles);
         }
     });
 }
 
 /// Linux: drive the StatusNotifierItem lifecycle (see [`crate::tray_sni`]).
 #[cfg(all(feature = "ui", target_os = "linux"))]
-pub fn sync_tray(session: Option<&Session>) {
+pub fn sync_tray(session: Option<&Session>, locked: bool) {
     let unread = crate::notify_accounts::total_unread(session).count;
-    let toggles = (
-        session.is_none_or(|s| s.settings.desktop_notifications),
-        session.is_none_or(|s| s.settings.inapp_sounds_enabled),
-    );
+    let toggles = TrayToggles::for_session(session, locked);
     TRAY.with(|cell| {
         let mut state = cell.borrow_mut();
         if tray_enabled() {
@@ -769,13 +799,13 @@ pub fn sync_tray(session: Option<&Session>) {
 /// worker thread (never blocking the UI thread) and the caller watches
 /// [`tray_registering`] / [`tray_available`] to learn the outcome.
 #[cfg(all(feature = "ui", not(target_os = "linux")))]
-pub fn sync_tray_startup(session: Option<&Session>) {
-    sync_tray(session);
+pub fn sync_tray_startup(session: Option<&Session>, locked: bool) {
+    sync_tray(session, locked);
 }
 
 #[cfg(all(feature = "ui", target_os = "linux"))]
-pub fn sync_tray_startup(session: Option<&Session>) {
-    sync_tray(session);
+pub fn sync_tray_startup(session: Option<&Session>, locked: bool) {
+    sync_tray(session, locked);
 }
 
 /// Whether the tray registration is still in flight (Linux only; the other

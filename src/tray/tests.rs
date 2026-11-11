@@ -9,6 +9,18 @@ fn startup_reveal_waits_then_decides() {
     assert_eq!(tray_startup_reveal(false, false, 10), Some(true));
 }
 #[test]
+fn the_notification_toggles_are_left_out_while_locked() {
+    assert_eq!(
+        TrayToggles::for_session(None, false),
+        TrayToggles::Shown {
+            notifications: true,
+            sounds: true
+        }
+    );
+    assert_eq!(TrayToggles::for_session(None, true), TrayToggles::Hidden);
+}
+
+#[test]
 fn tray_menu_routes_only_its_own_actions() {
     assert_eq!(menu_action("quill-tray-open"), Some(TrayAction::Open));
     assert_eq!(menu_action("quill-tray-quit"), Some(TrayAction::Quit));

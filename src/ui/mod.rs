@@ -626,6 +626,7 @@ mod ton_wallet_ui_tests;
 #[cfg(target_os = "macos")]
 mod touch_bar;
 mod translate_ui;
+mod tray_lock;
 mod tray_settings;
 mod video_avatar;
 mod video_editor;

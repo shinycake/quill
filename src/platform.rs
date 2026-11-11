@@ -198,9 +198,15 @@ impl SecretStore for FileSecretStore {
         let mut sealed = seal_key_bytes(key.as_bytes())?;
         let written = write_key_file_0600(&tmp, &sealed);
         sealed.zeroize();
-        written?;
-        crate::fs_retry::rename_retrying(&tmp, &path, crate::fs_retry::SHORT)
-            .map_err(|_| SecretStoreError::Platform)?;
+        // The temp file holds the key: it never outlives a failed put.
+        let placed = written.and_then(|()| {
+            crate::fs_retry::rename_retrying(&tmp, &path, crate::fs_retry::SHORT)
+                .map_err(|_| SecretStoreError::Platform)
+        });
+        if placed.is_err() {
+            let _ = std::fs::remove_file(&tmp);
+        }
+        placed?;
         set_mode_0600(&path)?;
         Ok(())
     }
@@ -712,15 +718,25 @@ fn os_spawn(mut command: std::process::Command) -> OsOpen {
 /// thread can wait for it, the helper did start, so that is the answer.
 #[cfg(unix)]
 #[cfg_attr(all(feature = "test-support", not(test)), allow(dead_code))]
-fn answer_on_exit(mut child: std::process::Child) -> OsOpen {
+fn answer_on_exit(child: std::process::Child) -> OsOpen {
     let (answer, answered) = futures_channel::oneshot::channel();
+    // The worker takes the child from here; when no thread starts, it is
+    // still here to be handed to the reaper instead of dropped unwaited.
+    let slot = std::sync::Arc::new(std::sync::Mutex::new(Some(child)));
+    let worker = slot.clone();
     let waiter = crate::thread_guard::spawn_guarded("quill-os-open-wait", move || {
-        let success = child.wait().is_ok_and(|status| status.success());
+        let child = crate::locks::lock_or_recover(&worker).take();
+        let success = child.is_some_and(|mut child| child.wait().is_ok_and(|s| s.success()));
         let _ = answer.send(success);
     });
     match waiter {
         Ok(_) => OsOpen::Pending(answered),
-        Err(_) => OsOpen::Answered(true),
+        Err(_) => {
+            if let Some(child) = crate::locks::lock_or_recover(&slot).take() {
+                let _ = crate::child_reap::wait_in_background(child);
+            }
+            OsOpen::Answered(true)
+        }
     }
 }
 
@@ -1099,6 +1115,19 @@ mod tests {
             let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
             assert_eq!(mode, 0o600, "key file must be owner-read/write only");
         }
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_failed_put_leaves_no_key_in_the_temp_file() {
+        let root = tmp_app_root("failed-put");
+        let account = AccountKey::primary();
+        let store = FileSecretStore::new(&root);
+        // A folder where the key file belongs makes the rename fail.
+        std::fs::create_dir_all(store.key_path(&account)).unwrap();
+        assert!(store.put(&account, &DatabaseKey::generate()).is_err());
+        let tmp = store.key_path(&account).with_extension("key.tmp");
+        assert!(!tmp.exists(), "the raw key stayed in {tmp:?}");
         let _ = std::fs::remove_dir_all(&root);
     }
 
