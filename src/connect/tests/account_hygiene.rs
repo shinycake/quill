@@ -347,7 +347,7 @@ fn clear_storage_sends_optimize_storage_and_reports_freed_bytes() {
     assert_eq!(request["file_types"][1]["@type"], "fileTypeVideo");
     assert_eq!(request["chat_ids"], serde_json::json!([]));
     assert_eq!(request["return_deleted_file_statistics"], true);
-    assert!(f.1.session.settings.storage_clearing);
+    assert!(f.1.session.settings.storage_clear.is_loading());
     // One clear at a time.
     assert_invalid(f.1.clear_storage(&[], &[]));
     let extra = request["@extra"].as_str().unwrap().to_string();
@@ -359,10 +359,13 @@ fn clear_storage_sends_optimize_storage_and_reports_freed_bytes() {
             r#"{{"@type":"storageStatistics","size":"5242880","count":3,"by_chat":[],"@extra":"{extra}"}}"#
         ),
     );
-    assert_eq!(f.1.session.settings.storage_freed, Some(5_242_880));
-    assert!(!f.1.session.settings.storage_clearing);
+    assert_eq!(
+        f.1.session.settings.storage_clear.data().copied(),
+        Some(5_242_880)
+    );
+    assert!(!f.1.session.settings.storage_clear.is_loading());
     // The usage numbers are refetched on the same ingest.
-    assert!(f.1.session.settings.storage_stats_loading);
+    assert!(f.1.session.settings.storage_stats.is_loading());
     assert_eq!(requests_of(&f.2, "getStorageStatistics").len(), 1);
     cleanup(f);
 }
@@ -388,9 +391,9 @@ fn clear_storage_failure_reports_and_frees_the_gate() {
         &f.3,
         &format!(r#"{{"@type":"error","code":500,"message":"x","@extra":"{extra}"}}"#),
     );
-    assert!(!f.1.session.settings.storage_clearing);
-    assert!(f.1.session.settings.data_storage_error.is_some());
-    assert!(f.1.session.settings.storage_freed.is_none());
+    assert!(!f.1.session.settings.storage_clear.is_loading());
+    assert!(f.1.session.settings.data_storage_error().is_some());
+    assert!(f.1.session.settings.storage_clear.data().is_none());
     cleanup(f);
 }
 

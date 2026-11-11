@@ -1,5 +1,6 @@
 //! Connect driver: storage statistics, auto-download presets and storage limits.
 use super::*;
+use crate::state::fetch::Fetch;
 
 impl<S: JsonSender> ConnectDriver<S> {
     /// Phase S2: `getStorageStatistics` for the storage-usage overlay —
@@ -13,7 +14,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        if self.session.settings.storage_stats.is_some()
+        if self.session.settings.storage_stats.data().is_some()
             || self
                 .session
                 .requests
@@ -24,12 +25,12 @@ impl<S: JsonSender> ConnectDriver<S> {
         let extra = self
             .session
             .request(RequestPurpose::GetStorageStatistics, None);
-        self.session.settings.storage_stats_loading = true;
+        self.session.settings.storage_stats.begin();
         match self.sender.send_json(&get_storage_statistics(extra, 50)) {
             Ok(()) => Ok(Some(extra)),
             Err(err) => {
                 self.session.requests.take(extra);
-                self.session.settings.storage_stats_loading = false;
+                self.session.settings.storage_stats.cancel();
                 Err(err)
             }
         }
@@ -42,8 +43,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// data yet." until the old answer lands (late answers to the dropped
     /// `@extra` are ignored by the purpose match).
     pub fn refresh_storage_statistics(&mut self) {
-        self.session.settings.storage_stats = None;
-        self.session.settings.storage_stats_loading = false;
+        self.session.settings.storage_stats = Fetch::Idle;
         self.session
             .requests
             .take_purpose(RequestPurpose::GetStorageStatistics);
@@ -69,15 +69,16 @@ impl<S: JsonSender> ConnectDriver<S> {
         let extra = self
             .session
             .request(RequestPurpose::GetAutoDownloadSettingsPresets, None);
-        self.session.settings.auto_download_presets_loading = true;
+        self.session.settings.auto_download_presets.begin();
         if let Err(err) = self
             .sender
             .send_json(&get_auto_download_settings_presets(extra))
         {
             self.session.requests.take(extra);
-            self.session.settings.auto_download_presets_loading = false;
-            self.session.settings.data_storage_error =
-                Some("Couldn't load auto-download settings.".to_string());
+            self.session
+                .settings
+                .auto_download_presets
+                .fail("Couldn't load auto-download settings.");
             return Err(err);
         }
         Ok(())
@@ -109,8 +110,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         let payload = set_auto_download_settings(extra, settings.to_json(), network.td_type());
         if let Err(err) = self.sender.send_json(&payload) {
             self.session.requests.take(extra);
-            self.session.settings.data_storage_error =
-                Some("Couldn't save auto-download settings.".to_string());
+            self.session
+                .settings
+                .data_storage_save
+                .fail("Couldn't save auto-download settings.");
             return Err(err);
         }
         Ok(extra)
@@ -155,7 +158,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         file_types: &[&str],
         chat_ids: &[i64],
     ) -> Result<RequestId, ConnectSendError> {
-        if !self.chats_path_active() || self.session.settings.storage_clearing {
+        if !self.chats_path_active() || self.session.settings.storage_clear.is_loading() {
             return Err(ConnectSendError::InvalidRequest);
         }
         let extra = self.session.request(RequestPurpose::OptimizeStorage, None);
@@ -164,14 +167,13 @@ impl<S: JsonSender> ConnectDriver<S> {
             chat_ids,
             ..OptimizeStorage::everything(50)
         };
-        self.session.settings.storage_freed = None;
-        self.session.settings.storage_clearing = true;
-        self.session.settings.data_storage_error = None;
+        self.session.settings.storage_clear.begin();
         if let Err(err) = self.sender.send_json(&optimize_storage(extra, &params)) {
             self.session.requests.take(extra);
-            self.session.settings.storage_clearing = false;
-            self.session.settings.data_storage_error =
-                Some("Couldn't clear the cache.".to_string());
+            self.session
+                .settings
+                .storage_clear
+                .fail("Couldn't clear the cache.");
             return Err(err);
         }
         Ok(extra)
@@ -204,8 +206,10 @@ impl<S: JsonSender> ConnectDriver<S> {
             };
             if let Err(err) = self.sender.send_json(&json) {
                 self.session.requests.take(extra);
-                self.session.settings.data_storage_error =
-                    Some("Couldn't save the storage limits.".to_string());
+                self.session
+                    .settings
+                    .data_storage_save
+                    .fail("Couldn't save the storage limits.");
                 first_error.get_or_insert(err);
             }
         }

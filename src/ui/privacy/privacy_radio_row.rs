@@ -130,11 +130,11 @@ impl QuillApp {
     pub(super) fn read_date_toggle_row(&self, cx: &mut Context<Self>) -> AnyElement {
         let hidden = !self
             .session()
-            .and_then(|s| s.settings.read_date_show)
+            .and_then(|s| s.settings.read_date.show())
             .unwrap_or(true);
         let loading = self
             .session()
-            .is_some_and(|s| s.settings.read_date_stage.in_flight());
+            .is_some_and(|s| s.settings.read_date.in_flight());
         div()
             .id("privacy-hide-read-time")
             .role(gpui_kit::Role::Button)
@@ -179,7 +179,7 @@ impl QuillApp {
     pub(super) fn toggle_read_date(&mut self, cx: &mut Context<Self>) {
         let next = !self
             .session()
-            .and_then(|s| s.settings.read_date_show)
+            .and_then(|s| s.settings.read_date.show())
             .unwrap_or(true);
         if let Some(live) = self.live.as_mut() {
             let result = { live.driver.set_read_date_privacy(next) };
@@ -190,7 +190,7 @@ impl QuillApp {
                 )));
             }
         } else if let Some(demo) = self.demo_session.as_mut() {
-            demo.settings.read_date_show = Some(next);
+            demo.settings.read_date = quill::state::ReadDate::Known(next);
         }
         cx.notify();
     }

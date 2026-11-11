@@ -38,7 +38,7 @@ impl Session {
                 self.groups.invite_link_error.clone(),
                 self.calls.group_call_error.clone(),
                 self.calls.error.clone(),
-                self.settings.account_error.clone(),
+                self.settings.account_ttl.error().map(str::to_owned),
             ],
             [
                 self.chats_state.chat_action_error.clone(),
@@ -74,6 +74,9 @@ impl Session {
         self.groups.invite_link_error = invite_link;
         self.calls.group_call_error = group_call;
         self.calls.error = calls;
-        self.settings.account_error = account;
+        match account {
+            Some(note) => self.settings.account_ttl.fail(note),
+            None => self.settings.account_ttl.clear_error(),
+        }
     }
 }

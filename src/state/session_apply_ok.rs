@@ -127,8 +127,7 @@ impl Session {
                     | RequestPurpose::TerminateAllOtherSessions
             )
         ) {
-            self.settings.sessions_stale = true;
-            self.settings.sessions_mutating = false;
+            self.settings.sessions_edit = ListEdit::Refetch;
             self.settings.sessions.clear_error();
         }
         // Slice A4: a `toggleSessionCanAcceptSecretChats` /
@@ -142,16 +141,13 @@ impl Session {
                     | RequestPurpose::Settings(SettingsPurpose::ToggleSessionCalls { .. })
             )
         ) {
-            self.settings.sessions_stale = true;
-            self.settings.sessions_mutating = false;
+            self.settings.sessions_edit = ListEdit::Refetch;
             self.settings.sessions.clear_error();
         }
         if let Some(RequestPurpose::Settings(SettingsPurpose::SetDefaultAutoDelete { seconds })) =
             pending.map(|p| p.purpose)
         {
-            self.settings.default_auto_delete_secs = Some(seconds);
-            self.settings.default_auto_delete_busy = false;
-            self.settings.default_auto_delete_error = None;
+            self.settings.default_auto_delete.succeed(seconds);
         }
         // Slice A7: a `setAccountTtl` succeeded — the server
         // confirmed the write of exactly the sent value, so it
@@ -164,16 +160,14 @@ impl Session {
         if let Some(RequestPurpose::Settings(SettingsPurpose::SetAccountTtl { days })) =
             pending.map(|p| p.purpose)
         {
-            self.settings.account_ttl_days = Some(days);
-            self.settings.account_mutating = false;
-            self.settings.account_error = None;
+            self.settings.account_ttl.succeed(days);
         }
         if matches!(
             pending.map(|p| p.purpose),
             Some(RequestPurpose::DeleteAccount)
         ) {
-            self.settings.account_mutating = false;
-            self.settings.account_error = None;
+            self.settings.account_ttl.cancel();
+            self.settings.account_ttl.clear_error();
         }
         // Slice A8: a `checkPhoneNumberCode` succeeded — the
         // server completed the number change of the number the
@@ -220,7 +214,7 @@ impl Session {
         {
             *self.settings.data_storage.for_network_mut(network) = settings;
             self.settings.data_storage.seeded = true;
-            self.settings.data_storage_error = None;
+            self.settings.data_storage_save.succeed(());
             self.settings.data_storage_dirty = true;
             self.settings.auto_download_answer = extra.map(AutoDownloadAnswer::Saved);
         }
@@ -259,7 +253,7 @@ impl Session {
             pending.map(|p| p.purpose),
             Some(RequestPurpose::SetStorageOption)
         ) {
-            self.settings.data_storage_error = None;
+            self.settings.data_storage_save.succeed(());
         }
         // Slice A4: a `disconnectWebsite` /
         // `disconnectAllWebsites` succeeded — same stale pattern
@@ -271,9 +265,8 @@ impl Session {
                     | RequestPurpose::DisconnectAllWebsites
             )
         ) {
-            self.settings.websites_stale = true;
-            self.settings.websites_mutating = false;
-            self.settings.websites_error = None;
+            self.settings.websites_edit = ListEdit::Refetch;
+            self.settings.connected_websites.clear_error();
         }
         // Slice `parity:bots-payment-recurring`: an
         // `editStarSubscription` / `reuseStarSubscription` succeeded —
@@ -573,9 +566,8 @@ impl Session {
         // handled in the error arm below.
         if let Some(pending) = pending
             && pending.purpose == RequestPurpose::SetReadDatePrivacy
-            && self.settings.read_date_stage == ReadDateStage::Setting(pending.id)
         {
-            self.settings.read_date_stage = ReadDateStage::Idle;
+            self.settings.read_date.set_confirmed(pending.id);
         }
         // `resetAllNotificationSettings` needs nothing here: TDLib sends
         // `updateScopeNotificationSettings` for each scope it reset before

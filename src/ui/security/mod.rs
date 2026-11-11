@@ -129,8 +129,8 @@ impl QuillApp {
                 .and_then(|s| s.settings.sessions.data().cloned())
                 .unwrap_or_default();
             let loading = session.is_some_and(|s| s.settings.sessions.is_loading());
-            let mutating = session.is_some_and(|s| s.settings.sessions_mutating);
-            let stale = session.is_some_and(|s| s.settings.sessions_stale);
+            let mutating = session.is_some_and(|s| s.settings.sessions_busy());
+            let stale = session.is_some_and(|s| s.settings.sessions_edit.needs_refetch());
             let error = session
                 .as_ref()
                 .and_then(|s| s.settings.sessions.error().map(str::to_string));
@@ -486,8 +486,7 @@ impl QuillApp {
             live.driver.refresh_storage_statistics();
             let _ = live.driver.maybe_fetch_storage_statistics();
         } else if let Some(session) = self.demo_session.as_mut() {
-            session.settings.storage_stats = Some(demo_storage_stats());
-            session.settings.storage_stats_loading = false;
+            session.settings.storage_stats.succeed(demo_storage_stats());
         }
         cx.notify();
     }
@@ -608,7 +607,7 @@ impl QuillApp {
     pub(super) fn refresh_sessions(&mut self, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
             live.driver.session.settings.sessions = Fetch::Idle;
-            live.driver.session.settings.sessions_stale = false;
+            live.driver.session.settings.sessions_edit.refetched();
             let _ = live.driver.maybe_fetch_active_sessions();
         } else if let Some(session) = self.demo_session.as_mut() {
             session.settings.sessions = Fetch::Ready(demo_sessions());

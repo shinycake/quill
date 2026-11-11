@@ -103,7 +103,7 @@ impl QuillApp {
         if let Some(linked) = self
             .live
             .as_mut()
-            .and_then(|live| live.driver.session.settings.device_login_result.take())
+            .and_then(|live| live.driver.session.settings.device_login.take_result())
         {
             self.privacy.device_link_notice = Some(match linked {
                 quill::auth::DeviceLoginResult::Linked => tr(keys::Q_MISC_DEVICE_LINKED),
@@ -190,7 +190,7 @@ impl QuillApp {
         self.privacy.device_login_qr = None;
         self.privacy.device_link_notice = None;
         if let Some(live) = self.live.as_mut() {
-            live.driver.session.settings.device_login_result = None;
+            live.driver.session.settings.device_login = Default::default();
         }
     }
 }

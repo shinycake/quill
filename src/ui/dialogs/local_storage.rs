@@ -111,8 +111,8 @@ impl QuillApp {
             .sum();
         let clearing = session
             .as_ref()
-            .is_some_and(|s| s.settings.storage_clearing);
-        let freed = session.as_ref().and_then(|s| s.settings.storage_freed);
+            .is_some_and(|s| s.settings.storage_clear.is_loading());
+        let freed = session.as_ref().and_then(|s| s.settings.storage_clear.data().copied());
         let actions =
             self.local_storage_actions(cx, &categories_selected(self), selected_size, clearing);
         section = section.child(self.setting_spot(&["data.clear_cache"], actions, cx));
@@ -259,8 +259,8 @@ impl QuillApp {
             // dialog (the S3 pattern).
             live.driver.clear_storage(&types, &chats).is_ok()
         } else if let Some(demo) = self.demo_session.as_mut() {
-            demo.settings.storage_stats = None;
-            demo.settings.storage_freed = Some(54_525_952);
+            demo.settings.storage_stats = quill::state::fetch::Fetch::Idle;
+            demo.settings.storage_clear.succeed(54_525_952);
             true
         } else {
             false

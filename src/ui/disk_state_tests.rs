@@ -485,7 +485,11 @@ fn the_storage_list_stays_in_view_when_rows_above_arrive(cx: &mut TestAppContext
     let rows = |app: &mut QuillApp, arrived: bool| {
         if let Some(demo) = app.demo_session.as_mut() {
             demo.settings.data_storage.seeded = arrived;
-            demo.settings.auto_download_presets_loading = !arrived;
+            demo.settings.auto_download_presets = if arrived {
+                quill::state::fetch::Fetch::Ready(())
+            } else {
+                quill::state::fetch::Fetch::Loading { stale: None }
+            };
         }
     };
     app.update_in(&mut vcx, |app, _, cx| {

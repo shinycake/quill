@@ -27,19 +27,19 @@ impl Session {
             // Slice S4: Data & Storage request failures surface
             // on the screen (the S3 pattern) — never as toasts.
             Some(RequestPurpose::Settings(SettingsPurpose::SetAutoDownloadSettings { .. })) => {
-                self.settings.data_storage_error = Some(format!(
+                self.settings.data_storage_save.fail(format!(
                     "Couldn't save auto-download settings: {}",
                     error_reason(err)
                 ));
                 self.settings.auto_download_answer = extra.map(AutoDownloadAnswer::Refused);
             }
             Some(RequestPurpose::OptimizeStorage) => {
-                self.settings.storage_clearing = false;
-                self.settings.data_storage_error =
-                    Some(format!("Couldn't clear the cache: {}", error_reason(err)));
+                self.settings
+                    .storage_clear
+                    .fail(format!("Couldn't clear the cache: {}", error_reason(err)));
             }
             Some(RequestPurpose::SetStorageOption) => {
-                self.settings.data_storage_error = Some(format!(
+                self.settings.data_storage_save.fail(format!(
                     "Couldn't save the storage limits: {}",
                     error_reason(err)
                 ));
@@ -68,8 +68,7 @@ impl Session {
                 }
             }
             Some(RequestPurpose::GetAutoDownloadSettingsPresets) => {
-                self.settings.auto_download_presets_loading = false;
-                self.settings.data_storage_error = Some(format!(
+                self.settings.auto_download_presets.fail(format!(
                     "Couldn't load auto-download settings: {}",
                     error_reason(err)
                 ));
@@ -100,20 +99,15 @@ impl Session {
                 }
             }
             Some(RequestPurpose::GetReadDatePrivacy) => {
-                if pending
-                    .is_some_and(|p| self.settings.read_date_stage == ReadDateStage::Getting(p.id))
-                {
-                    self.settings.read_date_stage = ReadDateStage::Failed;
+                if let Some(pending) = pending {
+                    self.settings.read_date.request_failed(pending.id);
                 }
             }
             Some(RequestPurpose::SetReadDatePrivacy) => {
-                if pending
-                    .is_some_and(|p| self.settings.read_date_stage == ReadDateStage::Setting(p.id))
-                {
-                    self.settings.read_date_stage = ReadDateStage::Failed;
-                    // The optimistic value is dropped; the next
-                    // fetch restores the truth.
-                    self.settings.read_date_show = None;
+                // The optimistic value is dropped; the next fetch restores
+                // the truth.
+                if let Some(pending) = pending {
+                    self.settings.read_date.request_failed(pending.id);
                 }
             }
             Some(RequestPurpose::Settings(SettingsPurpose::GetBlockedSenders {
@@ -139,7 +133,7 @@ impl Session {
             // in-flight flag so the overlay shows "No storage data
             // yet." instead of spinning forever.
             Some(RequestPurpose::GetStorageStatistics) => {
-                self.settings.storage_stats_loading = false;
+                self.settings.storage_stats.cancel();
             }
             // Slice A3: a failed sessions fetch or terminate
             // clears the in-flight flags and parks the honest,
@@ -150,8 +144,7 @@ impl Session {
             // flood state worsens; retry is user-driven via the
             // Refresh button. The old cache stays visible.
             Some(RequestPurpose::ConfirmDeviceLogin) => {
-                self.settings.device_login_result = Some(crate::auth::DeviceLoginResult::Failed);
-                self.settings.sessions_mutating = false;
+                self.settings.device_login = DeviceLogin::Done(crate::auth::DeviceLoginResult::Failed);
                 self.settings
                     .sessions
                     .fail(sessions_error_line("link the device", err));
@@ -185,7 +178,7 @@ impl Session {
                 | RequestPurpose::HideContactCloseBirthdays),
             ) => self.apply_privacy_data_error(purpose, pending, err),
             Some(RequestPurpose::GetActiveSessions) => {
-                self.settings.sessions_stale = false;
+                self.settings.sessions_edit.refetched();
                 self.settings
                     .sessions
                     .fail(sessions_error_line("load the sessions list", err));
@@ -194,7 +187,7 @@ impl Session {
                 RequestPurpose::Settings(SettingsPurpose::TerminateSession { .. })
                 | RequestPurpose::TerminateAllOtherSessions,
             ) => {
-                self.settings.sessions_mutating = false;
+                self.settings.sessions_edit = ListEdit::Idle;
                 self.settings
                     .sessions
                     .fail(sessions_error_line("terminate the session", err));
@@ -206,7 +199,7 @@ impl Session {
                 RequestPurpose::Settings(SettingsPurpose::ToggleSessionSecretChats { .. })
                 | RequestPurpose::Settings(SettingsPurpose::ToggleSessionCalls { .. }),
             ) => {
-                self.settings.sessions_mutating = false;
+                self.settings.sessions_edit = ListEdit::Idle;
                 self.settings
                     .sessions
                     .fail(sessions_error_line("change the session setting", err));
@@ -218,22 +211,23 @@ impl Session {
             // `sessions_error_line` is reused: it is a pure
             // (action, error-class) formatter, not session-bound.
             Some(RequestPurpose::GetDefaultAutoDelete) => {
-                self.settings.default_auto_delete_busy = false;
-                self.settings.default_auto_delete_error = Some(sessions_error_line(
-                    "load the default auto-delete timer",
-                    err,
-                ));
+                self.settings
+                    .default_auto_delete
+                    .fail(sessions_error_line(
+                        "load the default auto-delete timer",
+                        err,
+                    ));
             }
             Some(RequestPurpose::Settings(SettingsPurpose::SetDefaultAutoDelete { .. })) => {
-                self.settings.default_auto_delete_busy = false;
-                self.settings.default_auto_delete_error = Some(sessions_error_line(
-                    "change the default auto-delete timer",
-                    err,
-                ));
+                self.settings
+                    .default_auto_delete
+                    .fail(sessions_error_line(
+                        "change the default auto-delete timer",
+                        err,
+                    ));
             }
             Some(RequestPurpose::GetAccountTtl) => {
-                self.settings.account_ttl_loading = false;
-                self.settings.account_error = Some(sessions_error_line(
+                self.settings.account_ttl.fail(sessions_error_line(
                     "load the account inactivity timer",
                     err,
                 ));
@@ -242,8 +236,9 @@ impl Session {
                 RequestPurpose::Settings(SettingsPurpose::SetAccountTtl { .. })
                 | RequestPurpose::DeleteAccount,
             ) => {
-                self.settings.account_mutating = false;
-                self.settings.account_error = Some(sessions_error_line("update the account", err));
+                self.settings
+                    .account_ttl
+                    .fail(sessions_error_line("update the account", err));
             }
             // Slice A4: a failed websites fetch or disconnect
             // clears the in-flight flags and parks the honest,
@@ -254,18 +249,19 @@ impl Session {
             // retry is user-driven via the Refresh button. The old
             // cache stays visible.
             Some(RequestPurpose::GetConnectedWebsites) => {
-                self.settings.connected_websites_loading = false;
-                self.settings.websites_stale = false;
-                self.settings.websites_error =
-                    Some(sessions_error_line("load the websites list", err));
+                self.settings.websites_edit.refetched();
+                self.settings
+                    .connected_websites
+                    .fail(sessions_error_line("load the websites list", err));
             }
             Some(
                 RequestPurpose::Settings(SettingsPurpose::DisconnectWebsite { .. })
                 | RequestPurpose::DisconnectAllWebsites,
             ) => {
-                self.settings.websites_mutating = false;
-                self.settings.websites_error =
-                    Some(sessions_error_line("disconnect the website", err));
+                self.settings.websites_edit = ListEdit::Idle;
+                self.settings
+                    .connected_websites
+                    .fail(sessions_error_line("disconnect the website", err));
             }
             _ => {}
         }

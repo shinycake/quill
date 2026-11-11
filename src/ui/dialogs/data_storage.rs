@@ -91,7 +91,7 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         let settled = self.session().is_none_or(|session| {
-            session.settings.data_storage.seeded || !session.settings.auto_download_presets_loading
+            session.settings.data_storage.seeded || !session.settings.auto_download_presets.is_loading()
         });
         let scroll = &mut self.settings.storage_scroll;
         let user_moved = scroll
@@ -124,14 +124,14 @@ impl QuillApp {
         self.forget_storage_sliders();
         self.settings.storage_confirm = None;
         if let Some(live) = self.live.as_mut() {
-            live.driver.session.settings.storage_freed = None;
+            live.driver.session.settings.storage_clear = quill::state::fetch::Fetch::Idle;
             let _ = live.driver.maybe_fetch_storage_statistics();
             let _ = live.driver.fetch_auto_download_presets();
             let _ = live.driver.fetch_network_statistics();
         }
         self.privacy.extra.network_reset = Default::default();
         if let Some(demo) = self.demo_session.as_mut() {
-            demo.settings.storage_freed = None;
+            demo.settings.storage_clear = quill::state::fetch::Fetch::Idle;
             if demo.settings.privacy_data.network.data().is_none() {
                 demo.settings.privacy_data.network =
                     quill::state::fetch::Fetch::Ready(super::data_extra::demo_network_usage());
@@ -231,7 +231,9 @@ impl QuillApp {
     pub(crate) fn arrive_data_storage(&mut self) {
         self.forget_storage_sliders();
         if let Some(session) = self.session_mut() {
-            session.settings.data_storage_error = None;
+            session.settings.auto_download_presets.clear_error();
+            session.settings.storage_clear.clear_error();
+            session.settings.data_storage_save.clear_error();
         }
     }
 
@@ -254,7 +256,7 @@ impl QuillApp {
         // Failures surface here, never as toasts (the S3 pattern).
         if let Some(err) = session
             .as_ref()
-            .and_then(|s| s.settings.data_storage_error.clone())
+            .and_then(|s| s.settings.data_storage_error().map(str::to_owned))
         {
             body = body.child(
                 div()
@@ -292,7 +294,7 @@ impl QuillApp {
         let prefs = session.as_ref().map(|s| &s.settings.data_storage);
         let mut downloads: Vec<AnyElement> = Vec::new();
         if !prefs.is_some_and(|p| p.seeded) {
-            let loading = session.is_some_and(|s| s.settings.auto_download_presets_loading);
+            let loading = session.is_some_and(|s| s.settings.auto_download_presets.is_loading());
             downloads.push(
                 self.setting_spot(
                     &[
@@ -370,8 +372,8 @@ impl QuillApp {
         // --- Storage usage ---
         let stats = session
             .as_ref()
-            .and_then(|s| s.settings.storage_stats.clone());
-        let loading = session.is_some_and(|s| s.settings.storage_stats_loading);
+            .and_then(|s| s.settings.storage_stats.data().cloned());
+        let loading = session.is_some_and(|s| s.settings.storage_stats.is_loading());
         let mut usage = div().flex().flex_col().gap_2().px_3().py_2();
         let has_stats = stats.is_some();
         usage = match stats {

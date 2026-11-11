@@ -98,10 +98,8 @@ impl Session {
             SettingsPayload::ReadDatePrivacySettings { show_read_date } => {
                 if let Some(pending) = pending
                     && pending.purpose == RequestPurpose::GetReadDatePrivacy
-                    && self.settings.read_date_stage == ReadDateStage::Getting(pending.id)
                 {
-                    self.settings.read_date_show = Some(show_read_date);
-                    self.settings.read_date_stage = ReadDateStage::Idle;
+                    self.settings.read_date.got(pending.id, show_read_date);
                 }
             }
             // Slice S3: `messageSenders` answer — one blocked-senders
@@ -176,23 +174,19 @@ impl Session {
                 // Phase S2: `getStorageStatistics` answer — only our own
                 // in-flight request writes the cache (matched by `@extra`).
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::GetStorageStatistics) {
-                    self.settings.storage_stats = Some(StorageStats {
+                    self.settings.storage_stats.succeed(StorageStats {
                         total_size,
                         by_file_type,
                         by_chat,
                     });
-                    self.settings.storage_stats_loading = false;
                 }
                 // Batch 6: `optimizeStorage` answers with the statistics
                 // of the files it deleted. Drop the usage cache so the
                 // driver refetches the post-clear numbers on this same
                 // ingest.
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::OptimizeStorage) {
-                    self.settings.storage_freed = Some(total_size);
-                    self.settings.storage_clearing = false;
-                    self.settings.storage_stats = None;
-                    self.settings.storage_stats_loading = false;
-                    self.settings.data_storage_error = None;
+                    self.settings.storage_clear.succeed(total_size);
+                    self.settings.storage_stats = crate::state::fetch::Fetch::Idle;
                 }
             }
             SettingsPayload::AutoDownloadSettingsPresets { low, medium, high } => {
@@ -209,8 +203,7 @@ impl Session {
                         .data_storage
                         .seed_from_presets(low, medium, high);
                     self.settings.data_storage_dirty = true;
-                    self.settings.auto_download_presets_loading = false;
-                    self.settings.data_storage_error = None;
+                    self.settings.auto_download_presets.succeed(());
                 }
             }
             SettingsPayload::UpdateUnconfirmedSession { session, count } => {
@@ -256,10 +249,9 @@ impl Session {
             }
             SettingsPayload::DeviceLoginResult { result } => {
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::ConfirmDeviceLogin) {
-                    self.settings.device_login_result = Some(result);
-                    self.settings.sessions_mutating = false;
+                    self.settings.device_login = DeviceLogin::Done(result);
                     if result != crate::auth::DeviceLoginResult::Failed {
-                        self.settings.sessions_stale = true;
+                        self.settings.sessions_edit.mark_stale();
                         self.settings.sessions.clear_error();
                     } else {
                         self.settings
@@ -309,7 +301,7 @@ impl Session {
                         self.settings.privacy_data.inactive_session_ttl_days =
                             inactive_session_ttl_days;
                     }
-                    self.settings.sessions_stale = false;
+                    self.settings.sessions_edit.refetched();
                 }
             }
             SettingsPayload::AccountTtl { days } => {
@@ -318,9 +310,7 @@ impl Session {
                 // `@extra`). Authoritative: replaces the cached days and
                 // clears any stale error.
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::GetAccountTtl) {
-                    self.settings.account_ttl_days = Some(days);
-                    self.settings.account_ttl_loading = false;
-                    self.settings.account_error = None;
+                    self.settings.account_ttl.succeed(days);
                 }
             }
             SettingsPayload::ConnectedWebsites { websites } => {
@@ -330,10 +320,8 @@ impl Session {
                 // clears any stale error. No optimistic mutation ever
                 // happens client-side.
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::GetConnectedWebsites) {
-                    self.settings.connected_websites = Some(websites);
-                    self.settings.connected_websites_loading = false;
-                    self.settings.websites_error = None;
-                    self.settings.websites_stale = false;
+                    self.settings.connected_websites.succeed(websites);
+                    self.settings.websites_edit.refetched();
                 }
             }
             SettingsPayload::ScopeNotificationSettings { settings, .. } => {

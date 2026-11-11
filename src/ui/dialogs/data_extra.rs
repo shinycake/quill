@@ -275,12 +275,15 @@ pub(crate) enum NetworkReset {
 
 impl QuillApp {
     /// The confirmed reset. The box stays until the request went out; a
-    /// failed send says so on the page (the `data_storage_error` pattern).
+    /// failed send says so on the page (the `data_storage_save` pattern).
     pub(crate) fn reset_network_usage(&mut self) {
         if let Some(live) = self.live.as_mut() {
             if live.driver.reset_network_statistics().is_err() {
-                live.driver.session.settings.data_storage_error =
-                    Some(tr(keys::Q_OPS_RESET_STATISTICS_FAILED).to_string());
+                live.driver
+                    .session
+                    .settings
+                    .data_storage_save
+                    .fail(tr(keys::Q_OPS_RESET_STATISTICS_FAILED).to_string());
                 return;
             }
         } else if let Some(demo) = self.demo_session.as_mut() {

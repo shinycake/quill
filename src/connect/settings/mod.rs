@@ -8,7 +8,6 @@ use crate::settings::{
     load_preferences, save_badge_prefs, save_call_prefs, save_device_prefs, save_language_prefs,
     save_preferences,
 };
-use crate::state::ReadDateStage;
 use crate::state::RequestPurpose;
 use crate::state::SettingsPurpose;
 use crate::telegram::envelope::{
@@ -114,10 +113,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         // A set in flight already holds the value the server will have;
         // a get answered after it would undo the user's change.
-        if matches!(
-            self.session.settings.read_date_stage,
-            ReadDateStage::Setting(_)
-        ) {
+        if self.session.settings.read_date.setting() {
             return Ok(());
         }
         let extra = self
@@ -128,10 +124,10 @@ impl<S: JsonSender> ConnectDriver<S> {
             .send_json(&get_read_date_privacy_settings(extra))
         {
             self.session.requests.take(extra);
-            self.session.settings.read_date_stage = ReadDateStage::Failed;
+            self.session.settings.read_date.send_refused();
             return Err(err);
         }
-        self.session.settings.read_date_stage = ReadDateStage::Getting(extra);
+        self.session.settings.read_date.start_get(extra);
         Ok(())
     }
 
@@ -150,14 +146,11 @@ impl<S: JsonSender> ConnectDriver<S> {
             .send_json(&set_read_date_privacy_settings(extra, show))
         {
             self.session.requests.take(extra);
-            if !self.session.settings.read_date_stage.in_flight() {
-                self.session.settings.read_date_stage = ReadDateStage::Failed;
-            }
+            self.session.settings.read_date.send_refused();
             return Err(err);
         }
         // A get still in flight is superseded: its answer no longer lands.
-        self.session.settings.read_date_show = Some(show);
-        self.session.settings.read_date_stage = ReadDateStage::Setting(extra);
+        self.session.settings.read_date.start_set(extra, show);
         Ok(extra)
     }
 

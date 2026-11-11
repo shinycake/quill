@@ -232,7 +232,7 @@ fn hide_read_time(app: &Entity<QuillApp>, cx: &mut VisualTestContext) {
                 quill::telegram::envelope::MessageReadDate::MyPrivacyRestricted,
             );
             session.messages.message_audience = Some(audience);
-            session.settings.read_date_show = Some(false);
+            session.settings.read_date = quill::state::ReadDate::Known(false);
         }
         cx.notify();
     });
@@ -257,7 +257,7 @@ fn your_hidden_read_time_offers_to_show_it(cx: &mut TestAppContext) {
     assert_eq!(read_time_box(&app, vcx), None);
     let shown = app.read_with(vcx, |app, _| {
         app.session()
-            .and_then(|session| session.settings.read_date_show)
+            .and_then(|session| session.settings.read_date.show())
     });
     assert_eq!(
         shown,

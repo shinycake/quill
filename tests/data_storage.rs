@@ -70,7 +70,7 @@ fn set_auto_download_settings_ok_applies_confirmed_settings() {
     );
     assert!(session.settings.data_storage.seeded);
     assert!(session.settings.data_storage_dirty);
-    assert!(session.settings.data_storage_error.is_none());
+    assert!(session.settings.data_storage_error().is_none());
 }
 
 /// Slice S4: a `setAutoDownloadSettings` TDLib error surfaces on
@@ -100,7 +100,11 @@ fn set_auto_download_settings_error_surfaces_without_applying() {
             extra.0,
         ),
     );
-    let err = session.settings.data_storage_error.expect("error surfaced");
+    let err = session
+        .settings
+        .data_storage_error()
+        .expect("error surfaced")
+        .to_owned();
     assert!(
         err.starts_with("Couldn't save auto-download settings:"),
         "{err}"
@@ -122,7 +126,7 @@ fn optimize_storage_answer_drops_stats_and_reports_freed_bytes() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
     let stats_extra = session.request(RequestPurpose::GetStorageStatistics, None);
-    session.settings.storage_stats_loading = true;
+    session.settings.storage_stats.begin();
     apply_json(
         &mut session,
         &seq,
@@ -132,10 +136,10 @@ fn optimize_storage_answer_drops_stats_and_reports_freed_bytes() {
             stats_extra.0,
         ),
     );
-    assert!(session.settings.storage_stats.is_some());
-    session.settings.data_storage_error = Some("stale".into());
+    assert!(session.settings.storage_stats.data().is_some());
+    session.settings.storage_clear.fail("stale");
     let extra = session.request(RequestPurpose::OptimizeStorage, None);
-    session.settings.storage_clearing = true;
+    session.settings.storage_clear.begin();
     apply_json(
         &mut session,
         &seq,
@@ -145,11 +149,14 @@ fn optimize_storage_answer_drops_stats_and_reports_freed_bytes() {
             extra.0
         ),
     );
-    assert!(session.settings.storage_stats.is_none());
-    assert!(!session.settings.storage_stats_loading);
-    assert!(!session.settings.storage_clearing);
-    assert_eq!(session.settings.storage_freed, Some(5_242_880));
-    assert!(session.settings.data_storage_error.is_none());
+    assert!(session.settings.storage_stats.data().is_none());
+    assert!(!session.settings.storage_stats.is_loading());
+    assert!(!session.settings.storage_clear.is_loading());
+    assert_eq!(
+        session.settings.storage_clear.data().copied(),
+        Some(5_242_880)
+    );
+    assert!(session.settings.data_storage_error().is_none());
 }
 
 /// Batch 6: an `optimizeStorage` error surfaces without dropping the
@@ -168,9 +175,9 @@ fn optimize_storage_error_keeps_stats() {
             stats_extra.0,
         ),
     );
-    assert!(session.settings.storage_stats.is_some());
+    assert!(session.settings.storage_stats.data().is_some());
     let extra = session.request(RequestPurpose::OptimizeStorage, None);
-    session.settings.storage_clearing = true;
+    session.settings.storage_clear.begin();
     apply_json(
         &mut session,
         &seq,
@@ -180,9 +187,13 @@ fn optimize_storage_error_keeps_stats() {
             extra.0,
         ),
     );
-    let err = session.settings.data_storage_error.expect("error surfaced");
+    let err = session
+        .settings
+        .data_storage_error()
+        .expect("error surfaced")
+        .to_owned();
     assert!(err.starts_with("Couldn't clear the cache:"), "{err}");
-    assert!(session.settings.storage_stats.is_some());
-    assert!(!session.settings.storage_clearing);
-    assert!(session.settings.storage_freed.is_none());
+    assert!(session.settings.storage_stats.data().is_some());
+    assert!(!session.settings.storage_clear.is_loading());
+    assert!(session.settings.storage_clear.data().is_none());
 }
