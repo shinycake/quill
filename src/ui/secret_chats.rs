@@ -108,7 +108,7 @@ impl QuillApp {
 
     /// Phase B3: keep the self-destruct countdown badges re-rendering
     /// while the open chat has a live `self_destruct_in` timer. At most
-    /// one task per open chat (guarded by `self_destruct_tick_chat`,
+    /// one task per open chat (held in `self_destruct_tick`,
     /// mirroring the Phase A1 slow-mode tick); it exits when no timer is
     /// live or the open chat changes. Called from `render`, which has the
     /// `&mut self` the tick needs.
@@ -119,7 +119,12 @@ impl QuillApp {
         };
         // A running tick keeps itself alive: no need to scan the history
         // again every frame.
-        if self.history.self_destruct_tick_chat == Some(chat_id) {
+        if self
+            .chat_ui
+            .self_destruct_tick
+            .as_ref()
+            .is_some_and(|(chat, _)| *chat == chat_id)
+        {
             return;
         }
         if !self
@@ -128,8 +133,7 @@ impl QuillApp {
         {
             return;
         }
-        self.history.self_destruct_tick_chat = Some(chat_id);
-        self.spawn_scoped(cx, async move |this, cx| {
+        let task = self.spawn_scoped(cx, async move |this, cx| {
             loop {
                 cx.background_executor().timer(Duration::from_secs(1)).await;
                 let cont = this
@@ -144,8 +148,16 @@ impl QuillApp {
                             this.notify_conversations(cx);
                             true
                         } else {
-                            if this.history.self_destruct_tick_chat == Some(chat_id) {
-                                this.history.self_destruct_tick_chat = None;
+                            // This task ends: let go of it without
+                            // cancelling the update it is inside.
+                            if this
+                                .chat_ui
+                                .self_destruct_tick
+                                .as_ref()
+                                .is_some_and(|(chat, _)| *chat == chat_id)
+                                && let Some((_, task)) = this.chat_ui.self_destruct_tick.take()
+                            {
+                                task.detach();
                             }
                             false
                         }
@@ -155,8 +167,8 @@ impl QuillApp {
                     break;
                 }
             }
-        })
-        .detach();
+        });
+        self.chat_ui.self_destruct_tick = Some((chat_id, task));
     }
 
     /// Phase B4: apply a chat TTL choice (`setChatMessageAutoDeleteTime`,

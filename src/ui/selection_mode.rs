@@ -484,7 +484,7 @@ impl QuillApp {
         };
         let mut ids = draft.message_ids.clone();
         ids.sort_by_key(|id| id.0);
-        self.clear_forward(window, cx);
+        self.end_selection(window, cx);
         self.open_message_report(draft.from_chat_id, ids, cx);
     }
 
@@ -667,15 +667,17 @@ impl QuillApp {
         let ids = ids.as_slice();
         let mut went_out = true;
         if !ids.is_empty() {
-            self.begin_vanish(chat_id, ids);
             if let Some(live) = self.live.as_mut() {
                 if live.driver.delete_selected(chat_id, ids, revoke).is_err() {
                     went_out = false;
                     self.set_note(StatusNote::error(tr(
                         keys::Q_CHAT_COULD_NOT_DELETE_MESSAGES,
                     )));
+                } else {
+                    self.begin_vanish(chat_id, ids);
                 }
             } else if self.demo_session.is_some() {
+                self.begin_vanish(chat_id, ids);
                 for id in ids {
                     self.apply_demo_delete(chat_id, *id);
                 }

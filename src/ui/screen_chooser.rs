@@ -278,6 +278,7 @@ impl QuillApp {
         let sources = match sources {
             Ok(sources) => sources,
             Err(err) => {
+                self.screen_share.for_call = None;
                 self.set_note(StatusNote::error(err.to_string()));
                 cx.notify();
                 return false;

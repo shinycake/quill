@@ -34,12 +34,17 @@ impl Session {
                 | RequestPurpose::ReorderActiveUsernames
                 | RequestPurpose::ToggleUsernameIsActive
                 | RequestPurpose::SetProfilePhoto
-                | RequestPurpose::DeleteProfilePhoto
-                | RequestPurpose::SetProfileAccentColor
+                | RequestPurpose::DeleteProfilePhoto,
+            ) => {
+                self.users_state.profile_edit_error =
+                    Some(format!("Profile update failed: {}", error_reason(err)));
+            }
+            Some(
+                RequestPurpose::SetProfileAccentColor
                 | RequestPurpose::SetAccentColor
                 | RequestPurpose::SetUpgradedGiftColors,
             ) => {
-                self.users_state.profile_edit_error =
+                self.users_state.peer_color_error =
                     Some(format!("Profile update failed: {}", error_reason(err)));
             }
             Some(RequestPurpose::GetUserFullInfo) => {

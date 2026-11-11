@@ -17,12 +17,53 @@ use quill::business_info::{
 use quill::lang::{keys, tr, tr_with};
 use quill::local_time::{civil_local, now_unix, weekday_name};
 
-/// Expanded schedule and chosen time zone of the hours row.
-#[derive(Default)]
-pub(crate) struct BusinessHoursUi {
+/// Expanded schedule and chosen time zone of one profile's hours row.
+#[derive(Clone, Copy, Default, PartialEq, Debug)]
+pub(crate) struct HoursView {
     pub(super) expanded: bool,
     /// Show the schedule in the business's own time zone.
     pub(super) business_time: bool,
+}
+
+/// The hours row's view, for the one profile it was set on: another
+/// profile (or a user the panel moved to) starts folded in the viewer's
+/// own zone.
+#[derive(Default)]
+pub(crate) struct BusinessHoursUi {
+    view: Option<(i64, HoursView)>,
+}
+
+impl BusinessHoursUi {
+    pub(super) fn of(&self, user_id: i64) -> HoursView {
+        match self.view {
+            Some((owner, view)) if owner == user_id => view,
+            _ => HoursView::default(),
+        }
+    }
+
+    pub(super) fn update(&mut self, user_id: i64, change: impl FnOnce(&mut HoursView)) {
+        let mut view = self.of(user_id);
+        change(&mut view);
+        self.view = Some((user_id, view));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::BusinessHoursUi;
+
+    #[test]
+    fn another_profile_starts_folded_in_the_viewers_zone() {
+        let mut ui = BusinessHoursUi::default();
+        ui.update(1, |view| {
+            view.expanded = true;
+            view.business_time = true;
+        });
+        assert!(ui.of(1).expanded && ui.of(1).business_time);
+        assert_eq!(ui.of(2), Default::default());
+        ui.update(2, |view| view.expanded = true);
+        assert_eq!(ui.of(1), Default::default(), "the first one was replaced");
+    }
 }
 
 /// The note under the phone row menu for an anonymous Fragment number
@@ -69,7 +110,7 @@ impl QuillApp {
         };
         let mut rows = Vec::new();
         if info.opening_hours.is_some() {
-            rows.push(self.business_hours_row(&info, cx));
+            rows.push(self.business_hours_row(user_id, &info, cx));
         }
         if let Some(location) = info.location.clone() {
             rows.push(self.business_location_row(&location, cx));
@@ -128,8 +169,13 @@ impl QuillApp {
             .into_any_element()
     }
 
-    fn business_hours_row(&self, info: &BusinessInfo, cx: &mut Context<Self>) -> AnyElement {
-        let ui = &self.dialogs.business_hours;
+    fn business_hours_row(
+        &self,
+        user_id: i64,
+        info: &BusinessInfo,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let ui = self.dialogs.business_hours.of(user_id);
         let distinct = info.has_distinct_local_hours();
         let use_business = ui.business_time && distinct;
         let expanded = ui.expanded;
@@ -190,9 +236,10 @@ impl QuillApp {
             ))
             .tab_index(0)
             .hover(move |style| style.bg(hover))
-            .on_click(cx.listener(|this, _, _, cx| {
-                let ui = &mut this.dialogs.business_hours;
-                ui.expanded = !ui.expanded;
+            .on_click(cx.listener(move |this, _, _, cx| {
+                this.dialogs
+                    .business_hours
+                    .update(user_id, |view| view.expanded = !view.expanded);
                 cx.notify();
             }))
             .child(
@@ -223,9 +270,10 @@ impl QuillApp {
                                 .child(switch_label)
                                 .on_click(cx.listener(move |this, _, _, cx| {
                                     cx.stop_propagation();
-                                    let ui = &mut this.dialogs.business_hours;
-                                    ui.business_time = !use_business;
-                                    ui.expanded = true;
+                                    this.dialogs.business_hours.update(user_id, |view| {
+                                        view.business_time = !use_business;
+                                        view.expanded = true;
+                                    });
                                     cx.notify();
                                 })),
                         )

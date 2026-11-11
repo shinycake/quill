@@ -5464,3 +5464,48 @@ land and the typed form was gone.
 - **Skipped.** 13-069: `AgentUi::pick_account` already resets the activity
   filter wherever `picked` changes, with a test
   (`picking_another_account_resets_the_activity_filter`).
+
+### Sweep fixes (s4-misc-2)
+
+- **Owner resets.** The side column's slide (`PanelReveal`) is replaced in
+  `replace_screen`, so it never slides out an old account's panel (11-p7-007).
+  The business-hours row's view is `BusinessHoursUi { view: Option<(user,
+  HoursView)> }`: another profile starts folded in the viewer's zone
+  (12-036). The send button's morph, the topic strip's reveal key and the
+  self-destruct tick task are `ChatUi` fields, replaced with the chat: a new
+  chat's Send button starts settled, its strip is scrolled to its selected
+  tab, and a return to a chat holds one tick task, not two (04-088, 13-101,
+  12-079). The send menu (and its card) closes in `replace_chat_ui`
+  (12-104). Closing a chat window drops its flying sticker (`send_fly::
+  window_closed`) and its toast entry (12-106, 13-117). The effect strip
+  rests only while a card is shown, not after it was hidden (12-105). The Privacy page's
+  password-check field is emptied by a derived upkeep step whenever Settings
+  is not on the Privacy page (13-170).
+- **Colors box.** Color-request failures have their own
+  `UsersState::peer_color_error`; `PeerColorDialog::stage` is `ApplyStage`
+  (`Editing`, `Sent`, `Failed(text)`) and replaces `sent`. Editing leaves
+  `Sent` and `Failed`; with the box closed the failure is a note (11-p8-002).
+- **Answers and effects only when they happened.** The reaction fly-up
+  starts only when the request went out (12-063). A failed source listing
+  forgets the call like an empty list (12-069). Report and Save as HTML end
+  a selection with `end_selection`, which says nothing; only
+  `clear_forward` says "Forward cancelled" (12-087). The dissolve starts
+  only after `delete_selected` / `delete_confirmed` were sent (12-089), a
+  waiting dissolve asks for no frames, and an emptied chat keeps its rows
+  while the last message crumbles (14-012). Dust starts only from a row
+  painted in its window's latest frame (14-013).
+- **Dialogs and shortcuts.** `MainWindow::dialogs_closed` is a set of
+  windows whose kit dialog an action already closed
+  (`close_kit_dialog_if_done`); the shell then forgets it instead of closing
+  the dialog now on top (13-053, hotspot: shell.rs). The story viewer blocks
+  shortcuts of the main window only (13-055). The statistics chart cache
+  compares the whole text, so a buffer reused at the same address parses again
+  (13-024).
+- **Skipped.** 11-p5-007: `close_add_contact_dialog` calls
+  `forget_new_contact` (test `a_closed_boxs_import_opens_nothing_and_the_next_box_sends`).
+  12-091: the first mouse move without the button ends the drag
+  (`selection_drag_lost`), a window that lost focus ends it in the poll, and
+  GPUI has no read of held buttons for the poll. 13-074: `ForwardStage` is
+  one enum (round 18). 13-033: a pick removes the picker's flight in
+  `begin_sponsored_report`, so a second click finds no picker (test
+  `a_picked_report_option_closes_the_picker_until_the_answer`).

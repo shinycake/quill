@@ -455,14 +455,17 @@ impl QuillApp {
         let Some(confirm) = self.chat_ui.pending_delete.take() else {
             return;
         };
-        self.begin_vanish(confirm.chat_id, &[confirm.message_id]);
         if let Some(live) = self.live.as_mut() {
             let result = live.driver.delete_confirmed(&confirm);
+            if result.is_ok() {
+                self.begin_vanish(confirm.chat_id, &[confirm.message_id]);
+            }
             self.set_note(match result {
                 Ok(_) => StatusNote::silent(tr(keys::Q_CHAT_DELETING)),
                 Err(_) => StatusNote::error(tr(keys::Q_CHAT_COULD_NOT_DELETE_MESSAGE)),
             });
         } else if self.demo_session.is_some() {
+            self.begin_vanish(confirm.chat_id, &[confirm.message_id]);
             self.apply_demo_delete(confirm.chat_id, confirm.message_id);
             self.set_note(StatusNote::silent(tr(
                 keys::Q_CHAT_DEMO_DELETE_APPLIED_LOCALLY_NO,

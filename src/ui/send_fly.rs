@@ -382,6 +382,23 @@ impl QuillApp {
     }
 }
 
+/// The chat window `closed` is gone: a flight armed in it can never land
+/// (only its own conversation draws and ends it), so the sticker it hides
+/// in the main window is shown again.
+pub(super) fn window_closed(closed: ChatId) {
+    let ended = FLY.with(|fly| {
+        let mut fly = fly.borrow_mut();
+        let own = fly.as_ref().is_some_and(|fly| fly.window == Some(closed));
+        if own {
+            *fly = None;
+        }
+        own
+    });
+    if ended {
+        TARGET.with(|target| target.set(None));
+    }
+}
+
 /// Whether a flight is armed, and whether it has started moving.
 #[cfg(test)]
 #[cfg(feature = "demo-capture")]

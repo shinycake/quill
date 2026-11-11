@@ -99,8 +99,6 @@ pub(crate) struct ComposerUi {
     pub(super) date_dialog: Option<super::composer_date::ComposerDateDialog>,
     /// The "Code Language" box for the fenced block under the caret.
     pub(super) code_language: Option<super::composer_shortcuts::CodeLanguageDialog>,
-    /// Cross-fade timeline of the round Send / Record / Save button.
-    pub(super) send_morph: std::cell::Cell<Option<quill::send_button::SendMorph>>,
     /// Phase S2: the inline-bot warning has been confirmed once this
     /// session (TGX `TUTORIAL_INLINE_SEARCH_SECRECY`, which persists;
     /// Quill keeps it per session — documented divergence).
@@ -145,7 +143,6 @@ impl ComposerUi {
             link_dialog: None,
             date_dialog: None,
             code_language: None,
-            send_morph: Default::default(),
             inline_bot_alert_shown: false,
             drop_paths: Vec::new(),
             drop_state: None,

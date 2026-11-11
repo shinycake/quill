@@ -295,7 +295,7 @@ pub(super) static ESC_LAYERS: &[EscLayer] = &[
             .session()
             .and_then(|session| session.open_chat)
             .is_some_and(|chat| app.selecting_in(chat)),
-        |app, window, cx| app.clear_forward(window, cx)
+        |app, window, cx| app.end_selection(window, cx)
     ),
     layer!(
         "pending-reply",
