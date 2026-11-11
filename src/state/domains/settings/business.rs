@@ -142,7 +142,9 @@ impl Session {
                 );
             }
             Some(RequestPurpose::Settings(SettingsPurpose::SaveBusinessSetting { kind })) => {
-                state.saving.retain(|(request, _)| Some(*request) != pending_id);
+                state
+                    .saving
+                    .retain(|(request, _)| Some(*request) != pending_id);
                 state.refuse(
                     BusinessArea::Save(kind),
                     save_error_line(kind, &error_reason(err)),

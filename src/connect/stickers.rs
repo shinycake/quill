@@ -758,7 +758,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         let open = stickers.open;
         // A list nobody shows and nobody loaded is fetched on first open.
         let shown = [
-            (open || !stickers.recent.is_empty(), &mut stickers.lists.recent),
+            (
+                open || !stickers.recent.is_empty(),
+                &mut stickers.lists.recent,
+            ),
             (
                 open || !stickers.favorites.is_empty(),
                 &mut stickers.lists.favorites,

@@ -315,13 +315,14 @@ mod demo {
         fn demo_mini_app_invoice(&mut self, window: &mut Window, cx: &mut Context<Self>) {
             if let Some(session) = self.demo_session.as_mut() {
                 // box-host: demo
-                session.payments.checkout.form = quill::state::CheckoutForm::Ready(PaymentFormData {
-                    id: 1,
-                    form_type: PaymentFormTypeData::Stars { star_count: 50 },
-                    seller_bot_user_id: 900,
-                    product_title: "Premium skin pack".into(),
-                    product_description: "Ordered from the Quillbot mini app.".into(),
-                });
+                session.payments.checkout.form =
+                    quill::state::CheckoutForm::Ready(PaymentFormData {
+                        id: 1,
+                        form_type: PaymentFormTypeData::Stars { star_count: 50 },
+                        seller_bot_user_id: 900,
+                        product_title: "Premium skin pack".into(),
+                        product_description: "Ordered from the Quillbot mini app.".into(),
+                    });
             }
             self.open_payment_dialog(window, cx);
         }

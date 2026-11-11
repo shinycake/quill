@@ -26,11 +26,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         // a double click on Add must not create the message twice. The
         // answer (or error) ends it.
         let is_change = purpose == RequestPurpose::Settings(SettingsPurpose::MutateQuickReplies);
-        let subject = if is_change {
-            Some(build(""))
-        } else {
-            subject
-        };
+        let subject = if is_change { Some(build("")) } else { subject };
         // The request registry is the one record of what is on its way: the
         // request carries what it is for, so nothing here outlives it.
         if let Some(subject) = &subject

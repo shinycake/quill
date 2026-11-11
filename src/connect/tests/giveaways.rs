@@ -433,7 +433,13 @@ fn an_older_stars_options_answer_or_error_does_not_touch_the_newer_fetch() {
         json!({"@type":"error","@extra":old,"code":500,"message":"BOOM"}),
     );
     assert_eq!(
-        driver.session.payments.giveaway.options.stars_options().len(),
+        driver
+            .session
+            .payments
+            .giveaway
+            .options
+            .stars_options()
+            .len(),
         1
     );
     std::fs::remove_dir_all(dir).unwrap();

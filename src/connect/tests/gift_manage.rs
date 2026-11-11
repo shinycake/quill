@@ -102,7 +102,10 @@ fn opening_my_gifts_loads_collections_and_limits_once() {
         json!({"@type": "giftCollections", "@extra": sent["@extra"], "collections": [
             {"@type": "giftCollection", "id": 4, "name": "Cats", "gift_count": 1}]}),
     );
-    assert_eq!(p.0.session.payments.gifts_manage.collections.items().len(), 1);
+    assert_eq!(
+        p.0.session.payments.gifts_manage.collections.items().len(),
+        1
+    );
     // The limit options land by name.
     let option =
         p.1.snapshot()
@@ -706,15 +709,14 @@ fn a_delete_answer_removes_the_gift_of_its_own_request_and_a_second_waits() {
     // One change at a time: the second waits for the first's answer.
     assert!(p.0.delete_received_gift("b").is_err());
     feed(&mut p, json!({"@type": "ok", "@extra": first.as_extra()}));
-    let ids: Vec<String> = p
-        .0
-        .session
-        .payments
-        .hub
-        .gifts
-        .iter()
-        .map(|g| g.id.clone())
-        .collect();
+    let ids: Vec<String> =
+        p.0.session
+            .payments
+            .hub
+            .gifts
+            .iter()
+            .map(|g| g.id.clone())
+            .collect();
     assert_eq!(ids, ["b"]);
     assert!(p.0.session.payments.gifts_manage.deleting.is_empty());
 }

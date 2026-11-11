@@ -129,9 +129,13 @@ impl<S: JsonSender> ConnectDriver<S> {
         collections.sent(extra);
         self.send_json_request(extra, &rq::get_gift_collections(extra, owner))
             .inspect_err(|_| {
-                self.session.payments.gifts_manage.collections.fail(crate::lang::tr(
-                    crate::lang::keys::Q_MONEY_COULD_NOT_LOAD_THE_COLLECTIONS,
-                ));
+                self.session
+                    .payments
+                    .gifts_manage
+                    .collections
+                    .fail(crate::lang::tr(
+                        crate::lang::keys::Q_MONEY_COULD_NOT_LOAD_THE_COLLECTIONS,
+                    ));
             })
     }
 

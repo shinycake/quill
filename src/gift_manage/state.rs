@@ -2,11 +2,11 @@
 //! `PaymentsState::gifts_manage`, so the poll loop and reducer own every
 //! transition.
 
-use crate::ids::RequestId;
-use crate::state::fetch::Fetch;
 use super::{
     AvailableGift, GiftCollection, GiftLimits, GiftRecipient, PremiumGiftOption, TransferPicker,
 };
+use crate::ids::RequestId;
+use crate::state::fetch::Fetch;
 
 /// The inline form or confirmation that is open for the selected gift.
 #[derive(Debug, Clone, PartialEq, Eq)]

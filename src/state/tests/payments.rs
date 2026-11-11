@@ -71,7 +71,10 @@ fn payment_request_survives_form_and_validated_answers() {
         ),
     );
     assert!(session.payments.checkout.order_info.validated().is_some());
-    assert_eq!(session.payments.checkout.shipping_id.as_deref(), Some("ship1"));
+    assert_eq!(
+        session.payments.checkout.shipping_id.as_deref(),
+        Some("ship1")
+    );
     assert!(
         session.payments.checkout.request.is_some(),
         "validated answer must not clear the payment request"
@@ -153,7 +156,10 @@ fn payment_result_notes_and_verification_url() {
         &sink,
         &result_json(&extra.0.to_string(), false, ""),
     );
-    assert_eq!(session.payments.checkout.note.as_deref(), Some("Payment failed"));
+    assert_eq!(
+        session.payments.checkout.note.as_deref(),
+        Some("Payment failed")
+    );
 }
 
 #[test]
@@ -397,7 +403,12 @@ fn a_verification_step_closes_only_its_own_checkout() {
             extra.0
         ),
     );
-    let step = session.payments.verifications.first().cloned().expect("A's step");
+    let step = session
+        .payments
+        .verifications
+        .first()
+        .cloned()
+        .expect("A's step");
     assert_eq!(step.url, "https://pay.example.com/3ds");
     assert!(!step.closes_checkout, "B's checkout stays open");
     assert!(session.payments.shows(&b));
@@ -479,7 +490,10 @@ fn a_rejected_continue_leaves_the_order_unvalidated() {
             extra.0
         ),
     );
-    assert_eq!(session.payments.checkout.order_info, OrderInfoStage::Unvalidated);
+    assert_eq!(
+        session.payments.checkout.order_info,
+        OrderInfoStage::Unvalidated
+    );
     assert!(session.payments.checkout.note.is_some());
 }
 
@@ -544,7 +558,12 @@ fn a_giveaway_verification_step_names_its_chat() {
             extra.0
         ),
     );
-    let step = session.payments.verifications.first().cloned().expect("step");
+    let step = session
+        .payments
+        .verifications
+        .first()
+        .cloned()
+        .expect("step");
     assert!(step.closes_checkout);
     assert_eq!(step.giveaway_chat_id, Some(-100));
 }
@@ -570,7 +589,12 @@ fn a_giveaway_verification_with_the_checkout_closed_keeps_start_refused() {
             extra.0
         ),
     );
-    let step = session.payments.verifications.first().cloned().expect("step");
+    let step = session
+        .payments
+        .verifications
+        .first()
+        .cloned()
+        .expect("step");
     assert!(!step.closes_checkout);
     assert!(session.payments.giveaway.launch.is_done_for(-100));
     assert!(!session.payments.giveaway.launch.is_done_for(-200));
@@ -631,7 +655,10 @@ fn opening_another_checkout_drops_every_part_of_the_earlier_one() {
 fn two_payments_waiting_on_provider_pages_keep_both_pages() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
-    for (message, url) in [(7, "https://pay.example.com/a"), (8, "https://pay.example.com/b")] {
+    for (message, url) in [
+        (7, "https://pay.example.com/a"),
+        (8, "https://pay.example.com/b"),
+    ] {
         session.payments.checkout.request = Some(PaymentRequest {
             invoice: crate::payment_invoice::InputInvoice::Message {
                 chat_id: ChatId(51),
@@ -656,5 +683,8 @@ fn two_payments_waiting_on_provider_pages_keep_both_pages() {
         .iter()
         .map(|step| step.url.as_str())
         .collect();
-    assert_eq!(urls, ["https://pay.example.com/a", "https://pay.example.com/b"]);
+    assert_eq!(
+        urls,
+        ["https://pay.example.com/a", "https://pay.example.com/b"]
+    );
 }

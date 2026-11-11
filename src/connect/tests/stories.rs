@@ -972,13 +972,23 @@ fn story_reaction_options_come_only_from_the_request_that_asked() {
     driver
         .ingest(copy_and_parse(&payload("999"), &seq, &dyn_sink).unwrap())
         .unwrap();
-    assert!(driver.session.stories.available_reactions.items().is_empty());
+    assert!(
+        driver
+            .session
+            .stories
+            .available_reactions
+            .items()
+            .is_empty()
+    );
     // A refused ask is failed, and the next open asks again.
     let extra = driver.get_story_available_reactions().unwrap().unwrap();
     driver
         .ingest(
             copy_and_parse(
-                &format!(r#"{{"@type":"error","@extra":"{}","code":500,"message":"BOOM"}}"#, extra.0),
+                &format!(
+                    r#"{{"@type":"error","@extra":"{}","code":500,"message":"BOOM"}}"#,
+                    extra.0
+                ),
                 &seq,
                 &dyn_sink,
             )

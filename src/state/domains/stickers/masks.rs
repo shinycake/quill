@@ -107,7 +107,9 @@ impl MasksPanel {
 
     /// Where the next archived page starts, when there is one.
     pub fn archived_next_offset(&self) -> Option<i64> {
-        self.archived.data().and_then(|archived| archived.next_offset)
+        self.archived
+            .data()
+            .and_then(|archived| archived.next_offset)
     }
 
     /// The loaded stickers of a mask set.
@@ -130,10 +132,9 @@ impl Session {
             masks.archived.take_data().unwrap_or_default()
         };
         // A full page that moved on has a next one.
-        let next_offset = (sets.len() == ARCHIVED_MASK_PAGE
-            && last > 0
-            && Some(last) != held.next_offset)
-            .then_some(last);
+        let next_offset =
+            (sets.len() == ARCHIVED_MASK_PAGE && last > 0 && Some(last) != held.next_offset)
+                .then_some(last);
         let mut all = held.sets;
         let mut seen: std::collections::HashSet<i64> = all.iter().map(|set| set.id).collect();
         all.extend(sets.into_iter().filter(|set| seen.insert(set.id)));

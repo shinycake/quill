@@ -3,8 +3,8 @@
 //! lists stale and the connect driver refetches them from the server.
 use crate::earn::EarnErrorHint;
 use crate::gift_manage::{
-    ExportError, ExportSend, GiftEvent, GiftListFetch, GiftManagePayload,
-    GiftManageState, ProbeOutcome, SendStage, TransferStage,
+    ExportError, ExportSend, GiftEvent, GiftListFetch, GiftManagePayload, GiftManageState,
+    ProbeOutcome, SendStage, TransferStage,
 };
 use crate::lang::{keys, tr_with};
 use crate::state::*;

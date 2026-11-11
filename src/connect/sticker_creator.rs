@@ -211,7 +211,8 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// lists again so the "Add to … Set" menus and the panel's "edit" badge
     /// follow the server (tdesktop `notifyUpdated` after `feedSetFull`).
     fn refetch_installed_sets_after_edit(&mut self) -> Result<(), ConnectSendError> {
-        if !self.session.stickers.stickers.lists.installed.is_outdated() || !self.chats_path_active()
+        if !self.session.stickers.stickers.lists.installed.is_outdated()
+            || !self.chats_path_active()
         {
             return Ok(());
         }
@@ -235,8 +236,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.emoji_set_request(
                 RequestPurpose::GetInstalledEmojiSets,
                 crate::telegram::requests_emoji::get_installed_emoji_sets,
-            )
-            ?;
+            )?;
         }
         Ok(())
     }

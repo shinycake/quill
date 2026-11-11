@@ -309,7 +309,11 @@ impl<S: JsonSender> ConnectDriver<S> {
                 .settings
                 .scope_notification_settings
                 .wants_fetch(&scope)
-                || self.session.settings.scope_notification_settings.contains_key(&scope)
+                || self
+                    .session
+                    .settings
+                    .scope_notification_settings
+                    .contains_key(&scope)
                 || self
                     .session
                     .requests

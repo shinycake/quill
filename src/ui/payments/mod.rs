@@ -271,7 +271,11 @@ impl QuillApp {
             );
         }
         let typed_order = dialog.order(cx);
-        if let Some(validated) = session.payments.checkout.order_info.validated_for(&typed_order)
+        if let Some(validated) = session
+            .payments
+            .checkout
+            .order_info
+            .validated_for(&typed_order)
             && !validated.shipping_options.is_empty()
         {
             // Phase 6: kit RadioGroup (was: buttons with a ◉/○ prefix).
@@ -314,7 +318,8 @@ impl QuillApp {
                                 if let Some(live) = this.live.as_mut()
                                     && let Some(id) = shipping_ids.get(ix)
                                 {
-                                    live.driver.session.payments.checkout.shipping_id = Some(id.clone());
+                                    live.driver.session.payments.checkout.shipping_id =
+                                        Some(id.clone());
                                 }
                                 cx.notify();
                             })),

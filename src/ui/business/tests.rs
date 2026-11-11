@@ -907,9 +907,13 @@ fn a_save_refused_after_the_box_closed_goes_to_the_status_line(cx: &mut TestAppC
     assert_eq!(status_note(&app, vcx), "Couldn't save the greeting");
     // Said once.
     let left = app.read_with(vcx, |app, _| {
-        app.demo_session
-            .as_ref()
-            .and_then(|s| s.settings.business.error.clone().map(|refusal| refusal.line))
+        app.demo_session.as_ref().and_then(|s| {
+            s.settings
+                .business
+                .error
+                .clone()
+                .map(|refusal| refusal.line)
+        })
     });
     assert_eq!(left, None);
 }

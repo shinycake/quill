@@ -318,9 +318,11 @@ impl Session {
                 true
             }
             Some(EarnPurpose::AdAccountUrl { peer }) => {
-                if let Some(page) = earn.page.as_mut().filter(|p| {
-                    p.peer == peer && p.ad_account_url.waits_for(pending.map(|p| p.id))
-                }) {
+                if let Some(page) = earn
+                    .page
+                    .as_mut()
+                    .filter(|p| p.peer == peer && p.ad_account_url.waits_for(pending.map(|p| p.id)))
+                {
                     page.ad_account_url = if url.is_empty() {
                         Load::Unavailable
                     } else {

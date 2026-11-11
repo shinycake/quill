@@ -299,15 +299,13 @@ pub(super) fn gift_collection_tabs(
         );
     }
     if let Some(error) = manage.collections.error() {
-        tabs = tabs
-            .child(div().text_sm().child(error.to_string()))
-            .child(
-                Button::new("gift-collections-retry")
-                    .label(tr(keys::Q_CHAT_RETRY))
-                    .small()
-                    .ghost()
-                    .on_click(cx.listener(|this, _, _, cx| this.retry_gift_collections(cx))),
-            );
+        tabs = tabs.child(div().text_sm().child(error.to_string())).child(
+            Button::new("gift-collections-retry")
+                .label(tr(keys::Q_CHAT_RETRY))
+                .small()
+                .ghost()
+                .on_click(cx.listener(|this, _, _, cx| this.retry_gift_collections(cx))),
+        );
     }
     let mut col = div().flex().flex_col().gap_2().child(tabs);
     if mine && active != 0 && manage.flow.is_none() {

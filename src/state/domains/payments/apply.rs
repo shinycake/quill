@@ -37,8 +37,8 @@ impl Session {
                     && extra.is_some()
                     && self.payments.checkout.waits_for(extra)
                 {
-                    self.payments.checkout = std::mem::take(&mut self.payments.checkout)
-                        .with_form(form);
+                    self.payments.checkout =
+                        std::mem::take(&mut self.payments.checkout).with_form(form);
                 }
             }
             PaymentsPayload::ValidatedOrderInfo(validated) => {
@@ -48,7 +48,8 @@ impl Session {
                 // is not this one's.
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::ValidateOrderInfo)
                     && extra.is_some()
-                    && let OrderInfoStage::Validating { request, order } = &self.payments.checkout.order_info
+                    && let OrderInfoStage::Validating { request, order } =
+                        &self.payments.checkout.order_info
                     && Some(*request) == extra
                 {
                     let order = order.clone();

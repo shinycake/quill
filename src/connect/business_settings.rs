@@ -1,9 +1,9 @@
 //! Connect driver: Telegram Business settings of the own account
 //! (`crate::business_settings`).
 use super::*;
-use crate::ids::RequestId;
 use crate::business_info::{BusinessLocation, OpeningHours};
 use crate::business_settings::{self as bs, AwaySettings, BusinessSettingKind, GreetingSettings};
+use crate::ids::RequestId;
 use crate::state::{RequestPurpose, SettingsPurpose};
 
 impl<S: JsonSender> ConnectDriver<S> {

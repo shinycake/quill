@@ -152,7 +152,10 @@ impl Session {
     /// tdesktop shows as a toast (`ShowPaidMediaUnlockedToast`, "Media
     /// Unlocked"). Only for paid media; an invoice message gets none. `true` when the
     /// note was queued.
-    pub(crate) fn note_paid_media_unlocked(&mut self, paid: &crate::state::PaymentInFlight) -> bool {
+    pub(crate) fn note_paid_media_unlocked(
+        &mut self,
+        paid: &crate::state::PaymentInFlight,
+    ) -> bool {
         use crate::payment_invoice::InputInvoice;
         use crate::telegram::envelope::PaymentFormTypeData;
         let InputInvoice::Message {
@@ -179,10 +182,8 @@ impl Session {
             .chats
             .get(&chat_id.0)
             .map_or("the chat", |chat| chat.title.as_str());
-        self.payments.notify(
-            NoticeKind::Info,
-            media_unlocked_note(star_count, chat),
-        );
+        self.payments
+            .notify(NoticeKind::Info, media_unlocked_note(star_count, chat));
         true
     }
 }

@@ -70,7 +70,13 @@ fn an_invoice_link_asks_for_its_form_by_name() {
         json!({"@type": "inputInvoiceName", "name": "shop_1"})
     );
     assert_eq!(
-        driver.session.payments.checkout.request.as_ref().map(|r| &r.invoice),
+        driver
+            .session
+            .payments
+            .checkout
+            .request
+            .as_ref()
+            .map(|r| &r.invoice),
         Some(&invoice)
     );
 }

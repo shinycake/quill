@@ -30,7 +30,11 @@ impl ScopeSettings {
 
     /// The defaults are known: an update, or an edit shown at once. A fetch
     /// still out is dropped (its answer is older than this value).
-    pub fn insert(&mut self, scope: NotificationSettingsScope, settings: ScopeNotificationSettings) {
+    pub fn insert(
+        &mut self,
+        scope: NotificationSettingsScope,
+        settings: ScopeNotificationSettings,
+    ) {
         self.scopes.insert(scope, Fetch::Ready(settings));
     }
 

@@ -195,7 +195,10 @@ fn a_payment_answered_after_the_checkout_closed_still_unlocks_the_media() {
     let note = session.payments.notices.pop().expect("a note").text;
     assert!(note.contains("25 Stars"), "{note}");
     assert!(session.payments.paying.is_empty());
-    assert!(session.payments.checkout.note.is_none(), "no checkout shows it");
+    assert!(
+        session.payments.checkout.note.is_none(),
+        "no checkout shows it"
+    );
 }
 
 /// A checkout opened for another invoice while a payment is in flight
@@ -234,7 +237,10 @@ fn a_checkout_opened_meanwhile_does_not_take_the_payment_answer() {
         !session.payments.checkout.is_paid(),
         "the new checkout is not paid"
     );
-    assert!(session.payments.checkout.note.is_none(), "and shows no outcome");
+    assert!(
+        session.payments.checkout.note.is_none(),
+        "and shows no outcome"
+    );
     assert_eq!(session.payments.checkout.form().map(|f| f.id), Some(2));
     let note = session.payments.notices.pop().expect("a note").text;
     assert!(note.contains("25 Stars"), "the paid message's note: {note}");

@@ -387,9 +387,12 @@ impl QuillApp {
         let loaded = self
             .session()
             .is_some_and(|s| s.settings.scope_notification_settings.contains_key(&scope));
-        let refused = self
-            .session()
-            .is_some_and(|s| s.settings.scope_notification_settings.error(&scope).is_some());
+        let refused = self.session().is_some_and(|s| {
+            s.settings
+                .scope_notification_settings
+                .error(&scope)
+                .is_some()
+        });
         let muted = settings.mute_for > 0;
         // The three sections repeat each setting: search lands on the first.
         let first = NotificationSettingsScope::ALL.first() == Some(&scope);

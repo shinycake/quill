@@ -27,7 +27,11 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.send_language_option("localization_target", LOCALIZATION_TARGET, None)?;
         if let Some(root) = &root {
             let path = database_path(root);
-            self.send_language_option("language_pack_database_path", &path.to_string_lossy(), None)?;
+            self.send_language_option(
+                "language_pack_database_path",
+                &path.to_string_lossy(),
+                None,
+            )?;
         }
         let choice = root.as_deref().map(load_choice).unwrap_or_default();
         if choice.is_builtin() {
