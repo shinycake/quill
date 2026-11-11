@@ -256,7 +256,7 @@ impl QuillApp {
 #[cfg(test)]
 mod tests {
     // Not a glob: `gpui_kit::*` would shadow the built-in `#[test]`.
-    use super::{split_ready, to_restore};
+    use super::{Restore, split_ready, to_restore, windows_to_save};
     use gpui_kit::{point, px, size};
     use quill::ids::ChatId;
     use quill::settings::{ChatWindowsState, SavedChatWindow};
@@ -296,5 +296,32 @@ mod tests {
         assert_eq!(ready[0].1.size, size(px(700.), px(500.)));
         assert_eq!(waiting.len(), 1);
         assert_eq!(waiting[0].chat_id, 2);
+    }
+
+    #[test]
+    fn a_save_in_the_middle_of_a_restore_keeps_the_windows_not_back_yet() {
+        let chats = |windows: Option<Vec<SavedChatWindow>>| {
+            windows.map(|all| all.iter().map(|w| w.chat_id).collect::<Vec<_>>())
+        };
+        let waiting = vec![saved(1), saved(2), saved(3)];
+        // Chat 1 is open; 2 and 3 still wait for their chats.
+        let opening = Restore::Opening(waiting.clone());
+        assert_eq!(
+            chats(windows_to_save(vec![saved(1)], &opening)),
+            Some(vec![1, 2, 3])
+        );
+        // Not answered yet: the offered windows are not forgotten either.
+        let offered = Restore::Offered(waiting);
+        assert_eq!(
+            chats(windows_to_save(Vec::new(), &offered)),
+            Some(vec![1, 2, 3])
+        );
+        // Not looked at: the file stays as it is.
+        assert_eq!(windows_to_save(vec![saved(1)], &Restore::Pending), None);
+        // Done: what is open is what is saved.
+        assert_eq!(
+            chats(windows_to_save(vec![saved(1)], &Restore::Done)),
+            Some(vec![1])
+        );
     }
 }

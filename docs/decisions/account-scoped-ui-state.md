@@ -4120,16 +4120,29 @@ Agent access, windows and platform code. Entries by area:
 - **Permission prompt.** `PermissionAsk::{Idle, Asking}` is held by
   `RecordingUi`: a second press while the system prompt is up is ignored and
   the answer starts its press only while the same call is active (08-054).
+  A press that finds a device already granted or denied no longer sets the
+  state to `Idle`: only the answer to the ask itself ends it, so a later
+  Allow is not dropped.
 - **Country list.** `AuthState::countries` is `Fetch<Vec<Country>>`; the
   error answer lands in `Failed`, the boxes draw "Couldn't load the
   countries" with Retry, and only a box opening or Retry asks again, never a
-  frame (09-017).
+  frame (09-017). The sign-in picker is one of those boxes: it draws the
+  failed row and asks again when it opens.
+- **Grants.** Changes are `Widen` (save first; a failed save changes
+  nothing) or `Narrow` (the cache takes it even when the file cannot be
+  written, and the failure is logged and shown). `forget_account` and the
+  Settings revokes narrow, so a logged-out account never keeps all-chats
+  access in memory for the next sign-in under its key (01-012).
+- **Agent `td_call` sends** return the refused messages as `failed` beside
+  the delivered ones (01-031).
 - **Saved tag box** moved to `MessageUi` and is `per_window` (12-072).
 - **Debug mode.** `debug_mode::switch` returns `DebugLog::{Off, On,
   TdlibRefused}`; the flag and the saved file follow the state after TDLib
   answered, and a refusal is shown (01-025).
 - **Share box.** Only the destinations that failed stay ticked; with no
-  client nothing is cleared (13-073, 13-072).
+  client nothing is cleared (13-073, 13-072). `ShareSelection` holds a
+  `ChatSend::{Due, CommentSent}` per ticked chat, so a retry sends a chat
+  whose comment landed only the forward, never the comment twice.
 - **Connect.** `deselect_chat` tears down locally before the TDLib closes
   (02-024); the Replies block box closes only after the send (02-179).
 - **Keychain.** Delete maps `errSecItemNotFound` to Ok and every other

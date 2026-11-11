@@ -28,7 +28,8 @@ pub(crate) const PINNED_LEFT_SKIP: f64 = PINNED_SPACE / 2.;
 /// tdesktop `kMaxStickerSets`: the installed sets the sticker scrubber lists.
 pub(crate) const MAX_STICKER_SETS: usize = 5;
 
-/// How far (pt) a touch moves before it drags a pinned chat.
+/// Qt's start drag distance: a touch that moves less than this (pt) is a
+/// tap; further, it drags a pinned chat.
 pub(crate) const DRAG_START: f64 = 10.;
 
 /// A touch on a pinned chat: pressed, or moved far enough to drag it. No

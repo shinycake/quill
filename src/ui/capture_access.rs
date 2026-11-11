@@ -152,8 +152,9 @@ impl QuillApp {
         for &device in devices {
             match access(device) {
                 Access::Granted => {}
+                // A prompt already up belongs to an earlier press: this one
+                // must not wipe it, or that prompt's Allow would be ignored.
                 Access::Denied => {
-                    self.recording.permission = PermissionAsk::Idle;
                     self.set_note(StatusNote::error(denied_note(device)));
                     cx.notify();
                     return;
@@ -215,7 +216,6 @@ impl QuillApp {
                 }
             }
         }
-        self.recording.permission = PermissionAsk::Idle;
         start(self, cx);
     }
 

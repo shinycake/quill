@@ -200,12 +200,30 @@ fn send_count(request: &Value) -> u32 {
 /// carries final message ids; `common::send` logs it.
 fn send(ctx: &Ctx, target: &Target, method: &str, request: Value) -> Result<Value, ToolError> {
     let count = send_count(&request);
-    let mut sent = common::send(ctx, target, "td_call", method, request, count)?.messages;
-    if sent.len() == 1 && method != "sendMessageAlbum" && method != "forwardMessages" {
-        Ok(sent.remove(0))
-    } else {
-        Ok(json!({"@type": "messages", "total_count": sent.len(), "messages": sent}))
+    let batch = common::send(ctx, target, "td_call", method, request, count)?;
+    shape_sent(method, batch.messages, batch.failures)
+}
+
+/// The answer for a send: one message as itself, several as a list. What
+/// Telegram refused rides along as `failed`, so the agent never takes a
+/// partly sent album or forward for a complete one.
+fn shape_sent(
+    method: &str,
+    mut sent: Vec<Value>,
+    failures: Vec<String>,
+) -> Result<Value, ToolError> {
+    if sent.len() == 1
+        && failures.is_empty()
+        && method != "sendMessageAlbum"
+        && method != "forwardMessages"
+    {
+        return Ok(sent.remove(0));
     }
+    let mut answer = json!({"@type": "messages", "total_count": sent.len(), "messages": sent});
+    if let (false, Some(fields)) = (failures.is_empty(), answer.as_object_mut()) {
+        fields.insert("failed".into(), json!(failures));
+    }
+    Ok(answer)
 }
 
 /// Refuses uploads from Quill's own data folder (sign-in keys, the agent
@@ -442,8 +460,19 @@ fn is_contacts(method: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{run, send_count};
+    use super::{run, send_count, shape_sent};
     use serde_json::json;
+
+    #[test]
+    fn a_partly_sent_album_tells_the_agent_what_failed() {
+        let one = vec![json!({"id": 5})];
+        let album = shape_sent("sendMessageAlbum", one.clone(), vec!["FLOOD_WAIT_3".into()])
+            .unwrap_or_default();
+        assert_eq!(album["failed"], json!(["FLOOD_WAIT_3"]));
+        assert_eq!(album["total_count"], 1);
+        let lone = shape_sent("sendMessage", one, Vec::new()).unwrap_or_default();
+        assert_eq!(lone, json!({"id": 5}), "a clean single send stays itself");
+    }
 
     #[test]
     fn files_named_by_id_never_go_out() {

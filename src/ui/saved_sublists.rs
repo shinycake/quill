@@ -962,6 +962,7 @@ crate::ui::shell::register_dialogs! {
 #[cfg(test)]
 mod tests {
     use super::{count_line, tag_name};
+    use crate::ui::shell::{DialogKind, QuillShell};
     use quill::telegram::envelope::{ReactionType, SavedMessagesTag};
 
     #[test]
@@ -988,5 +989,10 @@ mod tests {
             tag_name(&[], &[], &ReactionType::CustomEmoji { custom_emoji_id: 5 }),
             "tag"
         );
+    }
+
+    #[test]
+    fn the_tag_name_box_opens_in_the_window_that_asked() {
+        assert!(QuillShell::is_per_window(DialogKind::SavedTagName));
     }
 }

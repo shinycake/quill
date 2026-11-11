@@ -26,7 +26,6 @@ use std::time::{Duration, Instant};
 
 /// tdesktop `st::slideWrapDuration` and `st::dialogsOnlineBadgeDuration`.
 const ANIMATION: Duration = Duration::from_millis(150);
-/// Qt's start drag distance: a touch that moves less is a tap.
 /// tdesktop `kOnlineCircleSize`, `kOnlineCircleStrokeWidth`.
 const ONLINE_SIZE: f64 = 8.;
 const ONLINE_STROKE: f64 = 1.5;
