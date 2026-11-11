@@ -366,7 +366,7 @@ fn a_refused_audience_list_does_not_strand_the_others() {
     };
     assert!(
         t.driver
-            .fetch_message_audience(ChatId(-100_9), MessageId(5), actions)
+            .fetch_message_audience(ChatId(-1_009), MessageId(5), actions)
             .is_err()
     );
     let audience = t.driver.session.messages.message_audience.as_ref().unwrap();

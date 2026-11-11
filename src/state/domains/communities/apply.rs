@@ -53,14 +53,12 @@ impl Session {
             CommunitiesPayload::MemberChats(chats) => {
                 if let Some((CommunitiesPurpose::GetMemberChats { member }, community_id)) =
                     communities_purpose(pending)
-                {
-                    if let Some(fetch) = self
+                    && let Some(fetch) = self
                         .communities
                         .member_chats
                         .get_mut(&(community_id, member))
-                    {
-                        fetch.answered(asked, chats);
-                    }
+                {
+                    fetch.answered(asked, chats);
                 }
             }
         }

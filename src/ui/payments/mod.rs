@@ -316,12 +316,10 @@ impl QuillApp {
                             .on_click(cx.listener(move |this, &ix: &usize, _, cx| {
                                 if let Some(live) = this.live.as_mut()
                                     && let Some(id) = shipping_ids.get(ix)
-                                {
-                                    if let Some(checkout) =
+                                    && let Some(checkout) =
                                         live.driver.session.payments.checkout.checkout_mut()
-                                    {
-                                        checkout.shipping_id = Some(id.clone());
-                                    }
+                                {
+                                    checkout.shipping_id = Some(id.clone());
                                 }
                                 cx.notify();
                             })),

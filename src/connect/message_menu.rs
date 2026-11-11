@@ -226,10 +226,9 @@ impl<S: JsonSender> ConnectDriver<S> {
             && wanted_chat == chat_id
             && wanted_message == message_id
             && can_react_list
+            && let Err(err) = self.fetch_reactors_tab(chat_id, message_id, Some(&reaction), false)
         {
-            if let Err(err) = self.fetch_reactors_tab(chat_id, message_id, Some(&reaction), false) {
-                refused.get_or_insert(err);
-            }
+            refused.get_or_insert(err);
         }
         refused.map_or(Ok(()), Err)
     }
