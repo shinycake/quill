@@ -115,8 +115,9 @@ impl QuillApp {
         // A failure line is the last open's: a cached TTL or auto-delete
         // time skips the fetch that would clear it.
         if let Some(session) = self.session_mut() {
-            session.settings.account_error = None;
-            session.settings.default_auto_delete_error = None;
+            session.settings.account_ttl.clear_error();
+            session.settings.account_delete.clear_error();
+            session.settings.default_auto_delete.clear_error();
         }
         if let Some(live) = self.live.as_mut() {
             let _ = live.driver.get_account_ttl();
@@ -157,7 +158,7 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut() {
             let _ = live.driver.set_default_auto_delete(seconds);
         } else if let Some(session) = self.demo_session.as_mut() {
-            session.settings.default_auto_delete_secs = Some(seconds);
+            session.settings.default_auto_delete.succeed(seconds);
         }
         cx.notify();
     }
@@ -328,12 +329,16 @@ impl QuillApp {
         );
         app.update(cx, |this, cx| {
             let session = this.session();
-            let ttl_days = session.as_ref().and_then(|s| s.settings.account_ttl_days);
-            let ttl_loading = session.is_some_and(|s| s.settings.account_ttl_loading);
-            let mutating = session.is_some_and(|s| s.settings.account_mutating);
+            let ttl_days = session
+                .as_ref()
+                .and_then(|s| s.settings.account_ttl.data().copied());
+            let ttl_loading = session.is_some_and(|s| {
+                s.settings.account_ttl.is_loading() && s.settings.account_ttl.data().is_none()
+            });
+            let mutating = session.is_some_and(|s| s.settings.account_busy());
             let error = session
                 .as_ref()
-                .and_then(|s| s.settings.account_error.clone());
+                .and_then(|s| s.settings.account_error().map(str::to_string));
             let has_password = session
                 .as_ref()
                 .and_then(|s| s.auth_state.password_state.as_ref())
@@ -351,11 +356,12 @@ impl QuillApp {
             }
             let auto_delete = session
                 .as_ref()
-                .and_then(|s| s.settings.default_auto_delete_secs);
-            let auto_delete_busy = session.is_some_and(|s| s.settings.default_auto_delete_busy);
+                .and_then(|s| s.settings.default_auto_delete.data().copied());
+            let auto_delete_busy =
+                session.is_some_and(|s| s.settings.default_auto_delete.is_loading());
             let auto_delete_error = session
                 .as_ref()
-                .and_then(|s| s.settings.default_auto_delete_error.clone());
+                .and_then(|s| s.settings.default_auto_delete.error().map(str::to_string));
             body = this.account_auto_delete_body(
                 cx,
                 body,

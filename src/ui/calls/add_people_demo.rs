@@ -73,7 +73,7 @@ impl QuillApp {
             seed_video_call(session, false, &sink, &self.demo_ui.seq);
             if let Some(call) = session.calls.active_call.as_mut() {
                 call.is_video = false;
-                call.camera_on = false;
+                call.set_camera_on(false);
                 call.remote_video = RemoteVideoState::Inactive;
             }
             seed_people(session, &query, &sink, &self.demo_ui.seq);

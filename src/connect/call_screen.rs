@@ -465,7 +465,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                         | TransportState::Reconnecting
                 )
             );
-            return (call.screen_sharing && up).then_some(CaptureTarget::Private(call.id));
+            return (call.screen_sharing() && up).then_some(CaptureTarget::Private(call.id));
         }
         let call = self.session.calls.active_group_call.as_ref()?;
         (call.is_joined && call.screen.is_sharing()).then_some(CaptureTarget::Group(call.id))
@@ -672,7 +672,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// End the share the capture can no longer feed.
     fn stop_sharing_screen(&mut self) {
         if let Some(call) = self.session.calls.active_call.as_ref()
-            && call.screen_sharing
+            && call.screen_sharing()
         {
             let call_id = call.id;
             let _ = self.set_call_screen_share(call_id, false);

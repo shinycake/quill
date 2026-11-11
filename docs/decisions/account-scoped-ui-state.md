@@ -6784,3 +6784,83 @@ Thirty-four minor entries; each was proved against the integration branch first.
   process-wide (`next_query_token`). 13-165: tdesktop toasts the hide at
   once (the bar is optimistic here too, with `RequestRollback`), and the
   local hidden flag is already keyed by account.
+
+### Sweep fixes (is-02)
+
+Implicit state in the calls, chat-swipe, composer, account and settings
+files, each rebuilt as one value per stage.
+
+- **Calls.** The live-video slot is a `Feed` (empty, unshown, shown) and a
+  `Waker` (idle, armed, pending) instead of `unshown`, `wake_pending`,
+  `waker` (01-095). The muted-speech hint is one `HintStage` (idle,
+  listening with its tester and due time, showing, done) (01-091).
+  Push-to-talk is `Idle`, `Held`, `Releasing { mute_at }` (01-090). The
+  global key hook is `Off`, `Active { key, handle }`, `Failed { key,
+  state }`, `RetryDue` (01-089). The stream playout is `Priming` or
+  `Playing` (01-097). "Stream with..." is `Fetching { request }`,
+  `FetchFailed`, `Ready { info, revoke }`; a failed first request and a
+  failed revoke are taken once by the UI (`RtmpFailure`), and an answer
+  counts only for the request it asks (01-092). The box view is
+  `Rows(KeyRow)` or `Confirm { which, back }` (09-046, 09-X027).
+- **Call driver.** The level tap is `Tap::{Closed, Opening, Open, Failed}`
+  with the read time inside `Open` (02-010). The call microphone is
+  `Mic::{Off, Active, Failed, Refused}` (02-011). The driver's shared
+  screen is `Share::{Idle, Picked, Running, Ended}`, and a group call's
+  screen share is `ScreenShare::{Off, Pending, On, Paused}` instead of
+  `screen_sharing`, `screen_share_pending`, `screen_share_paused`
+  (02-012). A 1:1 call sends `LocalVideo::{Off, Camera, Screen}`: the
+  camera and a screen share replace each other in one place (02-036). The
+  first device listing is `DeviceListing::{Cold, Listing, Listed}`, so
+  `call_devices_warmed` is gone (02-036). The call window is
+  `CallWindow::{Closed, Opening, Open}`, the clock `CallTick`, and the
+  ended call's linger `CallEnd::{Running, Ended, Lingering}` (08-035,
+  08-055).
+- **Recent calls.** One `RecentCalls` stage (`Idle`, `Loading { request }`,
+  `Failed`, `Clearing { request }`) replaces `recent_calls_request`,
+  `recent_calls_error` and `recent_calls_clearing`; `can_clear` takes it,
+  and a refused clear ends only for the clear that was asked (02-003,
+  05-218, 02-017).
+- **Chat swipe.** The gesture's orientation includes `NoDirection`, the
+  reach bounce is `Reach::{Below, Reached}`, and the poll task lives in
+  `SwipePoll::Running` (02-008, 08-114).
+- **Composer.** `GifMode::{Off, Gif, SoundRemoved}` replaces `gif` and
+  `sound_removed` (02-094). `PhotoPrep::{AsIs, Jpeg, FileOnly, Rendering}`
+  holds the JPEG, the file-only mark and the render in flight, with what
+  the picture was kept for a failed render (02-093). A Send held for a
+  render is `TraySend::Held`, made only by `hold_send`, which refuses
+  without a render (08-160). The draft clock is `Idle` or `Armed` (02-096).
+  A repeat period lives in `ComposerScheduling::SendAtDate`, so no repeat
+  period sits beside a different schedule (02-095). The inline query of a
+  chat window is `InlineQueryStage::{Idle, Waiting, Armed}`; closing the
+  panel or a newer keystroke leaves `Armed`, which cancels the timer
+  (02-085).
+- **Account and settings.** The new-login review hands its outcome to the UI
+  as `ReviewStage::Reviewed`, taken once (02-076, 05-018). Terms are
+  `TermsState::{None, Offered, Accepting, Failed}` (02-077, 05-021). The
+  2FA request is `PasswordFlight::{Idle, InFlight, Failed(line)}`, so an
+  older request's late error neither ends a newer one nor keeps a line
+  (02-079). Change number is `ChangeNumber::{Idle, Sending, Ready,
+  Resending, Checking, Failed}` with the code that was valid kept through a
+  refused send (02-078, 05-220). The birthday card is `BirthdayCard::{Shown,
+  Hiding { request }, Hidden}`; a refusal brings it back only for the
+  request that hid it (02-006). Time zones, connected websites, the default
+  auto-delete timer and the account TTL are `Fetch` values. Sessions,
+  websites and star subscriptions use `ListOp::{Idle, Mutating(request),
+  Stale}`: the change is matched to its request, and staleness is taken
+  when the refetch goes out, so a change that lands during the refetch is
+  not lost (02-034, 05-219, 05-023 partly). Folder specs are `FolderSpecs`
+  with `Fresh`, `Stale` and `Failed` per folder (02-021).
+- **Skipped or partly done.** 02-002: `CollectibleLookup` already is one
+  `LookupStage`. 05-222: `folder_invite_done` is gone. 02-018: the call
+  privacy asks are already per-setting `PrivacyAsk` matched to a request.
+  02-097: `ComposerDoc` is a value built whole and normalized, with no
+  stage. 02-033: links, bot and the chat-link save are `Fetch` and an enum;
+  `business.saving` is the set of saves in flight, and `error` also carries
+  local validation lines. 02-034: the own full info is read from the shared
+  cache and the request table. 02-021: `folder_remove_queue` is a work list
+  of intents; each folder's stage comes from the request table. 05-023:
+  the two "code sent to" patterns are independent steps; the `refetch`
+  mark is the driver's one-shot upkeep. 02-036: `call_sound_watch` is the
+  call-keyed watch. 05-219: the gift hub's `gift_mutating` and
+  `gifts_stale` (about seventy sites over many flows that clear it without
+  a request id) and the call-keyed `muted` flag are left.

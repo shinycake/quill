@@ -1,3 +1,4 @@
 # Bools that name a stage word but are not a stage (scripts/check-implicit-state.py).
 # One per line: Struct::field <reason>
 State::frame_requested mirrors the C qw_state struct field by field (repr(C)); it is a per-poll flag from the native side, not a stage Quill keeps
+SettingsState::pending_attention+data_storage_error pending_attention is a one-shot signal the UI drains (bounce the Dock icon, flash the taskbar), not a stage of a request or a box; the pair came from the struct's first error line, which is not about it

@@ -245,7 +245,7 @@ impl Session {
         } else {
             // The update carries no session id: refetch the list; its
             // answer fills `unconfirmed_entries`.
-            self.settings.sessions_stale = true;
+            self.settings.sessions_op.mark_stale();
         }
     }
 
@@ -339,7 +339,7 @@ impl Session {
                 notices.unconfirmed_entries.clear();
             }
         }
-        self.settings.sessions_stale = true;
+        self.settings.sessions_op.mark_stale();
     }
 
     pub(crate) fn apply_email_code_info(&mut self, op: PasswordOp, pattern: String) {

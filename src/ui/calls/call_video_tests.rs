@@ -100,7 +100,7 @@ fn turning_the_camera_off_drops_your_preview(cx: &mut TestAppContext) {
             .as_mut()
             .and_then(|s| s.calls.active_call.as_mut())
         {
-            active.camera_on = false;
+            active.set_camera_on(false);
         }
         cx.notify();
     });

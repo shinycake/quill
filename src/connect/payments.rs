@@ -182,7 +182,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(ConnectSendError::InvalidRequest);
         }
         if (self.session.payments.star_subscriptions.is_some()
-            && !self.session.payments.star_subscriptions_stale)
+            && !self.session.payments.star_subscriptions_op.is_stale())
             || self.session.payments.star_subscriptions_loading()
         {
             return Ok(None);
@@ -222,6 +222,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         let payments = &mut self.session.payments;
         payments.star_subscriptions_request = Some(extra);
         payments.star_subscriptions_error = None;
+        // A first page answers the refetch (or fails it): no longer waiting.
+        if !append {
+            payments.star_subscriptions_op.refetched();
+        }
         if let Err(err) = self.send_json_request(extra, &json) {
             let payments = &mut self.session.payments;
             payments.star_subscriptions_request = None;
@@ -245,14 +249,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         let payments = &self.session.payments;
         // A page in flight settles first: the list stays stale until a first
         // page answers (or fails), so a refetch never races an appended one.
-        if !payments.star_subscriptions_stale || payments.star_subscriptions_loading() {
+        if !payments.star_subscriptions_op.is_stale() || payments.star_subscriptions_loading() {
             return Ok(None);
         }
-        let sent = self.fetch_star_subscriptions_page(false);
-        if sent.is_err() {
-            self.session.payments.star_subscriptions_stale = false;
-        }
-        sent.map(Some)
+        self.fetch_star_subscriptions_page(false).map(Some)
     }
 
     /// Slice `parity:bots-payment-recurring`: `editStarSubscription`
@@ -264,17 +264,20 @@ impl<S: JsonSender> ConnectDriver<S> {
         subscription_id: &str,
         is_canceled: bool,
     ) -> Result<RequestId, ConnectSendError> {
-        if !self.chats_path_active() || self.session.payments.star_subscriptions_mutating {
+        if !self.chats_path_active() || self.session.payments.star_subscriptions_op.is_mutating() {
             return Err(ConnectSendError::InvalidRequest);
         }
         let extra = self
             .session
             .request(RequestPurpose::EditStarSubscription, None);
-        self.session.payments.star_subscriptions_mutating = true;
+        self.session.payments.star_subscriptions_op.begin(extra);
         self.session.payments.star_subscriptions_error = None;
         let json = edit_star_subscription(extra, subscription_id, is_canceled);
         if let Err(err) = self.send_json_request(extra, &json) {
-            self.session.payments.star_subscriptions_mutating = false;
+            self.session
+                .payments
+                .star_subscriptions_op
+                .failed(Some(extra));
             return Err(err);
         }
         Ok(extra)
@@ -288,17 +291,20 @@ impl<S: JsonSender> ConnectDriver<S> {
         &mut self,
         subscription_id: &str,
     ) -> Result<RequestId, ConnectSendError> {
-        if !self.chats_path_active() || self.session.payments.star_subscriptions_mutating {
+        if !self.chats_path_active() || self.session.payments.star_subscriptions_op.is_mutating() {
             return Err(ConnectSendError::InvalidRequest);
         }
         let extra = self
             .session
             .request(RequestPurpose::ReuseStarSubscription, None);
-        self.session.payments.star_subscriptions_mutating = true;
+        self.session.payments.star_subscriptions_op.begin(extra);
         self.session.payments.star_subscriptions_error = None;
         let json = reuse_star_subscription(extra, subscription_id);
         if let Err(err) = self.send_json_request(extra, &json) {
-            self.session.payments.star_subscriptions_mutating = false;
+            self.session
+                .payments
+                .star_subscriptions_op
+                .failed(Some(extra));
             return Err(err);
         }
         Ok(extra)

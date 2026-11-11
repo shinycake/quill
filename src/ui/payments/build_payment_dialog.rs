@@ -307,7 +307,7 @@ impl QuillApp {
                             .child(tr(keys::Q_MONEY_NO_ACTIVE_SUBSCRIPTIONS)),
                     );
                 }
-                let mutating = session.payments.star_subscriptions_mutating;
+                let mutating = session.payments.star_subscriptions_op.is_mutating();
                 let confirming = session.payments.subscription_cancel_confirm.clone();
                 let chat_titles: std::collections::HashMap<i64, String> = session
                     .chats

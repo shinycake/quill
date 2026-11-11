@@ -263,15 +263,15 @@ fn star_subscription_mutation_ok_marks_stale() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
     let extra = session.request(RequestPurpose::EditStarSubscription, None);
-    session.payments.star_subscriptions_mutating = true;
+    session.payments.star_subscriptions_op.begin(extra);
     apply_json(
         &mut session,
         &seq,
         &sink,
         &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra.0),
     );
-    assert!(session.payments.star_subscriptions_stale);
-    assert!(!session.payments.star_subscriptions_mutating);
+    assert!(session.payments.star_subscriptions_op.is_stale());
+    assert!(!session.payments.star_subscriptions_op.is_mutating());
     assert!(session.payments.star_subscriptions_error.is_none());
 }
 

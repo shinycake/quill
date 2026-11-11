@@ -366,12 +366,11 @@ impl<S: JsonSender> ConnectDriver<S> {
                 .active_group_call
                 .as_ref()
                 .is_some_and(|call| call.is_joined);
-        if self.call_devices_warmed || !coming {
+        if !matches!(self.call_devices_listing, DeviceListing::Cold) || !coming {
             return;
         }
         if self.call_engine.is_some() {
             self.refresh_call_devices();
-            self.call_devices_warmed = true;
         }
     }
 

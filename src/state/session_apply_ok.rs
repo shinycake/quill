@@ -125,8 +125,7 @@ impl Session {
                     | RequestPurpose::TerminateAllOtherSessions
             )
         ) {
-            self.settings.sessions_stale = true;
-            self.settings.sessions_mutating = false;
+            self.settings.sessions_op.changed(pending.map(|p| p.id));
             self.settings.sessions.clear_error();
         }
         // Slice A4: a `toggleSessionCanAcceptSecretChats` /
@@ -140,16 +139,13 @@ impl Session {
                     | RequestPurpose::Settings(SettingsPurpose::ToggleSessionCalls { .. })
             )
         ) {
-            self.settings.sessions_stale = true;
-            self.settings.sessions_mutating = false;
+            self.settings.sessions_op.changed(pending.map(|p| p.id));
             self.settings.sessions.clear_error();
         }
         if let Some(RequestPurpose::Settings(SettingsPurpose::SetDefaultAutoDelete { seconds })) =
             pending.map(|p| p.purpose)
         {
-            self.settings.default_auto_delete_secs = Some(seconds);
-            self.settings.default_auto_delete_busy = false;
-            self.settings.default_auto_delete_error = None;
+            self.settings.default_auto_delete.succeed(seconds);
         }
         // Slice A7: a `setAccountTtl` succeeded — the server
         // confirmed the write of exactly the sent value, so it
@@ -162,16 +158,13 @@ impl Session {
         if let Some(RequestPurpose::Settings(SettingsPurpose::SetAccountTtl { days })) =
             pending.map(|p| p.purpose)
         {
-            self.settings.account_ttl_days = Some(days);
-            self.settings.account_mutating = false;
-            self.settings.account_error = None;
+            self.settings.account_ttl.succeed(days);
         }
         if matches!(
             pending.map(|p| p.purpose),
             Some(RequestPurpose::DeleteAccount)
         ) {
-            self.settings.account_mutating = false;
-            self.settings.account_error = None;
+            self.settings.account_delete = crate::state::fetch::Fetch::Idle;
         }
         // Slice A8: a `checkPhoneNumberCode` succeeded — the
         // server completed the number change of the number the
@@ -262,9 +255,8 @@ impl Session {
                     | RequestPurpose::DisconnectAllWebsites
             )
         ) {
-            self.settings.websites_stale = true;
-            self.settings.websites_mutating = false;
-            self.settings.websites_error = None;
+            self.settings.websites_op.changed(pending.map(|p| p.id));
+            self.settings.connected_websites.clear_error();
         }
         // Slice `parity:bots-payment-recurring`: an
         // `editStarSubscription` / `reuseStarSubscription` succeeded —
@@ -274,8 +266,9 @@ impl Session {
             pending.map(|p| p.purpose),
             Some(RequestPurpose::EditStarSubscription | RequestPurpose::ReuseStarSubscription)
         ) {
-            self.payments.star_subscriptions_stale = true;
-            self.payments.star_subscriptions_mutating = false;
+            self.payments
+                .star_subscriptions_op
+                .changed(pending.map(|p| p.id));
             self.payments.star_subscriptions_error = None;
         }
         // `toggleGiftIsSaved` / `sellGift` succeeded: refetch the list from

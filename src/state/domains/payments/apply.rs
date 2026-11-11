@@ -207,10 +207,6 @@ impl Session {
                 {
                     self.payments.star_subscriptions_request = None;
                     self.payments.star_subscriptions_error = None;
-                    // Only a first page answers a refetch.
-                    if !append {
-                        self.payments.star_subscriptions_stale = false;
-                    }
                     self.payments.star_subscriptions_offset = subs.next_offset.clone();
                     if append && let Some(existing) = self.payments.star_subscriptions.as_mut() {
                         existing.star_amount = subs.star_amount;

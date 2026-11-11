@@ -350,7 +350,7 @@ fn a_private_call_shares_without_pause_requests() {
     {
         let call = driver.session.calls.active_call.as_mut().unwrap();
         call.transport = CallTransport::Connected(Default::default());
-        call.screen_sharing = true;
+        call.set_screen_sharing(true);
     }
     pump_until_screen_answers(&mut driver);
     assert_eq!(

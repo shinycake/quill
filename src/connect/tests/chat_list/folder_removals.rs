@@ -248,16 +248,10 @@ fn a_failed_folder_fetch_is_recorded_for_the_editor_and_cleared_by_the_retry() {
         r#"{{"@type":"error","@extra":"{}","code":500,"message":"Timeout"}}"#,
         extra.0
     ));
-    assert!(
-        rig.driver
-            .session
-            .chat_list
-            .folder_spec_errors
-            .contains_key(&5)
-    );
+    assert!(rig.driver.session.chat_list.folder_specs.error(5).is_some());
     assert!(rig.driver.fetch_chat_folder(5).unwrap().is_some());
     assert!(
-        rig.driver.session.chat_list.folder_spec_errors.is_empty(),
+        !rig.driver.session.chat_list.folder_specs.any_error(),
         "asking again clears the error"
     );
     rig.answer_spec(&[7]);

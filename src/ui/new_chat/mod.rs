@@ -114,7 +114,7 @@ impl QuillApp {
     fn new_chat_auto_delete(&self, dialog: &NewChatDialog) -> i32 {
         dialog.auto_delete.unwrap_or_else(|| {
             self.session()
-                .and_then(|s| s.settings.default_auto_delete_secs)
+                .and_then(|s| s.settings.default_auto_delete.data().copied())
                 .unwrap_or(0)
         })
     }

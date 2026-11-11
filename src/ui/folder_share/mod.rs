@@ -525,9 +525,12 @@ impl QuillApp {
         let spec = self
             .session()
             .and_then(|s| s.chat_list.folder_specs.get(&folder_id).cloned());
-        let spec_error = self
-            .session()
-            .and_then(|s| s.chat_list.folder_spec_errors.get(&folder_id).cloned());
+        let spec_error = self.session().and_then(|s| {
+            s.chat_list
+                .folder_specs
+                .error(folder_id)
+                .map(str::to_string)
+        });
         let share = self
             .session()
             .and_then(|s| s.chat_list.folder_shares.get(&folder_id));

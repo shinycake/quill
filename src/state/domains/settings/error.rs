@@ -149,7 +149,7 @@ impl Session {
             // Refresh button. The old cache stays visible.
             Some(RequestPurpose::ConfirmDeviceLogin) => {
                 self.settings.device_login_result = Some(crate::auth::DeviceLoginResult::Failed);
-                self.settings.sessions_mutating = false;
+                self.settings.sessions_op.failed(pending.map(|p| p.id));
                 self.settings
                     .sessions
                     .fail(sessions_error_line("link the device", err));
@@ -183,7 +183,7 @@ impl Session {
                 | RequestPurpose::HideContactCloseBirthdays),
             ) => self.apply_privacy_data_error(purpose, pending, err),
             Some(RequestPurpose::GetActiveSessions) => {
-                self.settings.sessions_stale = false;
+                self.settings.sessions_op.refetched();
                 self.settings
                     .sessions
                     .fail(sessions_error_line("load the sessions list", err));
@@ -192,7 +192,7 @@ impl Session {
                 RequestPurpose::Settings(SettingsPurpose::TerminateSession { .. })
                 | RequestPurpose::TerminateAllOtherSessions,
             ) => {
-                self.settings.sessions_mutating = false;
+                self.settings.sessions_op.failed(pending.map(|p| p.id));
                 self.settings
                     .sessions
                     .fail(sessions_error_line("terminate the session", err));
@@ -204,7 +204,7 @@ impl Session {
                 RequestPurpose::Settings(SettingsPurpose::ToggleSessionSecretChats { .. })
                 | RequestPurpose::Settings(SettingsPurpose::ToggleSessionCalls { .. }),
             ) => {
-                self.settings.sessions_mutating = false;
+                self.settings.sessions_op.failed(pending.map(|p| p.id));
                 self.settings
                     .sessions
                     .fail(sessions_error_line("change the session setting", err));
@@ -216,32 +216,32 @@ impl Session {
             // `sessions_error_line` is reused: it is a pure
             // (action, error-class) formatter, not session-bound.
             Some(RequestPurpose::GetDefaultAutoDelete) => {
-                self.settings.default_auto_delete_busy = false;
-                self.settings.default_auto_delete_error = Some(sessions_error_line(
+                self.settings.default_auto_delete.fail(sessions_error_line(
                     "load the default auto-delete timer",
                     err,
                 ));
             }
             Some(RequestPurpose::Settings(SettingsPurpose::SetDefaultAutoDelete { .. })) => {
-                self.settings.default_auto_delete_busy = false;
-                self.settings.default_auto_delete_error = Some(sessions_error_line(
+                self.settings.default_auto_delete.fail(sessions_error_line(
                     "change the default auto-delete timer",
                     err,
                 ));
             }
             Some(RequestPurpose::GetAccountTtl) => {
-                self.settings.account_ttl_loading = false;
-                self.settings.account_error = Some(sessions_error_line(
+                self.settings.account_ttl.fail(sessions_error_line(
                     "load the account inactivity timer",
                     err,
                 ));
             }
-            Some(
-                RequestPurpose::Settings(SettingsPurpose::SetAccountTtl { .. })
-                | RequestPurpose::DeleteAccount,
-            ) => {
-                self.settings.account_mutating = false;
-                self.settings.account_error = Some(sessions_error_line("update the account", err));
+            Some(RequestPurpose::Settings(SettingsPurpose::SetAccountTtl { .. })) => {
+                self.settings
+                    .account_ttl
+                    .fail(sessions_error_line("update the account", err));
+            }
+            Some(RequestPurpose::DeleteAccount) => {
+                self.settings
+                    .account_delete
+                    .fail(sessions_error_line("update the account", err));
             }
             // Slice A4: a failed websites fetch or disconnect
             // clears the in-flight flags and parks the honest,
@@ -252,18 +252,19 @@ impl Session {
             // retry is user-driven via the Refresh button. The old
             // cache stays visible.
             Some(RequestPurpose::GetConnectedWebsites) => {
-                self.settings.connected_websites_loading = false;
-                self.settings.websites_stale = false;
-                self.settings.websites_error =
-                    Some(sessions_error_line("load the websites list", err));
+                self.settings.websites_op.refetched();
+                self.settings
+                    .connected_websites
+                    .fail(sessions_error_line("load the websites list", err));
             }
             Some(
                 RequestPurpose::Settings(SettingsPurpose::DisconnectWebsite { .. })
                 | RequestPurpose::DisconnectAllWebsites,
             ) => {
-                self.settings.websites_mutating = false;
-                self.settings.websites_error =
-                    Some(sessions_error_line("disconnect the website", err));
+                self.settings.websites_op.failed(pending.map(|p| p.id));
+                self.settings
+                    .connected_websites
+                    .fail(sessions_error_line("disconnect the website", err));
             }
             _ => {}
         }

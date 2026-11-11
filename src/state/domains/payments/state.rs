@@ -181,14 +181,12 @@ pub struct PaymentsState {
     /// Slice `parity:bots-payment-recurring`: pagination offset for the
     /// next `getStarSubscriptions` page (empty = no more pages).
     pub star_subscriptions_offset: String,
-    /// Slice `parity:bots-payment-recurring`: a cancel/rejoin mutation
-    /// landed — the list refetches on the next pump (the
-    /// `sessions_stale` pattern; never optimistic).
-    pub star_subscriptions_stale: bool,
     /// Slice `parity:bots-payment-recurring`: an `editStarSubscription` /
-    /// `reuseStarSubscription` is in flight — the dialog disables its
-    /// action buttons until the `ok` (or error) lands.
-    pub star_subscriptions_mutating: bool,
+    /// `reuseStarSubscription` in flight (the dialog disables its action
+    /// buttons until the `ok` or error lands), or a cancel/rejoin that
+    /// landed — the list refetches on the next pump (the `sessions_op`
+    /// pattern; never optimistic).
+    pub star_subscriptions_op: crate::state::fetch::ListOp,
     /// Slice `parity:bots-payment-recurring`: the Subscriptions dialog is
     /// on screen.
     pub subscriptions_open: bool,
@@ -349,8 +347,7 @@ impl PaymentsState {
             star_subscriptions_request: None,
             star_subscriptions_error: None,
             star_subscriptions_offset: String::new(),
-            star_subscriptions_stale: false,
-            star_subscriptions_mutating: false,
+            star_subscriptions_op: Default::default(),
             subscriptions_open: false,
             hub: crate::premium_hub::PremiumHub::default(),
             gifts_manage: Default::default(),

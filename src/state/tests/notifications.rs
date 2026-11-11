@@ -846,7 +846,7 @@ fn default_auto_delete_roundtrip_and_failure() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
     let extra = session.request(RequestPurpose::GetDefaultAutoDelete, None);
-    session.settings.default_auto_delete_busy = true;
+    session.settings.default_auto_delete.begin();
     apply_json(
         &mut session,
         &seq,
@@ -856,27 +856,33 @@ fn default_auto_delete_roundtrip_and_failure() {
             extra.0
         ),
     );
-    assert_eq!(session.settings.default_auto_delete_secs, Some(604_800));
-    assert!(!session.settings.default_auto_delete_busy);
+    assert_eq!(
+        session.settings.default_auto_delete.data().copied(),
+        Some(604_800)
+    );
+    assert!(!session.settings.default_auto_delete.is_loading());
 
     let extra = session.request(
         RequestPurpose::Settings(SettingsPurpose::SetDefaultAutoDelete { seconds: 86_400 }),
         None,
     );
-    session.settings.default_auto_delete_busy = true;
+    session.settings.default_auto_delete.begin();
     apply_json(
         &mut session,
         &seq,
         &sink,
         &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra.0),
     );
-    assert_eq!(session.settings.default_auto_delete_secs, Some(86_400));
+    assert_eq!(
+        session.settings.default_auto_delete.data().copied(),
+        Some(86_400)
+    );
 
     let extra = session.request(
         RequestPurpose::Settings(SettingsPurpose::SetDefaultAutoDelete { seconds: 0 }),
         None,
     );
-    session.settings.default_auto_delete_busy = true;
+    session.settings.default_auto_delete.begin();
     apply_json(
         &mut session,
         &seq,
@@ -887,12 +893,12 @@ fn default_auto_delete_roundtrip_and_failure() {
         ),
     );
     assert_eq!(
-        session.settings.default_auto_delete_secs,
+        session.settings.default_auto_delete.data().copied(),
         Some(86_400),
         "a refusal keeps the old value"
     );
-    assert!(session.settings.default_auto_delete_error.is_some());
-    assert!(!session.settings.default_auto_delete_busy);
+    assert!(session.settings.default_auto_delete.error().is_some());
+    assert!(!session.settings.default_auto_delete.is_loading());
 }
 
 #[test]

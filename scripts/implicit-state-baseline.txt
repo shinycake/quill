@@ -160,12 +160,8 @@ SavedTagSearch::loaded
 SearchTabsState::recommended_loaded
 SearchTabsState::recommended_loading
 SettingsSearch::pending_clear
-SettingsState::account_ttl_loading
 SettingsState::auto_download_presets_loading
-SettingsState::connected_websites_loading
-SettingsState::default_auto_delete_busy
 SettingsState::pending_attention
-SettingsState::pending_attention+default_auto_delete_error
 SettingsState::saved_sounds_loaded
 SettingsState::saved_sounds_stale
 SettingsState::storage_limits_seed_sent

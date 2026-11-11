@@ -793,7 +793,7 @@ fn a_stale_subscriptions_refetch_waits_for_an_appended_page_and_is_kept_when_ref
     t.driver.maybe_fetch_star_subscriptions().unwrap();
     t.answer("getStarSubscriptions", subs("more"));
     t.driver.fetch_more_star_subscriptions().unwrap();
-    t.driver.session.payments.star_subscriptions_stale = true;
+    t.driver.session.payments.star_subscriptions_op.mark_stale();
     // The appended page is out: no first-page request beside it.
     assert!(
         t.driver
@@ -811,16 +811,18 @@ fn a_stale_subscriptions_refetch_waits_for_an_appended_page_and_is_kept_when_ref
         "",
         "a first page"
     );
-    assert!(t.driver.session.payments.star_subscriptions_stale);
-    // The refetch is cleared by its own answer.
+    assert!(
+        !t.driver.session.payments.star_subscriptions_op.is_stale(),
+        "the refetch took the mark when it went out"
+    );
     t.answer("getStarSubscriptions", subs(""));
-    assert!(!t.driver.session.payments.star_subscriptions_stale);
+    assert!(!t.driver.session.payments.star_subscriptions_op.is_stale());
     // A refetch that is refused shows its error and is not asked every frame.
-    t.driver.session.payments.star_subscriptions_stale = true;
+    t.driver.session.payments.star_subscriptions_op.mark_stale();
     t.sender.refuse(&["getStarSubscriptions"]);
     assert!(t.driver.refresh_star_subscriptions_if_stale().is_err());
     let payments = &t.driver.session.payments;
-    assert!(!payments.star_subscriptions_stale);
+    assert!(!payments.star_subscriptions_op.is_stale());
     assert!(payments.star_subscriptions_error.is_some());
     assert!(!payments.star_subscriptions_loading());
 }

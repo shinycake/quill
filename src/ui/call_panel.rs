@@ -204,8 +204,8 @@ impl QuillApp {
             status,
             connecting,
             muted: call.muted,
-            camera_on: call.camera_on,
-            screen_sharing: call.screen_sharing,
+            camera_on: call.camera_on(),
+            screen_sharing: call.screen_sharing(),
             can_share_screen: ready && quill::calls::capture::screen::can_share(),
             emojis: call
                 .ready

@@ -70,12 +70,10 @@ pub struct SettingsState {
     /// Chats with an OS notification we showed (or TDLib reports active
     /// from a previous launch); only these produce a clear.
     pub shown_notification_chats: std::collections::HashSet<ChatId>,
-    /// `getDefaultMessageAutoDeleteTime` cache, seconds (0 = off).
-    pub default_auto_delete_secs: Option<i32>,
-    /// A default auto-delete fetch or write is in flight.
-    pub default_auto_delete_busy: bool,
-    /// Honest one-line failure of the last default auto-delete request.
-    pub default_auto_delete_error: Option<String>,
+    /// `getDefaultMessageAutoDeleteTime` cache, seconds (0 = off): in
+    /// flight for a fetch or a write, answered, or failed with the honest
+    /// one-line failure of the last request (the cached value stays).
+    pub default_auto_delete: Fetch<i32>,
     /// Parity slice: `getSavedNotificationSounds` cache (titles / durations
     /// for the sound picker; `sound` files download on demand).
     pub saved_notification_sounds: Vec<NotificationSound>,
@@ -156,44 +154,40 @@ pub struct SettingsState {
     /// visible meanwhile and the next successful fetch clears the error.
     pub sessions: Fetch<Vec<ParsedSession>>,
     /// Slice A3: a `terminateSession` / `terminateAllOtherSessions` round
-    /// trip is in flight — terminate buttons stay disabled meanwhile.
-    pub sessions_mutating: bool,
+    /// trip in flight (terminate buttons stay disabled meanwhile), or a
+    /// terminate that succeeded — the old cache stays visible and is
+    /// refetched from the authoritative answer on the next ingest (the
+    /// `saved_sounds_stale` pattern); never an optimistic delete.
+    pub sessions_op: crate::state::fetch::ListOp,
     pub device_login_result: Option<crate::auth::DeviceLoginResult>,
-    /// Slice A3: a terminate succeeded — the old cache stays visible and
-    /// is refetched from the authoritative answer on the next ingest
-    /// (the `saved_sounds_stale` pattern); never an optimistic delete.
-    pub sessions_stale: bool,
     /// Slice A7: cached `getAccountTtl` answer, in days — drives the
     /// self-destruct-if-away picker (UI half ships post-Phase-9).
-    pub account_ttl_days: Option<i32>,
-    /// Slice A7: a `getAccountTtl` round trip is in flight.
-    pub account_ttl_loading: bool,
-    /// Slice A7: a `deleteAccount` / `setAccountTtl` round trip is in
-    /// flight — the account surfaces stay disabled meanwhile.
-    pub account_mutating: bool,
-    /// Slice A7: honest one-line failure of the last account-lifecycle
-    /// op (classified from the TDLib error code, never the native
-    /// message). Cleared on the next attempt and on success.
-    pub account_error: Option<String>,
+    /// A `getAccountTtl` or `setAccountTtl` round trip is in flight, the
+    /// days are known, or the last try failed with the honest one-line
+    /// failure (classified from the TDLib error code, never the native
+    /// message); the known days stay. Cleared on the next attempt and on
+    /// success.
+    pub account_ttl: Fetch<i32>,
+    /// Slice A7: a `deleteAccount` round trip is in flight — the account
+    /// surfaces stay disabled meanwhile — or its honest one-line failure.
+    pub account_delete: Fetch<()>,
     /// Slice A4: cached `getConnectedWebsites` answer (TGX
     /// `SettingsWebsitesController` style); drives the Connected Websites
     /// overlay.
-    pub connected_websites: Option<Vec<ParsedWebsite>>,
+    ///
+    /// One value for the fetch: in flight, answered, or failed with the
+    /// honest one-line error (classified from the TDLib error code, never
+    /// the native message) of the last fetch or disconnect; the cache stays
+    /// visible meanwhile and the next successful fetch clears the error.
+    pub connected_websites: Fetch<Vec<ParsedWebsite>>,
     /// The account's login passkeys (`crate::passkeys`).
     pub passkeys: crate::passkeys::PasskeysState,
-    /// Slice A4: a `getConnectedWebsites` round trip is in flight.
-    pub connected_websites_loading: bool,
     /// Slice A4: a `disconnectWebsite` / `disconnectAllWebsites` round trip
-    /// is in flight — disconnect buttons stay disabled meanwhile.
-    pub websites_mutating: bool,
-    /// Slice A4: honest one-line failure of the last websites fetch or
-    /// disconnect (classified from the TDLib error code, never the native
-    /// message). Cleared on the next successful fetch.
-    pub websites_error: Option<String>,
-    /// Slice A4: a disconnect succeeded — the old cache stays visible and
-    /// is refetched from the authoritative answer on the next ingest
-    /// (the `saved_sounds_stale` pattern); never an optimistic delete.
-    pub websites_stale: bool,
+    /// in flight (disconnect buttons stay disabled meanwhile), or a
+    /// disconnect that succeeded — the old cache stays visible and is
+    /// refetched from the authoritative answer on the next ingest (the
+    /// `saved_sounds_stale` pattern); never an optimistic delete.
+    pub websites_op: crate::state::fetch::ListOp,
     /// Parity slice: downloaded-file id → notification sound id, for files
     /// fetched as notification sounds.
     pub sound_file_ids: HashMap<i32, i64>,
@@ -283,6 +277,17 @@ pub struct SettingsState {
 }
 
 impl SettingsState {
+    /// The failure line of the last account-lifecycle op.
+    pub fn account_error(&self) -> Option<&str> {
+        self.account_ttl.error().or(self.account_delete.error())
+    }
+
+    /// An account-lifecycle round trip is in flight: the surfaces stay
+    /// disabled.
+    pub fn account_busy(&self) -> bool {
+        self.account_ttl.is_loading() || self.account_delete.is_loading()
+    }
+
     /// The blocked list starts over (a fresh fetch, or its data was
     /// dropped): pages asked for the old one no longer apply.
     pub fn restart_blocked_list(&mut self) {
@@ -357,9 +362,7 @@ impl SettingsState {
             pending_attention: false,
             disable_contact_registered_notifications: false,
             shown_notification_chats: std::collections::HashSet::new(),
-            default_auto_delete_secs: None,
-            default_auto_delete_busy: false,
-            default_auto_delete_error: None,
+            default_auto_delete: Fetch::Idle,
             saved_notification_sounds: Vec::new(),
             saved_sounds_loaded: false,
             saved_sounds_stale: false,
@@ -384,19 +387,13 @@ impl SettingsState {
             privacy_data: Default::default(),
             notices: AccountNotices::default(),
             sessions: Fetch::Idle,
-            sessions_mutating: false,
+            sessions_op: Default::default(),
             device_login_result: None,
-            sessions_stale: false,
-            account_ttl_days: None,
-            account_ttl_loading: false,
-            account_mutating: false,
-            account_error: None,
-            connected_websites: None,
+            account_ttl: Fetch::Idle,
+            account_delete: Fetch::Idle,
+            connected_websites: Fetch::Idle,
             passkeys: Default::default(),
-            connected_websites_loading: false,
-            websites_mutating: false,
-            websites_error: None,
-            websites_stale: false,
+            websites_op: Default::default(),
             sound_file_ids: HashMap::new(),
             pending_sound_downloads: HashSet::new(),
             pending_sound_plays: Vec::new(),

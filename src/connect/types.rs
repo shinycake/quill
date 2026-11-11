@@ -284,6 +284,16 @@ pub enum InstantViewOutcome {
 }
 
 /// Session + outbound sender that auto-replies to `WaitTdlibParameters`.
+/// The call devices' list: never asked for (a call that is coming asks
+/// once), on its way, or in.
+#[derive(Default)]
+pub(crate) enum DeviceListing {
+    #[default]
+    Cold,
+    Listing(std::sync::mpsc::Receiver<Vec<MediaDevice>>),
+    Listed,
+}
+
 pub struct ConnectDriver<S: JsonSender> {
     pub session: Session,
     pub(crate) sender: S,
@@ -310,7 +320,6 @@ pub struct ConnectDriver<S: JsonSender> {
     pub(crate) call_capture: super::call_capture::CallCapture,
     /// The shared screen Quill captures (`connect::call_screen`).
     pub(crate) call_screen: super::call_screen::CallScreen,
-    pub(crate) call_devices_warmed: bool,
     /// Every picture (group-call tracks, streams, 1:1 calls): one live
     /// feed each, newest frame only (`group_calls/live_feeds.rs`).
     pub(crate) live_feeds: super::group_calls::live_feeds::LiveFeeds,
@@ -342,8 +351,9 @@ pub struct ConnectDriver<S: JsonSender> {
     /// (microphone, speaker) ids. `None` means the engine default; no
     /// devices are fabricated, so this can legitimately be empty.
     pub(crate) call_devices_cache: Vec<MediaDevice>,
-    /// The device list on its way (`refresh_call_devices`).
-    pub(crate) call_devices_listing: Option<std::sync::mpsc::Receiver<Vec<MediaDevice>>>,
+    /// Whether the device list was asked for, and is on its way
+    /// (`refresh_call_devices`).
+    pub(crate) call_devices_listing: DeviceListing,
     pub(crate) selected_devices: (Option<String>, Option<String>),
     /// The group calls whose sound you muted for yourself (the live
     /// stream's settings box, the live story's sound toggle).
