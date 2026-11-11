@@ -683,7 +683,7 @@ mod dispatch_tests {
             app.screen_share.chooser = crate::ui::screen_share_state::Chooser::PrivacyBox(
                 crate::ui::screen_share_state::ChooserTarget {
                     for_call: crate::ui::screen_share_state::ScreenFor::Group,
-                    group_call: None,
+                    group_call: Some(77),
                 },
             );
             app.stories.page = Some(crate::ui::story_page::StoryPage::new(ChatId(1), window, cx));
