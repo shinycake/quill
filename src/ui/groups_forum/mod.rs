@@ -89,6 +89,21 @@ impl QuillApp {
             .session()
             .map(|s| s.ordered_forum_topics(chat_id))
             .unwrap_or_default();
+        // A save is on its way: its answer lands in this editor, so a new
+        // form must not replace it (the duplicate would send again).
+        if self
+            .admin
+            .forum_manage_dialog
+            .as_ref()
+            .and_then(|dialog| dialog.editor.as_ref())
+            .is_some_and(|editor| {
+                editor
+                    .submit
+                    .is_sending(self.session().map(|session| &session.requests))
+            })
+        {
+            return;
+        }
         let existing = topic_id.and_then(|id| topics.iter().find(|t| t.forum_topic_id == id));
         let (name, color, emoji) = match existing {
             Some(topic) => (
@@ -119,7 +134,6 @@ impl QuillApp {
                 target: topic_id,
                 color,
                 icon_emoji: emoji,
-                original_emoji: emoji,
                 submit: Submit::default(),
             });
         }
@@ -409,8 +423,9 @@ impl QuillApp {
                     let body = Rc::new(RefCell::new(Some(body)));
                     move |content, _, _| {
                         let body = body
-                            .borrow_mut()
-                            .take()
+                            .try_borrow_mut()
+                            .ok()
+                            .and_then(|mut body| body.take())
                             .unwrap_or_else(|| div().into_any_element());
                         content.child(body)
                     }
@@ -900,3 +915,8 @@ mod forum_editor_tests {
         assert_eq!(topic_letter(""), "#");
     }
 }
+
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+#[path = "topic_editor_tests.rs"]
+mod tests;

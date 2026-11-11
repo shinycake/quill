@@ -275,3 +275,76 @@ fn tiles_are_bounded() {
     }
     assert!(picker.tiles().len() <= 24);
 }
+
+/// Fails every ask for the current view's tile until the picker stops
+/// asking, and returns the tile's key.
+fn fail_the_tile_until_it_rests(picker: &mut LocationPicker) -> TileKey {
+    let key = picker.tile_to_request().expect("tile");
+    let mut asks = 0u64;
+    while let Some(again) = picker.tile_to_request() {
+        assert_eq!(again, key);
+        asks += 1;
+        assert!(asks <= 3, "a failing tile is not asked for without end");
+        picker.tile_requested(key, asks);
+        assert_eq!(picker.tile_to_request(), None, "one ask at a time");
+        assert!(picker.tile_answered(asks, None));
+    }
+    assert_eq!(asks, 3, "a lost answer is asked again, a few times");
+    key
+}
+
+#[test]
+fn a_failed_tile_is_asked_a_few_times_then_again_once_the_map_rests() {
+    let mut picker = fresh();
+    picker.set_map_size(SIZE);
+    let view = picker.view();
+    let key = fail_the_tile_until_it_rests(&mut picker);
+    // Away and back to the very same view: the same tile, asked again.
+    picker.moved_to(view.panned(100., 0.));
+    picker.moved_to(view);
+    picker.move_ended();
+    assert_eq!(picker.tile_to_request(), Some(key), "asked after a move");
+    picker.tile_requested(key, 9);
+    assert!(picker.tile_answered(9, Some(FileId(5))));
+    assert_eq!(picker.tile_to_request(), None);
+    assert_eq!(picker.tiles(), vec![(key, FileId(5))]);
+}
+
+#[test]
+fn a_failed_tile_is_asked_again_after_a_resize() {
+    let mut picker = fresh();
+    picker.set_map_size(SIZE);
+    fail_the_tile_until_it_rests(&mut picker);
+    picker.set_map_size(SIZE);
+    assert_eq!(
+        picker.tile_to_request(),
+        None,
+        "same size keeps the failure"
+    );
+    picker.set_map_size(MapSize {
+        width: SIZE.width + 10,
+        ..SIZE
+    });
+    assert!(picker.tile_to_request().is_some());
+}
+
+#[test]
+fn a_tile_whose_ask_cannot_be_sent_is_not_asked_on_every_pass() {
+    let mut picker = fresh();
+    picker.set_map_size(SIZE);
+    let key = picker.tile_to_request().expect("tile");
+    for _ in 0..3 {
+        assert_eq!(picker.tile_to_request(), Some(key));
+        picker.tile_unsent(key);
+    }
+    assert_eq!(picker.tile_to_request(), None, "it waits for a move");
+    // A refused send between two failed answers counts with them.
+    let mut picker = fresh();
+    picker.set_map_size(SIZE);
+    picker.tile_requested(key, 1);
+    assert!(picker.tile_answered(1, None));
+    picker.tile_unsent(key);
+    picker.tile_requested(key, 2);
+    assert!(picker.tile_answered(2, None));
+    assert_eq!(picker.tile_to_request(), None);
+}

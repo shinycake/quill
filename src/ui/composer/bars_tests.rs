@@ -823,31 +823,41 @@ fn a_refused_send_drops_its_draft_clear_and_gives_back_the_text(cx: &mut TestApp
 #[gpui_kit::test]
 fn an_ai_answer_applies_only_to_the_draft_it_was_asked_about(cx: &mut TestAppContext) {
     use crate::ui::composer::AiAsk;
+    use quill::ids::RequestId;
+    use quill::state::{AiAnswer, AiResult};
     let (app, mut vcx) = new_app(cx);
     let vcx = &mut vcx;
     open_chat(&app, vcx, GROUP);
-    let answer = |app: &Entity<QuillApp>, vcx: &mut VisualTestContext, text: &str| {
+    let reply = |app: &Entity<QuillApp>, vcx: &mut VisualTestContext, request: u64, result| {
         app.update(vcx, |app, _| {
             if let Some(session) = app.demo_session.as_mut() {
-                session.messages.ai_composer_text = Some((None, GROUP, text.to_string()));
+                session.messages.ai_answers.push(AiAnswer {
+                    request: RequestId(request),
+                    window: None,
+                    chat: GROUP,
+                    result,
+                });
             }
         });
         vcx.update(|window, cx| app.update(cx, |app, cx| app.apply_ai_composer_answer(window, cx)));
     };
+    let answer = |app: &Entity<QuillApp>, vcx: &mut VisualTestContext, text: &str| {
+        reply(app, vcx, 1, AiResult::Text(text.to_string()));
+    };
+    let ask = |app: &Entity<QuillApp>, vcx: &mut VisualTestContext, request: u64, markup: &str| {
+        app.update(vcx, |app, _| {
+            app.chat_ui.ai_ask = AiAsk::Asked {
+                request: RequestId(request),
+                markup: markup.into(),
+            };
+        });
+    };
     set_field(&app, vcx, "teh draft");
-    app.update(vcx, |app, _| {
-        app.chat_ui.ai_ask = AiAsk::Asked {
-            markup: "teh draft".into(),
-        };
-    });
+    ask(&app, vcx, 1, "teh draft");
     answer(&app, vcx, "the draft");
     assert_eq!(field(&app, vcx), "the draft", "the asked draft is replaced");
     // Asked about "the draft", then the user typed on before the answer.
-    app.update(vcx, |app, _| {
-        app.chat_ui.ai_ask = AiAsk::Asked {
-            markup: "the draft".into(),
-        };
-    });
+    ask(&app, vcx, 1, "the draft");
     set_field(&app, vcx, "the draft and more");
     answer(&app, vcx, "better draft");
     assert_eq!(
@@ -855,6 +865,23 @@ fn an_ai_answer_applies_only_to_the_draft_it_was_asked_about(cx: &mut TestAppCon
         "the draft and more",
         "typed text survives"
     );
+    // Fix, then Rewrite on the same draft: the first answer is stale and
+    // changes nothing; the second applies.
+    set_field(&app, vcx, "teh draft");
+    ask(&app, vcx, 2, "teh draft");
+    reply(&app, vcx, 1, AiResult::Text("stale".into()));
+    assert_eq!(field(&app, vcx), "teh draft", "an older ask's answer");
+    reply(&app, vcx, 2, AiResult::Text("the draft".into()));
+    assert_eq!(field(&app, vcx), "the draft");
+    // A failed ask is over: a late answer for it never applies.
+    ask(&app, vcx, 3, "the draft");
+    reply(&app, vcx, 3, AiResult::Failed);
+    assert_eq!(
+        app.read_with(vcx, |app, _| app.chat_ui.ai_ask.clone()),
+        AiAsk::Idle
+    );
+    reply(&app, vcx, 3, AiResult::Text("late".into()));
+    assert_eq!(field(&app, vcx), "the draft");
 }
 
 /// Sweep 10-115: a window reads its own bot, not the one another window's

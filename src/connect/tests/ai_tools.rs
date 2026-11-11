@@ -53,8 +53,13 @@ fn fix_text_with_ai_applies_fixed_text() {
     let owned = copy_and_parse(&json, &seq, &dyn_sink).expect("parse fixedText");
     driver.ingest(owned).expect("ingest fixedText");
     assert_eq!(
-        driver.session.messages.ai_composer_text,
-        Some((None, ChatId(7), "the draft".to_string()))
+        driver.session.messages.ai_answers,
+        vec![crate::state::AiAnswer {
+            request: extra,
+            window: None,
+            chat: ChatId(7),
+            result: crate::state::AiResult::Text("the draft".to_string()),
+        }]
     );
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -77,13 +82,17 @@ fn create_rich_message_with_ai_round_trips_blocks() {
     );
     let owned = copy_and_parse(&json, &seq, &dyn_sink).expect("parse richMessage");
     driver.ingest(owned).expect("ingest richMessage");
-    let (_, chat_id, rich, note) = driver
+    let answer = driver
         .session
         .messages
-        .ai_composer_blocks
-        .take()
+        .ai_answers
+        .pop()
         .expect("blocks stored");
-    assert_eq!(chat_id, ChatId(7));
+    assert_eq!(answer.request, extra);
+    let crate::state::AiResult::Blocks(rich, note) = answer.result else {
+        panic!("a rich answer");
+    };
+    assert_eq!(answer.chat, ChatId(7));
     assert_eq!(note, "AI created the draft");
     assert!(rich.is_full);
     assert!(matches!(
@@ -130,9 +139,12 @@ fn rich_ai_draft_notes_match_the_method() {
         driver
             .session
             .messages
-            .ai_composer_blocks
-            .as_ref()
-            .map(|(_, _, _, note)| *note),
+            .ai_answers
+            .pop()
+            .map(|answer| match answer.result {
+                crate::state::AiResult::Blocks(_, note) => note,
+                _ => "",
+            }),
         Some("AI fixed the draft")
     );
 
@@ -144,9 +156,12 @@ fn rich_ai_draft_notes_match_the_method() {
         driver
             .session
             .messages
-            .ai_composer_blocks
-            .as_ref()
-            .map(|(_, _, _, note)| *note),
+            .ai_answers
+            .pop()
+            .map(|answer| match answer.result {
+                crate::state::AiResult::Blocks(_, note) => note,
+                _ => "",
+            }),
         Some("AI rewrote the draft")
     );
     let _ = std::fs::remove_dir_all(&dir);
@@ -231,7 +246,16 @@ fn ai_flood_premium_error_surfaces_premium_line() {
         .next()
         .expect("AI error stored");
     assert!(err.contains("Premium"), "premium line surfaced, got: {err}");
-    // Never applied as a success.
-    assert!(driver.session.messages.ai_composer_text.is_none());
+    // Never applied as a success: the failure is the request's answer, so
+    // the composer leaves its ask.
+    assert_eq!(
+        driver.session.messages.ai_answers,
+        vec![crate::state::AiAnswer {
+            request: extra,
+            window: None,
+            chat: ChatId(7),
+            result: crate::state::AiResult::Failed,
+        }]
+    );
     let _ = std::fs::remove_dir_all(&dir);
 }
