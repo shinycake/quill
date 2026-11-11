@@ -155,6 +155,20 @@ fn a_failed_older_page_is_not_asked_again_until_retry_or_scroll_away() {
     }
     t.driver.fetch_history().unwrap().expect("asked again");
     assert_eq!(t.sender.count("getChatHistory"), 3);
+    // A window too short to scroll away from its top has one more way out:
+    // the chat opened again asks once, and only once.
+    t.fail("getChatHistory", "boom");
+    assert_eq!(t.driver.fetch_history().unwrap(), None);
+    private_chat(&mut t, 8);
+    t.driver.select_chat(ChatId(8)).unwrap();
+    let before = t.sender.count("getChatHistory");
+    t.driver.select_chat(ChatId(7)).unwrap();
+    assert!(!t.driver.session.histories[&7].load_failed());
+    assert_eq!(
+        t.sender.count("getChatHistory"),
+        before + 1,
+        "the older page is asked for again when the chat is opened again"
+    );
 }
 
 #[test]

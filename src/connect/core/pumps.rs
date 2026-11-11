@@ -72,8 +72,11 @@ impl<S: JsonSender> ConnectDriver<S> {
             Some(err) => {
                 // Not silent: without the owner file the next start cannot
                 // tell whose the folder is, so it drops what is in it. The
-                // next ingest retries the write.
-                eprintln!("quill: could not save the account owner: {err}");
+                // next ingest retries the write; it is reported once, not
+                // on every ingest while the folder cannot be written.
+                if self.owner_claim != OwnerClaim::Unsaved(me) {
+                    eprintln!("quill: could not save the account owner: {err}");
+                }
                 OwnerClaim::Unsaved(me)
             }
         };

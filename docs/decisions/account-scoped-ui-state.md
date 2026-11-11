@@ -8053,14 +8053,14 @@ profile_tabs, ton_wallet}.rs`, `connect/core/{mod, pumps}.rs`,
 
 | id | result |
 |---|---|
-| 02-015 | A new microphone, level-tap or screen-share failure is put on the call by `pump_call_media` (edge detected on the text): the group call's `group_call_error` line while joined, else `ActiveCall::media_note`, which the 1:1 call window draws and which dies with the call. |
+| 02-015 | A microphone, level-tap or screen-share failure is put on the call by `pump_call_media`. The three are compared one by one, so a failure that still stands does not hide a new one of another device. A joined group call takes only a new failure, in its `group_call_error` line (the user dismisses it). The 1:1 call's `ActiveCall::media_note` follows the devices: the newest failure, else one that still stands, and nothing once they work again. |
 | 02-029 | The installed-sets answer replaces `suggest_for` only when it is `WaitingForSets`; `Asked(emoji)` stays. |
 | 02-030 | Both sends call `cancel_pending_draft_of(chat_id)`: another slot's waiting save (and its dirty mark) is left alone. |
 | 02-045, 05-030, 02-046 | `CollectionsFetch::Stale` stays until the send went out (`Loading` is set there); a refused first ask in `begin_gift_manage` leaves `Stale`, so the next ingest asks again. |
-| 02-056 | `ConnectDriver::claimed_owner` is `OwnerClaim { Unclaimed, Saved(user), Unsaved(user) }`. A failed owner-file write is retried by the next ingest with `account_data::write_owner` only: a second `claim` would take the new user's own files for leftovers and drop them. |
+| 02-056 | `ConnectDriver::claimed_owner` is `OwnerClaim { Unclaimed, Saved(user), Unsaved(user) }`. A failed owner-file write is retried by the next ingest with `account_data::write_owner` only: a second `claim` would take the new user's own files for leftovers and drop them. The failure is printed once, not on every ingest. |
 | 02-067 | Undo takes the pending Stars only after the removal went out. |
 | 02-070 | `UsernameCheck::Checking` carries the check's `RequestId` (the generation counter and its purpose payload are gone); only that request's answer or error ends it, and a refused second check leaves the first one answerable. |
-| 02-081 | An older page that failed on a window that holds messages is no longer asked for from the list's paint; Retry, a new message, or a scroll away from the top edge (`preload_history_by_scroll`) clears it. |
+| 02-081 | An older page that failed on a window that holds messages is no longer asked for from the list's paint; Retry, a new message, a scroll away from the top edge (`preload_history_by_scroll`) or opening the chat again (`prepare_history_window`, for a window too short to scroll away from its top) clears it. |
 | 02-087, 02-049 | `PremiumHub::close_gifts` drops owner, list, page, notice and a stale mark in one place (`reset_gifts_list` is shared with opening and switching collection). A change in flight keeps its lock until its own answer. |
 | 02-088 | A refused remove or reorder marks the playlist outdated (`playlist_change_unsent`), so it loads again. |
 | 07-013, 02-108 | `open_money_page` runs every ask and returns the first error: a refused explorer, state or rates send no longer skips the history page. |

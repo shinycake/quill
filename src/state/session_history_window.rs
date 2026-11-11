@@ -349,6 +349,12 @@ impl Session {
         let has_newer = self.history_has_newer(chat_id);
         let history = self.histories.entry(chat_id.0).or_default();
         history.clear_newer_failed();
+        // An older page that failed on a window with messages has no Retry
+        // row (that is the empty window's), and a short window cannot be
+        // scrolled away from its top: the chat opened again asks once more.
+        if !history.messages.is_empty() {
+            history.clear_load_failed();
+        }
         let keep = !has_newer
             && match history.unread_anchor {
                 // A tail window that reaches back to the boundary shows the
