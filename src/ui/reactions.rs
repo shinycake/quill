@@ -53,6 +53,11 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         self.message_ui.menu = Some(menu);
+        // A reactor tab asked for by an earlier menu whose properties never
+        // allowed it is not this menu's (a chip's menu sets it after this).
+        if let Some(live) = self.live.as_mut() {
+            live.driver.session.messages.wanted_reactor_tab = None;
+        }
         self.message_ui.menu_ui.page = super::message_menu_ui::MessageMenuPage::Main;
         self.message_ui.menu_link = self.take_right_clicked_link(menu.position);
         self.message_ui.menu_item = self.take_right_clicked_item(menu.position);

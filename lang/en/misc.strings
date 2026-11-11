@@ -125,6 +125,7 @@
 "qll_misc_bob_harris" = "Bob Harris";
 "qll_misc_bold" = "Bold";
 "qll_misc_bold_caption" = "bold caption";
+"qll_misc_close_the_open_box_first" = "Close the open box first";
 "qll_misc_create_a_bot_this_bot" = "Create a bot for this bot to manage";
 "qll_misc_camera" = "Camera";
 "qll_misc_camera_device_linking_is_available" = "Camera device linking is available on macOS.";
