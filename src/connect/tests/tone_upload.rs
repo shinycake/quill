@@ -110,7 +110,7 @@ fn an_answer_for_another_request_does_not_settle_the_upload() {
     driver
         .upload_notification_tone(&path, ToneTarget::Reaction)
         .unwrap();
-    driver.session.settings.tone_upload = waiting;
+    driver.session.settings.tone_upload = waiting.clone();
     answer(
         &mut driver,
         &recorder,
@@ -119,13 +119,18 @@ fn an_answer_for_another_request_does_not_settle_the_upload() {
         "addSavedNotificationSound",
         NEW_SOUND,
     );
+    assert!(
+        driver
+            .session
+            .settings
+            .saved_sounds
+            .data()
+            .is_some_and(|sounds| sounds.iter().any(|sound| sound.id == 900)),
+        "the sound is saved"
+    );
     assert_eq!(
-        driver.session.settings.tone_upload,
-        ToneUpload::Added {
-            sound_id: 900,
-            target: None,
-        },
-        "the sound is saved, but another upload's picker is not its"
+        driver.session.settings.tone_upload, waiting,
+        "the other upload still waits for its own answer"
     );
 }
 
