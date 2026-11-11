@@ -104,11 +104,14 @@ impl<S: JsonSender> ConnectDriver<S> {
                 self.ask_gift_text_limit();
             }
             if let Some(gift) = self.session.payments.marketplace_gift.as_mut() {
-                gift.note = Some(if max.is_none() {
-                    "Could not check the comment length. Retry.".into()
-                } else {
-                    "The comment is too long.".into()
-                });
+                gift.note = Some(
+                    crate::lang::tr(if max.is_none() {
+                        crate::lang::keys::Q_MARKETPLACE_COMMENT_UNCHECKED
+                    } else {
+                        crate::lang::keys::Q_MARKETPLACE_COMMENT_TOO_LONG
+                    })
+                    .to_string(),
+                );
             }
             return Err(ConnectSendError::InvalidRequest);
         }

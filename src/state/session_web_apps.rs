@@ -109,7 +109,7 @@ impl Session {
             .replace_open_result(Some(if url.is_empty() {
                 WebAppOpenResult::Failed {
                     bot_user_id,
-                    message: "The bot returned no app address.".into(),
+                    message: crate::lang::tr(crate::lang::keys::Q_WEB_APP_NO_ADDRESS).to_string(),
                 }
             } else {
                 WebAppOpenResult::Opened {

@@ -908,3 +908,6 @@
 "qll_money_statistics_unavailable" = "Statistics are not available for this chat.";
 "qll_money_statistics_send_failed" = "Could not send the statistics request.";
 "qll_money_statistics_info_failed" = "Could not load the chat's details.";
+"qll_marketplace_comment_unchecked" = "Could not check the comment length. Retry.";
+"qll_marketplace_comment_too_long" = "The comment is too long.";
+"qll_web_app_no_address" = "The bot returned no app address.";
