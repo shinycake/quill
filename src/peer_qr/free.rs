@@ -83,17 +83,51 @@ pub enum FreeMenuItem {
     RestoreFee,
 }
 
+/// What the free-code pill is doing: nothing, its menu open, or a request
+/// out. A request closes the menu by construction; the answer, a dropped
+/// request (`FreeState::drop_pending`) and the box closing each leave it.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum FreeUi {
+    #[default]
+    Idle,
+    MenuOpen,
+    /// The `getUserLink` out as ticket `serial`; only its answer applies.
+    Requesting {
+        request: FreeRequest,
+        serial: u64,
+    },
+}
+
 /// The free-code part of the box.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct FreeState {
     pub mode: FreeMode,
-    pub requesting: Option<FreeRequest>,
-    /// Bumped by every request and every dropped one.
+    pub ui: FreeUi,
+    /// The serial of the last request sent; every request takes the next.
     pub serial: u64,
-    pub menu_open: bool,
 }
 
 impl FreeState {
+    /// The request out, if one is.
+    pub fn requesting(&self) -> Option<FreeRequest> {
+        match self.ui {
+            FreeUi::Requesting { request, .. } => Some(request),
+            _ => None,
+        }
+    }
+
+    /// The pill's menu is open.
+    pub fn menu_open(&self) -> bool {
+        self.ui == FreeUi::MenuOpen
+    }
+
+    /// Closes the menu; a request out stays.
+    pub fn close_menu(&mut self) {
+        if self.menu_open() {
+            self.ui = FreeUi::Idle;
+        }
+    }
+
     /// Permanent codes are offered unless the server said they are not,
     /// or the account's own link is itself temporary.
     pub fn permanent_allowed(&self, temporary_only: bool) -> bool {

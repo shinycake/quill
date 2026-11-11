@@ -72,7 +72,7 @@ fn a_backdrop_picked_in_your_box_is_saved_when_the_panel_closes(cx: &mut TestApp
     );
     app.read_with(vcx, |app, _| {
         let open = app.peer_qr.open.as_ref().expect("the box stays");
-        assert_eq!(open.state.saving, None);
+        assert!(open.state.save.out().is_none());
         assert_eq!(
             open.state.served,
             Some(ThemeChoice::Emoji {

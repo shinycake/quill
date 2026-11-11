@@ -434,7 +434,7 @@ fn the_clock_runs_only_while_a_countdown_shows(cx: &mut TestAppContext) {
             app.peer_qr
                 .open
                 .as_ref()
-                .is_some_and(|open| open.clock_running)
+                .is_some_and(|open| open.clock.is_some())
         })
     };
     assert!(!running(&app, vcx), "a username link never runs out");

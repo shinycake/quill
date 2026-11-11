@@ -4,6 +4,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::super::app::QuillApp;
+use super::Export;
 use super::qr_path::{QrGrid, qr_body};
 use base64::Engine as _;
 use gpui_kit::*;
@@ -322,7 +323,7 @@ impl QuillApp {
     ) -> Option<(ShownLink, Picture)> {
         let view = self.qr_view()?;
         let open = self.peer_qr.open.as_ref()?;
-        if open.exporting {
+        if open.export.is_rendering() {
             return None;
         }
         let shown = match open.state.check_share(view.shown.clone(), now_unix()) {
@@ -432,12 +433,11 @@ impl QuillApp {
         let Some(open) = self.peer_qr.open.as_mut() else {
             return;
         };
-        open.exporting = true;
         let box_id = open.state.id;
         let renderer = cx.svg_renderer();
         let link = picture.link.clone();
         let appearance = picture.appearance.clone();
-        self.run_off_ui_then(
+        let rendering = self.run_off_ui_held(
             move || render_png(&renderer, &picture).and_then(finish),
             move |this, result, cx| {
                 // A box opened since then, even for the same link, is not
@@ -449,7 +449,7 @@ impl QuillApp {
                     .filter(|open| open.state.id == box_id);
                 let same_box = open.is_some();
                 if let Some(open) = open {
-                    open.exporting = false;
+                    open.export = Export::Idle;
                 }
                 let current = same_box && this.qr_image_current(&link, &appearance, cx);
                 done(this, result, current, cx);
@@ -457,6 +457,9 @@ impl QuillApp {
             },
             cx,
         );
+        if let Some(open) = self.peer_qr.open.as_mut() {
+            open.export = Export::Rendering(rendering);
+        }
         cx.notify();
     }
 

@@ -170,7 +170,7 @@ impl QuillApp {
             .iter()
             .map(|gift| (**gift).clone())
             .collect();
-        if open.motion.shown == Some(quill::peer_qr::state::QrPanel::Gifts)
+        if open.motion.shown() == Some(quill::peer_qr::state::QrPanel::Gifts)
             && let Some(session) = self.session()
         {
             gifts.extend(session.users_state.peer_qr.gifts.list.iter().cloned());

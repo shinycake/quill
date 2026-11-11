@@ -4,7 +4,7 @@
 //! alone, and runs the effects [`PeerQrBox::apply`] returns.
 
 use super::appearance::{Appearance, Swatch, SwatchKey};
-use super::free::{FreeMenuItem, FreeMode, FreeRequest, FreeResult, FreeState, FreeTicket};
+use super::free::{FreeMenuItem, FreeMode, FreeRequest, FreeResult, FreeState, FreeTicket, FreeUi};
 use super::link::SHARE_CUTOFF_SECS;
 use super::theme::{ThemeChoice, ThemeEmoji, ThemeGift};
 use crate::lang::Key;
@@ -174,12 +174,45 @@ pub struct PeerQrBox {
     /// Something was picked in this box (tdesktop `chosen`): the box
     /// stops following the saved theme and saves the pick.
     pub chosen: bool,
-    /// The save in flight, by serial.
-    pub saving: Option<(u64, ThemeChoice)>,
+    /// The save of the pick: out, or idle with the pick that failed.
+    pub save: SaveStage,
+    /// The serial of the last save sent; every save takes the next.
     pub save_serial: u64,
-    /// The pick whose save last failed: not sent again until the pick
-    /// changes.
-    pub failed: Option<ThemeChoice>,
+}
+
+/// The `setProfileShareTheme` of the box. An answer applies only while
+/// its serial is the one out; the answer, a newer save and the box
+/// closing each leave `Out`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SaveStage {
+    /// No save is out. `failed` is the pick whose save last failed: it is
+    /// not sent again until the pick changes.
+    Idle { failed: Option<ThemeChoice> },
+    /// The save of `choice` is out as `serial`.
+    Out { serial: u64, choice: ThemeChoice },
+}
+
+impl Default for SaveStage {
+    fn default() -> Self {
+        Self::Idle { failed: None }
+    }
+}
+
+impl SaveStage {
+    /// The choice being saved, if a save is out.
+    pub fn out(&self) -> Option<&ThemeChoice> {
+        match self {
+            Self::Out { choice, .. } => Some(choice),
+            Self::Idle { .. } => None,
+        }
+    }
+
+    fn failed(&self) -> Option<&ThemeChoice> {
+        match self {
+            Self::Idle { failed } => failed.as_ref(),
+            Self::Out { .. } => None,
+        }
+    }
 }
 
 impl PeerQrBox {
@@ -194,9 +227,8 @@ impl PeerQrBox {
             free: FreeState::default(),
             served: None,
             chosen: false,
-            saving: None,
+            save: SaveStage::default(),
             save_serial: 0,
-            failed: None,
         }
     }
 
@@ -211,7 +243,7 @@ impl PeerQrBox {
             QrAction::OpenPanel(panel) => {
                 if styling && self.panel.is_none() {
                     self.panel = Some(panel);
-                    self.free.menu_open = false;
+                    self.free.close_menu();
                     if panel == QrPanel::Gifts {
                         return vec![QrEffect::LoadGifts { more: false }];
                     }
@@ -261,7 +293,7 @@ impl PeerQrBox {
             QrAction::SaveAnswer { ticket, result } => return self.save_answer(ticket, result),
             QrAction::Closing => return self.save(env),
             QrAction::PillClicked => return self.pill_clicked(env),
-            QrAction::MenuDismissed => self.free.menu_open = false,
+            QrAction::MenuDismissed => self.free.close_menu(),
             QrAction::MenuChose(item) => return self.menu_chose(item, env),
             QrAction::FreeAnswer { ticket, result } => {
                 return self.free_answer(ticket, result, env);
@@ -320,11 +352,11 @@ impl PeerQrBox {
         self.chosen = true;
         let choice = self.choice();
         if self
-            .failed
-            .as_ref()
+            .save
+            .failed()
             .is_some_and(|failed| !failed.same_key(&choice))
         {
-            self.failed = None;
+            self.save = SaveStage::Idle { failed: None };
         }
     }
 
@@ -349,11 +381,7 @@ impl PeerQrBox {
             return Vec::new();
         }
         let choice = self.choice();
-        let baseline = self
-            .saving
-            .as_ref()
-            .map(|(_, choice)| choice)
-            .or(self.served.as_ref());
+        let baseline = self.save.out().or(self.served.as_ref());
         let unchanged = match baseline {
             Some(baseline) => baseline.same_key(&choice),
             // The saved theme is not known yet: a pick back to the
@@ -361,14 +389,17 @@ impl PeerQrBox {
             None => choice.same_key(&ThemeChoice::default()),
         };
         let failed_before = self
-            .failed
-            .as_ref()
+            .save
+            .failed()
             .is_some_and(|failed| failed.same_key(&choice));
         if unchanged || failed_before || choice.input_json().is_none() {
             return Vec::new();
         }
         self.save_serial += 1;
-        self.saving = Some((self.save_serial, choice.clone()));
+        self.save = SaveStage::Out {
+            serial: self.save_serial,
+            choice: choice.clone(),
+        };
         vec![QrEffect::SaveTheme {
             ticket: SaveTicket {
                 box_id: self.id,
@@ -388,10 +419,13 @@ impl PeerQrBox {
         if ticket.box_id != self.id {
             return Vec::new();
         }
-        let sent = self
-            .saving
-            .take_if(|(serial, _)| *serial == ticket.serial)
-            .map(|(_, choice)| choice);
+        let sent = match std::mem::take(&mut self.save) {
+            SaveStage::Out { serial, choice } if serial == ticket.serial => Some(choice),
+            other => {
+                self.save = other;
+                None
+            }
+        };
         match result {
             // An answer for a save that is no longer the one out says nothing
             // about the newer pick; the saved theme reaches `served` from the
@@ -399,13 +433,12 @@ impl PeerQrBox {
             Ok(saved) => {
                 if sent.is_some() {
                     self.served = Some(saved);
-                    self.failed = None;
                 }
                 Vec::new()
             }
             Err(reason) => {
                 if sent.is_some() {
-                    self.failed = sent;
+                    self.save = SaveStage::Idle { failed: sent };
                 }
                 if reason.is_empty() {
                     Vec::new()
@@ -428,15 +461,17 @@ impl PeerQrBox {
     }
 
     fn request(&mut self, what: FreeRequest, env: QrEnv) -> Vec<QrEffect> {
-        if self.free.requesting.is_some()
+        if self.free.requesting().is_some()
             || env.price <= 0
             || (what.permanent() && !self.free.permanent_allowed(env.temporary_only))
         {
             return Vec::new();
         }
-        self.free.menu_open = false;
-        self.free.requesting = Some(what);
         self.free.serial += 1;
+        self.free.ui = FreeUi::Requesting {
+            request: what,
+            serial: self.free.serial,
+        };
         vec![QrEffect::RequestFreeCode(FreeTicket {
             request: what,
             box_id: self.id,
@@ -446,26 +481,28 @@ impl PeerQrBox {
 
     /// tdesktop `dropPending`.
     fn drop_pending(&mut self) {
-        self.free.requesting = None;
-        self.free.serial += 1;
-        self.free.menu_open = false;
+        self.free.ui = FreeUi::Idle;
     }
 
     fn pill_clicked(&mut self, env: QrEnv) -> Vec<QrEffect> {
-        if self.free.requesting.is_some() || env.price <= 0 {
+        if self.free.requesting().is_some() || env.price <= 0 {
             return Vec::new();
         }
         match self.free.mode {
             FreeMode::Fee => self.request(FreeRequest::Temporary, env),
             FreeMode::Temporary { .. } | FreeMode::Permanent { .. } => {
-                self.free.menu_open = !self.free.menu_open;
+                self.free.ui = if self.free.menu_open() {
+                    FreeUi::Idle
+                } else {
+                    FreeUi::MenuOpen
+                };
                 Vec::new()
             }
         }
     }
 
     fn menu_chose(&mut self, item: FreeMenuItem, env: QrEnv) -> Vec<QrEffect> {
-        self.free.menu_open = false;
+        self.free.close_menu();
         let temporary = matches!(self.free.mode, FreeMode::Temporary { .. });
         match item {
             FreeMenuItem::Reset if temporary => self.request(FreeRequest::ResetTemporary, env),
@@ -484,12 +521,15 @@ impl PeerQrBox {
     /// after a reset the fee is back.
     fn free_answer(&mut self, ticket: FreeTicket, result: FreeResult, env: QrEnv) -> Vec<QrEffect> {
         if ticket.box_id != self.id
-            || ticket.serial != self.free.serial
-            || self.free.requesting != Some(ticket.request)
+            || self.free.ui
+                != (FreeUi::Requesting {
+                    request: ticket.request,
+                    serial: ticket.serial,
+                })
         {
             return Vec::new();
         }
-        self.free.requesting = None;
+        self.free.ui = FreeUi::Idle;
         let request = ticket.request;
         if request.permanent() && env.temporary_only {
             return Vec::new();
@@ -524,7 +564,7 @@ impl PeerQrBox {
         match &self.free.mode {
             FreeMode::Temporary { code } if code.link.expires_at <= env.now => {
                 self.free.mode = FreeMode::Fee;
-                self.free.menu_open = false;
+                self.free.close_menu();
                 vec![QrEffect::Toast(QrToast::CodeExpired)]
             }
             _ => Vec::new(),
@@ -535,7 +575,7 @@ impl PeerQrBox {
     /// permanent code and a permanent request.
     fn sync(&mut self, env: QrEnv) {
         if env.price <= 0 {
-            if self.free.requesting.is_some() || self.free.menu_open {
+            if self.free.ui != FreeUi::Idle {
                 self.drop_pending();
             }
             self.free.mode = FreeMode::Fee;
@@ -544,7 +584,7 @@ impl PeerQrBox {
         if !env.temporary_only {
             return;
         }
-        if self.free.requesting.is_some_and(FreeRequest::permanent) {
+        if self.free.requesting().is_some_and(FreeRequest::permanent) {
             self.drop_pending();
         }
         if matches!(self.free.mode, FreeMode::Permanent { .. }) {
@@ -575,7 +615,7 @@ impl PeerQrBox {
         shown: Option<ShownLink>,
         now: i64,
     ) -> Result<ShownLink, Option<QrToast>> {
-        if self.free.requesting.is_some() {
+        if self.free.requesting().is_some() {
             return Err(None);
         }
         let Some(shown) = shown.filter(|shown| !shown.link.is_empty()) else {
