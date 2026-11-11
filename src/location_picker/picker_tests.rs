@@ -43,6 +43,17 @@ fn without_a_fix_it_starts_at_the_country_and_waits() {
 }
 
 #[test]
+fn my_location_after_a_refusal_is_locating_until_it_answers() {
+    let mut picker = fresh();
+    picker.geolocated(GeoOutcome::Denied, false);
+    assert_eq!(picker.here(), HereState::Denied);
+    picker.locate_started();
+    assert_eq!(picker.here(), HereState::Locating);
+    picker.geolocated(GeoOutcome::Unavailable, false);
+    assert_eq!(picker.here(), HereState::Unavailable);
+}
+
+#[test]
 fn a_previous_fix_starts_there_with_venues_and_address() {
     let here = point(40.7, -74.);
     let mut picker = LocationPicker::open(ChatId(7), Some(here), point(31., 35.), 0);

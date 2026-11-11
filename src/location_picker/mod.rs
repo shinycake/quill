@@ -154,6 +154,13 @@ impl LocationSharing {
         }
     }
 
+    /// "My location" began a new lookup: the picker is locating again.
+    pub fn locate_started(&mut self) {
+        if let Some(picker) = self.picker.as_mut() {
+            picker.locate_started();
+        }
+    }
+
     pub fn geolocated(&mut self, outcome: GeoOutcome) {
         let changed = match outcome {
             GeoOutcome::Found(point) => !geo::same_place(self.last_exact, Some(point)),

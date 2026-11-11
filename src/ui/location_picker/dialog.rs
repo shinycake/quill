@@ -51,21 +51,17 @@ impl QuillApp {
                 }
                 let text = state.read(cx).value().to_string();
                 let _ = this.in_window_of(window, cx, |this, _, cx| {
-                    this.location_search_changed(Some(text), cx);
+                    this.location_search_changed(super::state::SearchEdit::Text(text), cx);
                 });
             },
         )
         .detach();
         input.update(cx, |input, cx| input.focus(window, cx));
-        self.location_ui.search = super::state::Search::Open {
-            input,
-            debounce: super::state::Wait::Idle,
-        };
-        self.location_search_changed(Some(String::new()), cx);
+        self.location_search_changed(super::state::SearchEdit::Open(input), cx);
     }
 
     fn location_search_close(&mut self, cx: &mut Context<Self>) {
-        self.location_search_changed(None, cx);
+        self.location_search_changed(super::state::SearchEdit::Close, cx);
     }
 
     fn location_title(&self, cx: &mut Context<Self>) -> AnyElement {
