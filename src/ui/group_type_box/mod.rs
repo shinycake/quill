@@ -480,6 +480,10 @@ impl QuillApp {
         let Some(edit) = self.group_edit_box_mut() else {
             return;
         };
+        // Only the Type box leaves here: another box over the Edit box stays.
+        if edit.type_box().is_none() {
+            return;
+        }
         let crate::ui::group_edit_box::EditSub::Type(mut type_box) = std::mem::take(&mut edit.sub)
         else {
             return;
