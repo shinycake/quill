@@ -273,8 +273,6 @@ StreamFacts::transport_failed
 StyleExamples::loading
 Tempo::done
 Tempo::inner_done
-ThemeGifts::loaded
-ThemeGifts::loading
 ThreadView::reading_started
 ThreadWindow::loaded_complete
 TonWalletState::explorer_url_requested

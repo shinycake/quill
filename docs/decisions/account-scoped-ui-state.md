@@ -4095,11 +4095,16 @@ and 10 are widget items another fixer owns).
   after a successful send and the answer, not the send, clears `stale`
   (02-180). A refused `finish_register`/`finish_login` is a note (04-066).
 - **Owner of an account folder.** `claim` reads the owner as `Previous::{Unknown,
-  Known}`: an unreadable `owner.json` with leftovers in the folder counts as
-  someone else and forgets, and a failed owner write is returned
-  (`Claimed::owner_error`) and logged by the driver (01-005). Behaviour change:
-  a folder that predates `owner.json` and has leftovers is forgotten once, on
-  the next sign-in, before the owner is written.
+  Known}`. An unreadable `owner.json` with leftovers counts as someone else
+  only when this run signed in fresh (`SignInOrigin::Fresh`, set by
+  `Session::set_auth` when TDLib asks for a phone, code, QR, email,
+  registration or password step). A session TDLib resumed
+  (`SignInOrigin::Resumed`) is the folder's own account: a user updating from
+  a release that kept no `owner.json` keeps their grants, trust, volumes,
+  windows, hashtags and widgets, and the owner is just written (01-005).
+  An empty `recent_hashtags.json` (what a wipe writes) is not a leftover, so a
+  failed owner write (`Claimed::owner_error`, logged by the driver) does not
+  wipe again at the next start. A different known owner always forgets.
 - **Exports settle and stay honest.** A worker that unwinds publishes
   `Failed` through `SettleOnPanic` (a drop guard in the thread body), so the
   Done button appears and a new export is not refused (03-042). `result.json`
@@ -4157,6 +4162,4 @@ and 10 are widget items another fixer owns).
   registry write, which the offline harness cannot make; 08-037, 08-036,
   11-p8-007, 12-076 and 12-094 call the driver or the lock from the frame and
   are only checked by the lock-surface and window-scope scripts and by eye.
-- **Not done.** `ThemeGifts` stays a struct with `loaded`/`loading`/`complete`
-  (baseline lines kept): the stage bools are read by the panel, the driver and
-  seven tests, and the fix for 11-p8-012 does not need the conversion.
+- **Not done.** Nothing left open.
