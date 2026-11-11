@@ -183,7 +183,8 @@ fn money_history_is_asked_when_an_earlier_money_send_is_refused() {
     t.sender.refuse(&["getApplicationConfig"]);
     assert!(t.driver.open_money_page().is_err());
     assert!(t.sender.count("getTonWalletTransactions") >= 1);
-    assert!(t.driver.session.ton_wallet.money.history.is_loading());
+    let money = t.driver.session.ton_wallet.money.as_ref();
+    assert!(money.is_some_and(|money| money.history.is_loading()));
 }
 
 #[test]
