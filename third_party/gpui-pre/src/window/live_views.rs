@@ -265,7 +265,7 @@ impl Window {
         }
         self.text_system.truncate_layouts(layouts);
         self.a11y.resume_tree(tree);
-        let entities = std::mem::take(cx.entities.accessed_entities.get_mut());
+        let entities = cx.entities.take_accessed();
         cx.add_entities_accessed(self.handle, self.invalidator.clone(), &entities);
         self.invalidator.set_phase(DrawPhase::None);
         self.needs_present.set(true);
