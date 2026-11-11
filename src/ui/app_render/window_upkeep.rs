@@ -113,6 +113,13 @@ impl QuillApp {
         {
             self.business_info_upkeep(window, cx);
         }
+        // A proxy editor that sent its request: the answer closes it.
+        if self
+            .windows
+            .dialog_may_show_in(crate::ui::shell::DialogKind::ProxyEdit, self.windows.scope)
+        {
+            self.proxy_saving_upkeep(window, cx);
+        }
         self.business_closed_error_upkeep();
         if self.windows.dialog_may_show_in(
             crate::ui::shell::DialogKind::GroupSettings,
