@@ -1,7 +1,7 @@
 use super::super::CallbackShared;
 use super::*;
 use crate::calls::engine::SsrcOwners;
-use std::sync::atomic::AtomicUsize;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 /// Encrypts by appending 0xEE, decrypts by prefixing the sender's id byte.
 #[derive(Default)]

@@ -234,8 +234,7 @@ async fn cast(
         options,
         pacer: FramePacer::new(options.fps),
         format: None,
-        streamed: false,
-        paused: false,
+        phase: StreamPhase::Connecting,
     };
     let stream = match PwStream::connect(fd, node, Box::new(handler)) {
         Ok(stream) => stream,
@@ -246,6 +245,17 @@ async fn cast(
     Ok(Outcome::Ended)
 }
 
+/// Where the PipeWire stream is. Pausing before frames flowed is setup, so
+/// `Paused` is only reached from `Streaming`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum StreamPhase {
+    /// No frame has flowed yet.
+    Connecting,
+    Streaming,
+    /// The source stopped sending (the shared window is hidden).
+    Paused,
+}
+
 /// Turns PipeWire buffers into call frames, on PipeWire's thread.
 struct Frames {
     sink: FrameSink<VideoFrame>,
@@ -253,9 +263,7 @@ struct Frames {
     options: ScreenOptions,
     pacer: FramePacer,
     format: Option<NegotiatedFormat>,
-    /// Whether frames have flowed: pausing before that is setup.
-    streamed: bool,
-    paused: bool,
+    phase: StreamPhase,
 }
 
 impl StreamHandler for Frames {
@@ -298,14 +306,13 @@ impl StreamHandler for Frames {
     fn state_changed(&mut self, state: StreamState, error: Option<String>) {
         match state {
             StreamState::Streaming => {
-                if self.paused {
-                    self.paused = false;
+                if self.phase == StreamPhase::Paused {
                     self.sink.push_event(CaptureEvent::Resumed);
                 }
-                self.streamed = true;
+                self.phase = StreamPhase::Streaming;
             }
-            StreamState::Paused if self.streamed && !self.paused => {
-                self.paused = true;
+            StreamState::Paused if self.phase == StreamPhase::Streaming => {
+                self.phase = StreamPhase::Paused;
                 self.sink.push_event(CaptureEvent::Paused);
             }
             StreamState::Error => self
@@ -314,7 +321,7 @@ impl StreamHandler for Frames {
                     "Screen sharing failed: {}",
                     error.unwrap_or_default()
                 )))),
-            StreamState::Unconnected if self.streamed => {
+            StreamState::Unconnected if self.phase != StreamPhase::Connecting => {
                 self.sink.push_event(CaptureEvent::Ended);
             }
             _ => {}

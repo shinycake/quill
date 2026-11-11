@@ -130,6 +130,82 @@ fn loader_failure(status: ExitStatus) -> bool {
 pub(super) static KEEP_ALIVES_HEARD: std::sync::atomic::AtomicU64 =
     std::sync::atomic::AtomicU64::new(0);
 
+/// One helper's life. Each stage follows the last, and `Failed` and
+/// `Closing` are the ends.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CarrierStage {
+    /// Started; the helper has not said `ready`.
+    Starting,
+    /// The helper said `ready`.
+    Ready,
+    /// A failure was reported (only the first one counts).
+    Failed,
+    /// Quill closed it: the exit that follows is not a failure, and the
+    /// page's last words are not passed on.
+    Closing,
+}
+
+impl CarrierStage {
+    /// Failed or closing: the page is not heard any more.
+    fn ended(self) -> bool {
+        matches!(self, Self::Failed | Self::Closing)
+    }
+}
+
+/// A [`CarrierStage`] the reader, the writer and the host move, each
+/// transition one atomic step.
+struct StageCell(AtomicU8);
+
+impl StageCell {
+    fn new() -> Self {
+        Self(AtomicU8::new(CarrierStage::Starting as u8))
+    }
+
+    fn get(&self) -> CarrierStage {
+        match self.0.load(Ordering::Acquire) {
+            x if x == CarrierStage::Starting as u8 => CarrierStage::Starting,
+            x if x == CarrierStage::Ready as u8 => CarrierStage::Ready,
+            x if x == CarrierStage::Failed as u8 => CarrierStage::Failed,
+            _ => CarrierStage::Closing,
+        }
+    }
+
+    /// The helper said `ready` (only while it is starting).
+    fn ready(&self) {
+        let _ = self.0.compare_exchange(
+            CarrierStage::Starting as u8,
+            CarrierStage::Ready as u8,
+            Ordering::AcqRel,
+            Ordering::Acquire,
+        );
+    }
+
+    /// Quill closed it.
+    fn close(&self) {
+        self.0.store(CarrierStage::Closing as u8, Ordering::Release);
+    }
+
+    /// A failure: `true` when this one is to be reported, that is, nothing
+    /// failed or closed it before.
+    fn fail(&self) -> bool {
+        let mut seen = self.0.load(Ordering::Acquire);
+        loop {
+            if seen == CarrierStage::Failed as u8 || seen == CarrierStage::Closing as u8 {
+                return false;
+            }
+            match self.0.compare_exchange_weak(
+                seen,
+                CarrierStage::Failed as u8,
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            ) {
+                Ok(_) => return true,
+                Err(now) => seen = now,
+            }
+        }
+    }
+}
+
 /// What the threads of one carrier share.
 struct Shared {
     started: Instant,
@@ -137,13 +213,8 @@ struct Shared {
     last_heard_ms: AtomicU64,
     /// Base64 bytes queued for the writer.
     queued: AtomicUsize,
-    /// A failure was reported (only the first one counts).
-    failed: AtomicBool,
-    /// Quill closed it: the exit that follows is not a failure, and the
-    /// page's last words are not passed on.
-    closing: AtomicBool,
-    /// The helper said `ready`.
-    ready: AtomicBool,
+    /// Where the helper stands.
+    stage: StageCell,
     /// The helper process, until something ends it.
     child: Mutex<Option<Child>>,
 }
@@ -154,9 +225,7 @@ impl Shared {
             started: Instant::now(),
             last_heard_ms: AtomicU64::new(0),
             queued: AtomicUsize::new(0),
-            failed: AtomicBool::new(false),
-            closing: AtomicBool::new(false),
-            ready: AtomicBool::new(false),
+            stage: StageCell::new(),
             child: Mutex::new(Some(child)),
         }
     }
@@ -186,7 +255,7 @@ impl Shared {
     /// Whether the helper is past its start budget, or silent too long
     /// once started.
     fn overdue(&self) -> bool {
-        if !self.ready.load(Ordering::Acquire) {
+        if self.stage.get() == CarrierStage::Starting {
             return self.started.elapsed() > START_TIMEOUT;
         }
         let heard = Duration::from_millis(self.last_heard_ms.load(Ordering::Acquire));
@@ -227,7 +296,7 @@ impl Shared {
     /// Report `error` unless something was reported already or Quill is
     /// closing the carrier itself.
     fn fail(&self, carrier_id: i32, error: CarrierError, failures: &Sender<(i32, CarrierError)>) {
-        if self.closing.load(Ordering::Acquire) || self.failed.swap(true, Ordering::AcqRel) {
+        if !self.stage.fail() {
             return;
         }
         let _ = failures.send((carrier_id, error));
@@ -256,14 +325,22 @@ pub struct HelperConfig {
     pub capability: Capability,
 }
 
+/// This host's data folder inside the account's folder.
+enum Folder {
+    /// No account folder is configured: helpers run without one.
+    NotConfigured,
+    /// The folder is claimed, until the host stops.
+    Claimed(data_folder::Generation),
+    /// No folder: the last claim failed (or the host stopped), and none is
+    /// tried before this time.
+    RetryAfter(Instant),
+}
+
 pub struct HelperCarrierHost {
     program: Option<PathBuf>,
     /// The account's folder the generations live in.
     root: Option<PathBuf>,
-    /// This host's data folder, until it stops.
-    generation: Option<data_folder::Generation>,
-    /// No claim before this, after one failed.
-    claim_after: Option<Instant>,
+    folder: Folder,
     relay: RelaySink,
     capability: Capability,
     carriers: HashMap<i32, Running>,
@@ -291,22 +368,26 @@ enum Waited {
 
 impl HelperCarrierHost {
     pub fn new(config: HelperConfig) -> Self {
-        let generation = config.data_dir.as_deref().and_then(|root| {
-            let generation = data_folder::Generation::claim(root);
-            // What earlier hosts left (they may have been killed).
-            data_folder::sweep_in_background(root.to_path_buf());
-            generation
-        });
+        let folder = match config.data_dir.as_deref() {
+            None => Folder::NotConfigured,
+            Some(root) => {
+                let generation = data_folder::Generation::claim(root);
+                // What earlier hosts left (they may have been killed).
+                data_folder::sweep_in_background(root.to_path_buf());
+                match generation {
+                    Some(generation) => Folder::Claimed(generation),
+                    None => Folder::RetryAfter(Instant::now() + CLAIM_BACKOFF),
+                }
+            }
+        };
         if let (Some(program), Some(cache)) = (&config.program, &config.probe_cache) {
             start_probe(program.clone(), cache.clone(), config.capability.clone());
         }
         let (failures_tx, failures) = channel();
         Self {
             program: config.program,
-            claim_after: (config.data_dir.is_some() && generation.is_none())
-                .then(|| Instant::now() + CLAIM_BACKOFF),
             root: config.data_dir,
-            generation,
+            folder,
             relay: config.relay,
             capability: config.capability,
             carriers: HashMap::new(),
@@ -327,15 +408,22 @@ impl HelperCarrierHost {
             return Ok(None);
         };
         let now = Instant::now();
-        if self.generation.is_none() && self.claim_after.is_none_or(|after| now >= after) {
-            self.generation = data_folder::Generation::claim(root);
-            self.claim_after = self.generation.is_none().then(|| now + CLAIM_BACKOFF);
+        if let Folder::RetryAfter(after) = self.folder
+            && now >= after
+        {
+            self.folder = match data_folder::Generation::claim(root) {
+                Some(generation) => Folder::Claimed(generation),
+                None => Folder::RetryAfter(now + CLAIM_BACKOFF),
+            };
         }
-        self.generation
-            .as_ref()
-            .and_then(|generation| generation.dir().to_str())
-            .map(|dir| Some(dir.to_string()))
-            .ok_or(CarrierError::Terminated)
+        match &self.folder {
+            Folder::Claimed(generation) => generation
+                .dir()
+                .to_str()
+                .map(|dir| Some(dir.to_string()))
+                .ok_or(CarrierError::Terminated),
+            Folder::NotConfigured | Folder::RetryAfter(_) => Err(CarrierError::Terminated),
+        }
     }
 }
 
@@ -372,7 +460,7 @@ impl CarrierHost for HelperCarrierHost {
         // Not starting is this process's trouble (no handles, no memory),
         // not proof the system has no web view: TDLib may try again.
         let mut child = spawn(program).map_err(|_| CarrierError::Terminated)?;
-        if let Some(generation) = &self.generation {
+        if let Folder::Claimed(generation) = &self.folder {
             generation.hold(&child);
         }
         let (Some(stdin), Some(stdout)) = (child.stdin.take(), child.stdout.take()) else {
@@ -443,7 +531,7 @@ impl CarrierHost for HelperCarrierHost {
 
     fn close(&mut self, carrier_id: i32, notify_page: bool) {
         if let Some(running) = self.carriers.remove(&carrier_id) {
-            running.shared.closing.store(true, Ordering::Release);
+            running.shared.stage.close();
             let last = self.carriers.is_empty();
             let _ = running
                 .commands
@@ -493,7 +581,7 @@ impl HelperCarrierHost {
     fn stop(&mut self, wait: bool) -> Waited {
         let deadline = Instant::now() + self.shutdown_wait;
         for (_, running) in self.carriers.drain() {
-            running.shared.closing.store(true, Ordering::Release);
+            running.shared.stage.close();
             if !wait {
                 running.shared.kill();
                 continue;
@@ -524,7 +612,9 @@ impl HelperCarrierHost {
                 waited = Waited::GaveUp;
             }
         }
-        if let Some(generation) = self.generation.take() {
+        if let Folder::Claimed(generation) =
+            std::mem::replace(&mut self.folder, Folder::RetryAfter(Instant::now()))
+        {
             if wait {
                 generation.tear_down(data_folder::RETRY_FOR);
             } else {
@@ -543,7 +633,10 @@ impl HelperCarrierHost {
     /// This host's data folder.
     #[cfg(test)]
     fn data_folder(&self) -> Option<&Path> {
-        self.generation.as_ref().map(data_folder::Generation::dir)
+        match &self.folder {
+            Folder::Claimed(generation) => Some(generation.dir()),
+            Folder::NotConfigured | Folder::RetryAfter(_) => None,
+        }
     }
 }
 
@@ -645,7 +738,7 @@ fn read_events(
         shared.heard();
         let message = match event {
             CarrierEvent::Ready => {
-                shared.ready.store(true, Ordering::Release);
+                shared.stage.ready();
                 continue;
             }
             CarrierEvent::Alive => {
@@ -668,7 +761,7 @@ fn read_events(
         };
         // After TDLib's close or a failure the page is not heard (the
         // schema's "must be ignored").
-        if shared.failed.load(Ordering::Acquire) || shared.closing.load(Ordering::Acquire) {
+        if shared.stage.get().ended() {
             continue;
         }
         let request = process_web_proxy_carrier_message(CARRIER_RELAY_EXTRA, carrier_id, &message);
@@ -679,7 +772,7 @@ fn read_events(
     // The helper exited without saying why. Only a missing web view
     // library is `Unsupported` (TDLib then stops asking); a crash, a kill
     // or anything else is `Terminated`, and TDLib tries again.
-    let missing_library = !shared.ready.load(Ordering::Acquire)
+    let missing_library = shared.stage.get() == CarrierStage::Starting
         && shared.exit_status(EXIT_WAIT).is_some_and(loader_failure);
     let error = if missing_library {
         capability.set(false);

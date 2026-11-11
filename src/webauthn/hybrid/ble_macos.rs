@@ -29,17 +29,15 @@ use std::sync::{Arc, Mutex};
 
 /// What the delegate shares with the scanner.
 struct Shared {
+    /// `Some` while the scanner runs; `stop` takes the sender, and nothing
+    /// is sent after.
     events: Mutex<Option<Sender<ScanEvent>>>,
     /// Availability goes out once (tdesktop `base::take(onAvailability)`).
     told: AtomicBool,
-    stopped: AtomicBool,
 }
 
 impl Shared {
     fn send(&self, event: ScanEvent) {
-        if self.stopped.load(Ordering::SeqCst) {
-            return;
-        }
         if let Ok(events) = self.events.lock()
             && let Some(events) = events.as_ref()
         {
@@ -181,7 +179,6 @@ impl Scanner for MacScanner {
         let shared = Arc::new(Shared {
             events: Mutex::new(Some(events)),
             told: AtomicBool::new(false),
-            stopped: AtomicBool::new(false),
         });
         let delegate = Delegate::new(shared.clone());
         let queue = DispatchQueue::new("org.shinycake.quill.cable", None);
@@ -208,7 +205,6 @@ impl Scanner for MacScanner {
         let Some(running) = self.running.take() else {
             return;
         };
-        running.shared.stopped.store(true, Ordering::SeqCst);
         if let Ok(mut events) = running.shared.events.lock() {
             *events = None;
         }
