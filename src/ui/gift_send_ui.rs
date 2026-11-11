@@ -25,7 +25,7 @@ use quill::gift_market::{auction_tile, resale_tile_price};
 use quill::lang::{keys, tr, tr_with};
 use quill::local_time::now_unix;
 use quill::state::Session;
-use std::cell::RefCell;
+use std::cell::Cell;
 use std::rc::Rc;
 
 const TILE_W: f32 = 132.0;
@@ -286,12 +286,9 @@ impl QuillApp {
             }
             dialog
                 .content(crate::ui::shell::scrollable_dialog_content({
-                    let body = Rc::new(RefCell::new(Some(body.into_any_element())));
+                    let body = Rc::new(Cell::new(Some(body.into_any_element())));
                     move |content, _, _| {
-                        let body = body
-                            .borrow_mut()
-                            .take()
-                            .unwrap_or_else(|| div().into_any_element());
+                        let body = body.take().unwrap_or_else(|| div().into_any_element());
                         content.child(body)
                     }
                 }))

@@ -148,12 +148,12 @@ fn a_chat_windows_gift_box_goes_on_without_the_main_window(cx: &mut TestAppConte
         app.windows.last_press = Some(OTHER);
         app.windows
             .dialog_opened_in(crate::ui::shell::DialogKind::GiftMarket, Some(OTHER));
-        app.gift_market.auction_open = crate::ui::gift_market_state::AuctionOpen::Waiting {
-            from_send_box: false,
-        };
+        app.gift_market.flow.begin_opening(7);
         if let Some(session) = app.demo_session.as_mut() {
-            session.payments.gift_market.auction =
-                quill::gift_market::AuctionFetch::Ready { gift_id: 5 };
+            session.payments.gift_market.auction = quill::gift_market::AuctionFetch::Ready {
+                gift_id: 5,
+                request: 7,
+            };
         }
     });
     cx.update_window(chat_window, |_, window, cx| window.render_frame(cx))
@@ -161,7 +161,7 @@ fn a_chat_windows_gift_box_goes_on_without_the_main_window(cx: &mut TestAppConte
     cx.run_until_parked();
     h.app.read_with(cx, |app, _| {
         assert!(
-            app.gift_market.auction_open == crate::ui::gift_market_state::AuctionOpen::Idle,
+            app.gift_market.flow.opening().is_none(),
             "the auction answer was taken"
         );
         let auction = app

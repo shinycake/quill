@@ -332,11 +332,10 @@ impl QuillApp {
                             return Woke::Later(plan);
                         }
                         let demand = this.frame.animation_demand.replace(0);
-                        let targets =
-                            with_cell(&this.frame.animation_targets, std::mem::take)
-                                .unwrap_or_default();
-                        let window_views = with_cell(&this.frame.window_views, std::mem::take)
+                        let targets = with_cell(&this.frame.animation_targets, std::mem::take)
                             .unwrap_or_default();
+                        let window_views =
+                            with_cell(&this.frame.window_views, std::mem::take).unwrap_or_default();
                         let sound = this.frame.animation_sound.replace(false);
                         let own_window = this.frame.own_window_tick.replace(false);
                         let app_ticks = tick_wanted(this.frame.window_active.get(), sound);
