@@ -369,7 +369,6 @@ impl CraftSession {
         self.candidates_total = 0;
         self.candidates_load = PageLoad::Idle;
         self.candidates_offset.clear();
-        self.candidates_page = 0;
         self.market = ResaleSearch::new(self.regular_gift_id, ResaleFilter::default(), true);
     }
 

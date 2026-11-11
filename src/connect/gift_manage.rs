@@ -620,7 +620,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// and only those.
     pub fn retry_send_gift_lists(&mut self) -> Result<(), ConnectSendError> {
         let send = &self.session.payments.gifts_manage.send;
-        if !send.open || !self.chats_path_active() {
+        if !send.is_open() || !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
         let gifts = matches!(send.gifts_fetch, GiftListFetch::Failed(_));
