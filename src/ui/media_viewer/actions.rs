@@ -589,41 +589,34 @@ impl QuillApp {
         if self.viewer.visibility.has_timer() || controls_stay_up() {
             return;
         }
+        self.viewer_idle_check(cx);
+    }
+
+    /// The idle clock's turn: hide the controls once the pause is over,
+    /// else wait out the rest of it in a timer the visible stage holds.
+    fn viewer_idle_check(&mut self, cx: &mut Context<Self>) {
+        let idle = self.viewer.last_activity.elapsed().as_millis() as u64;
+        let done = !self.viewer.state.is_open() || self.viewer.visibility.is_hidden();
+        if done {
+            self.viewer.visibility.timer_done();
+            return;
+        }
+        // Never mid-drag (a seek, volume or speed thumb).
+        let held = self.viewer.pointer.over_controls() || self.viewer.controls.dragging();
+        if controls_should_hide(idle, held) {
+            let end = self.viewer_fade_end(cx);
+            self.viewer.visibility.hide(end);
+            cx.notify();
+            return;
+        }
+        let wait = Duration::from_millis(if held {
+            VIEWER_WAIT_HIDE_MS
+        } else {
+            controls_hide_wait_ms(idle).max(16)
+        });
         let timer = self.spawn_scoped(cx, async move |this, cx| {
-            loop {
-                let wait = this
-                    .update(cx, |this, cx| {
-                        let idle = this.viewer.last_activity.elapsed().as_millis() as u64;
-                        let done =
-                            !this.viewer.state.is_open() || this.viewer.visibility.is_hidden();
-                        // Never mid-drag (a seek, volume or speed thumb).
-                        let held =
-                            this.viewer.pointer.over_controls() || this.viewer.controls.dragging();
-                        if !done && controls_should_hide(idle, held) {
-                            let end = this.viewer_fade_end(cx);
-                            this.viewer.visibility.hide(end);
-                            cx.notify();
-                        } else if !done {
-                            return Some(if held {
-                                VIEWER_WAIT_HIDE_MS
-                            } else {
-                                controls_hide_wait_ms(idle).max(16)
-                            });
-                        }
-                        this.viewer.visibility.timer_done();
-                        None
-                    })
-                    .ok()
-                    .flatten();
-                match wait {
-                    Some(ms) => {
-                        cx.background_executor()
-                            .timer(Duration::from_millis(ms))
-                            .await;
-                    }
-                    None => break,
-                }
-            }
+            cx.background_executor().timer(wait).await;
+            let _ = this.update(cx, |this, cx| this.viewer_idle_check(cx));
         });
         self.viewer.visibility.set_timer(timer);
     }

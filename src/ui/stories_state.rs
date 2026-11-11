@@ -266,11 +266,17 @@ impl StoryViewerUi {
 /// (`StoryUi::media_saves`, one per story item). `Saving` ends with the
 /// copy's result, which waits in `Done` for the story it was for, so
 /// stepping away and back still shows it. Saving again is allowed once it
-/// is `Done`.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// is `Done`. The copy's task is held here, so a replaced or removed stage
+/// drops it.
 pub(super) enum MediaSave {
-    Saving,
+    Saving { _task: Task<()> },
     Done(String),
+}
+
+impl MediaSave {
+    pub(super) fn is_saving(&self) -> bool {
+        matches!(self, Self::Saving { .. })
+    }
 }
 
 /// The viewer's 100 ms tick. The task is owned here, so dropping the
@@ -401,8 +407,7 @@ impl StoryUi {
         self.open = None;
         // Finished results go with the viewer; a copy still running stays
         // so a reopened viewer does not start a second one.
-        self.media_saves
-            .retain(|_, save| matches!(save, MediaSave::Saving));
+        self.media_saves.retain(|_, save| save.is_saving());
     }
 
     /// The viewer moved on from the story it showed: what was open over
@@ -422,9 +427,13 @@ impl StoryUi {
             } else {
                 ViewerPanel::None
             };
+            // A cover or privacy call already sent stays tracked: its answer
+            // settles the story it was sent for, not the one shown now.
             self.open = Some(StoryViewerUi {
                 panel,
                 page_op: open.page_op.filter(|_| close_friends),
+                cover_request: open.cover_request,
+                privacy_request: open.privacy_request,
                 ..StoryViewerUi::default()
             });
         }

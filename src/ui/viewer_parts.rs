@@ -390,6 +390,23 @@ impl ControlsVisibility {
     }
 }
 
+/// The wait that ends a phaseless trackpad swipe: none running, or the
+/// timer, held here so a close or a new timer drops it.
+#[derive(Default)]
+pub(super) enum SwipeTimer {
+    #[default]
+    Idle,
+    Armed {
+        _task: Task<()>,
+    },
+}
+
+impl SwipeTimer {
+    pub(super) fn is_armed(&self) -> bool {
+        matches!(self, Self::Armed { .. })
+    }
+}
+
 /// The photo editor slot: closed, an open asked for while its photo still
 /// renders, or the editor.
 #[derive(Default)]

@@ -43,12 +43,15 @@ pub(crate) enum Notes {
     Failed,
 }
 
-/// The window: not open, being opened (deferred), or open.
-#[derive(Default, Clone, Copy)]
+/// The window: not open, being opened (deferred), or open. The deferred
+/// open is the variant's task, so the app going away drops it.
+#[derive(Default)]
 enum WhatsNewWindow {
     #[default]
     Closed,
-    Opening,
+    Opening {
+        _task: Task<()>,
+    },
     Open(AnyWindowHandle),
 }
 
@@ -66,7 +69,7 @@ impl QuillApp {
         if !matches!(self.preferences.whats_new.notes, Notes::Loading { .. }) {
             self.load_release_notes(cx);
         }
-        match self.preferences.whats_new.window {
+        match &self.preferences.whats_new.window {
             WhatsNewWindow::Open(handle) => {
                 let raised = handle.update(cx, |_, window, _| window.activate_window());
                 if raised.is_ok() {
@@ -74,19 +77,19 @@ impl QuillApp {
                 }
                 self.preferences.whats_new.window = WhatsNewWindow::Closed;
             }
-            WhatsNewWindow::Opening => return,
+            WhatsNewWindow::Opening { .. } => return,
             WhatsNewWindow::Closed => {}
         }
-        self.preferences.whats_new.window = WhatsNewWindow::Opening;
         let owner = cx.entity();
-        cx.defer(move |cx| {
-            let handle = open_window(owner.clone(), cx);
-            owner.update(cx, |app, cx| {
+        let task = cx.spawn(async move |this, cx| {
+            let handle = cx.update(|cx| open_window(owner, cx));
+            let _ = this.update(cx, |app, cx| {
                 app.preferences.whats_new.window =
                     handle.map_or(WhatsNewWindow::Closed, WhatsNewWindow::Open);
                 cx.notify();
             });
         });
+        self.preferences.whats_new.window = WhatsNewWindow::Opening { _task: task };
     }
 
     fn load_release_notes(&mut self, cx: &mut Context<Self>) {
@@ -444,9 +447,9 @@ impl QuillApp {
 
     #[cfg(test)]
     pub(crate) fn whats_new_window(&self) -> Option<AnyWindowHandle> {
-        match self.preferences.whats_new.window {
-            WhatsNewWindow::Open(handle) => Some(handle),
-            WhatsNewWindow::Closed | WhatsNewWindow::Opening => None,
+        match &self.preferences.whats_new.window {
+            WhatsNewWindow::Open(handle) => Some(*handle),
+            WhatsNewWindow::Closed | WhatsNewWindow::Opening { .. } => None,
         }
     }
 }

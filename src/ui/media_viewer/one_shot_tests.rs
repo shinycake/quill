@@ -3,8 +3,10 @@
 //! one window's viewer stopping leaves another window's parked clip
 //! (needs the `demo-capture` feature for gpui-kit's test support).
 use super::super::navigation::wheel_ui_tests::{add_photo, new_app, open};
+use crate::ui::forward_stage::{ForwardStage, ShareAt};
 use crate::ui::play_intent::{PlayIntent, PlayTarget};
-use quill::ids::{ChatId, ChatMessage, FileId, MessageId};
+use quill::composer::ForwardDraft;
+use quill::ids::{ChatId, ChatMessage, FileId, MessageId, TopicId};
 
 #[gpui_kit::test]
 fn closing_the_viewer_drops_a_timestamp_start(cx: &mut gpui_kit::TestAppContext) {
@@ -62,9 +64,21 @@ fn closing_the_forward_picker_drops_share_at(cx: &mut gpui_kit::TestAppContext) 
     let (app, mut vcx) = new_app(cx);
     let vcx = &mut vcx;
     app.update_in(vcx, |app, window, cx| {
-        app.viewer.extra.share_at = Some((ChatId(11), MessageId(101), 83));
+        app.share.forward = ForwardStage::Selecting(
+            ForwardDraft::from_message(ChatId(11), TopicId::None, MessageId(101), false)
+                .expect("a message to forward"),
+        );
+        assert!(app.share.forward.open_picker());
+        app.share.forward.set_share_at(ShareAt {
+            chat_id: ChatId(11),
+            message_id: MessageId(101),
+            secs: 83,
+        });
         app.close_forward_picker(window, cx);
-        assert_eq!(app.viewer.extra.share_at, None);
+        assert_eq!(
+            app.share.forward.take_share_at(ChatId(11), MessageId(101)),
+            None
+        );
     });
 }
 

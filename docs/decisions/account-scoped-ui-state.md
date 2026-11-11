@@ -8057,7 +8057,7 @@ style preview) and three files of the main frame (`frame_upkeep`, `render`,
 | --- | --- |
 | 14-059 | `reset_viewer_item_state` drops a timestamp start for any item but the current one (the open or quality change that armed it keeps it) |
 | 14-060 | `ViewerUi::pointer: Pointer { Away, OverControls, Panning(anchor) }` replaces `drag` and `over_controls`; a step ends a pan, a close ends both, a move over a control never ends a pan |
-| 14-061 | `Reorient` owns the shown orientation in every stage (`Idle(o)`, `Decoding { orientation, target, token, shown }`, `Ready { orientation, rotated }`); `ViewerUi::orientation` and the code in `Rotated` are gone, so nothing compares them by hand |
+| 14-061 | `Reorient` owns the shown orientation in every stage (`Idle(o)`, `Decoding { orientation, target, shown, _task }` (the stage holds the decode task, so a newer turn, a step or a close drops a superseded decode and no token is needed), `Ready { orientation, rotated }`); `ViewerUi::orientation` and the code in `Rotated` are gone, so nothing compares them by hand |
 | 14-020, 14-066, 14-013, 14-014, 14-085, 14-032 | no panicking borrows; the dialog body slot is `Rc<Cell<Option<_>>>` |
 | 14-036, 14-037 | `Lookup::stage: LookStage { Settled, Rendering, JustMade, FadeStarted }` replaces `pending` and `fade_started` (baseline lines dropped) |
 | 14-040 | a crossfade holds one old picture per window, each painted in its own window |
@@ -8074,6 +8074,32 @@ style preview) and three files of the main frame (`frame_upkeep`, `render`,
 | 07-050 | a Premium preview fetches nothing while locked. The other steps are teardown or pauses and already lock-aware; `sync_video_avatar` no longer opens a clip while locked (`video_avatar.rs`) |
 | 07-051 | `ToastQueue::wake` is `Wake::{Idle, Armed { deadline, timer }}`; the timer is an app task held in the queue, so it survives an account switch and is dropped with its deadline. Touched outside the bundle: `toast_queue.rs`. Baseline line `detached:status_toast_visible` dropped |
 | 07-059 | the toast surface uses `try_borrow_mut` |
+
+Review fix round (file-complete rule; the integration branch `claude/sweep-r2-followup` was merged first and its shapes kept):
+
+| item | result |
+| --- | --- |
+| review 1 (`widgets_state.rs`) | `Poll::Asking(RequestId)`: `poll_widget_public_data` returns the id of the poll that is out (the one already in flight, if any) and `WidgetAnswer::PublicData` carries `request`; an answer for another request (a replaced widget, a restart) is dropped |
+| review 2 (`whats_new.rs`) | `WhatsNewWindow::Opening(Task<()>)` holds the deferred open, so the app going away cancels it |
+| review 3, viewer timers (`navigation.rs`, `actions.rs`) | the swipe timeout is a held `SwipeTimer::{Idle, Armed(Task)}` re-armed one wake at a time (no loop, no detach, dropped on close); the controls' idle clock re-arms from `viewer_idle_check` into the visible stage's timer instead of looping |
+| review 3, allowed clocks (`playback.rs`, `hdr_image/viewer.rs`) | `spawn_viewer_session_tick` (OS media-key queue with no wake signal) and `poll_viewer_headroom` (the OS posts no EDR change) are in `owned-timers-allow.txt` with what ends them; both tasks were already held by their stage |
+| review 3, `stories_state.rs`, `story_more.rs` | `MediaSave::Saving(Task)` holds the copy task; the answer replaces it with `Done` |
+| review 3, `story_albums/cover_strip.rs` (13-038) | `CoverStage::Probing { _probe }`, `Ready { cut: PreviewCut, _strip }`: probe, strip and preview tasks are held by the stage that waits for them; the serial is gone (a closed or replaced picker drops its tasks) |
+| review 3, `Reorient::Decoding` | the token is gone (see 14-061 above); no allow line |
+| review 3, `apply_chats_payload` | the Backgrounds arms file their answers under the pending request (`answered(extra, ..)`, `background_answers.push(id, ..)`, `Found(id, ..)`); `check-request-match.py --list` reports no hit for the function after the merge |
+| nit: `bare:Phase::Loading` | pruned from `stage-enums-baseline.txt` with the other stale lines (all four baselines pruned) |
+| nit: Share answer after Blur | `Answers::push` keeps at most `KEPT` answers, so the answer is bounded and the next drain drops it |
+| nit: `Wake::Armed.timer` | `None` only between `rewake` and `arm` in one call; no frame can see it |
+| 11-006 | `VideoControlsState::drag: SliderDrag { None, Seek(at), Volume, Speed(v) }` replaces `seek_preview`, `volume_dragging` and `speed_preview`; a clip stop ends it |
+| 11-014 | the per-item and per-open resets are two methods beside the fields (`ViewerUi::new_item`, `ViewerUi::closed`), no longer two lists in `navigation.rs` |
+| 11-015 | the "Share at" position is `ForwardStage::Picking { share_at }`; leaving the box drops it (the three hand clears are gone) |
+| 11-016 | the viewer panel copies only the item's files and download intents (`FileMap::only`, `DownloadIntents::only`) instead of both whole maps |
+| 13-033 | `leave_item` carries `cover_request` and `privacy_request` to the next story, and reopening an editor no longer clears them; Set is disabled while a cover call is out |
+| 13-042 | a picker save whose adds went out and whose removes did not send marks the adds done (`AlbumPicker::mark_added`), so the retry sends only the removes |
+| 13-058 | `ToastQueue::pointer` is gone: the shown toast's `Timer::Paused` is the hover, and `dismiss` hands it to the next toast |
+| 14-052 | the window-activation observer pauses the playing cover clip when no Quill window is in front (`hold_video_avatar`) |
+| 10-083 | not a bug: a failed HDR decode draws the SDR picture, as a file with no HDR does; a re-decode of the same key from render would loop, and each open or step resets the stage, which retries it |
+| 10-081, 10-082, 11-002, 11-004, 11-008, 11-009, 13-038, 13-039, 13-059 | already fixed by the worker commits or `claude/sweep-r2-followup` (held tasks in `Decode::Decoding`, `Shown`, `Reorient`, `SavedToastStage`, `FadeOut`, `Wake`), and by the items above |
 
 ### Sweep fixes (r2-05)
 

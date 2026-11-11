@@ -703,10 +703,15 @@ impl QuillApp {
                     },
                 ),
                 WidgetAnswer::Deleted { key } => self.forget_widget(key),
-                WidgetAnswer::PublicData { key, data } => {
+                WidgetAnswer::PublicData { key, request, data } => {
                     let Some(entry) = self.widgets.entries.get_mut(&key) else {
                         continue;
                     };
+                    // Only the poll that is out: a restart or a replaced
+                    // widget forgot it, and its late answer is not ours.
+                    if entry.poll != Poll::Asking(request) {
+                        continue;
+                    }
                     let period = match data {
                         Some((data, period)) => {
                             entry.polled = Some(data);
@@ -714,9 +719,7 @@ impl QuillApp {
                         }
                         None => quill::message_widget::DEFAULT_POLL_PERIOD,
                     };
-                    if entry.poll == Poll::Asking {
-                        entry.poll = Poll::Due(Instant::now() + period);
-                    }
+                    entry.poll = Poll::Due(Instant::now() + period);
                 }
             }
         }
@@ -753,12 +756,11 @@ impl QuillApp {
             let asked = self
                 .live
                 .as_mut()
-                .is_some_and(|live| live.driver.poll_widget_public_data(key).is_ok());
+                .and_then(|live| live.driver.poll_widget_public_data(key).ok());
             if let Some(entry) = self.widgets.entries.get_mut(&key) {
-                entry.poll = if asked {
-                    Poll::Asking
-                } else {
-                    Poll::Due(now + quill::message_widget::DEFAULT_POLL_PERIOD)
+                entry.poll = match asked {
+                    Some(request) => Poll::Asking(request),
+                    None => Poll::Due(now + quill::message_widget::DEFAULT_POLL_PERIOD),
                 };
             }
         }

@@ -15,9 +15,17 @@
 #![deny(clippy::indexing_slicing)]
 
 use quill::composer::ForwardDraft;
-use quill::ids::ChatId;
+use quill::ids::{ChatId, MessageId};
 
 use super::mount::Mount;
+
+/// A viewer video's message and second the share box was opened at.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct ShareAt {
+    pub(crate) chat_id: ChatId,
+    pub(crate) message_id: MessageId,
+    pub(crate) secs: i32,
+}
 
 /// The forward being built in one window.
 #[derive(Debug, Default)]
@@ -34,11 +42,14 @@ pub(crate) enum ForwardStage {
     /// selection, which leaving it returns to.
     ///
     /// `mount` is the box's own opening stage: its search field takes focus
-    /// on the first draw after the dialog has mounted.
+    /// on the first draw after the dialog has mounted. `share_at` is the
+    /// viewer position ("Share at 1:23") the box was opened at, which
+    /// lasts as long as the box.
     Picking {
         draft: ForwardDraft,
         bar: Option<ChatId>,
         mount: Mount,
+        share_at: Option<ShareAt>,
     },
     /// One destination chosen: the forward bar waits above `dest`'s
     /// composer, and Send forwards (the typed comment first). No selection
@@ -136,6 +147,25 @@ impl ForwardStage {
         }
     }
 
+    /// Record the viewer position the open box was opened at (nothing
+    /// when no box is open).
+    pub(crate) fn set_share_at(&mut self, at: ShareAt) {
+        if let Self::Picking { share_at, .. } = self {
+            *share_at = Some(at);
+        }
+    }
+
+    /// The position the open box was opened at for this message, taken:
+    /// the link carries it once.
+    pub(crate) fn take_share_at(&mut self, chat_id: ChatId, message_id: MessageId) -> Option<i32> {
+        let Self::Picking { share_at, .. } = self else {
+            return None;
+        };
+        share_at
+            .take_if(|at| at.chat_id == chat_id && at.message_id == message_id)
+            .map(|at| at.secs)
+    }
+
     /// The share box is open.
     pub(crate) fn picker_open(&self) -> bool {
         matches!(self, Self::Picking { .. })
@@ -203,11 +233,13 @@ impl ForwardStage {
                 draft,
                 bar: None,
                 mount: Mount::Mounting,
+                share_at: None,
             },
             Self::Bar { draft, dest } => Self::Picking {
                 draft,
                 bar: Some(dest),
                 mount: Mount::Mounting,
+                share_at: None,
             },
             picking @ Self::Picking { .. } => picking,
         };
@@ -234,10 +266,16 @@ impl ForwardStage {
     pub(crate) fn drop_bar(&mut self) {
         *self = match std::mem::take(self) {
             Self::Bar { draft, .. } => Self::Selecting(draft),
-            Self::Picking { draft, mount, .. } => Self::Picking {
+            Self::Picking {
+                draft,
+                mount,
+                share_at,
+                ..
+            } => Self::Picking {
                 draft,
                 bar: None,
                 mount,
+                share_at,
             },
             Self::ReplyChooser(mut under, mount) => {
                 under.drop_bar();
@@ -334,6 +372,7 @@ mod tests {
             draft: draft(),
             bar: Some(ChatId(2)),
             mount: Mount::Shown,
+            share_at: None,
         };
         stage.drop_bar();
         assert!(stage.picker_open());

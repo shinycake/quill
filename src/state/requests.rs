@@ -838,11 +838,25 @@ impl RequestRegistry {
         chat_id: ChatId,
         message_id: MessageId,
     ) -> bool {
-        self.pending.values().any(|p| {
-            p.purpose == purpose
-                && p.chat_id == Some(chat_id)
-                && p.around_message_id == Some(message_id)
-        })
+        self.find_for_message(purpose, chat_id, message_id)
+            .is_some()
+    }
+
+    /// The in-flight request for a purpose and message, if any.
+    pub fn find_for_message(
+        &self,
+        purpose: RequestPurpose,
+        chat_id: ChatId,
+        message_id: MessageId,
+    ) -> Option<RequestId> {
+        self.pending
+            .values()
+            .find(|p| {
+                p.purpose == purpose
+                    && p.chat_id == Some(chat_id)
+                    && p.around_message_id == Some(message_id)
+            })
+            .map(|p| p.id)
     }
 
     /// Mutable access to a pending request (parity slice: stamping

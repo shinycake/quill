@@ -39,6 +39,8 @@ pub(crate) struct ViewerUi {
     pub(super) wheel: WheelNav,
     /// A horizontal trackpad swipe pulling the next or previous arrow in.
     pub(super) swipe: SwipeNav,
+    /// The wait that ends a swipe the platform sends no end phase for.
+    pub(super) swipe_timer: super::viewer_parts::SwipeTimer,
     /// Parity slice 5: the clip of the shown item, playing (sound playing)
     /// or paused (clock frozen, sound paused), a GIF animating as an image,
     /// or the line saying why it could not play. The controls read the
@@ -97,6 +99,42 @@ impl super::on_screen::Farewell for ViewerUi {
 }
 
 impl ViewerUi {
+    /// Another item is on screen: what belongs to the item before it goes,
+    /// and `orientation` is the turn the new one starts with. Open, step
+    /// and "the current item was deleted" all come here; what outlives the
+    /// item (the open's own state) is [`Self::closed`]'s.
+    pub(super) fn new_item(&mut self, orientation: quill::media_viewer::ViewerOrientation) {
+        self.zoom.reset();
+        self.pointer.end_pan();
+        self.wheel.new_item();
+        self.swipe.new_item();
+        self.hdr.reset();
+        self.clip.clear_error();
+        self.reorient.reset(orientation);
+        self.extra.loop_pause = super::media_viewer::LoopPause::Free;
+    }
+
+    /// The viewer closed: everything that belongs to this open goes (the
+    /// per-item state is reset by the next open's [`Self::new_item`]).
+    pub(super) fn closed(&mut self) {
+        // A timestamp link's start belongs to this open: a clip that never
+        // played here must not start there the next time it opens.
+        self.pending_seek = None;
+        self.extra.saved_toast = Default::default();
+        // Reopening the same item starts with its caption collapsed.
+        self.extra.caption = Default::default();
+        self.state.close();
+        // A turned photo is a full-size picture of its own (up to about
+        // 20 MB, and as much again on the GPU); opening the next item
+        // replaced it, but nothing did until then.
+        self.reorient.reset(Default::default());
+        self.hdr.reset();
+        // A pan held or a control rested on when the viewer closed ends
+        // with it, and so does the wait for a swipe's end.
+        self.pointer = Default::default();
+        self.swipe_timer = Default::default();
+    }
+
     pub(super) fn new() -> Self {
         Self {
             state: MediaViewer::closed(),
@@ -107,6 +145,7 @@ impl ViewerUi {
             pointer: Default::default(),
             wheel: WheelNav::default(),
             swipe: SwipeNav::default(),
+            swipe_timer: Default::default(),
             clip: Default::default(),
             pip: None,
             video_layer: None,

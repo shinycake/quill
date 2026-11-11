@@ -161,7 +161,12 @@ fn a_story_media_save_belongs_to_its_story(cx: &mut TestAppContext) {
     let key = app.update(vcx, |app, cx| {
         let key = app.stories.viewer.current().map(|item| item.key());
         let key = key.expect("the demo viewer shows a story");
-        app.stories.media_saves.insert(key, MediaSave::Saving);
+        app.stories.media_saves.insert(
+            key,
+            MediaSave::Saving {
+                _task: gpui_kit::Task::ready(()),
+            },
+        );
         app.stories
             .with_viewer_ui(|open| open.notice = Some("Saving…".into()));
         app.save_story_media(cx);
@@ -176,9 +181,11 @@ fn a_story_media_save_belongs_to_its_story(cx: &mut TestAppContext) {
     frames(vcx);
     app.update(vcx, |app, cx| {
         assert_eq!(app.stories.viewer_ui().notice, None);
-        assert_eq!(
-            app.stories.media_saves.get(&key),
-            Some(&MediaSave::Saving),
+        assert!(
+            app.stories
+                .media_saves
+                .get(&key)
+                .is_some_and(MediaSave::is_saving),
             "the copy is still the first story's"
         );
         // It finishes while the other story shows; back on the first, the
@@ -191,5 +198,24 @@ fn a_story_media_save_belongs_to_its_story(cx: &mut TestAppContext) {
             app.stories.viewer_ui().notice.as_deref(),
             Some("Saved to Downloads")
         );
+    });
+}
+
+/// A cover or privacy call already sent stays tracked when the viewer
+/// steps to another story: its answer settles the story it was sent for.
+#[gpui_kit::test]
+fn a_manage_call_sent_stays_tracked_across_a_step(cx: &mut TestAppContext) {
+    use quill::ids::RequestId;
+    let (app, mut vcx) = open_app(cx, "ready-story-viewer");
+    let vcx = &mut vcx;
+    app.update(vcx, |app, cx| {
+        app.stories.with_viewer_ui(|open| {
+            open.cover_request = Some((RequestId(7), (1, 2)));
+            open.privacy_request = Some((RequestId(8), (1, 2)));
+        });
+        app.step_story_viewer(1, cx);
+        let open = app.stories.viewer_ui();
+        assert_eq!(open.cover_request, Some((RequestId(7), (1, 2))));
+        assert_eq!(open.privacy_request, Some((RequestId(8), (1, 2))));
     });
 }

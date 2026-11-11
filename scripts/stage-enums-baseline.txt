@@ -77,7 +77,6 @@ bare:ListStatus::Loading 1
 bare:Lookup::Pending 1
 bare:Lookup::Waiting 1
 bare:MediaFile::Downloading 1
-bare:MediaSave::Saving 1
 bare:MembersStage::Loading 1
 bare:MenuSend::Sent 1
 bare:MessageStatsFetch::Loading 1
@@ -104,7 +103,6 @@ bare:PipWindowStage::Opening 1
 bare:PlayHead::Waiting 1
 bare:PlayState::Opening 1
 bare:Playback::Waiting 1
-bare:Poll::Asking 1
 bare:PollPage::Opening 1
 bare:PollStatsFetch::Loading 1
 bare:PollVotersFetch::Loading 1
@@ -162,7 +160,6 @@ bare:ViewState::Opening 1
 bare:ViewState::Waiting 1
 bare:Waker::Pending 1
 bare:WebRowState::Connecting 1
-bare:WhatsNewWindow::Opening 1
 bare:WithdrawalState::Pending 2
 bare:WorkerLife::Running 1
 bare:WriteAccess::Asking 1
@@ -185,7 +182,6 @@ unkeyed:ChatSearchPaging::Loading 1
 unkeyed:ChatStatisticsFetch::Loading 1
 unkeyed:ComposerReplyFetch::Loading 1
 unkeyed:ConferenceStage::Upgrading 1
-unkeyed:CoverStage::Probing 1
 unkeyed:CreateStage::Creating 1
 unkeyed:CustomEmojiCard::Asked 1
 unkeyed:DebugConfirm::Asking 1

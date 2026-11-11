@@ -139,6 +139,19 @@ impl QuillApp {
         }
     }
 
+    /// No Quill window is in front: the playing cover clip pauses now,
+    /// since the main window may be hidden and draw no frame to do it.
+    pub(super) fn hold_video_avatar(&mut self, active: bool) {
+        if active {
+            return;
+        }
+        if let Cover::Playing(clip) = &self.video_avatar.cover
+            && clip.player.wants_play()
+        {
+            clip.player.pause();
+        }
+    }
+
     /// A player for `animation` once its file is local (it downloads with
     /// the open chat's thumbnails, `info_cover_file_ids_to_download`).
     fn open_cover_clip(
