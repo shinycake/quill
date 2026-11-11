@@ -132,7 +132,7 @@ fn undo_removes_the_pending_stars_and_nothing_commits() {
 }
 
 #[test]
-fn a_refused_commit_keeps_the_stars_stuck_and_the_next_tap_joins_them() {
+fn a_refused_commit_releases_the_stars_and_the_next_tap_starts_fresh() {
     let (mut driver, recorder, sink, seq) = driver_parts();
     driver
         .add_paid_reaction(ChatId(-100), MessageId(7), 4, None, 0)
@@ -148,11 +148,11 @@ fn a_refused_commit_keeps_the_stars_stuck_and_the_next_tap_joins_them() {
         })
         .to_string(),
     );
-    // A refused commit is not tried again on its own, and TDLib still holds
-    // its Stars: they are reserved but not shown. The user is told why.
+    // A refused commit is not tried again on its own: TDLib gave the Stars
+    // back with the error, so they are let go and the user is told why.
     let paid = &driver.session.payments.paid;
     assert_eq!(paid.pending_stars(-100, 7), 0);
-    assert_eq!(paid.total_pending(), 4);
+    assert_eq!(paid.total_pending(), 0);
     assert!(
         driver
             .session
@@ -169,8 +169,7 @@ fn a_refused_commit_keeps_the_stars_stuck_and_the_next_tap_joins_them() {
     driver
         .add_paid_reaction(ChatId(-100), MessageId(7), 1, None, ACCUMULATE_MS + 10)
         .unwrap();
-    // TDLib would commit its 4 with the new 1, so the toast says 5.
-    assert_eq!(driver.session.payments.paid.pending_stars(-100, 7), 5);
+    assert_eq!(driver.session.payments.paid.pending_stars(-100, 7), 1);
 }
 
 #[test]

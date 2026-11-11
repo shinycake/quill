@@ -111,11 +111,16 @@ enum Save {
     /// A flag was added that no save has carried yet.
     Unsaved,
     /// The write of `written` is out; it ends `InSync` when it succeeded
-    /// and carried everything, else `Unsaved` again.
+    /// and carried everything, `Unsaved` when a flag came in meanwhile, and
+    /// `Failed` when it did not succeed.
     Writing {
         job: Job<bool>,
         written: BTreeSet<i64>,
     },
+    /// The last write failed. Nothing writes again on its own (a folder
+    /// that cannot be written would start a worker on every sync); the
+    /// next new flag saves them all.
+    Failed,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -231,7 +236,7 @@ impl PsaAbout {
 
     /// Settle the write that ended, then start one for flags no save has
     /// carried: on a worker thread, merged with the file. A write that
-    /// failed leaves the flags unsaved, so the next sync tries again.
+    /// failed is not started again by a sync (`Save::Failed`).
     pub fn sync_save(&mut self) {
         let ended = match &self.stage {
             Stage::Ready {
@@ -275,10 +280,10 @@ impl PsaAbout {
             return;
         };
         if let Save::Writing { written, .. } = save {
-            *save = if result == Some(true) && *written == self.seen {
-                Save::InSync
-            } else {
-                Save::Unsaved
+            *save = match result {
+                Some(true) if *written == self.seen => Save::InSync,
+                Some(true) => Save::Unsaved,
+                Some(false) | None => Save::Failed,
             };
         }
     }
@@ -627,10 +632,10 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// A write that fails is not counted as written: the flags are saved
-    /// again on the next sync, once the folder works.
+    /// A write that fails is not counted as written, and no sync starts it
+    /// again on its own: the next new flag saves them all.
     #[test]
-    fn a_failed_write_is_tried_again() {
+    fn a_failed_write_waits_for_the_next_flag() {
         let (dir, file) = temp_file("retry");
         std::fs::create_dir_all(&dir).ok();
         // A regular file where the folder should be: every write fails.
@@ -641,16 +646,23 @@ mod tests {
         s.open_chat(ChatId(5));
         s.chat_list.psa_about.sync_save();
         s.finish_psa_background(Instant::now());
-        s.chat_list.psa_about.sync_save();
-        assert!(
-            s.chat_list.psa_about.is_writing(),
-            "the failed write left the flags unsaved, so another starts"
-        );
+        for _ in 0..3 {
+            s.chat_list.psa_about.sync_save();
+            assert!(
+                !s.chat_list.psa_about.is_writing(),
+                "a failed write is not started again by a sync"
+            );
+        }
+        // The folder works again and another box is shown: one write
+        // carries both flags.
         s.chat_list.psa_about.use_file(file.clone());
-        s.finish_psa_background(Instant::now());
+        s.chat_list
+            .psa_about
+            .show(ChatId(6), Instant::now(), Duration::from_secs(5));
         s.chat_list.psa_about.sync_save();
+        assert!(s.chat_list.psa_about.is_writing());
         s.finish_psa_background(Instant::now());
-        assert!(load_seen_from(&file).contains(&5));
+        assert_eq!(load_seen_from(&file), BTreeSet::from([5, 6]));
         s.chat_list.psa_about.sync_save();
         assert!(!s.chat_list.psa_about.is_writing(), "now in sync");
         let _ = std::fs::remove_dir_all(&dir);

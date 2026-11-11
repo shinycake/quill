@@ -8069,7 +8069,7 @@ Round 2, bundle 10: the files `media_tools`, `message_effect_watch`,
 | 04-006 | `HeldSend::total`, `PaidConfirm::total` and the guard's total saturate. |
 | 04-009 | `PendingPaid::stars` is derived from `taps`. |
 | 04-010 | Star totals and the commit time saturate. |
-| 04-011 | A commit that cannot be sent, a refused commit and a refused undo leave the entry `PaidStage::Stuck`: TDLib still holds those Stars, so they stay reserved, are not shown and are not re-sent, and the next tap on the message joins them into the waiting entry (the toast shows what TDLib would commit). An answered commit or undo also settles a stuck entry of that message. |
+| 04-011 | A commit that cannot be sent and a refused undo leave the entry `PaidStage::Stuck`: TDLib still holds those Stars, so they stay reserved, are not shown and are not re-sent, and the next tap on the message joins them into the waiting entry (the toast shows what TDLib would commit). An answered commit or undo also settles a stuck entry of that message. A refused commit releases its Stars as before: TDLib takes the pending Stars out of the message when it sends the commit and unlocks them on the server's error (`MessageReactions::send_paid_message_reaction`, `SendPaidReactionQuery::on_error`), so keeping them would lock balance that is free and show the next tap a total TDLib does not commit. |
 | 04-041 | `validate_at` adds with `saturating_add`. |
 | 04-035 | `LimitStore` is one `HashMap<PremiumLimitKind, LimitState { Asked, Refused, Answered }>`. |
 | 04-036 | `CameraStream`'s stage is one atomic `StreamStage` (`Running`/`Ended`/`Stopping`); the thread reaps ffmpeg when it ended by itself, and an owner's stop is never read as an end. |
@@ -8079,7 +8079,7 @@ Round 2, bundle 10: the files `media_tools`, `message_effect_watch`,
 | 04-042 | The PSA reader and writer use `spawn_guarded` through `Job`. |
 | 04-043 | `Stage::Reading` holds the `Job`; a worker that died ends the stage with empty flags. |
 | 04-044 | One `Stage { Unread{waiting}, Reading{job, waiting}, Ready{save, toast} }`; `restore_psa_about` resolves the waiting chat. |
-| 04-045 | `Save::Writing { job, written }`: `InSync` only when the write succeeded and carried every flag, else `Unsaved` and written again. The tests join the worker instead of sleeping. |
+| 04-045 | `Save::Writing { job, written }`: `InSync` only when the write succeeded and carried every flag, `Unsaved` (written again) when a flag came in meanwhile, and `Failed` when the write did not succeed. A failed write is not started again by a sync, which runs on every pump and would start a worker each time for a folder that cannot be written; the next new flag saves them all. The tests join the worker instead of sleeping. |
 | 04-049 | The Linux watcher's `EndGuard` ends the watch when the thread ends, also by a panic. |
 | 04-050 | `GlobalSearchFilters` stores the `SearchTab` (plus the Chats tab's chat type, date and archive); scope, media and chat type are read off it. A scope or a Channels chip is a tab change (`in_scope`, `with_chat_type`). |
 | new-01 | `search_filters` date math, `proxy` last-used date and `poll_answer_for_tap` index use checked or saturating conversions. |

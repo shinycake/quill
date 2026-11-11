@@ -283,7 +283,7 @@ fn a_commit_keeps_its_stars_reserved_until_tdlib_answers() {
 }
 
 #[test]
-fn a_refused_commit_keeps_the_stars_stuck_and_never_retries() {
+fn a_refused_commit_releases_the_stars_and_never_retries() {
     let mut paid = PaidReactions::default();
     paid.add(1, 10, 5, None, 0, None);
     paid.due(ACCUMULATE_MS);
@@ -292,13 +292,27 @@ fn a_refused_commit_keeps_the_stars_stuck_and_never_retries() {
     assert_eq!(paid.add(1, 10, 2, None, ACCUMULATE_MS + 100, None), Some(2));
     assert_eq!(paid.total_pending(), 7);
     paid.refused(RequestId(7));
-    // TDLib still holds the refused Stars with the newer tap: one waiting
-    // entry, so the next commit covers them all.
-    assert_eq!(paid.total_pending(), 7);
-    assert_eq!(paid.toast().map(PendingPaid::stars), Some(7));
+    // Only the newer tap is still held: TDLib took the refused Stars out of
+    // the message with the commit and unlocked them on the error.
+    assert_eq!(paid.total_pending(), 2);
+    assert_eq!(paid.toast().map(PendingPaid::stars), Some(2));
     assert!(!paid.in_flight());
     paid.begin_commit(1, 10, RequestId(8));
     paid.settled(RequestId(8));
+    assert_eq!(paid.total_pending(), 0);
+}
+
+#[test]
+fn a_refused_undo_joins_the_next_tap_of_its_message() {
+    let mut paid = PaidReactions::default();
+    paid.add(1, 10, 3, None, 0, None);
+    paid.begin_undo(1, 10, RequestId(4));
+    paid.refused(RequestId(4));
+    // TDLib removed nothing: the next tap commits them together.
+    assert_eq!(paid.add(1, 10, 2, None, 1_000, None), Some(5));
+    assert_eq!(paid.toast().map(PendingPaid::stars), Some(5));
+    paid.begin_commit(1, 10, RequestId(5));
+    paid.settled(RequestId(5));
     assert_eq!(paid.total_pending(), 0);
 }
 
@@ -323,7 +337,7 @@ fn a_low_balance_commit_error_does_not_loop() {
     assert_eq!(paid.due(ACCUMULATE_MS).len(), 1);
     paid.begin_commit(1, 10, RequestId(1));
     paid.refused(RequestId(1));
-    assert_eq!(paid.total_pending(), 5, "TDLib still holds them");
+    assert_eq!(paid.total_pending(), 0);
     assert!(paid.due(u64::MAX).is_empty());
     assert!(paid.next_change_ms(ACCUMULATE_MS * 3).is_none());
 }

@@ -100,13 +100,18 @@ impl Refusal {
     }
 }
 
-/// Where a pending Star reaction is. It leaves the list only on TDLib's
-/// `ok` to the request it is waiting on (the request id matches the answer
-/// to what asked). An error, or a commit that could not be sent, does not
-/// release the Stars: TDLib still holds them, so the entry is `Stuck`, a
-/// note is shown and nothing is re-sent on its own. The next tap on the
-/// message takes its Stars back into a waiting entry, and the toast shows
-/// what TDLib would commit.
+/// Where a pending Star reaction is. It leaves the list on TDLib's answer
+/// to the request it is waiting on (the request id matches the answer to
+/// what asked): `ok`, or the error of a commit. TDLib takes the pending
+/// Stars out of the message when it sends a commit and gives them back to
+/// the balance when the server refuses it
+/// (`MessageReactions::send_paid_message_reaction`,
+/// `SendPaidReactionQuery::on_error`), so a refused commit holds nothing.
+/// A commit that could not be sent and a refused undo never reached that
+/// point: TDLib still holds the Stars, so the entry is `Stuck`, a note is
+/// shown and nothing is re-sent on its own. The next tap on the message
+/// takes its Stars back into a waiting entry, and the toast shows what
+/// TDLib would commit.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PaidStage {
     /// Held for the Undo window.
@@ -115,9 +120,10 @@ pub enum PaidStage {
     Committing(RequestId),
     /// `removePendingPaidMessageReactions` is out.
     Undoing(RequestId),
-    /// A commit or an undo failed: TDLib still holds the Stars. Nothing
-    /// shows them and nothing sends them; they stay reserved against the
-    /// balance and the cap until a new tap on the message joins them.
+    /// A commit could not be sent, or an undo was refused: TDLib still
+    /// holds the Stars. Nothing shows them and nothing sends them; they stay
+    /// reserved against the balance and the cap until a new tap on the
+    /// message joins them or a later commit or undo of it is answered.
     Stuck,
 }
 
@@ -442,13 +448,18 @@ impl PaidReactions {
         });
     }
 
-    /// TDLib refused `request` (a commit or an undo): its Stars are still
-    /// held by TDLib, so the entry is `Stuck` and nothing is sent again on
-    /// its own. A permanent error (a low balance) would otherwise loop.
+    /// TDLib refused `request`. A refused commit releases its Stars, as in
+    /// Telegram Desktop: TDLib took them out of the message with the commit
+    /// and unlocked them on the error, so nothing is held and nothing is
+    /// sent again on its own (a permanent error, a low balance, would
+    /// otherwise loop). A refused undo removed nothing: TDLib still holds
+    /// those Stars, so the entry is `Stuck`.
     pub fn refused(&mut self, request: RequestId) {
+        self.pending
+            .retain(|p| p.stage != PaidStage::Committing(request));
         let mut messages = Vec::new();
         for p in &mut self.pending {
-            if p.stage == PaidStage::Committing(request) || p.stage == PaidStage::Undoing(request) {
+            if p.stage == PaidStage::Undoing(request) {
                 p.stage = PaidStage::Stuck;
                 messages.push((p.chat_id, p.message_id));
             }

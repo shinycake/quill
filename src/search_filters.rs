@@ -267,7 +267,12 @@ impl GlobalSearchFilters {
     }
 
     /// The scope's own tab: where a hashtag search with that scope lands.
+    /// Filters already in that scope stay on their tab (a hashtag searched
+    /// from the Photos tab keeps the media kind).
     pub fn in_scope(self, scope: SearchScope) -> Self {
+        if self.scope() == scope {
+            return self;
+        }
         self.on_tab(match scope {
             SearchScope::MyMessages => SearchTab::Chats,
             SearchScope::PublicPosts => SearchTab::Posts,
