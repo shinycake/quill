@@ -117,7 +117,8 @@ impl QuillApp {
                 && self
                     .session()
                     .is_some_and(|s| s.users_state.user_full_infos.failed(&user_id));
-            if failed && let Some(ProfileDialog::EditContact(dialog)) = &mut self.dialogs.profile_dialog
+            if failed
+                && let Some(ProfileDialog::EditContact(dialog)) = &mut self.dialogs.profile_dialog
             {
                 dialog.note = ContactNote::Unavailable;
                 dialog.note_input.update(cx, |input, cx| {

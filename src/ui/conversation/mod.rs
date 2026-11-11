@@ -4,8 +4,8 @@
 use super::app::{PaneMode, QuillApp, pane_placeholder};
 use super::group_panels::SupergroupHeaderExtras;
 use super::history::HistoryShared;
-use super::history_state::ReportedVisible;
 use super::history::{album_history_row, history_skeleton, session_history_row};
+use super::history_state::ReportedVisible;
 use super::synthetic::BubbleLook;
 use super::*;
 use gpui_kit::assets::IconName;
@@ -484,9 +484,12 @@ impl QuillApp {
             .session()
             .and_then(|session| session.histories.get(&chat_id.0))
             .map_or(0, |history| history.views.epoch());
-        if self.history.reported_visible.as_ref().is_some_and(|last| {
-            last.chat == chat_id && last.open == open && last.ids == ids
-        }) {
+        if self
+            .history
+            .reported_visible
+            .as_ref()
+            .is_some_and(|last| last.chat == chat_id && last.open == open && last.ids == ids)
+        {
             return;
         }
         // Before `viewMessages`, while the rows still count as unread: an

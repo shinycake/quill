@@ -78,14 +78,8 @@ fn a_force_logout_notice_cannot_be_dismissed(cx: &mut TestAppContext) {
 fn the_terms_prompt_starts_over_for_another_version(cx: &mut TestAppContext) {
     let (app, mut vcx) = open(cx);
     app.update(&mut vcx, |app, _| {
-        app.set_terms_stage(
-            "tos-1",
-            TermsStage::Terms(AgeLine::Ticked),
-        );
-        assert_eq!(
-            app.terms_stage("tos-1"),
-            TermsStage::Terms(AgeLine::Ticked)
-        );
+        app.set_terms_stage("tos-1", TermsStage::Terms(AgeLine::Ticked));
+        assert_eq!(app.terms_stage("tos-1"), TermsStage::Terms(AgeLine::Ticked));
         app.set_terms_stage("tos-1", TermsStage::DeleteWarning);
         assert_eq!(app.terms_stage("tos-2"), TermsStage::default());
         assert_eq!(app.terms_stage("tos-1"), TermsStage::DeleteWarning);

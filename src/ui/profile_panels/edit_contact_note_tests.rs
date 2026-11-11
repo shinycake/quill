@@ -167,7 +167,10 @@ fn a_birthday_refusal_goes_when_a_field_is_corrected(cx: &mut TestAppContext) {
         dialog
             .month_input
             .update(cx, |input, cx| input.set_value("1", window, cx));
-        assert!(!app.submit_birthday(false, cx), "an impossible day is refused");
+        assert!(
+            !app.submit_birthday(false, cx),
+            "an impossible day is refused"
+        );
         let Some(ProfileDialog::Birthday(dialog)) = &app.dialogs.profile_dialog else {
             panic!("still open");
         };

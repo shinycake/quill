@@ -505,50 +505,51 @@ impl QuillApp {
                 if let Some(error) = account_error {
                     body = body.child(div().text_xs().text_color(danger()).child(error));
                 }
-                let footer = div()
-                    .flex()
-                    .justify_end()
-                    .gap_2()
-                    .child(
-                        Button::new("terms-delete-back")
-                            .label(tr(keys::Q_OPS_BACK))
-                            .primary()
-                            .disabled(busy_delete)
-                            .on_click({
-                                let terms_id = terms_id.clone();
-                                cx.listener(move |this, _, _, cx| {
-                                    this.set_terms_stage(&terms_id, TermsStage::DeclineSorry);
-                                    cx.notify();
+                let footer =
+                    div()
+                        .flex()
+                        .justify_end()
+                        .gap_2()
+                        .child(
+                            Button::new("terms-delete-back")
+                                .label(tr(keys::Q_OPS_BACK))
+                                .primary()
+                                .disabled(busy_delete)
+                                .on_click({
+                                    let terms_id = terms_id.clone();
+                                    cx.listener(move |this, _, _, cx| {
+                                        this.set_terms_stage(&terms_id, TermsStage::DeclineSorry);
+                                        cx.notify();
+                                    })
+                                }),
+                        )
+                        .child(
+                            Button::new("terms-delete-now")
+                                .label(if busy_delete {
+                                    tr(keys::Q_OPS_DELETING)
+                                } else {
+                                    tr(keys::Q_OPS_DELETE_NOW)
                                 })
-                            }),
-                    )
-                    .child(
-                        Button::new("terms-delete-now")
-                            .label(if busy_delete {
-                                tr(keys::Q_OPS_DELETING)
-                            } else {
-                                tr(keys::Q_OPS_DELETE_NOW)
-                            })
-                            .danger()
-                            .disabled(busy_delete)
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                // TDLib: declined terms must call
-                                // `deleteAccount` with this reason.
-                                // A send that did not go out says so in the box
-                                // (`account_error`), so Delete now can be pressed again.
-                                if let Some(live) = this.live.as_mut()
-                                    && live
-                                        .driver
-                                        .delete_account(tr(keys::Q_OPS_DECLINE_TOS_UPDATE), "")
-                                        .is_err()
-                                {
-                                    live.driver.session.settings.account_delete.fail(tr(
-                                        keys::Q_PEOPLE_COULDNT_REACH_TELEGRAM_TRY_AGAIN,
-                                    ));
-                                }
-                                cx.notify();
-                            })),
-                    );
+                                .danger()
+                                .disabled(busy_delete)
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    // TDLib: declined terms must call
+                                    // `deleteAccount` with this reason.
+                                    // A send that did not go out says so in the box
+                                    // (`account_error`), so Delete now can be pressed again.
+                                    if let Some(live) = this.live.as_mut()
+                                        && live
+                                            .driver
+                                            .delete_account(tr(keys::Q_OPS_DECLINE_TOS_UPDATE), "")
+                                            .is_err()
+                                    {
+                                        live.driver.session.settings.account_delete.fail(tr(
+                                            keys::Q_PEOPLE_COULDNT_REACH_TELEGRAM_TRY_AGAIN,
+                                        ));
+                                    }
+                                    cx.notify();
+                                })),
+                        );
                 (
                     tr(keys::Q_OPS_TERMS_OF_SERVICE).into(),
                     body.into_any_element(),

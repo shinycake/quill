@@ -423,7 +423,9 @@ impl QuillApp {
         // still waits for it.
         let task = self.spawn_scoped(cx, async move |this, cx| {
             let result = read.await;
-            let _ = this.update(cx, |this, cx| this.finish_poll_option_file(slot, result, cx));
+            let _ = this.update(cx, |this, cx| {
+                this.finish_poll_option_file(slot, result, cx)
+            });
         });
         self.set_poll_option_media(
             target,

@@ -56,7 +56,8 @@ fn a_link_is_attached_with_done_and_an_empty_one_is_refused(cx: &mut TestAppCont
         assert_eq!(slot(app, 1), None);
         assert!(app.connection.status_note().contains("link"));
 
-        let input = app.chat_ui.poll_dialog.as_ref().unwrap().options[1].attach
+        let input = app.chat_ui.poll_dialog.as_ref().unwrap().options[1]
+            .attach
             .link_input()
             .cloned()
             .unwrap();
@@ -155,7 +156,10 @@ fn removing_a_row_keeps_the_media_with_its_option(cx: &mut TestAppContext) {
             .collect();
         assert_eq!(media, vec![Some(link_input("a")), Some(link_input("c"))]);
         assert!(
-            matches!(dialog.options[1].attach.mode, crate::ui::dialogs::AttachMode::Menu),
+            matches!(
+                dialog.options[1].attach.mode,
+                crate::ui::dialogs::AttachMode::Menu
+            ),
             "the open menu follows its row"
         );
         app.clear_poll_option_media(AttachTarget::Row(0), cx);
@@ -238,7 +242,9 @@ fn a_slot_is_found_by_its_id_after_an_earlier_row_is_removed(cx: &mut TestAppCon
         app.open_poll_dialog(window, cx);
         app.add_poll_option_row(window, cx);
         app.add_poll_option_row(window, cx);
-        let asked = app.chat_ui.poll_dialog.as_ref().unwrap().options[2].attach.id;
+        let asked = app.chat_ui.poll_dialog.as_ref().unwrap().options[2]
+            .attach
+            .id;
         assert_eq!(app.target_of_attach(asked), Some(AttachTarget::Row(2)));
         app.remove_poll_option_row(0, cx);
         assert_eq!(
@@ -252,9 +258,7 @@ fn a_slot_is_found_by_its_id_after_an_earlier_row_is_removed(cx: &mut TestAppCon
 }
 
 #[gpui_kit::test]
-fn a_pick_for_a_removed_option_is_dropped_and_the_panel_has_one_recipient(
-    cx: &mut TestAppContext,
-) {
+fn a_pick_for_a_removed_option_is_dropped_and_the_panel_has_one_recipient(cx: &mut TestAppContext) {
     let (app, mut vcx) = new_app(cx);
     app.update_in(&mut vcx, |app, window, cx| {
         app.open_poll_dialog(window, cx);

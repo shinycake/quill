@@ -472,9 +472,6 @@ fn a_refused_limit_send_puts_the_sliders_back_on_what_tdlib_holds(cx: &mut TestA
                 s.settings.storage_limits.keep_for(),
             )
         });
-        assert_eq!(
-            held,
-            Some(app.storage_slider_limits(cx))
-        );
+        assert_eq!(held, Some(app.storage_slider_limits(cx)));
     });
 }

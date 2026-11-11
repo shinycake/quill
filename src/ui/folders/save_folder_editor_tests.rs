@@ -63,7 +63,10 @@ fn a_failed_load_cannot_save_and_retry_loads_again(cx: &mut TestAppContext) {
         app.folders.editor = Some(dialog);
         app.save_folder_editor(cx);
         let dialog = app.folders.editor.as_ref().expect("still open");
-        assert!(dialog.load.error().is_none(), "nothing was validated or saved");
+        assert!(
+            dialog.load.error().is_none(),
+            "nothing was validated or saved"
+        );
         app.retry_folder_editor_load(cx);
         let dialog = app.folders.editor.as_ref().expect("still open");
         assert_eq!(dialog.load, FolderLoad::Loading, "Retry asks again");

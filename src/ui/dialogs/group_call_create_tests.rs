@@ -624,9 +624,9 @@ fn a_second_create_waits_for_the_first_one_in_flight(cx: &mut TestAppContext) {
             .as_mut()
             .map(|session| {
                 session.request(
-                    quill::state::RequestPurpose::Calls(quill::state::CallsPurpose::CreateVideoChat {
-                        chat_id: CHANNEL,
-                    }),
+                    quill::state::RequestPurpose::Calls(
+                        quill::state::CallsPurpose::CreateVideoChat { chat_id: CHANNEL },
+                    ),
                     None,
                 )
             })
