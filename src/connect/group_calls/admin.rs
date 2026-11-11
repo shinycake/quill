@@ -421,7 +421,13 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(ConnectSendError::InvalidRequest);
         }
         let group_call_id = match &self.session.calls.active_group_call {
-            Some(call) if !call.loaded_all_participants => call.id,
+            Some(call) if !call.loaded_all_participants => {
+                // A page already on its way answers a second click.
+                if let crate::state::ParticipantPaging::Loading(asked) = call.paging {
+                    return Ok(asked);
+                }
+                call.id
+            }
             _ => return Err(ConnectSendError::InvalidRequest),
         };
         let extra = self.session.request(
@@ -434,6 +440,9 @@ impl<S: JsonSender> ConnectDriver<S> {
         {
             self.session.requests.take(extra);
             return Err(err);
+        }
+        if let Some(call) = self.session.calls.active_group_call.as_mut() {
+            call.paging = crate::state::ParticipantPaging::Loading(extra);
         }
         Ok(extra)
     }

@@ -97,21 +97,33 @@ impl GroupTransport {
     }
 }
 
-/// The screen share of a tracked group call.
+/// The screen share of a tracked group call, one value: off, the last
+/// share's failure, the start in flight, or the connected presentation.
+/// Starting a share leaves a failure; every other exit is below.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum GroupScreenShare {
     #[default]
     Off,
-    /// `startGroupCallScreenSharing` is in flight; `answer` is its `Text`
-    /// answer once it arrived, for the pump to connect.
-    Starting { answer: String },
-    /// The presentation transport is connected.
-    Sharing,
+    /// The last share failed (its offer, start, connect or stop); the call
+    /// itself still works. A new start replaces it.
+    Failed(String),
+    /// `startGroupCallScreenSharing` is in flight as `request`; `answer` is
+    /// its `Text` answer once it arrived, for the pump to connect. Another
+    /// request's answer lands nowhere.
+    Starting {
+        request: crate::ids::RequestId,
+        answer: Option<String>,
+    },
+    /// The presentation transport is connected. `paused`: your shared
+    /// window is hidden (the driver sent
+    /// `toggleGroupCallScreenSharingIsPaused`); your own tile shows it at
+    /// once, before the participant update.
+    Sharing { paused: bool },
 }
 
 impl GroupScreenShare {
     pub fn is_sharing(&self) -> bool {
-        matches!(self, Self::Sharing)
+        matches!(self, Self::Sharing { .. })
     }
 
     pub fn is_starting(&self) -> bool {
@@ -120,27 +132,48 @@ impl GroupScreenShare {
 
     /// Sharing, or on the way to it.
     pub fn is_on(&self) -> bool {
-        !matches!(self, Self::Off)
+        matches!(self, Self::Starting { .. } | Self::Sharing { .. })
     }
 
-    /// The stored presentation answer, empty unless one waits.
-    pub fn answer(&self) -> &str {
+    /// The stored presentation answer, once one waits.
+    pub fn answer(&self) -> Option<&str> {
         match self {
-            Self::Starting { answer } => answer,
-            _ => "",
+            Self::Starting { answer, .. } => answer.as_deref(),
+            _ => None,
         }
     }
 
-    pub fn start(&mut self) {
+    /// The failure of the last share, until another starts.
+    pub fn error(&self) -> Option<&str> {
+        match self {
+            Self::Failed(error) => Some(error),
+            _ => None,
+        }
+    }
+
+    /// Your shared window is hidden and the share is paused.
+    pub fn paused(&self) -> bool {
+        matches!(self, Self::Sharing { paused: true })
+    }
+
+    /// The start went out as `request`.
+    pub fn start(&mut self, request: crate::ids::RequestId) {
         *self = Self::Starting {
-            answer: String::new(),
+            request,
+            answer: None,
         };
     }
 
-    /// The answer of a start in flight; with none in flight it is stale.
-    pub fn store_answer(&mut self, payload: String) {
-        if let Self::Starting { answer } = self {
-            *answer = payload;
+    /// The answer of the start `request`; any other (or none in flight) is
+    /// stale.
+    pub fn store_answer(&mut self, request: Option<crate::ids::RequestId>, payload: String) {
+        if let Self::Starting {
+            request: waiting,
+            answer,
+        } = self
+            && request == Some(*waiting)
+        {
+            *answer = Some(payload);
         }
     }
 
@@ -152,12 +185,24 @@ impl GroupScreenShare {
     }
 
     pub fn connected(&mut self) {
-        *self = Self::Sharing;
+        *self = Self::Sharing { paused: false };
     }
 
-    /// Stopped, failed or reset.
+    /// The pause state of the connected share; nothing else has one.
+    pub fn set_paused(&mut self, now_paused: bool) {
+        if let Self::Sharing { paused } = self {
+            *paused = now_paused;
+        }
+    }
+
+    /// Stopped or reset.
     pub fn stop(&mut self) {
         *self = Self::Off;
+    }
+
+    /// The share failed (or could not start): off, with the reason.
+    pub fn fail(&mut self, error: String) {
+        *self = Self::Failed(error);
     }
 }
 
@@ -194,15 +239,24 @@ mod tests {
 
     #[test]
     fn a_stale_screen_answer_is_not_kept() {
+        use crate::ids::RequestId;
         let mut share = GroupScreenShare::default();
-        share.store_answer("stale".into());
-        share.start();
-        assert_eq!(share.answer(), "");
-        share.store_answer("fresh".into());
-        assert_eq!(share.answer(), "fresh");
+        share.store_answer(Some(RequestId(1)), "stale".into());
+        share.start(RequestId(2));
+        assert_eq!(share.answer(), None);
+        share.store_answer(Some(RequestId(1)), "earlier".into());
+        assert_eq!(share.answer(), None, "another request's answer");
+        share.store_answer(Some(RequestId(2)), "fresh".into());
+        assert_eq!(share.answer(), Some("fresh"));
         share.connected();
         assert!(share.is_sharing() && share.is_on() && !share.is_starting());
+        share.set_paused(true);
+        assert!(share.paused());
         share.stop();
-        assert!(!share.is_on());
+        assert!(!share.is_on() && !share.paused());
+        share.fail("no".into());
+        assert_eq!(share.error(), Some("no"));
+        share.start(RequestId(3));
+        assert_eq!(share.error(), None, "a new start leaves the failure");
     }
 }

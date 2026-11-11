@@ -245,15 +245,14 @@ impl Session {
             })) => {
                 if let Some(tracked) = self.calls.active_group_call.as_mut()
                     && tracked.id == group_call_id
-                    && tracked.screen_share_paused == paused
+                    && tracked.screen_share.paused() == paused
                 {
-                    tracked.screen_share_paused = !paused;
+                    tracked.screen_share.set_paused(!paused);
                 }
             }
             Some(
                 RequestPurpose::Calls(CallsPurpose::LeaveGroupCall { .. })
                 | RequestPurpose::Calls(CallsPurpose::EndGroupCall { .. })
-                | RequestPurpose::Calls(CallsPurpose::LoadGroupCallParticipants { .. })
                 | RequestPurpose::Calls(CallsPurpose::SetVideoChatDefaultParticipant { .. })
                 | RequestPurpose::Calls(CallsPurpose::SetVideoChatTitle { .. })
                 | RequestPurpose::Calls(CallsPurpose::RevokeVideoChatInviteLink { .. })
@@ -278,6 +277,14 @@ impl Session {
             ) => {
                 self.calls.group_call_error =
                     Some(call_request_error_line(err, "Voice chat request failed"));
+            }
+            // The next participants were refused: the button asks again.
+            Some(RequestPurpose::Calls(CallsPurpose::LoadGroupCallParticipants { .. })) => {
+                self.settle_group_paging(pending, true);
+                self.calls.group_call_error = Some(call_request_error_line(
+                    err,
+                    "Could not load more participants",
+                ));
             }
             // A failed speaker link is left out of the share box (tdesktop's
             // `fail` handler); a failed listener link is reported and can be

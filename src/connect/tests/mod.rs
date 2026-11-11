@@ -103,6 +103,7 @@ mod polls_checklists;
 mod premium_limits;
 mod premium_purchase;
 mod privacy_data;
+mod private_chat_creation;
 mod private_sharing;
 mod profile_actions;
 mod profile_music;

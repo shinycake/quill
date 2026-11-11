@@ -557,9 +557,6 @@ impl<S: JsonSender> ConnectDriver<S> {
             if let Share::Picked { wait, .. } = &mut self.call_screen.share {
                 *wait = EngineWait::Idle;
             }
-            if let Some(call) = self.session.calls.active_group_call.as_mut() {
-                call.screen_share_paused = false;
-            }
             return;
         };
         if self.call_screen.active().is_none() {
@@ -643,8 +640,8 @@ impl<S: JsonSender> ConnectDriver<S> {
         else {
             return;
         };
-        let was = call.screen_share_paused;
-        call.screen_share_paused = paused;
+        let was = call.screen_share.paused();
+        call.screen_share.set_paused(paused);
         // A fresh share starts unpaused on the server: only edges go out.
         if !changed && was == paused {
             return;
@@ -686,9 +683,6 @@ impl<S: JsonSender> ConnectDriver<S> {
             .is_some_and(|call| call.screen_share.is_on());
         if sharing {
             let _ = self.toggle_group_call_screen_share();
-        }
-        if let Some(call) = self.session.calls.active_group_call.as_mut() {
-            call.screen_share_paused = false;
         }
     }
 

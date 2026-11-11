@@ -574,11 +574,16 @@ impl Session {
     /// Phase C2g: store the `startGroupCallScreenSharing` `Text`
     /// response on the tracked call; the driver pump consumes it to
     /// finish the presentation handshake.
-    pub fn set_group_call_screen_share_answer(&mut self, group_call_id: i32, payload: String) {
+    pub fn set_group_call_screen_share_answer(
+        &mut self,
+        group_call_id: i32,
+        request: Option<RequestId>,
+        payload: String,
+    ) {
         if let Some(tracked) = self.calls.active_group_call.as_mut()
             && tracked.id == group_call_id
         {
-            tracked.screen_share.store_answer(payload);
+            tracked.screen_share.store_answer(request, payload);
         }
     }
 

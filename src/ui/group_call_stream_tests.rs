@@ -558,7 +558,7 @@ fn a_failed_share_does_not_fail_the_join(cx: &mut TestAppContext) {
     app.update(&mut call, |app, cx| {
         let session = app.demo_session.as_mut().expect("demo");
         if let Some(active) = session.calls.active_group_call.as_mut() {
-            active.screen_share_error = Some("screen share failed".into());
+            active.screen_share.fail("screen share failed".into());
         }
         // Join was pressed; TDLib has not answered yet.
         app.group_call_screen.stream_watch = crate::ui::group_call_state::StreamWatch::Joining(

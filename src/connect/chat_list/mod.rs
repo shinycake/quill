@@ -476,8 +476,8 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// B1: `createPrivateChat` with an arbitrary user id (schema 1.8.67,
     /// line 9588) — the user button on an inline keyboard. The `chat`
     /// answer opens the chat via the `CreatePrivateChat` pending purpose.
-    /// `Ok(None)` = a creation already in flight; the UI prefers an
-    /// already-listed private chat with the user when one exists.
+    /// `Ok(None)` = a creation for this user already in flight; the UI
+    /// prefers an already-listed private chat with the user when one exists.
     pub fn create_private_chat_for(
         &mut self,
         user_id: i64,
@@ -485,11 +485,12 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
+        // One creation per user at a time; another user's goes out beside it.
         let purpose = RequestPurpose::CreatePrivateChat;
-        if self.session.requests.has_purpose(purpose) {
+        if self.session.requests.has_purpose_for_user(purpose, user_id) {
             return Ok(None);
         }
-        let extra = self.session.request(purpose, None);
+        let extra = self.session.request_for_user(purpose, user_id);
         if let Err(err) = self
             .sender
             .send_json(&create_private_chat(extra, user_id, false))

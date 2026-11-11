@@ -296,7 +296,7 @@ fn a_failed_share_payload_clears_the_pending_share() {
     assert_eq!(sent_count(&recorder, "startGroupCallScreenSharing"), 0);
     let call = tracked(&driver);
     assert!(!call.screen_share.is_starting());
-    assert!(call.screen_share_error.is_some());
+    assert!(call.screen_share.error().is_some());
     assert_eq!(call.transport.error(), None, "the call itself still works");
     assert!(!handle.presentation_active(555));
     let _ = std::fs::remove_dir_all(&dir);
@@ -319,7 +319,10 @@ fn a_new_join_drops_the_last_transport_error() {
     driver.join_video_chat(555).expect("join again");
     let call = tracked(&driver);
     assert_eq!(call.transport.error(), None);
-    assert!(call.screen_share_error.is_some());
+    assert!(
+        call.screen_share.error().is_none(),
+        "the fresh context drops the last share's failure too"
+    );
     let _ = std::fs::remove_dir_all(&dir);
 }
 

@@ -47,6 +47,7 @@ impl Session {
         self.apply_group_type_ok(pending);
         self.apply_ai_compose_ok(pending);
         self.apply_hang_up_ok(pending);
+        self.settle_group_paging(pending, false);
         self.apply_communities_ok(pending);
         self.settle_permissions_save(pending);
         self.apply_backgrounds_ok(pending);

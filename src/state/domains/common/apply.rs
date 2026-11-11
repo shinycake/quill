@@ -264,7 +264,11 @@ impl Session {
                 Some(RequestPurpose::Calls(CallsPurpose::StartGroupCallScreenSharing {
                     group_call_id,
                 })) => {
-                    self.set_group_call_screen_share_answer(group_call_id, text);
+                    self.set_group_call_screen_share_answer(
+                        group_call_id,
+                        pending.map(|p| p.id),
+                        text,
+                    );
                 }
                 _ => {}
             },

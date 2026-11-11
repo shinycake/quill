@@ -391,6 +391,8 @@ pub struct ActiveGroupCall {
     pub is_owned: bool,
     pub participant_count: i32,
     pub loaded_all_participants: bool,
+    /// The "Show more" request for the next participants.
+    pub paging: crate::state::ParticipantPaging,
     /// Sorted: recent speakers first (in `recent_speakers` order),
     /// then by `order` descending (lexicographic — schema: "The
     /// bigger is order, the higher is user in the list").
@@ -414,16 +416,9 @@ pub struct ActiveGroupCall {
     /// connect, subscribe). The join itself is never blocked by these.
     pub transport: GroupTransport,
     /// Screen-share presentation: the `startGroupCallScreenSharing`
-    /// handshake, then the connected presentation.
+    /// handshake, then the connected presentation (with its pause), or the
+    /// last share's failure. A failed share leaves the call working.
     pub screen_share: GroupScreenShare,
-    /// Your shared window is hidden, so the share is paused (the driver
-    /// sent `toggleGroupCallScreenSharingIsPaused`). Your own tile shows
-    /// the paused state at once, before the participant update.
-    pub screen_share_paused: bool,
-    /// The last screen share's failure (its offer, start, connect or
-    /// stop). Kept apart from `transport_error`: a failed share leaves
-    /// the call itself working.
-    pub screen_share_error: Option<String>,
     /// Speaker and listener links from `getVideoChatInviteLink`,
     /// fetched on demand (`crate::calls::share_links`).
     pub share_links: crate::calls::share_links::VideoChatShareLinks,
@@ -677,6 +672,7 @@ impl ActiveGroupCall {
             is_owned: false,
             participant_count: 0,
             loaded_all_participants: false,
+            paging: crate::state::ParticipantPaging::Idle,
             participants: ParticipantList::default(),
             recent_speaker_order: Vec::new(),
             is_muted_self: false,
@@ -688,8 +684,6 @@ impl ActiveGroupCall {
             verification: None,
             transport: GroupTransport::NoTransport,
             screen_share: GroupScreenShare::Off,
-            screen_share_paused: false,
-            screen_share_error: None,
             share_links: Default::default(),
             is_rtmp_stream: false,
             scheduled_start_date: 0,

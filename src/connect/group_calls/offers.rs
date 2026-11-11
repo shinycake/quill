@@ -298,7 +298,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             && let Some(call) = self.session.calls.group_call_mut(id)
         {
             // The share failed; the call it was for still works.
-            call.screen_share_error = Some(err.to_string());
+            call.screen_share.fail(err.to_string());
         } else if let Some(call) = self.session.calls.group_call_mut(id) {
             call.transport.fail(err.to_string());
             if matches!(send, OfferSend::Rejoin { .. }) {

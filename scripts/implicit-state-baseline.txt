@@ -1,7 +1,6 @@
 
 # Implicit-state debt (scripts/check-implicit-state.py). Only remove lines.
 
-ActiveGroupCall::loaded_all_participants
 AppearancePrefs::ignore_battery_saving
 
 
@@ -52,7 +51,6 @@ MiniAppWindow::closing_confirmation
 
 
 
-ParsedGroupCall::loaded_all_participants
 ParsedSession::is_password_pending
 PasswordBox::sending
 PasswordBox::sending+error

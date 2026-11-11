@@ -45,15 +45,15 @@ impl<S: JsonSender> ConnectDriver<S> {
                 return Ok(extra);
             }
             let extra = self.send_end_screen_sharing(group_call_id)?;
-            if let Some(engine) = self.call_engine.as_deref_mut()
-                && let Err(err) = engine.stop_screen_share(group_call_id)
-                && let Some(call) = self.session.calls.active_group_call.as_mut()
-            {
-                call.screen_share_error = Some(err.to_string());
-            }
+            let stop_error = self
+                .call_engine
+                .as_deref_mut()
+                .and_then(|engine| engine.stop_screen_share(group_call_id).err());
             if let Some(call) = self.session.calls.active_group_call.as_mut() {
-                call.screen_share.stop();
-                call.screen_share_paused = false;
+                match stop_error {
+                    Some(err) => call.screen_share.fail(err.to_string()),
+                    None => call.screen_share.stop(),
+                }
             }
             return Ok(extra);
         }
@@ -69,7 +69,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         };
         if let Err(err) = engine.start_screen_share(group_call_id) {
             if let Some(call) = self.session.calls.active_group_call.as_mut() {
-                call.screen_share_error = Some(err.to_string());
+                call.screen_share.fail(err.to_string());
             }
             return Err(ConnectSendError::InvalidRequest);
         }
@@ -78,7 +78,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             None,
         );
         if let Some(call) = self.session.calls.active_group_call.as_mut() {
-            call.screen_share.start();
+            call.screen_share.start(extra);
         }
         self.wait_for_offer(
             GroupOfferKey::Screen(group_call_id),

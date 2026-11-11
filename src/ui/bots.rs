@@ -307,7 +307,8 @@ impl QuillApp {
             .as_mut()
             .map(|live| live.driver.create_private_chat_for(user_id));
         match sent {
-            Some(Ok(Some(_))) => {}
+            // `Ok(None)`: this user's chat is already being created.
+            Some(Ok(_)) => {}
             _ => self.set_status_note(
                 StatusNote::error(tr(keys::Q_MEDIA_COULDNT_OPEN_THE_USERS_CHAT)),
                 cx,

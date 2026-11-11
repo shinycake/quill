@@ -264,10 +264,8 @@ impl<S: JsonSender> ConnectDriver<S> {
             .calls
             .group_call(group_call_id)
             .filter(|call| call.screen_share.is_starting())
-            .map(|call| call.screen_share.answer().to_string());
-        if let Some(answer) = share_answer
-            && !answer.is_empty()
-        {
+            .and_then(|call| call.screen_share.answer().map(str::to_string));
+        if let Some(answer) = share_answer {
             let Some(engine) = self.call_engine.as_deref_mut() else {
                 return Ok(());
             };
@@ -279,14 +277,8 @@ impl<S: JsonSender> ConnectDriver<S> {
             }
             if let Some(call) = self.session.calls.group_call_mut(group_call_id) {
                 match result {
-                    Ok(()) => {
-                        call.screen_share.connected();
-                        call.screen_share_error = None;
-                    }
-                    Err(err) => {
-                        call.screen_share.stop();
-                        call.screen_share_error = Some(err.to_string());
-                    }
+                    Ok(()) => call.screen_share.connected(),
+                    Err(err) => call.screen_share.fail(err.to_string()),
                 }
             }
         }
