@@ -143,16 +143,24 @@ pub(super) enum TileState {
     Failed,
 }
 
+/// The pin: lifted while the map moves; once it rests away from the place
+/// the venues were asked for, the "search this area" button shows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Pin {
+    Resting,
+    Moving,
+    RestedAway,
+}
+
 #[derive(Debug)]
 pub struct LocationPicker {
     chat_id: ChatId,
     view: MapView,
-    moving: bool,
+    pin: Pin,
     map_size: Option<MapSize>,
     here: HereState,
     address: Address,
     venues: VenueSearch,
-    places_in_area: bool,
     tiles: Vec<(TileKey, TileState)>,
 }
 
@@ -173,7 +181,7 @@ impl LocationPicker {
         let mut picker = Self {
             chat_id,
             view,
-            moving: false,
+            pin: Pin::Resting,
             map_size: None,
             here: HereState::Locating,
             address: Address::default(),
@@ -187,7 +195,6 @@ impl LocationPicker {
                 no_search_location: None,
                 input: SearchInput::Closed,
             },
-            places_in_area: false,
             tiles: Vec::new(),
         };
         if let Some(point) = last_exact {
@@ -207,7 +214,7 @@ impl LocationPicker {
     }
 
     pub fn is_moving(&self) -> bool {
-        self.moving
+        self.pin == Pin::Moving
     }
 
     pub fn here(&self) -> HereState {
@@ -219,7 +226,7 @@ impl LocationPicker {
     }
 
     pub fn places_in_area_shown(&self) -> bool {
-        self.places_in_area
+        self.pin == Pin::RestedAway
     }
 
     pub fn can_search(&self) -> bool {
@@ -258,6 +265,10 @@ impl LocationPicker {
 
     /// The UI's map area changed size (tiles are asked at this size).
     pub fn set_map_size(&mut self, size: MapSize) {
+        if self.map_size != Some(size) {
+            self.tiles
+                .retain(|(_, state)| !matches!(state, TileState::Failed));
+        }
         self.map_size = Some(size);
     }
 
@@ -268,17 +279,16 @@ impl LocationPicker {
     /// tdesktop `move_start`: the pin lifts, the address hides (kept for a
     /// return to the same place), the venue button hides.
     pub fn move_started(&mut self) {
-        if self.moving {
+        if self.pin == Pin::Moving {
             return;
         }
-        self.moving = true;
+        self.pin = Pin::Moving;
         self.address.stage = match std::mem::take(&mut self.address.stage) {
             AddressStage::Shown { point, text } => AddressStage::HiddenWhileMoving { point, text },
             // A lookup not started is dropped; one under way goes on.
             AddressStage::Postponed(_) => AddressStage::Idle,
             other => other,
         };
-        self.places_in_area = false;
     }
 
     /// The map moved to `view` (a drag or a zoom step); no request yet.
@@ -289,10 +299,13 @@ impl LocationPicker {
 
     /// tdesktop `move_end`, sent half a second after the map stops.
     pub fn move_ended(&mut self) {
-        if !self.moving {
+        if self.pin != Pin::Moving {
             return;
         }
-        self.moving = false;
+        self.pin = Pin::Resting;
+        // A tile that failed is asked again once the map rests.
+        self.tiles
+            .retain(|(_, state)| !matches!(state, TileState::Failed));
         let location = self.view.center();
         self.address.stage = match std::mem::take(&mut self.address.stage) {
             // Back at the place the address is for.
@@ -313,7 +326,7 @@ impl LocationPicker {
             self.venues.request.as_ref().map(|r| r.point),
             Some(location),
         ) {
-            self.places_in_area = true;
+            self.pin = Pin::RestedAway;
         }
         self.venues.search_location = Some(location);
     }
@@ -357,7 +370,7 @@ impl LocationPicker {
             .filter(|name| !name.is_empty())
             .unwrap_or_else(|| point.coordinates_label());
         // An answer that lands while the pin is lifted waits for its return.
-        self.address.stage = if self.moving {
+        self.address.stage = if self.pin == Pin::Moving {
             AddressStage::HiddenWhileMoving { point, text }
         } else {
             AddressStage::Shown { point, text }
@@ -401,7 +414,9 @@ impl LocationPicker {
     }
 
     pub fn search_places_in_area(&mut self) {
-        self.places_in_area = false;
+        if self.pin == Pin::RestedAway {
+            self.pin = Pin::Resting;
+        }
         self.request_venues(self.view.center(), "");
     }
 
@@ -546,7 +561,7 @@ impl LocationPicker {
     }
 
     pub(super) fn tile_to_request(&self) -> Option<TileKey> {
-        if self.moving {
+        if self.pin == Pin::Moving {
             return None;
         }
         let key = TileKey::for_view(&self.view, self.map_size?);
