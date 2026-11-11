@@ -263,7 +263,11 @@ mod tests {
         assert_eq!(flow.take_origin(), Some(origin));
         assert_eq!(flow.take_origin(), None, "a terminal step leaves none");
         flow.resume(Some(origin));
-        assert_eq!(flow.take_origin(), Some(origin), "an agent's flow stays its");
+        assert_eq!(
+            flow.take_origin(),
+            Some(origin),
+            "an agent's flow stays its"
+        );
     }
 
     #[core::prelude::v1::test]

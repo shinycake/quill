@@ -9,9 +9,9 @@
 //! so an idle composer causes no redraws.
 #![deny(clippy::indexing_slicing)]
 
-use crate::ui::composer_sends::SendOnce;
 use super::app::QuillApp;
 use super::recording::RecordMode;
+use crate::ui::composer_sends::SendOnce;
 use gpui_kit::component::button::*;
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;

@@ -1,7 +1,7 @@
 //! Methods moved out of `composer.rs` to keep files under 1000 lines.
 
-use crate::ui::composer_sends::SendOnce;
 use super::*;
+use crate::ui::composer_sends::SendOnce;
 use crate::ui::status_note::StatusNote;
 use quill::lang::{keys, tr};
 

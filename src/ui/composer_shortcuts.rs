@@ -431,8 +431,8 @@ impl QuillApp {
             Err(error) => {
                 if let Some(dialog) = self.chat_ui.code_language.as_mut() {
                     dialog.stage = CodeLanguageStage::Editing {
-                            error: Some(error.note()),
-                        };
+                        error: Some(error.note()),
+                    };
                 }
             }
         }

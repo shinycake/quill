@@ -6,8 +6,8 @@
 //! back with `UiCommand::ComposerSent` so the box clears.
 #![deny(clippy::indexing_slicing)]
 
-use crate::ui::composer_sends::SendOnce;
 use super::app::QuillApp;
+use crate::ui::composer_sends::SendOnce;
 use gpui_kit::*;
 use quill::agent::ui_driver::bridge::UiSend;
 use quill::agent::ui_driver::guard;

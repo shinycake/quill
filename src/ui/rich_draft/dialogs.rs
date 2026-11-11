@@ -4,9 +4,9 @@
 //! (`ShowRichMessagesPremiumToast`).
 
 use super::RichDraftBox;
-use crate::ui::composer_sends::SendOnce;
 use crate::ui::ai_compose::marked_link;
 use crate::ui::app::QuillApp;
+use crate::ui::composer_sends::SendOnce;
 use crate::ui::shell::{DialogKind, QuillShell};
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::*;

@@ -4,12 +4,12 @@
 //! post bar, the loading / error pane and navigation.
 #![deny(clippy::indexing_slicing)]
 
-use crate::ui::history_state::ScrollAim;
 use super::app::QuillApp;
 use super::history_state::ScrollGoal;
 use super::message_text::kit_avatar_element;
 use super::nested_click::SwallowPress;
 use super::*;
+use crate::ui::history_state::ScrollAim;
 use crate::ui::status_note::StatusNote;
 use gpui_kit::component::button::*;
 use gpui_kit::component::*;

@@ -6,9 +6,9 @@
 //! `suggested_posts_decide.rs`.
 #![deny(clippy::indexing_slicing)]
 
-use crate::ui::composer_sends::SendOnce;
 use super::app::QuillApp;
 use super::suggested_posts_state::{BalanceFor, SuggestTarget};
+use crate::ui::composer_sends::SendOnce;
 use crate::ui::status_note::StatusNote;
 use crate::ui::wall_clock::WallClock;
 use gpui_kit::assets::IconName;

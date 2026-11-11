@@ -8,11 +8,11 @@
 //! the message and no Stars move.
 #![deny(clippy::indexing_slicing)]
 
-use crate::ui::composer_sends::SendOnce;
 use super::app::QuillApp;
 use super::chat_theme::{danger, text_muted, warning};
 use super::paid_messages_state::{ComposerPaidConfirm, RemoveFeeBox};
 use super::shell::{DialogKind, QuillShell};
+use crate::ui::composer_sends::SendOnce;
 use crate::ui::status_note::StatusNote;
 use gpui_kit::component::button::*;
 use gpui_kit::component::checkbox::Checkbox;

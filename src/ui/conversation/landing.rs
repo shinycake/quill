@@ -11,8 +11,8 @@
 //! instead of deciding on part of the run. The reader's own scrolling,
 //! clicking or keys end it.
 
-use crate::ui::history_state::ScrollAim;
 use super::*;
+use crate::ui::history_state::ScrollAim;
 
 /// What the open history is brought to.
 #[derive(Clone, Copy, Debug, PartialEq)]

@@ -1,7 +1,6 @@
 //! composer submit/send/edit/reply/scheduling, command menu state, drafts consumption.
 #![deny(clippy::indexing_slicing)]
 
-use crate::ui::composer_sends::SendOnce;
 use super::actions::{
     FormatBlockQuote, FormatBold, FormatClear, FormatItalic, FormatMonospace, FormatSpoiler,
     FormatStrikethrough, FormatUnderline,
@@ -76,7 +75,7 @@ impl QuillApp {
     pub(super) fn submit_composer(
         &mut self,
         text: String,
-        once: SendOnce,
+        once: crate::ui::composer_sends::SendOnce,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -469,7 +468,7 @@ impl QuillApp {
     pub(super) fn submit_rich_composer(
         &mut self,
         mut blocks: Vec<quill::rich::RichBlock>,
-        once: SendOnce,
+        once: crate::ui::composer_sends::SendOnce,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {

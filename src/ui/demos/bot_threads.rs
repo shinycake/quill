@@ -4,9 +4,9 @@
 //! message in it.
 #![deny(clippy::indexing_slicing)]
 
-use crate::ui::composer_sends::SendOnce;
 use crate::ui::app::QuillApp;
 use crate::ui::bots::apply_ready_bot_chat;
+use crate::ui::composer_sends::SendOnce;
 use crate::ui::screenshot_demo::{DemoSpec, register_demos};
 use gpui_kit::*;
 use quill::ids::ChatId;

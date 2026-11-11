@@ -18,8 +18,8 @@ mod demo;
 #[path = "rich_draft_tests.rs"]
 mod tests;
 
-use crate::ui::composer_sends::SendOnce;
 use super::app::QuillApp;
+use crate::ui::composer_sends::SendOnce;
 use crate::ui::message_text::rich_block_element;
 use crate::ui::status_note::StatusNote;
 use gpui_kit::assets::IconName;

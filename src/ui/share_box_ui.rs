@@ -7,9 +7,9 @@
 //! `docs/decisions/codex-share-box.md`.
 #![deny(clippy::indexing_slicing)]
 
-use crate::ui::composer_sends::SendOnce;
 use super::app::QuillApp;
 use super::*;
+use crate::ui::composer_sends::SendOnce;
 use crate::ui::status_note::StatusNote;
 use gpui_kit::component::button::*;
 use gpui_kit::component::checkbox::Checkbox;

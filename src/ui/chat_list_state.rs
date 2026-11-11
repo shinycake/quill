@@ -286,8 +286,7 @@ mod tests {
         assert!(matches!(pin, PinStage::Pressed { chat: 5, .. }));
         let ids = vec![4, 5];
         let heights = ids.iter().map(|id| (*id, 10.)).collect();
-        let reorder =
-            quill::pin_reorder::PinReorder::begin(ids, heights, 4, 1., Instant::now());
+        let reorder = quill::pin_reorder::PinReorder::begin(ids, heights, 4, 1., Instant::now());
         assert!(reorder.is_some());
         if let Some(reorder) = reorder {
             let mut dragging = PinStage::Dragging(PinDrag {

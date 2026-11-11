@@ -6,8 +6,8 @@
 //! `paste` (the paste notice with Open) or `paste-locked` (the notice
 //! without Premium).
 
-use crate::ui::composer_sends::SendOnce;
 use crate::ui::app::QuillApp;
+use crate::ui::composer_sends::SendOnce;
 use crate::ui::screenshot_demo::{DemoSpec, register_demos};
 use gpui_kit::*;
 use quill::diagnostics::DiagnosticSink;

@@ -29,10 +29,10 @@ mod tests;
 #[path = "style_tests.rs"]
 mod style_tests;
 
-use crate::ui::composer_sends::SendOnce;
 use super::ai_compose_state::{AiComposeOpen, AiComposeView};
 use super::app::QuillApp;
 use super::status_note::StatusNote;
+use crate::ui::composer_sends::SendOnce;
 use gpui_kit::component::ActiveTheme as _;
 use gpui_kit::component::button::ButtonCustomVariant;
 use gpui_kit::*;

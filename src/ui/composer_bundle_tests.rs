@@ -96,7 +96,11 @@ fn the_repeat_choice_rides_the_schedule_for_premium(cx: &mut TestAppContext) {
         // The choice is as one-shot as the schedule: clearing the schedule
         // drops it from the options.
         app.update_pending_send(|send| send.scheduling = ComposerScheduling::None);
-        assert_eq!(app.composer_send_options(Default::default()).schedule_repeat_period, 0);
+        assert_eq!(
+            app.composer_send_options(Default::default())
+                .schedule_repeat_period,
+            0
+        );
     });
 }
 

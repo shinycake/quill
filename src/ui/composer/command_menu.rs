@@ -1,8 +1,8 @@
 //! The bot command menu above the composer.
 
-use crate::ui::composer_sends::SendOnce;
 use super::send_bot_command::MenuSend;
 use super::*;
+use crate::ui::composer_sends::SendOnce;
 use quill::composer::{commands_with_username, complete_command_at};
 use std::ops::Range;
 
