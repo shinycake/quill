@@ -95,12 +95,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !listed || !self.chats_path_active() || self.session.threads.forum_row_asked(chat_id.0) {
             return;
         }
-        if self.maybe_fetch_forum_topics(chat_id).is_ok() {
-            self.session
-                .threads
-                .forum_row
-                .insert(chat_id.0, crate::state::ForumRowLoad::Asked);
-        }
+        let _ = self.maybe_fetch_forum_topics(chat_id);
     }
 
     /// A topic whose TDLib state may have changed: its read position or

@@ -106,6 +106,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session.requests.take(extra);
             return Err(err);
         }
+        self.session.threads.forum_topics.begin(chat_id.0);
         Ok(())
     }
 
