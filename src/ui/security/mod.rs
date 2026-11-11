@@ -501,8 +501,7 @@ impl QuillApp {
             return;
         }
         self.open_box(DialogKind::TwoFa);
-        self.twofa.open_at(TwofaView::Status);
-        self.goto_twofa_view(TwofaView::Status);
+        self.twofa_open();
         // The last change's error belongs to the box it was shown in; a
         // cached state skips the fetch that would clear it. One still in
         // flight keeps its answer's line.
@@ -552,8 +551,7 @@ impl QuillApp {
     /// Slice A2: close the overlay and clear every 2FA input — passwords
     /// must not linger in the form after the dialog is gone.
     pub(super) fn close_twofa(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.twofa.close();
-        self.goto_twofa_view(TwofaView::Status);
+        self.twofa_close();
         self.twofa
             .current_password
             .update(cx, |input, cx| input.set_value("", window, cx));
@@ -606,19 +604,6 @@ impl QuillApp {
             session.settings.sessions = Fetch::Ready(demo_sessions());
         }
         cx.notify();
-    }
-
-    /// Slice A2: switch the 2FA view; a fresh form starts with no local
-    /// notice line.
-    pub(super) fn goto_twofa_view(&mut self, view: TwofaView) {
-        self.twofa.goto(view);
-        if view == TwofaView::Status {
-            self.clear_twofa_flow();
-        } else if let Some(session) = self.live.as_mut().map(|l| &mut l.driver.session) {
-            session.auth_state.twofa_flow.notice = None;
-        } else if let Some(session) = self.demo_session.as_mut() {
-            session.auth_state.twofa_flow.notice = None;
-        }
     }
 
     /// Slice A2: one `setPassword` round-trip — enable (empty current),

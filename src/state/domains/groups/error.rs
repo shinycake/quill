@@ -222,7 +222,13 @@ impl Session {
             Some(RequestPurpose::Groups(GroupsPurpose::GetStatsPost {
                 chat_id,
                 message_id,
-            })) => self.groups.stats.post_missing(chat_id, message_id),
+            })) => {
+                if let Some(pending) = pending {
+                    self.groups
+                        .stats
+                        .post_missing(chat_id, message_id, pending.id);
+                }
+            }
             // Phase D3a: failed invite-link / join-request requests
             // land in the fetch state so the panel shows an honest
             // error instead of spinning forever.

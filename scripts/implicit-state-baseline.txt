@@ -13,7 +13,6 @@ CheckoutView::sending
 
 DestRow::saved
 DragSelect::pending
-Drawn::leaving
 
 FooterMeta::pending
 

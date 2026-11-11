@@ -20,7 +20,7 @@ use quill::story_stealth::{
 };
 use quill::story_tray_walk::story_to_open;
 use quill::story_viewer::StoryOpenScope;
-use std::cell::RefCell;
+use std::cell::Cell;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
@@ -138,7 +138,7 @@ impl QuillApp {
         }
     }
 
-    fn close_stealth_box(&mut self) {
+    pub(in crate::ui) fn close_stealth_box(&mut self) {
         self.stories.stealth_box = None;
     }
 
@@ -323,16 +323,13 @@ impl QuillApp {
             let button = StealthButton::of(facts.mode, now_unix_secs(), facts.premium, open_after);
             let body = stealth_box_body(&facts, cx);
             let footer = stealth_box_button(button, cx);
-            let body = Rc::new(RefCell::new(Some(body)));
+            let body = Rc::new(Cell::new(Some(body)));
             dialog
                 .overlay(true)
                 .w(px(BOX_WIDTH))
                 .content(crate::ui::shell::scrollable_dialog_content(
                     move |content, _, _| {
-                        let body = body
-                            .borrow_mut()
-                            .take()
-                            .unwrap_or_else(|| div().into_any_element());
+                        let body = body.take().unwrap_or_else(|| div().into_any_element());
                         content.child(body)
                     },
                 ))

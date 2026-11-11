@@ -333,10 +333,12 @@ impl super::QuillApp {
             }
             CloseOutcome::Hide => {
                 hide_main_window(window, cx);
+                self.main_window_media_left();
                 false
             }
             CloseOutcome::Minimize => {
                 window.minimize_window();
+                self.main_window_media_left();
                 false
             }
         }

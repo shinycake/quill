@@ -8044,6 +8044,40 @@ whose variants carry the data, with a way out of every stage.
   `ProxyFetch::FailedStale`: the tick does not ask again, the list stays
   busy (never planned on), and Refresh is the way out.
 
+### Sweep fixes (r2-32)
+
+Round 2, bundle 32: the statistics rows, the story state files, the suggested
+posts, toasts, threads, userpic clips, vanish and the video editor.
+
+| id | result |
+| --- | --- |
+| 06-018, 13-024 | `StatsState::posts` is `PostFetch { Loading{request}, Ready, Missing, Failed }`: a recent post's `getMessage` is recorded when sent (`post_requested`) and settled only by its own request (`accept_post`/`post_missing` compare it). A send the sender refuses is `Failed`: render does not ask again, and opening the panel afresh (`reset`) asks again. `PostLookup::Loading(request)` replaces the missing entry. A graph whose send failed is `GraphFetch::Failed` (its Retry exists), not a removed entry that the next render asked for. |
+| 13-033 | The cover and privacy calls are `StoryUi::manage_calls`, one `ManageCall{kind, story, request}` each. Opening an editor or stepping to another story drops none; `story_frame_upkeep` settles each by its own answer, shows a failure for the story it was sent for and closes the editor only when it is still open on that story. |
+| 13-039 | `MediaSave::Saving(Task<()>)` holds the copy's continuation; the finishing continuation lets it go (`finish_media_save`). |
+| 13-045 | `AlbumDelete::Deleting(RequestId)` is the delete stage, inside the album view; `PageWait::Deleting` is gone, so leaving the view drops the stage and its request together. |
+| 13-046 | `close_for_lock` closes the stealth box, which owns its redraw tick. |
+| 13-050, 13-051 | `SuggestedPostsUi` is one `Flow` of the legal boxes (price, price+time, price+Grams Needed, accept, accept+Grams Needed, decline, time, Grams Needed). A Grams Needed answer never replaces an open time box: it says the need in a note instead. The dialog builder clones the price box instead of taking it out and putting it back. |
+| 13-054 | `Drawn::leaving` is gone: `Drawn::target` is where the glide heads (a number) and `leaving()` reads it. `Presence` also holds its swap (`from` and `since`) as one value. Baseline lines removed. |
+| 13-055 | The synthetic photo row owns the timer that ends its loading (`ImageLoading(Rc<Task>)`). |
+| 13-052 | `ThreadView::asker` replaces `ChatWindows::thread_asker`: the window that asked lives on the thread, is set by `open_thread_for` and ends with it. A retry keeps the asker. |
+| 13-053 | `advance_thread` drops the jump-to-root goal when the older end failed. |
+| 13-058, 13-059 | `ToastQueue::pointer` is gone (the hover is the visible toast's `Timer::Paused`, handed to the next toast by `dismiss`); the wake-up is `Wake::Scheduled{deadline, task}` held in the queue, so a click, a hover or an empty queue cancels it. |
+| 14-064 | The session's recovery flow (`TwofaFlow`: the emailed code a step awaits, the finished step's notice) is written by the core's answers, so it stays the session's; the box only ever forgets it. Every path that drops the box runs `twofa_forget_flow`: `twofa_close` for the box's own close, `replace_screen` (account switch, logout, a replacing connection: the whole `TwoStepUi` is dropped, `Farewell` for it is empty) for the rest. `twofa_open` also starts clean. Test: `replacing_the_screen_forgets_a_half_finished_recovery_step`. |
+| 14-039 | A clip whose file entry is not known yet downloads (`should_download` handles the unknown file). |
+| 14-006 | `failed` remembers the file a clip failed on; a different file gets another try. |
+| 14-019 | `begin_vanish` skips a message that already has a ghost. |
+| 14-052 | `main_window_media_left` (hide, minimize, lock) drops the cover player and holds the main window's userpic clips. |
+| 14-056, 14-069 | `Ready` and `Encoding` hold a `Look` (quality, GIF, turns, flip, crop) beside the timeline; the kept range and cover exist only in the timeline, and `edits()` builds the `VideoEdits` from both, so no stale range can be read. `edits_mut()` returns the `Look` and is `None` while encoding, so nothing edits during an encode. The `Task::detach()` calls of the finishing task (`toast_queue`, `stories_state`, `video_editor_timeline/frames`, `end_reading`) carry a comment saying why. |
+| 14-057 | `CoverFrame{at_ms, path, still}` is replaced whole by each cut; a cut whose picture will not decode clears the still. |
+| 14-058, 14-070 | `Looping { Off, Playing, PausedByUser }` with the playhead is in `Ready`; `user_paused` and `playback_ms` are gone. The probe's task is held by `Reading`. |
+| 14-009, 14-047 | `Drag { Idle, Strip, Pressed, Dragging, Quality }` is the one live pointer drag; `QualityPointer`, `StagePress::moved` and the separate strip/press fields are gone. |
+| 14-048 | `Frames { Idle, Cutting{width, frames, task}, Done }` with `StripFrame::{Empty, Cut, Failed}` (in `video_editor_timeline/frames.rs`); the cancel flag is the task. |
+
+Skips from the fresh review: `userpic_videos` `sweep_due` is cleared by the
+`cx.defer` closure that always runs, `history_listed` at every frame start;
+`public_shares(loading, error)` are two reads of one `ForwardsPage`.
+Two `RefCell` body slots (stealth box, video editor) are `Cell`s.
+
 ### Sweep fixes (r2-05)
 
 | id | what changed |

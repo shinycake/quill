@@ -42,8 +42,14 @@ impl QuillApp {
             }
             UserpicVideo::Clip(clip) => clip,
         };
-        let file = session.media.files.get(&clip.0)?;
-        let Some(path) = file.usable_path() else {
+        // A clip whose file entry TDLib has not reported yet downloads too:
+        // `should_download` asks for a file nobody knows.
+        let usable = session
+            .media
+            .files
+            .get(&clip.0)
+            .and_then(|file| file.usable_path());
+        let Some(path) = usable else {
             if session.should_download(clip) {
                 self.defer_userpic_fetch(UserpicFetch::Clip(clip), cx);
             }

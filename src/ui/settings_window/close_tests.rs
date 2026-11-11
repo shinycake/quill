@@ -338,6 +338,32 @@ fn aborting_the_recovery_email_asks_inside_the_2fa_box(cx: &mut TestAppContext) 
     );
 }
 
+/// A screen replaced under an open 2FA box (account switch, logout) takes the
+/// session's half-finished recovery step with it.
+#[gpui_kit::test]
+fn replacing_the_screen_forgets_a_half_finished_recovery_step(cx: &mut TestAppContext) {
+    let (app, main) = new_app(cx);
+    let mut vcx = VisualTestContext::from_window(main, cx);
+    let vcx = &mut vcx;
+    app.update_in(vcx, |app, window, cx| {
+        app.demo_settings(Page::Account, cx);
+        app.open_twofa(cx);
+        if let Some(session) = app.demo_session.as_mut() {
+            session.auth_state.twofa_flow.code_wait =
+                quill::state::CodeWait::Recovery("a***@example.com".into());
+        }
+        app.replace_screen(window, cx);
+    });
+    app.read_with(vcx, |app, _| {
+        assert!(!app.twofa.is_open());
+        let waiting = app
+            .demo_session
+            .as_ref()
+            .and_then(|session| session.auth_state.twofa_flow.code_wait.recovery());
+        assert_eq!(waiting, None);
+    });
+}
+
 /// A password typed into the Privacy page's check card, not sent, does not
 /// wait there for the next visit.
 #[gpui_kit::test]

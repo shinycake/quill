@@ -75,7 +75,6 @@ mod window_state_tests;
 
 use super::app::QuillApp;
 use super::on_screen::ScreenEpoch;
-use super::threads::ThreadAsker;
 use cover::WindowPlace;
 use gpui_kit::component::input::TextareaState;
 use gpui_kit::*;
@@ -103,10 +102,6 @@ pub(crate) struct ChatWindows {
     /// Who asks for what the code running now opens (`dialog_hosts`):
     /// the window in place, a window a flow carried, or nobody.
     pub(super) asker: dialog_hosts::Asker,
-    /// The window that asked for the thread the session is opening (the
-    /// session keeps one thread): only its frame takes the resolved
-    /// thread on, not whichever window draws first (`advance_thread`).
-    pub(super) thread_asker: ThreadAsker,
     /// Which window shows each kit dialog (`dialog_hosts`).
     dialogs: dialog_hosts::DialogHosts,
     /// A write of the open windows is scheduled (`saved`).
@@ -231,7 +226,6 @@ impl ChatWindows {
             scope: None,
             last_press: None,
             asker: dialog_hosts::Asker::InPlace,
-            thread_asker: ThreadAsker::Nobody,
             dialogs: dialog_hosts::DialogHosts::default(),
             save: saved::SaveTimer::Idle,
             closed: Vec::new(),

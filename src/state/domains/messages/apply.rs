@@ -481,13 +481,16 @@ impl Session {
                     self.accept_date_message(message.id, pending);
                     return;
                 }
-                if let Some(RequestPurpose::Groups(GroupsPurpose::GetStatsPost {
-                    chat_id,
-                    message_id,
-                })) = pending.map(|p| p.purpose)
+                if let Some(pending) = pending
+                    && let RequestPurpose::Groups(GroupsPurpose::GetStatsPost {
+                        chat_id,
+                        message_id,
+                    }) = pending.purpose
                 {
                     self.remember_files(&message.files);
-                    self.groups.stats.accept_post(chat_id, message_id, &message);
+                    self.groups
+                        .stats
+                        .accept_post(chat_id, message_id, pending.id, &message);
                     return;
                 }
                 if let Some(RequestPurpose::GetRepliedMessage {

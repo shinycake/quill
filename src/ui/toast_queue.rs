@@ -7,8 +7,10 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::status_note::{NoteKind, StatusNote};
+use gpui_kit::Task;
 use quill::ids::ChatId;
 use std::collections::VecDeque;
+use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 /// Notes waiting behind the visible one. Past this, the oldest waiting
@@ -39,12 +41,35 @@ enum Timer {
     Paused { left: Duration },
 }
 
-/// Whether the pointer is over the toast slot.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-enum Pointer {
+/// The wake-up scheduled for the visible toast's deadline. The queue owns
+/// its task, so a click, a hover, an empty queue or a dropped queue cancels
+/// it. (`Rc` so the queue stays `Clone`.)
+#[derive(Clone, Default)]
+enum Wake {
     #[default]
-    Away,
-    Over,
+    Idle,
+    Scheduled {
+        deadline: Instant,
+        task: Rc<Task<()>>,
+    },
+}
+
+impl std::fmt::Debug for Wake {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Idle => f.write_str("Idle"),
+            Self::Scheduled { deadline, .. } => write!(f, "Scheduled({deadline:?})"),
+        }
+    }
+}
+
+impl Wake {
+    fn deadline(&self) -> Option<Instant> {
+        match self {
+            Self::Idle => None,
+            Self::Scheduled { deadline, .. } => Some(*deadline),
+        }
+    }
 }
 
 impl Showing {
@@ -66,13 +91,10 @@ pub(crate) struct ToastQueue {
     /// The current note. Every write names its kind through
     /// [`Self::set_note_in`], so a toast never depends on the words.
     note: StatusNote,
-    /// The deadline a wake-up is already scheduled for.
-    wake: Option<Instant>,
+    /// The wake-up scheduled for the visible toast's deadline.
+    wake: Wake,
     showing: Option<Showing>,
     waiting: VecDeque<Toast>,
-    /// The pointer over the toast slot: the next toast starts paused too,
-    /// since the pointer has not left.
-    pointer: Pointer,
 }
 
 impl ToastQueue {
@@ -105,7 +127,7 @@ impl ToastQueue {
     /// Drops the current note and its toasts.
     pub(crate) fn clear_note(&mut self) {
         *self = Self {
-            wake: self.wake,
+            wake: std::mem::take(&mut self.wake),
             ..Self::default()
         };
     }
@@ -125,21 +147,37 @@ impl ToastQueue {
         }
     }
 
-    /// The deadline a new wake-up must be scheduled for, if the visible
-    /// toast's has moved since the last one.
-    pub(crate) fn rewake(&mut self, now: Instant) -> Option<Instant> {
+    /// The deadline a wake-up must be scheduled for, when the visible
+    /// toast's has moved since the last one (the old wake-up is cancelled).
+    /// The caller schedules it and hands the task to [`Self::scheduled`].
+    pub(crate) fn wanted_wake(&mut self, now: Instant) -> Option<Instant> {
         let deadline = self.deadline(now);
-        if deadline == self.wake {
+        if deadline == self.wake.deadline() {
             return None;
         }
-        self.wake = deadline;
+        self.wake = Wake::Idle;
         deadline
     }
 
-    /// The wake-up for `deadline` fired.
+    /// The wake-up for `deadline` is scheduled as `task`.
+    pub(crate) fn scheduled(&mut self, deadline: Instant, task: Task<()>) {
+        self.wake = Wake::Scheduled {
+            deadline,
+            task: Rc::new(task),
+        };
+    }
+
+    /// The wake-up for `deadline` fired. Its task is the one running this,
+    /// so it is let go, not cancelled from inside itself.
     pub(crate) fn woke(&mut self, deadline: Instant) {
-        if self.wake == Some(deadline) {
-            self.wake = None;
+        if self.wake.deadline() != Some(deadline) {
+            return;
+        }
+        if let Wake::Scheduled { task, .. } = std::mem::take(&mut self.wake)
+            && let Ok(task) = Rc::try_unwrap(task)
+        {
+            // This task is the one running this call: detach lets it end, dropping would cancel it.
+            task.detach();
         }
     }
 
@@ -147,7 +185,7 @@ impl ToastQueue {
     /// wake-up is no longer wanted.
     pub(crate) fn dismiss_by_click(&mut self, now: Instant) {
         self.dismiss(now);
-        self.wake = None;
+        self.wake = Wake::Idle;
     }
 
     /// Queues a note for the main window.
@@ -166,7 +204,7 @@ impl ToastQueue {
         }
         let toast = Toast { note, host };
         let Some(showing) = self.showing.as_mut() else {
-            self.show(toast, now);
+            self.show(toast, false, now);
             return;
         };
         if showing.toast == toast {
@@ -240,10 +278,13 @@ impl ToastQueue {
 
     /// A click: the visible toast goes, the next one comes.
     pub(crate) fn dismiss(&mut self, now: Instant) {
-        self.showing = None;
-        match self.waiting.pop_front() {
-            Some(next) => self.show(next, now),
-            None => self.pointer = Pointer::Away,
+        // The pointer has not left the slot: the next toast starts paused.
+        let hovered = self
+            .showing
+            .take()
+            .is_some_and(|showing| matches!(showing.timer, Timer::Paused { .. }));
+        if let Some(next) = self.waiting.pop_front() {
+            self.show(next, hovered, now);
         }
     }
 
@@ -254,11 +295,6 @@ impl ToastQueue {
         // showing is stale and must not pause the next toast.
         let Some(showing) = self.showing.as_mut() else {
             return;
-        };
-        self.pointer = if hovered {
-            Pointer::Over
-        } else {
-            Pointer::Away
         };
         let left = showing.left(now);
         match (hovered, showing.timer) {
@@ -272,7 +308,6 @@ impl ToastQueue {
     /// none, or its window went): a hover that never ends would pause it for
     /// good and queue every later toast behind it.
     pub(crate) fn pointer_gone(&mut self, now: Instant) {
-        self.pointer = Pointer::Away;
         if let Some(showing) = self.showing.as_mut()
             && let Timer::Paused { left } = showing.timer
         {
@@ -314,12 +349,13 @@ impl ToastQueue {
         self.waiting.len()
     }
 
-    fn show(&mut self, toast: Toast, now: Instant) {
+    fn show(&mut self, toast: Toast, hovered: bool, now: Instant) {
         let left = toast.note.toast_duration();
         self.showing = Some(Showing {
-            timer: match self.pointer {
-                Pointer::Away => Timer::Running { left, since: now },
-                Pointer::Over => Timer::Paused { left },
+            timer: if hovered {
+                Timer::Paused { left }
+            } else {
+                Timer::Running { left, since: now }
             },
             toast,
         });
@@ -534,23 +570,23 @@ mod tests {
         queue.set_note_in(StatusNote::error("boom"), None, t0);
         assert_eq!(queue.note().text(), "boom");
         // A wake-up is wanted once for the visible toast's deadline.
-        let deadline = queue.rewake(t0);
-        assert!(deadline.is_some());
-        assert_eq!(queue.rewake(t0), None, "already scheduled");
+        let deadline = queue.wanted_wake(t0).expect("a wake");
+        queue.scheduled(deadline, gpui_kit::Task::ready(()));
+        assert_eq!(queue.wanted_wake(t0), None, "already scheduled");
         // Progress chatter does not replace a note its toast still shows.
         queue.set_note_in(StatusNote::silent("sending"), None, t0);
         assert_eq!(queue.note().text(), "boom");
         // The toast's time is up: the note goes with it, and so does the wake.
         queue.advance(secs(t0, 60));
         assert!(queue.note().text().is_empty());
-        assert_eq!(queue.rewake(secs(t0, 60)), None);
+        assert_eq!(queue.wanted_wake(secs(t0, 60)), None);
         // A click sends the toast and its wake-up away at once.
         queue.set_note_in(StatusNote::error("again"), None, secs(t0, 61));
-        let later = queue.rewake(secs(t0, 61));
-        assert!(later.is_some());
+        let later = queue.wanted_wake(secs(t0, 61)).expect("a wake");
+        queue.scheduled(later, gpui_kit::Task::ready(()));
         queue.dismiss_by_click(secs(t0, 62));
         assert_eq!(queue.visible(), None);
-        queue.woke(later.expect("a wake"));
+        assert_eq!(queue.wanted_wake(secs(t0, 62)), None, "the click ended it");
     }
 
     #[test]

@@ -191,7 +191,9 @@ fn a_story_media_save_belongs_to_its_story(cx: &mut TestAppContext) {
     let key = app.update(vcx, |app, cx| {
         let key = app.stories.viewer.current().map(|item| item.key());
         let key = key.expect("the demo viewer shows a story");
-        app.stories.media_saves.insert(key, MediaSave::Saving);
+        app.stories
+            .media_saves
+            .insert(key, MediaSave::Saving(gpui::Task::ready(())));
         app.stories
             .with_viewer_ui(|open| open.notice = Some("Saving…".into()));
         app.save_story_media(cx);
@@ -206,9 +208,11 @@ fn a_story_media_save_belongs_to_its_story(cx: &mut TestAppContext) {
     frames(vcx);
     app.update(vcx, |app, cx| {
         assert_eq!(app.stories.viewer_ui().notice, None);
-        assert_eq!(
-            app.stories.media_saves.get(&key),
-            Some(&MediaSave::Saving),
+        assert!(
+            app.stories
+                .media_saves
+                .get(&key)
+                .is_some_and(MediaSave::is_saving),
             "the copy is still the first story's"
         );
         // It finishes while the other story shows; back on the first, the

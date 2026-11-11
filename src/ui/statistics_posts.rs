@@ -131,7 +131,7 @@ impl QuillApp {
                                 StatsPage::Message(message_id),
                                 post.thumbs,
                             ),
-                            PostLookup::Missing => continue,
+                            PostLookup::Missing | PostLookup::Loading(_) => continue,
                             PostLookup::Unknown => {
                                 request_post(self, chat_id, message_id, cx);
                                 continue;
@@ -370,7 +370,7 @@ impl QuillApp {
                 request_post(self, chat_id, message_id, cx);
                 None
             }
-            PostLookup::Missing => None,
+            PostLookup::Missing | PostLookup::Loading(_) => None,
         };
         // The numbers come from the chat's recent interactions when the
         // post is among them, else from the post itself.

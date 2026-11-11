@@ -23,7 +23,6 @@ purpose:ConnectDriver::fetch_country_code 1
 purpose:ConnectDriver::fetch_marketplace_gift 2
 purpose:ConnectDriver::fetch_message_statistics 1
 purpose:ConnectDriver::fetch_new_chat_privacy 1
-purpose:ConnectDriver::fetch_stats_post 1
 purpose:ConnectDriver::fetch_sticker_menu_facts 2
 purpose:ConnectDriver::fetch_top_chats 1
 purpose:ConnectDriver::fetch_trending_stickers 1

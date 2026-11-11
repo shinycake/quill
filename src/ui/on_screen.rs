@@ -440,6 +440,9 @@ impl QuillApp {
         // the deferred replacement runs (`screen_leaves_later`).
         let note = self.connection.note().text().to_string();
         self.screen = OnScreen::new(epoch, &self.chat_prefs, note, window, cx);
+        // The new screen's 2FA box is closed: the session's recovery flow
+        // (code wait, notice) must not outlive the box that showed it.
+        self.twofa_forget_flow();
         // The side column slides out drawing the panels it last had, which
         // name the old account's users and chats.
         self.frame.panels = super::panel_reveal::PanelReveal::new(std::time::Instant::now());

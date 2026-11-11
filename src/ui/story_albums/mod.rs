@@ -4,7 +4,7 @@
 use super::app::QuillApp;
 use super::*;
 use crate::ui::status_note::StatusNote;
-use crate::ui::stories_state::{PanelKind, ViewerPanel};
+use crate::ui::stories_state::{ManageCall, ManageKind, PanelKind, ViewerPanel};
 use crate::ui::story_page::{AlbumDelete, AlbumView, PageWait};
 use crate::ui::user_error::{user_error_doing, user_error_for};
 use gpui_kit::component::button::*;
@@ -290,6 +290,7 @@ impl QuillApp {
     /// second click sends `deleteStoryAlbum`.
     pub(super) fn delete_story_album(&mut self, album_id: i32, cx: &mut Context<Self>) {
         let chat_id = match self.stories.page.as_mut() {
+            Some(page) if page.view.deleting().is_some() => return,
             Some(page) if page.view.delete_armed(album_id) => page.chat_id,
             Some(page) => {
                 if let AlbumView::Album { id, delete } = &mut page.view
@@ -314,7 +315,7 @@ impl QuillApp {
         if let Some(page) = self.stories.page.as_mut() {
             page.view.disarm();
             if let Some(request) = sent.and_then(|ids| ids.first().copied()) {
-                page.wait = PageWait::Deleting(request);
+                page.view.delete_sent(request);
             }
         }
     }
@@ -607,7 +608,6 @@ impl QuillApp {
         };
         if let Some(open) = self.stories.viewer_ui_mut() {
             open.show(ViewerPanel::Privacy(value));
-            open.privacy_request = None;
         }
         self.stories
             .privacy_user_search
@@ -722,7 +722,7 @@ impl QuillApp {
                     .child(list),
             );
         }
-        let busy = self.stories.viewer_ui().privacy_request.is_some();
+        let busy = self.privacy_call_busy();
         // No second call for this story while one is in flight.
         let manage_busy = self
             .stories
@@ -765,12 +765,20 @@ impl QuillApp {
         panel.into_any_element()
     }
 
+    /// A privacy call for the story the open editor is for is on its way.
+    fn privacy_call_busy(&self) -> bool {
+        self.stories.viewer_ui().privacy_edit().is_some_and(|edit| {
+            self.stories
+                .manage_call_busy(ManageKind::Privacy, (edit.chat_id, edit.story_id))
+        })
+    }
+
     /// Phase 9.5: send `setStoryPrivacySettings` (`td_api.tl:13743`)
     /// for the edited story. The driver gates on
     /// `can_set_privacy_settings`; the tick closes the panel on
     /// success.
     pub(super) fn story_privacy_save(&mut self, cx: &mut Context<Self>) {
-        if self.stories.viewer_ui().privacy_request.is_some() {
+        if self.privacy_call_busy() {
             return;
         }
         let Some(edit) = self.stories.viewer_ui().privacy_edit().cloned() else {
@@ -808,9 +816,11 @@ impl QuillApp {
                 settings,
             ) {
                 Ok(request) => {
-                    if let Some(open) = self.stories.viewer_ui_mut() {
-                        open.privacy_request = Some(request);
-                    }
+                    self.stories.manage_calls.push(ManageCall {
+                        kind: ManageKind::Privacy,
+                        story: (edit.chat_id, edit.story_id),
+                        request,
+                    });
                 }
                 Err(_) => {
                     live.driver.session.stories.manage.fail_locally(

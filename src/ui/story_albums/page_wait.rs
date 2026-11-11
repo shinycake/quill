@@ -46,32 +46,46 @@ impl QuillApp {
         let Some(page) = self.stories.page.as_ref() else {
             return;
         };
+        let deleting = page.view.deleting();
         let requests = match &page.wait {
-            PageWait::Idle => return,
-            PageWait::Creating(request) | PageWait::Deleting(request) => vec![*request],
+            PageWait::Idle => Vec::new(),
+            PageWait::Creating(request) => vec![*request],
             PageWait::SavingPicker(requests) => requests.clone(),
         };
+        let waits = !matches!(page.wait, PageWait::Idle);
         let Some(session) = self.session() else {
             return;
         };
-        let answered = answer(&session.stories.page_ops, &requests);
-        if answered == Answer::Waiting {
+        let delete_answer = deleting.map(|request| answer(&session.stories.page_ops, &[request]));
+        let answered = waits.then(|| answer(&session.stories.page_ops, &requests));
+        if delete_answer.is_none() && answered.is_none() {
             return;
         }
         let Some(page) = self.stories.page.as_mut() else {
             return;
         };
-        let wait = std::mem::replace(&mut page.wait, PageWait::Idle);
-        if answered == Answer::Succeeded {
-            match wait {
-                PageWait::Idle => {}
-                PageWait::Creating(_) => {
-                    page.picker = None;
-                    page.new_album_name
-                        .update(cx, |input, cx| input.set_value("", window, cx));
+        match delete_answer {
+            Some(Answer::Succeeded) => page.view = AlbumView::List,
+            Some(Answer::Refused) => {
+                page.view = page
+                    .view
+                    .open_album()
+                    .map_or(AlbumView::List, AlbumView::album);
+            }
+            Some(Answer::Waiting) | None => {}
+        }
+        if let Some(answered) = answered.filter(|answered| *answered != Answer::Waiting) {
+            let wait = std::mem::replace(&mut page.wait, PageWait::Idle);
+            if answered == Answer::Succeeded {
+                match wait {
+                    PageWait::Idle => {}
+                    PageWait::Creating(_) => {
+                        page.picker = None;
+                        page.new_album_name
+                            .update(cx, |input, cx| input.set_value("", window, cx));
+                    }
+                    PageWait::SavingPicker(_) => page.picker = None,
                 }
-                PageWait::SavingPicker(_) => page.picker = None,
-                PageWait::Deleting(_) => page.view = AlbumView::List,
             }
         }
         cx.notify();

@@ -6,8 +6,8 @@ use crate::diagnostics::{DiagnosticSink, MemorySink};
 use crate::ids::{AccountKey, ChatId, MessageId, RequestId};
 use crate::platform::MemorySecretStore;
 use crate::state::{
-    ChatStatisticsFetch, GraphFetch, InfoPanelTarget, MessageStatsFetch, RECENT_POSTS_FIRST,
-    RequestPurpose, Session, StatsPage,
+    ChatStatisticsFetch, GraphFetch, InfoPanelTarget, MessageStatsFetch, PostFetch,
+    RECENT_POSTS_FIRST, RequestPurpose, Session, StatsPage,
 };
 use crate::telegram::client::copy_and_parse;
 use crate::telegram::envelope::StatisticalGraph;
@@ -283,9 +283,17 @@ fn recent_post_previews_are_fetched_once() {
         extra,
         r#"{"@type":"message","id":9437184,"chat_id":-100,"date":1727740800,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"Launch day","entities":[]}},"interaction_info":{"@type":"messageInteractionInfo","view_count":1200,"forward_count":7}}"#,
     );
-    let preview = rig.driver.session.groups.stats.posts[&(-100, 9 << 20)]
-        .clone()
-        .expect("preview");
+    let Some(PostFetch::Ready(preview)) = rig
+        .driver
+        .session
+        .groups
+        .stats
+        .posts
+        .get(&(-100, 9 << 20))
+        .cloned()
+    else {
+        panic!("preview");
+    };
     assert_eq!(preview.text, "Launch day");
     assert_eq!(preview.views, 1200);
     assert_eq!(preview.forwards, 7);
@@ -297,7 +305,7 @@ fn recent_post_previews_are_fetched_once() {
     rig.error(missing);
     assert_eq!(
         rig.driver.session.groups.stats.posts[&(-100, 10 << 20)],
-        None
+        PostFetch::Missing
     );
 }
 
@@ -393,7 +401,7 @@ fn a_refused_poll_votes_request_fails_and_retries() {
 #[test]
 fn the_open_panel_downloads_recent_post_thumbnails() {
     use crate::ids::FileId;
-    use crate::state::{ChatStatisticsFetch, StatsPostPreview};
+    use crate::state::{ChatStatisticsFetch, PostFetch, StatsPostPreview};
     use crate::telegram::envelope::{
         ChannelStatistics, ChatStatistics, ChatStatisticsInteractionInfo, ChatStatisticsObject,
         StatisticalValue,
@@ -449,7 +457,7 @@ fn the_open_panel_downloads_recent_post_thumbnails() {
     );
     session.groups.stats.posts.insert(
         (-100, 9 << 20),
-        Some(StatsPostPreview {
+        PostFetch::Ready(StatsPostPreview {
             text: "Photo".into(),
             date: 1,
             views: 1,
@@ -738,4 +746,67 @@ fn a_zoom_whose_load_is_refused_is_not_recorded() {
     rig.recorder.refuse_sends(true);
     assert!(rig.driver.zoom_stat_graph(ChatId(-100), "zoom", 5).is_err());
     assert!(rig.driver.session.groups.stats.zoomed.is_empty());
+}
+
+/// Sweep 06-018 / 13-024: a post or graph request that did not go out is
+/// a settled failure, not an empty slot the next render asks for again.
+#[test]
+fn a_refused_post_or_graph_request_is_not_asked_again_by_render() {
+    let mut rig = Rig::new();
+    rig.recorder.refuse_sends(true);
+    assert!(
+        rig.driver
+            .fetch_stats_post(ChatId(-100), MessageId(9 << 20))
+            .is_err()
+    );
+    assert_eq!(
+        rig.driver.session.groups.stats.posts[&(-100, 9 << 20)],
+        PostFetch::Failed
+    );
+    assert!(
+        rig.driver
+            .load_stat_graph(ChatId(-100), "growth", 0)
+            .is_err()
+    );
+    assert!(matches!(
+        rig.driver.session.groups.stats.graph(-100, "growth", 0),
+        Some(GraphFetch::Failed(_))
+    ));
+    rig.recorder.refuse_sends(false);
+    // Render finds the post taken; reopening the panel asks again.
+    assert!(
+        rig.driver
+            .fetch_stats_post(ChatId(-100), MessageId(9 << 20))
+            .unwrap()
+            .is_none()
+    );
+    rig.driver.session.groups.stats.reset(-100);
+    assert!(
+        rig.driver
+            .fetch_stats_post(ChatId(-100), MessageId(9 << 20))
+            .unwrap()
+            .is_some()
+    );
+}
+
+/// An answer for a request the row no longer waits for is ignored.
+#[test]
+fn a_stale_post_answer_does_not_settle_the_row() {
+    let mut rig = Rig::new();
+    let old = rig
+        .driver
+        .fetch_stats_post(ChatId(-100), MessageId(9 << 20))
+        .unwrap()
+        .expect("sends");
+    rig.driver.session.groups.stats.posts.insert(
+        (-100, 9 << 20),
+        PostFetch::Loading {
+            request: RequestId(old.0 + 1000),
+        },
+    );
+    rig.error(old);
+    assert!(matches!(
+        rig.driver.session.groups.stats.posts[&(-100, 9 << 20)],
+        PostFetch::Loading { .. }
+    ));
 }
