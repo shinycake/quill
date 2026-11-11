@@ -612,16 +612,8 @@ fn a_surface_that_keeps_what_it_made_is_named(cx: &mut TestAppContext) {
 
 #[gpui_kit::test]
 fn leaving_a_settings_page_lets_go_of_what_it_made(cx: &mut TestAppContext) {
-    // The System page asks `xdg-mime` for the `tg:` handler; the test
-    // answers instead, so no process starts.
-    struct PinnedLinkHandler;
-    impl Drop for PinnedLinkHandler {
-        fn drop(&mut self) {
-            quill::link_handler::demo_pin(None);
-        }
-    }
-    quill::link_handler::demo_pin(Some(quill::link_handler::LinkHandlerState::Unset));
-    let _pinned = PinnedLinkHandler;
+    // The System page asks `xdg-mime` for the `tg:` handler; every test app
+    // pins the answer (`QuillApp::new_with_demo`), so no process starts.
     let mut h = new_app(cx, "ready-chats");
     let mut failures = Vec::new();
     // One table row per page: `Surface` takes plain functions.
