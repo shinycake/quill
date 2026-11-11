@@ -631,3 +631,37 @@ pub(super) fn mention_name(first_name: &str, display_name: &str) -> String {
 #[cfg(feature = "demo-capture")]
 #[path = "composer_long_line_tests.rs"]
 mod long_line_tests;
+
+#[cfg(test)]
+mod echo_tests {
+    use super::{FieldEcho, MarkdownRevert};
+    use gpui_kit::SharedString;
+
+    fn revert(text: &str) -> MarkdownRevert {
+        MarkdownRevert {
+            text: text.to_string(),
+            caret: text.len(),
+            restore: None,
+        }
+    }
+
+    #[test]
+    fn a_replacement_is_taken_back_only_for_the_text_it_was_made_for() {
+        let mut echo = FieldEcho::default();
+        echo.set(SharedString::from("*a*"));
+        echo.arm(revert("a"));
+        // The field now holds other text: the replacement is gone.
+        let before = echo.set(SharedString::from("ab"));
+        assert_eq!(before.as_ref(), "*a*");
+        assert!(echo.take_revert().is_none());
+    }
+
+    #[test]
+    fn a_replacement_survives_the_event_for_its_own_text() {
+        let mut echo = FieldEcho::default();
+        echo.arm(revert("a"));
+        echo.set(SharedString::from("a"));
+        assert!(echo.take_revert().is_some());
+        assert!(echo.take_revert().is_none(), "taken once");
+    }
+}

@@ -125,3 +125,45 @@ impl InlineMode {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn closing_the_panel_drops_its_timer_and_its_wait() {
+        let mut inline = InlineMode::default();
+        assert!(!inline.is_open());
+        inline.open_waiting();
+        assert!(inline.is_open());
+        assert!(inline.take_session_wait(), "the wait is taken once");
+        assert!(!inline.take_session_wait());
+        inline.arm("bot", "cats", Task::ready(()));
+        assert!(inline.is_armed_for("bot", "cats"));
+        assert!(!inline.is_armed_for("bot", "dogs"));
+        inline.close();
+        assert!(
+            !inline.is_armed_for("bot", "cats"),
+            "the timer went with it"
+        );
+        assert!(!inline.take_session_wait());
+    }
+
+    #[test]
+    fn a_closed_panel_arms_nothing_and_a_newer_query_replaces_the_timer() {
+        let mut inline = InlineMode::default();
+        inline.arm("bot", "cats", Task::ready(()));
+        assert!(!inline.is_armed_for("bot", "cats"));
+        inline.open();
+        inline.arm("bot", "cats", Task::ready(()));
+        inline.arm("bot", "cat", Task::ready(()));
+        assert!(inline.is_armed_for("bot", "cat"));
+        assert!(!inline.is_armed_for("bot", "cats"));
+        inline.timer_fired();
+        assert!(!inline.is_armed_for("bot", "cat"));
+        inline.select(3);
+        assert_eq!(inline.selected(), 3);
+        inline.close();
+        assert_eq!(inline.selected(), 0);
+    }
+}

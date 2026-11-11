@@ -500,4 +500,42 @@ mod tests {
         queue.push(StatusNote::info("Copied"), t0);
         assert_eq!(queue.deadline(secs(t0, 60)), None);
     }
+
+    #[test]
+    fn the_note_its_toast_and_its_wake_end_together() {
+        let t0 = Instant::now();
+        let mut queue = ToastQueue::default();
+        queue.set_note_in(StatusNote::error("boom"), None, t0);
+        assert_eq!(queue.note().text(), "boom");
+        // A wake-up is wanted once for the visible toast's deadline.
+        let deadline = queue.rewake(t0);
+        assert!(deadline.is_some());
+        assert_eq!(queue.rewake(t0), None, "already scheduled");
+        // Progress chatter does not replace a note its toast still shows.
+        queue.set_note_in(StatusNote::silent("sending"), None, t0);
+        assert_eq!(queue.note().text(), "boom");
+        // The toast's time is up: the note goes with it, and so does the wake.
+        queue.advance(secs(t0, 60));
+        assert!(queue.note().text().is_empty());
+        assert_eq!(queue.rewake(secs(t0, 60)), None);
+        // A click sends the toast and its wake-up away at once.
+        queue.set_note_in(StatusNote::error("again"), None, secs(t0, 61));
+        let later = queue.rewake(secs(t0, 61));
+        assert!(later.is_some());
+        queue.dismiss_by_click(secs(t0, 62));
+        assert_eq!(queue.visible(), None);
+        queue.woke(later.expect("a wake"));
+    }
+
+    #[test]
+    fn dropping_toasts_keeps_the_note_the_footer_shows() {
+        let t0 = Instant::now();
+        let mut queue = ToastQueue::default();
+        queue.set_note_in(StatusNote::error("boom"), None, t0);
+        queue.drop_toasts();
+        assert_eq!(queue.note().text(), "boom");
+        assert_eq!(queue.visible(), None);
+        queue.clear_note();
+        assert!(queue.note().text().is_empty());
+    }
 }

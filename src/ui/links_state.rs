@@ -230,3 +230,37 @@ impl LinkUi {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use quill::state::DeepLinkState;
+
+    fn invite() -> DeepLinkState {
+        DeepLinkState::ShowText("preview".into())
+    }
+
+    #[core::prelude::v1::test]
+    fn the_origin_is_taken_with_the_step_and_put_back_while_the_flow_goes_on() {
+        let mut flow = LinkFlow::default();
+        flow.start(Some(ChatId(7)));
+        assert_eq!(flow.take_origin(), Some(ChatId(7)));
+        assert_eq!(flow.take_origin(), None, "a terminal step leaves none");
+        flow.resume(Some(ChatId(7)));
+        assert_eq!(flow.take_origin(), Some(ChatId(7)));
+    }
+
+    #[core::prelude::v1::test]
+    fn an_invite_being_asked_survives_the_pump_and_gives_way_to_a_new_flow() {
+        let mut flow = LinkFlow::default();
+        flow.ask(invite());
+        assert_eq!(flow.take_origin(), None);
+        flow.resume(Some(ChatId(1)));
+        assert!(flow.invite().is_some(), "the pump does not drop the invite");
+        flow.start(None);
+        assert!(flow.invite().is_none(), "a new flow replaces it");
+        flow.ask(invite());
+        assert!(flow.take_invite().is_some());
+        assert!(flow.take_invite().is_none());
+    }
+}

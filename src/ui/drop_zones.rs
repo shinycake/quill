@@ -328,3 +328,47 @@ impl QuillApp {
 #[cfg(feature = "demo-capture")]
 #[path = "drop_zones_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+mod drag_over_tests {
+    use super::*;
+
+    fn paths(names: &[&str]) -> Vec<PathBuf> {
+        names.iter().map(PathBuf::from).collect()
+    }
+
+    #[core::prelude::v1::test]
+    fn a_classification_applies_only_to_the_paths_still_dragged() {
+        let state = quill::drop_modes::classify(&[quill::drop_modes::DragEntry::probe(
+            std::path::Path::new("a.heic"),
+        )]);
+        let mut over = DragOver::None;
+        over = match state {
+            Some(_) => DragOver::Probing(paths(&["a.heic"])),
+            None => over,
+        };
+        assert!(over.is_over(&paths(&["a.heic"])));
+        assert!(
+            !over.probed(paths(&["b.heic"]), state),
+            "another drag's answer"
+        );
+        assert!(over.state().is_none());
+        assert!(over.probed(paths(&["a.heic"]), state));
+        assert_eq!(over.state().is_some(), state.is_some());
+        over.end_drag();
+        assert!(over.state().is_none());
+    }
+
+    #[core::prelude::v1::test]
+    fn a_demos_fixed_state_outlives_the_end_of_a_drag() {
+        let state = quill::drop_modes::classify(&[quill::drop_modes::DragEntry::probe(
+            std::path::Path::new("a.heic"),
+        )]);
+        let Some(state) = state else {
+            return;
+        };
+        let mut over = DragOver::Fixed(state);
+        over.end_drag();
+        assert!(over.state().is_some());
+    }
+}

@@ -221,3 +221,41 @@ impl ChatListUi {
 
 /// Nothing to say: its state is the account's only app-side.
 impl super::on_screen::Farewell for ChatListUi {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[core::prelude::v1::test]
+    fn a_release_ends_a_press_but_leaves_an_open_peek() {
+        let started = Instant::now();
+        let mut peek = PeekPreview::Pressing {
+            chat: ChatId(5),
+            started,
+        };
+        assert_eq!(peek.pressing(), Some(ChatId(5)));
+        peek.cancel_press();
+        assert!(peek.is_idle());
+        peek = PeekPreview::Open(ChatPreviewState {
+            chat_id: ChatId(5),
+            anchor: Point::default(),
+        });
+        peek.cancel_press();
+        assert!(peek.open().is_some(), "an open panel stays");
+        assert!(!peek.is_idle());
+    }
+
+    #[core::prelude::v1::test]
+    fn a_press_is_taken_by_the_drag_of_its_own_row() {
+        let mut pin = PinStage::Pressed { chat: 4, y: 30. };
+        assert_eq!(
+            pin.take_press(9),
+            None,
+            "another row's drag starts at the pointer"
+        );
+        assert!(matches!(pin, PinStage::Pressed { .. }));
+        assert_eq!(pin.take_press(4), Some(30.));
+        assert!(matches!(pin, PinStage::Idle));
+        assert!(!pin.end_drag());
+    }
+}

@@ -399,3 +399,55 @@ fn a_failed_refetch_keeps_the_shown_sticker_set() {
     session.fail_sticker_set_view(5);
     assert_eq!(stage(&session), Some(StickerSetViewStage::Failed));
 }
+
+fn saved_gif(id: i32) -> crate::telegram::envelope::AnimationItem {
+    crate::telegram::envelope::AnimationItem {
+        duration: 1,
+        width: 1,
+        height: 1,
+        file_name: String::new(),
+        mime_type: "video/mp4".into(),
+        file_id: crate::ids::FileId(id),
+        thumb_file_id: None,
+        thumb_width: 0,
+        thumb_height: 0,
+        minithumbnail: None,
+        thumb_still: true,
+    }
+}
+
+#[test]
+fn the_saved_gifs_walk_their_stages_and_keep_the_list_in_each() {
+    use crate::state::SavedGifs;
+    let mut saved = SavedGifs::default();
+    assert!(saved.needs_load() && !saved.is_loaded());
+    saved.begin_load();
+    assert!(saved.is_loading() && !saved.needs_load());
+    saved.loaded(vec![saved_gif(1)]);
+    assert!(saved.is_loaded() && !saved.needs_load());
+    // `updateSavedAnimations`: fetched again, the list shown meanwhile.
+    saved.mark_stale();
+    assert!(saved.needs_load() && saved.is_loaded());
+    saved.begin_load();
+    assert_eq!(saved.items().len(), 1, "the list does not blank");
+    // A failure keeps the list, waits for the next opening, and is forgiven
+    // by a change that goes out.
+    saved.fail();
+    assert!(saved.is_failed() && saved.is_loaded() && !saved.needs_load());
+    assert_eq!(saved.items().len(), 1);
+    saved.retry();
+    assert!(!saved.is_failed() && saved.is_loaded());
+    // A saved GIF added or removed drops the list to be asked for again.
+    saved.clear();
+    assert!(saved.needs_load() && saved.items().is_empty());
+}
+
+#[test]
+fn a_stale_mark_on_a_failed_list_asks_again() {
+    use crate::state::SavedGifs;
+    let mut saved = SavedGifs::default();
+    saved.loaded(vec![saved_gif(2)]);
+    saved.fail();
+    saved.mark_stale();
+    assert!(saved.needs_load() && !saved.is_failed());
+}

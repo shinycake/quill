@@ -218,3 +218,81 @@ impl ChromeDue {
         matches!(self, Self::Notifying(_))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const KEY: ScrollKey = (7, None, 0);
+
+    #[test]
+    fn a_window_anchors_once_and_a_replaced_one_anchors_again() {
+        let mut anchor = WindowAnchor::default();
+        assert!(anchor.sync(KEY, 1), "the first sync anchors");
+        assert!(anchor.is_anchoring());
+        assert!(!anchor.is_placed_for(KEY, 1));
+        anchor.placed();
+        assert!(anchor.is_placed_for(KEY, 1));
+        assert!(!anchor.sync(KEY, 1), "the same window is left alone");
+        assert!(anchor.sync(KEY, 2), "a replaced window anchors again");
+        assert!(anchor.is_anchoring());
+    }
+
+    #[test]
+    fn a_landed_jump_belongs_to_its_chat() {
+        let mut anchor = WindowAnchor::default();
+        anchor.sync(KEY, 1);
+        anchor.placed();
+        anchor.set_landed(Some((3, MessageId(9))));
+        // A replaced window of the same chat keeps it: it lands once per jump.
+        anchor.sync(KEY, 2);
+        assert_eq!(anchor.landed(), Some((3, MessageId(9))));
+        // Message ids are chat-local: another chat starts with none.
+        anchor.sync((8, None, 0), 2);
+        assert_eq!(anchor.landed(), None);
+    }
+
+    #[test]
+    fn a_measured_history_replaces_its_seed_whole() {
+        let seeded = HistoryMeasure::default();
+        assert!(!seeded.is_measured());
+        assert_eq!(seeded.layout(), ChatLayout::default());
+        let measured = HistoryMeasure::Measured {
+            width: HistoryWidth::new(400.),
+            layout: ChatLayout::Wide,
+            pane: Pixels::default(),
+        };
+        assert!(measured.is_measured());
+        assert_eq!(measured.layout(), ChatLayout::Wide);
+        assert_eq!(measured.width(), HistoryWidth::new(400.));
+    }
+
+    #[test]
+    fn a_chrome_notify_is_asked_for_once_and_ends_with_the_render() {
+        let mut due = ChromeDue::default();
+        assert!(due.note(3), "the first stale row schedules the notify");
+        assert!(!due.note(3), "the same row is not noted twice");
+        assert!(!due.note(5), "a notify is already on its way");
+        assert!(due.is_notifying());
+        // The notify lands: the rows wait for the render, no notify is out.
+        due.notified();
+        assert!(!due.is_notifying());
+        assert!(due.note(6), "a row noted after it schedules the next one");
+        due.notified();
+        assert_eq!(due.take(), vec![3, 5, 6]);
+        assert!(!due.is_notifying());
+        assert!(due.take().is_empty());
+    }
+
+    #[test]
+    fn a_rebuild_that_empties_the_rows_does_not_strand_the_notify() {
+        let mut due = ChromeDue::default();
+        due.note(1);
+        // The rows were rebuilt before the notify landed.
+        assert_eq!(due.take(), vec![1]);
+        assert!(due.is_notifying(), "the notify is still on its way");
+        due.notified();
+        assert!(!due.is_notifying());
+        assert!(due.note(2), "the next stale row asks for a notify again");
+    }
+}
