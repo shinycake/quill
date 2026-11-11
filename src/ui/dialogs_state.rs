@@ -68,7 +68,6 @@ pub(crate) struct DialogUi {
     pub(super) account_export_dialog: Option<super::account_export_box::AccountExportDraft>,
     /// Last account export progress drawn.
     pub(super) account_export_seen: Option<quill::export::account::AccountProgress>,
-    pub(super) export_stop: Option<super::export_quit::ExitAfterStop>,
     /// The Saved Messages sublist list, which pages near its end
     /// (`scroll_load`).
     pub(super) saved_scroll: ScrollHandle,
@@ -150,7 +149,6 @@ impl DialogUi {
             chat_export_seen: None,
             account_export_dialog: None,
             account_export_seen: None,
-            export_stop: None,
             saved_scroll: ScrollHandle::new(),
             saved_asked: Default::default(),
             rating_detail: None,

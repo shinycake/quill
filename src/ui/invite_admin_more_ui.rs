@@ -295,8 +295,14 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut() {
             if open {
                 live.driver.close_link_join_requests(chat_id);
-            } else {
-                let _ = live.driver.open_link_join_requests(chat_id, invite_link);
+            } else if !live
+                .driver
+                .open_link_join_requests(chat_id, invite_link)
+                .is_ok_and(|sent| sent.is_some())
+            {
+                self.set_note(StatusNote::error(tr(
+                    keys::Q_CHAT_COULD_NOT_LOAD_JOIN_REQUESTS,
+                )));
             }
         } else if open && let Some(session) = self.demo_session.as_mut() {
             session.groups.invite_pages.close_join_requests(chat_id.0);

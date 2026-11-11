@@ -173,6 +173,35 @@ fn a_failed_load_drops_what_waited() {
 }
 
 #[test]
+fn a_message_that_waited_for_a_failed_load_can_play_later() {
+    let mut pack = EmojiAnimations::default();
+    pack.loading(1);
+    assert!(pack.mark_watched((1, 2)));
+    pack.wait(Waiting {
+        chat_id: ChatId(1),
+        message_id: MessageId(2),
+        emoji: "👍".into(),
+    });
+    pack.failed();
+    assert!(pack.mark_watched((1, 2)));
+}
+
+#[test]
+fn a_message_pushed_out_of_the_queue_is_unwatched() {
+    let mut pack = EmojiAnimations::default();
+    for id in 0..=MAX_WAITING as i64 {
+        assert!(pack.mark_watched((1, id)));
+        pack.wait(Waiting {
+            chat_id: ChatId(1),
+            message_id: MessageId(id),
+            emoji: "👍".into(),
+        });
+    }
+    assert!(pack.mark_watched((1, 0)));
+    assert!(!pack.mark_watched((1, 1)));
+}
+
+#[test]
 fn waiting_keeps_the_newest() {
     let mut pack = EmojiAnimations::default();
     for id in 0..20 {

@@ -289,7 +289,7 @@ fn a_failed_revoke_ends_so_the_box_can_revoke_again() {
     );
     assert_eq!(state.public_limit_reached, Some(true));
     assert!(
-        rig.driver.session.chats_state.chat_action_error.is_some(),
+        !rig.driver.session.chats_state.chat_action_error.is_empty(),
         "the failure is said"
     );
     // The box is usable again: a second Revoke goes out.
@@ -320,7 +320,7 @@ fn a_half_sent_revoke_is_recorded_and_settles() {
     rig.answer(revoke.requests[0], "ok");
     let state = &rig.driver.session.groups.group_type;
     assert_eq!(state.revoke, crate::state::PublicLinkStage::Idle);
-    assert!(rig.driver.session.chats_state.chat_action_error.is_some());
+    assert!(!rig.driver.session.chats_state.chat_action_error.is_empty());
     assert_eq!(state.public_chats, crate::state::PublicChatsFetch::None);
 }
 
@@ -377,5 +377,5 @@ fn queued_edits_without_an_upgraded_chat_are_reported() {
         kind: Vec::new(),
     };
     rig.driver.run_edit_after_upgrade(edit, true);
-    assert!(rig.driver.session.chats_state.chat_action_error.is_some());
+    assert!(!rig.driver.session.chats_state.chat_action_error.is_empty());
 }

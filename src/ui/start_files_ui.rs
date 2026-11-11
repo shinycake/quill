@@ -45,8 +45,16 @@ impl QuillApp {
             return;
         }
         let files = quill::start_files::take_files();
+        let dropped = quill::start_files::take_dropped();
         if !files.is_empty() {
             self.begin_start_files(files, cx);
+        }
+        if dropped > 0 {
+            self.set_note(StatusNote::info(quill::lang::trn(
+                keys::Q_START_FILES_DROPPED,
+                dropped,
+            )));
+            cx.notify();
         }
     }
 

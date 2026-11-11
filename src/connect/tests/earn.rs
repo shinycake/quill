@@ -651,8 +651,8 @@ fn a_closed_join_boxs_answer_leaves_the_box_open_now_alone() {
         feed(&mut p, body);
         let earn = &p.0.session.payments.earn;
         assert_eq!(
-            earn.join_box.as_ref().map(|j| (j.bot_user_id, j.send)),
-            Some((BOT + 1, BoxSend::Idle)),
+            earn.join_box.as_ref().map(|j| (j.bot_user_id, j.stage)),
+            Some((BOT + 1, crate::earn::JoinStage::Open)),
             "the open box is still the second program's, idle"
         );
         assert!(earn.link_box.is_none());

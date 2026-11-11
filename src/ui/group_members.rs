@@ -144,13 +144,23 @@ impl QuillApp {
             cx.notify();
             return;
         }
-        let note = match self.live.as_mut() {
+        let (note, sent) = match self.live.as_mut() {
             Some(live) => match live.driver.add_chat_members(chat_id, &user_ids) {
-                Ok(_) => StatusNote::silent(tr(keys::Q_PEOPLE_ADDING_MEMBERS)),
-                Err(_) => StatusNote::error(tr(keys::Q_PEOPLE_COULD_NOT_ADD_MEMBERS)),
+                Ok(_) => (StatusNote::silent(tr(keys::Q_PEOPLE_ADDING_MEMBERS)), true),
+                Err(_) => (
+                    StatusNote::error(tr(keys::Q_PEOPLE_COULD_NOT_ADD_MEMBERS)),
+                    false,
+                ),
             },
-            None => StatusNote::info(tr(keys::Q_PEOPLE_ADDING_MEMBERS_NEEDS_A_LIVE)),
+            None => (
+                StatusNote::info(tr(keys::Q_PEOPLE_ADDING_MEMBERS_NEEDS_A_LIVE)),
+                false,
+            ),
         };
+        // An add that did not go out keeps the picked contacts to try again.
+        if !sent && let Some(dialog) = self.admin.member_dialog.as_mut() {
+            dialog.add_selected = user_ids;
+        }
         self.set_note(note);
         // TDLib sends `updateChatMember` to bots only: the add's own answer
         // (`failedToAddMembers`) drops the cached pages and marks the chat

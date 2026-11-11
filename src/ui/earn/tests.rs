@@ -292,7 +292,7 @@ fn park_a_join_box(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) {
             info: Default::default(),
             recipient: quill::earn::EarnPeer::User(1),
             choose_recipient: true,
-            send: BoxSend::Idle,
+            stage: quill::earn::JoinStage::Open,
         });
     });
 }

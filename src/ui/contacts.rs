@@ -365,8 +365,9 @@ impl QuillApp {
     pub(super) fn set_contact_sync(&mut self, on: bool, cx: &mut Context<Self>) {
         let next = on;
         if let Some(live) = self.live.as_mut() {
-            live.driver.session.settings.contact_prefs.sync_enabled = next;
-            if let Err(err) = live.driver.save_contact_prefs() {
+            // Not saved, so not switched: the switch and the file agree
+            // after a restart too.
+            if let Err(err) = live.driver.set_contact_sync(next) {
                 self.screen.connection.set_note_for(
                     &self.screen.windows,
                     StatusNote::error(tr_with(
@@ -374,6 +375,8 @@ impl QuillApp {
                         &[("err", &err.to_string())],
                     )),
                 );
+                cx.notify();
+                return;
             }
             if next && live.driver.session.users_state.contacts.is_none() {
                 // Re-enable refetches the server list so the tab

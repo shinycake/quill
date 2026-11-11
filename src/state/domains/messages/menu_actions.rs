@@ -54,6 +54,17 @@ impl MenuActions {
         }
     }
 
+    /// Whether "delete for everyone" is open for the message: TDLib's
+    /// `can_be_deleted_for_all_users` once it answered, `local` (your own
+    /// message) until then, and no after a failed ask.
+    pub fn allows_revoke(&self, chat_id: ChatId, message_id: MessageId, local: bool) -> bool {
+        match self.find(chat_id, message_id) {
+            Some(Know::Allows(actions)) => actions.can_be_deleted_for_all_users,
+            Some(Know::Failed) => false,
+            None => local,
+        }
+    }
+
     pub fn is_failed(&self, chat_id: ChatId, message_id: MessageId) -> bool {
         self.find(chat_id, message_id) == Some(Know::Failed)
     }

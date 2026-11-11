@@ -116,7 +116,11 @@ pub enum CloseFriendsStage {
     /// `getCloseFriends` failed: the panel says so and offers a retry.
     Failed,
     Editing(CloseFriendsEdit),
-    Saving(CloseFriendsEdit),
+    /// `setCloseFriends` `request` is out: the stage leaves with its answer.
+    Saving {
+        edit: CloseFriendsEdit,
+        request: crate::ids::RequestId,
+    },
 }
 
 impl CloseFriendsStage {
@@ -124,9 +128,13 @@ impl CloseFriendsStage {
         !matches!(self, Self::Closed)
     }
 
+    pub fn is_saving(&self) -> bool {
+        matches!(self, Self::Saving { .. })
+    }
+
     pub fn edit(&self) -> Option<&CloseFriendsEdit> {
         match self {
-            Self::Editing(edit) | Self::Saving(edit) => Some(edit),
+            Self::Editing(edit) | Self::Saving { edit, .. } => Some(edit),
             Self::Closed | Self::Loading | Self::Failed => None,
         }
     }
@@ -134,7 +142,7 @@ impl CloseFriendsStage {
     pub fn edit_mut(&mut self) -> Option<&mut CloseFriendsEdit> {
         match self {
             Self::Editing(edit) => Some(edit),
-            Self::Closed | Self::Loading | Self::Failed | Self::Saving(_) => None,
+            Self::Closed | Self::Loading | Self::Failed | Self::Saving { .. } => None,
         }
     }
 

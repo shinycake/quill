@@ -89,7 +89,12 @@ impl QuillApp {
             .map_or(MENU_WIDTH_GUESS, |bounds| f32::from(bounds.size.width));
         let room = f32::from(open.viewport.width) - 16.;
         let layout = strip_layout(lists.reactions.len(), menu_width, room);
-        let paused = open.preview.is_some();
+        // The strip rests while a card shows; one hiding (or faded out,
+        // which stays in `preview` until the menu closes) lets it play.
+        let paused = open
+            .preview
+            .as_ref()
+            .is_some_and(|preview| preview.hiding.is_none());
         let theme = cx.theme();
         let (hover_bg, muted) = (theme.accent, theme.muted_foreground);
         let mut row = div()

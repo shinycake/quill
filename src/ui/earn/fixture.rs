@@ -290,7 +290,7 @@ pub(in crate::ui) fn open_join_box(session: &mut Session) {
         info: program.info,
         recipient: EarnPeer::User(777),
         choose_recipient: true,
-        send: BoxSend::Idle,
+        stage: quill::earn::JoinStage::Open,
     });
 }
 

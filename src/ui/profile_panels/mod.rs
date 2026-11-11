@@ -310,12 +310,9 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         if let Some(live) = self.live.as_mut() {
-            live.driver
-                .session
-                .users_state
-                .profile_chat_lists
-                .remove(&(kind, key));
-            let _ = match kind {
+            let lists = &mut live.driver.session.users_state.profile_chat_lists;
+            let failed = lists.remove(&(kind, key));
+            let sent = match kind {
                 ProfileChatsKind::GroupsInCommon => live.driver.fetch_groups_in_common(key),
                 ProfileChatsKind::SimilarChats => live.driver.fetch_similar_chats(ChatId(key)),
                 ProfileChatsKind::SuitablePersonalChats => {
@@ -328,6 +325,18 @@ impl QuillApp {
                     live.driver.fetch_suitable_community_chats()
                 }
             };
+            // Nothing went out (offline, closed sender): the failure and
+            // its Retry stay.
+            if !matches!(sent, Ok(Some(_)))
+                && let Some(failed) = failed
+            {
+                live.driver
+                    .session
+                    .users_state
+                    .profile_chat_lists
+                    .entry((kind, key))
+                    .or_insert(failed);
+            }
         }
         cx.notify();
     }
@@ -371,7 +380,16 @@ impl QuillApp {
             cx.notify();
             return;
         }
-        self.open_box(DialogKind::ProfilePanel);
+        // The box under the picker (Edit contact stays up; Add contact has
+        // closed): the answer opens the confirm step only over that same
+        // stage, and only then names a box host, so a cancelled picker
+        // leaves none.
+        let under = self
+            .dialogs
+            .profile_dialog
+            .as_ref()
+            .map(std::mem::discriminant);
+        let window = self.asking_window_or_last_press();
         let picker = cx.prompt_for_paths(PathPromptOptions {
             files: true,
             directories: false,
@@ -394,11 +412,21 @@ impl QuillApp {
                         cx.notify();
                         return;
                     }
-                    // box-host: opened by a picker answer; start_personal_photo named the window
-                    this.dialogs.profile_dialog = Some(ProfileDialog::PersonalPhoto {
-                        user_id,
-                        mode,
-                        path: Some(path.to_string_lossy().into_owned()),
+                    let now = this
+                        .dialogs
+                        .profile_dialog
+                        .as_ref()
+                        .map(std::mem::discriminant);
+                    if now != under {
+                        return;
+                    }
+                    this.as_asked_by(window, |this| {
+                        this.open_box(DialogKind::ProfilePanel);
+                        this.dialogs.profile_dialog = Some(ProfileDialog::PersonalPhoto {
+                            user_id,
+                            mode,
+                            path: Some(path.to_string_lossy().into_owned()),
+                        });
                     });
                     cx.notify();
                 });

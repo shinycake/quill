@@ -462,7 +462,43 @@ pub struct JoinBox {
     /// The user picks the recipient among their own peers (tdesktop
     /// `requireOthers`: the user's own page or "View existing programs").
     pub choose_recipient: bool,
-    pub send: BoxSend,
+    pub stage: JoinStage,
+}
+
+/// Where the join box stands: only the answer of `Joining`'s own request
+/// closes it (the error returns it to `Open`), so a late answer of a box
+/// the user left acts on nothing.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum JoinStage {
+    #[default]
+    Open,
+    Joining(crate::ids::RequestId),
+}
+
+impl JoinStage {
+    pub fn is_joining(self) -> bool {
+        matches!(self, Self::Joining(_))
+    }
+
+    pub fn waits_for(self, request: Option<crate::ids::RequestId>) -> bool {
+        matches!(self, Self::Joining(waiting) if Some(waiting) == request)
+    }
+}
+
+/// A click on a program asks whether it is joined
+/// (`getConnectedAffiliateProgram`). Only that request's answer opens a
+/// box; leaving the page or a newer click returns it to `Idle`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum Resolve {
+    #[default]
+    Idle,
+    Asking(crate::ids::RequestId),
+}
+
+impl Resolve {
+    pub fn waits_for(self, request: Option<crate::ids::RequestId>) -> bool {
+        matches!(self, Self::Asking(waiting) if Some(waiting) == request)
+    }
 }
 
 /// tdesktop `StarRefLinkBox`: a joined program's link.
@@ -528,6 +564,8 @@ pub struct EarnState {
     pub join: Option<JoinPage>,
     pub join_box: Option<JoinBox>,
     pub link_box: Option<LinkBox>,
+    /// The click on a program that is being resolved.
+    pub resolve: Resolve,
     pub revoke: Option<RevokeBox>,
     /// "View existing programs" of the setup page (tdesktop
     /// `ProgramsListBox`).
@@ -580,21 +618,6 @@ impl EarnState {
 
     pub fn note(&mut self, text: impl Into<String>) {
         self.notes.push(text.into());
-    }
-
-    /// The list a program click came from is still open: the programs box
-    /// of that setup page, or the join page of that peer.
-    pub fn program_surface_open(&self, from: ProgramSurface, recipient: EarnPeer) -> bool {
-        match from {
-            ProgramSurface::Box => {
-                self.programs_box.is_some()
-                    && self
-                        .setup
-                        .as_ref()
-                        .is_some_and(|s| EarnPeer::User(s.bot_user_id) == recipient)
-            }
-            ProgramSurface::Page => self.join.as_ref().is_some_and(|j| j.peer == recipient),
-        }
     }
 
     /// The Stars balance of `peer`, when known.

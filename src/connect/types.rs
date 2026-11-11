@@ -387,6 +387,9 @@ pub struct ConnectDriver<S: JsonSender> {
 
 pub(crate) struct OutgoingTyping {
     pub(crate) chat_id: ChatId,
+    /// The topic or thread the action was sent into: a change inside the
+    /// same chat ends it, and its cancel goes to the same place.
+    pub(crate) topic: crate::ids::TopicId,
     pub(crate) last_sent_ms: u64,
 }
 

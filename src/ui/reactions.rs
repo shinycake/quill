@@ -53,6 +53,11 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         self.message_ui.menu = Some(menu);
+        // A reactor tab asked for by an earlier menu whose properties never
+        // allowed it is not this menu's (a chip's menu sets it after this).
+        if let Some(live) = self.live.as_mut() {
+            live.driver.session.messages.wanted_reactor_tab = None;
+        }
         self.message_ui.menu_ui.page = super::message_menu_ui::MessageMenuPage::Main;
         self.message_ui.menu_link = self.take_right_clicked_link(menu.position);
         self.message_ui.menu_item = self.take_right_clicked_item(menu.position);
@@ -66,9 +71,14 @@ impl QuillApp {
         self.message_ui.link_tooltip = None;
         // A right-click keeps the text selection; the menu then acts on it
         // (Telegram Desktop's Quote & Reply, Copy Selected Text).
+        self.message_ui.menu_selection_nth = 0;
         self.message_ui.menu_selection = super::selectable_text::selected_message_text(window, cx)
             .filter(|(key, _)| *key == (menu.chat_id.0, menu.message_id.0 as u64))
-            .map(|(_, text)| text)
+            .map(|(_, text)| {
+                self.message_ui.menu_selection_nth =
+                    super::selectable_text::selected_occurrence(window, cx, text.trim());
+                text
+            })
             // A widget's selection lives in its runtime (`widgets_ui.rs`).
             .or_else(|| {
                 let key = quill::message_widget::WidgetKey {
@@ -337,25 +347,30 @@ impl QuillApp {
             self.open_premium_at(feature, cx);
             return false;
         }
-        // The reaction flies up from the message when it is added.
+        // The reaction flies up from the message when it is added, once the
+        // change went out.
         let adding = self
             .session()
             .and_then(|s| s.histories.get(&chat_id.0))
             .and_then(|h| h.messages.get(&message_id.0))
             .is_some_and(|m| !m.chosen_reaction(&choice));
-        if adding && let ReactionChoice::Emoji(emoji) = &choice {
-            self.history.reaction_fly = Some(super::history_fx::ReactionFly {
+        let fly = match &choice {
+            ReactionChoice::Emoji(emoji) if adding => Some(super::history_fx::ReactionFly {
                 chat_id: chat_id.0,
                 message_id: message_id.0,
                 glyph: emoji_presentation(emoji).into(),
                 started: std::time::Instant::now(),
-            });
-        }
+            }),
+            _ => None,
+        };
         if let Some(live) = self.live.as_mut() {
             let sent = live
                 .driver
                 .toggle_reaction_choice(chat_id, message_id, &choice)
                 .is_ok();
+            if sent && fly.is_some() {
+                self.history.reaction_fly = fly;
+            }
             self.screen.connection.set_note_for(
                 &self.screen.windows,
                 if sent {
@@ -366,6 +381,9 @@ impl QuillApp {
             );
             cx.notify();
             return sent;
+        }
+        if fly.is_some() {
+            self.history.reaction_fly = fly;
         }
         match choice {
             ReactionChoice::Emoji(emoji) => {

@@ -260,6 +260,9 @@ enum Forward {
     Delivered,
     NoOwner,
     Unresponsive,
+    /// This launch could not start its sender thread: nothing was asked of
+    /// the owner, so nothing is known about it.
+    NotSent,
     /// The owner holds the arguments; its UI has yet to answer.
     Queued(mpsc::Receiver<io::Result<String>>),
 }
@@ -318,7 +321,9 @@ fn forward_with(endpoint: &Endpoint, header: &str, args: &[String]) -> Forward {
         Ok(Ok(answer)) if answer == "busy" => Forward::Unresponsive,
         // Connected, then dropped or garbled: a dying owner counts as gone.
         Ok(_) => Forward::NoOwner,
-        Err(_) => Forward::Unresponsive,
+        // `tx` dropped with nothing sent: the sender thread never ran.
+        Err(mpsc::RecvTimeoutError::Disconnected) => Forward::NotSent,
+        Err(mpsc::RecvTimeoutError::Timeout) => Forward::Unresponsive,
     }
 }
 
@@ -587,6 +592,9 @@ fn acquire_as(
         let answers = match forward(endpoint, args) {
             Forward::Delivered => return Ok(Acquired::Forwarded),
             Forward::Unresponsive => return Err(not_responding()),
+            // Not "not responding": the owner was never asked. Quill starts
+            // unchecked, as when the endpoint cannot be used.
+            Forward::NotSent => return Err(io::Error::other("could not start the sender thread")),
             Forward::NoOwner => break,
             Forward::Queued(answers) => answers,
         };

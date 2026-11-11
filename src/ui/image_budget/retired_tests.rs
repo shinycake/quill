@@ -403,6 +403,38 @@ mod windows {
         }
     }
 
+    /// A window that sweeps from inside its own draw, as another window's
+    /// frame would find it.
+    struct SweepsMidDraw;
+
+    impl Render for SweepsMidDraw {
+        fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+            sweep(None, cx);
+            div()
+        }
+    }
+
+    /// 10-113: a sweep that finds a window mid-draw leaves retired images
+    /// waiting; with no other frame to wake it, it tries again by itself.
+    #[gpui_kit::test]
+    fn a_sweep_that_met_a_window_mid_draw_tries_again(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            gpui_kit::init(cx);
+            start_sweeper(cx);
+        });
+        let window = cx.open_window(size(px(200.), px(200.)), |_, _| SweepsMidDraw);
+        cx.run_until_parked();
+        let swept = || super::super::SWEEPS.get();
+        retire_all([picture()]);
+        cx.run_until_parked();
+        let before = swept();
+        draw(cx, window.into());
+        assert_eq!(swept(), before, "the blocked sweep dropped nothing");
+        cx.executor().advance_clock(super::super::RETRY_AFTER * 2);
+        cx.run_until_parked();
+        assert!(swept() > before, "a later sweep ran");
+    }
+
     /// A chat window lets go of the picture its frame on screen shows, and
     /// draws later (or never: minimized). The picture stays in its atlas,
     /// however many frames the main window draws meanwhile, until the chat

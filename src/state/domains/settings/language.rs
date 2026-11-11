@@ -84,7 +84,9 @@ impl Session {
                     LanguagePurpose::PsaLabels { epoch },
                 ))) = pending.map(|p| p.purpose)
                 {
-                    self.chat_list.psa_labels.store(epoch, strings);
+                    self.chat_list
+                        .psa_labels
+                        .store(epoch, pending.map(|p| p.id), strings);
                     return;
                 }
                 let Some(RequestPurpose::Settings(SettingsPurpose::Language(
@@ -146,7 +148,12 @@ impl Session {
         }
     }
 
-    pub(crate) fn apply_language_error(&mut self, err: &TdError, purpose: LanguagePurpose) {
+    pub(crate) fn apply_language_error(
+        &mut self,
+        err: &TdError,
+        purpose: LanguagePurpose,
+        request: Option<RequestId>,
+    ) {
         let state = &mut self.settings.language;
         match purpose {
             LanguagePurpose::TargetInfo => state.packs.fail(error_reason(err)),
@@ -156,9 +163,13 @@ impl Session {
                     state.error = Some(error_reason(err));
                 }
             }
-            LanguagePurpose::SetOption
-            | LanguagePurpose::PsaLabels { .. }
-            | LanguagePurpose::Synchronize => {}
+            // The badge types it asked for are asked again by the next pump.
+            LanguagePurpose::PsaLabels { .. } => {
+                if let Some(request) = request {
+                    self.chat_list.psa_labels.fail_request(request);
+                }
+            }
+            LanguagePurpose::SetOption | LanguagePurpose::Synchronize => {}
         }
     }
 }

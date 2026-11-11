@@ -410,6 +410,12 @@ impl SharedMediaState {
         self.active_tab
     }
 
+    /// A stamp no request in flight carries.
+    pub(crate) fn next_generation(&mut self) -> u64 {
+        self.generation = self.generation.saturating_add(1);
+        self.generation
+    }
+
     /// Clear every tab and give each a stamp no request in flight carries.
     fn restamp_all_tabs(&mut self) {
         self.generation = self.generation.saturating_add(1);
@@ -422,7 +428,7 @@ impl SharedMediaState {
 
     /// Whether `generation` is the stamp `tab` waits on in the gallery open
     /// for `chat_id`.
-    fn accepts(&self, chat_id: ChatId, tab: SharedMediaTab, generation: u64) -> bool {
+    pub(crate) fn accepts(&self, chat_id: ChatId, tab: SharedMediaTab, generation: u64) -> bool {
         self.open
             && self.chat_id == Some(chat_id)
             && self
@@ -453,8 +459,7 @@ impl SharedMediaState {
     /// this tab still on its way is superseded and stops counting as in
     /// flight. Other tabs keep their stamps.
     pub fn begin_fetch(&mut self, tab: SharedMediaTab) -> u64 {
-        self.generation = self.generation.saturating_add(1);
-        let stamp = self.generation;
+        let stamp = self.next_generation();
         let state = self.tab_state(tab);
         state.status = SharedMediaTabStatus::Loading;
         state.anchor_day = None;

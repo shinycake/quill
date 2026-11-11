@@ -9,6 +9,7 @@ use super::layer::ViewerGeometry;
 use super::*;
 use crate::ui::pressable::PressableDiv;
 use crate::ui::video_player::controls::hide_cursor;
+use quill::album_pin::AlbumPin;
 use quill::lang::{keys, tr};
 use quill::media_viewer::ViewerTtl;
 
@@ -78,30 +79,23 @@ impl QuillApp {
         // `MessagePinAlbum` semantics: unpins when any member is pinned).
         let album_pin_label: Option<String> =
             self.viewer_album_id(item.message_id).and_then(|album_id| {
-                let can_pin = self
-                    .session()
-                    .and_then(|s| s.chats.get(&item.chat_id.0))
+                let session = self.live.as_ref().map(|live| &live.driver.session);
+                let session = session.or(self.demo_session.as_deref())?;
+                let can_pin = session
+                    .chats
+                    .get(&item.chat_id.0)
                     .is_some_and(|chat| chat.can_pin_messages());
-                if !can_pin {
-                    return None;
+                let history = &session.histories.get(&item.chat_id.0)?.messages;
+                match self.screen.viewer.album_pin.action(
+                    item.chat_id.0,
+                    album_id,
+                    can_pin,
+                    history,
+                ) {
+                    AlbumPin::None => None,
+                    AlbumPin::Pin => Some(tr(keys::Q_AV_PIN_ALBUM).to_string()),
+                    AlbumPin::Unpin => Some(tr(keys::Q_AV_UNPIN_ALBUM).to_string()),
                 }
-                let history: Vec<HistoryMessage> = self
-                    .session()
-                    .and_then(|s| s.histories.get(&item.chat_id.0))
-                    .map(|h| h.ordered().into_iter().cloned().collect())
-                    .unwrap_or_default();
-                let ids = quill::album::album_message_ids(&history, album_id);
-                if ids.is_empty() {
-                    return None;
-                }
-                let any_pinned = ids
-                    .iter()
-                    .any(|id| history.iter().any(|m| m.id == *id && m.is_pinned));
-                Some(if any_pinned {
-                    tr(keys::Q_AV_UNPIN_ALBUM).to_string()
-                } else {
-                    tr(keys::Q_AV_PIN_ALBUM).to_string()
-                })
             });
         // Parity slice 5: the video player panel (or a download CTA).
         let is_video = item.kind == MediaViewerKind::Video;

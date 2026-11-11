@@ -57,7 +57,7 @@ pub struct ChatListState {
     pub delete_after_leave: Vec<ChatId>,
     /// Parity slice: `getChatFolderChatsToLeave` results per folder id —
     /// chats the delete-confirm dialog offers to leave with the folder.
-    pub folder_chats_to_leave: HashMap<i32, Vec<i64>>,
+    pub folder_chats_to_leave: HashMap<i32, crate::state::fetch::Fetch<Vec<i64>>>,
     /// The Share Folder box's data per folder id: the invite links and the
     /// chats a link may include, each with its own load stage.
     pub folder_shares: HashMap<i32, FolderShare>,

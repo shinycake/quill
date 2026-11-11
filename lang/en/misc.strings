@@ -125,6 +125,7 @@
 "qll_misc_bob_harris" = "Bob Harris";
 "qll_misc_bold" = "Bold";
 "qll_misc_bold_caption" = "bold caption";
+"qll_misc_close_the_open_box_first" = "Close the open box first";
 "qll_misc_create_a_bot_this_bot" = "Create a bot for this bot to manage";
 "qll_misc_camera" = "Camera";
 "qll_misc_camera_device_linking_is_available" = "Camera device linking is available on macOS.";
@@ -200,6 +201,7 @@
 "qll_misc_could_not_save_gif" = "Couldn't save GIF";
 "qll_misc_could_not_save_the_fact" = "Couldn't save the fact check";
 "qll_misc_could_not_search_gifs" = "Couldn't search GIFs";
+"qll_misc_link_inbox_full" = "Too many links opened at once. Some were ignored.";
 "qll_misc_could_not_send_video_note" = "Couldn't send video note";
 "qll_misc_could_not_send_voice_note" = "Couldn't send voice note";
 "qll_misc_could_not_submit_recovery_code" = "Couldn't submit recovery code";
@@ -388,6 +390,7 @@
 "qll_misc_next_unread_reaction_right_click" = "Next unread reaction · right-click for more";
 "qll_misc_no_archived_masks" = "No archived masks.";
 "qll_misc_no_chat_theme" = "No chat theme";
+"qll_misc_no_media_to_jump_to" = "No media to jump to.";
 "qll_misc_no_chats_found" = "No chats found.";
 "qll_misc_no_chats_loaded_yet" = "No chats loaded yet.";
 "qll_misc_no_colors_match" = "No colors match.";

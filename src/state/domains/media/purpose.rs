@@ -25,6 +25,9 @@ pub enum MediaPurpose {
     /// The gallery's Gifts tab: `getReceivedGifts` for the open chat's
     /// user or channel. Response is `receivedGifts`.
     GetProfileGifts {
+        /// The tab's stamp when the page was asked for: an answer for
+        /// another stamp is from a gallery that was closed since.
+        generation: u64,
         append: bool,
     },
     /// The gallery's Playlist tab: `getUserProfileAudios`. Response is

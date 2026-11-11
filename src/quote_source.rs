@@ -136,6 +136,14 @@ impl QuotableText {
     /// message it may run over several quotable texts, separated by line
     /// feeds; each becomes its own `RichText`. The first occurrence wins.
     pub fn quote_for(&self, selected: &str) -> Option<QuoteSelection> {
+        self.quote_for_nth(selected, 0)
+    }
+
+    /// [`Self::quote_for`] for the `nth` occurrence of `selected` (counted
+    /// from 0) when the same text stands more than once in the message: the
+    /// one the user selected. A count past the last occurrence takes the
+    /// last.
+    pub fn quote_for_nth(&self, selected: &str, nth: usize) -> Option<QuoteSelection> {
         if selected.is_empty() {
             return None;
         }
@@ -145,7 +153,13 @@ impl QuotableText {
             .map(|node| node.text.as_str())
             .collect::<Vec<_>>()
             .join("\n");
-        let start = joined.find(selected)?;
+        let mut starts = joined.match_indices(selected).map(|(at, _)| at);
+        let first = starts.next()?;
+        let start = if nth == 0 {
+            first
+        } else {
+            starts.take(nth).last().unwrap_or(first)
+        };
         let end = start + selected.len();
         let mut quote = QuoteSelection::plain(selected, 0);
         let mut first = true;
@@ -426,6 +440,18 @@ mod tests {
         let picked = source.quote_for("bold view").expect("verbatim");
         assert_eq!(picked.position, 2);
         assert_eq!(picked.entities, vec![entity(0, 4, TextEntityKind::Bold)]);
+    }
+
+    #[test]
+    fn a_repeated_phrase_is_quoted_where_it_was_selected() {
+        let source = QuotableText::plain("ok. fine. ok. done");
+        let first = source.quote_for_nth("ok.", 0).expect("first");
+        let second = source.quote_for_nth("ok.", 1).expect("second");
+        assert_eq!((first.position, second.position), (0, 10));
+        // A count past the last occurrence takes the last.
+        let past = source.quote_for_nth("ok.", 7).expect("last");
+        assert_eq!(past.position, 10);
+        assert_eq!(source.quote_for("ok.").map(|q| q.position), Some(0));
     }
 
     #[test]

@@ -139,13 +139,20 @@ fn market_failures_hit_only_the_request_that_failed() {
         None,
     );
     let market = &mut session.payments.gift_market;
-    market.auction_request = b.0;
-    market.auction_loading = true;
+    market.auction = crate::gift_market::AuctionFetch::Loading { request: b.0 };
     fail(&mut session, a, &sink);
     let market = &session.payments.gift_market;
-    assert!(market.auction_loading && market.notes.is_empty());
+    assert!(
+        matches!(
+            market.auction,
+            crate::gift_market::AuctionFetch::Loading { .. }
+        ) && market.notes.is_empty()
+    );
     fail(&mut session, b, &sink);
-    assert!(!session.payments.gift_market.auction_loading);
+    assert_eq!(
+        session.payments.gift_market.auction,
+        crate::gift_market::AuctionFetch::Idle
+    );
 
     // Craft candidates of a closed craft box do not fail the next one.
     let candidates = |page| GiftMarketPurpose::GiftsForCrafting { gift_id: 5, page };
@@ -233,7 +240,7 @@ fn a_join_box_parked_for_a_bot_profile_goes_when_the_profile_closes() {
             info: Default::default(),
             recipient: EarnPeer::User(1),
             choose_recipient: true,
-            send: crate::earn::BoxSend::Idle,
+            stage: crate::earn::JoinStage::Open,
         });
     };
     park(&mut session);

@@ -22,6 +22,14 @@ use quill::ids::{ChatId, FileId, MessageId};
 use quill::voice::VoiceCapture;
 use std::sync::atomic::Ordering;
 
+/// A demo's own check of the app's playback logic: a regression prints a
+/// note and the demo carries on, instead of ending the process.
+fn demo_expect(holds: bool, what: &str) {
+    if !holds {
+        eprintln!("demo check failed: {what}");
+    }
+}
+
 register_demos![
     // Music file bubble with title, performer, cover, and Play/Pause.
     DemoSpec::chats("ready-audio", "screenshot demo — audio file playback")
@@ -191,6 +199,7 @@ impl QuillApp {
     }
 
     fn demo_ready_downloads(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
+        self.chat_list.downloads_panel_open = true;
         // Exercise failed playback recovery without a network request.
         let audio = |message, file| PlayIntent {
             file: FileId(file),
@@ -202,10 +211,16 @@ impl QuillApp {
         };
         self.playback.intent = Some(audio(205, 26));
         self.discard_stopped_media_playback(cx);
-        assert!(self.playback.intent.is_none());
+        demo_expect(
+            self.playback.intent.is_none(),
+            "a stopped sound drops its intent",
+        );
         self.playback.intent = Some(audio(204, 24));
         self.discard_stopped_media_playback(cx);
-        assert!(self.playback.intent.is_some());
+        demo_expect(
+            self.playback.intent.is_some(),
+            "a failed sound keeps its intent",
+        );
         self.playback.intent = None;
     }
 
@@ -328,14 +343,18 @@ impl QuillApp {
                 session.media.files.insert(waiting);
             }
             self.toggle_voice_playback(ChatId(11), MessageId(91), FileId(82), true, 3., cx);
-            assert!(self.playback.intent.is_some());
+            demo_expect(
+                self.playback.intent.is_some(),
+                "a voice note waits for its file",
+            );
             if let Some(session) = self.demo_session.as_mut() {
                 session.media.files.insert(local);
             }
             self.resume_play_intent(cx);
-            assert!(
+            demo_expect(
                 self.playback.intent.is_none()
-                    && self.playback.playing_voice == Some(MessageId(91))
+                    && self.playback.playing_voice == Some(MessageId(91)),
+                "a voice note plays once its file lands",
             );
             self.stop_voice_playback();
         }

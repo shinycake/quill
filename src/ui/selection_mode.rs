@@ -6,6 +6,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
+use super::chat_ui_state::A11yFocus;
 use super::motion;
 use crate::ui::status_note::StatusNote;
 use gpui_kit::component::*;
@@ -80,13 +81,14 @@ impl QuillApp {
         }
         let now = std::time::Instant::now();
         let checked = self.frame.motion.selection.borrow_mut().check(
+            chat_id.0,
             message_id.0,
             selected,
             self.frame.window_active.get(),
             now,
         );
         let interactive = self.selecting_in(chat_id);
-        let focused = interactive && self.chat_ui.selection_focus == Some(message_id);
+        let focused = interactive && self.chat_ui.focus.row() == Some(message_id);
         let ring_color = cx.theme().ring;
         let forward = self.selection_forward_drag(chat_id, message_id);
         let overlay = (mode > 0.).then(|| {
@@ -249,7 +251,7 @@ impl QuillApp {
         );
         self.add_to_selection(chat_id, span);
         self.chat_ui.selection_anchor = Some(message_id);
-        self.chat_ui.selection_focus = Some(message_id);
+        self.chat_ui.focus = A11yFocus::Row(message_id);
         cx.notify();
     }
 
@@ -484,7 +486,7 @@ impl QuillApp {
         };
         let mut ids = draft.message_ids.clone();
         ids.sort_by_key(|id| id.0);
-        self.clear_forward(window, cx);
+        self.end_selection(window, cx);
         self.open_message_report(draft.from_chat_id, ids, cx);
     }
 
@@ -545,12 +547,17 @@ impl QuillApp {
         let Some(session) = self.session() else {
             return;
         };
+        // Every message must be yours and still open to "delete for
+        // everyone" (TDLib refuses the whole batch otherwise).
         let all_outgoing = session.histories.get(&chat_id.0).is_some_and(|history| {
             ids.iter().all(|id| {
-                history
-                    .messages
-                    .get(&id.0)
-                    .is_some_and(|message| message.is_outgoing)
+                history.messages.get(&id.0).is_some_and(|message| {
+                    message.is_outgoing
+                        && session
+                            .messages
+                            .menu_actions
+                            .allows_revoke(chat_id, *id, true)
+                })
             })
         });
         let offer_revoke = all_outgoing && !session.is_saved_messages(chat_id);
@@ -667,15 +674,17 @@ impl QuillApp {
         let ids = ids.as_slice();
         let mut went_out = true;
         if !ids.is_empty() {
-            self.begin_vanish(chat_id, ids);
             if let Some(live) = self.live.as_mut() {
                 if live.driver.delete_selected(chat_id, ids, revoke).is_err() {
                     went_out = false;
                     self.set_note(StatusNote::error(tr(
                         keys::Q_CHAT_COULD_NOT_DELETE_MESSAGES,
                     )));
+                } else {
+                    self.begin_vanish(chat_id, ids);
                 }
             } else if self.demo_session.is_some() {
+                self.begin_vanish(chat_id, ids);
                 for id in ids {
                     self.apply_demo_delete(chat_id, *id);
                 }

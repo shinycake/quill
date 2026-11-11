@@ -494,7 +494,6 @@ impl<S: JsonSender> ConnectDriver<S> {
         if setup.is_saving() {
             return Ok(());
         }
-        setup.confirm = None;
         let bot_user_id = setup.bot_user_id;
         let result = self.send_earn(
             EarnPurpose::SetProgram {
@@ -503,6 +502,12 @@ impl<S: JsonSender> ConnectDriver<S> {
             },
             |extra| set_chat_affiliate_program(extra, bot_user_id, None),
         );
+        // The box closes once the send went out; a refused send keeps it.
+        if result.is_ok()
+            && let Some(setup) = self.session.payments.earn.setup.as_mut()
+        {
+            setup.confirm = None;
+        }
         self.setup_waits_for(&result);
         result.map(|_| ())
     }
@@ -720,20 +725,19 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.request_earn_recipients()?;
         }
         let affiliate = peer.affiliate_json(me);
-        self.send_earn(
+        let result = self.send_earn_tracked(
             EarnPurpose::ConnectedProgram {
                 bot_user_id,
                 recipient: peer,
                 choose_recipient,
-                from: if for_box {
-                    ProgramSurface::Box
-                } else {
-                    ProgramSurface::Page
-                },
             },
             |extra| get_connected_affiliate_program(extra, affiliate, bot_user_id),
-        )
-        .map(|_| ())
+            |session, extra| session.payments.earn.resolve = Resolve::Asking(extra),
+        );
+        if result.is_err() {
+            self.session.payments.earn.resolve = Resolve::Idle;
+        }
+        result.map(|_| ())
     }
 
     /// The bot profile's "Affiliate Program" row: the join box straight
@@ -759,7 +763,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             info,
             recipient: EarnPeer::User(me),
             choose_recipient: true,
-            send: BoxSend::Idle,
+            stage: JoinStage::Open,
         };
         let earn = &mut self.session.payments.earn;
         if earn.recipients.is_loading() {
@@ -829,16 +833,24 @@ impl<S: JsonSender> ConnectDriver<S> {
         let Some(join) = self.session.payments.earn.join_box.as_mut() else {
             return Err(ConnectSendError::InvalidRequest);
         };
-        if join.send.is_sending() {
+        if join.stage.is_joining() {
             return Ok(());
         }
         let (bot_user_id, recipient) = (join.bot_user_id, join.recipient);
         let affiliate = recipient.affiliate_json(me);
-        let request = self.send_earn(EarnPurpose::Connect { recipient }, |extra| {
-            connect_affiliate_program(extra, affiliate, bot_user_id)
-        })?;
-        if let Some(join) = self.session.payments.earn.join_box.as_mut() {
-            join.send = BoxSend::Sending(request);
+        let result = self.send_earn_tracked(
+            EarnPurpose::Connect { recipient },
+            |extra| connect_affiliate_program(extra, affiliate, bot_user_id),
+            |session, extra| {
+                if let Some(join) = session.payments.earn.join_box.as_mut() {
+                    join.stage = JoinStage::Joining(extra);
+                }
+            },
+        );
+        if result.is_err()
+            && let Some(join) = self.session.payments.earn.join_box.as_mut()
+        {
+            join.stage = JoinStage::Open;
         }
         Ok(())
     }

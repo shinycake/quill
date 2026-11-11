@@ -195,6 +195,8 @@ on_screen_fields! {
     video_avatar: super::video_avatar::VideoAvatarUi,
     /// The `#` popup's recent hashtags, one list for every window (`ui/recent_hashtags_state.rs`).
     recent_hashtags: super::recent_hashtags_state::RecentHashtagsUi,
+    /// Empties the message effect badge registries when this screen goes (`ui/message_effect_badge.rs`).
+    _effect_notes: super::message_effect_badge::EffectNotes,
     /// The members block of the group info panel (`ui/inline_members_state.rs`).
     inline_members: super::inline_members_state::InlineMembersUi,
     /// The search field above a profile's groups in common.
@@ -323,6 +325,7 @@ impl OnScreen {
             chat_list: super::chat_list_state::ChatListUi::new(window, cx),
             composer,
             composer_ui: Box::new(super::composer_state::ComposerUi::new()),
+            _effect_notes: Default::default(),
             chat_ui: Default::default(),
             pickers: super::pickers_state::PickerUi::new(
                 window,
@@ -426,6 +429,9 @@ impl QuillApp {
         // the deferred replacement runs (`screen_leaves_later`).
         let note = self.connection.note().text().to_string();
         self.screen = OnScreen::new(epoch, &self.chat_prefs, status, note, window, cx);
+        // The side column slides out drawing the panels it last had, which
+        // name the old account's users and chats.
+        self.frame.panels = super::panel_reveal::PanelReveal::new(std::time::Instant::now());
         cx.notify();
     }
 
@@ -510,6 +516,7 @@ impl QuillApp {
         self.screen.client_filled = true;
         // The private media scratch is this account's from here on.
         quill::local_path::set_media_cache_scope(&live.driver.session.account);
+        quill::telegram::name_accent::set_active_account(&live.driver.session.account);
         self.live = Some(live);
     }
 }
@@ -560,7 +567,10 @@ impl QuillApp {
         } else {
             let _ = main.update(cx, |_, window, cx| window.close_all_dialogs(cx));
         }
-        self.main_window.dialogs_closed = true;
+        self.main_window
+            .dialogs_closed
+            .borrow_mut()
+            .insert(main.window_id());
     }
 }
 
