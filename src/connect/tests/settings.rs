@@ -496,7 +496,8 @@ fn sessions_terminate_ok_triggers_authoritative_refetch() {
     assert_eq!(snapshot.len(), sent + 1);
     assert!(snapshot[sent].contains("\"@type\":\"getActiveSessions\""));
     assert_eq!(driver.session.settings.sessions.data().unwrap().len(), 2);
-    assert!(driver.session.settings.sessions_op.is_stale());
+    // The refetch took the mark when it went out.
+    assert!(!driver.session.settings.sessions_op.is_stale());
     assert!(!driver.session.settings.sessions_op.is_mutating());
     // The authoritative answer lands — the @extra comes from the
     // recorded outbound JSON (what TDLib would echo back).
@@ -594,7 +595,8 @@ fn session_toggle_ok_triggers_authoritative_refetch() {
     assert_eq!(snapshot.len(), sent + 1);
     assert!(snapshot[sent].contains("\"@type\":\"getActiveSessions\""));
     assert!(driver.session.settings.sessions.data().unwrap()[1].can_accept_calls);
-    assert!(driver.session.settings.sessions_op.is_stale());
+    // The refetch took the mark when it went out.
+    assert!(!driver.session.settings.sessions_op.is_stale());
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -722,7 +724,8 @@ fn disconnect_all_websites_ok_triggers_authoritative_refetch() {
             .len(),
         1
     );
-    assert!(driver.session.settings.websites_op.is_stale());
+    // The refetch took the mark when it went out.
+    assert!(!driver.session.settings.websites_op.is_stale());
     let _ = std::fs::remove_dir_all(&dir);
 }
 
