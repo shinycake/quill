@@ -65,34 +65,13 @@ impl InlineView {
     }
 }
 
-/// The username an [`InlineBotResolve`] is for.
-fn resolve_username(resolve: &InlineBotResolve) -> &str {
-    match resolve {
-        InlineBotResolve::Resolving { username, .. }
-        | InlineBotResolve::Resolved { username, .. }
-        | InlineBotResolve::Failed { username, .. } => username,
-    }
-}
-
 impl QuillApp {
-    /// What is known of the bot `@username` for the composer in place. The
-    /// session keeps one resolution slot that any window's trigger can
-    /// replace, so each window copies out the answer for its own username
-    /// (`ChatUi::inline_bot`) and reads that: a window never reads another
-    /// window's bot. Before the copy is made, the slot answers when it is
-    /// for this username.
+    /// What is known of the bot `@username`. The session keeps one entry
+    /// per username, so each window reads its own trigger's bot and no
+    /// window's lookup replaces another's.
     pub(super) fn inline_bot_for(&self, username: &str) -> Option<&InlineBotResolve> {
-        let slot = self
-            .session()
-            .and_then(|session| session.bots.inline_bot_resolve.as_ref())
-            .filter(|resolve| resolve_username(resolve) == username);
-        let settled = slot.filter(|resolve| !matches!(resolve, InlineBotResolve::Resolving { .. }));
-        let own = self
-            .chat_ui
-            .inline_bot
-            .as_ref()
-            .filter(|resolve| resolve_username(resolve) == username);
-        settled.or(own).or(slot)
+        self.session()
+            .and_then(|session| session.bots.inline_bot(username))
     }
 
     /// The bot of the `@bot query` trigger in the field, if any.
@@ -103,22 +82,6 @@ impl QuillApp {
         let text = self.composer.read(cx).value();
         let (username, _) = inline_query_trigger(&text)?;
         self.inline_bot_for(username)
-    }
-
-    /// Copy the session's resolution into this window's own when it is for
-    /// `username` and settled. A `Resolving` value is never copied: another
-    /// window's lookup may replace the slot before it answers, and the copy
-    /// would then wait forever. Until it settles the slot itself answers
-    /// ([`Self::inline_bot_for`]).
-    pub(super) fn capture_inline_bot(&mut self, username: &str) {
-        let slot = self
-            .session()
-            .and_then(|session| session.bots.inline_bot_resolve.clone())
-            .filter(|resolve| resolve_username(resolve) == username)
-            .filter(|resolve| !matches!(resolve, InlineBotResolve::Resolving { .. }));
-        if slot.is_some() {
-            self.chat_ui.inline_bot = slot;
-        }
     }
 }
 
@@ -185,13 +148,6 @@ impl QuillApp {
             if self.chat_ui.bot_alert == BotAlert::Typed {
                 self.chat_ui.bot_alert = BotAlert::None;
             }
-            // A failed lookup of the bot goes with the trigger.
-            if matches!(
-                self.chat_ui.inline_bot,
-                Some(InlineBotResolve::Failed { .. })
-            ) {
-                self.chat_ui.inline_bot = None;
-            }
             self.chat_ui.inline.close();
             return;
         };
@@ -206,18 +162,13 @@ impl QuillApp {
             cx.notify();
             return;
         }
-        self.capture_inline_bot(username);
         // A failed lookup is not an answer to keep: the next composer event
         // asks again (a lookup that failed offline works once back online).
-        let failed = matches!(
+        let unknown = matches!(
             self.inline_bot_for(username),
-            Some(InlineBotResolve::Failed { .. })
+            None | Some(InlineBotResolve::Failed { .. })
         );
-        if failed {
-            self.chat_ui.inline_bot = None;
-        }
-        let username_changed = failed || self.inline_bot_for(username).is_none();
-        if username_changed {
+        if unknown {
             self.resolve_inline_bot(username);
             // The query goes out once the bot is known (`progress_inline_mode`).
             self.chat_ui.inline.open_waiting();
@@ -271,7 +222,6 @@ impl QuillApp {
         let Some((username, query)) = inline_query_trigger(&text) else {
             return;
         };
-        self.capture_inline_bot(username);
         let resolved_same = matches!(
             self.inline_bot_for(username),
             Some(InlineBotResolve::Resolved {
@@ -280,22 +230,13 @@ impl QuillApp {
             })
         );
         if !resolved_same {
-            // Waiting on this bot's resolution. Another window's trigger
-            // took the session's one slot before ours answered (its answer
-            // was dropped as older): ask again once that one is settled, so
-            // this panel does not wait for an answer that never comes.
+            // Waiting on this bot's resolution (its entry answers by its
+            // request). An entry that is gone is asked again.
             let waits = match self.inline_bot_for(username) {
                 Some(InlineBotResolve::Resolving { .. }) => true,
                 Some(_) => false,
                 None => {
-                    let other_in_flight = self
-                        .session()
-                        .and_then(|s| s.bots.inline_bot_resolve.as_ref())
-                        .is_some_and(|r| matches!(r, InlineBotResolve::Resolving { .. }));
-                    if !other_in_flight {
-                        self.resolve_inline_bot(username);
-                        self.capture_inline_bot(username);
-                    }
+                    self.ask_inline_bot(username);
                     true
                 }
             };
@@ -311,7 +252,6 @@ impl QuillApp {
     /// request); otherwise `searchPublicChat` via the driver.
     fn resolve_inline_bot(&mut self, username: &str) {
         self.ask_inline_bot(username);
-        self.capture_inline_bot(username);
     }
 
     fn ask_inline_bot(&mut self, username: &str) {
@@ -333,24 +273,33 @@ impl QuillApp {
         };
         match hit {
             Some((_, false, _)) => {
-                live.driver.session.bots.inline_bot_resolve = Some(InlineBotResolve::Failed {
-                    username: username.to_string(),
-                    reason: format!("@{username} is not a bot"),
-                });
+                live.driver
+                    .session
+                    .bots
+                    .set_inline_bot(InlineBotResolve::Failed {
+                        username: username.to_string(),
+                        reason: format!("@{username} is not a bot"),
+                    });
             }
             Some((user_id, true, is_inline)) => {
-                live.driver.session.bots.inline_bot_resolve = Some(InlineBotResolve::Resolved {
-                    username: username.to_string(),
-                    user_id,
-                    is_inline: Some(is_inline),
-                });
+                live.driver
+                    .session
+                    .bots
+                    .set_inline_bot(InlineBotResolve::Resolved {
+                        username: username.to_string(),
+                        user_id,
+                        is_inline: Some(is_inline),
+                    });
             }
             None => {
                 if live.driver.resolve_inline_bot(username).is_err() {
-                    live.driver.session.bots.inline_bot_resolve = Some(InlineBotResolve::Failed {
-                        username: username.to_string(),
-                        reason: tr(keys::Q_MEDIA_COULD_NOT_LOOK_UP_THE).to_string(),
-                    });
+                    live.driver
+                        .session
+                        .bots
+                        .set_inline_bot(InlineBotResolve::Failed {
+                            username: username.to_string(),
+                            reason: tr(keys::Q_MEDIA_COULD_NOT_LOOK_UP_THE).to_string(),
+                        });
                 }
             }
         }

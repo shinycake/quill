@@ -399,11 +399,13 @@ fn an_inline_bots_hint_follows_the_typed_name(cx: &mut TestAppContext) {
     assert_eq!(hint(&app, vcx), None);
     app.update(vcx, |app, _| {
         if let Some(session) = app.demo_session.as_mut() {
-            session.bots.inline_bot_resolve = Some(quill::state::InlineBotResolve::Resolved {
-                username: "gifbot".into(),
-                user_id: 61,
-                is_inline: Some(true),
-            });
+            session
+                .bots
+                .set_inline_bot(quill::state::InlineBotResolve::Resolved {
+                    username: "gifbot".into(),
+                    user_id: 61,
+                    is_inline: Some(true),
+                });
         }
     });
     set_field(&app, vcx, "@gifbot ");
@@ -910,69 +912,39 @@ fn an_ai_answer_applies_only_to_the_draft_it_was_asked_about(cx: &mut TestAppCon
     assert_eq!(field(&app, vcx), "the draft");
 }
 
-/// Sweep 10-115: a window reads its own bot, not the one another window's
-/// trigger put in the session's single slot.
+/// Sweep 10-115 and 10-093: each username has its own entry, so a window
+/// reads its own bot and another window's lookup does not replace it.
 #[gpui_kit::test]
-fn a_window_reads_its_own_inline_bot(cx: &mut TestAppContext) {
+fn each_username_keeps_its_own_inline_bot(cx: &mut TestAppContext) {
     use quill::state::InlineBotResolve;
     let (app, mut vcx) = new_app(cx);
     let vcx = &mut vcx;
     app.update(vcx, |app, _| {
         if let Some(session) = app.demo_session.as_mut() {
-            session.bots.inline_bot_resolve = Some(InlineBotResolve::Resolved {
+            session.bots.set_inline_bot(InlineBotResolve::Resolving {
+                username: "bota".into(),
+                request: quill::ids::RequestId(1),
+            });
+            session.bots.set_inline_bot(InlineBotResolve::Resolved {
                 username: "botb".into(),
                 user_id: 2,
                 is_inline: Some(true),
             });
         }
-        app.chat_ui.inline_bot = Some(InlineBotResolve::Resolved {
-            username: "bota".into(),
-            user_id: 1,
-            is_inline: Some(true),
-        });
     });
     app.read_with(vcx, |app, _| {
         assert!(matches!(
             app.inline_bot_for("bota"),
-            Some(InlineBotResolve::Resolved { user_id: 1, .. })
+            Some(InlineBotResolve::Resolving { .. })
         ));
         assert!(matches!(
-            app.inline_bot_for("botb"),
+            app.inline_bot_for("BotB"),
             Some(InlineBotResolve::Resolved { user_id: 2, .. })
         ));
         assert!(
             app.inline_bot_for("botc").is_none(),
             "unknown: not resolved"
         );
-    });
-}
-
-/// Sweep 10-115: window A copies the session slot while it is still
-/// `Resolving`, then window B's lookup replaces the slot. A must not keep
-/// the stale `Resolving` (it would wait for an answer that never comes): it
-/// reads nothing for its bot, so it asks again.
-#[gpui_kit::test]
-fn a_resolving_slot_replaced_by_another_window_is_not_kept(cx: &mut TestAppContext) {
-    use quill::state::InlineBotResolve;
-    let (app, mut vcx) = new_app(cx);
-    let vcx = &mut vcx;
-    app.update(vcx, |app, _| {
-        if let Some(session) = app.demo_session.as_mut() {
-            session.bots.inline_bot_resolve = Some(InlineBotResolve::Resolving {
-                username: "bota".into(),
-                generation: 1,
-            });
-        }
-        app.capture_inline_bot("bota");
-        if let Some(session) = app.demo_session.as_mut() {
-            session.bots.inline_bot_resolve = Some(InlineBotResolve::Resolved {
-                username: "botb".into(),
-                user_id: 2,
-                is_inline: Some(true),
-            });
-        }
-        assert!(app.chat_ui.inline_bot.is_none());
-        assert!(app.inline_bot_for("bota").is_none());
     });
 }
 
@@ -1131,28 +1103,13 @@ fn a_forced_reply_waits_while_the_composer_replies(cx: &mut TestAppContext) {
     assert_eq!(reply, Some((KEYBOARD_BOT, MessageId(88))));
 }
 
-/// Sweep 10-092 and 10-096: a failed bot lookup goes with the trigger, and
-/// a pick with no connection leaves the typed query in the field.
+/// Sweep 10-096: a pick with no connection leaves the typed query in the
+/// field.
 #[gpui_kit::test]
-fn inline_mode_forgets_a_failed_lookup_and_keeps_the_query_without_a_connection(
-    cx: &mut TestAppContext,
-) {
-    use quill::state::InlineBotResolve;
+fn inline_mode_keeps_the_query_without_a_connection(cx: &mut TestAppContext) {
     let (app, mut vcx) = new_app(cx);
     let vcx = &mut vcx;
     open_chat(&app, vcx, GROUP);
-    app.update(vcx, |app, _| {
-        app.chat_ui.inline_bot = Some(InlineBotResolve::Failed {
-            username: "somebot".into(),
-            reason: "could not look up the bot".into(),
-        });
-    });
-    set_field(&app, vcx, "hello");
-    app.update(vcx, |app, cx| app.sync_inline_mode(cx));
-    assert!(
-        app.read_with(vcx, |app, _| app.chat_ui.inline_bot.is_none()),
-        "the trigger went away, the failure with it"
-    );
     set_field(&app, vcx, "@somebot hi");
     vcx.update(|window, cx| {
         app.update(cx, |app, cx| {

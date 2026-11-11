@@ -143,7 +143,7 @@ pub(crate) struct MainWindow {
     /// `close_kit_dialog_if_done`): the shell forgets the one it showed
     /// (`QuillShell::sync_kit_dialogs_in`) and does not close again, which
     /// would close an unrelated dialog now on top.
-    pub(super) dialogs_closed: std::cell::RefCell<std::collections::HashSet<WindowId>>,
+    pub(super) dialogs_closed: ClosedKitDialogs,
     /// The exit a Quit left waiting behind the "Stop and quit" alert. The
     /// alert is the window's and the Quit is the app's, so an account
     /// switch under the alert does not take the exit with it.
@@ -151,6 +151,30 @@ pub(crate) struct MainWindow {
     /// Keys go to the window that received them: the interceptor runs
     /// before any handler and puts that window's state in place.
     _key_scope: Subscription,
+}
+
+/// The mailbox of [`MainWindow::dialogs_closed`]. A closer holds only
+/// `&QuillApp` (often inside a shell's own update), so the marks sit in a
+/// cell; every borrow is `try_borrow_mut` and a busy cell reads as "no
+/// mark" instead of panicking.
+#[derive(Default)]
+pub(super) struct ClosedKitDialogs(std::cell::RefCell<std::collections::HashSet<WindowId>>);
+
+impl ClosedKitDialogs {
+    /// `window`'s kit dialog was closed from outside its shell.
+    pub(super) fn mark(&self, window: WindowId) {
+        if let Ok(mut marks) = self.0.try_borrow_mut() {
+            marks.insert(window);
+        }
+    }
+
+    /// The shell of `window` reads (and clears) the mark: true when its
+    /// dialog was already closed.
+    pub(super) fn take(&self, window: WindowId) -> bool {
+        self.0
+            .try_borrow_mut()
+            .is_ok_and(|mut marks| marks.remove(&window))
+    }
 }
 
 impl MainWindow {
@@ -661,9 +685,10 @@ impl QuillApp {
             .open
             .iter()
             .find(|open| open.chat_id == chat_id)
-            && let Ok(mut closed) = self.main_window.dialogs_closed.try_borrow_mut()
         {
-            closed.remove(&open.handle.window_id());
+            self.main_window
+                .dialogs_closed
+                .take(open.handle.window_id());
         }
         self.windows.open.retain(|open| open.chat_id != chat_id);
         // Its media panel goes: the GIF downloads follow the panels left.

@@ -873,7 +873,7 @@ impl QuillApp {
 
     /// Phase S2: confirm the secret-chat inline-bot warning (TGX's single
     /// `Confirm`, `ALERT_NO_CANCEL`) — insert the stashed `SwitchInline`
-    /// query and don't ask again this session.
+    /// query and don't ask again for this account's session.
     pub(in crate::ui) fn confirm_inline_bot_alert(
         &mut self,
         window: &mut Window,

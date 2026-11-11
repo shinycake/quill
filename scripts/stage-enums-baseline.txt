@@ -190,7 +190,6 @@ unkeyed:GiftsRest::Waiting 1
 unkeyed:GroupScreenShare::Starting 1
 unkeyed:IconState::Requested 1
 unkeyed:IdLookup::Asking 1
-unkeyed:InlineBotResolve::Resolving 1
 unkeyed:LanguageStage::Fetching 1
 unkeyed:Lifecycle::Loading 1
 unkeyed:Lifecycle::Running 1
@@ -198,7 +197,6 @@ unkeyed:Lifecycle::Waiting 1
 unkeyed:ListEdit::InFlight 1
 unkeyed:LiveOverlay::Opening 1
 unkeyed:MessageReactionsState::Loading 1
-unkeyed:MicTestRun::Opening 1
 unkeyed:Neighbour::Asking 1
 unkeyed:OptionMediaSlot::Preparing 1
 unkeyed:P2pStage::Waiting 1

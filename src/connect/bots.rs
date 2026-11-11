@@ -751,9 +751,9 @@ impl<S: JsonSender> ConnectDriver<S> {
     }
 
     /// Bots slice: resolve `@botname` → bot user id via `searchPublicChat`
-    /// (schema 1.8.67, line 11603). Sets the resolve slot to `Resolving`
-    /// with a fresh generation; the answer (or error) resolves it in
-    /// `Session::apply` (stale generations are ignored). A local
+    /// (schema 1.8.67, line 11603). Sets the username's entry to `Resolving`
+    /// under this request; the answer (or error) resolves it in
+    /// `Session::apply`, and only that request does. A local
     /// user-cache hit short-circuits: the caller should check
     /// `session.users` first and skip this when the username is known.
     pub fn resolve_inline_bot(
@@ -763,23 +763,21 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        self.session.bots.inline_bot_resolve_seq =
-            self.session.bots.inline_bot_resolve_seq.wrapping_add(1);
-        let generation = self.session.bots.inline_bot_resolve_seq;
-        self.session.bots.inline_bot_resolve = Some(InlineBotResolve::Resolving {
-            username: username.to_string(),
-            generation,
-        });
-        let extra = self.session.request(
-            RequestPurpose::Bots(BotsPurpose::ResolveInlineBot { generation }),
-            None,
-        );
+        let extra = self
+            .session
+            .request(RequestPurpose::Bots(BotsPurpose::ResolveInlineBot), None);
+        self.session
+            .bots
+            .set_inline_bot(InlineBotResolve::Resolving {
+                username: username.to_string(),
+                request: extra,
+            });
         let json = search_public_chat(extra, username);
         match self.sender.send_json(&json) {
             Ok(()) => Ok(Some(extra)),
             Err(err) => {
                 self.session.requests.take(extra);
-                self.session.bots.inline_bot_resolve = Some(InlineBotResolve::Failed {
+                self.session.bots.set_inline_bot(InlineBotResolve::Failed {
                     username: username.to_string(),
                     reason: "could not look up the bot".to_string(),
                 });

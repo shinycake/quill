@@ -164,7 +164,6 @@ pub(crate) struct CallBoxes {
     /// Settings > Calls: the microphone test and its level meter
     /// (`ui::call_audio_ui`).
     pub(super) mic_test: super::call_audio_ui::MicTestRun,
-    pub(super) mic_test_starts: u64,
     pub(super) open_mic_test: super::call_audio_ui::OpenMicTest,
     /// "Add People" over the call window (`ui::call_add_people`), `Some`
     /// while the box is open.
@@ -186,7 +185,6 @@ impl CallBoxes {
             history_scroll: ScrollHandle::new(),
             history_asked: Default::default(),
             mic_test: Default::default(),
-            mic_test_starts: 0,
             open_mic_test: super::call_audio_ui::open_default_mic_test(),
             add_people: None,
             conference_link: None,

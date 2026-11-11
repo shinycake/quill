@@ -112,6 +112,40 @@ fn inline_query_pagination_appends() {
     }
 }
 
+/// 10-094: a first page's answer fills the slot only when it is the request
+/// the slot waits for.
+#[test]
+fn inline_query_first_page_of_an_older_request_is_dropped() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    let purpose = RequestPurpose::Bots(BotsPurpose::GetInlineQueryResults {
+        chat_id: ChatId(1),
+        bot_user_id: 77,
+        first_page: true,
+    });
+    let old = session.request(purpose, Some(ChatId(1)));
+    let current = session.request(purpose, Some(ChatId(1)));
+    session.bots.inline_query = Some(InlineQuerySlot {
+        chat_id: ChatId(1),
+        bot_user_id: 77,
+        query: "@gif dogs".to_string(),
+        fetch: InlineQueryFetch::Loading { request: current },
+    });
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"inlineQueryResults","@extra":"{}","inline_query_id":1,"button":null,"results":[],"next_offset":""}}"#,
+            old.0,
+        ),
+    );
+    assert_eq!(
+        session.bots.inline_query.as_ref().map(|slot| &slot.fetch),
+        Some(&InlineQueryFetch::Loading { request: current })
+    );
+}
+
 #[test]
 fn inline_query_first_page_error_fails_slot() {
     let (mut session, sink) = session();

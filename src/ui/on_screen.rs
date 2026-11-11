@@ -584,9 +584,7 @@ impl QuillApp {
         } else {
             let _ = main.update(cx, |_, window, cx| window.close_all_dialogs(cx));
         }
-        if let Ok(mut closed) = self.main_window.dialogs_closed.try_borrow_mut() {
-            closed.insert(main.window_id());
-        }
+        self.main_window.dialogs_closed.mark(main.window_id());
     }
 }
 

@@ -8936,3 +8936,20 @@ The skips of 10-065, 12-B004 and 13-048 above did not hold (owner's file-complet
 | 12-B001, 12-B002 | Verified fixed by r2-05. |
 | 12-B004 | `ShortcutPane { stage: PaneStage, error }`: `Editing`, `Saving { request }`, `Accepted`, `ConfirmDelete`, `Deleting { request }`. Any other action replaces `ConfirmDelete`; the shortcut's delete is `Deleting` until its own answer (list on success, the error line and the field on a refusal). A new text or edit is not taken while one is on its way. |
 | 13-047, 13-048 | 13-047 verified fixed by r2-05. `StoryOpen { Shown(viewer), Waiting { open, shown } }` replaces `StoryUi::viewer` and `ChatListUi::pending_story_open`; the viewer reads through `Deref`, and a newer press, the story arriving, a step and a close are transitions of that one value. |
+
+### Sweep fixes (r2-08b)
+
+Corrects the r2-08 skips in `call_audio_ui`, `device_qr`, `inline_mode` and `shell`.
+
+| id | result |
+|---|---|
+| 08-041, 08-042 | `MicTestRun::Opening(Task<()>)`: the stage owns the opening task, so Stop or closing Settings drops the task and the device it opens; `mic_test_starts` and the stale-answer branch are gone. The watchdog `Task` lives in `MicTest`; a failed device draws no 30 fps tick (already fixed by r2-08, checked). |
+| 09-024 | Already fixed by r2-08: `DeviceLink::Linking(RequestId)`; `clear_device_qr` no longer touches the session while the confirm is out. |
+| 09-025 | `DeviceLogin::InFlight` is gone: the request in flight is `sessions_op`'s (`begin(id)`), which already locks the sessions page. What stays is the answer slot `Done { request, result }`, taken only by the request that asked, and `clear_device_qr` discards it when the owner goes away (`DeviceLogin::discard`). |
+| 10-092, 10-095, 10-096 | Already fixed by r2-08 (failed lookup asked again, failed query shows its error, a pick without a connection keeps the query); re-checked against the new per-username entries. |
+| 10-093 | `BotsState::inline_bots`: one entry per lowercase username (bounded, settled entries leave first). `Resolving { request }` is answered only by that `RequestId` (purpose `ResolveInlineBot` is unit; `generation` and `inline_bot_resolve_seq` are gone). `ChatUi::inline_bot`, `capture_inline_bot` and the re-ask workaround are gone: another window's lookup cannot replace this window's. |
+| 10-094 | `InlineQueryFetch::Loading(RequestId)`: a first page fills the slot, and a refusal fails it, only for the request the slot waits for. `InlineWait::Session` re-reads session state on every update and answers nothing, so it needs no id. |
+| 10-097 | The confirmed-once latch moved from `ComposerUi` (per window) to `BotsState::inline_warning_confirmed` (the account's session: every window of it shares it, another account starts unconfirmed). The box being asked stays `ChatUi::bot_alert`; the latch is an independent per-account fact, not a stage of the ask. |
+| 13-009 | Already fixed by r2-08 (`Host::Asked { waits }` ends with its own requests). |
+| 13-011 | `ClosedKitDialogs` wraps the mailbox: `mark` and `take` use `try_borrow_mut` and a busy cell reads as no mark; no raw `borrow_mut` is left. |
+| 13-010 | Not collapsed. The kit gives no way to name the dialog it shows, so the shell's `open_dialog` (what this window's kit shows), the mailbox (closers hold only `&QuillApp`, often inside the shell's own update, so they cannot write the shell) and the host map (which window owns a session-wide kind) stay three records; the mailbox is now a typed one-shot. |

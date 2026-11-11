@@ -450,12 +450,7 @@ impl QuillShell {
         // switch, or the action that finished it): closing again would
         // take whichever dialog is on top now.
         let window_id = window.window_handle().window_id();
-        if app.update(cx, |app, _| {
-            app.main_window
-                .dialogs_closed
-                .try_borrow_mut()
-                .is_ok_and(|mut closed| closed.remove(&window_id))
-        }) {
+        if app.update(cx, |app, _| app.main_window.dialogs_closed.take(window_id)) {
             self.open_dialog = None;
         }
         // A session-wide box this window showed whose flag is clear (its own
@@ -624,9 +619,9 @@ impl QuillApp {
         }
         if !QuillShell::dialog_is_open(self, kind) {
             window.close_dialog(cx);
-            if let Ok(mut closed) = self.main_window.dialogs_closed.try_borrow_mut() {
-                closed.insert(window.window_handle().window_id());
-            }
+            self.main_window
+                .dialogs_closed
+                .mark(window.window_handle().window_id());
         }
     }
 
