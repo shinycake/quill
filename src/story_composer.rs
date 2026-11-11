@@ -198,24 +198,38 @@ pub struct StoryMedia {
     pub kind: StoryMediaKind,
 }
 
-/// Composer state. Pure (no GPUI); the UI layer owns the text inputs and
-/// syncs them into this before posting.
-/// The composer's `editStory` call.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum SaveStage {
+/// What the composer waits on after Post or Save. Each stage names the
+/// request it sent and leaves with the answer to that request only (the
+/// UI tick, `ui/story_composer_stage.rs`), so another composer's or
+/// another call's answer never moves it.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum ComposerStage {
+    /// Nothing sent: the Post button is live.
     #[default]
-    Idle,
-    /// Sent as `request`; only its own answer ends the wait.
+    Editing,
+    /// `canPostStory` for `target` is out; its answer posts or says why not.
+    Checking {
+        request: crate::ids::RequestId,
+        target: crate::ids::ChatId,
+    },
+    /// `postStory` is out or uploading; leaves with its outcome.
+    Posting { request: crate::ids::RequestId },
+    /// `editStory` is out; leaves with its answer.
     Saving { request: crate::ids::RequestId },
+    /// The story was posted: the composer says so and Post stays off, so
+    /// the same media is not posted twice.
+    Posted,
 }
 
-impl StoryComposer {
-    /// An `editStory` call is waiting for its answer.
-    pub fn is_saving(&self) -> bool {
-        matches!(self.save, SaveStage::Saving { .. })
+impl ComposerStage {
+    /// A press of Post or Save is still being answered, or has been.
+    pub fn busy(&self) -> bool {
+        !matches!(self, Self::Editing)
     }
 }
 
+/// Composer state. Pure (no GPUI); the UI layer owns the text inputs and
+/// syncs them into this before posting.
 #[derive(Debug, Clone, Default)]
 pub struct StoryComposer {
     pub open: bool,
@@ -231,21 +245,8 @@ pub struct StoryComposer {
     pub protect_content: bool,
     pub link_url: String,
     pub reaction_emojis: String,
-    /// A `canPostStory` round-trip is in flight; the UI tick converts
-    /// `Session::story_post.eligibility` into a post or an ineligible
-    /// message once it lands.
-    pub check_sent: bool,
-    /// `postStory` was sent and its answer has not landed yet. While
-    /// set the Post button stays disabled (double-press would post a
-    /// duplicate story). The UI tick clears it once
-    /// `Session::story_post.outcome` leaves `None`.
-    pub post_sent: bool,
-    /// Phase 9.5: the `editStory` call of edit mode, until its own answer
-    /// lands. The UI tick settles it from the outcome of that request
-    /// (`StoryManageState::outcome`): success closes the composer, failure
-    /// surfaces the error, and a call another management call pushed out of
-    /// the slot says so instead of closing as saved.
-    pub save: SaveStage,
+    /// Where the Post / Save press stands (`ComposerStage`).
+    pub stage: ComposerStage,
     /// UI-local validation / flow error (no valid media path yet, no
     /// users selected, demo mode, …). Cleared on open.
     pub local_error: Option<String>,

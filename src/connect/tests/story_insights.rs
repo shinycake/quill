@@ -244,7 +244,10 @@ fn story_statistics_reopened_while_pending_take_the_late_answer() {
     );
     let insights = driver.session.stories.insights.as_ref().expect("insights");
     assert_eq!((insights.chat_id, insights.story_id), (7, 5));
-    assert!(insights.forwards_loading, "A's forwards are on the way too");
+    assert!(
+        insights.forwards_loading(),
+        "A's forwards are on the way too"
+    );
 
     let graph = r#"{"@type":"statisticalGraphData","json_data":"{}","zoom_token":""}"#;
     driver
@@ -323,6 +326,59 @@ fn story_forwards_answered_before_a_reopen_are_asked_again() {
     assert_eq!(asked, 2);
     let insights = driver.session.stories.insights.as_ref().expect("insights");
     assert_eq!((insights.chat_id, insights.story_id), (7, 5));
-    assert!(insights.forwards_loading);
+    assert!(insights.forwards_loading());
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// A's forwards answer first, then A is reopened while its statistics are
+/// still out: the first page is not asked for again, so it is not shown
+/// twice (sweep 03-007).
+#[test]
+fn the_first_forwards_page_is_not_asked_twice_on_a_reopen() {
+    let store = MemorySecretStore::new();
+    let (dir, prepared) = prepared_tmp(&store);
+    let sink = Arc::new(MemorySink::new());
+    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+    let recorder = Arc::new(RecordingSender::new());
+    let session = Session::new(AccountKey::primary(), dyn_sink.clone());
+    let mut driver = ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
+    let seq = AtomicU64::new(0);
+    seed_ready_alice(&mut driver, &seq, &dyn_sink);
+    seed_story(
+        &mut driver,
+        &seq,
+        &dyn_sink,
+        7,
+        5,
+        "storyContentPhoto",
+        r#""can_get_statistics":true,"#,
+    );
+    driver.fetch_story_insights(ChatId(7), 5, false).unwrap();
+    let forwards = sent_types(&recorder)
+        .into_iter()
+        .find(|v| v["@type"] == "getStoryPublicForwards")
+        .expect("A's forwards");
+    let page = format!(
+        r#"{{"@type":"publicForwards","@extra":"{}","total_count":1,"next_offset":"","forwards":[{{"@type":"publicForwardStory","story":{{"@type":"story","id":9,"poster_chat_id":7,"date":1,"content":{{"@type":"storyContentUnsupported"}},"caption":{{"@type":"formattedText","text":"","entities":[]}}}}}}]}}"#,
+        forwards["@extra"].as_str().unwrap()
+    );
+    driver
+        .ingest(copy_and_parse(&page, &seq, &dyn_sink).unwrap())
+        .unwrap();
+    let rows = |session: &Session| {
+        session
+            .stories
+            .insights
+            .as_ref()
+            .map_or(0, |state| state.forwards.len())
+    };
+    assert_eq!(rows(&driver.session), 1);
+    driver.fetch_story_insights(ChatId(7), 5, false).unwrap();
+    let asked = sent_types(&recorder)
+        .into_iter()
+        .filter(|v| v["@type"] == "getStoryPublicForwards")
+        .count();
+    assert_eq!(asked, 1, "the answered first page is not asked for again");
+    assert_eq!(rows(&driver.session), 1);
     let _ = std::fs::remove_dir_all(dir);
 }

@@ -258,10 +258,10 @@ impl Session {
             }
             _ => {}
         }
-        if pending.map(|p| p.purpose) == Some(RequestPurpose::ViewMessages)
-            && let Some(chat_id) = pending.and_then(|p| p.chat_id)
+        if let Some(viewed) = pending.filter(|p| p.purpose == RequestPurpose::ViewMessages)
+            && let Some(chat_id) = viewed.chat_id
         {
-            self.abort_viewing(chat_id);
+            self.abort_viewing(chat_id, viewed.id);
         }
         if let Some(pending) = pending
             && pending.purpose == RequestPurpose::GetHistoryNewer

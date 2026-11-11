@@ -18,12 +18,13 @@
 //!   or pauses the focused voice message, audio or video message when
 //!   nothing is selected (`keyPressEvent`, `playPauseFocusedMedia`).
 //!
-//! The focused message is the selection's focus row (`selection_focus`),
-//! the same row Ctrl+Space toggles, as tdesktop shares
-//! `_accessibilityFocusedItem` between the two.
+//! The focused message is the chat's `A11yFocus` (`ChatUi::a11y_focus`: none,
+//! the unread bar, or a row), the same row Ctrl+Space toggles, as tdesktop
+//! shares `_accessibilityFocusedItem` between the two.
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
+use super::chat_ui_state::A11yFocus;
 use super::history_row::HistoryRow;
 use gpui_kit::*;
 use quill::ids::{ChatId, MessageId};
@@ -34,9 +35,6 @@ use quill::telegram::envelope::MessageContent;
 /// Accessibility focus bookkeeping of the history.
 #[derive(Debug, Default)]
 pub(crate) struct HistoryA11y {
-    /// The unread bar holds accessibility focus (tdesktop: a focused index
-    /// with no item).
-    pub(super) bar_focused: bool,
     /// The history took focus while this chat had no messages: its first
     /// messages take focus when they arrive (`_announceFirstMessages`).
     pub(super) announce_first: Option<ChatId>,
@@ -137,12 +135,12 @@ impl QuillApp {
 
     /// The accessibility child focused now, if it is still in the list.
     pub(super) fn history_a11y_current(&self, items: &[A11yItem]) -> Option<usize> {
-        if self.message_ui.a11y.bar_focused {
+        if self.chat_ui.focus.is_bar() {
             return items
                 .iter()
                 .position(|item| matches!(item, A11yItem::Bar(_)));
         }
-        let focus = self.chat_ui.selection_focus?;
+        let focus = self.chat_ui.focus.row()?;
         items.iter().position(|item| match item {
             A11yItem::Row(ix) => self
                 .history
@@ -166,15 +164,14 @@ impl QuillApp {
             });
         let ix = match item {
             A11yItem::Bar(ix) => {
-                self.message_ui.a11y.bar_focused = true;
+                self.chat_ui.focus = A11yFocus::Bar;
                 ix
             }
             A11yItem::Row(ix) => {
                 let Some(id) = self.history.rows.get(ix).and_then(HistoryRow::first_id) else {
                     return;
                 };
-                self.message_ui.a11y.bar_focused = false;
-                self.chat_ui.selection_focus = Some(id);
+                self.chat_ui.focus = A11yFocus::Row(id);
                 self.chat_ui.selection_anchor = Some(id);
                 ix
             }
@@ -265,7 +262,9 @@ impl QuillApp {
         if extend {
             // Shift+Up / Down: grow the selection from the focused message.
             let chat = self.session().and_then(|s| s.open_chat)?;
-            self.message_ui.a11y.bar_focused = false;
+            if self.chat_ui.focus.is_bar() {
+                self.chat_ui.focus = A11yFocus::None;
+            }
             if !self.selecting_in(chat) {
                 self.toggle_focused_selection_by_key(window, cx);
             }
@@ -287,10 +286,10 @@ impl QuillApp {
         window: &Window,
         cx: &mut Context<Self>,
     ) -> bool {
-        if !self.screen_reader_on(window) || self.message_ui.a11y.bar_focused {
+        if !self.screen_reader_on(window) || self.chat_ui.focus.is_bar() {
             return false;
         }
-        let Some(focus) = self.chat_ui.selection_focus else {
+        let Some(focus) = self.chat_ui.focus.row() else {
             return false;
         };
         let Some(message) = self.history.rows.iter().find_map(|row| match row {
@@ -338,12 +337,13 @@ impl QuillApp {
         let Some(row) = self.history.rows.get(ix) else {
             return (false, false);
         };
-        if self.message_ui.a11y.bar_focused {
+        if self.chat_ui.focus.is_bar() {
             return (false, row.unread_divider());
         }
         let focused = self
             .chat_ui
-            .selection_focus
+            .focus
+            .row()
             .is_some_and(|focus| row.contains(focus));
         (focused, false)
     }

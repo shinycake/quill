@@ -42,15 +42,118 @@ pub enum StoryPageOpState {
     Failed(String),
 }
 
-/// Phase 9.7: the latest story-page mutation (`createStoryAlbum`,
-/// `setChatPinnedStories`, …) — `label` names the operation, `state` the
-/// honest TDLib round-trip state.
+/// Phase 9.7: one story-page call — `label` names the operation, `state`
+/// the honest TDLib round-trip state, `request` the call it tracks (only
+/// its answer moves `state`) and `chat_id` the chat page it is about.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StoryPageOp {
     pub label: String,
     pub state: StoryPageOpState,
-    /// The call the op tracks: only its answer moves `state`.
-    pub request: Option<crate::ids::RequestId>,
+    pub request: crate::ids::RequestId,
+    pub chat_id: Option<i64>,
+}
+
+/// Most story-page ops kept; past it the oldest finished ones go.
+const STORY_PAGE_OPS_CAP: usize = 64;
+
+/// Every story-page call the session is tracking, one entry per request:
+/// a read (paging the archive) and a mutation (deleting an album) never
+/// share a slot, so neither one's answer hides the other's.
+#[derive(Debug, Clone, Default)]
+pub struct StoryPageOps {
+    ops: Vec<StoryPageOp>,
+}
+
+impl StoryPageOps {
+    /// Track `op`; a call tracked under the same request is replaced.
+    pub fn begin(&mut self, op: StoryPageOp) {
+        self.ops.retain(|tracked| tracked.request != op.request);
+        if self.ops.len() >= STORY_PAGE_OPS_CAP
+            && let Some(oldest) = self.ops.iter().position(|tracked| tracked.is_finished())
+        {
+            self.ops.remove(oldest);
+        }
+        self.ops.push(op);
+    }
+
+    pub fn get(&self, request: crate::ids::RequestId) -> Option<&StoryPageOp> {
+        self.ops.iter().find(|op| op.request == request)
+    }
+
+    pub(crate) fn get_mut(&mut self, request: crate::ids::RequestId) -> Option<&mut StoryPageOp> {
+        self.ops.iter_mut().find(|op| op.request == request)
+    }
+
+    pub(crate) fn remove(&mut self, request: crate::ids::RequestId) -> bool {
+        let before = self.ops.len();
+        self.ops.retain(|op| op.request != request);
+        self.ops.len() != before
+    }
+
+    /// Drop the ops that finished: their line was about what was left.
+    pub fn settle_finished(&mut self) {
+        self.ops.retain(|op| !op.is_finished());
+    }
+
+    /// The page of `chat_id` was left: nothing it asked for is tracked
+    /// any more, so a late answer changes no status line.
+    pub fn forget_chat(&mut self, chat_id: i64) {
+        self.ops.retain(|op| op.chat_id != Some(chat_id));
+    }
+
+    /// The account is going away.
+    pub fn clear(&mut self) {
+        self.ops.clear();
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.ops.is_empty()
+    }
+
+    /// A read labelled `label` for `chat_id` is in flight.
+    pub fn loading(&self, chat_id: i64, label: &str) -> bool {
+        self.ops.iter().any(|op| {
+            op.chat_id == Some(chat_id)
+                && op.state == StoryPageOpState::Checking
+                && op.label == label
+        })
+    }
+
+    /// A mutation for `chat_id` is in flight.
+    pub fn mutating(&self, chat_id: i64) -> bool {
+        self.ops
+            .iter()
+            .any(|op| op.chat_id == Some(chat_id) && op.state == StoryPageOpState::Sending)
+    }
+
+    /// The one line a page shows: a failure first, then a mutation in
+    /// flight, a finished one, and a read last; the newest of each kind.
+    pub fn status_for(&self, chat_id: Option<i64>) -> Option<&StoryPageOp> {
+        let rank = |op: &StoryPageOp| match op.state {
+            StoryPageOpState::Failed(_) => 3,
+            StoryPageOpState::Sending => 2,
+            StoryPageOpState::Succeeded => 1,
+            StoryPageOpState::Checking => 0,
+        };
+        self.ops
+            .iter()
+            .filter(|op| op.chat_id == chat_id)
+            .max_by_key(|op| rank(op))
+    }
+
+    /// The newest op of any chat, for tests and the viewer's own lookup.
+    pub fn latest(&self) -> Option<&StoryPageOp> {
+        self.ops.last()
+    }
+}
+
+impl StoryPageOp {
+    fn is_finished(&self) -> bool {
+        matches!(
+            self.state,
+            StoryPageOpState::Succeeded | StoryPageOpState::Failed(_)
+        )
+    }
 }
 
 /// Phase 9.7: the status-line label for a story-page request purpose —
@@ -121,7 +224,7 @@ mod tests {
             .map(|a| a.name.as_str())
             .collect();
         assert_eq!(names, ["Travel", "Food"]);
-        assert!(session.stories.page_op.is_none());
+        assert!(session.stories.page_ops.is_empty());
     }
 
     #[test]
@@ -155,7 +258,7 @@ mod tests {
         };
         let (extra, _) = fetch(&mut session, &[301, 302]);
         assert!(matches!(
-            session.stories.page_op.as_ref().map(|op| &op.state),
+            session.stories.page_ops.latest().map(|op| &op.state),
             Some(StoryPageOpState::Checking)
         ));
         apply_json(
@@ -172,7 +275,7 @@ mod tests {
             &stories(&extra.0.to_string(), &[302, 303]),
         );
         assert_eq!(session.stories.album_stories[&(11, 7)], vec![301, 302, 303]);
-        assert!(session.stories.page_op.is_none());
+        assert!(session.stories.page_ops.is_empty());
     }
 
     #[test]
@@ -233,7 +336,7 @@ mod tests {
             extra,
         );
         assert!(matches!(
-            session.stories.page_op.as_ref().map(|op| &op.state),
+            session.stories.page_ops.latest().map(|op| &op.state),
             Some(StoryPageOpState::Checking)
         ));
         apply_json(
@@ -248,7 +351,7 @@ mod tests {
         let archived = &session.stories.archived_stories[&11];
         assert_eq!(archived.story_ids, vec![202, 201]);
         assert_eq!(archived.next_from_story_id, Some(201));
-        assert!(session.stories.page_op.is_none());
+        assert!(session.stories.page_ops.is_empty());
     }
 
     #[test]
@@ -260,7 +363,7 @@ mod tests {
         let extra = session.request(RequestPurpose::CreateStoryAlbum, Some(ChatId(11)));
         session.begin_story_page_op(story_page_op_label(RequestPurpose::CreateStoryAlbum), extra);
         assert!(matches!(
-            session.stories.page_op.as_ref().map(|op| &op.state),
+            session.stories.page_ops.latest().map(|op| &op.state),
             Some(StoryPageOpState::Sending)
         ));
         apply_json(
@@ -273,7 +376,7 @@ mod tests {
             ),
         );
         assert!(matches!(
-            session.stories.page_op.as_ref().map(|op| &op.state),
+            session.stories.page_ops.latest().map(|op| &op.state),
             Some(StoryPageOpState::Succeeded)
         ));
         assert_eq!(session.stories.albums[&11][0].name, "New");
@@ -289,7 +392,7 @@ mod tests {
             ),
         );
         assert!(matches!(
-            session.stories.page_op.as_ref().map(|op| &op.state),
+            session.stories.page_ops.latest().map(|op| &op.state),
             Some(StoryPageOpState::Failed(_))
         ));
     }
