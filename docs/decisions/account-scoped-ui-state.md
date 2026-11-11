@@ -8075,6 +8075,22 @@ Round 2, files `window_slices`, theme editor/omarchy, appearance pickers and wal
 | 08-052, 08-053 | The rating draft is `CallRating::{Editing, Sending{request, draft}, Failed{error, draft}}` on the summary; the comment input stays until the editor opens again. |
 | 08-058 | `LiveInput::{HostFailed, Nothing, Expected}` (touches `group_call_tiles.rs`, `live_view.rs`, `live_overlay.rs` constructors). |
 | 08-060 | `VolumePill::{Closed, Held, Closing {_timer}}` owns the close timer. |
+
+Review fix round (r2-34, after merging `r2-followup` and `r2-28`):
+
+| item | result |
+| --- | --- |
+| review 1 | This entry: one row per id above, each fixed; none skipped as not real. |
+| review 2: `call_types.rs` | `CallSummary::busy` and `ActiveGroupCall::loaded_all_participants` are allow-listed with their reasons (a fact about how the call ended; TDLib's own report) and leave the baseline. `CallRating::Sent` and `CallUpload::Sent` are the end states after the answer of their `Sending(request)` (nothing in flight); `CallTransport::Connecting` ends on the engine's next report: all three are allow-listed with that reason. |
+| review 2: dialog bodies | `build_call_confirm_dialog`, `build_call_swap_dialog` and the theme editor already build the body in the content closure; `chat_look_ui.rs` now uses `shell::one_shot_dialog_content`, so no `RefCell` take is left in these files. |
+| review 2: `keybindings/mod.rs` | `apply_custom_bindings` reads the keymap with `try_borrow` and leaves the keymap as it is when it cannot (a partial list would drop the kit's bindings). |
+| review 2: `ensure_call_tick` | Allow-listed: the elapsed-time clock and the ringtone loop change with the passing second, which no update announces. `CallTick::Ticking` owns the task and it ends itself on the first beat that `call_tick_wanted` is false. |
+| review 2: `after_closing` | No clock any more. A waiter (`CloseWaiter`: its wait, its follow-up, its cap task) is looked at by `settle_close_waiters` when something it waits on changes: after each background pass that drains the closing set (TDLib's `authorizationStateClosed` pokes that pass), when a deletion ends and when the screen's preparation ends. The cap is one 60 s timer per waiter and is the way out (`then(.., false)`). `closed()` (the connect screen) uses `after_closing` with a oneshot answer. |
+| review 2: stage lines | `Capture::Waiting` (the user's keystroke), `BotLink::Loading` (the session's connected-bot `Fetch`, moved on by `business_bot_upkeep`), `Found::Loading` (a view computed per draw, never stored) and `Phase::Opening`, `LiveOverlay::Opening` (derived per draw from the player's `PlayState`) are allow-listed with those reasons. `settings_window/search.rs` `Stage::{Live, Finished}` is not an in-flight stage (the guard does not list it) and holds its selection beside the text it belongs to. |
+| review 3 | r2-28 is merged. `KeybindingUi::capture` stays private; push-to-talk goes through `toggle_ptt_capture`, `end_ptt_capture` and `ptt_armed`, and the tests of this branch that set `group_call.ptt_capture` use them. The `ptt_release` timer baseline is gone with r2-28's shape. |
+| new-01 | `group_call_join_sent` asked the request registry by purpose (`check-request-match`). The join is now `GroupTransport::Joining { request }`, set where the join is made (`start_group_join`) and ended by the answer (`store_answer(request, ..)`), by the error of that request (`join_failed`), by an offer that was never sent or is no longer wanted (`join_unsent`, from `undo_offer`) or by a reset. Another request's answer or error leaves it alone. The panel reads `call.transport.joining()`. |
+| new-02 | `fetch_installed_backgrounds` on the per-theme fetches of the follow-up: a send that cannot leave is that theme's `Fetch::fail("not sent")` with Retry (it was `cancel`, which asked again from the next arrival), as on this branch before the merge. |
+| new-03 | Merge repairs: the escape and lock tests use r2-28's `open_call_box` seam; the inline "load more" refusal sets `InlineMore::Failed { offset }` on the follow-up's slot; `EntryStage::Loading` (image budget) is allow-listed (the entry's `Load` handle sits beside it and ends with it). |
 ### Sweep fixes (r2-05)
 
 | id | what changed |
