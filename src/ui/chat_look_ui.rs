@@ -345,11 +345,8 @@ impl QuillApp {
                                 .set_chat_theme_name(chat_id, (!name.is_empty()).then_some(name)),
                             LookChange::WallpaperFile { .. } => {}
                             LookChange::Wallpaper { id, dimming } => {
-                                let found = session
-                                    .chats_state
-                                    .installed_backgrounds
-                                    .find(id)
-                                    .cloned();
+                                let found =
+                                    session.chats_state.installed_backgrounds.find(id).cloned();
                                 if let Some(background) = found {
                                     session.set_chat_background(
                                         chat_id,

@@ -711,6 +711,9 @@ mod tests {
         let second = ReplacementProbe::for_kind(EditMediaKind::Video);
         assert!(first.probing().is_some());
         assert_ne!(first.probing(), second.probing(), "an old answer is stale");
-        assert_eq!(ReplacementProbe::for_kind(EditMediaKind::Photo).probing(), None);
+        assert_eq!(
+            ReplacementProbe::for_kind(EditMediaKind::Photo).probing(),
+            None
+        );
     }
 }

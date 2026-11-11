@@ -64,9 +64,10 @@ pub use markup_parser::parse_format_markup;
 pub use media_options::{
     AttachmentExtras, FILE_THUMBNAIL_SIDE, FileThumbnail, GifMode, HeldGif, MediaSendOptions,
     PAID_MEDIA_MAX_STARS, PHOTO_SIDE_LARGE, PHOTO_SIDE_STANDARD, PhotoPrep, PhotoScaleTimedOut,
-    PriceInput, VideoEdit, VideoPrep, can_use_high_quality, file_thumbnail_upload_required, fitted_photo_size,
-    is_gif_path, paid_media_fits, parse_paid_price, photo_for_send, photo_scale_args,
-    photo_side_limit, photo_size_of, scaled_photo_for_send, session_allows_paid_media,
+    PriceInput, VideoEdit, VideoPrep, can_use_high_quality, file_thumbnail_upload_required,
+    fitted_photo_size, is_gif_path, paid_media_fits, parse_paid_price, photo_for_send,
+    photo_scale_args, photo_side_limit, photo_size_of, scaled_photo_for_send,
+    session_allows_paid_media,
 };
 pub use media_prep::{
     AnimationSize, PREP_BUDGET, PrepareError, PreparedFile, PreparedMedia, PreparedNote,

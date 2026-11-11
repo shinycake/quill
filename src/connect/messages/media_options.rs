@@ -115,7 +115,11 @@ impl<S: JsonSender> ConnectDriver<S> {
         content: serde_json::Value,
     ) -> serde_json::Value {
         let cover = cover_path(&self.session, chat_id, attachment);
-        with_video_options(content, cover.as_deref(), attachment.extras.start_timestamp())
+        with_video_options(
+            content,
+            cover.as_deref(),
+            attachment.extras.start_timestamp(),
+        )
     }
 
     /// [`Self::with_attachment_video_options`] for a built `sendMessage`.

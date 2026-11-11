@@ -551,7 +551,10 @@ mod tests {
         let mut list = [silent, muted];
         ComposerAttachment::set_send_as_files(&mut list, true);
         assert!(list.iter().all(|att| att.kind == AttachmentKind::Document));
-        assert!(list.iter().all(|att| !att.extras.is_gif()), "files, not animations");
+        assert!(
+            list.iter().all(|att| !att.extras.is_gif()),
+            "files, not animations"
+        );
         assert!(list.iter().all(|att| !att.extras.sound_removed()));
         ComposerAttachment::set_send_as_files(&mut list, false);
         assert!(list.iter().all(|att| att.kind == AttachmentKind::Video));

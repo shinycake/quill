@@ -90,9 +90,9 @@ impl DeviceThread {
             Opened::Waiting(answer) => match answer.try_recv() {
                 Ok(answer) => answer,
                 Err(TryRecvError::Empty) => return None,
-                Err(TryRecvError::Disconnected) => Err(CaptureError::Device(
-                    "The capture thread stopped.".into(),
-                )),
+                Err(TryRecvError::Disconnected) => {
+                    Err(CaptureError::Device("The capture thread stopped.".into()))
+                }
             },
         };
         *opened = Opened::Answered(answer.clone());

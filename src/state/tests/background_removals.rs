@@ -73,7 +73,10 @@ fn each_theme_keeps_its_own_installed_list() {
     );
     let lists = &session.chats_state.installed_backgrounds;
     assert_eq!(lists.theme(true).data().map(Vec::len), Some(1));
-    assert!(lists.theme(false).is_loading(), "the light list still waits");
+    assert!(
+        lists.theme(false).is_loading(),
+        "the light list still waits"
+    );
     assert!(lists.theme(false).data().is_none());
     // The light list's own answer lands under the light theme only.
     apply_json(

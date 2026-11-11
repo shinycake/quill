@@ -470,9 +470,15 @@ mod tests {
             draft_in_the_way(&chat_with("my words"), "other"),
             Some("my words".to_string())
         );
-        assert_eq!(draft_in_the_way(&chat_with("my words"), ""), Some("my words".into()));
+        assert_eq!(
+            draft_in_the_way(&chat_with("my words"), ""),
+            Some("my words".into())
+        );
         assert_eq!(draft_in_the_way(&chat_with("same"), " same "), None);
         assert_eq!(draft_in_the_way(&chat_with("  "), "new"), None);
-        assert_eq!(draft_in_the_way(&json!({"draft_message": null}), "new"), None);
+        assert_eq!(
+            draft_in_the_way(&json!({"draft_message": null}), "new"),
+            None
+        );
     }
 }

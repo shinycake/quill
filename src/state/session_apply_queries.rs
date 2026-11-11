@@ -17,8 +17,9 @@ impl Session {
             self.location.venues_answered(generation, page.venues);
             return;
         }
-        if let Some(RequestPurpose::Bots(BotsPurpose::GetInlineQueryResults { first_page, .. })) =
-            pending.map(|p| p.purpose)
+        if let Some(RequestPurpose::Bots(BotsPurpose::GetInlineQueryResults {
+            first_page, ..
+        })) = pending.map(|p| p.purpose)
         {
             // Only the request the slot waits for settles it: the first page
             // under `Loading`, a next page under `Loaded.more`.

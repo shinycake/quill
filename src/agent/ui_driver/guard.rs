@@ -108,10 +108,8 @@ impl OpenCommand {
 impl Drop for OpenCommand {
     fn drop(&mut self) {
         let closed = on_guard(|guard| {
-            let commands = std::mem::replace(
-                &mut guard.commands,
-                Commands::Closed { latest: None },
-            );
+            let commands =
+                std::mem::replace(&mut guard.commands, Commands::Closed { latest: None });
             match commands {
                 Commands::Open { step, count } if count > 1 => {
                     guard.commands = Commands::Open {

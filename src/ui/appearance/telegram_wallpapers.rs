@@ -27,7 +27,13 @@ impl QuillApp {
     ) -> AnyElement {
         let dark = cx.theme().is_dark();
         let session = self.session();
-        let list = session.and_then(|s| s.chats_state.installed_backgrounds.theme(dark).data().cloned());
+        let list = session.and_then(|s| {
+            s.chats_state
+                .installed_backgrounds
+                .theme(dark)
+                .data()
+                .cloned()
+        });
         let in_use = session
             .and_then(|s| s.chats_state.default_backgrounds.get(&dark))
             .map(|b| b.id)
@@ -211,7 +217,10 @@ impl QuillApp {
             }
             None => {
                 if let Some(session) = self.demo_session.as_mut() {
-                    session.chats_state.installed_backgrounds.forget(background_id);
+                    session
+                        .chats_state
+                        .installed_backgrounds
+                        .forget(background_id);
                 }
             }
         }

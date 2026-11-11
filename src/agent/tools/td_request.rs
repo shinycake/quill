@@ -3,8 +3,8 @@
 //! and listing the chats it names, the local files it would upload and the
 //! types that can spend money.
 
-use super::td_redact::{SECRET_BASE, SUPERGROUP_BASE};
 use super::ToolError;
+use super::td_redact::{SECRET_BASE, SUPERGROUP_BASE};
 use super::td_schema::Schema;
 use serde_json::{Map, Value};
 
@@ -231,7 +231,7 @@ pub fn spends(request: &Value) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{pin_uploads, chats_named, local_paths, sanitize, spends};
+    use super::{chats_named, local_paths, pin_uploads, sanitize, spends};
     use crate::agent::tools::td_schema;
     use serde_json::json;
 

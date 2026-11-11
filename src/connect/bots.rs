@@ -642,9 +642,12 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(ConnectSendError::InvalidRequest);
         }
         let first_page = offset.is_empty();
-        let slot = self.session.bots.inline_query.as_ref().filter(|slot| {
-            slot.chat_id == chat_id && slot.bot_user_id == bot_user_id
-        });
+        let slot = self
+            .session
+            .bots
+            .inline_query
+            .as_ref()
+            .filter(|slot| slot.chat_id == chat_id && slot.bot_user_id == bot_user_id);
         // One request at a time for the (chat, bot) pair, whatever the page;
         // a next page needs the loaded page it continues, not asked twice
         // for an offset that failed.

@@ -370,13 +370,19 @@ mod tests {
         let me = MessageSender::User { user_id: 1 };
         let mut asked = CreateJoinAs::asking(5, RequestId(3));
         assert_eq!(asked.answer(), None);
-        assert!(!asked.accept(Some(RequestId(4)), vec![me]), "another request");
+        assert!(
+            !asked.accept(Some(RequestId(4)), vec![me]),
+            "another request"
+        );
         assert!(!asked.accept(None, vec![me]));
         assert!(!asked.fail(Some(RequestId(4))));
         assert!(asked.accept(Some(RequestId(3)), vec![me]));
         assert_eq!(asked.answer(), Some(Ok(vec![me])));
         assert!(!asked.fail(Some(RequestId(3))), "answered already");
-        assert!(!asked.accept(Some(RequestId(3)), Vec::new()), "answered once");
+        assert!(
+            !asked.accept(Some(RequestId(3)), Vec::new()),
+            "answered once"
+        );
         let mut failed = CreateJoinAs::asking(5, RequestId(3));
         assert!(failed.fail(Some(RequestId(3))));
         assert_eq!(failed.answer(), Some(Err(())));

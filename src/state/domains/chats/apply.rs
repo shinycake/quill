@@ -12,9 +12,7 @@ impl Session {
                 self.chats_state.default_backgrounds.remove(&for_dark_theme);
             }
             RequestPurpose::Chats(ChatsPurpose::RemoveInstalledBackground { background_id }) => {
-                self.chats_state
-                    .installed_backgrounds
-                    .forget(background_id);
+                self.chats_state.installed_backgrounds.forget(background_id);
             }
             RequestPurpose::DeleteChatBackground => {
                 if let Some(chat_id) = pending.chat_id {

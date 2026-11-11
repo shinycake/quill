@@ -178,11 +178,11 @@ impl ComposerSnapshot {
     /// Some file needs ffprobe or ffmpeg before it can be sent.
     pub fn needs_media_prep(&self) -> bool {
         self.content.attachments().iter().any(|attachment| {
-                matches!(
-                    attachment.kind,
-                    AttachmentKind::Photo | AttachmentKind::Video | AttachmentKind::VideoNote
-                )
-            })
+            matches!(
+                attachment.kind,
+                AttachmentKind::Photo | AttachmentKind::Video | AttachmentKind::VideoNote
+            )
+        })
     }
 
     /// Attach the files read in the background.

@@ -531,7 +531,9 @@ pub enum PollVotersFetch {
 pub enum InlineQueryFetch {
     /// The first page is out under `request`; only its answer or error
     /// settles the slot.
-    Loading { request: RequestId },
+    Loading {
+        request: RequestId,
+    },
     Loaded {
         inline_query_id: i64,
         button: Option<InlineQueryResultsButton>,

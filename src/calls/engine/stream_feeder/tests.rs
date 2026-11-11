@@ -1,8 +1,8 @@
 use crate::calls::engine::{
     BroadcastChannel, BroadcastPartAnswer, BroadcastPartRequest, BroadcastPartStatus,
     BroadcastRequestId, FeederState, GroupCallMode, MAX_PENDING_PARTS, ReplyOutcome, SegmentFetch,
-    StreamChannel, StreamFeeder, StreamFetchError, StreamPort, StreamQuality,
-    StreamReply, StreamState,
+    StreamChannel, StreamFeeder, StreamFetchError, StreamPort, StreamQuality, StreamReply,
+    StreamState,
 };
 use crate::ids::RequestId;
 use std::time::{Duration, Instant};
@@ -618,7 +618,10 @@ fn a_tile_width_maps_to_a_quality_bucket() {
     assert_eq!(StreamQuality::for_tile_width(720.0), StreamQuality::Full);
     assert_eq!(StreamQuality::for_tile_width(640.0), StreamQuality::Full);
     assert_eq!(StreamQuality::for_tile_width(500.0), StreamQuality::Medium);
-    assert_eq!(StreamQuality::for_tile_width(240.0), StreamQuality::Thumbnail);
+    assert_eq!(
+        StreamQuality::for_tile_width(240.0),
+        StreamQuality::Thumbnail
+    );
     assert_eq!(StreamQuality::for_tile_width(1280.0), StreamQuality::Full);
 }
 

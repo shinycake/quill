@@ -58,7 +58,11 @@ impl InstalledBackgrounds {
     }
 
     pub fn theme_mut(&mut self, dark: bool) -> &mut crate::state::fetch::Fetch<Vec<Background>> {
-        if dark { &mut self.dark } else { &mut self.light }
+        if dark {
+            &mut self.dark
+        } else {
+            &mut self.light
+        }
     }
 
     /// Every installed background held, of either theme.
