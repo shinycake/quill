@@ -1,6 +1,5 @@
 //! Connect-driver tests: the shared screen Quill captures and feeds into
 //! the engine's external screen source (`connect::call_screen`).
-use crate::state::ScreenShare;
 use super::super::*;
 use super::support::{pump_until_mic_answers, pump_until_screen_answers, until};
 use super::*;
@@ -11,6 +10,7 @@ use crate::calls::capture::{
 };
 use crate::calls::engine::{CallEngine, CaptureTarget, ConnectParams, ExternalDevice, MockEngine};
 use crate::diagnostics::{DiagnosticSink, MemorySink};
+use crate::state::ScreenShare;
 use crate::state::{ActiveGroupCall, CallTransport};
 use crate::telegram::client::copy_and_parse;
 use crate::telegram::envelope::parse_group_call_participant;

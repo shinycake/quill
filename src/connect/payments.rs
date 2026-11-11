@@ -207,7 +207,11 @@ impl<S: JsonSender> ConnectDriver<S> {
         append: bool,
     ) -> Result<RequestId, ConnectSendError> {
         let offset = if append {
-            self.session.payments.star_subscriptions.offset().to_string()
+            self.session
+                .payments
+                .star_subscriptions
+                .offset()
+                .to_string()
         } else {
             String::new()
         };

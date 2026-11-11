@@ -14,7 +14,9 @@ pub enum ScreenShare {
     Off,
     /// Asked; `answer` is the `Text` presentation answer once it arrived,
     /// consumed by the driver pump to finish the handshake.
-    Starting { answer: Option<String> },
+    Starting {
+        answer: Option<String>,
+    },
     Sharing,
 }
 

@@ -19,7 +19,7 @@ mod ton_wallet;
 
 pub use gift_code::*;
 pub use giveaway::*;
-pub use subscriptions::{StarSubscriptionsList, SubsEdit, SubsLoad};
 pub use purpose::*;
+pub use subscriptions::{StarSubscriptionsList, SubsEdit, SubsLoad};
 
 pub use state::*;

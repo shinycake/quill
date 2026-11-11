@@ -13,8 +13,9 @@ struct ThreadWindow {
     unread_count: i32,
     has_newer: bool,
     window_epoch: u64,
-    /// The older replies are loaded down to the root post.
-    loaded_complete: bool,
+    /// The older end of the replies: complete once they are loaded down
+    /// to the root post.
+    older: quill::state::OlderEnd,
 }
 
 /// The reader's scroll goal in this render (`HistoryUi::scroll_goal`).
@@ -70,7 +71,7 @@ impl QuillApp {
                 unread_count: thread.unread_count,
                 has_newer: thread.history.has_newer(),
                 window_epoch: thread.history.window_epoch,
-                loaded_complete: thread.history.loaded_complete(),
+                older: thread.history.older,
             });
         // A Saved Messages sublist or tag filter is its own history.
         let saved_scope = self.saved_view_scope();
@@ -856,7 +857,11 @@ impl QuillApp {
     fn scroll_goal_now(&self, thread: Option<&ThreadWindow>) -> GoalNow {
         match (self.history.scroll_goal, thread) {
             (None, _) => GoalNow::Waiting,
-            (Some(ScrollGoal::ThreadRoot), Some(thread)) if thread.loaded_complete => GoalNow::Due,
+            (Some(ScrollGoal::ThreadRoot), Some(thread))
+                if thread.older == quill::state::OlderEnd::Complete =>
+            {
+                GoalNow::Due
+            }
             (Some(ScrollGoal::ThreadRoot), Some(_)) => GoalNow::Waiting,
             // The thread closed: the goal goes with it.
             (Some(ScrollGoal::ThreadRoot), None) => GoalNow::Stale,

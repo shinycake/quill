@@ -124,7 +124,9 @@ pub enum CheckoutForm {
     #[default]
     Closed,
     /// `getPaymentForm` is out as `request` (the dialog shows a spinner).
-    Loading { request: RequestId },
+    Loading {
+        request: RequestId,
+    },
     Ready(PaymentFormData),
     Verifying(PaymentFormData),
     Paid(PaymentFormData),

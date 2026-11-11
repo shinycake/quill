@@ -727,7 +727,10 @@ fn reading_far_back_and_forth_through_a_thread_keeps_its_window_bounded() {
     assert_eq!(thread.ordered().first().map(|m| m.id.0), Some(40));
     assert!(thread.history.loaded_complete());
     assert_eq!(thread.last_message_id, top - 1, "the end is remembered");
-    assert!(thread.history.has_newer(), "scrolling down pages it back in");
+    assert!(
+        thread.history.has_newer(),
+        "scrolling down pages it back in"
+    );
     let newest = thread.newest_loaded_id().unwrap().0;
 
     let newer: Vec<i64> = (newest..top).rev().collect();

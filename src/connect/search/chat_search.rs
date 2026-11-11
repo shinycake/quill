@@ -171,7 +171,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        if !self.session.search.chat_search.open && !self.session.open_chat_search() {
+        if !self.session.search.chat_search.is_open() && !self.session.open_chat_search() {
             return Err(ConnectSendError::InvalidRequest);
         }
         let trimmed = query.trim();
@@ -251,7 +251,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         &mut self,
         sender: Option<MessageSender>,
     ) -> Result<ChatSearchQueryOutcome, ConnectSendError> {
-        if !self.chats_path_active() || !self.session.search.chat_search.open {
+        if !self.chats_path_active() || !self.session.search.chat_search.is_open() {
             return Err(ConnectSendError::InvalidRequest);
         }
         self.session.search.chat_search.sender = sender;
@@ -270,7 +270,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         &mut self,
         media: SearchMediaKind,
     ) -> Result<ChatSearchQueryOutcome, ConnectSendError> {
-        if !self.chats_path_active() || !self.session.search.chat_search.open {
+        if !self.chats_path_active() || !self.session.search.chat_search.is_open() {
             return Err(ConnectSendError::InvalidRequest);
         }
         self.session.search.chat_search.media = media;

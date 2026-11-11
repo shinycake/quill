@@ -90,8 +90,8 @@ fn a_media_tab_on_an_empty_field_lists_that_kind_everywhere() {
     assert_eq!(search[0]["offset"], "");
     // No chat or public-chat lookups for an empty query.
     assert!(fx.requests("searchPublicChats").is_empty());
-    assert!(fx.driver.session.search.search.open);
-    assert!(!fx.driver.session.search.search.recents);
+    assert!(fx.driver.session.search.search.is_open());
+    assert!(!fx.driver.session.search.search.is_recents());
 }
 
 #[test]
@@ -129,7 +129,7 @@ fn going_back_to_chats_on_an_empty_field_asks_for_recents() {
     fx.open_tab(SearchTab::Voice);
     fx.open_tab(SearchTab::Chats);
     assert_eq!(fx.requests("searchRecentlyFoundChats").len(), before + 1);
-    assert!(fx.driver.session.search.search.recents);
+    assert!(fx.driver.session.search.search.is_recents());
 }
 
 #[test]

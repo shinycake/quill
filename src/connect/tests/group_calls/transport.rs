@@ -1,7 +1,7 @@
 //! Driver tests: group-call native transport, video routing and screen sharing.
-use crate::state::ScreenShare;
 use super::*;
 use crate::connect::SelfMuteError;
+use crate::state::ScreenShare;
 
 /// Phase C2g: the join carries the native offer (not the no-device
 /// fallback) and the audio SSRC parsed from it.

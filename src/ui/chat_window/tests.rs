@@ -516,12 +516,14 @@ fn a_chat_window_searches_and_forwards_with_fields_of_its_own(cx: &mut TestAppCo
         (
             slot.chat_search_input.read(cx).value().to_string(),
             app.search_ui.chat_input.read(cx).value().to_string(),
-            app.session().is_some_and(|s| s.search.chat_search.open),
+            app.session()
+                .is_some_and(|s| s.search.chat_search.is_open()),
         )
     });
     let window_open = h.app.update(cx, |app, cx| {
         app.in_window_scope(Some(OTHER), cx, |app, _| {
-            app.session().is_some_and(|s| s.search.chat_search.open)
+            app.session()
+                .is_some_and(|s| s.search.chat_search.is_open())
         })
     });
     assert_eq!(window_text, "later");

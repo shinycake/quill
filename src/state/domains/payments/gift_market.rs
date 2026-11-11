@@ -1,8 +1,8 @@
 //! Reducer for the gift market (`crate::gift_market`): resale pages and
 //! purchases, auction states and bids, crafting candidates and results.
 use crate::gift_market::{
-    AuctionFetch, AuctionFollow, CraftGift, CraftResult, CraftRun, PageLoad, GiftMarketPayload, GiftMarketPurpose,
-    bid_done_toast, error_note,
+    AuctionFetch, AuctionFollow, BuyPhase, CraftGift, CraftResult, CraftRun, GiftMarketPayload,
+    GiftMarketPurpose, PageLoad, bid_done_toast, error_note,
 };
 use crate::marketplace::GiftPurchaseResult;
 use crate::state::fetch::Fetch;
@@ -41,10 +41,7 @@ impl Session {
                 }
                 let me = self.my_user_id;
                 let market = &mut self.payments.gift_market;
-                if let Some(search) = market
-                    .resale
-                    .as_mut()
-                    .filter(|s| s.load.waits_for(request)) {
+                if let Some(search) = market.resale.as_mut().filter(|s| s.load.waits_for(request)) {
                     search.apply(page, me, index > 0);
                 } else if let Some(search) = market
                     .craft
@@ -163,17 +160,12 @@ impl Session {
     /// The answer to the buy `request`, for the box that sent it only.
     pub(crate) fn apply_gift_market_purchase(&mut self, result: GiftPurchaseResult, request: u64) {
         let market = &mut self.payments.gift_market;
-        let Some(buy) = market
-            .buy
-            .as_mut()
-            .filter(|buy| request != 0 && buy.request == request)
-        else {
+        let Some(buy) = market.buy.as_mut().filter(|buy| buy.waits_for(request)) else {
             return;
         };
-        buy.sending = false;
+        buy.phase = BuyPhase::Idle;
         match result {
             GiftPurchaseResult::Sent(received_gift_id) => {
-                buy.done = Some(received_gift_id.clone());
                 let listing = buy.listing.clone();
                 let recipient = buy.recipient.clone();
                 let for_craft = buy.for_craft;
@@ -285,14 +277,10 @@ impl Session {
                 }
             }
             GiftMarketPurpose::BuyResale => {
-                let Some(buy) = market
-                    .buy
-                    .as_mut()
-                    .filter(|buy| request != 0 && buy.request == request)
-                else {
+                let Some(buy) = market.buy.as_mut().filter(|buy| buy.waits_for(request)) else {
                     return;
                 };
-                buy.sending = false;
+                buy.phase = BuyPhase::Idle;
                 if low {
                     market.balance_low = true;
                 } else {

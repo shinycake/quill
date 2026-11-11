@@ -40,9 +40,9 @@ impl<S: JsonSender> ConnectDriver<S> {
         &mut self,
     ) -> Result<Option<SearchFlight>, ConnectSendError> {
         let search = &self.session.search.search;
-        if search.open
+        if search.is_open()
             && search.query.is_empty()
-            && !search.recents
+            && !search.is_recents()
             && matches!(
                 search.status(),
                 SearchStatus::Searching

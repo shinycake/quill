@@ -390,9 +390,9 @@ fn the_checkout_prefills_in_the_window_that_hosts_it(cx: &mut TestAppContext) {
     });
     h.app.update(cx, |app, _| {
         if let Some(session) = app.demo_session.as_mut() {
-            session.payments.checkout = quill::state::CheckoutForm::Ready(crate::ui::payments::card_form_demo::stripe_checkout(
-                true, false,
-            ));
+            session.payments.checkout = quill::state::CheckoutForm::Ready(
+                crate::ui::payments::card_form_demo::stripe_checkout(true, false),
+            );
         }
     });
     let prefilled = |cx: &mut TestAppContext| {

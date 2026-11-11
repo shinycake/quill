@@ -462,13 +462,16 @@ fn replay_forward_messages_result_and_attribution() {
         ],
     );
     let extra = session.request(RequestPurpose::ForwardMessages, Some(quill::ids::ChatId(8)));
-    session.messages.forward_flights.push(quill::state::ForwardFlight {
-        extra,
-        dest_chat_id: quill::ids::ChatId(8),
-        from_chat_id: quill::ids::ChatId(7),
-        from_topic: quill::ids::TopicId::None,
-        requested: 1,
-    });
+    session
+        .messages
+        .forward_flights
+        .push(quill::state::ForwardFlight {
+            extra,
+            dest_chat_id: quill::ids::ChatId(8),
+            from_chat_id: quill::ids::ChatId(7),
+            from_topic: quill::ids::TopicId::None,
+            requested: 1,
+        });
     apply_all_seq(
         &mut session,
         &sink,

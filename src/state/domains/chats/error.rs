@@ -156,7 +156,8 @@ impl Session {
                     ));
                 } else if !stale {
                     let text = deep_link_error_text(self.chats_state.deep_link_stage(), err.code);
-                    self.chats_state.enter_deep_link_stage(DeepLinkState::ShowText(text));
+                    self.chats_state
+                        .enter_deep_link_stage(DeepLinkState::ShowText(text));
                 }
             }
             _ => {}

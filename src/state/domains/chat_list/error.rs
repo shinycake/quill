@@ -235,7 +235,9 @@ impl Session {
         let list = &mut self.chat_list;
         match pending.map(|p| p.purpose) {
             Some(RequestPurpose::LoadChats) => list.main_paging.page_failed(err.code, now),
-            Some(RequestPurpose::LoadArchiveChats) => list.archive_paging.page_failed(err.code, now),
+            Some(RequestPurpose::LoadArchiveChats) => {
+                list.archive_paging.page_failed(err.code, now)
+            }
             _ => {}
         }
         // Parity slice: folder `loadChats` paging ends the same way

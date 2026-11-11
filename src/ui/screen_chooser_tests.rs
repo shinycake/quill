@@ -69,7 +69,8 @@ fn group_sharing(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> bool {
             .active_group_call
             .as_ref()
             .unwrap()
-            .screen_share.is_sharing()
+            .screen_share
+            .is_sharing()
     })
 }
 

@@ -58,7 +58,9 @@ fn a_failed_page_is_asked_for_again_at_the_next_scroll(cx: &mut TestAppContext) 
         app.inline_members.paging = Paging::Asked { offset: 20 };
         if let Some(session) = app.session_mut() {
             let key = (chat, MemberListFilter::Recent);
-            session.groups.note_member_more(key, quill::ids::RequestId(1));
+            session
+                .groups
+                .note_member_more(key, quill::ids::RequestId(1));
             session.groups.member_more_failed(key);
         }
         // A frame looks again: it does not ask a failing server in a loop.

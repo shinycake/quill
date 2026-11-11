@@ -305,10 +305,16 @@ fn chat_list_paging_restarts_after_logout_and_login() {
             );
         }
         session.chat_list.folder_chats_exhausted.insert(2);
-        assert!(session.chat_list.main_paging.is_exhausted() && session.chat_list.archive_paging.is_exhausted());
+        assert!(
+            session.chat_list.main_paging.is_exhausted()
+                && session.chat_list.archive_paging.is_exhausted()
+        );
         apply_json(&mut session, &seq, &sink, &auth(leaving));
         assert!(!session.chat_list.main_paging.is_exhausted(), "{leaving}");
-        assert!(!session.chat_list.archive_paging.is_exhausted(), "{leaving}");
+        assert!(
+            !session.chat_list.archive_paging.is_exhausted(),
+            "{leaving}"
+        );
         assert!(
             session.chat_list.folder_chats_exhausted.is_empty(),
             "{leaving}"

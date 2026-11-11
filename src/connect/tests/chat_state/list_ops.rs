@@ -265,7 +265,7 @@ fn cl2_clear_recently_found_chats_optimistic_clear() {
     let mut driver = ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
     let seq = AtomicU64::new(0);
     ready_private_chat(&mut driver, &seq, &dyn_sink);
-    driver.session.search.search.recents = true;
+    driver.session.search.search.surface = crate::state::SearchSurface::Recents;
     driver.session.search.search.chat_ids = vec![ChatId(7)];
 
     let sent = driver.clear_recently_found_chats().expect("send");

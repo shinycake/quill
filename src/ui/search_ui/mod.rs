@@ -293,12 +293,12 @@ pub(super) fn apply_ready_search_in_chat(
 impl QuillApp {
     pub(super) fn search_is_open(&self) -> bool {
         self.session()
-            .is_some_and(|session| session.search.search.open)
+            .is_some_and(|session| session.search.search.is_open())
     }
 
     pub(super) fn chat_search_is_open(&self) -> bool {
         self.session()
-            .is_some_and(|session| session.search.chat_search.open)
+            .is_some_and(|session| session.search.chat_search.is_open())
     }
 
     /// Open the global search. It lives in the main window's sidebar
@@ -559,7 +559,7 @@ impl QuillApp {
             return;
         }
         let fresh = !self.session().is_some_and(|s| {
-            s.search.chat_search.open && s.search.chat_search.chat_id == s.open_chat
+            s.search.chat_search.is_open() && s.search.chat_search.chat_id == s.open_chat
         });
         let opened = if let Some(live) = self.live.as_mut() {
             match live.driver.open_chat_search() {
@@ -648,7 +648,7 @@ impl QuillApp {
             }
         } else if let Some(session) = self.demo_session.as_mut() {
             let trimmed = query.trim();
-            if session.search.chat_search.open
+            if session.search.chat_search.is_open()
                 && session.search.chat_search.query == trimmed
                 && !matches!(session.search.chat_search.status, SearchStatus::Closed)
             {

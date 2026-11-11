@@ -168,7 +168,10 @@ impl QuillApp {
     /// "New Card..." on a Stripe or Smart Glocal checkout: the card form,
     /// focused on the number (tdesktop's `showEditCard`).
     pub(in crate::ui) fn open_card_form(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(form) = self.session().and_then(|s| s.payments.checkout.form().cloned()) else {
+        let Some(form) = self
+            .session()
+            .and_then(|s| s.payments.checkout.form().cloned())
+        else {
             return;
         };
         let PaymentFormTypeData::Regular(regular) = &form.form_type else {

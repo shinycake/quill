@@ -23,7 +23,10 @@ pub enum PageLoad {
     Idle,
     /// The page is out as `request`. `more`: it extends a list that already
     /// had an answer.
-    Loading { request: u64, more: bool },
+    Loading {
+        request: u64,
+        more: bool,
+    },
     Ready,
     /// The page was refused or did not leave; the text is drawn with a
     /// Retry.
@@ -77,7 +80,9 @@ pub enum CraftRun {
     Idle,
     /// `craftGift` is out as `request` (0: the demo's), whose answer this
     /// box shows.
-    Crafting { request: u64 },
+    Crafting {
+        request: u64,
+    },
     Done(CraftResult),
 }
 
@@ -162,16 +167,25 @@ pub struct ResaleBuy {
     pub recipient: GiftRecipient,
     pub step: BuyStep,
     pub pay_in_grams: bool,
-    pub sending: bool,
+    /// The purchase in flight ([`BuyPhase`]).
+    pub phase: BuyPhase,
     /// The price TDLib reported after a refused purchase ("Price change!").
     pub price_changed: Option<GiftPrice>,
     /// Bought for a craft slot: the gift lands there instead of a toast.
     pub for_craft: bool,
-    /// The bought gift's id once `giftResaleResultOk` arrives.
-    pub done: Option<String>,
-    /// The purchase in flight (0: none): only its answer applies here, not
-    /// one for a box closed before it came.
-    pub request: u64,
+}
+
+/// The purchase of a listing. `Sending` leaves on its own answer (the box
+/// goes on `giftResaleResultOk`, back to `Idle` for a refusal or a price
+/// change) or its error; only that answer applies here, not one for a box
+/// closed before it came.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum BuyPhase {
+    #[default]
+    Idle,
+    Sending {
+        request: u64,
+    },
 }
 
 impl ResaleBuy {
@@ -182,12 +196,20 @@ impl ResaleBuy {
             recipient,
             step: BuyStep::View,
             pay_in_grams,
-            sending: false,
+            phase: BuyPhase::Idle,
             price_changed: None,
             for_craft,
-            done: None,
-            request: 0,
         }
+    }
+
+    /// The purchase is out and unanswered.
+    pub fn sending(&self) -> bool {
+        matches!(self.phase, BuyPhase::Sending { .. })
+    }
+
+    /// `request` is the purchase this box sent.
+    pub fn waits_for(&self, request: u64) -> bool {
+        request != 0 && self.phase == (BuyPhase::Sending { request })
     }
 
     /// The price the buy sends.

@@ -1,7 +1,7 @@
 //! Connect driver: starting, joining, rejoining and leaving group calls.
 use super::*;
-use crate::state::ScreenShare;
 use crate::state::GroupCallRejoin;
+use crate::state::ScreenShare;
 
 impl<S: JsonSender> ConnectDriver<S> {
     /// Phase C3a / C2h: `createVideoChat` — start a voice chat on a

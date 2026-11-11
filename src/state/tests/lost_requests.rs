@@ -46,9 +46,8 @@ fn sweeping_a_shared_media_page_allows_the_next_page_request() {
 fn sweeping_an_in_chat_search_page_clears_its_loading_flag() {
     let mut session = ready_session();
     let chat = ChatId(5);
+    session.search.chat_search.open_for(chat);
     let generation = session.search.chat_search.generation;
-    session.search.chat_search.open = true;
-    session.search.chat_search.chat_id = Some(chat);
     session.search.chat_search.begin_more(MessageId(9));
     session.request_chat_search(RequestPurpose::SearchChatMessagesMore, chat, generation);
 
@@ -109,7 +108,10 @@ fn account_loss_resets_the_loading_flags_of_pending_lookups() {
         RequestPurpose::Payments(PaymentsPurpose::GetStarSubscriptions { append: false }),
         None,
     );
-    session.payments.star_subscriptions.begin_load(subscriptions);
+    session
+        .payments
+        .star_subscriptions
+        .begin_load(subscriptions);
     session.payments.hub.tx_loading = true;
     let history = session.request(
         RequestPurpose::Payments(PaymentsPurpose::GetStarTransactions { append: false }),

@@ -355,7 +355,8 @@ impl<S: JsonSender> ConnectDriver<S> {
         if self.session.requests.has_purpose(purpose) {
             return Ok(None);
         }
-        if !(self.session.search.search.recents && !self.session.search.search.chat_ids.is_empty())
+        if !(self.session.search.search.is_recents()
+            && !self.session.search.search.chat_ids.is_empty())
         {
             return Ok(None);
         }
@@ -379,7 +380,12 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        if self.session.chat_list.archive_chat_list_settings().is_some() {
+        if self
+            .session
+            .chat_list
+            .archive_chat_list_settings()
+            .is_some()
+        {
             return Ok(None);
         }
         self.reload_archive_chat_list_settings()

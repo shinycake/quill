@@ -210,8 +210,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     }
 
     fn fetch_call_history_page(&mut self) -> Result<RequestId, ConnectSendError> {
-        if self.session.calls.recent_calls_loading() || self.session.calls.recent_calls_clearing()
-        {
+        if self.session.calls.recent_calls_loading() || self.session.calls.recent_calls_clearing() {
             return Err(ConnectSendError::InvalidRequest);
         }
         let extra = self

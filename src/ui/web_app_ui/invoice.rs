@@ -21,10 +21,22 @@ use quill::payment_invoice::invoice_link_invoice;
 #[derive(Default, Debug, PartialEq, Eq)]
 pub(super) struct InvoiceWatch {
     slug: String,
+    attempt: Attempt,
+}
+
+/// How the last payment attempt of a watched checkout stands. `Sending`
+/// leaves on the next look that does not see the payment out: `Failed` (an
+/// error on the form), `Pending` (a verification step) or `Idle`; a new
+/// attempt starts it over.
+#[derive(Default, Debug, Clone, Copy, PartialEq, Eq)]
+enum Attempt {
+    /// No attempt yet, or one that ended without paying.
+    #[default]
+    Idle,
     /// A payment was being sent on the last look.
-    sending: bool,
-    failed: bool,
-    pending: bool,
+    Sending,
+    Failed,
+    Pending,
 }
 
 /// What the payment state shows right now.
@@ -56,25 +68,26 @@ impl InvoiceWatch {
             // A payment still being sent when the checkout closed (Esc, or
             // the 3-D Secure page taking over before the next look) may
             // still go through: that is pending, never cancelled.
-            return Some(if self.failed {
-                "failed"
-            } else if self.pending || self.sending || view.sending {
-                "pending"
-            } else {
-                "cancelled"
+            return Some(match self.attempt {
+                Attempt::Failed => "failed",
+                Attempt::Pending | Attempt::Sending => "pending",
+                Attempt::Idle if view.sending => "pending",
+                Attempt::Idle => "cancelled",
             });
         }
         if view.sending {
-            self.sending = true;
-            self.failed = false;
-            self.pending = false;
-        } else if self.sending {
+            self.attempt = Attempt::Sending;
+        } else if self.attempt == Attempt::Sending {
             // The attempt ended without paying: an error on the form means it
             // failed, a verification step means it is pending, and anything
             // else leaves it cancelled.
-            self.sending = false;
-            self.failed = view.note;
-            self.pending = view.verification && !view.note;
+            self.attempt = if view.note {
+                Attempt::Failed
+            } else if view.verification {
+                Attempt::Pending
+            } else {
+                Attempt::Idle
+            };
         }
         None
     }

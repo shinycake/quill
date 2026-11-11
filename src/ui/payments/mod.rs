@@ -30,7 +30,10 @@ impl QuillApp {
     /// fields from the form's `saved_order_info` (schema:4720) when present.
     pub(super) fn open_payment_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let mut dialog = PaymentDialog::new(window, cx);
-        if let Some(form) = self.session().and_then(|s| s.payments.checkout.form().cloned()) {
+        if let Some(form) = self
+            .session()
+            .and_then(|s| s.payments.checkout.form().cloned())
+        {
             dialog.prefill_from_form(&form, window, cx);
         }
         self.payments.dialog = Some(dialog);

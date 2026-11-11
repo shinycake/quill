@@ -7,12 +7,13 @@ impl Session {
     /// Open the calendar box for the open chat. `None` when no chat is open.
     pub fn open_history_calendar(&mut self, now: i64) -> Option<&HistoryCalendar> {
         let chat_id = self.open_chat?;
-        let media =
-            if self.search.chat_search.open && self.search.chat_search.chat_id == Some(chat_id) {
-                self.search.chat_search.media
-            } else {
-                SearchMediaKind::All
-            };
+        let media = if self.search.chat_search.is_open()
+            && self.search.chat_search.chat_id == Some(chat_id)
+        {
+            self.search.chat_search.media
+        } else {
+            SearchMediaKind::All
+        };
         let generation = self.next_calendar_generation();
         self.search.clear_date_jump_note();
         self.search.history_calendar = Some(HistoryCalendar::new(chat_id, media, now, generation));
@@ -195,7 +196,7 @@ impl Session {
 
     /// Open the "From:" picker (groups only; the caller checks).
     pub fn open_from_picker(&mut self) {
-        if self.search.chat_search.open && self.search.chat_search.from_picker.is_none() {
+        if self.search.chat_search.is_open() && self.search.chat_search.from_picker.is_none() {
             self.search.chat_search.from_picker = Some(FromPicker::default());
         }
     }

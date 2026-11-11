@@ -131,10 +131,9 @@ impl<S: JsonSender> ConnectDriver<S> {
                 .pending_conference
                 .as_ref()
                 .is_some_and(|pending| pending.request == extra),
-            OfferSend::Screen => calls
-                .active_group_call
-                .as_ref()
-                .is_some_and(|call| call.id == id && call.is_joined && call.screen_share.is_starting()),
+            OfferSend::Screen => calls.active_group_call.as_ref().is_some_and(|call| {
+                call.id == id && call.is_joined && call.screen_share.is_starting()
+            }),
         }
     }
 

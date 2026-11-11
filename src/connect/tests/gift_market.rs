@@ -224,7 +224,7 @@ fn resale_buy_sends_the_confirmed_price_and_handles_a_change() {
     );
     let buy = f.driver.session.payments.gift_market.buy.clone().unwrap();
     assert_eq!(buy.price(), Some(GiftPrice::Stars(1700)));
-    assert!(!buy.sending);
+    assert!(!buy.sending());
     f.driver
         .buy_gift_resale(GiftPrice::Stars(1700), "", false)
         .unwrap();
@@ -608,7 +608,7 @@ fn opening_the_resale_list_keeps_a_buy_that_is_out() {
         "refused while the buy is out"
     );
     let buy = f.driver.session.payments.gift_market.buy.clone();
-    assert!(buy.is_some_and(|buy| buy.sending), "the buy is still out");
+    assert!(buy.is_some_and(|buy| buy.sending()), "the buy is still out");
     f.answer(
         "sendResoldGift",
         json!({"@type": "giftResaleResultOk", "received_gift_id": "rx"}),

@@ -31,7 +31,9 @@ impl QuillApp {
     pub(super) fn payment_dialog_visible(&self) -> bool {
         self.payments.dialog.is_some()
             && self.session().is_some_and(|s| {
-                s.payments.checkout.form().is_some() || s.payments.checkout.is_loading() || s.payments.note.is_some()
+                s.payments.checkout.form().is_some()
+                    || s.payments.checkout.is_loading()
+                    || s.payments.note.is_some()
             })
     }
 

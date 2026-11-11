@@ -125,7 +125,13 @@ fn a_stars_form_is_paid_without_credentials_and_only_when_asked() {
     driver
         .ingest(copy_and_parse(&stars_form(&request["@extra"]), &seq, &sink).unwrap())
         .unwrap();
-    let form = driver.session.payments.checkout.form().cloned().expect("form");
+    let form = driver
+        .session
+        .payments
+        .checkout
+        .form()
+        .cloned()
+        .expect("form");
     // Getting the form pays nothing.
     assert!(
         recorder
@@ -248,7 +254,13 @@ fn a_new_card_pays_with_the_provider_token_and_may_need_verification() {
     driver
         .ingest(copy_and_parse(&stripe_form(&request["@extra"]), &seq, &sink).unwrap())
         .unwrap();
-    let form = driver.session.payments.checkout.form().cloned().expect("form");
+    let form = driver
+        .session
+        .payments
+        .checkout
+        .form()
+        .cloned()
+        .expect("form");
     let PaymentFormTypeData::Regular(regular) = &form.form_type else {
         panic!("regular form");
     };

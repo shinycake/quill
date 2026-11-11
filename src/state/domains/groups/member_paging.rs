@@ -57,7 +57,10 @@ impl MemberPaging {
     /// waited for; an older query's page is dropped.
     pub fn take_more(&mut self, request: RequestId) -> bool {
         match self.more {
-            MemberMore::Loading { request: asked, base } if asked == request => {
+            MemberMore::Loading {
+                request: asked,
+                base,
+            } if asked == request => {
                 self.more = MemberMore::Idle;
                 base == self.first_id()
             }

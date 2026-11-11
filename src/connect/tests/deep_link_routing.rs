@@ -31,7 +31,10 @@ fn a_new_launch_link_replaces_a_finished_flow_but_not_one_in_flight() {
     let mut driver = ready_driver(&recorder, prepared, &sink, &seq);
     let _keep = dir;
 
-    driver.session.chats_state.enter_deep_link_stage(DeepLinkState::ShowText("old".into()));
+    driver
+        .session
+        .chats_state
+        .enter_deep_link_stage(DeepLinkState::ShowText("old".into()));
     let sent = driver.request_deep_link_info("https://t.me/durov").unwrap();
     assert!(sent.is_some(), "an unconsumed ShowText does not block");
     assert!(matches!(
@@ -659,7 +662,14 @@ fn a_flow_keeps_its_origin_when_another_link_arrives() {
         .request_deep_link_info_from("https://t.me/agentpick", true)
         .unwrap()
         .unwrap();
-    assert!(driver.session.chats_state.deep_link.as_ref().is_some_and(|flow| flow.from_agent));
+    assert!(
+        driver
+            .session
+            .chats_state
+            .deep_link
+            .as_ref()
+            .is_some_and(|flow| flow.from_agent)
+    );
     // The user's link waits: the flow in progress wins and keeps its origin.
     assert_eq!(
         driver
@@ -667,7 +677,14 @@ fn a_flow_keeps_its_origin_when_another_link_arrives() {
             .unwrap(),
         None
     );
-    assert!(driver.session.chats_state.deep_link.as_ref().is_some_and(|flow| flow.from_agent));
+    assert!(
+        driver
+            .session
+            .chats_state
+            .deep_link
+            .as_ref()
+            .is_some_and(|flow| flow.from_agent)
+    );
     feed(
         &mut driver,
         &seq,
@@ -679,7 +696,14 @@ fn a_flow_keeps_its_origin_when_another_link_arrives() {
         driver.session.chats_state.deep_link_stage().cloned(),
         Some(DeepLinkState::ChatReady { chat_id, .. }) if chat_id.0 == 77
     ));
-    assert!(driver.session.chats_state.deep_link.as_ref().is_some_and(|flow| flow.from_agent));
+    assert!(
+        driver
+            .session
+            .chats_state
+            .deep_link
+            .as_ref()
+            .is_some_and(|flow| flow.from_agent)
+    );
 
     // A fresh flow started outside an injected step is the user's.
     driver.session.chats_state.deep_link = None;
@@ -691,6 +715,13 @@ fn a_flow_keeps_its_origin_when_another_link_arrives() {
             story_id: None,
         })
         .unwrap();
-    assert!(!driver.session.chats_state.deep_link.as_ref().is_some_and(|flow| flow.from_agent));
+    assert!(
+        !driver
+            .session
+            .chats_state
+            .deep_link
+            .as_ref()
+            .is_some_and(|flow| flow.from_agent)
+    );
     std::fs::remove_dir_all(dir).unwrap();
 }

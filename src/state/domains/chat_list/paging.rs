@@ -80,11 +80,17 @@ mod tests {
         let now = Instant::now();
         let mut paging = ListPaging::More;
         paging.page_failed(500, now);
-        assert_eq!(paging.retry().map(|(_, wait)| wait), Some(Duration::from_secs(1)));
+        assert_eq!(
+            paging.retry().map(|(_, wait)| wait),
+            Some(Duration::from_secs(1))
+        );
         assert!(!paging.retry_due(now));
         assert!(paging.retry_due(now + Duration::from_secs(1)));
         paging.page_failed(500, now);
-        assert_eq!(paging.retry().map(|(_, wait)| wait), Some(Duration::from_secs(2)));
+        assert_eq!(
+            paging.retry().map(|(_, wait)| wait),
+            Some(Duration::from_secs(2))
+        );
         paging.page_ok();
         assert_eq!(paging, ListPaging::More);
     }
@@ -109,6 +115,9 @@ mod tests {
         for _ in 0..20 {
             paging.page_failed(500, now);
         }
-        assert_eq!(paging.retry().map(|(_, wait)| wait), Some(Duration::from_secs(300)));
+        assert_eq!(
+            paging.retry().map(|(_, wait)| wait),
+            Some(Duration::from_secs(300))
+        );
     }
 }

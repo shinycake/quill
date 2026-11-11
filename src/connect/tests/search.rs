@@ -172,7 +172,7 @@ fn driver_search_happy_empty_error_and_select() {
         )
         .unwrap();
     assert_eq!(driver.session.search.search.status(), SearchStatus::Ready);
-    assert!(driver.session.search.search.recents);
+    assert!(driver.session.search.search.is_recents());
 
     let empty = commit_typed_search(&mut driver, "zzz");
     let SearchFlight::Query(empty_chats, empty_messages, empty_public) = empty else {
@@ -369,7 +369,7 @@ fn driver_chat_search_debounce_jump_empty_and_close() {
     let seq = AtomicU64::new(0);
     seed_ready_alice(&mut driver, &seq, &dyn_sink);
     assert!(driver.open_chat_search().unwrap());
-    assert!(driver.session.search.chat_search.open);
+    assert!(driver.session.search.chat_search.is_open());
 
     let t1 = match driver.set_chat_search_query("h").unwrap() {
         ChatSearchQueryOutcome::Debounced { token } => token,

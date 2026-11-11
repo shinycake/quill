@@ -476,7 +476,7 @@ fn a_buy_in_flight_is_not_replaced_by_another_resale_box() {
         is_channel: false,
     };
     let mut buy = crate::gift_market::ResaleBuy::new(listing, recipient, false);
-    buy.sending = true;
+    buy.phase = crate::gift_market::BuyPhase::Sending { request: 7 };
     market.buy = Some(buy);
     assert!(t.driver.open_gift_resale(5, "Pepe").is_err());
     assert!(t.driver.start_gift_resale_buy("x", None, false).is_err());
@@ -487,7 +487,7 @@ fn a_buy_in_flight_is_not_replaced_by_another_resale_box() {
             .gift_market
             .buy
             .as_ref()
-            .is_some_and(|b| b.sending),
+            .is_some_and(|b| b.sending()),
         "the purchase keeps its box"
     );
 }
@@ -812,10 +812,14 @@ fn a_stale_subscriptions_refetch_waits_for_an_appended_page_and_is_kept_when_ref
         "",
         "a first page"
     );
-    assert!(t.driver.session.payments.star_subscriptions.is_stale());
+    assert!(
+        t.driver.session.payments.star_subscriptions.is_loading(),
+        "the refetch is the page waited for now"
+    );
     // The refetch is cleared by its own answer.
     t.answer("getStarSubscriptions", subs(""));
-    assert!(!t.driver.session.payments.star_subscriptions.is_stale());
+    let list = &t.driver.session.payments.star_subscriptions;
+    assert!(!list.is_stale() && !list.is_loading());
     // A refetch that is refused shows its error and is not asked every frame.
     t.driver.session.payments.star_subscriptions.edit_done();
     t.sender.refuse(&["getStarSubscriptions"]);

@@ -6,8 +6,8 @@ use crate::calls::engine::{
 use crate::calls::tile_pin::TileKey;
 use crate::ids::RequestId;
 use crate::locks::LockExt;
-use crate::state::{CallsPurpose, ScreenShare};
 use crate::state::RequestPurpose;
+use crate::state::{CallsPurpose, ScreenShare};
 use crate::telegram::envelope::{ChatKind, MessageSender};
 use crate::telegram::requests::{
     GroupCallJoinParams, InputGroupCallRef, MessageSenderRef, ban_group_call_participants,
@@ -269,14 +269,14 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.sync_incoming_video(group_call_id);
         // Finish the presentation handshake once the
         // `startGroupCallScreenSharing` answer is stored.
-        let share_answer = self
-            .session
-            .calls
-            .group_call(group_call_id)
-            .and_then(|call| match &call.screen_share {
-                ScreenShare::Starting { answer } => answer.clone(),
-                _ => None,
-            });
+        let share_answer =
+            self.session
+                .calls
+                .group_call(group_call_id)
+                .and_then(|call| match &call.screen_share {
+                    ScreenShare::Starting { answer } => answer.clone(),
+                    _ => None,
+                });
         if let Some(answer) = share_answer
             && !answer.is_empty()
         {

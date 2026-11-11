@@ -299,7 +299,9 @@ impl QuillApp {
                 body = body.child(div().text_sm().child(err.to_string()));
             }
             if let Some(subs) = session.payments.star_subscriptions.data() {
-                if subs.subscriptions.is_empty() && !session.payments.star_subscriptions.is_loading() {
+                if subs.subscriptions.is_empty()
+                    && !session.payments.star_subscriptions.is_loading()
+                {
                     body = body.child(
                         div()
                             .text_sm()
@@ -323,7 +325,8 @@ impl QuillApp {
                         cx,
                     ));
                 }
-                if !subs.next_offset.is_empty() && session.payments.star_subscriptions.is_loading() {
+                if !subs.next_offset.is_empty() && session.payments.star_subscriptions.is_loading()
+                {
                     body = body.child(loading_row("subs-loading", cx));
                 }
             }

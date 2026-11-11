@@ -239,7 +239,9 @@ impl QuillApp {
                 }
                 // Chats still loading get their windows when they arrive;
                 // once the list is complete the rest is gone for good.
-                let exhausted = self.session().is_some_and(|s| s.chat_list.main_paging.is_exhausted());
+                let exhausted = self
+                    .session()
+                    .is_some_and(|s| s.chat_list.main_paging.is_exhausted());
                 self.windows.restore = if waiting.is_empty() || exhausted {
                     Restore::Done
                 } else {

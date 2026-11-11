@@ -5,11 +5,11 @@
 //! called from a button that names the price or the gifts.
 use super::*;
 use crate::gift_market::{
-    AuctionFetch, AuctionFollow, CraftGift, CraftRun, CraftSession, GiftMarketPurpose, PageLoad,
-    ResaleBuy, ResaleFilter, ResaleSearch,
+    AuctionFetch, AuctionFollow, BuyPhase, CraftGift, CraftRun, CraftSession, GiftMarketPurpose,
+    PageLoad, ResaleBuy, ResaleFilter, ResaleSearch,
 };
-use crate::lang::{keys, tr};
 use crate::ids::RequestId;
+use crate::lang::{keys, tr};
 use crate::local_time::now_unix;
 use crate::marketplace::GiftPrice;
 use crate::state::{PaymentsPurpose, RequestPurpose};
@@ -53,14 +53,14 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         let market = &mut self.session.payments.gift_market;
         // A purchase that has gone out keeps its box until it answers.
-        if market.buy.as_ref().is_some_and(|buy| buy.sending) {
+        if market.buy.as_ref().is_some_and(|buy| buy.sending()) {
             return Err(ConnectSendError::InvalidRequest);
         }
         market.remember_title(gift_id, title);
         market.resale = Some(ResaleSearch::new(gift_id, ResaleFilter::default(), false));
         // A `sendResoldGift` that is out keeps its buy: its answer
         // belongs to it, and the new list does not change what it paid.
-        if !market.buy.as_ref().is_some_and(|buy| buy.sending) {
+        if !market.buy.as_ref().is_some_and(|buy| buy.sending()) {
             market.buy = None;
         }
         self.search_resale_page(false, false)
@@ -156,7 +156,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         let market = &self.session.payments.gift_market;
         // A purchase that has gone out keeps its box until it answers: a
         // second one would not be marked sending and could be paid twice.
-        if market.buy.as_ref().is_some_and(|buy| buy.sending) {
+        if market.buy.as_ref().is_some_and(|buy| buy.sending()) {
             return Err(ConnectSendError::InvalidRequest);
         }
         let listing = market
@@ -202,8 +202,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .ok_or(ConnectSendError::InvalidRequest)?;
         let limit = self.session.payments.gift_text_length_max;
         let text = text.trim();
-        if buy.sending
-            || buy.done.is_some()
+        if buy.sending()
             || buy.price() != Some(price)
             || !price.valid()
             || (!text.is_empty() && limit.is_some_and(|max| text.chars().count() > max))
@@ -218,12 +217,11 @@ impl<S: JsonSender> ConnectDriver<S> {
                 extra, &name, owner, price, text, hide_name,
             )
         });
-        if let Some(buy) = self.session.payments.gift_market.buy.as_mut() {
-            buy.sending = result.is_ok();
-            if let Ok(extra) = &result {
-                buy.price_changed = None;
-                buy.request = extra.0;
-            }
+        if let Ok(extra) = &result
+            && let Some(buy) = self.session.payments.gift_market.buy.as_mut()
+        {
+            buy.price_changed = None;
+            buy.phase = BuyPhase::Sending { request: extra.0 };
         }
         result
     }
@@ -397,7 +395,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         // A purchase in flight keeps its box until it answers. A craft's
         // answer belongs to the box that sent it (`craft_request`), so a new
         // craft box does not take it.
-        if market.buy.as_ref().is_some_and(|buy| buy.sending) {
+        if market.buy.as_ref().is_some_and(|buy| buy.sending()) {
             return Err(ConnectSendError::InvalidRequest);
         }
         // A craft in flight is not orphaned by a new session: its outcome

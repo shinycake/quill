@@ -394,7 +394,7 @@ fn search_recently_found_chats_empty_query() {
         r#"{"@type":"updateChatPosition","chat_id":11,"position":{"@type":"chatPosition","list":{"@type":"chatListMain"},"order":"4","is_pinned":false}}"#,
     );
     let search_gen = session.search.search.begin_recents();
-    assert!(session.search.search.recents);
+    assert!(session.search.search.is_recents());
     let extra = session.request_search(RequestPurpose::SearchRecentlyFoundChats, search_gen);
     apply_json(
         &mut session,
@@ -420,7 +420,7 @@ fn search_recently_found_chats_empty_query() {
         ),
     );
     assert_eq!(session.search.search.status(), SearchStatus::Idle);
-    assert!(session.search.search.recents);
+    assert!(session.search.search.is_recents());
 }
 
 #[test]

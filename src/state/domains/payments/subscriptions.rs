@@ -19,7 +19,10 @@ pub enum SubsLoad {
     /// The page is out as `request`; only its answer or error lands (a
     /// stale refetch and an appended page never mix). `again`: an edit
     /// landed while it was out, so its answer is already old.
-    Loading { request: RequestId, again: bool },
+    Loading {
+        request: RequestId,
+        again: bool,
+    },
     Failed(String),
 }
 
@@ -28,7 +31,9 @@ pub enum SubsLoad {
 pub enum SubsEdit {
     #[default]
     Idle,
-    Editing { request: RequestId },
+    Editing {
+        request: RequestId,
+    },
     /// The last edit failed or did not leave; the line is drawn in the
     /// dialog until the next edit.
     Failed(String),
@@ -53,7 +58,9 @@ impl StarSubscriptionsList {
 
     /// Pagination offset of the next page (empty = no more pages).
     pub fn offset(&self) -> &str {
-        self.data.as_ref().map_or("", |data| data.next_offset.as_str())
+        self.data
+            .as_ref()
+            .map_or("", |data| data.next_offset.as_str())
     }
 
     pub fn is_loading(&self) -> bool {
@@ -99,13 +106,21 @@ impl StarSubscriptionsList {
     /// `request` answered with `page`; a follow-up page appends, a fresh
     /// fetch replaces. Dropped unless it is the page in flight.
     pub fn page_answered(&mut self, request: RequestId, append: bool, page: StarSubscriptionsData) {
-        let SubsLoad::Loading { request: asked, again } = self.load else {
+        let SubsLoad::Loading {
+            request: asked,
+            again,
+        } = self.load
+        else {
             return;
         };
         if asked != request {
             return;
         }
-        self.load = if again { SubsLoad::Stale } else { SubsLoad::Idle };
+        self.load = if again {
+            SubsLoad::Stale
+        } else {
+            SubsLoad::Idle
+        };
         match self.data.as_mut() {
             Some(existing) if append => {
                 existing.star_amount = page.star_amount;
@@ -189,7 +204,10 @@ mod tests {
         let mut list = StarSubscriptionsList::default();
         list.begin_load(RequestId(1));
         list.edit_done();
-        assert!(list.is_loading(), "the page in flight stays the one waited for");
+        assert!(
+            list.is_loading(),
+            "the page in flight stays the one waited for"
+        );
         list.page_answered(RequestId(1), false, page(""));
         assert!(list.is_stale(), "the refetch is still due");
         assert!(list.data().is_some());
@@ -205,7 +223,10 @@ mod tests {
         assert_eq!(list.error(), Some("no"));
         list.page_answered(RequestId(1), false, page("more"));
         assert_eq!(list.offset(), "more");
-        assert!(list.error().is_none(), "an answer ends the old failure line");
+        assert!(
+            list.error().is_none(),
+            "an answer ends the old failure line"
+        );
     }
 
     #[test]
@@ -218,6 +239,9 @@ mod tests {
         assert!(list.data().is_none());
         list.page_failed(RequestId(2), "bad".into());
         assert_eq!(list.error(), Some("bad"));
-        assert!(!list.is_stale(), "a failed list is not asked again by itself");
+        assert!(
+            !list.is_stale(),
+            "a failed list is not asked again by itself"
+        );
     }
 }

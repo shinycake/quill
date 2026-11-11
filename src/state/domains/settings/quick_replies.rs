@@ -4,8 +4,8 @@ use crate::quick_replies::{
     MESSAGES_MAX, QuickRepliesUpdate, QuickReplyMessage, QuickReplyShortcut, SHORTCUTS_MAX,
     count_label,
 };
-use crate::state::*;
 use crate::state::fetch::Fetch;
+use crate::state::*;
 use std::collections::HashMap;
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -159,9 +159,7 @@ impl Session {
                 if let Some(shortcut) = state.shortcuts.get_mut(&shortcut_id) {
                     shortcut.message_count = messages.len() as i32;
                 }
-                state
-                    .messages
-                    .insert(shortcut_id, Fetch::Ready(messages));
+                state.messages.insert(shortcut_id, Fetch::Ready(messages));
             }
         }
     }

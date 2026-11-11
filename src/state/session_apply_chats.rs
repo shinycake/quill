@@ -150,10 +150,11 @@ impl Session {
             }) = self.chats_state.deep_link_stage()
             && *slot_generation == generation
         {
-            self.chats_state.enter_deep_link_stage(DeepLinkState::ChatReady {
-                chat_id,
-                action: action.clone(),
-            });
+            self.chats_state
+                .enter_deep_link_stage(DeepLinkState::ChatReady {
+                    chat_id,
+                    action: action.clone(),
+                });
         }
         if let ChatKind::Supergroup { supergroup_id, .. } = kind {
             self.groups

@@ -21,10 +21,9 @@ use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::gift_market::{
-    CRAFT_SLOTS, CraftGate, CraftGift, CraftResult, CraftRun, CraftSession, GiftMarketState, PageLoad,
-    ResaleFilter,
-    ResaleSearch, attribute_chances, craft_colors, craft_failed_text, format_percent,
-    shows_craftable_link,
+    CRAFT_SLOTS, CraftGate, CraftGift, CraftResult, CraftRun, CraftSession, GiftMarketState,
+    PageLoad, ResaleFilter, ResaleSearch, attribute_chances, craft_colors, craft_failed_text,
+    format_percent, shows_craftable_link,
 };
 use quill::lang::{keys, tr, tr_with};
 use quill::local_time::{civil_local, hhmm, month_name, now_unix};

@@ -74,9 +74,6 @@ HistoryState::newer_failed
 HistoryUi::anchor_pending
 InlineMembersUi::admins_asked
 InstallResult::failed
-InvoiceWatch::failed
-InvoiceWatch::pending
-InvoiceWatch::sending
 JoinedLines::started
 LanguageLinkLookup::loading
 LanguageLinkLookup::loading+error
@@ -139,7 +136,6 @@ PullMachine::expand_pending
 Queued::failed
 ReceivedGift::is_saved
 Relay::started
-ResaleBuy::sending
 RowForum::loaded
 RowMenuFacts::is_saved_messages
 RowState::pending
@@ -181,10 +177,7 @@ StyleExamples::loading
 Tempo::done
 Tempo::inner_done
 ThreadView::reading_started
-ThreadWindow::loaded_complete
 TopPerson::saved_messages
-TopicHistory::loaded_complete
-TopicHistory::newer_failed
 TransportMachine::loop_sent
 UiClip::failed
 UpdatePill::downloading

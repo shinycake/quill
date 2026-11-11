@@ -146,13 +146,13 @@ impl QuillApp {
         match popped {
             Some(MarketBox::Buy) if !still(&MarketBox::Buy) => {
                 if let Some(market) = self.gift_market_mut() {
-                    market.buy.take_if(|buy| !buy.sending);
+                    market.buy.take_if(|buy| !buy.sending());
                 }
             }
             Some(MarketBox::Resale) if !still(&MarketBox::Resale) => {
                 if let Some(market) = self.gift_market_mut() {
                     market.resale = None;
-                    market.buy.take_if(|buy| !buy.sending);
+                    market.buy.take_if(|buy| !buy.sending());
                 }
             }
             _ => {}

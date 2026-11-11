@@ -346,7 +346,11 @@ impl<S: JsonSender> ConnectDriver<S> {
             Ok(()) => Ok(Some(extra)),
             Err(err) => {
                 self.session.requests.take(extra);
-                self.session.chats_state.enter_deep_link_stage(DeepLinkState::ShowText("Couldn't reach Telegram.".into()));
+                self.session
+                    .chats_state
+                    .enter_deep_link_stage(DeepLinkState::ShowText(
+                        "Couldn't reach Telegram.".into(),
+                    ));
                 Err(err)
             }
         }
@@ -388,7 +392,11 @@ impl<S: JsonSender> ConnectDriver<S> {
             Ok(()) => Ok(Some(extra)),
             Err(err) => {
                 self.session.requests.take(extra);
-                self.session.chats_state.enter_deep_link_stage(DeepLinkState::ShowText("Couldn't reach Telegram.".into()));
+                self.session
+                    .chats_state
+                    .enter_deep_link_stage(DeepLinkState::ShowText(
+                        "Couldn't reach Telegram.".into(),
+                    ));
                 Err(err)
             }
         }
@@ -469,7 +477,11 @@ impl<S: JsonSender> ConnectDriver<S> {
             Ok(()) => Ok(Some(extra)),
             Err(err) => {
                 self.session.requests.take(extra);
-                self.session.chats_state.enter_deep_link_stage(DeepLinkState::ShowText("Couldn't reach Telegram.".into()));
+                self.session
+                    .chats_state
+                    .enter_deep_link_stage(DeepLinkState::ShowText(
+                        "Couldn't reach Telegram.".into(),
+                    ));
                 Err(err)
             }
         }
