@@ -83,30 +83,6 @@ impl Showing {
     }
 }
 
-/// The wake-up scheduled for the visible toast: none, or a deadline with
-/// the timer task that redraws at it. The task lives here, so a new
-/// deadline, a click, a cleared note or the queue going away drops it.
-#[derive(Default)]
-enum Wake {
-    #[default]
-    Idle,
-    /// A wake-up is wanted at `deadline`; `timer` is the task waiting for
-    /// it (`None` between [`ToastQueue::rewake`] and [`ToastQueue::arm`]).
-    Armed {
-        deadline: Instant,
-        timer: Option<Task<()>>,
-    },
-}
-
-impl Wake {
-    fn deadline(&self) -> Option<Instant> {
-        match self {
-            Self::Idle => None,
-            Self::Armed { deadline, .. } => Some(*deadline),
-        }
-    }
-}
-
 /// The current status note, the toasts it feeds and the wake-up scheduled
 /// for the visible one: one value, so a note, its toast and its timer end
 /// together.
