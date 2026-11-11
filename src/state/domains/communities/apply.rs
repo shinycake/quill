@@ -54,7 +54,10 @@ impl Session {
                 if let Some((CommunitiesPurpose::GetMemberChats { member }, community_id)) =
                     communities_purpose(pending)
                 {
-                    if let Some(fetch) = self.communities.member_chats.get_mut(&(community_id, member))
+                    if let Some(fetch) = self
+                        .communities
+                        .member_chats
+                        .get_mut(&(community_id, member))
                     {
                         fetch.answered(asked, chats);
                     }
@@ -312,7 +315,10 @@ impl Session {
                 return;
             }
             CommunitiesPurpose::GetMemberChats { member } => {
-                if let Some(fetch) = self.communities.member_chats.get_mut(&(community_id, member))
+                if let Some(fetch) = self
+                    .communities
+                    .member_chats
+                    .get_mut(&(community_id, member))
                 {
                     fetch.failed(asked, error_reason(err), true);
                 }

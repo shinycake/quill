@@ -465,6 +465,10 @@ fn a_refused_speaking_send_is_offered_again_on_the_next_poll() {
     sender.refuse(false);
     *level.0.lock().unwrap() = Some(1.3);
     driver.pump_call_audio(at(184)).unwrap();
-    assert_eq!(speaking_sent(), 1, "the edge goes out once the sender takes it");
+    assert_eq!(
+        speaking_sent(),
+        1,
+        "the edge goes out once the sender takes it"
+    );
     std::fs::remove_dir_all(dir).ok();
 }

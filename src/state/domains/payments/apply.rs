@@ -35,11 +35,11 @@ impl Session {
                 // answer to an earlier checkout's fetch is not this one's.
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::GetPaymentForm)
                     && extra.is_some()
+                    && let CheckoutForm::Loading { invoice, .. } = &self.payments.checkout
                     && self.payments.checkout.waits_for(extra)
                 {
-                    self.payments.checkout = CheckoutForm::Ready(form);
-                    self.payments.order_info = OrderInfoStage::Unvalidated;
-                    self.payments.shipping_id = None;
+                    let invoice = invoice.clone();
+                    self.payments.checkout = CheckoutForm::Ready(Checkout::new(form, invoice));
                     self.payments.note = None;
                 }
             }
@@ -50,13 +50,13 @@ impl Session {
                 // is not this one's.
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::ValidateOrderInfo)
                     && extra.is_some()
-                    && let OrderInfoStage::Validating { request, order } = &self.payments.order_info
+                    && let Some(checkout) = self.payments.checkout.checkout_mut()
+                    && let OrderInfoStage::Validating { request, order } = &checkout.order_info
                     && Some(*request) == extra
                 {
                     let order = order.clone();
-                    self.payments.shipping_id =
-                        validated.shipping_options.first().map(|o| o.id.clone());
-                    self.payments.order_info = OrderInfoStage::Validated {
+                    checkout.shipping_id = validated.shipping_options.first().map(|o| o.id.clone());
+                    checkout.order_info = OrderInfoStage::Validated {
                         order,
                         info: validated,
                     };

@@ -70,7 +70,12 @@ fn an_invoice_link_asks_for_its_form_by_name() {
         json!({"@type": "inputInvoiceName", "name": "shop_1"})
     );
     assert_eq!(
-        driver.session.payments.request.as_ref().map(|r| &r.invoice),
+        driver
+            .session
+            .payments
+            .checkout
+            .request()
+            .map(|r| &r.invoice),
         Some(&invoice)
     );
 }
@@ -107,7 +112,7 @@ fn a_message_invoice_still_needs_a_real_message() {
         driver.send_payment_form_request(invoice),
         Err(ConnectSendError::InvalidRequest)
     );
-    assert!(driver.session.payments.request.is_none());
+    assert!(driver.session.payments.checkout.request().is_none());
     assert!(
         recorder
             .snapshot()
@@ -318,4 +323,36 @@ fn a_new_card_pays_with_the_provider_token_and_may_need_verification() {
         Some("https://hooks.stripe.com/3d_secure/x")
     );
     assert!(!driver.session.payments.checkout.is_paid());
+}
+
+/// 02-092: a new form replaces the open checkout whole (its order info and
+/// shipping choice go with it), and is refused while a payment waits for
+/// its verification step.
+#[test]
+fn a_new_form_replaces_the_checkout_and_waits_out_a_verification() {
+    use crate::state::{CheckoutForm, OrderInfoStage};
+    let (mut driver, _recorder, _sink, _seq) = driver_parts();
+    driver.session.payments.checkout = CheckoutForm::stub(InputInvoice::Name("old".into()));
+    if let Some(checkout) = driver.session.payments.checkout.checkout_mut() {
+        checkout.shipping_id = Some("ship".into());
+        checkout.order_info = OrderInfoStage::Unvalidated;
+    }
+    driver
+        .send_payment_form_request(InputInvoice::Name("new".into()))
+        .unwrap();
+    let checkout = &driver.session.payments.checkout;
+    assert!(checkout.is_loading());
+    assert_eq!(checkout.shipping_id(), None, "the old choice is gone");
+    assert_eq!(
+        checkout.request().map(|r| &r.invoice),
+        Some(&InputInvoice::Name("new".into()))
+    );
+    driver.session.payments.checkout = CheckoutForm::stub(InputInvoice::Name("old".into()));
+    driver.session.payments.checkout.mark_verifying();
+    assert!(
+        driver
+            .send_payment_form_request(InputInvoice::Name("new".into()))
+            .is_err()
+    );
+    assert!(driver.session.payments.checkout.is_verifying());
 }

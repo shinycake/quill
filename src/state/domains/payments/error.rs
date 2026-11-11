@@ -29,12 +29,13 @@ impl Session {
             }
             Some(RequestPurpose::ValidateOrderInfo) => {
                 if extra.is_some()
+                    && let Some(checkout) = self.payments.checkout.checkout_mut()
                     && matches!(
-                        &self.payments.order_info,
+                        &checkout.order_info,
                         OrderInfoStage::Validating { request, .. } if Some(*request) == extra
                     )
                 {
-                    self.payments.order_info = OrderInfoStage::Unvalidated;
+                    checkout.order_info = OrderInfoStage::Unvalidated;
                     self.payments.note = Some(crate::lang::tr_with(
                         crate::lang::keys::Q_MONEY_PAYMENT_FAILED_REASON,
                         &[("reason", &error_reason(err))],

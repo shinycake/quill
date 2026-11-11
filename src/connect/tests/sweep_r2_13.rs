@@ -2,8 +2,8 @@
 //! refused Join reaches the caller, and answers act only for the request
 //! that asked.
 use super::sweep_s3_payments_1::Flaky;
-use crate::earn::*;
 use crate::connect::JsonSender;
+use crate::earn::*;
 use serde_json::json;
 
 const CHANNEL: i64 = -100_500;
@@ -21,7 +21,10 @@ fn a_refused_connected_list_does_not_strand_the_found_list() {
     assert!(t.driver.open_starref_join(EarnPeer::Chat(CHANNEL)).is_err());
     assert_eq!(t.sender.count("searchAffiliatePrograms"), 1);
     let join = t.driver.session.payments.earn.join.as_ref().unwrap();
-    assert!(matches!(join.mine.load, PageLoad::Failed { .. }), "Retry shows for My Programs");
+    assert!(
+        matches!(join.mine.load, PageLoad::Failed { .. }),
+        "Retry shows for My Programs"
+    );
     assert!(join.found.load.is_loading());
 }
 
@@ -107,7 +110,10 @@ fn a_failed_trending_page_is_asked_again_at_its_own_offset() {
     );
     t.sender.refuse(&["getTrendingStickerSets"]);
     assert!(t.driver.more_trending_emoji_packs().is_err());
-    assert_eq!(t.driver.session.stickers.emoji.trending.next_page(), Some(2));
+    assert_eq!(
+        t.driver.session.stickers.emoji.trending.next_page(),
+        Some(2)
+    );
     assert!(t.driver.session.stickers.emoji.trending.error().is_some());
     t.sender.refuse(&[]);
     t.driver.more_trending_emoji_packs().unwrap();
@@ -193,7 +199,14 @@ fn a_refused_craft_candidates_send_does_not_strand_the_market_list() {
     let primary = crate::gift_market::CraftGift::parse_received(&received(1)).unwrap();
     t.driver.open_gift_craft(primary).unwrap();
     assert_eq!(t.sender.count("searchGiftsForResale"), 1);
-    let craft = t.driver.session.payments.gift_market.craft.as_ref().unwrap();
+    let craft = t
+        .driver
+        .session
+        .payments
+        .gift_market
+        .craft
+        .as_ref()
+        .unwrap();
     assert!(craft.candidates_load.error().is_some());
     assert!(craft.market.load.error().is_none());
 }
@@ -224,8 +237,10 @@ fn a_refused_auction_close_keeps_following_until_it_goes_out() {
 #[test]
 fn a_refused_giveaway_prices_send_fails_the_list() {
     let mut t = Flaky::new();
-    t.sender
-        .refuse(&["getPremiumGiveawayPaymentOptions", "getStarGiveawayPaymentOptions"]);
+    t.sender.refuse(&[
+        "getPremiumGiveawayPaymentOptions",
+        "getStarGiveawayPaymentOptions",
+    ]);
     assert!(t.driver.request_giveaway_options(-100).is_err());
     let options = &t.driver.session.payments.giveaway.options;
     assert!(options.premium.error().is_some());
@@ -262,7 +277,11 @@ fn a_refused_language_switch_points_tdlib_back_at_the_shown_pack() {
         .filter(|v| v["name"] == "language_pack_id")
         .map(|v| v["value"]["value"].as_str().unwrap_or_default().to_string())
         .collect();
-    assert_eq!(options, ["de", "en"], "the new pack, then back to the shown one");
+    assert_eq!(
+        options,
+        ["de", "en"],
+        "the new pack, then back to the shown one"
+    );
 }
 
 /// 02-073: a gift code check that could not be sent keeps the box showing
@@ -301,7 +320,15 @@ fn a_refused_preview_download_is_asked_again_for_the_set_view() {
     let mut t = Flaky::new();
     let extra = t.driver.view_sticker_set(77).unwrap();
     t.feed(sticker_set_json(&extra.as_extra().into(), &[1, 2]));
-    let files = |t: &Flaky| match &t.driver.session.stickers.sticker_set_view.as_ref().unwrap().stage {
+    let files = |t: &Flaky| match &t
+        .driver
+        .session
+        .stickers
+        .sticker_set_view
+        .as_ref()
+        .unwrap()
+        .stage
+    {
         StickerSetViewStage::Ready { files, .. } => *files,
         other => panic!("not ready: {other:?}"),
     };
@@ -364,5 +391,12 @@ fn a_refused_paid_send_does_not_trust_the_price() {
     assert!(!trust.is_trusted(600, 25), "the price was never paid");
     t.sender.refuse(&[]);
     t.driver.release_paid_send(true).unwrap();
-    assert!(t.driver.session.payments.paid_messages.trust.is_trusted(600, 25));
+    assert!(
+        t.driver
+            .session
+            .payments
+            .paid_messages
+            .trust
+            .is_trusted(600, 25)
+    );
 }

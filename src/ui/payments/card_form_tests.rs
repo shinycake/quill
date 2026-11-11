@@ -83,7 +83,7 @@ fn open_checkout(
     app.update_in(&mut vcx, |app, window, cx| {
         if let Some(session) = app.demo_session.as_mut() {
             session.payments.checkout =
-                quill::state::CheckoutForm::Ready(stripe_checkout(can_save, need_password));
+                quill::state::CheckoutForm::demo(stripe_checkout(can_save, need_password));
         }
         app.payments.card_transport = Some(transport);
         app.open_payment_dialog(window, cx);

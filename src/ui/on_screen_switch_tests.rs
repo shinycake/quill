@@ -107,6 +107,9 @@ fn a_switch_closes_the_checkout(cx: &mut TestAppContext) {
         if let Some(session) = app.demo_session.as_mut() {
             session.payments.checkout = quill::state::CheckoutForm::Loading {
                 request: quill::ids::RequestId(1),
+                invoice: quill::state::PaymentRequest {
+                    invoice: quill::payment_invoice::InputInvoice::Name("shop".into()),
+                },
             };
         }
         app.open_payment_dialog(window, cx);
@@ -364,6 +367,9 @@ fn a_switch_closes_a_dialog_hidden_behind_another(cx: &mut TestAppContext) {
         if let Some(session) = app.demo_session.as_mut() {
             session.payments.checkout = quill::state::CheckoutForm::Loading {
                 request: quill::ids::RequestId(1),
+                invoice: quill::state::PaymentRequest {
+                    invoice: quill::payment_invoice::InputInvoice::Name("shop".into()),
+                },
             };
         }
         app.open_payment_dialog(window, cx);

@@ -388,7 +388,15 @@ fn the_bot_lookup_collects_three_answers() {
     // The same query after a failure asks again (Retry).
     driver.lookup_business_bot("shop_bot").unwrap();
     assert_eq!(count_sent(&recorder, "searchPublicChat"), 2);
-    assert!(driver.session.settings.business_extra.lookup.exact.is_loading());
+    assert!(
+        driver
+            .session
+            .settings
+            .business_extra
+            .lookup
+            .exact
+            .is_loading()
+    );
     // An invalid query clears it without sending.
     driver.lookup_business_bot("@").unwrap();
     assert!(

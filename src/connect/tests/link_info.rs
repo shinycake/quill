@@ -304,6 +304,14 @@ fn a_gift_code_check_never_replaces_an_apply_or_a_box_it_could_not_send() {
         &sink,
         json!({"@type":"ok","@extra":apply.as_extra()}),
     );
-    assert!(driver.session.payments.gift_code.as_ref().unwrap().applied());
+    assert!(
+        driver
+            .session
+            .payments
+            .gift_code
+            .as_ref()
+            .unwrap()
+            .applied()
+    );
     std::fs::remove_dir_all(dir).unwrap();
 }

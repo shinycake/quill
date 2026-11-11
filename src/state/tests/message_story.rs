@@ -127,20 +127,19 @@ fn pay_for_then(
             r#"{{"@type":"updateNewMessage","message":{{"id":402,"chat_id":21,"is_outgoing":false,"date":1,"content":{content}}}}}"#
         ),
     );
-    session.payments.request = Some(PaymentRequest {
-        invoice: crate::payment_invoice::InputInvoice::Message {
-            chat_id: ChatId(21),
-            message_id: MessageId(402),
-        },
-    });
-    session.payments.checkout =
-        crate::state::CheckoutForm::Ready(crate::telegram::envelope::PaymentFormData {
+    session.payments.checkout = crate::state::CheckoutForm::ready(
+        crate::telegram::envelope::PaymentFormData {
             id: 1,
             form_type: crate::telegram::envelope::PaymentFormTypeData::Stars { star_count },
             seller_bot_user_id: 0,
             product_title: String::new(),
             product_description: String::new(),
-        });
+        },
+        crate::payment_invoice::InputInvoice::Message {
+            chat_id: ChatId(21),
+            message_id: MessageId(402),
+        },
+    );
     let extra = session.request(RequestPurpose::SendPaymentForm, Some(ChatId(21)));
     session.payment_sent(extra);
     meanwhile(session);
@@ -182,7 +181,7 @@ fn a_payment_answered_after_the_checkout_closed_still_unlocks_the_media() {
         |session| {
             session.close_checkout();
             assert!(
-                session.payments.request.is_none(),
+                session.payments.checkout.request().is_none(),
                 "the checkout's own goes"
             );
             assert_eq!(
@@ -211,11 +210,8 @@ fn a_checkout_opened_meanwhile_does_not_take_the_payment_answer() {
         25,
         |session| {
             session.close_checkout();
-            session.payments.request = Some(PaymentRequest {
-                invoice: crate::payment_invoice::InputInvoice::Name("other".into()),
-            });
-            session.payments.checkout =
-                crate::state::CheckoutForm::Ready(crate::telegram::envelope::PaymentFormData {
+            session.payments.checkout = crate::state::CheckoutForm::ready(
+                crate::telegram::envelope::PaymentFormData {
                     id: 2,
                     form_type: crate::telegram::envelope::PaymentFormTypeData::Stars {
                         star_count: 99,
@@ -223,7 +219,9 @@ fn a_checkout_opened_meanwhile_does_not_take_the_payment_answer() {
                     seller_bot_user_id: 0,
                     product_title: String::new(),
                     product_description: String::new(),
-                });
+                },
+                crate::payment_invoice::InputInvoice::Name("other".into()),
+            );
             assert!(
                 !session.payments.checkout_sending(),
                 "not this checkout's payment"
@@ -247,9 +245,19 @@ fn an_earlier_checkouts_form_answer_is_dropped() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(session.last_seq);
     let first = session.request(RequestPurpose::GetPaymentForm, None);
-    session.payments.checkout = crate::state::CheckoutForm::Loading { request: first };
+    session.payments.checkout = crate::state::CheckoutForm::Loading {
+        request: first,
+        invoice: PaymentRequest {
+            invoice: crate::payment_invoice::InputInvoice::Name("shop".into()),
+        },
+    };
     let second = session.request(RequestPurpose::GetPaymentForm, None);
-    session.payments.checkout = crate::state::CheckoutForm::Loading { request: second };
+    session.payments.checkout = crate::state::CheckoutForm::Loading {
+        request: second,
+        invoice: PaymentRequest {
+            invoice: crate::payment_invoice::InputInvoice::Name("shop".into()),
+        },
+    };
     let form = |extra: u64, id: i64| {
         format!(
             r#"{{"@type":"paymentForm","@extra":"{extra}","id":{id},"type":{{"@type":"paymentFormTypeStars","star_count":5}},"seller_bot_user_id":5,"product_info":{{"@type":"productInfo","title":"x","description":{{"@type":"formattedText","text":"","entities":[]}},"photo":null}}}}"#
@@ -268,14 +276,13 @@ fn an_earlier_checkouts_form_answer_is_dropped() {
 #[test]
 fn closing_a_checkout_with_nothing_in_flight_drops_it_at_once() {
     let (mut session, _sink) = session();
-    session.payments.request = Some(PaymentRequest {
-        invoice: crate::payment_invoice::InputInvoice::Message {
+    session.payments.checkout =
+        crate::state::CheckoutForm::stub(crate::payment_invoice::InputInvoice::Message {
             chat_id: ChatId(21),
             message_id: MessageId(402),
-        },
-    });
+        });
     session.close_checkout();
-    assert!(session.payments.request.is_none());
+    assert!(session.payments.checkout.request().is_none());
     assert!(session.payments.paying.is_empty());
 }
 

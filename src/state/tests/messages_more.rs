@@ -543,10 +543,13 @@ fn validated_order_info_selects_first_shipping() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
     let extra = session.request(RequestPurpose::ValidateOrderInfo, Some(ChatId(51)));
-    session.payments.order_info = OrderInfoStage::Validating {
-        request: extra,
-        order: Default::default(),
-    };
+    set_order_info(
+        &mut session,
+        OrderInfoStage::Validating {
+            request: extra,
+            order: Default::default(),
+        },
+    );
     apply_json(
         &mut session,
         &seq,
@@ -556,10 +559,15 @@ fn validated_order_info_selects_first_shipping() {
             extra.0
         ),
     );
-    let validated = session.payments.order_info.validated().expect("validated");
+    let validated = session
+        .payments
+        .checkout
+        .order_info()
+        .validated()
+        .expect("validated");
     assert_eq!(validated.order_info_id, "oid1");
     assert_eq!(validated.shipping_options.len(), 2);
-    assert_eq!(session.payments.shipping_id.as_deref(), Some("ship1"));
+    assert_eq!(session.payments.checkout.shipping_id(), Some("ship1"));
 }
 
 /// A `validateOrderInfo` answer for a checkout that was closed (Esc, then
@@ -570,10 +578,13 @@ fn a_closed_checkouts_order_check_lands_nowhere() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
     let extra = session.request(RequestPurpose::ValidateOrderInfo, Some(ChatId(51)));
-    session.payments.order_info = OrderInfoStage::Validating {
-        request: extra,
-        order: Default::default(),
-    };
+    set_order_info(
+        &mut session,
+        OrderInfoStage::Validating {
+            request: extra,
+            order: Default::default(),
+        },
+    );
     session.close_checkout();
     apply_json(
         &mut session,
@@ -584,12 +595,15 @@ fn a_closed_checkouts_order_check_lands_nowhere() {
             extra.0
         ),
     );
-    assert!(session.payments.order_info.validated().is_none());
+    assert!(session.payments.checkout.order_info().validated().is_none());
     let failed = session.request(RequestPurpose::ValidateOrderInfo, Some(ChatId(51)));
-    session.payments.order_info = OrderInfoStage::Validating {
-        request: extra,
-        order: Default::default(),
-    };
+    set_order_info(
+        &mut session,
+        OrderInfoStage::Validating {
+            request: extra,
+            order: Default::default(),
+        },
+    );
     apply_json(
         &mut session,
         &seq,

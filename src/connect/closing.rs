@@ -177,13 +177,19 @@ pub(crate) fn drain_bridged<S: JsonSender>(
     }
 }
 
+/// How long a closing client has waited: since when, and whether the slow
+/// close was logged (once).
+#[derive(Clone, Copy)]
+enum CloseWait {
+    Since(Instant),
+    SlowLogged,
+}
+
 /// One client on its way out.
 pub struct ClosingClient {
     pub key: AccountKey,
     client: Box<dyn Closable>,
-    since: Instant,
-    /// The slow close was logged.
-    warned: bool,
+    wait: CloseWait,
     /// Start the account again in the background once closed (it was
     /// closed only because of a call, not because it signed out).
     pub restart: bool,
@@ -258,8 +264,7 @@ impl ClosingSet {
         self.slots.push(Slot::Closing(ClosingClient {
             key,
             client,
-            since: Instant::now(),
-            warned: false,
+            wait: CloseWait::Since(Instant::now()),
             restart,
         }));
     }
@@ -355,8 +360,10 @@ impl ClosingSet {
                 CloseProgress::Closed => true,
                 CloseProgress::Lost => false,
                 CloseProgress::Pending => {
-                    if !entry.warned && now.saturating_duration_since(entry.since) >= CLOSE_GRACE {
-                        entry.warned = true;
+                    if let CloseWait::Since(since) = entry.wait
+                        && now.saturating_duration_since(since) >= CLOSE_GRACE
+                    {
+                        entry.wait = CloseWait::SlowLogged;
                         eprintln!(
                             "quill: TDLib has not closed account {} after {:?}; still waiting",
                             entry.key, CLOSE_GRACE

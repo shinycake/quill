@@ -125,10 +125,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .search_chat
             .or(self.session.open_chat_id())
             .unwrap_or(ChatId(0));
-        self.session
-            .stickers
-            .gifs
-            .search_page_asked(offset.clone());
+        self.session.stickers.gifs.search_page_asked(offset.clone());
         let sent = self.gif_request(
             RequestPurpose::Stickers(StickersPurpose::GetGifSearchResults { first_page: !more }),
             |id| get_inline_query_results(id, bot_id, chat_id, &query, &offset),

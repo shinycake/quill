@@ -75,7 +75,6 @@ impl EmojiLists {
             _ => None,
         }
     }
-
 }
 
 /// The install or removal of one emoji set (`changeStickerSet`): at most

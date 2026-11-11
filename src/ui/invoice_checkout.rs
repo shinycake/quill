@@ -53,8 +53,6 @@ impl QuillApp {
         let sent = self.live.as_mut().map(|live| {
             let payments = &mut live.driver.session.payments;
             payments.checkout = quill::state::CheckoutForm::Closed;
-            payments.order_info = quill::state::OrderInfoStage::Unvalidated;
-            payments.shipping_id = None;
             payments.note = None;
             live.driver.send_payment_form_request(invoice)
         });
@@ -202,7 +200,7 @@ impl QuillApp {
         let snapshot = self.session().map(|session| {
             (
                 session.payments.checkout.form().cloned(),
-                session.payments.request.clone(),
+                session.payments.checkout.request().cloned(),
                 session.payments.checkout.is_paid(),
             )
         });

@@ -119,3 +119,16 @@ pub(crate) fn event_log_request(session: &mut Session, purpose: GroupsPurpose) -
     }
     extra
 }
+
+/// Moves the open checkout's order info to `stage`, opening a placeholder
+/// checkout first when there is none.
+pub(crate) fn set_order_info(session: &mut Session, stage: OrderInfoStage) {
+    if session.payments.checkout.checkout().is_none() {
+        session.payments.checkout = crate::state::CheckoutForm::stub(
+            crate::payment_invoice::InputInvoice::Name("shop".into()),
+        );
+    }
+    if let Some(checkout) = session.payments.checkout.checkout_mut() {
+        checkout.order_info = stage;
+    }
+}

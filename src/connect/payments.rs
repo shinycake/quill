@@ -37,12 +37,21 @@ impl<S: JsonSender> ConnectDriver<S> {
         &mut self,
         invoice: InputInvoice,
     ) -> Result<RequestId, ConnectSendError> {
+        // A payment that asked for a verification step is not abandoned by
+        // a new form: that checkout stays until its answer arrives.
+        if self.session.payments.checkout.is_verifying() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
         let extra = self.payment_extra(&invoice, RequestPurpose::GetPaymentForm)?;
         let json = get_payment_form(extra, &invoice);
         let sent = self.send_json_request(extra, &json)?;
-        // The checkout waits on the form only once the request is out.
-        self.session.payments.request = Some(PaymentRequest { invoice });
-        self.session.payments.checkout = crate::state::CheckoutForm::Loading { request: extra };
+        // The checkout waits on the form only once the request is out; the
+        // new value replaces the old checkout whole (its order info and
+        // shipping choice are for another form).
+        self.session.payments.checkout = crate::state::CheckoutForm::Loading {
+            request: extra,
+            invoice: PaymentRequest { invoice },
+        };
         Ok(sent)
     }
 
@@ -57,16 +66,15 @@ impl<S: JsonSender> ConnectDriver<S> {
         let extra = self.payment_extra(invoice, RequestPurpose::ValidateOrderInfo)?;
         let json = validate_order_info_request(extra, invoice, order, allow_save);
         let sent = self.send_json_request(extra, &json)?;
-        self.session.payments.request = Some(PaymentRequest {
-            invoice: invoice.clone(),
-        });
         // Stored only once the send went out; the earlier order id and
         // shipping choice are for other fields.
-        self.session.payments.shipping_id = None;
-        self.session.payments.order_info = OrderInfoStage::Validating {
-            request: extra,
-            order: order.clone(),
-        };
+        if let Some(checkout) = self.session.payments.checkout.checkout_mut() {
+            checkout.shipping_id = None;
+            checkout.order_info = OrderInfoStage::Validating {
+                request: extra,
+                order: order.clone(),
+            };
+        }
         Ok(sent)
     }
 
@@ -98,9 +106,6 @@ impl<S: JsonSender> ConnectDriver<S> {
             tip_amount,
         );
         let sent = self.send_json_request(extra, &json)?;
-        self.session.payments.request = Some(PaymentRequest {
-            invoice: invoice.clone(),
-        });
         self.session.payment_sent(extra);
         Ok(sent)
     }
@@ -118,8 +123,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         let extra = self
             .session
             .request(RequestPurpose::GetPaymentReceipt, Some(chat_id));
-        // A receipt is no checkout: `payments.request` stays the open
-        // checkout's invoice, which `shows` and `checkout_sending` read.
+        // A receipt is no checkout: the open checkout stays as it is.
         let json = get_payment_receipt(extra, chat_id, message_id);
         let sent = self.send_json_request(extra, &json)?;
         self.session.payments.receipt = crate::state::ReceiptStage::Loading(extra);

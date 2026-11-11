@@ -110,7 +110,10 @@ fn s9_gif_backend_purpose_gated_dispatch() {
         ),
     );
     assert_eq!(with_purpose.stickers.gifs.search_results().len(), 1);
-    assert_eq!(with_purpose.stickers.gifs.search_results()[0].file_id.0, 101);
+    assert_eq!(
+        with_purpose.stickers.gifs.search_results()[0].file_id.0,
+        101
+    );
     assert_eq!(with_purpose.stickers.gifs.search_next_offset(), "50");
     assert!(with_purpose.bots.inline_query.is_none());
 
@@ -133,7 +136,10 @@ fn s9_gif_backend_purpose_gated_dispatch() {
     // g1 (file 101) was already on page one — deduped; g2 (file 102)
     // appends; the offset advances to "" (exhausted).
     assert_eq!(with_purpose.stickers.gifs.search_results().len(), 2);
-    assert_eq!(with_purpose.stickers.gifs.search_results()[1].file_id.0, 102);
+    assert_eq!(
+        with_purpose.stickers.gifs.search_results()[1].file_id.0,
+        102
+    );
     assert_eq!(with_purpose.stickers.gifs.search_next_offset(), "");
 
     // A stray inlineQueryResults (no matching purpose) is ignored.

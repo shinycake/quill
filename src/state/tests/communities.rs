@@ -398,7 +398,10 @@ fn a_late_answer_of_a_replaced_ask_does_not_land_on_the_newer_one() {
             first.0
         ),
     );
-    assert!(session.communities.owned_bots.is_loading(), "first is not asked");
+    assert!(
+        session.communities.owned_bots.is_loading(),
+        "first is not asked"
+    );
     apply_json(
         &mut session,
         &seq,

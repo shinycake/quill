@@ -8043,3 +8043,36 @@ whose variants carry the data, with a way out of every stage.
 - **A refused refetch of a stale proxy list** lands in
   `ProxyFetch::FailedStale`: the tick does not ask again, the list stays
   busy (never planned on), and Refresh is the way out.
+
+### Sweep fixes (r2-13)
+
+Round 2 re-sweep, `src/connect/` files business_extra to payments (28
+entries). Every answer is matched to the request that asked, every refused
+send settles its own part, and the four-field checkout is one value.
+
+| id | outcome |
+| --- | --- |
+| 02-022 | `BotLookup` parts are `Fetch` values (`exact`, `mine`, `global`): a refused search is `Failed` and the Chatbots screen draws its error with Retry; the same query asks again after a failure. |
+| 02-019, 02-020 | `SpeakingTracker` records a send only through `sent()` once it left; it holds the speaking mark itself, so `CallAudio::speaking` is gone and resets only through `reset()`. |
+| 02-038 | The close hold is `ShutdownPhase::HoldingClose { until }`, so `chats_path_active()` is false while it holds; `close_held_until` is gone. |
+| 02-036 | Community fetches carry the `RequestId` (`Loading { request }`) and answers and errors go through `answered` / `failed`. A lost request settles through the existing lost-request error path. |
+| 02-057 | `ChatsState` owns the flow: `take_deep_link_step`, `cancel_deep_link_invite`, `next_deep_link_generation`; the UI no longer takes and puts back the flow every poll. The box's copy of the invite (`LinkFlow::Asking`) is the confirmed target captured when the box opened (Asker seam); `deep_link_seq` is a monotonic id source, not a stage, so it stays. |
+| 02-066 | "Mark as read": the two halves are independent; the call fails only when neither left. |
+| 02-041 | `WithdrawStep::Checking(RequestId)`; `Withdraw::request` is deleted. |
+| 02-042, 02-052, 02-064, 02-086 | The halves of the join page, folder share, craft lists and message audience are each sent whatever the other did; a refused half is `Failed`. |
+| 02-043 | `join_affiliate_program` returns the refused send. |
+| 02-044 | `Load::Loading(Option<RequestId>)` on the revenue page; only the open's own answer or error acts on it. |
+| 02-054 | `TrendingPaging` (Idle / Asking / More / End / Failed) replaces the fetch and four offset fields; the answer is matched by `RequestId` and a failed page keeps its offset. |
+| 02-053 | The sweep drops flood attempts and retained JSON of requests the registry no longer holds. |
+| 02-051 | Not a bug: the read's own `ok` clears the badge (`clear_topic_marks`); the refetch only double-checks. Test added. |
+| 02-055 | GIF search results and both offsets live inside `GifSearch`; a new search replaces them whole. |
+| 02-065 | A refused `closeGiftAuction` leaves the follow as it was; the next call closes it before opening another. |
+| 02-062 | A refused prices send is `Failed` and the form draws a Retry. |
+| 02-080 | A refused later send of a language switch points TDLib back at the shown pack. |
+| 02-073 | A gift code check is refused while an apply is out, and a refused check keeps the box. |
+| 02-083, 13-028 | `SetFiles::Asked` only after the downloads left. |
+| 02-084 | The emoji pack title is not asked again while its request is out. |
+| 02-090 | One `createBot` at a time, refused by the driver. The stage matches by its own generation, which each create bumps once and a username check does not touch. |
+| 02-089 | A paid price is trusted only after the send left. |
+| 02-092 | `CheckoutForm` carries the invoice, order info and shipping choice (`Checkout`); `PaymentsState::{request, order_info, shipping_id}` are gone and a new form replaces the checkout whole. A new form is refused while `Verifying`. |
+| new-01 | `ClosingClient::warned` is one `CloseWait` stage (`Since` / `SlowLogged`). |
