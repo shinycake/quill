@@ -42,11 +42,6 @@ pub struct AuthState {
     /// one; the overlay shows progress and disables submits. Only that
     /// request's answer or error ends it.
     pub password_op: PasswordFlight,
-    /// The `logOut` sent and not answered yet (`Session::logout_sent`).
-    pub logout_request: Option<RequestId>,
-    /// TDLib refused the `logOut`: the account stays signed in, and the UI
-    /// says so once (drained by the poll).
-    pub logout_refused: Option<TdError>,
 }
 
 impl AuthState {
@@ -60,8 +55,6 @@ impl AuthState {
             twofa_flow: TwofaFlow::default(),
             password_state: None,
             password_op: PasswordFlight::Idle,
-            logout_request: None,
-            logout_refused: None,
         }
     }
 }

@@ -74,9 +74,16 @@ impl Session {
                     // objects arrive via `updateUser`; ids alone drive the
                     // list (Telegram X `SharedChatsController` similarly
                     // resolves users from its cache).
-                    self.bots
-                        .similar_bots
-                        .insert(bot_user_id, SimilarBotsFetch::Loaded(user_ids));
+                    // Only the request the section waits for lands: an older
+                    // one, answered after a reopen asked again, is dropped.
+                    if matches!(
+                        self.bots.similar_bots.get(&bot_user_id),
+                        Some(SimilarBotsFetch::Loading(waiting)) if *waiting == pending.id
+                    ) {
+                        self.bots
+                            .similar_bots
+                            .insert(bot_user_id, SimilarBotsFetch::Loaded(user_ids));
+                    }
                 }
             }
             // Phase B1: secret chat lifecycle (schema 1.8.67, lines
@@ -100,6 +107,17 @@ impl Session {
                 ) {
                     // Settings → My Grams asked for a user its history
                     // names; store it unless an update already did.
+                    if let Some(pending) = pending
+                        && pending.purpose == RequestPurpose::Bots(BotsPurpose::GroupBotUser)
+                        && let Some(bot) = pending.user_id
+                        && self
+                            .bots
+                            .bot_users
+                            .get(&bot)
+                            .is_some_and(|fetch| fetch.waits_for(pending.id))
+                    {
+                        self.bots.bot_users.remove(&bot);
+                    }
                     if let Some(user) = user
                         && !self.users.contains_key(&user_id)
                     {

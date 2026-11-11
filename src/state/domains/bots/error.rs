@@ -17,6 +17,16 @@ impl Session {
         match pending.map(|p| p.purpose) {
             // Slice B2: refused `sendBotStartMessage` / `getBotSimilarBots` —
             // a refusal is never shown as success.
+            // The lookup of a group bot failed: the next time the group's
+            // commands arrive it is asked again.
+            Some(RequestPurpose::Bots(BotsPurpose::GroupBotUser)) => {
+                if let Some(pending) = pending
+                    && let Some(bot) = pending.user_id
+                    && let Some(fetch) = self.bots.bot_users.get_mut(&bot)
+                {
+                    fetch.failed(Some(pending.id), "could not load the bot", true);
+                }
+            }
             Some(RequestPurpose::SendBotStartMessage) => {
                 self.chats_state
                     .chat_action_error
@@ -25,10 +35,11 @@ impl Session {
             Some(RequestPurpose::GetBotSimilarBots) => {
                 // The section goes back to its button, so it can ask again
                 // (a `Loading` left behind refused every later press).
-                if let Some(bot) = pending.and_then(|p| p.user_id)
+                if let Some(pending) = pending
+                    && let Some(bot) = pending.user_id
                     && matches!(
                         self.bots.similar_bots.get(&bot),
-                        Some(SimilarBotsFetch::Loading)
+                        Some(SimilarBotsFetch::Loading(waiting)) if *waiting == pending.id
                     )
                 {
                     self.bots.similar_bots.remove(&bot);

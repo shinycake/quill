@@ -712,7 +712,7 @@ impl QuillApp {
                 }
                 panel = panel.child(row);
             }
-            Some(SimilarBotsFetch::Loading) => {
+            Some(SimilarBotsFetch::Loading(_)) => {
                 panel = panel.child(
                     div()
                         .id("bot-similar-loading")

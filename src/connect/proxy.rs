@@ -9,8 +9,8 @@ use crate::proxy::{
 };
 use crate::proxy_sync::{ProxySyncStep, plan_proxy_sync};
 use crate::settings::save_proxy_prefs;
+use crate::state::RequestPurpose;
 use crate::state::SettingsPurpose;
-use crate::state::{RequestPurpose, ShutdownPhase};
 use crate::system_proxy::{Detected, SYSTEM_PROXY_COMMENT, SystemProxyStep, plan_system_proxy};
 use crate::telegram::envelope::ConnectionState;
 use crate::telegram::requests::{
@@ -20,7 +20,7 @@ use crate::telegram::requests::{
 
 impl<S: JsonSender> ConnectDriver<S> {
     fn proxy_path_active(&self) -> bool {
-        matches!(self.session.shutdown, ShutdownPhase::Running)
+        self.session.shutdown.is_running()
     }
 
     /// `getProxies` — once per session when nothing is cached (the

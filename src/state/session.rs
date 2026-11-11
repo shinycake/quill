@@ -1,12 +1,29 @@
 //! The Session reducer: central client state and constructor.
 use super::*;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// How the session is ending, one value. `logOut` is a stage of it: sent
+/// under its request, answered by the auth states that follow, or refused
+/// (back to running, the refusal waiting for the UI to say so once).
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ShutdownPhase {
     Running,
+    /// `logOut` is out under this request. A refusal returns the session
+    /// to `Running` (via `LogoutRefused`); a quit asked for meanwhile
+    /// replaces the stage, so the refusal no longer applies.
+    LogoutRequested(RequestId),
+    /// TDLib refused the `logOut`: the account stays signed in and running.
+    /// The UI drains it once (`Session::take_logout_refusal`).
+    LogoutRefused(TdError),
     CloseRequested,
     WaitingClosed,
     Closed,
+}
+
+impl ShutdownPhase {
+    /// The session is not ending (a refused `logOut` leaves it signed in).
+    pub fn is_running(&self) -> bool {
+        matches!(self, Self::Running | Self::LogoutRefused(_))
+    }
 }
 
 #[derive(Debug, Clone)]

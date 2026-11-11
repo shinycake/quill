@@ -45,7 +45,7 @@ fn a_logout_that_cannot_go_out_leaves_the_account_as_it_was() {
         .request(RequestPurpose::SendMessage, Some(ChatId(5)));
     let chats = driver.session.request(RequestPurpose::LoadChats, None);
     let generation = driver.session.account_generation;
-    let shutdown = driver.session.shutdown;
+    let shutdown = driver.session.shutdown.clone();
 
     down.store(true, Ordering::SeqCst);
     assert!(driver.request_logout().is_err());

@@ -93,7 +93,7 @@ fn a_failed_similar_bots_load_can_be_asked_again() {
     // The driver marks the section loading once the request is out.
     assert!(matches!(
         rig.driver.session.bots.similar_bots.get(&42),
-        Some(SimilarBotsFetch::Loading)
+        Some(SimilarBotsFetch::Loading(id)) if *id == asked
     ));
     assert!(rig.driver.fetch_similar_bots(42).unwrap().is_none());
     rig.refuse(asked, "BOT_INVALID");

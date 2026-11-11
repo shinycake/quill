@@ -109,9 +109,7 @@ fn a_login_request_in_flight_survives_the_return() {
 fn every_drained_outcome_is_forgotten_on_return() {
     let drains = include_str!("../../ui/notifications/poll_drains.rs");
     let forgets = include_str!("../session_outcomes.rs");
-    // Not an outcome of the screen: TDLib refused the log-out, which the
-    // account's own sign-in state keeps.
-    let exempt = ["logout_refused"];
+    let exempt: [&str; 0] = [];
     let mut missing = Vec::new();
     for part in drains.split("driver.session.").skip(1) {
         let path: String = part

@@ -718,7 +718,10 @@ fn a_refused_logout_puts_the_session_back_to_running() {
             r#"{"@type":"updateAuthorizationState","authorization_state":{"@type":"authorizationStateReady"}}"#,
         );
         let extra = driver.request_logout().unwrap();
-        assert_eq!(driver.session.shutdown, ShutdownPhase::CloseRequested);
+        assert_eq!(
+            driver.session.shutdown,
+            ShutdownPhase::LogoutRequested(extra)
+        );
         if quit_meanwhile {
             driver.session.begin_close();
         }
@@ -731,10 +734,12 @@ fn a_refused_logout_puts_the_session_back_to_running() {
         );
         if quit_meanwhile {
             assert_eq!(driver.session.shutdown, ShutdownPhase::CloseRequested);
-            assert!(driver.session.auth_state.logout_refused.is_none());
+            assert!(driver.session.take_logout_refusal().is_none());
         } else {
+            assert!(driver.session.shutdown.is_running());
+            assert!(driver.session.take_logout_refusal().is_some());
             assert_eq!(driver.session.shutdown, ShutdownPhase::Running);
-            assert!(driver.session.auth_state.logout_refused.is_some());
+            assert!(driver.session.take_logout_refusal().is_none());
             assert!(matches!(driver.session.auth, AuthorizationState::Ready));
         }
         drop(driver);

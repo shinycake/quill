@@ -338,7 +338,7 @@ impl QuillApp {
         if let Some(err) = self
             .live
             .as_mut()
-            .and_then(|live| live.driver.session.auth_state.logout_refused.take())
+            .and_then(|live| live.driver.session.take_logout_refusal())
         {
             self.set_note(StatusNote::error(crate::ui::user_error::user_error_for(
                 quill::lang::keys::Q_NOTES_FAILED_LOG_OUT,

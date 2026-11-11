@@ -141,9 +141,20 @@ impl Session {
     }
 
     pub fn begin_close(&mut self) {
+        // A close asked for now replaces a `logOut` stage: a refusal of it
+        // no longer undoes the close.
         self.shutdown = ShutdownPhase::CloseRequested;
-        // A close asked for now is not undone by a refused `logOut`.
-        self.auth_state.logout_request = None;
+    }
+
+    /// The refusal of a `logOut`, once: the session is running again and
+    /// the UI says why.
+    pub fn take_logout_refusal(&mut self) -> Option<TdError> {
+        let ShutdownPhase::LogoutRefused(err) = &self.shutdown else {
+            return None;
+        };
+        let err = err.clone();
+        self.shutdown = ShutdownPhase::Running;
+        Some(err)
     }
 
     /// `logOut` went out as `request`: the account's other requests settle
@@ -152,7 +163,7 @@ impl Session {
     pub fn logout_sent(&mut self, request: RequestId) {
         let sent = self.requests.take(request);
         self.begin_logout();
-        self.auth_state.logout_request = Some(request);
+        self.shutdown = ShutdownPhase::LogoutRequested(request);
         if let Some(mut sent) = sent {
             sent.account_generation = self.account_generation;
             self.requests.readmit(sent);

@@ -39,6 +39,10 @@ fn b2_similar_bots_users_response_lands_by_pending_user() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
     let extra = session.request_for_user(RequestPurpose::GetBotSimilarBots, 21);
+    session
+        .bots
+        .similar_bots
+        .insert(21, SimilarBotsFetch::Loading(extra));
     apply_json(
         &mut session,
         &seq,
@@ -75,6 +79,10 @@ fn b2_start_and_similar_bots_errors_surface() {
         Some("could not start the bot (error 400)")
     );
     let extra = session.request_for_user(RequestPurpose::GetBotSimilarBots, 21);
+    session
+        .bots
+        .similar_bots
+        .insert(21, SimilarBotsFetch::Loading(extra));
     apply_json(
         &mut session,
         &seq,
@@ -464,4 +472,44 @@ fn fast_buttons_target_the_last_message_when_it_has_an_inline_keyboard() {
     assert_eq!(session.fast_button_target(ChatId(21)), None);
     // Other chats never qualify.
     assert_eq!(session.fast_button_target(ChatId(99)), None);
+}
+
+#[test]
+fn r2_similar_bots_older_request_neither_answers_nor_fails_the_newer() {
+    // Sweep r2-19 (05-015): a reopen asks again while the first request is
+    // out; only the request the section waits for lands or fails it.
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    let first = session.request_for_user(RequestPurpose::GetBotSimilarBots, 21);
+    let second = session.request_for_user(RequestPurpose::GetBotSimilarBots, 21);
+    session
+        .bots
+        .similar_bots
+        .insert(21, SimilarBotsFetch::Loading(second));
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"error","@extra":"{}","code":400,"message":"BOT_INVALID"}}"#,
+            first.0
+        ),
+    );
+    assert!(matches!(
+        session.bots.similar_bots.get(&21),
+        Some(SimilarBotsFetch::Loading(id)) if *id == second
+    ));
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"users","@extra":"{}","total_count":1,"user_ids":[31]}}"#,
+            second.0
+        ),
+    );
+    assert!(matches!(
+        session.bots.similar_bots.get(&21),
+        Some(SimilarBotsFetch::Loaded(ids)) if ids == &[31]
+    ));
 }

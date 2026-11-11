@@ -115,3 +115,67 @@ fn a_bot_lookup_that_failed_to_send_is_asked_again() {
     assert!(driver.group_bot_users_tick(), "asked again");
     assert_eq!(count_sent(&recorder, "getUser"), 1);
 }
+
+/// Sweep r2-19 (05-016): a `getUser` for a group bot that TDLib refuses is
+/// asked again the next time the group's commands arrive, and only the
+/// refusal of the request that is waiting settles it.
+#[test]
+fn a_refused_bot_lookup_is_asked_again_when_the_commands_arrive_again() {
+    let store = MemorySecretStore::new();
+    let (_dir, prepared) = prepared_tmp(&store);
+    let sink = Arc::new(MemorySink::new());
+    let dyn_sink: Arc<dyn DiagnosticSink> = sink;
+    let recorder = Arc::new(RecordingSender::new());
+    let seq = AtomicU64::new(0);
+    let mut driver = ready_driver(&recorder, prepared, &dyn_sink, &seq);
+    let full_info = r#"{"@type":"updateSupergroupFullInfo","supergroup_id":2,"supergroup_full_info":{"description":"","bot_commands":[{"@type":"botCommands","bot_user_id":77,"commands":[{"@type":"botCommand","command":"go","description":"","is_ephemeral":false}]}]}}"#;
+    for json in [
+        r#"{"@type":"updateNewChat","chat":{"id":-1002,"title":"Mega","type":{"@type":"chatTypeSupergroup","supergroup_id":2,"is_channel":false},"unread_count":0}}"#,
+        full_info,
+    ] {
+        driver
+            .ingest(copy_and_parse(json, &seq, &dyn_sink).unwrap())
+            .unwrap();
+    }
+    assert!(driver.group_bot_users_tick());
+    let asked = driver
+        .session
+        .bots
+        .bot_users
+        .get(&77)
+        .and_then(|fetch| match fetch {
+            crate::state::fetch::Fetch::Loading { request, .. } => *request,
+            _ => None,
+        })
+        .unwrap();
+    driver
+        .ingest(
+            copy_and_parse(
+                &format!(
+                    r#"{{"@type":"error","@extra":"{}","code":400,"message":"USER_INVALID"}}"#,
+                    asked.0
+                ),
+                &seq,
+                &dyn_sink,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+    assert!(
+        driver
+            .session
+            .bots
+            .bot_users
+            .get(&77)
+            .is_some_and(|f| f.error().is_some())
+    );
+    assert!(!driver.group_bot_users_tick(), "not re-asked from upkeep");
+    driver
+        .ingest(copy_and_parse(full_info, &seq, &dyn_sink).unwrap())
+        .unwrap();
+    assert!(
+        driver.group_bot_users_tick(),
+        "asked again with the commands"
+    );
+    assert_eq!(count_sent(&recorder, "getUser"), 2);
+}

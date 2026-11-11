@@ -4,7 +4,7 @@
 //! loop already ticks.
 use super::*;
 use crate::net_watch::NetworkState;
-use crate::state::{RequestPurpose, ShutdownPhase};
+use crate::state::RequestPurpose;
 use crate::telegram::requests::{NetworkType, set_network_type};
 use std::time::Instant;
 
@@ -101,7 +101,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// A proxy on the local network works with no route, and the proxy list
     /// arrives after the first poll, so it counts as a change.
     fn network_tick(&mut self, network: NetworkState) -> bool {
-        if !self.parameters_sent() || !matches!(self.session.shutdown, ShutdownPhase::Running) {
+        if !self.parameters_sent() || !self.session.shutdown.is_running() {
             return false;
         }
         let proxy = &self.session.settings.proxy;
