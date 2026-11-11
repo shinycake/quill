@@ -629,8 +629,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         // Batch 6: a finished reset / cancel / login-email step left the
         // cached password state out of date.
-        if std::mem::take(&mut self.session.auth_state.twofa_flow.refetch) {
-            let _ = self.refresh_password_state();
+        // The mark stays until the refetch is sent; a refused send keeps it
+        // for the next ingest.
+        if self.session.auth_state.twofa_flow.refetch && self.refresh_password_state().is_ok() {
+            self.session.auth_state.twofa_flow.refetch = false;
         }
         if let Some(chat_id) = unpinned_all {
             self.session

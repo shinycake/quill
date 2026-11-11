@@ -77,6 +77,11 @@ impl Session {
                         Some(slot)
                             if slot.chat_id == chat_id
                                 && slot.bot_user_id == bot_user_id
+                                && matches!(
+                                    slot.fetch,
+                                    InlineQueryFetch::Loading(asked)
+                                        if Some(asked) == pending.map(|p| p.id)
+                                )
                     );
                 if !first_page
                     && let Some(slot) = self.bots.inline_query.as_mut()

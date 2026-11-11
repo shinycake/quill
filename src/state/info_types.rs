@@ -529,7 +529,9 @@ pub enum PollVotersFetch {
 /// page-next keeps the loaded page.
 #[derive(Debug, Clone, PartialEq)]
 pub enum InlineQueryFetch {
-    Loading,
+    /// The first page asked by this request; only its answer or error
+    /// leaves the stage.
+    Loading(RequestId),
     Loaded {
         inline_query_id: i64,
         button: Option<InlineQueryResultsButton>,

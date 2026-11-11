@@ -637,6 +637,36 @@ fn reset_password_pending_refetches_the_state_for_the_date() {
 }
 
 #[test]
+fn a_refused_password_refetch_is_sent_on_a_later_ingest() {
+    let mut f = fixture();
+    seed_password_state(&mut f, PASSWORD_STATE_ON);
+    f.1.reset_twofa_password().unwrap();
+    let extra = last_request(&f.2)["@extra"].as_str().unwrap().to_string();
+    let before = requests_of(&f.2, "getPasswordState").len();
+    f.2.refuse_sends(true);
+    ingest(
+        &mut f.1,
+        &f.4,
+        &f.3,
+        &format!(
+            r#"{{"@type":"resetPasswordResultPending","pending_reset_date":1760604800,"@extra":"{extra}"}}"#
+        ),
+    );
+    assert_eq!(requests_of(&f.2, "getPasswordState").len(), before);
+    assert!(f.1.session.auth_state.twofa_flow.refetch);
+    f.2.refuse_sends(false);
+    ingest(
+        &mut f.1,
+        &f.4,
+        &f.3,
+        r#"{"@type":"updateOption","name":"x","value":{"@type":"optionValueEmpty"}}"#,
+    );
+    assert_eq!(requests_of(&f.2, "getPasswordState").len(), before + 1);
+    assert!(!f.1.session.auth_state.twofa_flow.refetch);
+    cleanup(f);
+}
+
+#[test]
 fn reset_password_declined_reports_the_retry_date() {
     let mut f = fixture();
     seed_password_state(&mut f, PASSWORD_STATE_ON);
