@@ -1,7 +1,6 @@
 //! Connect driver core: construction, the update pump, and lifecycle.
 use super::composer::ai_rich_draft_note;
 use super::*;
-use crate::composer::DraftSaveClock;
 use crate::credentials::TelegramCredentials;
 use crate::ids::{ChatId, ChatMessage, MessageId, RequestId};
 use crate::state::{
@@ -957,7 +956,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     }
 
     fn maybe_send_parameters(&mut self) -> Result<(), ConnectSendError> {
-        if self.parameters_sent {
+        if self.parameters_sent() {
             return Ok(());
         }
         if !matches!(self.session.auth, AuthorizationState::WaitTdlibParameters) {
@@ -978,7 +977,6 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session.requests.take(extra);
             return Err(err);
         }
-        self.parameters_sent = true;
         self.send_language_options()
     }
 }

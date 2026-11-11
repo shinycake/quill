@@ -33,7 +33,7 @@ fn apply_json(session: &mut Session, seq: &AtomicU64, sink: &Arc<MemorySink>, js
 fn set_auto_download_settings_ok_applies_confirmed_settings() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
-    assert!(!session.settings.data_storage.seeded);
+    assert!(!session.settings.data_storage.seeded.is_seeded());
     let settings = AutoDownloadNetSettings {
         is_auto_download_enabled: true,
         max_photo_file_size: 5 * 1024 * 1024,
@@ -68,7 +68,7 @@ fn set_auto_download_settings_ok_applies_confirmed_settings() {
             .for_network(NetworkKind::WiFi)
             .is_auto_download_enabled
     );
-    assert!(session.settings.data_storage.seeded);
+    assert!(session.settings.data_storage.seeded.is_seeded());
     assert!(session.settings.data_storage_dirty);
     assert!(session.settings.data_storage_error.is_none());
 }
@@ -105,7 +105,7 @@ fn set_auto_download_settings_error_surfaces_without_applying() {
         err.starts_with("Couldn't save auto-download settings:"),
         "{err}"
     );
-    assert!(!session.settings.data_storage.seeded);
+    assert!(!session.settings.data_storage.seeded.is_seeded());
     assert!(
         !session
             .settings

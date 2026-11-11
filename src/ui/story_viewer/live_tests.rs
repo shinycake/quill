@@ -594,7 +594,7 @@ fn the_emoji_panel_closes_with_the_reply_row(cx: &mut TestAppContext) {
     app.read_with(vcx, |app, _| {
         assert!(!app.story_reply_panel_active());
         assert!(
-            !app.stories.viewer_ui().reply_is_open(),
+            !app.stories.viewer_ui().reply_open(),
             "the reply row is not left open"
         );
     });

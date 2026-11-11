@@ -17,6 +17,7 @@ use crate::ui::app::QuillApp;
 use crate::ui::demo::{demo_file_json, demo_media_allowlist};
 use crate::ui::screenshot_demo::{DemoSpec, register_demos};
 use crate::ui::showcase_demo::{MAYA, Scene, apply_ready_showcase};
+use crate::ui::stories_state::ViewerPanel;
 use gpui_kit::*;
 use quill::diagnostics::DiagnosticSink;
 use quill::ids::ChatId;
@@ -84,7 +85,7 @@ impl QuillApp {
                 self.open_story_viewer(ChatId(LEO), 3, StoryOpenScope::Single, cx);
                 if variant != "own" {
                     if let Some(open) = self.stories.viewer_ui_mut() {
-                        open.viewers_open = true;
+                        open.show(ViewerPanel::Viewers);
                     }
                     if let Some(session) = self.demo_session.as_mut() {
                         session.stories.viewers =

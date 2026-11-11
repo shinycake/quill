@@ -1,6 +1,7 @@
 //! Panels that belong to one story (Report, viewers) over the
 //! `ready-story-viewer` demo. Nothing reaches Telegram.
 use super::open_tests::{frames, open_app};
+use crate::ui::stories_state::{PanelKind, ViewerPanel};
 use gpui_kit::TestAppContext;
 use quill::state::{StoryReportFlow, StoryReportStage};
 
@@ -10,7 +11,7 @@ fn moving_to_another_story_closes_its_report_and_viewers_panels(cx: &mut TestApp
     let vcx = &mut vcx;
     app.update(vcx, |app, _| {
         if let Some(open) = app.stories.viewer_ui_mut() {
-            open.report_open = true;
+            open.show(ViewerPanel::Report);
         }
         if let Some(session) = app.demo_session.as_mut() {
             session.begin_story_report(105, 3, quill::ids::RequestId(1));
@@ -22,8 +23,8 @@ fn moving_to_another_story_closes_its_report_and_viewers_panels(cx: &mut TestApp
     app.update(vcx, |app, cx| app.step_story_viewer(1, cx));
     frames(vcx);
     app.read_with(vcx, |app, _| {
-        assert!(!app.stories.viewer_ui().report_open);
-        assert!(!app.stories.viewer_ui().viewers_open);
+        assert!(!app.stories.viewer_ui().is_open(PanelKind::Report));
+        assert!(!app.stories.viewer_ui().is_open(PanelKind::Viewers));
         let flow = app
             .demo_session
             .as_ref()
@@ -61,10 +62,10 @@ fn opening_one_panel_closes_the_others(cx: &mut TestAppContext) {
         app.read_with(vcx, |app, _| {
             let ui = app.stories.viewer_ui();
             (
-                ui.stats_open,
-                ui.share_open,
-                ui.privacy_edit.is_some(),
-                ui.viewers_open,
+                ui.is_open(PanelKind::Stats),
+                ui.is_open(PanelKind::Share),
+                ui.privacy_edit().is_some(),
+                ui.is_open(PanelKind::Viewers),
             )
         })
     };
@@ -119,17 +120,17 @@ fn the_close_friends_save_leaves_saving_with_its_answer(cx: &mut TestAppContext)
         let mut edit = CloseFriendsEdit::new(&[]);
         edit.toggle(7);
         app.stories.with_viewer_ui(|open| {
-            open.close_friends = CloseFriendsStage::Saving {
+            open.show(ViewerPanel::CloseFriends(CloseFriendsStage::Saving {
                 edit,
                 request: RequestId(60),
-            }
+            }))
         });
         set_op(app, StoryPageOpState::Sending);
         app.tick_close_friends(cx);
-        assert!(app.stories.viewer_ui().close_friends.is_saving());
+        assert!(app.stories.viewer_ui().close_friends().is_saving());
         set_op(app, StoryPageOpState::Failed("no".into()));
         app.tick_close_friends(cx);
-        let stage = &app.stories.viewer_ui().close_friends;
+        let stage = app.stories.viewer_ui().close_friends();
         assert!(!stage.is_saving(), "the failure ended Saving");
         assert!(
             stage.edit().is_some_and(|edit| edit.contains(7)),
@@ -138,14 +139,14 @@ fn the_close_friends_save_leaves_saving_with_its_answer(cx: &mut TestAppContext)
         // Saved again: the answer closes the editor.
         let edit = stage.edit().cloned().unwrap_or_default();
         app.stories.with_viewer_ui(|open| {
-            open.close_friends = CloseFriendsStage::Saving {
+            open.show(ViewerPanel::CloseFriends(CloseFriendsStage::Saving {
                 edit,
                 request: RequestId(60),
-            }
+            }))
         });
         set_op(app, StoryPageOpState::Succeeded);
         app.tick_close_friends(cx);
-        assert!(!app.stories.viewer_ui().close_friends.is_open());
+        assert!(!app.stories.viewer_ui().close_friends().is_open());
     });
 }
 

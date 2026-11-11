@@ -197,7 +197,7 @@ impl QuillApp {
                 .ton_wallet
                 .money
                 .history
-                .items
+                .items()
                 .iter()
                 .find(|tx| tx.id == transaction_id)
                 .cloned();

@@ -197,19 +197,52 @@ fn wallet_state_hides_everything_when_the_option_is_off() {
 
 #[test]
 fn paged_lists_replace_then_append() {
+    use crate::ids::RequestId;
     let mut list: Paged<u8> = Paged::default();
-    list.fetch.begin();
-    assert!(list.loading() && !list.loaded());
-    list.apply(vec![1, 2], "next".into(), false);
-    assert!(list.has_more() && !list.loading());
-    list.apply(vec![3], String::new(), true);
-    assert_eq!(list.items, vec![1, 2, 3]);
+    list.begin(RequestId(1), false);
+    assert!(list.is_loading() && !list.is_loaded());
+    assert!(list.apply(Some(RequestId(1)), vec![1, 2], "next".into()));
+    assert!(list.has_more() && !list.is_loading());
+    list.begin(RequestId(2), true);
+    assert_eq!(list.items(), &[1, 2], "rows stay while the next page loads");
+    assert!(list.apply(Some(RequestId(2)), vec![3], String::new()));
+    assert_eq!(list.items(), &[1, 2, 3]);
     assert!(!list.has_more());
-    list.fail("boom".into());
-    assert_eq!(list.items.len(), 3);
-    assert!(list.loaded() && list.error() == Some("boom"));
-    list.apply(vec![9], String::new(), false);
-    assert_eq!(list.items, vec![9]);
+    list.begin(RequestId(3), true);
+    assert!(list.fail(Some(RequestId(3)), "boom".into()));
+    assert_eq!(list.items().len(), 3);
+    assert_eq!(list.error(), Some("boom"));
+    list.begin(RequestId(4), false);
+    assert!(list.error().is_none(), "asking again clears the error");
+    assert!(list.apply(Some(RequestId(4)), vec![9], String::new()));
+    assert_eq!(list.items(), &[9]);
+}
+
+#[test]
+fn a_page_for_another_request_is_dropped() {
+    use crate::ids::RequestId;
+    let mut list: Paged<u8> = Paged::default();
+    // Nothing asked: an answer lands nowhere.
+    assert!(!list.apply(Some(RequestId(1)), vec![1], String::new()));
+    assert!(!list.is_loaded());
+    list.begin(RequestId(2), false);
+    // The answer of an earlier list (the page was closed and reopened).
+    assert!(!list.apply(Some(RequestId(1)), vec![1], String::new()));
+    assert!(!list.fail(Some(RequestId(1)), "late".into()));
+    assert!(list.is_loading(), "still waiting for its own");
+    assert!(!list.apply(None, vec![1], String::new()));
+    assert!(list.apply(Some(RequestId(2)), vec![7], String::new()));
+    assert_eq!(list.items(), &[7]);
+}
+
+#[test]
+fn a_page_that_cannot_be_sent_leaves_the_list_failed_with_its_rows() {
+    let mut list: Paged<u8> = Paged::default();
+    list.set_ready(vec![1], "more".into());
+    list.send_failed("offline".into());
+    assert_eq!(list.items(), &[1]);
+    assert_eq!(list.error(), Some("offline"));
+    assert!(list.has_more());
 }
 
 #[test]

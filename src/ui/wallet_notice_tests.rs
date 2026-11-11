@@ -104,8 +104,8 @@ fn seed_wallet(app: &mut QuillApp, with_wallet: bool) {
     wallet
         .money
         .history
-        .apply(vec![transfer("t1", true)], String::new(), false);
-    wallet.money.nfts.apply(
+        .set_ready(vec![transfer("t1", true)], String::new());
+    wallet.money.nfts.set_ready(
         vec![WalletNft {
             address: "EQnft".into(),
             name: "Cat #7".into(),
@@ -113,7 +113,6 @@ fn seed_wallet(app: &mut QuillApp, with_wallet: bool) {
             ..WalletNft::default()
         }],
         String::new(),
-        false,
     );
 }
 
@@ -247,7 +246,10 @@ fn the_first_grams_hint_send_opens_the_notice(cx: &mut TestAppContext) {
         seed_wallet(app, true);
         app.open_money(cx);
         if let Some(wallet) = app.ton_wallet_mut() {
-            wallet.money.hint_open = true;
+            wallet.money.detail = quill::ton_wallet::MoneyDetail::Tx {
+                tx: Box::new(transfer("t1", true)),
+                hint: true,
+            };
         }
         cx.notify();
     });

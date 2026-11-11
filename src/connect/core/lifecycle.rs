@@ -72,16 +72,11 @@ impl<S: JsonSender> ConnectDriver<S> {
             paths: prepared.paths,
             claimed_owner: None,
             database_key: prepared.database_key,
-            parameters_sent: false,
-            search_debounce_token: 0,
-            pending_typed_search: None,
-            chat_search_debounce_token: 0,
-            pending_typed_chat_search: None,
+            typed_search: Default::default(),
+            typed_chat_search: Default::default(),
             outgoing_typing: None,
             outgoing_voice: None,
-            draft_clock: DraftSaveClock::idle(),
-            draft_save_token: 0,
-            pending_draft: None,
+            pending_draft: Default::default(),
             flood_retries: Vec::new(),
             flood_attempts: HashMap::new(),
             custom_emoji_hold: None,
@@ -92,8 +87,16 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
     }
 
+    /// `setTdlibParameters` is out (its answer pending) or answered:
+    /// TDLib leaves `WaitTdlibParameters` once it takes them, and a
+    /// failed answer ends in `StartupFailed`. Read off the session, so
+    /// there is no second record of it to keep in step.
     pub fn parameters_sent(&self) -> bool {
-        self.parameters_sent
+        !matches!(self.session.auth, AuthorizationState::WaitTdlibParameters)
+            || self
+                .session
+                .requests
+                .has_purpose(RequestPurpose::SetParameters)
     }
 
     pub fn tdlib_files(&self) -> &Path {

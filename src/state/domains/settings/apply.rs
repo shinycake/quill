@@ -201,13 +201,12 @@ impl Session {
                 // the seed on the next ingest (`data_storage_dirty`).
                 if pending.map(|p| p.purpose)
                     == Some(RequestPurpose::GetAutoDownloadSettingsPresets)
-                    && !self.settings.data_storage.seeded
+                    && !self.settings.data_storage.seeded.is_seeded()
                 {
                     self.settings
                         .data_storage
                         .seed_from_presets(low, medium, high);
                     self.settings.data_storage_dirty = true;
-                    self.settings.auto_download_presets_loading = false;
                     self.settings.data_storage_error = None;
                 }
             }

@@ -31,15 +31,11 @@ ChecklistSend::others_can_mark_tasks_as_done
 CheckoutView::sending
 Clip::busy
 ComposerUi::draft_restore_pending
-ConnectDriver::parameters_sent
+
 DestRow::saved
 DragSelect::pending
 Drawn::leaving
 DropTopic::load_failed
-EarnLimits::app_config_loaded
-EmojiPanel::mutation_failed
-EmojiStyleUi::started
-EmojiStyleUi::started+file_error
 FastShareFacts::sent
 FieldResult::finished
 FirstRunPrefs::completed
@@ -49,7 +45,7 @@ GifPanel::loaded
 GifPanel::loading
 GifPanel::search_failed
 GifPanel::search_loading
-GiftManageState::collections_loading
+
 GiftValueLookup::loading
 GiftValueLookup::loading+error
 GiveawayInfoLookup::loading
@@ -81,6 +77,7 @@ MediaFacts::in_saved_messages
 MediaMenuFacts::downloading
 MediaState::disk_paused_saved_changed
 MembersView::loading
+MiniAppWindow::closing_confirmation
 MutedSpeechHint::done
 NewChatView::busy
 NewChatView::busy+failure
@@ -121,14 +118,13 @@ SavedMessagesState::topics_requested
 SavedTagSearch::loaded
 
 SettingsState::account_ttl_loading
-SettingsState::auto_download_presets_loading
 SettingsState::connected_websites_loading
 SettingsState::default_auto_delete_busy
 SettingsState::pending_attention
 SettingsState::pending_attention+default_auto_delete_error
 SettingsState::saved_sounds_loaded
 SettingsState::saved_sounds_stale
-SettingsState::storage_limits_seed_sent
+
 SharedMediaTabState::loading_more
 SharedMediaTabState::loading_more+error
 Shown::waiting_for_input
@@ -139,13 +135,12 @@ State::started
 Step::started
 StickerPanel::suggest_waiting_for_sets
 StickerSetView::files_requested
-StorageScroll::pending
 StreamFacts::transport_failed
 Tempo::done
 Tempo::inner_done
-ThreadView::reading_started
+
 TopPerson::saved_messages
 
 
 Validation::finished
-WebApps::grossing_loading
+

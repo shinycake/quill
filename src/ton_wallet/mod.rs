@@ -106,58 +106,154 @@ pub enum ProfileAddress {
     None,
 }
 
-/// A paged, read-only list (history or NFTs).
+/// The rows of a paged list and where its next page starts.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Paged<T> {
+pub struct Page<T> {
     pub items: Vec<T>,
     pub next_offset: String,
-    /// The page request: the first page arriving makes it `Ready` (an
-    /// empty list then means "nothing yet"); a later request or failure
-    /// keeps the list shown.
-    pub fetch: Fetch<()>,
 }
 
-impl<T> Default for Paged<T> {
-    fn default() -> Self {
-        Self {
-            items: Vec::new(),
-            next_offset: String::new(),
-            fetch: Fetch::Idle,
-        }
-    }
+/// A paged, read-only list (history or NFTs): one value for "not asked",
+/// "a page is in flight", "shown" and "failed". The rows already shown stay
+/// reachable while another page loads or after it failed. A page is applied
+/// only when its answer carries the request the list waits for, so a late
+/// answer of an earlier list (the Money page was closed and opened again)
+/// lands nowhere.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum Paged<T> {
+    /// Never asked.
+    #[default]
+    Idle,
+    /// `request` asks for the first page, or the next one (`append`).
+    Loading {
+        request: crate::ids::RequestId,
+        append: bool,
+        shown: Option<Page<T>>,
+    },
+    /// The latest page landed. An empty list then means "nothing yet".
+    Ready(Page<T>),
+    /// The latest request failed; Retry asks again.
+    Failed {
+        error: String,
+        shown: Option<Page<T>>,
+    },
 }
 
 impl<T> Paged<T> {
-    /// Apply one page: a first page replaces the list.
-    pub fn apply(&mut self, items: Vec<T>, next_offset: String, append: bool) {
-        if !append {
-            self.items.clear();
+    /// A list that already holds its first page (a demo or a test seed).
+    pub fn set_ready(&mut self, items: Vec<T>, next_offset: String) {
+        *self = Self::Ready(Page { items, next_offset });
+    }
+
+    fn shown(&self) -> Option<&Page<T>> {
+        match self {
+            Self::Idle => None,
+            Self::Ready(page) => Some(page),
+            Self::Loading { shown, .. } | Self::Failed { shown, .. } => shown.as_ref(),
         }
-        self.items.extend(items);
-        self.next_offset = next_offset;
-        self.fetch.succeed(());
     }
 
-    /// The request failed: stop loading and keep what is shown.
-    pub fn fail(&mut self, error: String) {
-        self.fetch.fail(error);
+    fn take_shown(&mut self) -> Option<Page<T>> {
+        match std::mem::take(self) {
+            Self::Idle => None,
+            Self::Ready(page) => Some(page),
+            Self::Loading { shown, .. } | Self::Failed { shown, .. } => shown,
+        }
     }
 
-    pub fn loading(&self) -> bool {
-        self.fetch.is_loading()
+    /// The rows shown, oldest request first.
+    pub fn items(&self) -> &[T] {
+        self.shown().map_or(&[], |page| page.items.as_slice())
     }
 
-    /// The first page arrived.
-    pub fn loaded(&self) -> bool {
-        self.fetch.data().is_some()
+    pub fn next_offset(&self) -> &str {
+        self.shown().map_or("", |page| page.next_offset.as_str())
+    }
+
+    pub fn is_loading(&self) -> bool {
+        matches!(self, Self::Loading { .. })
+    }
+
+    /// The first page arrived (an empty list then means "nothing yet").
+    pub fn is_loaded(&self) -> bool {
+        self.shown().is_some()
     }
 
     pub fn error(&self) -> Option<&str> {
-        self.fetch.error()
+        match self {
+            Self::Failed { error, .. } => Some(error),
+            _ => None,
+        }
     }
 
     pub fn has_more(&self) -> bool {
-        self.loaded() && !self.next_offset.is_empty()
+        self.shown()
+            .is_some_and(|page| !page.next_offset.is_empty())
+    }
+
+    /// The request that asks for a page went out. The rows shown stay and
+    /// the last error is gone.
+    pub fn begin(&mut self, request: crate::ids::RequestId, append: bool) {
+        let shown = self.take_shown();
+        *self = Self::Loading {
+            request,
+            append,
+            shown,
+        };
+    }
+
+    /// Apply the answer of `request`: a first page replaces the list.
+    /// `false` (and nothing changes) when the list waits for another one.
+    pub fn apply(
+        &mut self,
+        request: Option<crate::ids::RequestId>,
+        items: Vec<T>,
+        next_offset: String,
+    ) -> bool {
+        let Self::Loading {
+            request: waiting,
+            append,
+            shown,
+        } = self
+        else {
+            return false;
+        };
+        if Some(*waiting) != request {
+            return false;
+        }
+        let mut rows = match shown.take() {
+            Some(page) if *append => page.items,
+            _ => Vec::new(),
+        };
+        rows.extend(items);
+        *self = Self::Ready(Page {
+            items: rows,
+            next_offset,
+        });
+        true
+    }
+
+    /// The error of `request`: the rows shown stay. `false` when the list
+    /// waits for another request.
+    pub fn fail(&mut self, request: Option<crate::ids::RequestId>, error: String) -> bool {
+        let Self::Loading {
+            request: waiting, ..
+        } = self
+        else {
+            return false;
+        };
+        if Some(*waiting) != request {
+            return false;
+        }
+        let shown = self.take_shown();
+        *self = Self::Failed { error, shown };
+        true
+    }
+
+    /// The request could not be sent: back to what the list held.
+    pub fn send_failed(&mut self, error: String) {
+        let shown = self.take_shown();
+        *self = Self::Failed { error, shown };
     }
 }
 
@@ -169,6 +265,27 @@ pub enum MoneyTab {
     Collectibles,
 }
 
+/// What the Money page shows over its lists: nothing (the overview), one
+/// transaction, one NFT, or the lookup of a clicked transfer card's
+/// transaction. One at a time, so "back" is one assignment.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub enum MoneyDetail {
+    #[default]
+    Overview,
+    /// The transaction whose details are shown; `hint` brings "Your first
+    /// Grams!" up over them until "Got it".
+    Tx { tx: Box<WalletTx>, hint: bool },
+    /// The NFT whose details are shown (by address).
+    Nft(String),
+    /// The lookup of a clicked transfer card's transaction. The answer
+    /// shows the details only while the lookup is for the request that
+    /// answers; "back" or another click replaces it, so a late answer for
+    /// an earlier card is dropped.
+    Lookup { request: crate::ids::RequestId },
+    /// The text shown instead of the details.
+    LookupFailed(String),
+}
+
 /// The Money page (iOS `WalletScreen`, read-only).
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct MoneyPage {
@@ -176,67 +293,42 @@ pub struct MoneyPage {
     pub tab: MoneyTab,
     pub history: Paged<WalletTx>,
     pub nfts: Paged<WalletNft>,
-    /// The list, or what replaces it.
-    pub view: MoneyView,
-    /// The "Your first Grams!" info is up over the details.
-    pub hint_open: bool,
-}
-
-/// What the Money page shows in place of its lists. Each way back to the
-/// overview is `back` or the other tab; a lookup's answer shows the details
-/// only while the view is `Lookup(Loading)` for the request that answers, so
-/// a late answer for an earlier card is dropped.
-#[derive(Debug, Clone, Default, PartialEq)]
-pub enum MoneyView {
-    #[default]
-    Overview,
-    /// A clicked transfer card's transaction is looked up (or the lookup
-    /// failed).
-    Lookup(TxLookup),
-    /// The transaction whose details are shown.
-    Tx(WalletTx),
-    /// The NFT whose details are shown (by address).
-    Nft(String),
-}
-
-/// A clicked transfer card's transaction lookup.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum TxLookup {
-    Loading {
-        request: crate::ids::RequestId,
-    },
-    /// The text shown instead of the details.
-    Failed(String),
+    pub detail: MoneyDetail,
 }
 
 impl MoneyPage {
     /// Whether the card lookup waits for the answer of `request`.
     pub fn tx_lookup_waits_for(&self, request: Option<crate::ids::RequestId>) -> bool {
-        request.is_some_and(|id| self.view == MoneyView::Lookup(TxLookup::Loading { request: id }))
+        request.is_some_and(|id| self.detail == MoneyDetail::Lookup { request: id })
     }
 
     /// The text of a failed lookup.
     pub fn tx_error(&self) -> Option<&str> {
-        match &self.view {
-            MoneyView::Lookup(TxLookup::Failed(text)) => Some(text),
+        match &self.detail {
+            MoneyDetail::LookupFailed(text) => Some(text),
             _ => None,
         }
     }
 
     /// The transaction whose details are shown.
     pub fn selected_tx(&self) -> Option<&WalletTx> {
-        match &self.view {
-            MoneyView::Tx(tx) => Some(tx),
+        match &self.detail {
+            MoneyDetail::Tx { tx, .. } => Some(tx),
             _ => None,
         }
     }
 
+    /// "Your first Grams!" is up over the details.
+    pub fn hint_open(&self) -> bool {
+        matches!(self.detail, MoneyDetail::Tx { hint: true, .. })
+    }
+
     /// The NFT whose details are shown.
     pub fn selected_nft(&self) -> Option<&WalletNft> {
-        let MoneyView::Nft(address) = &self.view else {
+        let MoneyDetail::Nft(address) = &self.detail else {
             return None;
         };
-        self.nfts.items.iter().find(|nft| &nft.address == address)
+        self.nfts.items().iter().find(|nft| nft.address == *address)
     }
 }
 

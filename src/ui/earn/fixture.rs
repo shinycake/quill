@@ -98,7 +98,7 @@ pub(in crate::ui) fn seed_earn_bots(
     limits.can_withdraw_chat_revenue = true;
     limits.starref_join_allowed = true;
     limits.starref_setup_allowed = true;
-    limits.app_config_loaded = true;
+    limits.app_config.succeed(());
 }
 
 fn star_stats() -> StarRevenueStats {

@@ -18,7 +18,7 @@ impl Session {
         let earn = &mut self.payments.earn;
         earn.notes.clear();
         earn.open_url = None;
-        earn.setup_closed = false;
+        earn.effects.clear();
         self.bots.callback_answers.clear();
         // The consent box and the raw-URL fallback of a login button
         // answered while away: its request goes with its answer. A request

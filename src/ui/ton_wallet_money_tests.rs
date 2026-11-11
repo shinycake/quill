@@ -88,12 +88,11 @@ fn seed_wallet(app: &mut QuillApp) {
         is_being_created: false,
         is_backup_enabled: true,
     });
-    wallet.money.history.apply(
+    wallet.money.history.set_ready(
         vec![transfer("t1", 2_000_000_000), transfer("t2", -500_000_000)],
         String::new(),
-        false,
     );
-    wallet.money.nfts.apply(
+    wallet.money.nfts.set_ready(
         vec![WalletNft {
             address: "EQnft".into(),
             name: "Cat #7".into(),
@@ -101,7 +100,6 @@ fn seed_wallet(app: &mut QuillApp) {
             ..WalletNft::default()
         }],
         String::new(),
-        false,
     );
 }
 

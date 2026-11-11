@@ -12,66 +12,227 @@ use quill::story_viewer::{StoryPlayback, StoryViewer};
 /// The facts the custom-emoji warm-up of the story viewer depends on.
 pub(super) type EmojiWarm = (Option<(quill::ids::ChatId, i32)>, Vec<i64>, usize, u32);
 
-/// What the story viewer has open over the story it shows: its panels,
-/// editors and their sent marks, the pause and the last result line. One
+/// A panel the viewer draws over its story. One is open at a time: opening
+/// one replaces the one before (`StoryViewerUi::show`), so they never stack
+/// and push the story out of its frame, or fight over the one search field
+/// they share. Each carries what only it needs.
+#[derive(Default)]
+pub(super) enum ViewerPanel {
+    #[default]
+    None,
+    /// Phase 9.2: story reaction picker open above the viewer overlay.
+    ReactionPicker,
+    /// Phase 9.2: story reply input open in the viewer overlay.
+    Reply(ReplyRow),
+    /// Phase 9.5: viewers panel (`getStoryInteractions`).
+    Viewers,
+    /// The statistics panel of the story.
+    Stats,
+    /// Phase 9.5: report flow UI (`reportStory`).
+    Report,
+    Share,
+    /// The close-friends editor. It is about the user's list, not the
+    /// story, so it stays when the viewer steps to another story.
+    CloseFriends(quill::story_extras::CloseFriendsStage),
+    /// Phase 9.5: privacy editor, open on a story with
+    /// `can_set_privacy_settings`; reuses the 4-way privacy selector +
+    /// contact checkboxes.
+    Privacy(StoryPrivacyEdit),
+    /// Phase 9.5: cover-frame picker, open on a video story with
+    /// `can_be_edited`: a preview over a strip of frames.
+    Cover(Box<super::story_albums::CoverPicker>),
+}
+
+/// Whether the reply row has opened the shared emoji / sticker / GIF panel.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum ReplyRow {
+    Typing,
+    MediaPanel,
+}
+
+/// Which panel, without what it carries.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum PanelKind {
+    ReactionPicker,
+    Reply,
+    Viewers,
+    Stats,
+    Report,
+    Share,
+    CloseFriends,
+    Privacy,
+    Cover,
+}
+
+impl ViewerPanel {
+    fn kind(&self) -> Option<PanelKind> {
+        Some(match self {
+            Self::None => return None,
+            Self::ReactionPicker => PanelKind::ReactionPicker,
+            Self::Reply(_) => PanelKind::Reply,
+            Self::Viewers => PanelKind::Viewers,
+            Self::Stats => PanelKind::Stats,
+            Self::Report => PanelKind::Report,
+            Self::Share => PanelKind::Share,
+            Self::CloseFriends(_) => PanelKind::CloseFriends,
+            Self::Privacy(_) => PanelKind::Privacy,
+            Self::Cover(_) => PanelKind::Cover,
+        })
+    }
+}
+
+/// What the story viewer has open over the story it shows: its panel,
+/// the calls its editors sent, the pause and the last result line. One
 /// value, held only while the viewer is open (`StoryUi::viewer_ui_mut`
 /// makes it then), and dropped by `release_story_viewer`: every close,
 /// the deleted-story and passcode ones included, ends all of it, so the
 /// next viewer cannot open on the last story's editor and Save cannot
 /// send the old `(chat_id, story_id)`.
-/// The story reply row: closed, open for typing, or open with the shared
-/// emoji / sticker / GIF panel it opened. A recording started from the row
-/// is the recorder's (`CaptureFor::StoryReply`).
-#[derive(Default, Clone, Copy, PartialEq, Eq)]
-pub(super) enum ReplyRow {
-    #[default]
-    Closed,
-    Typing,
-    Panel,
-}
-
 #[derive(Default)]
 pub(crate) struct StoryViewerUi {
-    /// Phase 9.2: story reaction picker open above the viewer overlay.
-    pub(super) reaction_picker_open: bool,
-    /// Phase 9.2: the story reply row in the viewer overlay.
-    pub(super) reply: ReplyRow,
-    /// Phase 9.5: viewers panel open in the viewer overlay
-    /// (`getStoryInteractions`).
-    pub(super) viewers_open: bool,
-    /// The statistics panel of the story open in the viewer.
-    pub(super) stats_open: bool,
-    /// Phase 9.5: report flow UI open in the viewer overlay
-    /// (`reportStory`).
-    pub(super) report_open: bool,
-    /// Phase 9.5: cover-frame picker (viewer) — open on a video story
-    /// with `can_be_edited`: a preview over a strip of frames.
-    pub(super) cover: Option<super::story_albums::CoverPicker>,
+    /// The one panel open over the story.
+    pub(super) panel: ViewerPanel,
     /// The `editStoryCover` call on its way; its answer closes the picker.
+    /// Its own value, not the panel's: a call the picker sent stays tracked
+    /// after another panel replaced it, so its answer still settles.
     pub(super) cover_request: Option<quill::ids::RequestId>,
-    /// Phase 9.5: privacy editor (viewer) — open on a story with
-    /// `can_set_privacy_settings`; reuses the 4-way privacy selector
-    /// + contact checkboxes.
-    pub(super) privacy_edit: Option<StoryPrivacyEdit>,
     /// The `setStoryPrivacySettings` call on its way; its answer closes
-    /// the editor.
+    /// the editor (kept apart from the panel like `cover_request`).
     pub(super) privacy_request: Option<quill::ids::RequestId>,
-    /// B14: the press-and-hold / Space pause, and the viewer's extra
-    /// panels (close friends, share) with their last result line.
+    /// B14: the press-and-hold / Space pause.
     pub(super) pause: quill::story_extras::StoryUserPause,
-    pub(super) close_friends: quill::story_extras::CloseFriendsStage,
     /// The story-page call sent from here (Hide, the profile toggle, the
     /// close-friends list): only its status line shows under the story.
     pub(super) page_op: Option<quill::ids::RequestId>,
-    pub(super) share_open: bool,
     /// The copy of the story's file to Downloads (`save_story_media`).
     pub(super) notice: Option<String>,
     /// The ⋯ menu is open: the story holds still under it, and its entries
-    /// act on the story it was opened for (`MenuAct` carries it).
+    /// act on the story it was opened for (`MenuAct` carries it). It
+    /// mirrors the kit menu's own visibility (`on_open_change`) and can be
+    /// up over any panel, so it is not a panel.
     pub(super) menu_open: bool,
     /// The "Stealth mode on" toast over this viewer until its deadline;
     /// it goes with the viewer (`release_story_viewer`).
     pub(super) stealth_toast: Option<super::story_stealth_ui::ShownStealthToast>,
+}
+
+static NO_CLOSE_FRIENDS: quill::story_extras::CloseFriendsStage =
+    quill::story_extras::CloseFriendsStage::Closed;
+
+impl StoryViewerUi {
+    /// `panel` opens and replaces the one before. A call a replaced editor
+    /// already sent (`cover_request`, `privacy_request`) stays tracked.
+    pub(super) fn show(&mut self, panel: ViewerPanel) {
+        self.panel = panel;
+    }
+
+    /// The panel of `kind` closes; another panel stays.
+    pub(super) fn close(&mut self, kind: PanelKind) {
+        if self.panel.kind() == Some(kind) {
+            self.panel = ViewerPanel::None;
+        }
+    }
+
+    pub(super) fn is_open(&self, kind: PanelKind) -> bool {
+        self.panel.kind() == Some(kind)
+    }
+
+    /// Any panel is open: the story holds still under it.
+    pub(super) fn has_panel(&self) -> bool {
+        !matches!(self.panel, ViewerPanel::None)
+    }
+
+    /// Open `panel` (a plain one), or close it when it is already open.
+    pub(super) fn toggle(&mut self, kind: PanelKind, panel: ViewerPanel) {
+        if self.is_open(kind) {
+            self.panel = ViewerPanel::None;
+        } else {
+            self.panel = panel;
+        }
+    }
+
+    pub(super) fn reply_open(&self) -> bool {
+        matches!(self.panel, ViewerPanel::Reply(_))
+    }
+
+    /// The reply row has opened the shared media panel.
+    pub(super) fn reply_panel(&self) -> bool {
+        matches!(self.panel, ViewerPanel::Reply(ReplyRow::MediaPanel))
+    }
+
+    /// The reply row's media panel opens or closes with its row; with no
+    /// row open there is nothing to change.
+    pub(super) fn set_reply_panel(&mut self, open: bool) {
+        if let ViewerPanel::Reply(row) = &mut self.panel {
+            *row = if open {
+                ReplyRow::MediaPanel
+            } else {
+                ReplyRow::Typing
+            };
+        }
+    }
+
+    pub(super) fn open_reply(&mut self) {
+        if !self.reply_open() {
+            self.panel = ViewerPanel::Reply(ReplyRow::Typing);
+        }
+    }
+
+    pub(super) fn cover(&self) -> Option<&super::story_albums::CoverPicker> {
+        match &self.panel {
+            ViewerPanel::Cover(cover) => Some(cover),
+            _ => None,
+        }
+    }
+
+    pub(super) fn cover_mut(&mut self) -> Option<&mut super::story_albums::CoverPicker> {
+        match &mut self.panel {
+            ViewerPanel::Cover(cover) => Some(cover),
+            _ => None,
+        }
+    }
+
+    pub(super) fn privacy_edit(&self) -> Option<&StoryPrivacyEdit> {
+        match &self.panel {
+            ViewerPanel::Privacy(edit) => Some(edit),
+            _ => None,
+        }
+    }
+
+    pub(super) fn privacy_edit_mut(&mut self) -> Option<&mut StoryPrivacyEdit> {
+        match &mut self.panel {
+            ViewerPanel::Privacy(edit) => Some(edit),
+            _ => None,
+        }
+    }
+
+    /// The close-friends editor's stage; `Closed` while another panel (or
+    /// none) is open.
+    pub(super) fn close_friends(&self) -> &quill::story_extras::CloseFriendsStage {
+        match &self.panel {
+            ViewerPanel::CloseFriends(stage) => stage,
+            _ => &NO_CLOSE_FRIENDS,
+        }
+    }
+
+    pub(super) fn close_friends_mut(
+        &mut self,
+    ) -> Option<&mut quill::story_extras::CloseFriendsStage> {
+        match &mut self.panel {
+            ViewerPanel::CloseFriends(stage) => Some(stage),
+            _ => None,
+        }
+    }
+
+    /// The editor moves to `stage` while it is the open panel; a panel
+    /// that replaced it is not brought back.
+    pub(super) fn set_close_friends(&mut self, stage: quill::story_extras::CloseFriendsStage) {
+        if matches!(stage, quill::story_extras::CloseFriendsStage::Closed) {
+            self.close(PanelKind::CloseFriends);
+        } else if let Some(open) = self.close_friends_mut() {
+            *open = stage;
+        }
+    }
 }
 
 /// One story's file being copied to Downloads on a background thread
@@ -85,78 +246,26 @@ pub(super) enum MediaSave {
     Done(String),
 }
 
-/// A panel the viewer draws over its story. One is open at a time:
-/// opening one closes the rest (`StoryViewerUi::close_other_panels`), so they
-/// never stack and push the story out of its frame, or fight over the one
-/// search field they share.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum ViewerPanel {
-    Viewers,
-    Stats,
-    Report,
-    Share,
-    Cover,
-    Privacy,
-    CloseFriends,
+/// The viewer's 100 ms tick. The task is owned here, so dropping the
+/// state stops it; it ends its own stage with `finish` when the viewer
+/// has closed.
+#[derive(Default)]
+pub(super) enum StoryTick {
+    #[default]
+    Off,
+    Running(Task<()>),
 }
 
-impl StoryViewerUi {
-    pub(super) fn reply_is_open(&self) -> bool {
-        self.reply != ReplyRow::Closed
+impl StoryTick {
+    pub(super) fn is_running(&self) -> bool {
+        matches!(self, Self::Running(_))
     }
 
-    /// The panel was opened from the open reply row.
-    pub(super) fn reply_panel_shown(&self) -> bool {
-        self.reply == ReplyRow::Panel
-    }
-
-    pub(super) fn open_reply(&mut self) {
-        if self.reply == ReplyRow::Closed {
-            self.reply = ReplyRow::Typing;
-        }
-    }
-
-    pub(super) fn close_reply(&mut self) {
-        self.reply = ReplyRow::Closed;
-    }
-
-    /// The panel opens from the row: a closed row has none.
-    pub(super) fn open_reply_panel(&mut self) {
-        if self.reply == ReplyRow::Typing {
-            self.reply = ReplyRow::Panel;
-        }
-    }
-
-    pub(super) fn close_reply_panel(&mut self) {
-        if self.reply == ReplyRow::Panel {
-            self.reply = ReplyRow::Typing;
-        }
-    }
-
-    /// `keep` is being opened: every other panel closes. A call a closed
-    /// panel already sent (`cover_request`, `privacy_request`, a saving
-    /// close-friends list) stays tracked, so its answer still settles.
-    pub(super) fn close_other_panels(&mut self, keep: ViewerPanel) {
-        if keep != ViewerPanel::Viewers {
-            self.viewers_open = false;
-        }
-        if keep != ViewerPanel::Stats {
-            self.stats_open = false;
-        }
-        if keep != ViewerPanel::Report {
-            self.report_open = false;
-        }
-        if keep != ViewerPanel::Share {
-            self.share_open = false;
-        }
-        if keep != ViewerPanel::Cover {
-            self.cover = None;
-        }
-        if keep != ViewerPanel::Privacy {
-            self.privacy_edit = None;
-        }
-        if keep != ViewerPanel::CloseFriends {
-            self.close_friends = quill::story_extras::CloseFriendsStage::Closed;
+    /// The tick task is done: it ends its own stage without cancelling
+    /// itself from inside.
+    pub(super) fn finish(&mut self) {
+        if let Self::Running(task) = std::mem::replace(self, Self::Off) {
+            task.detach();
         }
     }
 }
@@ -167,10 +276,9 @@ pub(crate) struct StoryUi {
     /// Phase 9.1: fullscreen story viewer (active-story tray → overlay).
     pub(super) viewer: StoryViewer,
     /// Phase 9.6: playback clock + segmented progress bar for the viewer;
-    /// `tick_active` guards the at-most-one 100ms tick task (same
-    /// pattern as `ensure_call_tick`).
+    /// `tick` is the at-most-one 100ms tick task.
     pub(super) playback: StoryPlayback,
-    pub(super) tick_active: bool,
+    pub(super) tick: StoryTick,
     /// What the tick last warmed custom-emoji reaction stickers for (the
     /// story, the ids it needs, how many stickers were known): the work
     /// repeats only when this changes.
@@ -211,8 +319,9 @@ pub(crate) struct StoryUi {
     /// panels (close friends, share) share.
     pub(super) muted: bool,
     pub(super) more_search: Entity<TextareaState>,
+    /// The stealth-mode box and its once-a-second tick, one value: the tick
+    /// ends with the box.
     pub(super) stealth_box: Option<super::story_stealth_ui::StealthBox>,
-    pub(super) stealth_tick: Option<Task<()>>,
     /// What the viewer has open over its story; `Some` only while the
     /// viewer is open (`viewer_ui_mut`), dropped by every close
     /// (`release_story_viewer`).
@@ -280,9 +389,14 @@ impl StoryUi {
         if self.viewer.is_open() {
             // The close-friends editor is about the list, not the story,
             // so it stays, and with it the call that loads or saves it.
-            let close_friends = open.close_friends.is_open();
+            let close_friends = open.is_open(PanelKind::CloseFriends);
+            let panel = if close_friends {
+                open.panel
+            } else {
+                ViewerPanel::None
+            };
             self.open = Some(StoryViewerUi {
-                close_friends: open.close_friends,
+                panel,
                 page_op: open.page_op.filter(|_| close_friends),
                 ..StoryViewerUi::default()
             });
@@ -367,10 +481,9 @@ impl StoryUi {
             muted: false,
             more_search: story_more_search,
             stealth_box: None,
-            stealth_tick: None,
             viewer: StoryViewer::closed(),
             playback: StoryPlayback::default(),
-            tick_active: false,
+            tick: StoryTick::Off,
             emoji_warm: None,
             open: None,
             media_saves: std::collections::HashMap::new(),
@@ -381,23 +494,23 @@ impl StoryUi {
 
 #[cfg(test)]
 mod reply_tests {
-    use super::StoryViewerUi;
+    use super::{StoryViewerUi, ViewerPanel};
 
     #[test]
     fn the_panel_belongs_to_an_open_row_and_goes_with_it() {
         let mut ui = StoryViewerUi::default();
-        ui.open_reply_panel();
-        assert!(!ui.reply_is_open(), "a closed row has no panel");
+        ui.set_reply_panel(true);
+        assert!(!ui.reply_open(), "a closed row has no panel");
         ui.open_reply();
-        ui.open_reply_panel();
-        assert!(ui.reply_is_open() && ui.reply_panel_shown());
-        ui.close_reply_panel();
-        assert!(ui.reply_is_open() && !ui.reply_panel_shown());
-        ui.open_reply_panel();
-        ui.close_reply();
-        assert!(!ui.reply_is_open() && !ui.reply_panel_shown());
+        ui.set_reply_panel(true);
+        assert!(ui.reply_open() && ui.reply_panel());
+        ui.set_reply_panel(false);
+        assert!(ui.reply_open() && !ui.reply_panel());
+        ui.set_reply_panel(true);
+        ui.panel = ViewerPanel::None;
+        assert!(!ui.reply_open() && !ui.reply_panel());
         // Reopening starts without the old panel.
         ui.open_reply();
-        assert!(!ui.reply_panel_shown());
+        assert!(!ui.reply_panel());
     }
 }

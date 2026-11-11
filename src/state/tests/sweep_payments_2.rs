@@ -81,7 +81,7 @@ fn collections_of_another_owner_are_dropped() {
     );
     // The channel's list is open now.
     session.payments.hub.gifts_owner = Some(channel);
-    session.payments.gifts_manage.collections_loading = true;
+    session.payments.gifts_manage.collections_fetch = crate::gift_manage::CollectionsFetch::Loading;
     let list = |extra: RequestId, id: i32| {
         format!(
             r#"{{"@type":"giftCollections","@extra":"{}","collections":[{{"@type":"giftCollection","id":{id},"name":"Mine","icon":null,"gift_count":1}}]}}"#,
@@ -90,12 +90,12 @@ fn collections_of_another_owner_are_dropped() {
     };
     apply_json(&mut session, &seq, &sink, &list(first, 7));
     assert!(session.payments.gifts_manage.collections.is_empty());
-    assert!(session.payments.gifts_manage.collections_loading);
+    assert!(session.payments.gifts_manage.collections_fetch.is_loading());
     fail(&mut session, first, &sink);
-    assert!(session.payments.gifts_manage.collections_loading);
+    assert!(session.payments.gifts_manage.collections_fetch.is_loading());
     apply_json(&mut session, &seq, &sink, &list(second, 9));
     assert_eq!(session.payments.gifts_manage.collections.len(), 1);
-    assert!(!session.payments.gifts_manage.collections_loading);
+    assert!(!session.payments.gifts_manage.collections_fetch.is_loading());
 }
 
 #[test]
@@ -236,22 +236,26 @@ fn a_join_box_parked_for_a_bot_profile_goes_when_the_profile_closes() {
     use crate::state::InfoPanelTarget;
     let (mut session, _sink) = session();
     let park = |session: &mut Session| {
-        session.payments.earn.pending_join = Some(JoinBox {
-            bot_user_id: 5,
-            info: Default::default(),
-            recipient: EarnPeer::User(1),
-            choose_recipient: true,
-            stage: crate::earn::JoinStage::Open,
-        });
+        session.payments.earn.recipients = crate::earn::Recipients::Loading {
+            waiting: Vec::new(),
+            found: Vec::new(),
+            join: Some(JoinBox {
+                bot_user_id: 5,
+                info: Default::default(),
+                recipient: EarnPeer::User(1),
+                choose_recipient: true,
+                stage: crate::earn::JoinStage::Open,
+            }),
+        };
     };
     park(&mut session);
     // The same bot's profile staying open keeps it.
     session.set_open_info_panel(Some(InfoPanelTarget::User(5)));
-    assert!(session.payments.earn.pending_join.is_some());
+    assert!(session.payments.earn.recipients.parked().is_some());
     // Another panel, or none, drops it.
     session.set_open_info_panel(Some(InfoPanelTarget::User(6)));
-    assert!(session.payments.earn.pending_join.is_none());
+    assert!(session.payments.earn.recipients.parked().is_none());
     park(&mut session);
     session.set_open_info_panel(None);
-    assert!(session.payments.earn.pending_join.is_none());
+    assert!(session.payments.earn.recipients.parked().is_none());
 }

@@ -29,7 +29,11 @@ fn outcomes_that_landed_in_the_background_are_not_drained_later() {
     session.groups.invite_link_error = Some("link".into());
     session.payments.earn.notes.push("Failed: x".into());
     session.payments.earn.open_url = Some("https://fragment.example".into());
-    session.payments.earn.setup_closed = true;
+    session
+        .payments
+        .earn
+        .effects
+        .push(crate::earn::EarnEffect::SetupDone);
 
     session.payments.receipt_error = Some("receipt".into());
     session.payments.unlocked_notice = Some("unlocked".into());
@@ -78,7 +82,7 @@ fn outcomes_that_landed_in_the_background_are_not_drained_later() {
     assert!(session.groups.invite_link_error.is_none());
     assert!(session.payments.earn.notes.is_empty());
     assert!(session.payments.earn.open_url.is_none());
-    assert!(!session.payments.earn.setup_closed);
+    assert!(session.payments.earn.effects.is_empty());
 }
 
 /// An answer whose request is still in flight keeps its context, so the

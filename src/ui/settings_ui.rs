@@ -408,7 +408,7 @@ impl QuillApp {
                 // schema 1.8.67 :9856) — one toggle driving all three
                 // networks — replacing the old local-only CallPrefs flag.
                 let on = self.session().is_some_and(|s| {
-                    s.settings.data_storage.seeded
+                    s.settings.data_storage.seeded.is_seeded()
                         && NetworkKind::ALL.iter().all(|n| {
                             s.settings
                                 .data_storage
@@ -444,7 +444,8 @@ impl QuillApp {
                                             .for_network_mut(n)
                                             .use_less_data_for_calls = on;
                                     }
-                                    demo.settings.data_storage.seeded = true;
+                                    demo.settings.data_storage.seeded =
+                                        quill::data_settings::Seed::Seeded;
                                 }
                                 cx.notify();
                             })),

@@ -386,7 +386,6 @@ fn storage_statistics_answer_cached_by_purpose() {
         .settings
         .storage_stats
         .data()
-        .cloned()
         .expect("stats cached");
     assert_eq!(stats.total_size, 6000);
     assert!(
@@ -426,7 +425,10 @@ fn storage_statistics_error_clears_loading() {
     );
     assert!(session.settings.storage_stats.data().is_none());
     assert!(!session.settings.storage_stats.is_loading());
-    assert!(session.settings.storage_stats.error().is_some());
+    assert!(
+        session.settings.storage_stats.error().is_some(),
+        "the overlay draws the failure"
+    );
 }
 
 #[test]

@@ -31,10 +31,12 @@ const LOGO: f32 = 88.;
 const LOGO_GLYPH: f32 = 45.;
 const TOAST_MAX_WIDTH: f32 = 340.;
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+/// The stealth-mode box, with the once-a-second tick that redraws its
+/// countdown: the tick ends with the box.
 pub(super) struct StealthBox {
     pub(super) open_after: Option<ChatId>,
     pub(super) stage: StealthStage,
+    _tick: Task<()>,
 }
 
 /// The box's button press. `Activating` leaves with the answer to its own
@@ -103,12 +105,13 @@ impl QuillApp {
             }
             self.show_stealth_toast(StealthToast::already(left), cx);
         } else {
+            let tick = self.stealth_box_tick(cx);
             self.stories.stealth_box = Some(StealthBox {
                 open_after,
                 stage: StealthStage::Idle,
+                _tick: tick,
             });
             self.open_box(DialogKind::StoryStealth);
-            self.ensure_stealth_box_tick(cx);
         }
         cx.notify();
     }
@@ -137,7 +140,6 @@ impl QuillApp {
 
     fn close_stealth_box(&mut self) {
         self.stories.stealth_box = None;
-        self.stories.stealth_tick = None;
     }
 
     fn press_story_stealth(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -189,7 +191,7 @@ impl QuillApp {
     }
 
     pub(in crate::ui) fn drain_story_stealth(&mut self, cx: &mut Context<Self>) -> bool {
-        let Some(stealth_box) = self.stories.stealth_box.clone() else {
+        let Some(open_after) = self.stories.stealth_box.as_ref().map(|b| b.open_after) else {
             return false;
         };
         let facts = self.stealth_facts();
@@ -198,7 +200,7 @@ impl QuillApp {
             return false;
         }
         self.close_stealth_box();
-        if let Some(chat_id) = stealth_box.open_after {
+        if let Some(chat_id) = open_after {
             self.open_peer_stories(chat_id, cx);
         }
         self.show_stealth_toast(StealthToast::activated(facts.periods), cx);
@@ -227,11 +229,8 @@ impl QuillApp {
         }
     }
 
-    fn ensure_stealth_box_tick(&mut self, cx: &mut Context<Self>) {
-        if self.stories.stealth_tick.is_some() {
-            return;
-        }
-        self.stories.stealth_tick = Some(self.spawn_screen(cx, async move |this, cx| {
+    fn stealth_box_tick(&mut self, cx: &mut Context<Self>) -> Task<()> {
+        self.spawn_screen(cx, async move |this, cx| {
             loop {
                 let into_second = std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
@@ -245,7 +244,7 @@ impl QuillApp {
                     break;
                 }
             }
-        }));
+        })
     }
 
     pub(in crate::ui) fn story_stealth_toast(&self) -> Option<AnyElement> {

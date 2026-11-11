@@ -57,7 +57,7 @@ impl QuillApp {
     /// The tab's body.
     pub(super) fn apps_tab_block(&self, query: &str, cx: &mut Context<Self>) -> AnyElement {
         let muted = cx.theme().muted_foreground;
-        let (used, grossing, loading) = self
+        let (used, grossing) = self
             .session()
             .map(|session| {
                 let used: Vec<i64> = session
@@ -68,16 +68,12 @@ impl QuillApp {
                     .filter(|bot| bot.is_added)
                     .map(|bot| bot.bot_user_id)
                     .collect();
-                (
-                    used,
-                    session.bots.web_apps.grossing_bots.clone(),
-                    session.bots.web_apps.grossing_loading,
-                )
+                (used, session.bots.web_apps.grossing.clone())
             })
-            .unwrap_or((Vec::new(), None, false));
+            .unwrap_or((Vec::new(), Default::default()));
         let used_rows = self.rows_matching(&used, query);
         let grossing_rows = grossing
-            .as_deref()
+            .data()
             .map(|ids| self.rows_matching(ids, query))
             .unwrap_or_default();
         let mut block = div().id("search-apps").flex().flex_col().gap_2();
@@ -130,7 +126,9 @@ impl QuillApp {
                 cx,
             ));
         } else {
-            let note = if loading || grossing.is_none() {
+            let note = if grossing.error().is_some() {
+                tr(keys::Q_MEDIA_COULD_NOT_LOAD_APPS).to_string()
+            } else if grossing.data().is_none() || grossing.is_loading() {
                 tr(keys::Q_MEDIA_LOADING_APPS).to_string()
             } else if query.trim().is_empty() {
                 tr(keys::Q_MEDIA_NO_APPS_TO_SHOW_RIGHT).to_string()

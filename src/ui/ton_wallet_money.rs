@@ -57,7 +57,7 @@ impl QuillApp {
     pub(super) fn close_money(&mut self, cx: &mut Context<Self>) {
         if self
             .ton_wallet_mut()
-            .is_some_and(|wallet| wallet.money.hint_open)
+            .is_some_and(|wallet| wallet.money.hint_open())
         {
             self.dismiss_first_grams_hint(cx);
         }
@@ -99,9 +99,9 @@ impl QuillApp {
 
     pub(super) fn select_wallet_nft(&mut self, address: Option<String>, cx: &mut Context<Self>) {
         if let Some(wallet) = self.ton_wallet_mut() {
-            wallet.money.view = match address {
-                Some(address) => quill::ton_wallet::MoneyView::Nft(address),
-                None => quill::ton_wallet::MoneyView::Overview,
+            wallet.money.detail = match address {
+                Some(address) => quill::ton_wallet::MoneyDetail::Nft(address),
+                None => quill::ton_wallet::MoneyDetail::Overview,
             };
         }
         cx.notify();
@@ -109,7 +109,7 @@ impl QuillApp {
 
     pub(super) fn money_back(&mut self, cx: &mut Context<Self>) {
         if let Some(wallet) = self.ton_wallet_mut() {
-            wallet.money.view = quill::ton_wallet::MoneyView::Overview;
+            wallet.money.detail = quill::ton_wallet::MoneyDetail::Overview;
         }
         cx.notify();
     }
@@ -119,7 +119,11 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut() {
             let _ = live.driver.dismiss_first_transfer_hint();
         } else if let Some(session) = self.demo_session.as_mut() {
-            session.ton_wallet.money.hint_open = false;
+            if let quill::ton_wallet::MoneyDetail::Tx { hint, .. } =
+                &mut session.ton_wallet.money.detail
+            {
+                *hint = false;
+            }
             session
                 .chat_list
                 .suggestions
@@ -195,16 +199,22 @@ impl QuillApp {
                 return dialog.on_close(on_close);
             };
             let money = &session.ton_wallet.money;
-            let body = if money.hint_open {
-                super::ton_wallet_details::first_grams_hint(&session.ton_wallet, cx)
-            } else if let Some(tx) = money.selected_tx() {
-                super::ton_wallet_details::tx_details(session, tx, &roots, cx)
-            } else if let Some(nft) = money.selected_nft() {
-                super::ton_wallet_details::nft_details(session, nft, &roots, cx)
-            } else if matches!(money.view, quill::ton_wallet::MoneyView::Lookup(_)) {
-                super::ton_wallet_details::tx_lookup_state(money.tx_error(), cx)
-            } else {
-                overview(session, &roots, cx)
+            use quill::ton_wallet::MoneyDetail;
+            let body = match &money.detail {
+                MoneyDetail::Tx { hint: true, .. } => {
+                    super::ton_wallet_details::first_grams_hint(&session.ton_wallet, cx)
+                }
+                MoneyDetail::Tx { tx, .. } => {
+                    super::ton_wallet_details::tx_details(session, tx, &roots, cx)
+                }
+                MoneyDetail::Nft(_) => match money.selected_nft() {
+                    Some(nft) => super::ton_wallet_details::nft_details(session, nft, &roots, cx),
+                    None => overview(session, &roots, cx),
+                },
+                MoneyDetail::Lookup { .. } | MoneyDetail::LookupFailed(_) => {
+                    super::ton_wallet_details::tx_lookup_state(money.tx_error(), cx)
+                }
+                MoneyDetail::Overview => overview(session, &roots, cx),
             };
             dialog
                 .content(crate::ui::shell::scrollable_dialog_content({
@@ -383,17 +393,17 @@ fn overview(
     body = body.child(tabs);
     let (loading, loaded, error, empty, more) = match money.tab {
         MoneyTab::Transactions => (
-            money.history.loading(),
-            money.history.loaded(),
+            money.history.is_loading(),
+            money.history.is_loaded(),
             money.history.error().map(str::to_string),
-            money.history.items.is_empty(),
+            money.history.items().is_empty(),
             money.history.has_more(),
         ),
         MoneyTab::Collectibles => (
-            money.nfts.loading(),
-            money.nfts.loaded(),
+            money.nfts.is_loading(),
+            money.nfts.is_loaded(),
             money.nfts.error().map(str::to_string),
-            money.nfts.items.is_empty(),
+            money.nfts.items().is_empty(),
             money.nfts.has_more(),
         ),
     };
@@ -415,12 +425,12 @@ fn overview(
     }
     match money.tab {
         MoneyTab::Transactions => {
-            for (ix, tx) in money.history.items.iter().enumerate() {
+            for (ix, tx) in money.history.items().iter().enumerate() {
                 body = body.child(tx_row(session, ix, tx, cx));
             }
         }
         MoneyTab::Collectibles => {
-            for (ix, nft) in money.nfts.items.iter().enumerate() {
+            for (ix, nft) in money.nfts.items().iter().enumerate() {
                 body = body.child(nft_row(session, ix, nft, roots, cx));
             }
         }

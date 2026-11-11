@@ -15,6 +15,7 @@ use super::live_state::{
 use super::*;
 use crate::ui::media_panel::PanelTab;
 use crate::ui::status_note::StatusNote;
+use crate::ui::stories_state::PanelKind;
 use gpui_kit::component::slider::{SliderEvent, SliderState};
 use quill::calls::engine::StreamState;
 use quill::lang::trn_with;
@@ -146,7 +147,7 @@ impl QuillApp {
             player.release_live(cx);
         }
         // The emoji panel the comment field opened goes with it.
-        if self.stories.viewer_ui().reply_is_open() {
+        if self.stories.viewer_ui().reply_open() {
             self.end_story_reply(cx);
         }
         self.stories.live.reset();
@@ -627,7 +628,8 @@ impl QuillApp {
         }
         self.toggle_story_reply_panel(PanelTab::Emoji, cx);
         if !self.story_reply_panel_active() {
-            self.stories.with_viewer_ui(|open| open.close_reply());
+            self.stories
+                .with_viewer_ui(|open| open.close(PanelKind::Reply));
         }
     }
 }

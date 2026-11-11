@@ -10,7 +10,7 @@ use super::pressable::PressableDiv;
 use super::search_ui::chat_search_jump_note;
 use super::*;
 use crate::ui::status_note::StatusNote;
-use crate::ui::stories_state::ViewerPanel;
+use crate::ui::stories_state::{PanelKind, StoryTick, ViewerPanel};
 use gpui_kit::component::button::*;
 use gpui_kit::component::input::Textarea;
 use gpui_kit::component::*;
@@ -83,7 +83,7 @@ impl QuillApp {
             )));
         }
         if let Some(open) = self.stories.viewer_ui_mut() {
-            open.reaction_picker_open = false;
+            open.close(PanelKind::ReactionPicker);
         }
         cx.notify();
     }
@@ -126,9 +126,9 @@ impl QuillApp {
     /// (`schema/td_api.tl:13802`).
     pub(super) fn toggle_story_reaction_picker(&mut self, cx: &mut Context<Self>) {
         if let Some(open) = self.stories.viewer_ui_mut() {
-            open.reaction_picker_open = !open.reaction_picker_open;
+            open.toggle(PanelKind::ReactionPicker, ViewerPanel::ReactionPicker);
         }
-        if self.stories.viewer_ui().reaction_picker_open {
+        if self.stories.viewer_ui().is_open(PanelKind::ReactionPicker) {
             if let Some(live) = self.live.as_mut() {
                 if live.driver.session.stories.available_reactions.is_none() {
                     match live.driver.get_story_available_reactions() {
@@ -171,7 +171,7 @@ impl QuillApp {
             )));
         }
         if let Some(open) = self.stories.viewer_ui_mut() {
-            open.reaction_picker_open = false;
+            open.close(PanelKind::ReactionPicker);
         }
         cx.notify();
     }
@@ -246,7 +246,7 @@ impl QuillApp {
             )));
         }
         if let Some(open) = self.stories.viewer_ui_mut() {
-            open.reaction_picker_open = false;
+            open.close(PanelKind::ReactionPicker);
         }
         cx.notify();
     }
@@ -344,7 +344,7 @@ impl QuillApp {
     /// Phase 9.2: toggle the reply row in the viewer (`story.can_be_replied`
     /// gates the button).
     pub(super) fn toggle_story_reply(&mut self, cx: &mut Context<Self>) {
-        if self.stories.viewer_ui().reply_is_open() {
+        if self.stories.viewer_ui().reply_open() {
             self.end_story_reply(cx);
         } else {
             if let Some(open) = self.stories.viewer_ui_mut() {
@@ -433,7 +433,7 @@ impl QuillApp {
             )));
         }
         if let Some(open) = self.stories.viewer_ui_mut() {
-            open.reaction_picker_open = false;
+            open.close(PanelKind::ReactionPicker);
         }
         self.end_story_reply(cx);
         cx.notify();
@@ -448,11 +448,9 @@ impl QuillApp {
             return;
         };
         if let Some(open) = self.stories.viewer_ui_mut() {
-            open.viewers_open = !open.viewers_open;
+            open.toggle(PanelKind::Viewers, ViewerPanel::Viewers);
         }
-        if self.stories.viewer_ui().viewers_open {
-            self.stories
-                .with_viewer_ui(|open| open.close_other_panels(ViewerPanel::Viewers));
+        if self.stories.viewer_ui().is_open(PanelKind::Viewers) {
             // Phase 9.5 review: reset rows before the fresh page-1
             // fetch — `begin_story_viewers` keeps rows for the same
             // story, so reopening would otherwise duplicate them.
@@ -537,11 +535,9 @@ impl QuillApp {
             return;
         };
         if let Some(open) = self.stories.viewer_ui_mut() {
-            open.report_open = !open.report_open;
+            open.toggle(PanelKind::Report, ViewerPanel::Report);
         }
-        if self.stories.viewer_ui().report_open {
-            self.stories
-                .with_viewer_ui(|open| open.close_other_panels(ViewerPanel::Report));
+        if self.stories.viewer_ui().is_open(PanelKind::Report) {
             self.send_story_report_step(&item, "", "", cx);
         } else {
             self.clear_terminal_story_report();
@@ -578,8 +574,8 @@ impl QuillApp {
     /// their session state, whatever stage the report flow reached.
     pub(super) fn close_story_item_panels(&mut self) {
         if let Some(open) = self.stories.viewer_ui_mut() {
-            open.report_open = false;
-            open.viewers_open = false;
+            open.close(PanelKind::Report);
+            open.close(PanelKind::Viewers);
         }
         let session = match self.live.as_mut() {
             Some(live) => Some(&mut live.driver.session),
@@ -763,21 +759,14 @@ impl QuillApp {
         // A locked Quill is not looked at, focused or not.
         !self.frame.main_active.get()
             || self.refused_while_locked()
-            || self.stories.viewer_ui().reaction_picker_open
-            || self.stories.viewer_ui().reply_is_open()
+            // Any panel open over the story holds it.
+            || self.stories.viewer_ui().has_panel()
             || self.stories.viewer_ui().pause.is_paused()
             // A repost's press waits for its story's answer.
             || self
                 .chat_list
                 .pending_story_open
                 .is_some_and(|open| open.if_gone.is_some())
-            || self.stories.viewer_ui().share_open
-            || self.stories.viewer_ui().report_open
-            || self.stories.viewer_ui().viewers_open
-            || self.stories.viewer_ui().stats_open
-            || self.stories.viewer_ui().privacy_edit.is_some()
-            || self.stories.viewer_ui().cover.is_some()
-            || self.stories.viewer_ui().close_friends.is_open()
             || self.stories.viewer_ui().menu_open
             || self.stories.stealth_box.is_some()
             // Edit and Repost open the composer over the viewer: the story
@@ -795,12 +784,11 @@ impl QuillApp {
     /// `updatePlayback` → `subjumpFor(1)` else `storiesClose()`,
     /// `media_stories_controller.cpp:1235-1240`).
     pub(super) fn ensure_story_tick(&mut self, cx: &mut Context<Self>) {
-        if !self.stories.viewer.is_open() || self.stories.tick_active {
+        if !self.stories.viewer.is_open() || self.stories.tick.is_running() {
             return;
         }
-        self.stories.tick_active = true;
         // window-scope: only the main window draws the story viewer (`hand_to_main_window`).
-        self.spawn_screen(cx, async move |this, cx| {
+        let task = self.spawn_screen(cx, async move |this, cx| {
             loop {
                 cx.background_executor()
                     .timer(Duration::from_millis(100))
@@ -809,7 +797,7 @@ impl QuillApp {
                     .update(cx, |this, cx| {
                         if !this.stories.viewer.is_open() {
                             this.stories.playback.stop();
-                            this.stories.tick_active = false;
+                            this.stories.tick.finish();
                             this.stories.emoji_warm = None;
                             return false;
                         }
@@ -842,8 +830,8 @@ impl QuillApp {
                     break;
                 }
             }
-        })
-        .detach();
+        });
+        self.stories.tick = StoryTick::Running(task);
     }
 }
 

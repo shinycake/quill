@@ -47,7 +47,7 @@ impl GiftFlow {
 /// One list the send-gift dialog asks for when it opens. The dialog is
 /// rebuilt for each recipient, so only the answer (or failure) of the
 /// request named here lands; an earlier box's is dropped.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub enum GiftListFetch {
     /// Not asked (the demo, or Premium options for yourself or a channel).
     #[default]
@@ -56,19 +56,37 @@ pub enum GiftListFetch {
     Asking(crate::ids::RequestId),
     /// The answer landed.
     Answered,
-    /// The request failed or could not be sent.
-    Failed,
+    /// The request failed or could not be sent; the line the box shows.
+    /// Apart from `SendStage`, so a list failure never overwrites a
+    /// `sendGift` in flight.
+    Failed(String),
 }
 
 impl GiftListFetch {
     /// Whether `pending` is the request this list waits for.
-    pub(crate) fn asked_by(self, pending: Option<&crate::state::PendingRequest>) -> bool {
-        matches!((self, pending), (Self::Asking(id), Some(pending)) if id == pending.id)
+    pub(crate) fn asked_by(&self, pending: Option<&crate::state::PendingRequest>) -> bool {
+        matches!((self, pending), (Self::Asking(id), Some(pending)) if *id == pending.id)
     }
 
-    pub fn is_loading(self) -> bool {
+    pub fn is_loading(&self) -> bool {
         matches!(self, Self::Asking(_))
     }
+}
+
+/// Where the send-gift dialog's `sendGift` stands. The dialog is rebuilt
+/// for each recipient, so only the answer of `Sending`'s own request leaves
+/// it; picking another gift, closing the box or sending again leaves
+/// `Sent` and `Failed`.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum SendStage {
+    #[default]
+    Idle,
+    /// The `sendGift` in flight.
+    Sending(crate::ids::RequestId),
+    /// The gift went out; the line the box shows.
+    Sent(String),
+    /// The send failed; the line the box shows.
+    Failed(String),
 }
 
 /// The send-gift dialog (`GiftBox` in tdesktop).
@@ -83,23 +101,34 @@ pub struct SendGiftState {
     pub premium_options: Vec<PremiumGiftOption>,
     /// `getPremiumGiftPaymentOptions` for `premium_options`.
     pub premium_fetch: GiftListFetch,
-    /// The `sendGift` this dialog waits for; set while it is in flight.
-    /// The dialog is rebuilt for each recipient, so an earlier
-    /// recipient's answer is dropped.
-    pub request: Option<crate::ids::RequestId>,
-    pub error: Option<String>,
-    pub done: Option<String>,
+    pub stage: SendStage,
 }
 
 impl SendGiftState {
     /// A `sendGift` is in flight.
     pub fn sending(&self) -> bool {
-        self.request.is_some()
+        matches!(self.stage, SendStage::Sending(_))
     }
 
     /// Whether `pending` is the `sendGift` this dialog waits for.
     pub(crate) fn waits_for(&self, pending: Option<&crate::state::PendingRequest>) -> bool {
-        pending.is_some_and(|pending| self.request == Some(pending.id))
+        pending.is_some_and(|pending| self.stage == SendStage::Sending(pending.id))
+    }
+
+    /// The line after a sent gift.
+    pub fn done_line(&self) -> Option<&str> {
+        match &self.stage {
+            SendStage::Sent(line) => Some(line),
+            _ => None,
+        }
+    }
+
+    /// The line after a failed send or gift list.
+    pub fn error_line(&self) -> Option<&str> {
+        match (&self.stage, &self.gifts_fetch) {
+            (SendStage::Failed(line), _) | (_, GiftListFetch::Failed(line)) => Some(line),
+            _ => None,
+        }
     }
 
     /// Whether `pending` is the gift list request of this dialog.
@@ -125,27 +154,60 @@ pub struct GiftManageState {
     /// at the next gifts open.
     pub limits_ask: crate::state::fetch::BatchAsk,
     pub collections: Vec<GiftCollection>,
-    pub collections_loading: bool,
-    pub collections_stale: bool,
+    /// Where the owner's collections list stands.
+    pub collections_fetch: CollectionsFetch,
     /// The collection tab that is open; 0 = all gifts.
     pub active_collection: i32,
     pub flow: Option<GiftFlow>,
     /// The gift whose `deleteGift` is in flight; the answer removes it.
     pub deleting: Option<String>,
-    /// One-shot: a gift was just deleted; the UI shows the "Gift Deleted"
-    /// toast and clears it.
-    pub deleted: bool,
     /// A one-line result of the last action ("Pinned", "Upgraded to ...").
     pub note: Option<String>,
     pub send: SendGiftState,
-    /// A finished transfer, for the toast and the recipient's chat.
-    pub transferred: Option<GiftTransferred>,
-    /// Fragment's export page from `getUpgradedGiftWithdrawalUrl`, waiting
-    /// for the UI to open it.
-    pub export_url: Option<String>,
-    /// One-shot: `createTemporaryPassword` succeeded for the export in
-    /// flight, so the driver sends `getUpgradedGiftWithdrawalUrl` next.
-    pub export_unlocked: bool,
+    /// What finished that the UI shows once: the window that hosts the
+    /// gifts drains them (`take_events`); a list that closes drops them.
+    pub events: Vec<GiftEvent>,
+}
+
+/// The collections list of the open gifts owner: current, on its way, or
+/// out of date because a collection changed (the next look asks again). A
+/// change while a request is out leaves it `Stale`, so that answer is taken
+/// but the list is asked for once more.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum CollectionsFetch {
+    #[default]
+    Idle,
+    Loading,
+    Stale,
+}
+
+impl CollectionsFetch {
+    pub fn is_loading(self) -> bool {
+        self == Self::Loading
+    }
+
+    pub fn is_stale(self) -> bool {
+        self == Self::Stale
+    }
+
+    /// The answer (or error) of the request in flight: a `Stale` list
+    /// stays so.
+    pub fn settle(&mut self) {
+        if *self == Self::Loading {
+            *self = Self::Idle;
+        }
+    }
+}
+
+/// A result the UI shows once.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum GiftEvent {
+    /// A gift was deleted: the "Gift Deleted" toast.
+    Deleted,
+    /// A finished transfer: the toast and the recipient's chat.
+    Transferred(GiftTransferred),
+    /// Fragment's export page from `getUpgradedGiftWithdrawalUrl`, to open.
+    ExportUrl(String),
 }
 
 /// tdesktop `ShowGiftTransferredToast` and `showPeerHistory` after
@@ -180,6 +242,32 @@ impl GiftManageState {
         }
     }
 
+    /// Take what finished since the last call.
+    pub fn take_events(&mut self) -> Vec<GiftEvent> {
+        std::mem::take(&mut self.events)
+    }
+
+    /// The finished transfer waiting to be shown.
+    pub fn transferred(&self) -> Option<&GiftTransferred> {
+        self.events.iter().find_map(|event| match event {
+            GiftEvent::Transferred(done) => Some(done),
+            _ => None,
+        })
+    }
+
+    /// The export page waiting to be opened.
+    pub fn export_url(&self) -> Option<&str> {
+        self.events.iter().find_map(|event| match event {
+            GiftEvent::ExportUrl(url) => Some(url.as_str()),
+            _ => None,
+        })
+    }
+
+    /// A deleted gift's toast is waiting.
+    pub fn deleted(&self) -> bool {
+        self.events.contains(&GiftEvent::Deleted)
+    }
+
     pub fn collection(&self, id: i32) -> Option<&GiftCollection> {
         self.collections.iter().find(|c| c.id == id)
     }
@@ -187,15 +275,12 @@ impl GiftManageState {
     /// Forget the per-owner state when another gifts list opens.
     pub fn reset_for_owner(&mut self) {
         self.collections.clear();
-        self.collections_loading = false;
-        self.collections_stale = false;
+        self.collections_fetch = CollectionsFetch::Idle;
         self.active_collection = 0;
         self.flow = None;
         self.deleting = None;
         self.note = None;
         // A result nobody took belongs to the list that was closed.
-        self.deleted = false;
-        self.transferred = None;
-        self.export_url = None;
+        self.events.clear();
     }
 }

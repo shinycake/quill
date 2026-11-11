@@ -322,7 +322,7 @@ fn grossing_apps_load_once_and_land_in_the_session() {
         .fetch_grossing_web_app_bots()
         .expect("sent")
         .expect("request");
-    assert!(h.driver.session.bots.web_apps.grossing_loading);
+    assert!(h.driver.session.bots.web_apps.grossing.is_loading());
     assert_eq!(
         h.driver.fetch_grossing_web_app_bots().unwrap(),
         None,
@@ -333,10 +333,10 @@ fn grossing_apps_load_once_and_land_in_the_session() {
         extra.as_extra()
     ));
     assert_eq!(
-        h.driver.session.bots.web_apps.grossing_bots,
-        Some(vec![42, 43])
+        h.driver.session.bots.web_apps.grossing.data(),
+        Some(&vec![42, 43])
     );
-    assert!(!h.driver.session.bots.web_apps.grossing_loading);
+    assert!(!h.driver.session.bots.web_apps.grossing.is_loading());
     assert_eq!(
         h.driver.fetch_grossing_web_app_bots().unwrap(),
         None,

@@ -373,14 +373,11 @@ fn a_refused_story_reply_keeps_the_text_and_the_row(cx: &mut TestAppContext) {
             "congrats!",
             "the typed text survives a refused send"
         );
-        assert!(
-            app.stories.viewer_ui().reply_is_open(),
-            "the row stays open"
-        );
+        assert!(app.stories.viewer_ui().reply_open(), "the row stays open");
         app.finish_story_reply_text(Some(true), window, cx);
         assert_eq!(app.stories.reply_input.read(cx).value().to_string(), "");
         assert!(
-            !app.stories.viewer_ui().reply_is_open(),
+            !app.stories.viewer_ui().reply_open(),
             "a sent reply closes it"
         );
     });

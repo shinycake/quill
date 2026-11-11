@@ -100,8 +100,11 @@ impl Session {
         thread.unread_anchor = (thread.unread_count > 0).then_some(MessageId(
             thread.last_read_inbox_message_id.max(thread.thread_id),
         ));
-        thread.status = ThreadStatus::LoadingHistory;
-        thread.needs_chat_switch = open_chat != Some(info.chat_id);
+        thread.status = if open_chat != Some(info.chat_id) {
+            ThreadStatus::SwitchingChat
+        } else {
+            ThreadStatus::Starting
+        };
         let rows: Vec<HistoryMessage> = info
             .messages
             .into_iter()
@@ -189,7 +192,7 @@ impl Session {
         };
         let trimmed = thread.trim_after_page(far_end) > 0;
         thread.history.total_count = thread.history.messages.len() as i32;
-        if thread.status == ThreadStatus::LoadingHistory {
+        if thread.status.is_opening() {
             thread.status = ThreadStatus::Ready;
         }
         if trimmed {
@@ -224,7 +227,7 @@ impl Session {
         }
         if newer {
             thread.history.fail_newer();
-        } else if thread.status != ThreadStatus::Ready {
+        } else if !thread.status.is_loaded() {
             thread.status = ThreadStatus::Failed(line);
         } else {
             thread.history.fail_older();

@@ -5,12 +5,55 @@ use crate::telegram::envelope::ServiceAction;
 /// Where the open thread view is in its load sequence.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ThreadStatus {
-    /// `getMessageThread` is in flight.
+    /// `getMessageThread` is in flight; its answer is matched to the
+    /// thread's origin message. The error line leaves it as `Failed`.
     Resolving,
-    /// The thread is known; the first `getMessageThreadHistory` page is in flight.
-    LoadingHistory,
+    /// The thread is known but lives in another chat (a channel post's
+    /// discussion group): the driver still has to open that chat. Leaves
+    /// by `switch_to_thread_chat` (`Starting`, or `Failed` when the chat
+    /// is unknown) or by closing the thread.
+    SwitchingChat,
+    /// The thread's chat is open; reading and the first
+    /// `getMessageThreadHistory` page are still to be started.
+    Starting,
+    /// The first `getMessageThreadHistory` page is in flight (the
+    /// request that went out). Its answer makes the thread `Ready`, its
+    /// error `Failed`; it is entered only once the send succeeded.
+    LoadingHistory(RequestId),
     Ready,
+    /// The reducer replaced the window (an own send while newer replies
+    /// were unloaded); the driver has to request the newest page, which
+    /// makes the thread `Ready` again.
+    ReloadNeeded,
     Failed(String),
+}
+
+impl ThreadStatus {
+    /// The thread chat still has to be opened.
+    pub fn needs_chat_switch(&self) -> bool {
+        matches!(self, Self::SwitchingChat)
+    }
+
+    /// The thread chat is open and its first page was not requested yet.
+    pub fn needs_start(&self) -> bool {
+        matches!(self, Self::Starting)
+    }
+
+    /// The thread is known but its first page has not landed: the driver
+    /// still has to open its chat or request the page (the UI polls this
+    /// each frame).
+    pub fn is_opening(&self) -> bool {
+        matches!(
+            self,
+            Self::SwitchingChat | Self::Starting | Self::LoadingHistory(_)
+        )
+    }
+
+    /// The first page landed: the thread shows rows (or the reload of its
+    /// window is due).
+    pub fn is_loaded(&self) -> bool {
+        matches!(self, Self::Ready | Self::ReloadNeeded)
+    }
 }
 
 /// The open comment / reply thread. `chat_id` is the chat that holds the
@@ -42,17 +85,10 @@ pub struct ThreadView {
     /// `loaded_complete` once it reaches the root, `has_newer` while it
     /// stops short of `last_message_id` (opened at the first unread).
     pub history: TopicHistory,
-    /// The window was reset by the reducer (an own send while newer replies
-    /// were unloaded); the driver has to request the newest page.
-    pub reload_needed: bool,
     /// The unread divider goes above the first incoming reply after this id.
     pub unread_anchor: Option<MessageId>,
     /// Bumped by "jump to root" so the view scrolls to the top again.
     pub root_jump_serial: u64,
-    /// `chat_id` differs from `open_chat`: the driver still has to open it.
-    pub needs_chat_switch: bool,
-    /// The thread chat is open and the first history page was requested.
-    pub reading_started: bool,
     /// The forum topic the thread was opened from. Sends and typing stay in
     /// that topic (`messageTopicForum`) and reply to the thread root;
     /// `None` outside forums, where a thread is its own `messageTopicThread`.
@@ -77,11 +113,8 @@ impl ThreadView {
             last_message_id: 0,
             root_ids: Vec::new(),
             history: TopicHistory::default(),
-            reload_needed: false,
             unread_anchor: None,
             root_jump_serial: 0,
-            needs_chat_switch: false,
-            reading_started: false,
             forum_topic_id: None,
             draft: None,
         }
@@ -271,7 +304,9 @@ impl ThreadView {
         self.history.reader = ReaderPosition::Tail;
         self.history.newer = NewerEnd::AtLatest;
         self.history.older = OlderEnd::Open;
-        self.reload_needed = true;
+        if self.status == ThreadStatus::Ready {
+            self.status = ThreadStatus::ReloadNeeded;
+        }
         self.history.window_epoch = self.history.window_epoch.wrapping_add(1);
     }
 }

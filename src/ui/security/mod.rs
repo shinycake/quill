@@ -481,7 +481,7 @@ impl QuillApp {
 
     /// Phase S2: refetch the storage stats. Live: drop the cache so the
     /// guarded fetch fires again. Demo: re-inject the fixture stats.
-    pub(super) fn refresh_storage_usage(&mut self, cx: &mut Context<Self>) {
+    pub(in crate::ui) fn refresh_storage_usage(&mut self, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
             live.driver.refresh_storage_statistics();
             let _ = live.driver.maybe_fetch_storage_statistics();

@@ -47,7 +47,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         // Supergroups choose a custom emoji pack from their installed ones.
         let _ = self.load_group_sticker_choices(chat_id);
         self.load_background_emoji_icons()?;
-        self.session.stickers.emoji.chat_status_open = true;
+        self.session.stickers.emoji.status_picker = crate::emoji::StatusPicker::ChatAppearance;
         let purpose = RequestPurpose::GetDefaultChatEmojiStatuses;
         if self
             .session
@@ -96,7 +96,9 @@ impl<S: JsonSender> ConnectDriver<S> {
 
     /// Closing the box stops resolving its status choices.
     pub fn close_chat_appearance(&mut self) {
-        self.session.stickers.emoji.chat_status_open = false;
+        if self.session.stickers.emoji.status_picker == crate::emoji::StatusPicker::ChatAppearance {
+            self.session.stickers.emoji.status_picker = crate::emoji::StatusPicker::Closed;
+        }
     }
 
     /// Whether every part of `plan` can be sent: valid values, and the

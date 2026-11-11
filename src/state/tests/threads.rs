@@ -483,7 +483,7 @@ fn an_own_send_while_newer_replies_are_unloaded_replaces_the_window() {
         let ids: Vec<i64> = thread.history.messages.keys().copied().collect();
         assert_eq!(ids, vec![-7, 40], "root and the pending send only");
         assert!(!thread.history.has_newer());
-        assert!(thread.reload_needed);
+        assert_eq!(thread.status, ThreadStatus::ReloadNeeded);
         assert_eq!(thread.history.window_epoch, 1);
         assert!(!thread.history.loaded_complete());
         assert_eq!(thread.history.next_from_message_id, MessageId(0));
