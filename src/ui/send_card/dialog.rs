@@ -19,7 +19,7 @@
 //! photo editor covers the window while the box steps aside.
 #![deny(clippy::indexing_slicing)]
 
-use super::layout::{MOSAIC_WIDTH, TrayLayout};
+use super::layout::{BoxRows, MOSAIC_WIDTH, TrayLayout, media_room, scroll_room};
 use super::options::tray_title;
 use crate::ui::app::{PaneMode, QuillApp};
 use crate::ui::composer_sends::SendOnce;
@@ -36,16 +36,10 @@ use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::lang::{keys, tr};
 use quill::send_button::{SendButtonKind, format_slowmode};
-use std::cell::RefCell;
-use std::rc::Rc;
 
 /// The box's width: the mosaic's room, the previews' inset and border (18)
 /// and the dialog's own padding and border (34).
 const BOX_WIDTH: f32 = MOSAIC_WIDTH as f32 + 52.;
-/// What the title, the caption and the buttons keep of the window's
-/// height; the previews and options scroll in the rest.
-const BOX_CHROME: f32 = 300.;
-
 /// The caption takes the focus when the box appears. Kept as the box's
 /// element state, so it happens once each time the box is put on screen.
 struct CaptionFocused;
@@ -87,6 +81,11 @@ impl QuillApp {
         } else {
             self.open_media_panel(PanelTab::Emoji, cx);
         }
+    }
+
+    /// The lines typed in the caption (a wrapped line counts once).
+    fn caption_lines(&self, cx: &App) -> usize {
+        self.composer.read(cx).value().split('\n').count()
     }
 
     fn focus_caption(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -131,11 +130,22 @@ impl QuillApp {
     }
 
     /// What the box shows above the caption: the files as they will be
-    /// sent, then every send option.
-    fn send_box_body(&self, cx: &mut Context<Self>) -> AnyElement {
+    /// sent, then every send option. In a box that may stand `box_max`
+    /// tall the previews take what the rest leaves, so a short window
+    /// shrinks them before any option row scrolls out of view.
+    fn send_box_body(&self, box_max: Pixels, cx: &mut Context<Self>) -> AnyElement {
         let layout = TrayLayout::of(
             self.pending_attachments(),
             self.composer_group_media_effective(),
+        );
+        let rows = self.send_card_option_rows(cx);
+        let room = media_room(
+            f32::from(box_max) as i32,
+            BoxRows {
+                options: rows.len(),
+                files: layout.files.len(),
+                caption_lines: self.caption_lines(cx),
+            },
         );
         let theme = cx.theme();
         let (surface, accent) = (theme.muted, theme.primary);
@@ -154,9 +164,8 @@ impl QuillApp {
             // Files dragged over the previews will join them
             // (`send_box_drop_layer` takes the drop).
             .drag_over::<ExternalPaths>(move |style, _, _, _| style.border_color(accent))
-            .children(self.send_card_media(&layout, cx))
+            .children(self.send_card_media(&layout, layout.max_height(room), cx))
             .children(self.send_card_files(&layout, cx));
-        let rows = self.send_card_option_rows(cx);
         div()
             .id("send-box-body")
             .flex()
@@ -401,10 +410,9 @@ impl QuillApp {
             QuillShell::on_close_kind(app, shell, DialogKind::SendBox, |this, window, cx| {
                 this.cancel_send_box(window, cx);
             });
-        let (title, body, footer, emoji_shown) = app.update(cx, |this, cx| {
+        let (title, footer, emoji_shown) = app.update(cx, |this, cx| {
             (
                 tray_title(this.pending_attachments()),
-                this.send_box_body(cx),
                 this.send_box_footer(cx),
                 this.send_box_emoji_shown(),
             )
@@ -413,8 +421,7 @@ impl QuillApp {
         let escape = app.downgrade();
         let dismiss = app.downgrade();
         let drops = app.downgrade();
-        // The content closure is `Fn`; the body is drawn once per build.
-        let body = Rc::new(RefCell::new(Some(body)));
+        let body_app = app.clone();
         dialog
             .overlay(true)
             // A click outside must not drop the files.
@@ -428,11 +435,19 @@ impl QuillApp {
                     CaptionFocused
                 });
                 let viewport = window.viewport_size();
-                let available = (viewport.height - px(BOX_CHROME)).max(px(120.));
-                let body = body
-                    .borrow_mut()
-                    .take()
-                    .unwrap_or_else(|| div().into_any_element());
+                // The kit keeps this margin clear at the window's top and
+                // bottom: the box is at most the rest.
+                let box_max = viewport.height - cx.theme().spacing_tokens().lg * 2.;
+                // The body follows the window's height, known only here,
+                // and is the window's own: its state is put in place.
+                let (body, lines) = body_app
+                    .update(cx, |this, cx| {
+                        this.in_window_of(window, cx, |this, _, cx| {
+                            (this.send_box_body(box_max, cx), this.caption_lines(cx))
+                        })
+                    })
+                    .unwrap_or_else(|| (div().into_any_element(), 1));
+                let available = px(scroll_room(f32::from(box_max) as i32, lines) as f32);
                 let border = cx.theme().border;
                 let content = content
                     .min_h_0()
@@ -440,6 +455,7 @@ impl QuillApp {
                     .child(
                         div()
                             .id("send-box-scroll")
+                            .debug_selector(|| "send-box-scroll".to_string())
                             .role(Role::ScrollView)
                             .aria_label(tr(keys::Q_MISC_DIALOG_CONTENT))
                             .w_full()

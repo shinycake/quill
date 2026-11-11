@@ -80,12 +80,13 @@ impl QuillApp {
     pub(super) fn send_card_media(
         &self,
         layout: &TrayLayout,
+        max_height: i32,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
         if layout.media.is_empty() {
             return None;
         }
-        let (max_height, max_width) = (layout.max_height(), layout.max_width());
+        let max_width = layout.max_width();
         // Messages that do not fit beside each other wrap: the box scrolls
         // down, never sideways.
         let mut strip = div()
@@ -112,7 +113,7 @@ impl QuillApp {
                 block = block.child(self.send_card_tile(*index, tile, corners, cx));
             }
             let first = message.first().copied().unwrap_or_default();
-            // An album taller than its room scrolls (`ALBUM_MIN_DRAWN`). The
+            // An album taller than its room scrolls (`narrowest_album`). The
             // scroll area fills what it is given, so it is given the
             // message's own size.
             strip = strip.child(

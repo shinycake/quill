@@ -11,7 +11,7 @@ use gpui_kit::component::WindowExt as _;
 use gpui_kit::test::TestWindowExt;
 use gpui_kit::{
     Bounds, Entity, ExternalPaths, FileDropEvent, Focusable, Modifiers, Pixels, PlatformInput,
-    TestAppContext, VisualTestContext, point, px,
+    TestAppContext, VisualTestContext, point, px, size,
 };
 use quill::composer::{AttachmentKind, ComposerAttachment};
 use quill::ids::ChatId;
@@ -424,6 +424,79 @@ fn pictures_sent_separately_stand_side_by_side(cx: &mut TestAppContext) {
     // The options are under the previews, inside the box.
     let options = part(vcx, "send-box-options");
     assert!(options.top() >= previews.bottom(), "{options:?}");
+}
+
+/// The box in a window `height` tall: its surface, the part that scrolls,
+/// the options, the first media message and the Send button.
+fn box_at(
+    vcx: &mut VisualTestContext,
+    height: f32,
+) -> (
+    Bounds<Pixels>,
+    Bounds<Pixels>,
+    Bounds<Pixels>,
+    Bounds<Pixels>,
+    Bounds<Pixels>,
+) {
+    vcx.simulate_resize(size(px(1100.), px(height)));
+    frames(vcx);
+    (
+        part(vcx, "dialog-0"),
+        part(vcx, "send-box-scroll"),
+        part(vcx, "send-box-options"),
+        part(vcx, "send-card-message-0"),
+        part(vcx, "send-box-send"),
+    )
+}
+
+#[gpui_kit::test]
+fn a_short_window_shrinks_the_previews_and_keeps_every_option_in_view(cx: &mut TestAppContext) {
+    let (app, mut vcx) = open_app(cx);
+    let vcx = &mut vcx;
+    // A lone picture twice as tall as wide takes the whole height it may.
+    let dir = quill::scratch::process_dir("quill-send-box-height");
+    std::fs::create_dir_all(&dir).expect("scratch");
+    let tall = dir.join("tall.png");
+    image::RgbaImage::from_pixel(40, 200, image::Rgba([9, 9, 9, 255]))
+        .save(&tall)
+        .expect("picture");
+    app.update_in(vcx, |app, _, cx| {
+        let photo = ComposerAttachment::pick(&tall, AttachmentKind::Photo).expect("picture");
+        app.update_pending_attachments(|tray| *tray = vec![photo])
+            .expect("an open chat");
+        cx.notify();
+    });
+    frames(vcx);
+
+    // A window with room: the picture stands as tall as a preview gets.
+    let mut full = None;
+    for height in [900., 700., 600.] {
+        let (surface, scroll, options, media, send) = box_at(vcx, height);
+        assert_eq!(media.size.height, px(240.), "at {height}");
+        assert!(options.bottom() <= scroll.bottom(), "at {height}");
+        assert!(send.bottom() <= surface.bottom() && surface.bottom() <= px(height));
+        full = Some(surface.size.height);
+    }
+    // A shorter one: the picture gives way, every option row is in view
+    // and nothing scrolls.
+    for height in [550., 510., 480.] {
+        let (surface, scroll, options, media, send) = box_at(vcx, height);
+        assert!(media.size.height < px(240.), "{media:?} at {height}");
+        assert!(media.size.height >= px(120.), "{media:?} at {height}");
+        assert!(
+            options.bottom() <= scroll.bottom(),
+            "{options:?} in {scroll:?} at {height}"
+        );
+        assert!(send.bottom() <= surface.bottom() && surface.bottom() <= px(height));
+        assert!(Some(surface.size.height) < full);
+    }
+    // Too short for even the least preview: it stops shrinking and the
+    // part over the caption scrolls, with the buttons still in the window.
+    let (surface, scroll, options, media, send) = box_at(vcx, 380.);
+    assert_eq!(media.size.height, px(120.));
+    assert!(options.bottom() > scroll.bottom(), "the options scroll");
+    assert!(send.bottom() <= surface.bottom() && surface.bottom() <= px(380.));
+    let _ = std::fs::remove_file(tall);
 }
 
 #[gpui_kit::test]
