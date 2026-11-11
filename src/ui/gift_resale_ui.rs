@@ -100,6 +100,13 @@ impl QuillApp {
             self.gift_market.push(MarketBox::Resale);
             self.open_box(crate::ui::shell::DialogKind::GiftMarket);
         } else {
+            // The refused open already replaced the session's search: with
+            // no resale box to show it, nothing is left to own it.
+            if !self.gift_market.stack.contains(&MarketBox::Resale)
+                && let Some(market) = self.gift_market_mut()
+            {
+                market.resale = None;
+            }
             self.set_note(StatusNote::error(tr(
                 keys::Q_MONEY_COULDNT_LOAD_THE_GIFTS_ON,
             )));

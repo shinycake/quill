@@ -66,16 +66,14 @@ impl QuillApp {
 
     pub(super) fn set_buy_step(&mut self, step: BuyStep, cx: &mut Context<Self>) {
         if let Some(buy) = self.resale_buy_mut() {
-            buy.step = step;
+            buy.go_to(step);
         }
         cx.notify();
     }
 
     fn set_buy_grams(&mut self, grams: bool, cx: &mut Context<Self>) {
         if let Some(buy) = self.resale_buy_mut() {
-            let gram_only = buy.listing.gift.resale.is_some_and(|r| r.gram_only);
-            buy.pay_in_grams = grams || gram_only;
-            buy.price_changed = None;
+            buy.pay_in(grams);
         }
         cx.notify();
     }

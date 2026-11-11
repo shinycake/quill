@@ -268,7 +268,7 @@ impl QuillApp {
                 },
                 false,
             );
-            buy.step = step;
+            buy.go_to(step);
             market.buy = Some(buy);
             self.gift_market.stack.push(MarketBox::Buy);
         }

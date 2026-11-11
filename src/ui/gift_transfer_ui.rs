@@ -25,8 +25,7 @@ use gpui_kit::component::notification::Notification;
 use gpui_kit::component::*;
 use gpui_kit::*;
 use quill::gift_manage::{
-    ExportError, ExportSend, GiftEvent, ProbeOutcome, TransferPicker, TransferStage,
-    fragment_gift_url,
+    ExportSend, GiftEvent, ProbeOutcome, TransferPicker, TransferStage, fragment_gift_url,
 };
 use quill::lang::{keys, tr, tr_with};
 use quill::local_time::now_unix;
@@ -194,15 +193,7 @@ impl QuillApp {
             Some(Ok(_)) => {}
             // Refused before sending: say so under the field, where it is
             // seen (a note would sit behind the picker).
-            Some(Err(_)) => self.edit_transfer(cx, |picker| {
-                if let TransferStage::Password {
-                    send: ExportSend::Idle,
-                    error,
-                } = &mut picker.stage
-                {
-                    *error = Some(ExportError::Other(String::new()));
-                }
-            }),
+            Some(Err(_)) => self.edit_transfer(cx, TransferPicker::export_refused),
             None => self.note_gift_refused(tr(keys::Q_MONEY_DEMO_MODE_THIS_NEEDS_A)),
         }
         cx.notify();

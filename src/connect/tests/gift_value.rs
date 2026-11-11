@@ -138,3 +138,25 @@ fn a_failure_shows_under_the_row_and_a_stale_one_is_ignored() {
     assert!(driver.request_gift_value(lookup("B-2")).unwrap().is_some());
     assert_eq!(sent_count(&recorder), 3);
 }
+
+/// Sweep r2-27 (10-019): a "learn more" that cannot go out (the chats path
+/// is not active) leaves a failed lookup the box shows, not a dead click.
+#[test]
+fn a_learn_more_that_cannot_go_out_says_so() {
+    let store = MemorySecretStore::new();
+    let (_dir, prepared) = prepared_tmp(&store);
+    let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+    let recorder = Arc::new(RecordingSender::new());
+    // No auth state seeded: the chats path is not active.
+    let session = crate::state::Session::new(crate::ids::AccountKey::primary(), sink);
+    let mut driver = ConnectDriver::new(
+        session,
+        recorder.clone(),
+        super::test_credentials(),
+        prepared,
+    );
+    assert!(driver.request_gift_value(lookup("A-1")).is_err());
+    let value = driver.session.payments.hub.gift_value.as_ref().unwrap();
+    assert!(value.error().is_some_and(|line| !line.is_empty()));
+    assert_eq!(sent_count(&recorder), 0);
+}

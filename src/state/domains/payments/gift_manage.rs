@@ -349,7 +349,8 @@ impl Session {
                     GiftListFetch::Failed(format!("Couldn't load the gifts: {reason}"));
             }
             PaymentsPurpose::GetPremiumGiftOptions => {
-                manage.send.premium_fetch = GiftListFetch::Failed(String::new());
+                manage.send.premium_fetch =
+                    GiftListFetch::Failed(format!("Couldn't load the Premium options: {reason}"));
             }
             PaymentsPurpose::TransferGift => {
                 if let (Some(picker), Some(request)) =

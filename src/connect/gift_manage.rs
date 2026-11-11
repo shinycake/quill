@@ -557,31 +557,9 @@ impl<S: JsonSender> ConnectDriver<S> {
             recipient: Some(recipient),
             ..Default::default()
         };
-        let extra = self.session.request(
-            RequestPurpose::Payments(PaymentsPurpose::GetAvailableGifts),
-            None,
-        );
-        self.session.payments.gifts_manage.send.gifts_fetch = GiftListFetch::Asking(extra);
-        if self
-            .send_json_request(extra, &rq::get_available_gifts(extra))
-            .is_err()
-        {
-            let send = &mut self.session.payments.gifts_manage.send;
-            send.gifts_fetch = GiftListFetch::Failed("Couldn't load the gifts.".into());
-        }
+        self.ask_send_gifts();
         if with_premium {
-            let extra = self.session.request(
-                RequestPurpose::Payments(PaymentsPurpose::GetPremiumGiftOptions),
-                None,
-            );
-            self.session.payments.gifts_manage.send.premium_fetch = GiftListFetch::Asking(extra);
-            if self
-                .send_json_request(extra, &rq::get_premium_gift_payment_options(extra))
-                .is_err()
-            {
-                self.session.payments.gifts_manage.send.premium_fetch =
-                    GiftListFetch::Failed(String::new());
-            }
+            self.ask_premium_gift_options();
         }
         if self.session.payments.gift_text_length_max.is_none()
             && !self
@@ -594,6 +572,54 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         // The balance arrives with the first Stars history page.
         let _ = self.maybe_fetch_star_transactions();
+        Ok(())
+    }
+
+    fn ask_send_gifts(&mut self) {
+        let extra = self.session.request(
+            RequestPurpose::Payments(PaymentsPurpose::GetAvailableGifts),
+            None,
+        );
+        self.session.payments.gifts_manage.send.gifts_fetch = GiftListFetch::Asking(extra);
+        if self
+            .send_json_request(extra, &rq::get_available_gifts(extra))
+            .is_err()
+        {
+            let send = &mut self.session.payments.gifts_manage.send;
+            send.gifts_fetch = GiftListFetch::Failed("Couldn't load the gifts.".into());
+        }
+    }
+
+    fn ask_premium_gift_options(&mut self) {
+        let extra = self.session.request(
+            RequestPurpose::Payments(PaymentsPurpose::GetPremiumGiftOptions),
+            None,
+        );
+        self.session.payments.gifts_manage.send.premium_fetch = GiftListFetch::Asking(extra);
+        if self
+            .send_json_request(extra, &rq::get_premium_gift_payment_options(extra))
+            .is_err()
+        {
+            self.session.payments.gifts_manage.send.premium_fetch =
+                GiftListFetch::Failed("Couldn't load the Premium options.".into());
+        }
+    }
+
+    /// Retry on the open send-gift box: asks again each list that failed,
+    /// and only those.
+    pub fn retry_send_gift_lists(&mut self) -> Result<(), ConnectSendError> {
+        let send = &self.session.payments.gifts_manage.send;
+        if !send.open || !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let gifts = matches!(send.gifts_fetch, GiftListFetch::Failed(_));
+        let premium = matches!(send.premium_fetch, GiftListFetch::Failed(_));
+        if gifts {
+            self.ask_send_gifts();
+        }
+        if premium {
+            self.ask_premium_gift_options();
+        }
         Ok(())
     }
 

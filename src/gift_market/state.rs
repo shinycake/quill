@@ -204,6 +204,20 @@ impl ResaleBuy {
         }
     }
 
+    /// The user moved to `step`.
+    pub fn go_to(&mut self, step: BuyStep) {
+        self.step = step;
+    }
+
+    /// The user picked the currency on the confirm step: the price TDLib
+    /// reported for the other one no longer applies, so the listing's own
+    /// price shows. A gram-only listing stays in grams.
+    pub fn pay_in(&mut self, grams: bool) {
+        let gram_only = self.listing.gift.resale.is_some_and(|r| r.gram_only);
+        self.pay_in_grams = grams || gram_only;
+        self.price_changed = None;
+    }
+
     /// The purchase is out and unanswered.
     pub fn sending(&self) -> bool {
         matches!(self.phase, BuyPhase::Sending { .. })

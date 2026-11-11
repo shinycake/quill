@@ -83,6 +83,9 @@ pub enum ExportError {
     Flood,
     /// `SRP_ID_INVALID`: the check expired; tdesktop shows a server error.
     ServerError,
+    /// The try was refused before it went out (the request could not be
+    /// sent): the field is ready again.
+    NotSent,
     /// Any other failure, with its reason ("not found", ...).
     Other(String),
 }
@@ -315,6 +318,18 @@ impl TransferPicker {
     pub fn open_fragment(&mut self) {
         if self.stage == TransferStage::ConfirmExport {
             self.stage = TransferStage::Probing;
+        }
+    }
+
+    /// The password try was refused before it went out: the box stays
+    /// ready for another and says so under the field.
+    pub fn export_refused(&mut self) {
+        if let TransferStage::Password {
+            send: ExportSend::Idle,
+            error,
+        } = &mut self.stage
+        {
+            *error = Some(ExportError::NotSent);
         }
     }
 
