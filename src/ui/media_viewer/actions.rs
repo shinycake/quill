@@ -649,9 +649,12 @@ impl QuillApp {
         };
         // The set is not known yet; the box is this window's alone.
         self.claim_sticker_set_box(None, cx);
-        if let Some(live) = self.live.as_mut()
-            && live.driver.fetch_attached_sticker_sets(file_id).is_err()
-        {
+        // No live connection is a failed ask too: the box must not wait.
+        let sent = self
+            .live
+            .as_mut()
+            .is_some_and(|live| live.driver.fetch_attached_sticker_sets(file_id).is_ok());
+        if !sent {
             self.message_ui.menu_ui.end_sticker_set();
             self.set_note(StatusNote::error(tr(
                 keys::Q_AV_COULD_NOT_LOAD_THE_ATTACHED,
