@@ -42,17 +42,27 @@ impl Default for RichPreview {
     }
 }
 
+/// The editor's text as blocks, reparsing only what an edit touched. A
+/// `Cell`: `parse` takes the cache out, runs and puts it back, so a second
+/// caller while one runs parses afresh instead of panicking on a borrow.
+#[derive(Default)]
+pub(in crate::ui) struct EditorBlocks(std::cell::Cell<MarkupBlocks>);
+
+impl EditorBlocks {
+    pub(in crate::ui) fn parse(&self, text: &str) -> Vec<std::sync::Arc<RichBlock>> {
+        let mut blocks = self.0.take();
+        let parsed = blocks.parse(text);
+        self.0.set(blocks);
+        parsed
+    }
+}
+
 impl RichPreview {
-    fn blocks(
-        &self,
-        revision: u64,
-        text: &str,
-        editor: &RefCell<MarkupBlocks>,
-    ) -> Rc<Vec<Rc<RichBlock>>> {
+    fn blocks(&self, revision: u64, text: &str, editor: &EditorBlocks) -> Rc<Vec<Rc<RichBlock>>> {
         let changed = {
             let mut parsed = self.parsed.borrow_mut();
             (parsed.revision != Some(revision)).then(|| {
-                let change = parsed.source.update(editor.borrow_mut().parse(text));
+                let change = parsed.source.update(editor.parse(text));
                 parsed.blocks = Rc::new(parsed.source.shown().to_vec());
                 parsed.revision = Some(revision);
                 change

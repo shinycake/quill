@@ -20,8 +20,6 @@ use quill::ids::{ChatId, MessageId};
 use quill::lang::{keys, tr};
 use quill::state::{DeepLinkAction, DeepLinkFlow, DeepLinkState, HistoryOpen};
 use quill::telegram::envelope::AuthorizationState;
-use std::cell::RefCell;
-use std::rc::Rc;
 
 /// Whether one `pump_deep_link` step has something to show: a terminal
 /// state to consume, or an invite preview not on screen yet. No flow, a
@@ -629,16 +627,9 @@ impl QuillApp {
                 } else {
                     tr(keys::Q_MISC_JOIN_GROUP)
                 }))
-                .content(crate::ui::shell::scrollable_dialog_content({
-                    let body = Rc::new(RefCell::new(Some(body.into_any_element())));
-                    move |content, _, _| {
-                        content.child(
-                            body.borrow_mut()
-                                .take()
-                                .unwrap_or_else(|| div().into_any_element()),
-                        )
-                    }
-                }))
+                .content(crate::ui::shell::scrollable_dialog_content(
+                    crate::ui::dialog_body::once_body(body.into_any_element()),
+                ))
                 .footer(footer)
                 .on_close(on_close)
         })
@@ -680,16 +671,9 @@ impl QuillApp {
                 .title(crate::ui::shell::dialog_title(tr(
                     keys::Q_MISC_TELEGRAM_LINK,
                 )))
-                .content(crate::ui::shell::scrollable_dialog_content({
-                    let body = Rc::new(RefCell::new(Some(body)));
-                    move |content, _, _| {
-                        let body = body
-                            .borrow_mut()
-                            .take()
-                            .unwrap_or_else(|| div().into_any_element());
-                        content.child(body)
-                    }
-                }))
+                .content(crate::ui::shell::scrollable_dialog_content(
+                    crate::ui::dialog_body::once_body(body),
+                ))
                 .footer(footer)
                 .on_close(on_close)
         })

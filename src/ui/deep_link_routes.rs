@@ -17,8 +17,6 @@ use quill::deep_link_types::{DeepLinkUi, SettingsTarget};
 use quill::ids::{ChatId, MessageId};
 use quill::lang::{keys, tr};
 use quill::state::DeepLinkAction;
-use std::cell::RefCell;
-use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 /// How many chats the share chooser lists.
@@ -355,16 +353,9 @@ impl QuillApp {
             dialog
                 .overlay(true)
                 .title(crate::ui::shell::dialog_title(tr(keys::Q_MISC_SHARE_TO)))
-                .content(crate::ui::shell::scrollable_dialog_content({
-                    let body = Rc::new(RefCell::new(Some(body)));
-                    move |content, _, _| {
-                        content.child(
-                            body.borrow_mut()
-                                .take()
-                                .unwrap_or_else(|| div().into_any_element()),
-                        )
-                    }
-                }))
+                .content(crate::ui::shell::scrollable_dialog_content(
+                    crate::ui::dialog_body::once_body(body),
+                ))
                 .footer(footer)
                 .on_close(on_close)
         })

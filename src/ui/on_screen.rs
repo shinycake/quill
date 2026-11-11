@@ -506,7 +506,11 @@ impl QuillApp {
             self.screen.client != ScreenClient::Filled,
             "the client leaves the screen before its UI is replaced"
         );
-        self.live.take()
+        let mut live = self.live.take()?;
+        // The debounced draft belongs to this client and the one timer only
+        // commits the client on screen: it goes out now, not never.
+        let _ = live.driver.flush_pending_draft();
+        Some(live)
     }
 
     /// A client fills the empty screen: the chat list, folders and counters

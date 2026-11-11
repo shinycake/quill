@@ -14,6 +14,15 @@ use quill::lang::{keys, tr, tr_with};
 use quill::platform::OsOpen;
 use std::path::PathBuf;
 
+/// Which list a downloads-manager row is in: one value, so a row is never
+/// both running and failed.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum DownloadRowKind {
+    Active,
+    Failed,
+    Recent,
+}
+
 impl QuillApp {
     pub(super) fn request_media_download(
         &mut self,
@@ -319,19 +328,19 @@ impl QuillApp {
         if !active.is_empty() {
             out.push(heading(tr(keys::Q_OPS_ACTIVE)));
             for file_id in active {
-                out.push(self.download_row(file_id, true, false, cx));
+                out.push(self.download_row(file_id, DownloadRowKind::Active, cx));
             }
         }
         if !failed.is_empty() {
             out.push(heading(tr(keys::Q_OPS_FAILED)));
             for file_id in failed {
-                out.push(self.download_row(file_id, false, true, cx));
+                out.push(self.download_row(file_id, DownloadRowKind::Failed, cx));
             }
         }
         if !recent.is_empty() {
             out.push(heading(tr(keys::Q_OPS_RECENT)));
             for file_id in recent.into_iter().rev() {
-                out.push(self.download_row(file_id, false, false, cx));
+                out.push(self.download_row(file_id, DownloadRowKind::Recent, cx));
             }
         }
         out
@@ -343,10 +352,11 @@ impl QuillApp {
     pub(super) fn download_row(
         &self,
         file_id: i32,
-        active: bool,
-        failed: bool,
+        kind: DownloadRowKind,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        let active = kind == DownloadRowKind::Active;
+        let failed = kind == DownloadRowKind::Failed;
         let session = self.session();
         let file = session.as_ref().and_then(|s| s.media.files.get(&file_id));
         let name = session

@@ -60,7 +60,6 @@ QuillApp::begin_widget_pass::passes.borrow_mut 2
 QuillApp::build_account_lifecycle_dialog::body.borrow_mut 1
 QuillApp::build_account_notice_dialog::body.borrow_mut 1
 QuillApp::build_accounts_dialog::body.borrow_mut 1
-QuillApp::build_add_contact_dialog::body.borrow_mut 1
 QuillApp::build_add_special_dialog::body.borrow_mut 1
 QuillApp::build_ai_compose_dialog::body.borrow_mut 1
 QuillApp::build_ai_style_preview_dialog::body.borrow_mut 1
@@ -78,10 +77,6 @@ QuillApp::build_chat_appearance_dialog::body.borrow_mut 1
 QuillApp::build_chat_look_dialog::body.borrow_mut 1
 QuillApp::build_collectible_info_dialog::body.borrow_mut 1
 QuillApp::build_create_sticker_dialog::body.borrow_mut 1
-QuillApp::build_deep_link_dialog::body.borrow_mut 1
-QuillApp::build_deep_link_invite_dialog::body.borrow_mut 1
-QuillApp::build_deep_link_share_dialog::body.borrow_mut 1
-QuillApp::build_direct_confirm_dialog::body.borrow_mut 1
 QuillApp::build_direct_messages_dialog::body.borrow_mut 1
 QuillApp::build_drop_topic_dialog::body.borrow_mut 1
 QuillApp::build_earn_withdraw_dialog::body.borrow_mut 1
@@ -103,7 +98,6 @@ QuillApp::build_group_call_create_dialog::body.borrow_mut 1
 QuillApp::build_group_confirm_dialog::body.borrow_mut 1
 QuillApp::build_group_history_box::body.borrow_mut 1
 QuillApp::build_group_settings_dialog::body.borrow_mut 1
-QuillApp::build_import_contacts_dialog::body.borrow_mut 1
 QuillApp::build_invite_link_custom_dialog::field.borrow_mut 1
 QuillApp::build_join_requests_dialog::body.borrow_mut 1
 QuillApp::build_jump_date_dialog::body.borrow_mut 1
@@ -172,7 +166,6 @@ QuillApp::chat_list_item_element::row_fx.borrow_mut 1
 QuillApp::choose_send_effect::cells.borrow 1
 QuillApp::close_kit_dialog_if_done::dialogs_closed.borrow_mut 1
 QuillApp::close_main_window_dialogs::dialogs_closed.borrow_mut 1
-QuillApp::composer_draft_parts::parsed.borrow_mut 1
 QuillApp::effect_list_cell::cells.borrow_mut 1
 QuillApp::effects_strip::cells.borrow_mut 1
 QuillApp::emoji_effect_overlay::active.borrow 3
@@ -239,7 +232,6 @@ QuillApp::try_open_chat_window_at::slot.borrow 1
 QuillApp::widgets_left_window::passes.borrow_mut 1
 QuillApp::window_title_in_place::title_badge.borrow_mut 1
 QuillShell::sync_host_dialogs::dialogs_closed.borrow_mut 1
-RichPreview::blocks::editor.borrow_mut 1
 RichPreview::blocks::parsed.borrow 1
 RichPreview::blocks::parsed.borrow_mut 1
 RunningResize::drop::resize.borrow_mut 1
@@ -265,7 +257,6 @@ backdrop::cache.borrow_mut 2
 badge::app.borrow 1
 badge::badges.borrow_mut 1
 badge::replays.borrow_mut 1
-begin::first.borrow_mut 1
 begin_pass::anchors.borrow_mut 1
 begin_pass::badges.borrow_mut 1
 block_opened_by_agent::blocked.borrow_mut 1
@@ -327,7 +318,6 @@ once::body.borrow_mut 2
 one_shot::body.borrow_mut 2
 open_chat_window::built.borrow_mut 1
 open_chat_window::built_out.borrow_mut 1
-open_if_ready::first.borrow_mut 1
 open_pip_window::slot.borrow_mut 1
 open_pip_window::slot_in.borrow_mut 1
 paint_stamp::scoped.borrow 1
@@ -370,7 +360,6 @@ slice_shown::slices.borrow_mut 1
 start_sweeper::seen.borrow_mut 1
 sync::applied.borrow_mut 2
 sync_tray::cell.borrow_mut 2
-take::first.borrow_mut 1
 take_blocked_closing_layers::blocked.borrow_mut 1
 take_replays::replays.borrow_mut 1
 take_text_painted::painted.borrow_mut 1

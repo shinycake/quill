@@ -20,8 +20,6 @@ use quill::lang::{keys, tr, tr_with, trn};
 use quill::paid_messages::stars_text;
 use quill::state::InfoPanelTarget;
 use quill::telegram::envelope::MessageSender;
-use std::cell::RefCell;
-use std::rc::Rc;
 
 pub(super) struct AdminHeader {
     /// The open chat's person; `None` keeps the channel's name.
@@ -320,16 +318,9 @@ impl QuillApp {
                 );
             dialog
                 .overlay(true)
-                .content(crate::ui::shell::scrollable_dialog_content({
-                    let body = Rc::new(RefCell::new(Some(body)));
-                    move |content, _, _| {
-                        let body = body
-                            .borrow_mut()
-                            .take()
-                            .unwrap_or_else(|| div().into_any_element());
-                        content.child(body)
-                    }
-                }))
+                .content(crate::ui::shell::scrollable_dialog_content(
+                    crate::ui::dialog_body::once_body(body),
+                ))
                 .footer(footer)
                 .on_close(on_close)
         })

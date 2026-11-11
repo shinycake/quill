@@ -244,9 +244,9 @@ pub use session_history_window::MentionSearch;
 pub(crate) use session_history_window::WindowEdge;
 pub use session_links_boosts::*;
 pub use session_message_menu::{
-    Audience, CustomEmojiPreview, MessageAudience, MessageReportFlow, MessageReportStage,
-    PollOptionMenu, SetChange, SetChangeStage, SetFiles, StickerSetView, StickerSetViewStage,
-    poll_option_key, reaction_filter_key,
+    Audience, CustomEmojiAnswer, CustomEmojiAnswers, CustomEmojiPreview, MessageAudience,
+    MessageReportFlow, MessageReportStage, PollOptionMenu, SetChange, SetChangeStage, SetFiles,
+    StickerSetView, StickerSetViewStage, poll_option_key, reaction_filter_key,
 };
 pub use session_message_story::{
     StoryCardState, StoryPreview, media_unlocked_note, message_story_key,

@@ -261,12 +261,14 @@ impl Session {
                             files: SetFiles::Unasked,
                         },
                     );
-                } else if let Some(RequestPurpose::Stickers(StickersPurpose::CustomEmojiPack {
-                    emoji_id,
-                    set_id,
-                })) = pending.map(|p| p.purpose)
+                } else if let Some(PendingRequest {
+                    id,
+                    purpose:
+                        RequestPurpose::Stickers(StickersPurpose::CustomEmojiPack { emoji_id, set_id }),
+                    ..
+                }) = pending
                 {
-                    self.accept_custom_emoji_preview(emoji_id, set_id, title);
+                    self.accept_custom_emoji_preview(*id, *emoji_id, *set_id, title);
                 } else if let Some(RequestPurpose::Stickers(StickersPurpose::EmojiPackTitle {
                     set_id,
                 })) = pending.map(|p| p.purpose)

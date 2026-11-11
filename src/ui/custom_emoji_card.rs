@@ -9,8 +9,9 @@ use gpui_kit::TestSupportExt;
 use gpui_kit::component::button::*;
 use gpui_kit::component::*;
 use gpui_kit::*;
+use quill::ids::RequestId;
 use quill::lang::{keys, tr};
-use quill::state::CustomEmojiPreview;
+use quill::state::{CustomEmojiAnswer, CustomEmojiPreview};
 use quill::sticker_set_box::custom_emoji_preview_label;
 use std::time::Duration;
 
@@ -18,30 +19,34 @@ use std::time::Duration;
 const CARD_LIFETIME: Duration = Duration::from_secs(6);
 
 /// Where a window's custom emoji card stands. Every stage has a way out: the
-/// pack's answer shows it, a close, View or the timer hides it, and a tap of
-/// another emoji replaces it.
-#[derive(Clone, Debug, Default, PartialEq)]
+/// pack's answer or error ends the ask, a close, View or the timer hides the
+/// card, and a tap of another emoji replaces it. The `Shown` stage owns its
+/// timer, so replacing or closing the card stops it.
+#[derive(Default)]
 pub(super) enum CustomEmojiCard {
     #[default]
     Hidden,
-    /// The emoji was tapped; its pack is being asked for. `tap` tells this
-    /// tap from every other, so each has its own timer.
-    Asked { emoji_id: i64, tap: u64 },
-    /// The card is on screen for this tap.
+    /// The emoji was tapped; its pack is being asked for under `request`,
+    /// and only that request's answer shows the card.
+    Asked { emoji_id: i64, request: RequestId },
+    /// The card is on screen until `_timer` ends or it is closed.
     Shown {
         preview: CustomEmojiPreview,
-        tap: u64,
+        _timer: Task<()>,
     },
 }
 
-fn next_tap() -> u64 {
-    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
-    NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
-}
-
 impl QuillApp {
-    /// A custom emoji in a message was tapped: ask for its pack.
+    /// A custom emoji in a message was tapped: ask for its pack, or start
+    /// the timer of the card already showing it over.
     pub(super) fn tap_custom_emoji(&mut self, emoji_id: i64, cx: &mut Context<Self>) {
+        if let CustomEmojiCard::Shown { preview, .. } = &self.message_ui.custom_emoji
+            && preview.emoji_id == emoji_id
+        {
+            let preview = preview.clone();
+            self.show_custom_emoji_card(preview, cx);
+            return;
+        }
         let set_id = self
             .session()
             .and_then(|s| {
@@ -56,79 +61,90 @@ impl QuillApp {
         let Some(set_id) = set_id else {
             return;
         };
-        if let Some(live) = self.live.as_mut() {
-            let _ = live.driver.preview_custom_emoji(emoji_id, set_id);
-        }
-        self.note_custom_emoji_tap(emoji_id);
+        let Some(live) = self.live.as_mut() else {
+            return;
+        };
+        // A send that failed asked nothing: no card waits for an answer.
+        let Ok(request) = live.driver.preview_custom_emoji(emoji_id, set_id) else {
+            return;
+        };
+        self.note_custom_emoji_tap(emoji_id, request);
         cx.notify();
     }
 
-    /// The emoji was tapped (again): its card is for this tap, and its
-    /// timer starts from it.
-    pub(super) fn note_custom_emoji_tap(&mut self, emoji_id: i64) {
-        self.message_ui.custom_emoji = CustomEmojiCard::Asked {
-            emoji_id,
-            tap: next_tap(),
-        };
+    /// The emoji was tapped and its pack asked for under `request`.
+    pub(super) fn note_custom_emoji_tap(&mut self, emoji_id: i64, request: RequestId) {
+        self.message_ui.custom_emoji = CustomEmojiCard::Asked { emoji_id, request };
     }
 
-    fn clear_custom_emoji_preview(&mut self, cx: &mut Context<Self>) {
-        if let Some(live) = self.live.as_mut() {
-            live.driver.session.stickers.custom_emoji_preview = None;
-        } else if let Some(session) = self.demo_session.as_mut() {
-            session.stickers.custom_emoji_preview = None;
-        }
+    fn clear_custom_emoji_card(&mut self, cx: &mut Context<Self>) {
         self.message_ui.custom_emoji = CustomEmojiCard::Hidden;
         cx.notify();
     }
 
-    /// The card, while a tapped emoji's pack is known, in the window the
-    /// emoji was tapped in (every window's render asks, with its state in
-    /// place). A new card starts its own timer.
+    /// The card shows `preview` from now, for its own lifetime.
+    fn show_custom_emoji_card(&mut self, preview: CustomEmojiPreview, cx: &mut Context<Self>) {
+        let timer = self.spawn_scoped(cx, async move |this, cx| {
+            cx.background_executor().timer(CARD_LIFETIME).await;
+            let _ = this.update(cx, |this, cx| this.clear_custom_emoji_card(cx));
+        });
+        self.message_ui.custom_emoji = CustomEmojiCard::Shown {
+            preview,
+            _timer: timer,
+        };
+    }
+
+    /// The answer of the request this window's tap is waiting for, if it
+    /// came: the card shows, or (a refusal, a pack with no title) the tap
+    /// ends without one.
+    fn settle_custom_emoji_ask(
+        &mut self,
+        emoji_id: i64,
+        request: RequestId,
+        cx: &mut Context<Self>,
+    ) {
+        let answer = self
+            .session_mut()
+            .and_then(|session| session.stickers.custom_emoji_answers.take(request));
+        match answer {
+            Some(CustomEmojiAnswer::Ready(preview)) if preview.emoji_id == emoji_id => {
+                self.show_custom_emoji_card(preview, cx)
+            }
+            Some(_) => self.message_ui.custom_emoji = CustomEmojiCard::Hidden,
+            None => {}
+        }
+    }
+
+    /// The card, once the pack of the emoji tapped in this window is known
+    /// (every window's render asks, with its state in place).
     pub(in crate::ui) fn custom_emoji_card(
         &mut self,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
-        let tapped = match &self.message_ui.custom_emoji {
+        match &self.message_ui.custom_emoji {
             CustomEmojiCard::Hidden => return None,
-            CustomEmojiCard::Asked { emoji_id, .. } => *emoji_id,
-            CustomEmojiCard::Shown { preview, .. } => preview.emoji_id,
-        };
-        let preview = self.session()?.stickers.custom_emoji_preview.as_ref()?;
-        if preview.emoji_id != tapped {
-            return None;
+            CustomEmojiCard::Asked { emoji_id, request } => {
+                let (emoji_id, request) = (*emoji_id, *request);
+                self.settle_custom_emoji_ask(emoji_id, request, cx);
+            }
+            CustomEmojiCard::Shown { .. } => {}
         }
-        self.custom_emoji_card_body(cx)
+        let CustomEmojiCard::Shown { preview, .. } = &self.message_ui.custom_emoji else {
+            return None;
+        };
+        let preview = preview.clone();
+        self.custom_emoji_card_body(preview, cx)
     }
 
     /// `custom_emoji_card` past its cheap check. A debug build reserves this
     /// builder's whole frame on entry, so frames that show nothing skip
     /// it (docs/decisions/main-thread-stack.md).
-    /// The outer function repeats this body's first check; keep the two in step.
     #[inline(never)]
-    fn custom_emoji_card_body(&mut self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let preview: CustomEmojiPreview = self.session()?.stickers.custom_emoji_preview.clone()?;
-        let (tap, newly_shown) = match &self.message_ui.custom_emoji {
-            CustomEmojiCard::Hidden => return None,
-            CustomEmojiCard::Asked { tap, .. } => (*tap, true),
-            CustomEmojiCard::Shown { preview: seen, tap } => (*tap, *seen != preview),
-        };
-        if newly_shown {
-            let shown = CustomEmojiCard::Shown {
-                preview: preview.clone(),
-                tap,
-            };
-            self.message_ui.custom_emoji = shown.clone();
-            self.spawn_scoped(cx, async move |this, cx| {
-                cx.background_executor().timer(CARD_LIFETIME).await;
-                let _ = this.update(cx, |this, cx| {
-                    if this.message_ui.custom_emoji == shown {
-                        this.clear_custom_emoji_preview(cx);
-                    }
-                });
-            })
-            .detach();
-        }
+    fn custom_emoji_card_body(
+        &mut self,
+        preview: CustomEmojiPreview,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
         let still = self.custom_emoji_still(preview.emoji_id);
         let label = custom_emoji_preview_label(&preview.title);
         let set_id = preview.set_id;
@@ -186,7 +202,7 @@ impl QuillApp {
                                 .primary()
                                 .small()
                                 .on_click(cx.listener(move |this, _, _, cx| {
-                                    this.clear_custom_emoji_preview(cx);
+                                    this.clear_custom_emoji_card(cx);
                                     this.view_message_sticker_set(set_id, cx);
                                 })),
                         )
@@ -198,7 +214,7 @@ impl QuillApp {
                                 .tooltip(tr(keys::CLOSE))
                                 .accessibility_label(tr(keys::CLOSE))
                                 .on_click(cx.listener(|this, _, _, cx| {
-                                    this.clear_custom_emoji_preview(cx);
+                                    this.clear_custom_emoji_card(cx);
                                 })),
                         ),
                 )

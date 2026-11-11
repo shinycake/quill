@@ -18,9 +18,6 @@ use gpui_kit::*;
 use quill::lang::{keys, tr, tr_with};
 use quill::state::{ContactRow, InfoPanelTarget};
 
-use std::cell::RefCell;
-use std::rc::Rc;
-
 impl QuillApp {
     /// kit Phase 2 (redo): import contacts hosted in a kit `Dialog` via
     /// `window.open_dialog`. Esc / backdrop / ✕ clear state via `on_close`.
@@ -43,8 +40,9 @@ impl QuillApp {
             let Some(dialog_state) = this.dialogs.import_contacts_dialog.as_ref() else {
                 return dialog.on_close(on_close);
             };
-            let can_import = dialog_state.state.can_import();
-            let body = Self::import_contacts_body(&dialog_state.state, cx).into_any_element();
+            let state = dialog_state.stage.state();
+            let can_import = state.can_import();
+            let body = Self::import_contacts_body(&state, cx).into_any_element();
             let footer = div()
                 .flex()
                 .justify_end()
@@ -69,18 +67,9 @@ impl QuillApp {
                         })),
                 );
             dialog
-                .content(crate::ui::shell::scrollable_dialog_content({
-                    // `content` needs an `Fn` closure, but the body is built once
-                    // per dialog render — hand it over through a one-shot cell.
-                    let body = Rc::new(RefCell::new(Some(body.into_any_element())));
-                    move |content, _, _| {
-                        let body = body
-                            .borrow_mut()
-                            .take()
-                            .unwrap_or_else(|| div().into_any_element());
-                        content.child(body)
-                    }
-                }))
+                .content(crate::ui::shell::scrollable_dialog_content(
+                    crate::ui::dialog_body::once_body(body.into_any_element()),
+                ))
                 .footer(footer)
                 .on_close(on_close)
         })
@@ -233,18 +222,9 @@ impl QuillApp {
                     keys::NEW_CONTACT_ADD_NAME,
                     &[("user", &name.to_string())],
                 )))
-                .content(crate::ui::shell::scrollable_dialog_content({
-                    // `content` needs an `Fn` closure, but the body is built once
-                    // per dialog render — hand it over through a one-shot cell.
-                    let body = Rc::new(RefCell::new(Some(body.into_any_element())));
-                    move |content, _, _| {
-                        let body = body
-                            .borrow_mut()
-                            .take()
-                            .unwrap_or_else(|| div().into_any_element());
-                        content.child(body)
-                    }
-                }))
+                .content(crate::ui::shell::scrollable_dialog_content(
+                    crate::ui::dialog_body::once_body(body.into_any_element()),
+                ))
                 .footer(footer)
                 .on_close(on_close)
         })
