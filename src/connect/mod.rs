@@ -69,6 +69,7 @@ mod messages;
 mod moderation;
 mod paid_messages;
 mod paid_reaction;
+pub use paid_reaction::PaidAddError;
 mod passkeys;
 mod passkeys_login;
 mod payments;

@@ -175,6 +175,7 @@ fn picker_options_are_refetched_when_reactions_change() {
             popular: Vec::new(),
             allow_custom_emoji: false,
             premium_locked: Vec::new(),
+            offers_paid: false,
         });
     // Another chat's change leaves the options alone.
     feed(

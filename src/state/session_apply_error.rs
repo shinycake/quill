@@ -22,6 +22,12 @@ impl Session {
         if let Some(slot) = extra.and_then(|id| self.groups.new_chats.type_saves.get_mut(&id)) {
             *slot = TypeSave::Failed(super::request_errors::error_reason(&err));
         }
+        if let Some(pending) = pending
+            && pending.purpose == RequestPurpose::GetPaidReactionSenders
+            && let Some(chat) = pending.chat_id
+        {
+            self.payments.paid.senders_failed(chat.0);
+        }
         if matches!(
             pending.map(|p| p.purpose),
             Some(

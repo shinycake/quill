@@ -385,7 +385,11 @@ fn late_answer_for_an_earlier_message_leaves_the_loading_menu_alone() {
     ));
     let state = &h.driver.session.stickers.message_reaction_options;
     assert!(state.is_loading_for(ChatId(7), MessageId(51)));
-    assert!(!h.driver.session.payments.paid.offered_for(7, 50));
+    assert!(
+        !h.driver
+            .session
+            .paid_reaction_offered(ChatId(7), MessageId(50))
+    );
     h.ingest(&reactions_answer(&second.0.to_string(), THUMB));
     assert!(
         h.driver
@@ -416,7 +420,11 @@ fn late_answers_after_b_answered_keep_bs_strip() {
         let state = &h.driver.session.stickers.message_reaction_options;
         assert!(state.ready_for(ChatId(7), MessageId(51)).is_some());
         assert!(!state.is_unavailable_for(ChatId(7), MessageId(50)));
-        assert!(!h.driver.session.payments.paid.offered_for(7, 50));
+        assert!(
+            !h.driver
+                .session
+                .paid_reaction_offered(ChatId(7), MessageId(50))
+        );
     }
 }
 
@@ -507,7 +515,11 @@ fn an_answer_offering_only_stars_still_shows_the_strip() {
     h.ingest(&reactions_answer(&extra.0.to_string(), STAR));
     let state = &h.driver.session.stickers.message_reaction_options;
     assert!(state.ready_for(ChatId(7), MessageId(50)).is_some());
-    assert!(h.driver.session.payments.paid.offered_for(7, 50));
+    assert!(
+        h.driver
+            .session
+            .paid_reaction_offered(ChatId(7), MessageId(50))
+    );
 }
 
 #[test]

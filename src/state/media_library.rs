@@ -72,6 +72,9 @@ pub struct MessageReactionOptions {
     pub allow_custom_emoji: bool,
     /// Offered reactions TDLib marks `needs_premium` for this account.
     pub premium_locked: Vec<ReactionChoice>,
+    /// This message's picker offers the Star reaction (its own flow,
+    /// `paid_reaction`).
+    pub offers_paid: bool,
 }
 
 /// Where the open message menu's reaction options stand. tdesktop reads
@@ -223,7 +226,6 @@ impl Session {
             .chain(&recent)
             .chain(&popular)
             .any(|view| matches!(view.kind, StoryAvailableReactionKind::Paid));
-        self.payments.paid.offered = paid_offered.then_some((chat_id.0, message_id.0));
         let premium_locked: Vec<ReactionChoice> = top
             .iter()
             .chain(&recent)
@@ -245,6 +247,7 @@ impl Session {
             popular: convert(popular),
             allow_custom_emoji,
             premium_locked,
+            offers_paid: paid_offered,
         };
         // tdesktop adds the paid reaction to `recent` when paid is enabled
         // (data_message_reactions.cpp), so an offer of Stars alone still
@@ -259,11 +262,18 @@ impl Session {
         };
     }
 
+    /// Whether the picker for this message offers the Star reaction.
+    pub fn paid_reaction_offered(&self, chat_id: ChatId, message_id: MessageId) -> bool {
+        self.stickers
+            .message_reaction_options
+            .ready_for(chat_id, message_id)
+            .is_some_and(|options| options.offers_paid)
+    }
+
     /// The message menu closed: nothing is asked for, and an answer still on
     /// its way is ignored.
     pub fn reset_message_reactions(&mut self) {
         self.stickers.message_reaction_options = MessageReactionsState::Idle;
-        self.payments.paid.offered = None;
     }
 
     /// `getMessageAvailableReactions` failed: the strip stays away, unless
