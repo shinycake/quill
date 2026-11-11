@@ -44,7 +44,7 @@ pub(crate) struct AdminUi {
     /// earlier events load when it is scrolled to its top.
     pub(super) event_log_list: ListState,
     /// The event ids the list was last built for (`event_log_list::plan_sync`).
-    pub(super) event_log_ids: std::cell::RefCell<Vec<i64>>,
+    pub(super) event_log_ids: std::cell::Cell<Vec<i64>>,
     /// The recent-actions page last opened, with the timers that belong to
     /// it. Opening it for another chat replaces it, and its timers stop.
     pub(super) event_log_page: Option<EventLogPage>,
@@ -64,9 +64,9 @@ pub(crate) struct AdminUi {
 /// them, and a newer one replaces an older one of its kind.
 pub(super) struct EventLogPage {
     pub(super) chat: ChatId,
-    /// The list length an automatic "load earlier" was last asked for in
-    /// this page (cleared when the list starts over).
-    pub(super) autoload: std::cell::Cell<Option<usize>>,
+    /// Where the automatic "load earlier" stands in this page (back to
+    /// `Idle` when the list starts over).
+    pub(super) autoload: std::cell::Cell<OlderAsk>,
     /// The search debounce: each edit replaces it, so only the last one
     /// searches.
     pub(super) typed: Option<gpui_kit::Task<()>>,
@@ -74,11 +74,35 @@ pub(super) struct EventLogPage {
     pub(super) poll: Option<gpui_kit::Task<()>>,
 }
 
+/// The "load earlier events" ask of one recent-actions page.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(super) enum OlderAsk {
+    /// Nothing asked yet: a list scrolled to its top asks.
+    #[default]
+    Idle,
+    /// Asked at this list length; the same length does not ask again.
+    Asked(usize),
+    /// The send was refused (no connection): the list shows Retry and
+    /// asks nothing until it is pressed or the list starts over.
+    Refused,
+}
+
+impl OlderAsk {
+    /// Whether a list of `len` events may ask for earlier ones now.
+    pub(super) fn may_ask(self, len: usize) -> bool {
+        match self {
+            Self::Idle => true,
+            Self::Asked(asked) => asked != len,
+            Self::Refused => false,
+        }
+    }
+}
+
 impl EventLogPage {
     pub(super) fn new(chat: ChatId) -> Self {
         Self {
             chat,
-            autoload: std::cell::Cell::new(None),
+            autoload: std::cell::Cell::new(OlderAsk::Idle),
             typed: None,
             poll: None,
         }
@@ -127,7 +151,7 @@ impl AdminUi {
             forum_manage_dialog: None,
             event_log_search: None,
             event_log_list: super::event_log::new_event_log_list(),
-            event_log_ids: std::cell::RefCell::new(Vec::new()),
+            event_log_ids: std::cell::Cell::new(Vec::new()),
             event_log_page: None,
             group_settings_dialog: None,
             join_requests_dialog: None,

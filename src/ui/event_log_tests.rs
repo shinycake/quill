@@ -3,6 +3,7 @@
 //! keeps its choices until Save and drops them on Cancel.
 #![cfg(feature = "demo-capture")]
 
+use crate::ui::admin_state::OlderAsk;
 use crate::ui::app::QuillApp;
 use crate::ui::dialogs::group_admin_settings::GroupSettingsView;
 use crate::ui::event_log_rows::LogBody;
@@ -222,10 +223,12 @@ fn the_search_box_follows_the_chat_whose_log_is_open(cx: &mut TestAppContext) {
 fn the_older_events_mark_is_cleared_when_the_list_starts_over(cx: &mut TestAppContext) {
     let (app, mut vcx) = new_app(cx);
     app.update(&mut vcx, |app, _| {
-        app.event_log_page_for(CHANNEL).autoload.set(Some(3));
+        app.event_log_page_for(CHANNEL)
+            .autoload
+            .set(OlderAsk::Asked(3));
         app.event_log_reset_list();
         let mark = app.admin.event_log_page.as_ref().map(|p| p.autoload.get());
-        assert_eq!(mark, Some(None));
+        assert_eq!(mark, Some(OlderAsk::Idle));
     });
 }
 
@@ -235,9 +238,28 @@ fn the_older_events_mark_is_cleared_when_the_list_starts_over(cx: &mut TestAppCo
 fn a_second_chats_page_replaces_the_first(cx: &mut TestAppContext) {
     let (app, mut vcx) = new_app(cx);
     app.update(&mut vcx, |app, _| {
-        app.event_log_page_for(CHANNEL).autoload.set(Some(3));
+        app.event_log_page_for(CHANNEL)
+            .autoload
+            .set(OlderAsk::Asked(3));
         let other = ChatId(CHANNEL.0 + 1);
         let page = app.event_log_page_for(other);
-        assert_eq!((page.chat, page.autoload.get()), (other, None));
+        assert_eq!((page.chat, page.autoload.get()), (other, OlderAsk::Idle));
+    });
+}
+
+/// A "load earlier" ask is recorded when it is sent: a refused send draws
+/// Retry (no spinner), and the same length does not ask again from render.
+#[gpui_kit::test]
+fn a_refused_older_events_ask_stops_asking_until_retry(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    app.update(&mut vcx, |app, cx| {
+        app.event_log_page_for(CHANNEL);
+        app.ask_older_events(CHANNEL, cx);
+        let ask = app.admin.event_log_page.as_ref().map(|p| p.autoload.get());
+        assert_eq!(ask, Some(OlderAsk::Refused), "no live client: refused");
+        assert!(!OlderAsk::Refused.may_ask(0));
+        assert!(OlderAsk::Idle.may_ask(0));
+        assert!(!OlderAsk::Asked(5).may_ask(5));
+        assert!(OlderAsk::Asked(5).may_ask(6));
     });
 }

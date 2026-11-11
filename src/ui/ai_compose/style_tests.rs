@@ -26,7 +26,7 @@ fn toasts(vcx: &mut VisualTestContext) -> usize {
 
 fn view(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> Option<AiComposeView> {
     app.read_with(vcx, |app, _| {
-        app.ai_compose.open.as_ref().map(|open| open.view)
+        app.ai_compose.open.as_ref().map(|open| open.view.clone())
     })
 }
 
@@ -49,7 +49,10 @@ fn open_editor(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) {
         frames(vcx);
     }
     click(vcx, "ai-style-create");
-    assert_eq!(view(app, vcx), Some(AiComposeView::StyleEditor));
+    assert!(matches!(
+        view(app, vcx),
+        Some(AiComposeView::StyleEditor(_))
+    ));
 }
 
 #[gpui_kit::test]
@@ -60,7 +63,7 @@ fn the_create_pill_opens_a_blank_editor(cx: &mut gpui_kit::TestAppContext) {
         app.ai_compose
             .open
             .as_ref()
-            .and_then(|open| open.editor.as_ref())
+            .and_then(|open| open.view.editor())
             .map(|editor| editor.editing.clone())
     });
     assert_eq!(editing, Some(None), "a new style");
@@ -84,7 +87,7 @@ fn an_empty_name_warns_and_sends_nothing(cx: &mut gpui_kit::TestAppContext) {
         app.ai_compose
             .open
             .as_ref()
-            .and_then(|open| open.editor.as_ref())
+            .and_then(|open| open.view.editor())
             .map(|editor| (editor.warning, editor.save))
     });
     assert_eq!(
@@ -93,7 +96,10 @@ fn an_empty_name_warns_and_sends_nothing(cx: &mut gpui_kit::TestAppContext) {
         "not sent"
     );
     assert!(main.debug_bounds("ai-style-warning").is_some());
-    assert_eq!(view(&app, &mut main), Some(AiComposeView::StyleEditor));
+    assert!(matches!(
+        view(&app, &mut main),
+        Some(AiComposeView::StyleEditor(_))
+    ));
 }
 
 #[gpui_kit::test]
@@ -123,7 +129,7 @@ fn a_saved_style_closes_the_editor_and_is_selected(cx: &mut gpui_kit::TestAppCon
         app.ai_compose
             .open
             .as_ref()
-            .map(|open| (open.editor.is_none(), open.ai.style().clone()))
+            .map(|open| (open.view.editor().is_none(), open.ai.style().clone()))
     });
     assert_eq!(picked, Some((true, StyleChoice::Style("pirate".into()))));
     assert_eq!(toasts(&mut main), before + 1, "the Created toast");
@@ -149,12 +155,15 @@ fn another_requests_save_answer_leaves_the_editor_open(cx: &mut gpui_kit::TestAp
         cx.notify();
     });
     frames(&mut main);
-    assert_eq!(view(&app, &mut main), Some(AiComposeView::StyleEditor));
+    assert!(matches!(
+        view(&app, &mut main),
+        Some(AiComposeView::StyleEditor(_))
+    ));
     let waiting = app.read_with(&main, |app, _| {
         app.ai_compose
             .open
             .as_ref()
-            .and_then(|open| open.editor.as_ref().map(|editor| editor.save))
+            .and_then(|open| open.view.editor().map(|editor| editor.save))
     });
     assert_eq!(waiting, Some(StyleSave::Sent { request: SAVE }));
 }

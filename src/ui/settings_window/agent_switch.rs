@@ -41,11 +41,14 @@ impl QuillApp {
     /// follows it to where the switch now is: the page once access is on,
     /// Advanced once it is off. An agent driving the window can't flip it
     /// (`access::set_enabled` refuses), so nothing moves then.
-    pub(super) fn set_agent_access(&mut self, on: bool, cx: &mut Context<Self>) {
+    pub(in crate::ui) fn set_agent_access(&mut self, on: bool, cx: &mut Context<Self>) {
         access::set_enabled(on);
         if access::enabled() != on {
             cx.notify();
             return;
+        }
+        if !on {
+            self.close_agent_boxes_for_access_off(cx);
         }
         let page = if on {
             Page::AgentAccess

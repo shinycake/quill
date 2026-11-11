@@ -4,7 +4,7 @@
 //! Earlier events load when the list is scrolled to its top.
 #![deny(clippy::indexing_slicing)]
 
-use super::admin_state::{EventLogPage, EventLogSearch};
+use super::admin_state::{EventLogPage, EventLogSearch, OlderAsk};
 use super::app::QuillApp;
 use super::dialogs::group_admin_settings::GroupSettingsView;
 use super::event_log_rows::{LogEntry, render_entry};
@@ -195,7 +195,7 @@ impl QuillApp {
                         app.update(cx, |this, cx| {
                             this.in_screen_scope(screen, cx, |this, cx| {
                                 if let Some(chat_id) = this.event_log_open_chat() {
-                                    this.load_more_event_log(chat_id, cx);
+                                    this.ask_older_events(chat_id, cx);
                                 }
                             });
                         })
@@ -209,7 +209,9 @@ impl QuillApp {
     /// events are fetched and join the bottom of the list (the list keeps a
     /// reader who has scrolled up where they are).
     pub(super) fn start_event_log_poll(&mut self, chat_id: ChatId, cx: &mut Context<Self>) {
-        self.event_log_page_for(chat_id).autoload.set(None);
+        self.event_log_page_for(chat_id)
+            .autoload
+            .set(OlderAsk::Idle);
         if self.live.is_none() {
             return;
         }
@@ -244,21 +246,49 @@ impl QuillApp {
         true
     }
 
-    /// Phase D3c: fetch the next older page of the event log.
-    pub(super) fn load_more_event_log(&mut self, chat_id: ChatId, cx: &mut Context<Self>) {
-        if let Some(live) = self.live.as_mut() {
-            match live.driver.fetch_chat_event_log_more(chat_id) {
-                Ok(_) => {}
-                Err(_) => {
-                    self.set_note(StatusNote::error(tr(
-                        keys::Q_OPS_COULD_NOT_LOAD_MORE_ACTIONS,
-                    )));
-                }
+    /// Phase D3c: fetch the next older page of the event log. Whether the
+    /// request went out (or is already in flight).
+    fn load_more_event_log(&mut self, chat_id: ChatId, cx: &mut Context<Self>) -> bool {
+        let sent = if let Some(live) = self.live.as_mut() {
+            let sent = live.driver.fetch_chat_event_log_more(chat_id).is_ok();
+            if !sent {
+                self.set_note(StatusNote::error(tr(
+                    keys::Q_OPS_COULD_NOT_LOAD_MORE_ACTIONS,
+                )));
             }
+            sent
         } else {
             self.set_note(StatusNote::info(tr(keys::Q_OPS_RECENT_ACTIONS_NEED_A_LIVE)));
-        }
+            false
+        };
         cx.notify();
+        sent
+    }
+
+    /// Ask for the page before the loaded ones and record how it went on the
+    /// page: the list length it was asked at, or that the send was refused
+    /// (Retry instead of a spinner nothing will end).
+    pub(super) fn ask_older_events(&mut self, chat_id: ChatId, cx: &mut Context<Self>) {
+        let len = self
+            .session()
+            .and_then(|session| match session.groups.event_log_fetch(chat_id.0) {
+                Some(ChatEventLogFetch::Loaded(page)) => Some(page.events.len()),
+                _ => None,
+            })
+            .unwrap_or_default();
+        let sent = self.load_more_event_log(chat_id, cx);
+        if let Some(page) = self
+            .admin
+            .event_log_page
+            .as_ref()
+            .filter(|page| page.chat == chat_id)
+        {
+            page.autoload.set(if sent {
+                OlderAsk::Asked(len)
+            } else {
+                OlderAsk::Refused
+            });
+        }
     }
 
     /// Administrators to offer in the filter: the loaded administrator
@@ -457,11 +487,10 @@ impl QuillApp {
     /// Forget the rows the list was built for.
     pub(super) fn event_log_reset_list(&self) {
         if let Some(page) = self.admin.event_log_page.as_ref() {
-            page.autoload.set(None);
+            page.autoload.set(OlderAsk::Idle);
         }
-        let mut shown = self.admin.event_log_ids.borrow_mut();
-        if !shown.is_empty() {
-            shown.clear();
+        // Taking the ids leaves them empty: the list is told it starts over.
+        if !self.admin.event_log_ids.take().is_empty() {
             self.admin.event_log_list.reset(0);
         }
     }
@@ -479,46 +508,42 @@ impl QuillApp {
         let entries: Rc<Vec<LogEntry>> = Rc::new(self.event_log_entries(&chronological));
         let ids: Vec<i64> = entries.iter().map(|entry| entry.id).collect();
         let state = self.admin.event_log_list.clone();
-        {
-            let mut shown = self.admin.event_log_ids.borrow_mut();
-            match plan_sync(&shown, &ids) {
-                ListSync::Keep => {}
-                ListSync::Reset => state.reset(ids.len()),
-                ListSync::Grow { older, newer } => {
-                    let before = shown.len();
-                    if older > 0 {
-                        state.splice(0..0, older);
-                        // The old first row may have lost its day label.
-                        state.remeasure_items(older..older.saturating_add(1));
-                    }
-                    if newer > 0 {
-                        let end = older.saturating_add(before);
-                        state.splice(end..end, newer);
-                    }
+        // The ids leave the cell while the list is touched: nothing holds them.
+        let shown = self.admin.event_log_ids.take();
+        let before = shown.len();
+        let plan = plan_sync(&shown, &ids);
+        let count = ids.len();
+        self.admin.event_log_ids.set(ids);
+        match plan {
+            ListSync::Keep => {}
+            ListSync::Reset => state.reset(count),
+            ListSync::Grow { older, newer } => {
+                if older > 0 {
+                    state.splice(0..0, older);
+                    // The old first row may have lost its day label.
+                    state.remeasure_items(older..older.saturating_add(1));
+                }
+                if newer > 0 {
+                    let end = older.saturating_add(before);
+                    state.splice(end..end, newer);
                 }
             }
-            *shown = ids;
         }
         // Only once the list has been laid out: before that every offset is 0.
         let laid_out = state.viewport_bounds().size.height > px(0.);
         let at_top = laid_out && state.scroll_px_offset_for_scrollbar().y > px(-TOP_SLACK);
-        let asked = Some(page.events.len());
-        let mark = self
+        let ask = self
             .admin
             .event_log_page
             .as_ref()
             .filter(|open| open.chat == chat_id)
-            .map(|open| &open.autoload);
-        if page.has_more
-            && at_top
-            && let Some(mark) = mark
-            && mark.get() != asked
-        {
+            .map(|open| open.autoload.get());
+        if page.has_more && at_top && ask.is_some_and(|ask| ask.may_ask(page.events.len())) {
             // Short lists never scroll, so the next page is asked for here,
-            // once for each length the list reaches in a chat (the mark is
-            // cleared when the list starts over).
-            mark.set(asked);
-            self.defer_screen(cx, move |this, cx| this.load_more_event_log(chat_id, cx));
+            // once for each length the list reaches in a chat. The ask is
+            // recorded when it is sent (`ask_older_events`), and the mark is
+            // cleared when the list starts over.
+            self.defer_screen(cx, move |this, cx| this.ask_older_events(chat_id, cx));
         }
         let rows = Rc::clone(&entries);
         let rows_list = list(state, move |ix, _, cx| {
@@ -535,7 +560,30 @@ impl QuillApp {
             .flex_1()
             .min_h_0()
             .w_full();
-        if page.has_more {
+        if page.has_more && ask == Some(OlderAsk::Refused) {
+            // The request for earlier events could not be sent.
+            area = area.child(
+                div()
+                    .flex()
+                    .flex_none()
+                    .items_center()
+                    .justify_center()
+                    .gap_2()
+                    .py_1()
+                    .text_xs()
+                    .text_color(theme.muted_foreground)
+                    .child(tr(keys::Q_OPS_COULD_NOT_LOAD_MORE_ACTIONS))
+                    .child(
+                        Button::new("event-log-older-retry")
+                            .label(tr(keys::Q_OPS_RETRY))
+                            .ghost()
+                            .xsmall()
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.ask_older_events(chat_id, cx);
+                            })),
+                    ),
+            );
+        } else if page.has_more {
             // Above the first row while earlier events remain to load.
             area = area.child(
                 div()

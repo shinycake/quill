@@ -275,6 +275,45 @@ fn an_opener_without_a_guard_leaves_no_hard_dialog_for_an_agent(cx: &mut TestApp
     assert_eq!(dialog_shown(&app, vcx), Some("PaidReaction"));
 }
 
+/// What an agent's step opened is closed by the shell of the window the
+/// step ran in, not by another window's shell.
+#[gpui_kit::test]
+fn a_blocked_dialog_waits_for_the_shell_of_its_window(cx: &mut TestAppContext) {
+    let _guard = quill::locks::lock_or_recover(&TEST_LOCK);
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    turn_on();
+    grant(11, Scope::ReadWrite);
+    grant_everything();
+    let _presence = activity::connect("Test agent");
+    settle(vcx);
+    let message_id = add_star_reaction(&app, vcx);
+    app.update_in(vcx, |app, _, cx| {
+        app.agent_step(true, |app| {
+            app.open_paid_box(
+                quill::ids::ChatId(11),
+                quill::ids::MessageId(message_id),
+                cx,
+            );
+        });
+    });
+    // Another window's shell finds nothing of its own.
+    let other = Some(quill::ids::ChatId(99));
+    let taken = vcx.update(|window, cx| {
+        crate::ui::agent_driver_surface::take_blocked_closing_layers(&app, other, window, cx)
+    });
+    assert!(taken.is_empty());
+    // The window the step ran in (the main one) takes it.
+    let taken = vcx.update(|window, cx| {
+        crate::ui::agent_driver_surface::take_blocked_closing_layers(&app, None, window, cx)
+    });
+    assert_eq!(taken, vec!["PaidReaction"]);
+    app.update(vcx, |app, cx| {
+        app.paid_reaction.boxed = None;
+        cx.notify();
+    });
+}
+
 #[gpui_kit::test]
 fn an_agent_neither_switches_accounts_nor_answers_a_call(cx: &mut TestAppContext) {
     let _guard = quill::locks::lock_or_recover(&TEST_LOCK);

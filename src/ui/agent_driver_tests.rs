@@ -705,6 +705,44 @@ fn input_commands_run_one_at_a_time(cx: &mut TestAppContext) {
     );
 }
 
+/// A running input command whose task cannot reach its finish (the window
+/// closed under it) leaves the stage, and the command waiting behind it is
+/// answered instead of waiting for ever.
+#[gpui_kit::test]
+fn an_abandoned_input_command_frees_the_driver_and_answers_the_waiting(cx: &mut TestAppContext) {
+    use crate::ui::agent_state::Driver;
+    let _guard = quill::locks::lock_or_recover(&TEST_LOCK);
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    turn_on();
+    grant(11, Scope::ReadWrite);
+    let _presence = activity::connect("Test agent");
+    settle(vcx);
+    let post = |text: &str| {
+        bridge::post("Test agent", UiCommand::TypeText { text: text.into() })
+            .unwrap_or_else(|_| panic!("posted"))
+    };
+    let (_first, second) = (post("a"), post("b"));
+    vcx.update(|window, cx| {
+        app.update(cx, |app, cx| {
+            app.agent_driver_tick(window, cx);
+        })
+    });
+    app.update(vcx, |app, _| {
+        let running = match &app.agent_bridge.driver {
+            Driver::Running { id, .. } => Some(*id),
+            Driver::Idle => None,
+        };
+        let id = running.unwrap_or_else(|| panic!("an input command runs"));
+        app.agent_command_abandoned(id);
+        assert!(matches!(app.agent_bridge.driver, Driver::Idle));
+    });
+    assert!(
+        matches!(second.poll(), Some(UiReply::Refused(_))),
+        "the waiting command is answered"
+    );
+}
+
 /// The cost of building the tree every frame, printed for the decision
 /// doc: `cargo test --features demo-capture --bin quill -- --ignored
 /// --nocapture forced_tree_frame_cost`.
