@@ -38,6 +38,10 @@ _TOKEN = re.compile(
 _NOT_NEWLINE = re.compile(r"[^\n]")
 _CFG_TEST = re.compile(r"#\[cfg\(test\)\]")
 _ATTRS = re.compile(r"(?:\s*#\[[^\]]*\])*\s*")
+_ITEM = re.compile(
+    r"(?:pub(?:\([^)]*\))?\s+)?(?:(?:async|unsafe|const|extern(?:\s+\"[^\"]*\")?)\s+)*"
+    r"(?:mod|fn|impl|use|const|static|struct|enum|type|trait|union|thread_local!|macro_rules!)(?![\w])"
+)
 _TEST_MOD = re.compile(
     r"#\[cfg\(test\)\]((?:\s*#\[[^\]]*\])*)\s*(?:pub(?:\([^)]*\))?\s+)?mod\s+(\w+)\s*;"
 )
@@ -104,18 +108,45 @@ def _body_start(text, start):
     return None
 
 
+def _statement_end(text, start):
+    """One past the end of the field, argument or statement at `start`."""
+    depth = 0
+    for i in range(start, len(text)):
+        ch = text[i]
+        if ch in "([{":
+            depth += 1
+        elif ch in ")]}":
+            if depth == 0:
+                return i
+            depth -= 1
+            if depth == 0 and ch == "}":
+                return i + 1
+        elif depth == 0 and ch in ",;":
+            return i + 1
+    return len(text)
+
+
+def _test_end(text, item):
+    """One past the end of what a `#[cfg(test)]` before `item` covers."""
+    word = _ITEM.match(text, item)
+    if word is None:
+        return _statement_end(text, item)
+    brace = _body_start(text, word.end())
+    if brace is None:
+        end = text.find(";", item)
+        return len(text) if end < 0 else end + 1
+    return closing(text, brace) + 1
+
+
 def strip_tests(text):
-    """`text` (already blanked) without the items under `#[cfg(test)]`."""
+    """`text` (already blanked) without what `#[cfg(test)]` covers: an
+    item (a module, function, impl, ...) or one field or statement."""
     out = []
     at = 0
     for match in _CFG_TEST.finditer(text):
         if match.start() < at:
             continue
-        item = _ATTRS.match(text, match.end()).end()
-        brace = _body_start(text, item)
-        end = closing(text, brace) + 1 if brace is not None else text.find(";", item) + 1
-        if end <= 0:
-            end = len(text)
+        end = _test_end(text, _ATTRS.match(text, match.end()).end())
         out.append(text[at : match.start()])
         out.append(_NOT_NEWLINE.sub(" ", text[match.start() : end]))
         at = end

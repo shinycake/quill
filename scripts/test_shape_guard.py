@@ -82,6 +82,21 @@ class Reader(unittest.TestCase):
         }
         self.assertEqual(keys(borrows, files), ["live::x.borrow"])
 
+    def test_a_test_only_field_or_statement_hides_nothing_after_it(self):
+        files = {
+            "src/a.rs": (
+                "struct S {\n    #[cfg(test)]\n    probe: Probe,\n    cell: RefCell<u8>,\n}\n"
+                "fn live(s: &S) {\n"
+                "    #[cfg(test)]\n"
+                "    COUNTS.with(|counts| {\n        counts.borrow_mut().push(1);\n    });\n"
+                "    #[cfg(test)]\n    let seen = s.cell.borrow();\n"
+                "    s.cell.borrow_mut();\n"
+                "}\n"
+                "fn later(s: &S) { s.cell.borrow(); }\n"
+            )
+        }
+        self.assertEqual(keys(borrows, files), ["later::cell.borrow", "live::cell.borrow_mut"])
+
     def test_a_key_names_the_type_and_function(self):
         files = {
             "src/ui/a.rs": (

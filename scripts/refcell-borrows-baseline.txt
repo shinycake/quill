@@ -1,6 +1,5 @@
 # RefCell borrows that can panic (scripts/check-refcell-borrows.py).
 # <Type::function>::<receiver>.<call> <count>. Only remove lines or lower counts.
-@frame_trace::counts.borrow_mut 1
 BoundedImageCache::new::current.borrow_mut 1
 CacheScope::enter::scoped.borrow_mut 2
 ChatListKeys::begin_search_rows::search_bounds.borrow_mut 1
@@ -378,6 +377,7 @@ take_text_painted::painted.borrow_mut 1
 take_unshowable::retired.borrow_mut 1
 trace_caller::last.borrow_mut 1
 trace_count_by::counts.borrow_mut 1
+trace_slice_render::counts.borrow_mut 1
 tracker::played.borrow 1
 tracker::seen.borrow_mut 1
 tray_available::cell.borrow 2
