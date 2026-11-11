@@ -68,9 +68,9 @@ impl QuillApp {
                 thread_id: thread.thread_id,
                 unread_anchor: thread.unread_anchor,
                 unread_count: thread.unread_count,
-                has_newer: thread.history.has_newer,
+                has_newer: thread.history.has_newer(),
                 window_epoch: thread.history.window_epoch,
-                loaded_complete: thread.history.loaded_complete,
+                loaded_complete: thread.history.loaded_complete(),
             });
         // A Saved Messages sublist or tag filter is its own history.
         let saved_scope = self.saved_view_scope();
@@ -85,7 +85,7 @@ impl QuillApp {
         );
         let saved_window = saved_scope
             .and_then(|_| self.saved_history())
-            .map(|(_, history)| (None, history.has_newer, history.window_epoch));
+            .map(|(_, history)| (None, history.has_newer(), history.window_epoch));
         // The loaded window: the thread's own (it opens around its read
         // position and pages forward like the main history), the topic's
         // (no unread divider) or the main history's.
@@ -100,7 +100,7 @@ impl QuillApp {
                             .threads
                             .topic_histories
                             .get(&(chat.0, topic))
-                            .map(|h| (None, h.has_newer, h.window_epoch)),
+                            .map(|h| (None, h.has_newer(), h.window_epoch)),
                         None => s
                             .histories
                             .get(&chat.0)

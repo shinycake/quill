@@ -497,6 +497,23 @@ pub enum OlderEnd {
     #[default]
     Open,
     Failed,
+    /// A page reached the start of the topic (`next_from_message_id` 0, or
+    /// an empty page): nothing older to ask for. Leaves when the oldest
+    /// end is trimmed away or the window is replaced.
+    Complete,
+}
+
+/// The newer end of a topic window, the twin of [`OlderEnd`]. `More`: the
+/// window stops short of the newest message, newer pages load as the
+/// reader scrolls down; `Failed`: the last newer page failed and
+/// auto-paging stops until a jump.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum NewerEnd {
+    /// The window reaches the newest message.
+    #[default]
+    AtLatest,
+    More,
+    Failed,
 }
 
 /// Phase 5.1: per-topic history for a forum supergroup, fetched with
@@ -509,7 +526,6 @@ pub enum OlderEnd {
 pub struct TopicHistory {
     pub messages: HistoryMessages,
     pub next_from_message_id: MessageId,
-    pub loaded_complete: bool,
     /// Subsection tabs: `foundChatMessages.total_count` of the latest
     /// page — the topic header's "N messages".
     pub total_count: i32,
@@ -518,12 +534,12 @@ pub struct TopicHistory {
     /// "the message is gone" (`Session::message_deleted`).
     pub tombstones: HashSet<i64>,
     pub reader: ReaderPosition,
-    /// The window stops short of the newest message: newer pages load as
-    /// the reader scrolls down, and live messages wait outside it.
-    pub has_newer: bool,
-    /// The last newer page failed; auto-paging stops until a jump.
-    pub newer_failed: bool,
-    /// The last older page failed; auto-paging stops until a jump.
+    /// The newer end: while it stops short of the newest message, newer
+    /// pages load as the reader scrolls down and live messages wait
+    /// outside the window; a failed page stops auto-paging until a jump.
+    pub newer: NewerEnd,
+    /// The older end: reached the start, or the last older page failed
+    /// and auto-paging stops until a jump.
     pub older: OlderEnd,
     /// The newest server id known to lie past the window's newest end
     /// (trimmed away or held out while `has_newer`).
@@ -541,12 +557,10 @@ impl Default for TopicHistory {
         Self {
             messages: HistoryMessages::default(),
             next_from_message_id: MessageId(0),
-            loaded_complete: false,
             total_count: 0,
             tombstones: HashSet::new(),
             reader: ReaderPosition::Tail,
-            has_newer: false,
-            newer_failed: false,
+            newer: NewerEnd::AtLatest,
             older: OlderEnd::Open,
             latest_seen: 0,
             window_epoch: 0,
@@ -556,6 +570,72 @@ impl Default for TopicHistory {
 }
 
 impl TopicHistory {
+    /// A page reached the start of the topic.
+    pub fn loaded_complete(&self) -> bool {
+        self.older == OlderEnd::Complete
+    }
+
+    /// The window stops short of the newest message.
+    pub fn has_newer(&self) -> bool {
+        self.newer != NewerEnd::AtLatest
+    }
+
+    /// The last newer page failed.
+    pub fn newer_failed(&self) -> bool {
+        self.newer == NewerEnd::Failed
+    }
+
+    /// A page reached the start of the topic: nothing older to ask for.
+    pub fn mark_complete(&mut self) {
+        self.older = OlderEnd::Complete;
+    }
+
+    /// The oldest end was trimmed away: scrolling up pages it again.
+    pub fn reopen_oldest(&mut self) {
+        if self.older == OlderEnd::Complete {
+            self.older = OlderEnd::Open;
+        }
+    }
+
+    /// The last older page failed (nothing to fail once the start is
+    /// reached).
+    pub fn fail_older(&mut self) {
+        if self.older == OlderEnd::Open {
+            self.older = OlderEnd::Failed;
+        }
+    }
+
+    /// Reopen the older end after a failure (a retry, a landed page or
+    /// re-selecting the topic).
+    pub fn reopen_older(&mut self) {
+        if self.older == OlderEnd::Failed {
+            self.older = OlderEnd::Open;
+        }
+    }
+
+    /// Whether a message past the window's newest end is known: the window
+    /// stops short of it (`true`), or reaches the latest (`false`). A
+    /// failed newer page stays failed while newer messages remain.
+    pub fn newer_exists(&mut self, exists: bool) {
+        self.newer = match (exists, self.newer) {
+            (true, NewerEnd::Failed) => NewerEnd::Failed,
+            (true, _) => NewerEnd::More,
+            (false, _) => NewerEnd::AtLatest,
+        };
+    }
+
+    /// The newer page failed: paging stops until a jump.
+    pub fn fail_newer(&mut self) {
+        self.newer = NewerEnd::Failed;
+    }
+
+    /// A jump asks for newer pages again.
+    pub fn retry_newer(&mut self) {
+        if self.newer == NewerEnd::Failed {
+            self.newer = NewerEnd::More;
+        }
+    }
+
     /// Drop a deleted row and remember the id.
     pub(crate) fn remove(&mut self, id: MessageId, permanent: bool) {
         self.messages.remove(&id.0);

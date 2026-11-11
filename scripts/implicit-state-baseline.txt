@@ -18,8 +18,6 @@ BarFacts::bot_start_pending
 BotCreateDialog::submitted
 BotEditTexts::load_failed
 BotEditTexts::load_failed+error
-BusinessSettingsState::time_zones_requested
-BusinessSettingsState::time_zones_requested+error
 CallSnap::connecting
 CallSummary::busy
 CallUi::window_opening
@@ -139,8 +137,6 @@ PremiumHub::tx_loading
 ProfileModal::closing
 PullMachine::expand_pending
 Queued::failed
-QuickRepliesState::shortcuts_requested
-QuickRepliesState::shortcuts_requested+error
 ReceivedGift::is_saved
 Relay::started
 ResaleBuy::sending
@@ -151,8 +147,6 @@ RtmpStart::failed
 SavedMessagesState::tags_loaded
 SavedMessagesState::topics_requested
 SavedTagSearch::loaded
-SearchTabsState::recommended_loaded
-SearchTabsState::recommended_loading
 SettingsSearch::pending_clear
 SettingsState::account_ttl_loading
 SettingsState::auto_download_presets_loading

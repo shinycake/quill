@@ -137,7 +137,7 @@ fn forum_flow_topics_then_topic_history() {
         .topic_histories
         .get(&(16, 2))
         .unwrap();
-    assert!(history.loaded_complete);
+    assert!(history.loaded_complete());
     assert!(history.messages.contains_key(&50));
     // Back to the topic list.
     driver.deselect_topic();
