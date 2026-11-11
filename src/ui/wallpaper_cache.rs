@@ -238,7 +238,7 @@ impl Cache {
         let at = self.entries.iter().position(|e| e.key == key)?;
         let mut entry = self.entries.remove(at)?;
         if entry.retry_at.is_some_and(|retry| now >= retry) {
-            self.bytes -= entry.bytes;
+            self.bytes = self.bytes.saturating_sub(entry.bytes);
             image_budget::retire_all(entry.composite.map(|c| c.image));
             return None;
         }
@@ -285,7 +285,7 @@ impl Cache {
         let mut retired = Vec::new();
         while self.bytes > BUDGET_BYTES && self.entries.len() > 1 {
             if let Some(old) = self.entries.pop_front() {
-                self.bytes -= old.bytes;
+                self.bytes = self.bytes.saturating_sub(old.bytes);
                 retired.extend(old.composite.map(|c| c.image));
             }
         }
