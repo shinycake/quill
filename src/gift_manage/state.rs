@@ -2,6 +2,7 @@
 //! `PaymentsState::gifts_manage`, so the poll loop and reducer own every
 //! transition.
 
+use crate::ids::RequestId;
 use crate::state::fetch::Fetch;
 use super::{
     AvailableGift, GiftCollection, GiftLimits, GiftRecipient, PremiumGiftOption, TransferPicker,
@@ -161,8 +162,9 @@ pub struct GiftManageState {
     /// The collection tab that is open; 0 = all gifts.
     pub active_collection: i32,
     pub flow: Option<GiftFlow>,
-    /// The gift whose `deleteGift` is in flight; the answer removes it.
-    pub deleting: Option<String>,
+    /// The gifts whose `deleteGift` is in flight, each under its request:
+    /// an answer removes the gift of its own request only.
+    pub deleting: Vec<(RequestId, String)>,
     /// A one-line result of the last action ("Pinned", "Upgraded to ...").
     pub note: Option<String>,
     pub send: SendGiftState,
@@ -244,12 +246,22 @@ impl GiftManageState {
         self.collections.items().iter().find(|c| c.id == id)
     }
 
+    /// The `deleteGift` of `request` was answered or refused: the gift it
+    /// was for, once.
+    pub fn take_deleting(&mut self, request: Option<RequestId>) -> Option<String> {
+        let at = self
+            .deleting
+            .iter()
+            .position(|(asked, _)| Some(*asked) == request)?;
+        Some(self.deleting.remove(at).1)
+    }
+
     /// Forget the per-owner state when another gifts list opens.
     pub fn reset_for_owner(&mut self) {
         self.collections = Fetch::Idle;
         self.active_collection = 0;
         self.flow = None;
-        self.deleting = None;
+        self.deleting.clear();
         self.note = None;
         // A result nobody took belongs to the list that was closed.
         self.events.clear();

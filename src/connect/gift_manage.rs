@@ -499,7 +499,11 @@ impl<S: JsonSender> ConnectDriver<S> {
         let extra = self.send_gift_mutation(owner, PaymentsPurpose::DeleteGift, |extra, _| {
             rq::delete_gift(extra, id)
         })?;
-        self.session.payments.gifts_manage.deleting = Some(id.to_string());
+        self.session
+            .payments
+            .gifts_manage
+            .deleting
+            .push((extra, id.to_string()));
         Ok(extra)
     }
 

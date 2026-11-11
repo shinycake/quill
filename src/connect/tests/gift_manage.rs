@@ -417,7 +417,7 @@ fn a_failed_delete_keeps_the_gift_and_says_why() {
     let hub = &p.0.session.payments.hub;
     assert!(!hub.gifts_op.is_mutating());
     assert_eq!(hub.gifts.len(), 1);
-    assert_eq!(p.0.session.payments.gifts_manage.deleting, None);
+    assert!(p.0.session.payments.gifts_manage.deleting.is_empty());
     assert!(
         p.0.session
             .payments
@@ -690,4 +690,31 @@ fn a_failed_collections_list_shows_an_error_and_retry_asks_again() {
     assert!(p.0.session.payments.gifts_manage.collections.is_loading());
     // A retry with nothing failed sends nothing.
     assert!(p.0.retry_gift_collections().unwrap().is_none());
+}
+
+#[test]
+fn a_delete_answer_removes_the_gift_of_its_own_request_and_a_second_waits() {
+    let mut p = parts();
+    open_my_gifts(
+        &mut p,
+        vec![
+            regular("a", json!({"can_be_deleted": true})),
+            regular("b", json!({"can_be_deleted": true})),
+        ],
+    );
+    let first = p.0.delete_received_gift("a").unwrap();
+    // One change at a time: the second waits for the first's answer.
+    assert!(p.0.delete_received_gift("b").is_err());
+    feed(&mut p, json!({"@type": "ok", "@extra": first.as_extra()}));
+    let ids: Vec<String> = p
+        .0
+        .session
+        .payments
+        .hub
+        .gifts
+        .iter()
+        .map(|g| g.id.clone())
+        .collect();
+    assert_eq!(ids, ["b"]);
+    assert!(p.0.session.payments.gifts_manage.deleting.is_empty());
 }

@@ -203,11 +203,17 @@ impl Session {
     /// `notifyGiftUpdate(Delete)` drops the gift from the grid and the
     /// box, then the toast.
     pub fn finish_gift_delete(&mut self, request: Option<RequestId>) {
+        let gift = self.payments.gifts_manage.take_deleting(request);
+        self.payments.hub.gifts_op.changed(request);
+        self.remove_deleted_gift(gift);
+    }
+
+    /// The gift `deleteGift` removed leaves the grid and its box.
+    pub fn remove_deleted_gift(&mut self, gift: Option<String>) {
         let hub = &mut self.payments.hub;
         let manage = &mut self.payments.gifts_manage;
-        hub.gifts_op.changed(request);
         hub.gift_notice = None;
-        if let Some(id) = manage.deleting.take() {
+        if let Some(id) = gift {
             let before = hub.gifts.len();
             hub.gifts.retain(|g| g.id != id);
             if hub.gifts.len() < before {
@@ -369,7 +375,7 @@ impl Session {
                 self.payments.hub.gifts_op.failed(pending.map(|p| p.id));
             }
             PaymentsPurpose::DeleteGift => {
-                manage.deleting = None;
+                manage.take_deleting(pending.map(|p| p.id));
                 self.payments.hub.gifts_op.failed(pending.map(|p| p.id));
                 manage.note = Some(tr_with(
                     keys::Q_MONEY_COULD_NOT_DELETE_THE_GIFT,
