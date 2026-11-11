@@ -802,7 +802,7 @@ mod paid_gate {
 }
 
 #[test]
-fn an_outdated_subscriptions_list_refetches_once_and_a_refusal_is_not_asked_again() {
+fn a_stale_subscriptions_refetch_waits_for_an_appended_page_and_is_kept_when_refused() {
     let mut t = Flaky::new();
     let subs = |next: &str| {
         json!({"@type": "starSubscriptions", "star_count": 5, "subscriptions": [],
@@ -818,8 +818,12 @@ fn an_outdated_subscriptions_list_refetches_once_and_a_refusal_is_not_asked_agai
         t.driver
             .refresh_star_subscriptions_if_stale()
             .unwrap()
-            .is_some()
+            .is_none()
     );
+    assert_eq!(t.sender.count("getStarSubscriptions"), 2);
+    t.answer("getStarSubscriptions", subs(""));
+    // The appended page did not refresh the list: it is still stale, and
+    // the refetch the driver runs after the answer is on its way.
     assert_eq!(t.sender.count("getStarSubscriptions"), 3);
     assert_eq!(
         t.sender.last("getStarSubscriptions").unwrap()["offset"],

@@ -84,7 +84,7 @@ fn gift_mutation_ok_marks_the_list_stale_and_errors_release_the_lock() {
         &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra.0),
     );
     assert!(!session.payments.hub.gift_mutation.is_busy());
-    assert!(session.payments.hub.gifts_stale);
+    assert!(session.payments.hub.gifts.is_outdated());
 
     session.payments.hub.gift_convert_confirm = Some("g1".into());
     let extra = session.request(RequestPurpose::SellGift, None);

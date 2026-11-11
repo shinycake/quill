@@ -221,7 +221,7 @@ impl Session {
         manage.collections_fetch = CollectionsFetch::Stale;
         // The list may have been reopened while the request was out: the
         // server's list stays the source of truth.
-        hub.gifts_stale = true;
+        hub.gifts.outdate();
         manage.events.push(GiftEvent::Deleted);
     }
 

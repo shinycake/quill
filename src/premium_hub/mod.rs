@@ -786,7 +786,6 @@ pub struct PremiumHub {
     /// resale price, collections, delete). Only its own answer or error
     /// frees the list.
     pub gift_mutation: GiftMutation,
-    pub gifts_stale: bool,
     // Premium.
     pub premium_open: bool,
     /// `premium_bot_username` / `premium_invoice_slug` from the app config.

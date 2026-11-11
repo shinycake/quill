@@ -326,10 +326,10 @@ impl Session {
                 // The answer is authoritative: it replaces the list and
                 // clears any stale error. No optimistic mutation ever
                 // happens client-side.
-                if pending.map(|p| p.purpose) == Some(RequestPurpose::GetConnectedWebsites) {
-                    if self.settings.connected_websites.answer(websites) {
-                        self.settings.websites_change.clear_error();
-                    }
+                if pending.map(|p| p.purpose) == Some(RequestPurpose::GetConnectedWebsites)
+                    && self.settings.connected_websites.answer(websites)
+                {
+                    self.settings.websites_change.clear_error();
                 }
             }
             SettingsPayload::ScopeNotificationSettings { settings, .. } => {

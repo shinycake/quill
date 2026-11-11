@@ -162,7 +162,7 @@ impl QuillApp {
         } else {
             tr(keys::Q_CHAT_MESSAGES)
         };
-        let confirm = session.and_then(|s| s.search.search.confirm);
+        let confirm = session.and_then(|s| s.search.search.confirm.clone());
         let messages_empty = messages.is_empty();
         // A new query, tab or filter starts the list from its top.
         if let Some(search) = session.map(|s| &s.search.search) {

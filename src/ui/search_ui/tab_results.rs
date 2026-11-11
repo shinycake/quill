@@ -405,7 +405,7 @@ impl QuillApp {
                         ))
                         .small()
                         .accessibility_label(tr(keys::Q_CHAT_SEARCH_PUBLIC_POSTS_WITH_STARS))
-                        .on_click(cx.listener(|this, _, _, cx| {
+                        .on_click(cx.listener(move |this, _, _, cx| {
                             let query = this
                                 .session()
                                 .map(|s| s.search.search.query.trim().to_string())
