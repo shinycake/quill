@@ -337,10 +337,7 @@ impl QuillApp {
         };
         let notes = std::mem::take(&mut earn.notes);
         let url = earn.open_url.take();
-        let closed = earn
-            .effects
-            .iter()
-            .any(|effect| *effect == quill::earn::EarnEffect::SetupDone);
+        let closed = earn.effects.contains(&quill::earn::EarnEffect::SetupDone);
         earn.effects.clear();
         let progressed = !notes.is_empty() || url.is_some() || closed;
         // Every note toasts, one after another through the toast queue.
