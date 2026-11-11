@@ -405,7 +405,8 @@ fn a_list_in_flight_during_a_removal_is_asked_again() {
     body["@extra"] = old["@extra"].clone();
     feed(&mut p, body);
     assert!(p.0.session.settings.passkeys.find("k2").is_none());
-    assert!(p.0.session.settings.passkeys.is_stale());
+    // The list is asked for again and waits for that answer.
+    assert!(!p.0.session.settings.passkeys.is_known());
     assert_eq!(count(&p.1, "getLoginPasskeys"), 3);
 }
 
