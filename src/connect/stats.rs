@@ -50,7 +50,10 @@ impl<S: JsonSender> ConnectDriver<S> {
             Ok(()) => Ok(Some(extra)),
             Err(err) => {
                 self.session.requests.take(extra);
-                self.session.groups.stats.graph_unsent(extra);
+                self.session.groups.stats.graph_unsent(
+                    extra,
+                    crate::lang::tr(crate::lang::keys::Q_MONEY_STATISTICS_SEND_FAILED).into(),
+                );
                 Err(err)
             }
         }
@@ -248,13 +251,22 @@ impl<S: JsonSender> ConnectDriver<S> {
             .stats
             .posts
             .contains_key(&(chat_id.0, message_id.0))
-            || self.session.requests.has_purpose(purpose)
         {
             return Ok(None);
         }
         let extra = self.session.request(purpose, Some(chat_id));
-        self.send_json_request(extra, &get_message(extra, chat_id, message_id))
-            .map(Some)
+        self.session
+            .groups
+            .stats
+            .post_requested(chat_id.0, message_id.0, extra);
+        let sent = self.send_json_request(extra, &get_message(extra, chat_id, message_id));
+        if sent.is_err() {
+            self.session
+                .groups
+                .stats
+                .post_unsent(chat_id.0, message_id.0, extra);
+        }
+        sent.map(Some)
     }
 
     /// `getPollVoteStatistics` for a poll's message statistics (tdesktop

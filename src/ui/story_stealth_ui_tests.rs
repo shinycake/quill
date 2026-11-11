@@ -334,3 +334,19 @@ fn a_refused_activation_shows_its_reason_and_asks_again(cx: &mut TestAppContext)
         "with the button to retry"
     );
 }
+
+/// Sweep 13-046: the box and its once-a-second redraw tick end with the lock.
+#[gpui_kit::test]
+fn the_passcode_lock_closes_the_stealth_box(cx: &mut TestAppContext) {
+    let (app, _shell, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    seed(&app, vcx, true, StoryStealthMode::default());
+    open_box(&app, vcx, None);
+    assert!(box_open(&app, vcx));
+    app.update(vcx, |app, cx| {
+        app.account.passcode.enabled = true;
+        app.lock_by_passcode(cx)
+    });
+    frames(vcx);
+    assert!(!box_open(&app, vcx), "the box and its tick went with the lock");
+}

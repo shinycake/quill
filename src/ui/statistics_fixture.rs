@@ -4,7 +4,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use quill::state::{
-    ChatStatisticsFetch, GraphFetch, GraphKey, MessageStatsFetch, Session, StatsPostPreview,
+    ChatStatisticsFetch, GraphFetch, GraphKey, MessageStatsFetch, PostFetch, Session, StatsPostPreview,
 };
 use quill::telegram::envelope::{
     ChannelStatistics, ChatStatistics, ChatStatisticsInteractionInfo, ChatStatisticsObject,
@@ -332,7 +332,7 @@ pub(crate) fn seed_channel_statistics(session: &mut Session, chat_id: i64) {
     for i in 0..14i64 {
         session.groups.stats.posts.insert(
             (chat_id, (100 + i) << 20),
-            Some(StatsPostPreview {
+            PostFetch::Ready(StatsPostPreview {
                 text: format!("Release notes, part {}", i + 1),
                 date: ((START_MS + (59 - i) * DAY_MS) / 1000) as i32,
                 views: 12_000 - i as i32 * 500,

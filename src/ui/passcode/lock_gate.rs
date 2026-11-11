@@ -147,6 +147,11 @@ impl QuillApp {
         // parked for its download plays on, as tdesktop's player does.
         self.drop_play_intents_for_lock();
         self.release_story_viewer(cx);
+        // The main window draws only the lock screen: its cover player and
+        // userpic clips stop with it.
+        self.main_window_media_left();
+        // The stealth box and its once-a-second redraw tick end with it.
+        self.close_stealth_box();
         // The mini app is a helper window the lock screen does not cover;
         // tdesktop closes such windows on lock (`closeAdditionalWindows`).
         self.close_mini_app_window(cx);

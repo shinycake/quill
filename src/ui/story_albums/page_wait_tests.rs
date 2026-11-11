@@ -116,12 +116,12 @@ fn the_album_view_leaves_only_on_a_deleted_answer(cx: &mut TestAppContext) {
         ] {
             if let Some(page) = app.stories.page.as_mut() {
                 page.view = AlbumView::album(3);
-                page.wait = PageWait::Deleting(request);
+                page.view.delete_sent(request);
             }
             set_op(app, request, StoryPageOpState::Sending);
             app.story_page_upkeep(window, cx);
-            let open = app.stories.page.as_ref().map(|page| page.view);
-            assert_eq!(open, Some(AlbumView::album(3)), "in flight keeps the view");
+            let open = app.stories.page.as_ref().and_then(|page| page.view.deleting());
+            assert_eq!(open, Some(request), "in flight keeps the view and its call");
             set_op(app, request, state);
             app.story_page_upkeep(window, cx);
             let open = app
@@ -134,12 +134,11 @@ fn the_album_view_leaves_only_on_a_deleted_answer(cx: &mut TestAppContext) {
         // A delete whose op is gone (the page was left) ends the wait too.
         if let Some(page) = app.stories.page.as_mut() {
             page.view = AlbumView::album(3);
-            page.wait = PageWait::Deleting(RequestId(799));
+            page.view.delete_sent(RequestId(799));
         }
         app.story_page_upkeep(window, cx);
         let page = app.stories.page.as_ref().expect("the page");
-        assert_eq!(page.wait, PageWait::Idle);
-        assert_eq!(page.view.open_album(), Some(3));
+        assert_eq!(page.view, AlbumView::album(3), "the wait ended with it");
     });
 }
 

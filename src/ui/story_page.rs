@@ -48,12 +48,14 @@ pub(crate) enum AlbumView {
 }
 
 /// The two-click album delete: the first click arms it, the second sends
-/// it. Part of the album view, so leaving the view (back, the picker, an
-/// answer) disarms it.
+/// it and waits for the answer. Part of the album view, so leaving the view
+/// (back, the picker, an answer) ends the stage and its request with it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum AlbumDelete {
     Idle,
     Armed,
+    /// `deleteStoryAlbum` sent: the album view goes once it is deleted.
+    Deleting(quill::ids::RequestId),
 }
 
 impl AlbumView {
@@ -80,10 +82,31 @@ impl AlbumView {
         )
     }
 
-    /// Something else was pressed: a delete armed before does not carry on.
+    /// Something else was pressed: a delete armed before does not carry on
+    /// (one already sent stays until its answer).
     pub(crate) fn disarm(&mut self) {
-        if let Self::Album { delete, .. } = self {
+        if let Self::Album { delete, .. } = self
+            && *delete == AlbumDelete::Armed
+        {
             *delete = AlbumDelete::Idle;
+        }
+    }
+
+    /// The delete request the view waits on.
+    pub(crate) fn deleting(self) -> Option<quill::ids::RequestId> {
+        match self {
+            Self::Album {
+                delete: AlbumDelete::Deleting(request),
+                ..
+            } => Some(request),
+            _ => None,
+        }
+    }
+
+    /// The delete was sent as `request`.
+    pub(crate) fn delete_sent(&mut self, request: quill::ids::RequestId) {
+        if let Self::Album { delete, .. } = self {
+            *delete = AlbumDelete::Deleting(request);
         }
     }
 }
@@ -98,8 +121,6 @@ pub(crate) enum PageWait {
     Creating(quill::ids::RequestId),
     /// The picker's adds and removes on an opened album.
     SavingPicker(Vec<quill::ids::RequestId>),
-    /// `deleteStoryAlbum`: the album view goes once it is deleted.
-    Deleting(quill::ids::RequestId),
 }
 
 impl StoryPage {

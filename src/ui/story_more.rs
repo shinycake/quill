@@ -407,17 +407,21 @@ impl QuillApp {
             return;
         };
         let key = item.key();
-        if self.stories.media_saves.get(&key) == Some(&MediaSave::Saving) {
+        if self
+            .stories
+            .media_saves
+            .get(&key)
+            .is_some_and(MediaSave::is_saving)
+        {
             return;
         }
         // The copy of a large clip runs off the UI thread; the notice says
         // so meanwhile and gives the result under the story it was for.
-        self.stories.media_saves.insert(key, MediaSave::Saving);
         self.stories
             .with_viewer_ui(|open| open.notice = Some(tr(keys::Q_MEDIA_SAVING).into()));
         let copy =
             cx.background_spawn(async move { quill::media_viewer::save_media_to_downloads(&path) });
-        self.spawn_scoped(cx, async move |this, cx| {
+        let task = self.spawn_scoped(cx, async move |this, cx| {
             let result = copy.await;
             let _ = this.update(cx, |this, cx| {
                 let notice = match result {
@@ -429,21 +433,17 @@ impl QuillApp {
                 };
                 // The result waits for its story: shown now when it is the
                 // one on screen, and again when the viewer steps back to it.
-                if this.stories.viewer.is_open() {
-                    this.stories
-                        .media_saves
-                        .insert(key, MediaSave::Done(notice.clone()));
-                } else {
-                    this.stories.media_saves.remove(&key);
-                }
+                let open = this.stories.viewer.is_open();
+                this.stories
+                    .finish_media_save(key, open.then(|| notice.clone()));
                 if this.stories.viewer.current().map(|item| item.key()) == Some(key) {
                     this.stories
                         .with_viewer_ui(|open| open.notice = Some(notice));
                 }
                 cx.notify();
             });
-        })
-        .detach();
+        });
+        self.stories.media_saves.insert(key, MediaSave::Saving(task));
         cx.notify();
     }
 

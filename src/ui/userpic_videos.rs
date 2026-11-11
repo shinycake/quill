@@ -193,8 +193,9 @@ struct State {
     covered: HashSet<Option<ChatId>>,
     /// The window's display scale; 0 until the first frame.
     scale: f32,
-    /// Clips that failed to open or decode: their still stays.
-    failed: HashSet<FileId>,
+    /// Clips that failed to open or decode, with the file they failed on:
+    /// their still stays until the clip is a different file.
+    failed: HashMap<FileId, PathBuf>,
     timer: Option<Task<()>>,
     /// A sweep is deferred to the end of this frame: the surfaces that
     /// render in it share it, so a second sweep cannot find the first
@@ -313,14 +314,20 @@ impl UserpicVideos {
     /// Whether `clip` failed for the account on screen (tests).
     #[cfg(test)]
     pub(super) fn has_failed(&self, clip: FileId) -> bool {
-        self.with(|state| state.failed.contains(&clip))
-            .unwrap_or(false)
+        self.failed_on(clip).is_some()
     }
 
-    /// Mark `clip` failed (tests).
+    /// The file `clip` failed on (tests).
     #[cfg(test)]
-    pub(super) fn mark_failed(&self, clip: FileId) {
-        self.with(|state| state.failed.insert(clip));
+    pub(super) fn failed_on(&self, clip: FileId) -> Option<PathBuf> {
+        self.with(|state| state.failed.get(&clip).cloned())
+            .flatten()
+    }
+
+    /// Mark `clip` failed on `path` (tests).
+    #[cfg(test)]
+    pub(super) fn mark_failed(&self, clip: FileId, path: &str) {
+        self.with(|state| state.failed.insert(clip, PathBuf::from(path)));
     }
 
     /// Start a pass of `surface` (its list renders): the slots whose rows
@@ -401,6 +408,14 @@ impl UserpicVideos {
         settle(commands);
     }
 
+    /// The main window will not render until it is back: its clips hold
+    /// still. Its next frame sets the hold again (`frame_start`).
+    pub(super) fn hold_main_window(&self) {
+        if let Some(commands) = self.with(|state| state.rehold(|state| cover(&mut state.covered, None, true))) {
+            settle(commands);
+        }
+    }
+
     /// At each render of the chat window showing `window`: whether
     /// something covers its chat, like `frame_start`'s `covered`.
     pub(super) fn cover_window(&self, window: ChatId, covered: bool) {
@@ -442,7 +457,7 @@ impl UserpicVideos {
         path: impl FnOnce() -> Option<PathBuf>,
         cx: &mut App,
     ) -> Option<VideoPlayer> {
-        let (current, failed, scale, pass) = self.with(|state| {
+        let (current, failed_on, scale, pass) = self.with(|state| {
             let current = state
                 .slots
                 .get(&key)
@@ -450,25 +465,46 @@ impl UserpicVideos {
                 .map(|slot| slot.player.clone());
             (
                 current,
-                state.failed.contains(&clip),
+                state.failed.get(&clip).cloned(),
                 state.scale,
                 state.pass(key.0),
             )
         })?;
-        if failed {
-            return None;
+        // A clip that failed stays a still while its file is the same one;
+        // a replaced or re-downloaded file gets another try.
+        let mut path = Some(path);
+        let mut resolved = None;
+        if let Some(failed_on) = failed_on {
+            let now = path.take().and_then(|path| path());
+            if now.as_ref().is_none_or(|now| *now == failed_on) {
+                return None;
+            }
+            self.with(|state| state.failed.remove(&clip));
+            resolved = Some(now);
         }
         let player = match current {
             Some(player) if player.state() == PlayState::Failed => {
                 let dropped = self.with(|state| {
-                    state.failed.insert(clip);
-                    state.slots.remove(&key)
+                    let slot = state.slots.remove(&key);
+                    if let Some(slot) = &slot {
+                        state.failed.insert(clip, slot.path.clone());
+                    }
+                    slot
                 });
                 drop(dropped);
                 return None;
             }
             Some(player) => player,
-            None => self.open(key, clip, decode_edge(size, scale), path, cx)?,
+            None => self.open(
+                key,
+                clip,
+                decode_edge(size, scale),
+                move || match resolved {
+                    Some(resolved) => resolved,
+                    None => path.and_then(|path| path()),
+                },
+                cx,
+            )?,
         };
         self.with(|state| {
             if let Some(slot) = state.slots.get_mut(&key) {
@@ -512,7 +548,7 @@ impl UserpicVideos {
         let player = match VideoPlayer::open(&path, Purpose::Inline { max_edge }, None, cx) {
             Ok(player) => player,
             Err(_) => {
-                self.with(|state| state.failed.insert(clip));
+                self.with(|state| state.failed.insert(clip, path));
                 return None;
             }
         };
@@ -768,11 +804,33 @@ mod tests {
         let a = AccountKey::primary();
         let b = AccountKey("second".into());
         videos.own(&a);
-        videos.mark_failed(FileId(5));
+        videos.mark_failed(FileId(5), "/clip.mp4");
         videos.own(&a);
         assert!(videos.has_failed(FileId(5)), "same account keeps it");
         videos.own(&b);
         assert!(!videos.has_failed(FileId(5)), "another account tries again");
+    }
+
+    /// Sweep 14-006: a clip that failed stays a still while its file is the
+    /// same, and is tried again once the file is another one.
+    #[gpui_kit::test]
+    fn a_failed_clip_is_tried_again_on_a_different_file(cx: &mut gpui_kit::TestAppContext) {
+        let videos = UserpicVideos::default();
+        videos.own(&AccountKey::primary());
+        let key = (super::Surface::ChatList, 1);
+        videos.mark_failed(FileId(5), "/a.mp4");
+        cx.update(|cx| {
+            let same = videos.frame(key, FileId(5), 32., || Some("/a.mp4".into()), cx);
+            assert!(same.is_none());
+            assert_eq!(videos.failed_on(FileId(5)), Some("/a.mp4".into()));
+            let other = videos.frame(key, FileId(5), 32., || Some("/b.mp4".into()), cx);
+            assert!(other.is_none(), "the missing file fails again");
+            assert_eq!(
+                videos.failed_on(FileId(5)),
+                Some("/b.mp4".into()),
+                "the other file was tried"
+            );
+        });
     }
 
     #[test]

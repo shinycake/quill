@@ -24,6 +24,7 @@ pub(crate) enum SuggestTarget {
 }
 
 /// The "Suggest a Message" box (tdesktop `ChooseSuggestPriceBox`).
+#[derive(Clone)]
 pub(crate) struct PriceBox {
     pub(super) target: SuggestTarget,
     pub(super) mode: SuggestMode,
@@ -94,72 +95,78 @@ pub(crate) enum BalanceFor {
     Accept,
 }
 
-/// The box a suggested-post flow has open. Kit dialogs never stack, so a
-/// flow is a box with at most one box over it: the price box with the time
-/// box or "Grams Needed" over it, or the Accept Terms box with "Grams
-/// Needed" over it.
+/// The box a suggested-post flow has open, as one value of the legal
+/// flows. Kit dialogs never stack, so a flow is a box with at most one box
+/// over it: the price box with the time box or "Grams Needed" over it, or
+/// the Accept Terms box with "Grams Needed" over it; the time box of an
+/// offer and a lone "Grams Needed" stand alone.
 pub(crate) struct SuggestedPostsUi {
-    base: Base,
-    over: Over,
+    flow: Flow,
 }
 
-/// The box a flow starts from.
-enum Base {
+#[derive(Default)]
+enum Flow {
+    #[default]
     None,
     Price(PriceBox),
+    PriceTime(PriceBox, TimeBox),
+    /// "{amount} Grams Needed" over the price box.
+    PriceNeeds(PriceBox, SuggestedPrice),
     Accept(AcceptBox),
+    AcceptNeeds(AcceptBox, SuggestedPrice),
     Decline(DeclineBox),
-}
-
-/// The box shown over the base (or alone: the time box of an offer).
-enum Over {
-    None,
+    /// The time box of an offer, or of an accept still without a time.
     Time(TimeBox),
-    /// "{amount} Grams Needed".
-    GramsNeeded(SuggestedPrice),
+    /// "{amount} Grams Needed" alone.
+    Needs(SuggestedPrice),
 }
 
 impl crate::ui::on_screen::Farewell for SuggestedPostsUi {}
 
 impl SuggestedPostsUi {
     pub(super) fn new() -> Self {
-        Self {
-            base: Base::None,
-            over: Over::None,
-        }
+        Self { flow: Flow::None }
+    }
+
+    fn take(&mut self) -> Flow {
+        std::mem::take(&mut self.flow)
     }
 
     pub(super) fn price(&self) -> Option<&PriceBox> {
-        match &self.base {
-            Base::Price(price) => Some(price),
+        match &self.flow {
+            Flow::Price(price) | Flow::PriceTime(price, _) | Flow::PriceNeeds(price, _) => {
+                Some(price)
+            }
             _ => None,
         }
     }
 
     pub(super) fn price_mut(&mut self) -> Option<&mut PriceBox> {
-        match &mut self.base {
-            Base::Price(price) => Some(price),
+        match &mut self.flow {
+            Flow::Price(price) | Flow::PriceTime(price, _) | Flow::PriceNeeds(price, _) => {
+                Some(price)
+            }
             _ => None,
         }
     }
 
+    /// The price box opens; a box over the price box that is open stays.
     pub(super) fn set_price(&mut self, price: PriceBox) {
-        self.base = Base::Price(price);
+        self.flow = match self.take() {
+            Flow::PriceTime(_, time) => Flow::PriceTime(price, time),
+            Flow::PriceNeeds(_, needs) => Flow::PriceNeeds(price, needs),
+            _ => Flow::Price(price),
+        };
     }
 
-    /// Close the price box, handing it back; another box stays.
-    pub(super) fn take_price(&mut self) -> Option<PriceBox> {
-        match std::mem::replace(&mut self.base, Base::None) {
-            Base::Price(price) => Some(price),
-            other => {
-                self.base = other;
-                None
-            }
-        }
-    }
-
+    /// Close the price box; a box that was over it stays alone.
     pub(super) fn close_price(&mut self) {
-        self.take_price();
+        self.flow = match self.take() {
+            Flow::Price(_) => Flow::None,
+            Flow::PriceTime(_, time) => Flow::Time(time),
+            Flow::PriceNeeds(_, needs) => Flow::Needs(needs),
+            other => other,
+        };
     }
 
     pub(super) fn close_decline(&mut self) {
@@ -167,83 +174,112 @@ impl SuggestedPostsUi {
     }
 
     pub(super) fn accept(&self) -> Option<&AcceptBox> {
-        match &self.base {
-            Base::Accept(accept) => Some(accept),
+        match &self.flow {
+            Flow::Accept(accept) | Flow::AcceptNeeds(accept, _) => Some(accept),
             _ => None,
         }
     }
 
     pub(super) fn set_accept(&mut self, accept: AcceptBox) {
-        self.base = Base::Accept(accept);
+        self.flow = match self.take() {
+            Flow::AcceptNeeds(_, needs) => Flow::AcceptNeeds(accept, needs),
+            _ => Flow::Accept(accept),
+        };
     }
 
     pub(super) fn close_accept(&mut self) {
-        if matches!(self.base, Base::Accept(_)) {
-            self.base = Base::None;
-        }
+        self.flow = match self.take() {
+            Flow::Accept(_) => Flow::None,
+            Flow::AcceptNeeds(_, needs) => Flow::Needs(needs),
+            other => other,
+        };
     }
 
     pub(super) fn decline(&self) -> Option<&DeclineBox> {
-        match &self.base {
-            Base::Decline(decline) => Some(decline),
+        match &self.flow {
+            Flow::Decline(decline) => Some(decline),
             _ => None,
         }
     }
 
     pub(super) fn set_decline(&mut self, decline: DeclineBox) {
-        self.base = Base::Decline(decline);
+        self.flow = Flow::Decline(decline);
     }
 
     /// Close the Decline box, handing it back; another box stays.
     pub(super) fn take_decline(&mut self) -> Option<DeclineBox> {
-        match std::mem::replace(&mut self.base, Base::None) {
-            Base::Decline(decline) => Some(decline),
+        match self.take() {
+            Flow::Decline(decline) => Some(decline),
             other => {
-                self.base = other;
+                self.flow = other;
                 None
             }
         }
     }
 
     pub(super) fn time(&self) -> Option<&TimeBox> {
-        match &self.over {
-            Over::Time(time) => Some(time),
+        match &self.flow {
+            Flow::PriceTime(_, time) | Flow::Time(time) => Some(time),
             _ => None,
         }
     }
 
     pub(super) fn time_mut(&mut self) -> Option<&mut TimeBox> {
-        match &mut self.over {
-            Over::Time(time) => Some(time),
+        match &mut self.flow {
+            Flow::PriceTime(_, time) | Flow::Time(time) => Some(time),
             _ => None,
         }
     }
 
+    /// The time box opens: over the price box when it is open, else alone.
     pub(super) fn set_time(&mut self, time: TimeBox) {
-        self.over = Over::Time(time);
+        self.flow = match self.take() {
+            Flow::Price(price) | Flow::PriceTime(price, _) | Flow::PriceNeeds(price, _) => {
+                Flow::PriceTime(price, time)
+            }
+            _ => Flow::Time(time),
+        };
     }
 
     pub(super) fn close_time(&mut self) {
-        if matches!(self.over, Over::Time(_)) {
-            self.over = Over::None;
-        }
+        self.flow = match self.take() {
+            Flow::PriceTime(price, _) => Flow::Price(price),
+            Flow::Time(_) => Flow::None,
+            other => other,
+        };
     }
 
     /// The missing amount "Grams Needed" names.
     pub(super) fn grams_needed(&self) -> Option<SuggestedPrice> {
-        match self.over {
-            Over::GramsNeeded(price) => Some(price),
+        match self.flow {
+            Flow::PriceNeeds(_, price) | Flow::AcceptNeeds(_, price) | Flow::Needs(price) => {
+                Some(price)
+            }
             _ => None,
         }
     }
 
-    pub(super) fn set_grams_needed(&mut self, price: SuggestedPrice) {
-        self.over = Over::GramsNeeded(price);
+    /// "Grams Needed" opens over the price or accept box. An open time
+    /// box is not replaced (the date being picked stays): `false` then.
+    pub(super) fn set_grams_needed(&mut self, price: SuggestedPrice) -> bool {
+        self.flow = match self.take() {
+            Flow::Price(base) | Flow::PriceNeeds(base, _) => Flow::PriceNeeds(base, price),
+            Flow::Accept(base) | Flow::AcceptNeeds(base, _) => Flow::AcceptNeeds(base, price),
+            Flow::None | Flow::Needs(_) => Flow::Needs(price),
+            held @ (Flow::PriceTime(..) | Flow::Time(_) | Flow::Decline(_)) => {
+                self.flow = held;
+                return false;
+            }
+        };
+        true
     }
 
     pub(super) fn close_grams_needed(&mut self) {
-        if matches!(self.over, Over::GramsNeeded(_)) {
-            self.over = Over::None;
-        }
+        self.flow = match self.take() {
+            Flow::PriceNeeds(price, _) => Flow::Price(price),
+            Flow::AcceptNeeds(accept, _) => Flow::Accept(accept),
+            Flow::Needs(_) => Flow::None,
+            other => other,
+        };
     }
 }

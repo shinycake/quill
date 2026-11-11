@@ -441,7 +441,7 @@ fn saving_without_a_password_asks_to_turn_it_on(cx: &mut TestAppContext) {
                 pending_reset_date: 0,
             });
         }
-        app.twofa.close();
+        app.twofa_close();
         cx.notify();
     });
     draw(&mut vcx);

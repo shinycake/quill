@@ -23,11 +23,9 @@ CheckoutView::sending
 
 DestRow::saved
 DragSelect::pending
-Drawn::leaving
 
 DestRow::saved
 DragSelect::pending
-Drawn::leaving
 FastShareFacts::sent
 FieldResult::finished
 FooterMeta::pending

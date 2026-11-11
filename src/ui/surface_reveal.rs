@@ -45,8 +45,9 @@ pub(crate) struct Drawn<T> {
     pub(crate) value: T,
     /// How far the surface is in, `0..=1`.
     pub(crate) shown: f32,
-    /// The state is gone; `value` is on its way out.
-    pub(crate) leaving: bool,
+    /// Where `shown` is heading: 1 while the state is there, 0 once it is
+    /// gone and `value` is on its way out (`leaving`).
+    pub(crate) target: f32,
     /// How far the content has swapped from `previous` to `value`,
     /// `0..=1` (1: no swap under way).
     pub(crate) swap: f32,
@@ -55,12 +56,17 @@ pub(crate) struct Drawn<T> {
 }
 
 impl<T> Drawn<T> {
+    /// The state is gone; `value` is on its way out.
+    pub(crate) fn leaving(&self) -> bool {
+        self.target <= 0.
+    }
+
     /// A settled, fully shown surface.
     pub(crate) fn settled(value: T) -> Self {
         Self {
             value,
             shown: 1.,
-            leaving: false,
+            target: 1.,
             swap: 1.,
             previous: None,
         }
@@ -158,7 +164,7 @@ impl<T: Clone + PartialEq> Presence<T> {
         Some(Drawn {
             value,
             shown: self.shown.value(now).clamp(0., 1.),
-            leaving: state_is_none(&self.shown),
+            target: self.shown.target(),
             swap,
             previous: self.previous.clone(),
         })
@@ -171,10 +177,6 @@ impl<T: Clone + PartialEq> Presence<T> {
                 .changed
                 .is_some_and(|changed| elapsed_since(changed, now) < SWAP)
     }
-}
-
-fn state_is_none(shown: &Glide) -> bool {
-    shown.target() <= 0.
 }
 
 /// Which pinned message the pinned bar shows, with its lines: the bar
@@ -404,7 +406,7 @@ mod tests {
         let mut p = Presence::new(ENTER, EXIT, linear, t0);
         assert_eq!(p.follow(None::<u8>, 0, true, t0), None);
         let start = p.follow(Some(7), 0, true, t0).unwrap();
-        assert_eq!((start.value, start.shown, start.leaving), (7, 0., false));
+        assert_eq!((start.value, start.shown, start.leaving()), (7, 0., false));
         assert!(p.moving(t0 + ms(10)));
         let mid = p.follow(Some(7), 0, true, t0 + ms(100)).unwrap();
         assert!(mid.shown > 0. && mid.shown < 1., "{}", mid.shown);
@@ -419,11 +421,11 @@ mod tests {
         let mut p = Presence::new(ENTER, EXIT, linear, t0);
         p.follow(Some("a"), 0, false, t0);
         let out = p.follow(None, 0, true, t0).unwrap();
-        assert_eq!((out.value, out.shown, out.leaving), ("a", 1., true));
+        assert_eq!((out.value, out.shown, out.leaving()), ("a", 1., true));
         let mid = p.follow(None, 0, true, t0 + ms(60)).unwrap();
         assert_eq!(mid.value, "a");
         assert!(mid.shown > 0. && mid.shown < 1., "{}", mid.shown);
-        assert!(mid.leaving);
+        assert!(mid.leaving());
         assert!(p.moving(t0 + ms(60)));
         assert_eq!(p.follow(None, 0, true, t0 + EXIT), None);
         assert!(!p.moving(t0 + EXIT));
@@ -440,7 +442,7 @@ mod tests {
         let mid = p.follow(None, 0, true, t0 + ms(60)).unwrap().shown;
         let back = p.follow(Some(1), 0, true, t0 + ms(60)).unwrap();
         assert!((back.shown - mid).abs() < 1e-4);
-        assert!(!back.leaving);
+        assert!(!back.leaving());
         assert!(p.follow(Some(1), 0, true, t0 + ms(76)).unwrap().shown > mid);
     }
 

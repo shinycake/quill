@@ -89,6 +89,15 @@ impl VideoAvatarUi {
 }
 
 impl QuillApp {
+    /// The main window went out of view (hidden to the tray, minimized, or
+    /// locked) and will not render until it comes back: the cover player
+    /// is dropped with its decoder, and the main window's userpic clips
+    /// hold still. Both start again from the next main-window frame.
+    pub(super) fn main_window_media_left(&mut self) {
+        self.video_avatar.cover = Cover::None;
+        self.players.userpic_videos.hold_main_window();
+    }
+
     /// The clip the cover should play now: the open panel's, while the
     /// panel is on screen and clips play here.
     fn wanted_cover_clip(&self) -> Option<(PhotoOwner, ChatPhotoAnimation)> {

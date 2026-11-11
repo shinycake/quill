@@ -7,7 +7,7 @@
 
 use super::*;
 use crate::ui::owned_image::OwnedImage;
-use crate::ui::stories_state::{PanelKind, ViewerPanel};
+use crate::ui::stories_state::{ManageCall, ManageKind, PanelKind, ViewerPanel};
 use crate::ui::story_viewer::chrome;
 use quill::story_cover::{
     STRIP_FRAMES, fraction_of, frame_times, time_at, time_label, timestamp_secs,
@@ -46,6 +46,13 @@ pub(in crate::ui) struct CoverPicker {
     bounds: Rc<Cell<Option<Bounds<Pixels>>>>,
     focus: FocusHandle,
     serial: u64,
+}
+
+impl CoverPicker {
+    /// The story the picker is for: `(chat id, story id)`.
+    pub(in crate::ui) fn story(&self) -> (i64, i32) {
+        (self.chat_id, self.story_id)
+    }
 }
 
 /// The cover picker's clip. Each stage leaves on its own: `WaitingForClip`
@@ -91,9 +98,6 @@ impl QuillApp {
             }
             cx.notify();
             return;
-        }
-        if let Some(open) = self.stories.viewer_ui_mut() {
-            open.cover_request = None;
         }
         let source = self.story_video_path();
         let fallback_ms = self
@@ -564,7 +568,7 @@ impl QuillApp {
                     )
                     .child(
                         Button::new("story-cover-set")
-                            .label(if self.stories.viewer_ui().cover_request.is_some() {
+                            .label(if self.cover_call_busy() {
                                 tr(keys::Q_MEDIA_SAVING)
                             } else {
                                 tr(keys::Q_MEDIA_SET_2)
@@ -578,6 +582,12 @@ impl QuillApp {
             .into_any_element()
     }
 
+    /// A cover call for the story the open picker is for is on its way.
+    pub(in crate::ui) fn cover_call_busy(&self) -> bool {
+        self.open_cover_story()
+            .is_some_and(|story| self.stories.manage_call_busy(ManageKind::Cover, story))
+    }
+
     /// The story the open cover picker is for.
     pub(in crate::ui) fn open_cover_story(&self) -> Option<(i64, i32)> {
         let cover = self.stories.viewer_ui().cover()?;
@@ -588,7 +598,7 @@ impl QuillApp {
     /// frame. The driver gates on `can_be_edited`; the tick closes the
     /// picker on success.
     pub(super) fn story_cover_save(&mut self, cx: &mut Context<Self>) {
-        if self.stories.viewer_ui().cover_request.is_some() {
+        if self.cover_call_busy() {
             return;
         }
         let Some((chat_id, story_id, at_ms)) = self
@@ -618,9 +628,11 @@ impl QuillApp {
                 .edit_story_cover(ChatId(chat_id), story_id, timestamp_secs(at_ms))
             {
                 Ok(request) => {
-                    if let Some(open) = self.stories.viewer_ui_mut() {
-                        open.cover_request = Some(request);
-                    }
+                    self.stories.manage_calls.push(ManageCall {
+                        kind: ManageKind::Cover,
+                        story: (chat_id, story_id),
+                        request,
+                    });
                 }
                 Err(_) => {
                     live.driver.session.stories.manage.fail_locally(

@@ -135,8 +135,19 @@ impl QuillApp {
                 self.open_stars(cx);
             }
             SuggestedPrice::TonCents(_) => {
-                self.suggested_posts.set_grams_needed(price);
-                self.open_box(DialogKind::SuggestGramsNeeded);
+                if self.suggested_posts.set_grams_needed(price) {
+                    self.open_box(DialogKind::SuggestGramsNeeded);
+                } else {
+                    // A box the user is filling in stays; the need is said.
+                    let what = match purpose {
+                        BalanceFor::Offer => tr(keys::Q_MONEY_OFFER_THIS_PRICE),
+                        BalanceFor::Accept => tr(keys::Q_MONEY_ACCEPT_THIS_POST),
+                    };
+                    self.set_note(StatusNote::info(tr_with(
+                        keys::Q_MONEY_YOU_NEED_TO,
+                        &[("label", &(price.label()).to_string()), ("what", what)],
+                    )));
+                }
             }
         }
         cx.notify();
@@ -470,13 +481,11 @@ impl QuillApp {
                 this.close_suggest_price(cx);
             });
         app.update(cx, |this, cx| {
-            let Some(price_box) = this.suggested_posts.take_price() else {
+            let Some(price_box) = this.suggested_posts.price().cloned() else {
                 return dialog.on_close(on_close);
             };
             let title = price_box.mode.price_title();
             let body = this.suggest_price_body(&price_box, cx);
-            // box-host: put back while the dialog builds; it stays where it shows
-            this.suggested_posts.set_price(price_box);
             let body = Rc::new(RefCell::new(Some(body)));
             dialog
                 .overlay(true)

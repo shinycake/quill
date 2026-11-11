@@ -37,11 +37,9 @@ detached:QuillApp::spawn_system_unlock_wait 1
 detached:QuillApp::start_connection 1
 detached:QuillApp::start_mic_test 1
 detached:QuillApp::start_update_checks 1
-detached:QuillApp::status_toast_visible 1
 detached:QuillApp::sync_call_window 1
 detached:QuillApp::wake_takeover_at 1
 detached:QuillApp::with_device_access 1
-detached:SyntheticChat::new 1
 detached:hide_main_window 1
 detached:open_main_window 1
 detached:request_video_frame 1

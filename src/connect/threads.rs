@@ -1,7 +1,7 @@
 //! Connect driver: channel comments and group reply threads.
 use super::*;
 use crate::ids::{ChatId, MessageId, RequestId};
-use crate::state::{OlderEnd, RequestPurpose, ThreadStatus, ThreadsPurpose};
+use crate::state::{OlderEnd, RequestPurpose, ThreadAsker, ThreadStatus, ThreadsPurpose};
 use crate::telegram::requests::{
     get_message_thread, get_message_thread_history, route_into_thread,
 };
@@ -18,18 +18,32 @@ impl<S: JsonSender> ConnectDriver<S> {
         chat_id: ChatId,
         message_id: MessageId,
     ) -> Result<Option<RequestId>, ConnectSendError> {
+        self.open_thread_for(chat_id, message_id, ThreadAsker::Nobody)
+    }
+
+    /// `open_thread` for the window that asked: its frame takes the thread
+    /// on once it resolved.
+    pub fn open_thread_for(
+        &mut self,
+        chat_id: ChatId,
+        message_id: MessageId,
+        asker: ThreadAsker,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
         if !self.chats_path_active() || message_id.0 <= 0 {
             return Err(ConnectSendError::InvalidRequest);
         }
-        if self.session.threads.thread.as_ref().is_some_and(|thread| {
-            thread.origin_chat_id == chat_id
-                && thread.origin_message_id == message_id
-                && !matches!(thread.status, ThreadStatus::Failed(_))
-        }) {
+        if let Some(thread) = self.session.threads.thread.as_mut()
+            && thread.origin_chat_id == chat_id
+            && thread.origin_message_id == message_id
+            && !matches!(thread.status, ThreadStatus::Failed(_))
+        {
+            // The same thread asked for again: the window that asks now
+            // takes it.
+            thread.asker = asker;
             return Ok(None);
         }
         let _ = self.cancel_outgoing_typing();
-        self.session.begin_thread(chat_id, message_id);
+        self.session.begin_thread_for(chat_id, message_id, asker);
         let purpose = RequestPurpose::GetMessageThread {
             message_id: message_id.0,
         };
@@ -47,18 +61,18 @@ impl<S: JsonSender> ConnectDriver<S> {
 
     /// Retry a failed thread open.
     pub fn retry_thread(&mut self) -> Result<Option<RequestId>, ConnectSendError> {
-        let Some((chat_id, message_id)) = self
+        let Some((chat_id, message_id, asker)) = self
             .session
             .threads
             .thread
             .as_ref()
-            .map(|thread| (thread.origin_chat_id, thread.origin_message_id))
+            .map(|thread| (thread.origin_chat_id, thread.origin_message_id, thread.asker))
         else {
             return Ok(None);
         };
         // The failed pane stays if the request cannot go out.
         let failed = self.session.threads.thread.take();
-        let sent = self.open_thread(chat_id, message_id);
+        let sent = self.open_thread_for(chat_id, message_id, asker);
         if sent.is_err() {
             self.session.threads.thread = failed;
         }

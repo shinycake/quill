@@ -138,7 +138,7 @@ impl QuillApp {
         }
     }
 
-    fn close_stealth_box(&mut self) {
+    pub(in crate::ui) fn close_stealth_box(&mut self) {
         self.stories.stealth_box = None;
     }
 

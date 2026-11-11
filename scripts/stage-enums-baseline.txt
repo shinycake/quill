@@ -83,7 +83,6 @@ bare:Load::Loading 1
 bare:Lookup::Pending 1
 bare:Lookup::Waiting 1
 bare:MediaFile::Downloading 1
-bare:MediaSave::Saving 1
 bare:MembersStage::Loading 2
 bare:MenuSend::Sent 1
 bare:MessageStatsFetch::Loading 1

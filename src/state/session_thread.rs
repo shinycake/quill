@@ -6,7 +6,18 @@ impl Session {
     /// Start resolving a thread (`getMessageThread`) for `message_id` of
     /// `chat_id`. Replaces any open thread.
     pub fn begin_thread(&mut self, chat_id: ChatId, message_id: MessageId) {
+        self.begin_thread_for(chat_id, message_id, ThreadAsker::Nobody);
+    }
+
+    /// Open the thread view for the window that asked.
+    pub fn begin_thread_for(
+        &mut self,
+        chat_id: ChatId,
+        message_id: MessageId,
+        asker: ThreadAsker,
+    ) {
         let mut view = ThreadView::resolving(chat_id, message_id);
+        view.asker = asker;
         // A thread opened from inside a forum topic keeps that topic.
         if self.open_chat_id() == Some(chat_id) && self.chat_has_topics(chat_id) {
             view.forum_topic_id = self.open_forum_topic();
