@@ -102,6 +102,44 @@ pub struct ChatLastMessage {
     pub send_state: crate::telegram::envelope::MessageSendState,
 }
 
+impl LastPreview {
+    /// A preview of `message` with the given text and nothing else: the
+    /// plain row a test or a demo builds by hand.
+    pub fn plain(text: impl Into<String>, message: ChatLastMessage) -> Self {
+        Self {
+            text: text.into(),
+            style: ChatPreviewStyle::default(),
+            sender: String::new(),
+            thumb: None,
+            message,
+        }
+    }
+}
+
+/// The chat-list row's view of the chat's last message, built whole by
+/// [`LastPreview::from_message`] so the text, its style, its sender line, its
+/// thumbnail and the message's identity never disagree. A chat with no last
+/// message holds none.
+#[derive(Debug, Clone)]
+pub struct LastPreview {
+    /// Sidebar preview from `updateChatLastMessage`. Not logged.
+    pub text: String,
+    /// Media icon + formatted-text entities for the last message (pure
+    /// functions of the same content).
+    pub style: ChatPreviewStyle,
+    /// Sender name for the 3-line row ("You" for own messages, the author
+    /// signature for signed channel posts, else the chat title — the list
+    /// doesn't parse `sender_id`).
+    pub sender: String,
+    /// The last message's photo minithumbnail: the chat list shows it small
+    /// before the preview text, as Telegram Desktop does. Never set for
+    /// secret or spoiler photos.
+    pub thumb: Option<std::sync::Arc<crate::telegram::envelope::MiniThumbnail>>,
+    /// Identity, date and direction of `chat.last_message` for the row's
+    /// timestamp and outgoing receipt.
+    pub message: ChatLastMessage,
+}
+
 #[derive(Debug, Clone)]
 pub struct ChatSummary {
     pub id: ChatId,
@@ -126,23 +164,10 @@ pub struct ChatSummary {
     pub folder_positions: BTreeMap<i32, i64>,
     /// `chat.notification_settings` / `updateChatNotificationSettings`.
     pub notification_settings: ChatNotificationSettings,
-    /// Sidebar preview from `updateChatLastMessage`. Not logged.
-    pub last_preview: String,
-    /// Slice chatlist-list-style: media icon + formatted-text entities
-    /// for the last message, captured wherever `last_preview` is set
-    /// (pure functions of the same content).
-    pub last_preview_style: ChatPreviewStyle,
-    /// Slice chatlist-list-style: sender name for the 3-line row ("You"
-    /// for own messages, the author signature for signed channel posts,
-    /// else the chat title — the list doesn't parse `sender_id`).
-    pub last_preview_sender: String,
-    /// The last message's photo minithumbnail: the chat list shows it
-    /// small before the preview text, as Telegram Desktop does. Never set
-    /// for secret or spoiler photos.
-    pub last_preview_thumb: Option<std::sync::Arc<crate::telegram::envelope::MiniThumbnail>>,
-    /// Identity, date and direction of `chat.last_message` for the row's
-    /// timestamp and outgoing receipt; `None` for an empty chat.
-    pub last_message: Option<ChatLastMessage>,
+    /// The last message as the sidebar row shows it (`updateChatLastMessage`);
+    /// `None` for an empty chat. Read through [`Self::last_preview`] and the
+    /// accessors beside it.
+    pub last: Option<LastPreview>,
     /// Senders with an active chat action (`updateChatAction`).
     pub sender_actions: Vec<super::chat_activity::SenderAction>,
     /// `chat.draft_message` text draft. Voice/rich drafts are not stored.
@@ -300,10 +325,45 @@ pub enum OwnRestriction {
 }
 
 impl ChatSummary {
+    /// The sidebar preview text; empty for an empty chat.
+    pub fn last_preview(&self) -> &str {
+        self.last.as_ref().map_or("", |last| last.text.as_str())
+    }
+
+    /// The media icon and entities of the preview.
+    pub fn last_preview_style(&self) -> &ChatPreviewStyle {
+        static NONE: std::sync::OnceLock<ChatPreviewStyle> = std::sync::OnceLock::new();
+        match &self.last {
+            Some(last) => &last.style,
+            None => NONE.get_or_init(ChatPreviewStyle::default),
+        }
+    }
+
+    /// The sender line of the 3-line row; empty for an empty chat.
+    pub fn last_preview_sender(&self) -> &str {
+        self.last.as_ref().map_or("", |last| last.sender.as_str())
+    }
+
+    /// The photo thumbnail shown before the preview text.
+    pub fn last_preview_thumb(
+        &self,
+    ) -> Option<&std::sync::Arc<crate::telegram::envelope::MiniThumbnail>> {
+        self.last.as_ref().and_then(|last| last.thumb.as_ref())
+    }
+
+    /// Identity, date and direction of the last message.
+    pub fn last_message(&self) -> Option<&ChatLastMessage> {
+        self.last.as_ref().map(|last| &last.message)
+    }
+
+    pub fn last_message_mut(&mut self) -> Option<&mut ChatLastMessage> {
+        self.last.as_mut().map(|last| &mut last.message)
+    }
+
     /// Delivery state of the last message when it is outgoing: read once
     /// the peer's read cursor reaches it.
     pub fn last_message_receipt(&self) -> OutboxReceipt {
-        match self.last_message {
+        match self.last_message().copied() {
             Some(last) if last.is_outgoing => {
                 if last.id.0 <= self.last_read_outbox_message_id.0 {
                     OutboxReceipt::Read
@@ -668,8 +728,8 @@ impl ChatSummary {
         if let Some(draft) = self.draft_preview() {
             return SidebarLine::Draft(draft);
         }
-        SidebarLine::Text(if !self.last_preview.is_empty() {
-            self.last_preview.clone()
+        SidebarLine::Text(if !self.last_preview().is_empty() {
+            self.last_preview().to_string()
         } else if self.unread_count > 0 {
             format!("{} unread", self.unread_count)
         } else if matches!(self.kind, ChatKind::Secret { .. }) {
@@ -691,7 +751,7 @@ impl ChatSummary {
     /// only for an outgoing last message and never beside a draft.
     pub fn row_status(&self) -> RowStatus {
         use crate::telegram::envelope::MessageSendState;
-        let Some(last) = self.last_message.filter(|last| last.is_outgoing) else {
+        let Some(last) = self.last_message().copied().filter(|last| last.is_outgoing) else {
             return RowStatus::None;
         };
         if self.draft_preview().is_some() {

@@ -541,7 +541,7 @@ impl QuillApp {
         chat: &quill::state::ChatSummary,
         cx: &mut Context<QuillApp>,
     ) -> PreviewEmoji {
-        self.sidebar_emoji_images(&chat.last_preview_style.entities, cx)
+        self.sidebar_emoji_images(&chat.last_preview_style().entities, cx)
     }
 
     /// [`Self::preview_emoji_images`] for the custom emoji a forum row shows

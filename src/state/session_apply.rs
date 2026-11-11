@@ -170,7 +170,7 @@ impl Session {
         if let Some(last) = self
             .chats
             .get_mut(&chat_id.0)
-            .and_then(|chat| chat.last_message.as_mut())
+            .and_then(|chat| chat.last_message_mut())
             .filter(|last| last.id == old_id || last.id == new_id)
         {
             last.id = new_id;
@@ -194,40 +194,58 @@ impl Session {
             .chats
             .entry(chat_id.0)
             .or_insert_with(|| placeholder_chat(chat_id));
-        if let Some(message) = message {
-            let content = effective_content(&message.content, message.ephemeral.as_ref());
-            chat.last_preview = service_preview.unwrap_or_else(|| content.preview());
-            chat.last_preview_style = preview_style(content, &chat.last_preview);
-            chat.last_preview_thumb = match content {
-                MessageContent::Photo(photo) if !photo.is_secret && !photo.has_spoiler => photo
-                    .minithumbnail
-                    .clone()
-                    .filter(|mini| !mini.data.is_empty())
-                    .map(std::sync::Arc::new),
-                _ => None,
-            };
-            chat.last_preview_sender = if chat.last_preview_style.service {
-                String::new()
-            } else {
-                preview_sender_name(
-                    message.is_outgoing,
-                    message.author_signature.as_deref(),
-                    &chat.title,
-                )
-            };
-            chat.last_message = Some(ChatLastMessage {
+        chat.last =
+            message.map(|message| LastPreview::from_message(message, &chat.title, service_preview));
+    }
+}
+
+impl LastPreview {
+    /// The row's view of `message`, the one place a last message becomes a
+    /// preview. `service_preview` is the wording of a service message.
+    pub(crate) fn from_message(
+        message: &ParsedMessage,
+        chat_title: &str,
+        service_preview: Option<String>,
+    ) -> Self {
+        let content = effective_content(&message.content, message.ephemeral.as_ref());
+        let text = service_preview.unwrap_or_else(|| content.preview());
+        let style = preview_style(content, &text);
+        let thumb = match content {
+            MessageContent::Photo(photo) if !photo.is_secret && !photo.has_spoiler => photo
+                .minithumbnail
+                .clone()
+                .filter(|mini| !mini.data.is_empty())
+                .map(std::sync::Arc::new),
+            _ => None,
+        };
+        let sender = if style.service {
+            String::new()
+        } else {
+            preview_sender_name(
+                message.is_outgoing,
+                message.author_signature.as_deref(),
+                chat_title,
+            )
+        };
+        Self {
+            text,
+            style,
+            sender,
+            thumb,
+            message: ChatLastMessage {
                 id: message.id,
                 date: message.date,
                 is_outgoing: message.is_outgoing,
                 sender: message.sender,
                 send_state: message.send_state,
-            });
-        } else {
-            chat.last_preview = String::new();
-            chat.last_preview_style = ChatPreviewStyle::default();
-            chat.last_preview_thumb = None;
-            chat.last_preview_sender = String::new();
-            chat.last_message = None;
+            },
         }
+    }
+
+    /// The last message's content was edited: the text and its style
+    /// follow, the message's identity and thumbnail stay.
+    pub(crate) fn restyle(&mut self, text: String, style: ChatPreviewStyle) {
+        self.text = text;
+        self.style = style;
     }
 }

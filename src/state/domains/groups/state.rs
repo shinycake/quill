@@ -115,7 +115,7 @@ impl GroupsState {
     /// A first page for `key` was sent as `request` with `query`: the list
     /// loads under that request, and how it was asked replaces the old one
     /// (a next page of the old one is dropped).
-    pub(crate) fn note_member_first(
+    pub fn note_member_first(
         &mut self,
         key: (i64, MemberListFilter),
         request: RequestId,

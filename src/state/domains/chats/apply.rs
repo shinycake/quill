@@ -183,7 +183,7 @@ impl Session {
                     let newer_known = self
                         .chats
                         .get(&chat_id.0)
-                        .and_then(|chat| chat.last_message)
+                        .and_then(|chat| chat.last_message().copied())
                         .is_some_and(|known| known.id.0 > message.id.0);
                     if !newer_known {
                         self.remember_files(&message.files);

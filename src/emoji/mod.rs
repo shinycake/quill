@@ -657,7 +657,7 @@ impl Session {
         }
         // Custom emoji in chat-list previews.
         for chat in self.chats.values() {
-            ids.extend(chat.last_preview_style.entities.iter().filter_map(
+            ids.extend(chat.last_preview_style().entities.iter().filter_map(
                 |entity| match entity.kind {
                     TextEntityKind::CustomEmoji { custom_emoji_id } => Some(custom_emoji_id),
                     _ => None,

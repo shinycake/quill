@@ -311,7 +311,7 @@ impl QuillApp {
                 newest: session
                     .chats
                     .get(&message.chat_id.0)
-                    .and_then(|chat| chat.last_message.as_ref())
+                    .and_then(|chat| chat.last_message())
                     .is_some_and(|last| last.id == message.id),
                 draft_live: live.is_some(),
             },

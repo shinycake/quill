@@ -371,9 +371,9 @@ fn new_chat_carries_its_last_message_preview() {
         r#"{"@type":"updateNewChat","chat":{"id":7,"title":"Ada","type":{"@type":"chatTypePrivate","user_id":7},"unread_count":0,"last_message":{"id":42,"chat_id":7,"is_outgoing":true,"date":1790631720,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"See you soon","entities":[]}}}}}"#,
     );
     let chat = &session.chats[&7];
-    assert_eq!(chat.last_preview, "See you soon");
+    assert_eq!(chat.last_preview(), "See you soon");
     assert_eq!(
-        chat.last_message.map(|last| (last.id.0, last.is_outgoing)),
+        chat.last_message().map(|last| (last.id.0, last.is_outgoing)),
         Some((42, true))
     );
     // A newer `updateChatLastMessage` that arrived first is never replaced
@@ -390,7 +390,7 @@ fn new_chat_carries_its_last_message_preview() {
         &sink,
         r#"{"@type":"updateNewChat","chat":{"id":7,"title":"Ada","type":{"@type":"chatTypePrivate","user_id":7},"unread_count":0,"last_message":{"id":42,"chat_id":7,"is_outgoing":true,"date":1790631720,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"See you soon","entities":[]}}}}}"#,
     );
-    assert_eq!(session.chats[&7].last_preview, "Newer");
+    assert_eq!(session.chats[&7].last_preview(), "Newer");
 }
 
 #[test]
