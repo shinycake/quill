@@ -581,6 +581,14 @@ impl GramsHub {
         self.selected = None;
     }
 
+    /// The Grams screen was closed: the receipt and Collect's box (with an
+    /// outcome it had not acted on) go with it, in one place.
+    pub fn close(&mut self) {
+        self.open = false;
+        self.selected = None;
+        self.withdraw = None;
+    }
+
     /// Settings closed: a failed balance probe may be asked again the next
     /// time it opens (not from the tick, so a flaky link cannot loop it).
     pub fn settings_closed(&mut self) {

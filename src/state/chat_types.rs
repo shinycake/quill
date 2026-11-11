@@ -189,12 +189,7 @@ pub struct ChatSummary {
     /// 1.8.67 line 762). `None` when the chat has no photo. Updated by
     /// `updateChatPhoto`; the file itself lives in `Session::files`.
     pub photo_file_id: Option<i32>,
-    /// Parity slice 4: `chat.permissions.can_send_basic_messages`
-    /// (`chatPermissions`, schema 1.8.67 line 1070), refreshed by
-    /// `updateChatPermissions` (line 10500). Gates the topic composer
-    /// alongside `ForumTopic.is_closed`.
-    pub can_send_basic_messages: bool,
-    /// Slice G1: the full default `chat.permissions` block
+    /// The full default `chat.permissions` block
     /// (`chatPermissions`, schema 1.8.67 line 1070), refreshed by
     /// `updateChatPermissions` (line 10500). Drives the default chat
     /// permissions editor; `None` until a full block parses.
@@ -325,6 +320,16 @@ pub enum OwnRestriction {
 }
 
 impl ChatSummary {
+    /// Parity slice 4: `chat.permissions.can_send_basic_messages`
+    /// (`chatPermissions`, schema 1.8.67 line 1070), read from the one
+    /// permissions block `updateChatPermissions` (line 10500) keeps fresh;
+    /// true while no block parsed. Gates the topic composer alongside
+    /// `ForumTopic.is_closed`.
+    pub fn can_send_basic_messages(&self) -> bool {
+        self.permissions
+            .is_none_or(|permissions| permissions.can_send_basic_messages)
+    }
+
     /// The sidebar preview text; empty for an empty chat.
     pub fn last_preview(&self) -> &str {
         self.last.as_ref().map_or("", |last| last.text.as_str())

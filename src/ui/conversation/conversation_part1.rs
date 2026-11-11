@@ -75,7 +75,7 @@ impl QuillApp {
                     let send_allowed = open.is_some_and(|id| {
                         self.session()
                             .and_then(|s| s.chats.get(&id.0))
-                            .is_some_and(|c| c.can_post() && c.can_send_basic_messages)
+                            .is_some_and(|c| c.can_post() && c.can_send_basic_messages())
                     });
                     if topic_closed {
                         Some(tr(keys::Q_CHAT_THIS_TOPIC_IS_CLOSED_NEW).to_string())

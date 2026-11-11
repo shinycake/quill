@@ -65,7 +65,6 @@ pub(crate) fn placeholder_chat(chat_id: ChatId) -> ChatSummary {
         // Parity slice 4: lenient default true — the real `chat` object
         // always carries `permissions`; only `updateNewChat` /
         // `updateChatPermissions` ever set it to false.
-        can_send_basic_messages: true,
         permissions: None,
         can_be_deleted_for_all_users: false,
         can_be_deleted_only_for_self: false,

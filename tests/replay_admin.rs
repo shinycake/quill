@@ -188,10 +188,10 @@ fn replay_admin_rights_lookup_and_demote() {
         RequestPurpose::Groups(GroupsPurpose::GetAdminRights { user_id: 2 }),
         Some(chat_id),
     );
-    session
-        .groups
-        .admin_rights
-        .insert((13, 2), quill::state::AdminRightsFetch::Loading(rights_extra));
+    session.groups.admin_rights.insert(
+        (13, 2),
+        quill::state::AdminRightsFetch::Loading(rights_extra),
+    );
     apply_all_seq(
         &mut session,
         &sink,

@@ -5,9 +5,9 @@ use crate::state::GroupsPurpose;
 use crate::state::TransferStage;
 use crate::state::fetch::Fetch;
 use crate::state::{
-    AdminListFetch, AdminRightsFetch, CHAT_EVENT_LOG_PAGE_SIZE, ChatEventLogFetch, EventLogAsk, InviteLinkFetch,
-    JoinRequestFetch, MemberListFilter, MemberStatusChange, OwnerLookup, RequestPurpose,
-    RequestRollback, SupergroupMembersFetch,
+    AdminListFetch, AdminRightsFetch, CHAT_EVENT_LOG_PAGE_SIZE, ChatEventLogFetch, EventLogAsk,
+    InviteLinkFetch, JoinRequestFetch, MemberListFilter, MemberStatusChange, OwnerLookup,
+    RequestPurpose, RequestRollback, SupergroupMembersFetch,
 };
 use crate::telegram::envelope::{
     CanTransferOwnershipResult, ChatAdminRights, ChatKind, ChatPermissions,
@@ -181,11 +181,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .pending_extra_for(purpose, Some(chat_id))
             .and_then(|id| self.session.requests.pending_mut(id))
             .and_then(|pending| match &pending.rollback {
-                Some(RequestRollback::ChatPermissions {
-                    previous,
-                    previous_can_send,
-                    ..
-                }) => Some((*previous, *previous_can_send)),
+                Some(RequestRollback::ChatPermissions { previous, .. }) => Some(*previous),
                 _ => None,
             });
         let extra = self.session.request(purpose, Some(chat_id));
@@ -201,15 +197,12 @@ impl<S: JsonSender> ConnectDriver<S> {
         // The pre-request values ride on the pending entry so the error
         // arm can roll back.
         if let Some(chat) = self.session.chats.get_mut(&chat_id.0) {
-            let (previous, previous_can_send) =
-                original.unwrap_or((chat.permissions, chat.can_send_basic_messages));
+            let previous = original.unwrap_or(chat.permissions);
             let rollback = RequestRollback::ChatPermissions {
                 previous,
-                previous_can_send,
                 sent: *permissions,
             };
             chat.permissions = Some(*permissions);
-            chat.can_send_basic_messages = permissions.can_send_basic_messages;
             if let Some(pending) = self.session.requests.pending_mut(extra) {
                 pending.rollback = Some(rollback);
             }

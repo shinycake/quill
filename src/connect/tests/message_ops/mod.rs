@@ -646,11 +646,7 @@ fn driver_link_preview_prefetch_ingest() {
     // is no "no preview": it is `Failed`, which a composer asks again for.
     let url = "https://example.com/flood";
     let flood = driver.session.request(RequestPurpose::GetLinkPreview, None);
-    driver
-        .session
-        .messages
-        .composer_previews
-        .asked(url, flood);
+    driver.session.messages.composer_previews.asked(url, flood);
     let json = format!(
         r#"{{"@type":"error","code":429,"message":"FLOOD_WAIT_5","@extra":"{id}"}}"#,
         id = flood.0,

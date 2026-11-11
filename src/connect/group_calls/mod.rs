@@ -139,12 +139,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .calls
             .group_call(group_call_id)
             .filter(|call| !call.transport.is_connected())
-            .map(|call| {
-                (
-                    call.transport.answer().to_string(),
-                    call.my_video.is_live(),
-                )
-            });
+            .map(|call| (call.transport.answer().to_string(), call.my_video.is_live()));
         if let Some((answer, video_enabled)) = join_answer
             && !answer.is_empty()
         {

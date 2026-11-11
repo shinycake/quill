@@ -9,6 +9,7 @@ mod join_requests;
 mod new_chat;
 mod private_sharing;
 mod purpose;
+mod stage_answers;
 mod state;
 mod supergroup_answer;
 

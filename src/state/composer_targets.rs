@@ -208,11 +208,7 @@ impl Session {
     }
 
     /// The fetch waiting for `request`, if it still is the one in flight.
-    fn composer_reply_attempts(
-        &self,
-        key: (i64, i64),
-        request: RequestId,
-    ) -> Option<u8> {
+    fn composer_reply_attempts(&self, key: (i64, i64), request: RequestId) -> Option<u8> {
         match self.messages.composer_reply_fetch.get(&key) {
             Some(ComposerReplyFetch::Loading {
                 request: asked,

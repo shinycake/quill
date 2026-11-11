@@ -373,7 +373,8 @@ fn new_chat_carries_its_last_message_preview() {
     let chat = &session.chats[&7];
     assert_eq!(chat.last_preview(), "See you soon");
     assert_eq!(
-        chat.last_message().map(|last| (last.id.0, last.is_outgoing)),
+        chat.last_message()
+            .map(|last| (last.id.0, last.is_outgoing)),
         Some((42, true))
     );
     // A newer `updateChatLastMessage` that arrived first is never replaced

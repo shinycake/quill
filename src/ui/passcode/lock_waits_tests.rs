@@ -96,7 +96,9 @@ fn a_withdrawal_page_that_lands_under_the_lock_opens_after_the_unlock(cx: &mut T
     let url = "https://fragment.com/withdraw?token=2";
     app.update(vcx, |app, cx| {
         if let Some(grams) = app.demo_session.as_mut().map(|s| &mut s.payments.hub.grams) {
-            grams.withdraw = Some(GramWithdraw::Finished(WithdrawOutcome::Url(url.to_string())));
+            grams.withdraw = Some(GramWithdraw::Finished(WithdrawOutcome::Url(
+                url.to_string(),
+            )));
         }
         cx.notify();
     });
@@ -109,7 +111,9 @@ fn a_withdrawal_page_that_lands_under_the_lock_opens_after_the_unlock(cx: &mut T
     });
     assert_eq!(
         kept,
-        Some(GramWithdraw::Finished(WithdrawOutcome::Url(url.to_string()))),
+        Some(GramWithdraw::Finished(WithdrawOutcome::Url(
+            url.to_string()
+        ))),
         "the answer waits where it landed"
     );
     unlock(&app, vcx);

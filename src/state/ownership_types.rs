@@ -190,7 +190,8 @@ impl Session {
             } if Some(*asked) == request => Some(*transfer),
             _ => None,
         };
-        let other_in_flight = self.groups.ownership.transfer.sending().is_some() && waiting.is_none();
+        let other_in_flight =
+            self.groups.ownership.transfer.sending().is_some() && waiting.is_none();
         let done = waiting.or_else(|| {
             chat_id.map(|chat_id| OwnershipTransfer {
                 chat_id,
@@ -219,12 +220,7 @@ impl Session {
 
     /// `request` failed: only the transfer waiting for it fails.
     pub(crate) fn fail_ownership_transfer(&mut self, request: Option<RequestId>, err: &TdError) {
-        if self
-            .groups
-            .ownership
-            .transfer
-            .waits_for(request)
-        {
+        if self.groups.ownership.transfer.waits_for(request) {
             self.groups.ownership.transfer = TransferStage::Failed(ownership_error_line(err));
         }
     }

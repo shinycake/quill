@@ -293,7 +293,11 @@ fn sweeping_a_link_preview_request_settles_its_chip() {
     assert!(sweep(&mut session));
 
     assert!(matches!(
-        session.messages.composer_previews.get(url).map(|p| &p.fetch),
+        session
+            .messages
+            .composer_previews
+            .get(url)
+            .map(|p| &p.fetch),
         Some(LinkPreviewFetch::Failed)
     ));
 }
@@ -326,8 +330,8 @@ fn sweeping_a_reply_bar_fetch_leaves_loading() {
 #[test]
 fn sweeping_a_lost_panel_request_ends_its_loading_stage() {
     use crate::state::{
-        AdminListFetch, AdminRightsFetch, ChatEventLogFetch, ChatStatisticsFetch,
-        InlineQueryFetch, InlineQuerySlot, InviteLinkCountsFetch, OwnerLookup, PollVotersFetch,
+        AdminListFetch, AdminRightsFetch, ChatEventLogFetch, ChatStatisticsFetch, InlineQueryFetch,
+        InlineQuerySlot, InviteLinkCountsFetch, OwnerLookup, PollVotersFetch,
     };
     let mut session = ready_session();
     let chat = ChatId(13);

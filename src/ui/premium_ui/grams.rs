@@ -25,8 +25,8 @@ use quill::lang::{keys, tr, tr_with};
 use quill::link_policy::{OpenDecision, open_decision};
 use quill::premium_hub::TxFilter;
 use quill::premium_hub::ton::{
-    GramsHub, PeerKey, TOPUP_URL, TonTx, TonTxKind, gram_amount_2dp, gram_balance, gram_balance_short,
-    signed_gram_amount, usd_line,
+    GramsHub, PeerKey, TOPUP_URL, TonTx, TonTxKind, gram_amount_2dp, gram_balance,
+    gram_balance_short, signed_gram_amount, usd_line,
 };
 use quill::state::Session;
 use quill::telegram::envelope::MessageSender;
@@ -157,9 +157,7 @@ impl QuillApp {
 
     pub(in crate::ui) fn close_grams(&mut self, cx: &mut Context<Self>) {
         if let Some(grams) = self.grams_mut() {
-            grams.open = false;
-            grams.selected = None;
-            grams.withdraw = None;
+            grams.close();
         }
         cx.notify();
     }

@@ -238,6 +238,9 @@ fn a_failed_probe_is_a_stage_and_is_asked_again_on_the_next_open() {
         .ingest(copy_and_parse(&stale, &seq, &sink).unwrap())
         .unwrap();
     let grams = &driver.session.payments.hub.grams;
-    assert!(grams.probe.is_loading(), "the first try's answer is dropped");
+    assert!(
+        grams.probe.is_loading(),
+        "the first try's answer is dropped"
+    );
     assert_eq!(grams.balance_nano, None);
 }

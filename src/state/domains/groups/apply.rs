@@ -328,27 +328,7 @@ impl Session {
             // no chat id, so it is correlated via the pending request's
             // `chat_id`.
             GroupsPayload::ChatStatistics { statistics } => {
-                if pending.map(|p| p.purpose) == Some(RequestPurpose::GetChatStatistics)
-                    && let Some(pending) = pending
-                    && let Some(chat_id) = pending.chat_id
-                {
-                    // The theme is the one the request in flight asked for;
-                    // an answer of a request the fetch no longer waits for
-                    // (the theme changed and it asked again) is dropped.
-                    if let Some(ChatStatisticsFetch::Loading { is_dark, request }) =
-                        self.groups.chat_statistics.get(&chat_id.0)
-                        && *request == pending.id
-                    {
-                        let is_dark = *is_dark;
-                        self.groups.chat_statistics.insert(
-                            chat_id.0,
-                            ChatStatisticsFetch::Loaded {
-                                stats: std::sync::Arc::new(statistics),
-                                is_dark,
-                            },
-                        );
-                    }
-                }
+                self.accept_chat_statistics(statistics, pending)
             }
             GroupsPayload::MessageStatistics { statistics } => {
                 if let Some(RequestPurpose::Groups(GroupsPurpose::GetMessageStatistics {
@@ -452,18 +432,7 @@ impl Session {
             }
             // B8: `getChatInviteLinkCounts` answer.
             GroupsPayload::ChatInviteLinkCounts { counts } => {
-                if let Some(p) = pending
-                    && p.purpose == RequestPurpose::GetChatInviteLinkCounts
-                    && let Some(chat_id) = p.chat_id
-                    && matches!(
-                        self.groups.invite_link_counts.get(&chat_id.0),
-                        Some(InviteLinkCountsFetch::Loading(asked)) if *asked == p.id
-                    )
-                {
-                    self.groups
-                        .invite_link_counts
-                        .insert(chat_id.0, InviteLinkCountsFetch::Loaded(counts));
-                }
+                self.accept_invite_link_counts(counts, pending)
             }
             // B8: `getChatInviteLinkMembers` answer; stale replies (the
             // details were opened for another link meanwhile) are dropped.
@@ -545,18 +514,7 @@ impl Session {
             // Phase D3b: `getChatAdministrators` answer — replaces the
             // cached admin list.
             GroupsPayload::ChatAdministrators { administrators } => {
-                if pending.map(|p| p.purpose) == Some(RequestPurpose::GetChatAdministrators)
-                    && let Some(pending) = pending
-                    && let Some(chat_id) = pending.chat_id
-                    && matches!(
-                        self.groups.admin_lists.get(&chat_id.0),
-                        Some(AdminListFetch::Loading(asked)) if *asked == pending.id
-                    )
-                {
-                    self.groups
-                        .admin_lists
-                        .insert(chat_id.0, AdminListFetch::Loaded(administrators));
-                }
+                self.accept_chat_administrators(administrators, pending)
             }
             // Phase D3b / slice G1: `getSupergroupMembers` answer —
             // replaces the cached page for this (chat, filter).
@@ -914,31 +872,8 @@ impl Session {
                     self.set_direct_member_banned(chat_id, user_id, banned);
                 }
                 // Phase D3b: `getChatMember` for one administrator's rights
-                // (edit dialog). Only an administrator status carries a
-                // rights block worth caching.
-                if let Some(RequestPurpose::Groups(GroupsPurpose::GetAdminRights { user_id })) =
-                    pending.map(|p| p.purpose)
-                    && let Some(pending) = pending
-                    && let Some(chat_id) = pending.chat_id
-                    && matches!(
-                        self.groups.admin_rights.get(&(chat_id.0, user_id)),
-                        Some(AdminRightsFetch::Loading(asked)) if *asked == pending.id
-                    )
-                {
-                    // A member who is no administrator (any more) has no
-                    // rights block to edit: the editor says so instead of
-                    // loading for good.
-                    self.groups.admin_rights.insert(
-                        (chat_id.0, user_id),
-                        match member.admin_rights() {
-                            Some(rights) => AdminRightsFetch::Loaded(rights),
-                            None => AdminRightsFetch::Failed(
-                                crate::lang::tr(crate::lang::keys::Q_PEOPLE_COULD_NOT_LOAD_ADMIN_RIGHTS)
-                                    .to_string(),
-                            ),
-                        },
-                    );
-                }
+                // (edit dialog).
+                self.accept_admin_rights(&member, pending);
             }
             GroupsPayload::UpdateChatMember { chat_id, member } => {
                 // Phase D3b: any membership change may alter the admin

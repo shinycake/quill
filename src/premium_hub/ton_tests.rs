@@ -401,3 +401,19 @@ fn a_peer_refusal_matches_its_request() {
     hub.peer_refused(RequestId(11));
     assert!(hub.peer_missing(PeerKey::Chat(1)) && !hub.peer_missing(PeerKey::User(1)));
 }
+
+/// r2-17 (04-032): closing the screen drops a finished outcome nobody acted
+/// on, so it cannot open Fragment later.
+#[test]
+fn closing_the_screen_drops_an_unacted_outcome() {
+    use super::{GramWithdraw, WithdrawOutcome};
+    let mut hub = GramsHub {
+        open: true,
+        selected: Some("t".into()),
+        withdraw: Some(GramWithdraw::Finished(WithdrawOutcome::Url("u".into()))),
+        ..GramsHub::default()
+    };
+    hub.close();
+    assert!(!hub.open && hub.selected.is_none());
+    assert_eq!(hub.take_withdraw_outcome(), None);
+}

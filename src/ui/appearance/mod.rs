@@ -502,11 +502,10 @@ impl QuillApp {
         // Tray-dependent switches only exist while a tray icon does:
         // a hidden window with no tray to reopen it from would
         // strand the user (Linux without a StatusNotifier host).
-        let tray =
-            quill::tray::tray_setting_switches(
-                tray_available,
-                this.appearance.work_mode.has_tray(),
-            );
+        let tray = quill::tray::tray_setting_switches(
+            tray_available,
+            this.appearance.work_mode.has_tray(),
+        );
         body.extend(this.tray_icon_sections(tray_available, cx));
         if tray.start_in_tray {
             body.push(

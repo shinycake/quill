@@ -8043,3 +8043,71 @@ whose variants carry the data, with a way out of every stage.
 - **A refused refetch of a stale proxy list** lands in
   `ProxyFetch::FailedStale`: the tick does not ask again, the list stays
   busy (never planned on), and Refresh is the way out.
+
+### Sweep fixes (r2-17)
+
+Round 2, file-complete bundle: `premium_hub/ton.rs`, `ton_withdraw.rs`,
+`pull_next/mod.rs`, `settings/accounts.rs`, `appearance.rs`, `media.rs`,
+`state/call_types.rs`, `chat_types.rs`, `composer_link_preview.rs`,
+`composer_targets.rs`, `fetch.rs`, `group_call_stage.rs`, `info_types.rs`,
+`ownership_types.rs`.
+
+| id | result |
+|----|--------|
+| 04-029, 04-030 | `GramsHub::peers: BTreeMap<PeerKey, PeerAsk>`; `PeerAsk::Asked(RequestId)` / `Missing`. The four sets and the `ChatId(user_id)` smuggled in the pending request are gone; a refusal marks only the peer its own request asked. The rows and their peers cursor are one `TxRows`, so a cleared list restarts the cursor by construction. |
+| 04-031 | The balance probe holds its `RequestId` in `Fetch::Loading` and takes only that answer. A failed probe is asked again on the next Settings open (`settings_closed` from the tick, never a re-send from the tick while Settings is open); a probe that never left is a failure, not a re-send every poll. |
+| 04-032, 04-033, 02-063 | `GramWithdraw::{Password{error}, Sending(RequestId), SecurityCheck, Finished(WithdrawOutcome)}`: one value for the box and its outcome. The window takes the outcome once (`take_withdraw_outcome`); `GramsHub::close` drops an outcome nobody acted on. |
+| 04-046, 04-047, 04-048 | Pull gesture: `Stage::{Idle, Pulling, Released, Jumping}`; `Reach::{Stretching{dwell_due}, Ready{peak}}` inside the pull, so the dwell timer and the peak live and die with their stage; `Expand::{Settled, Running(Tween)}` replaces `ExpandRun` beside the tween. |
+| 04-051 | `rename_account` goes through `update_registry` like every other writer. |
+| 04-055 | `ignore_battery_saving` is tdesktop's own user setting (keep animations while the battery saver is on), independent of `power_saving`; moved to `implicit-state-allow.txt` with that reason. |
+| 04-056 | `WallpaperSource::{Theme, Color(rgb), Telegram}` in the prefs; the file keeps `wallpaper_rgb` and `telegram_wallpaper` through a serde adapter (Telegram wins when both are set, as before). |
+| 04-057 | Proven independent, with one coupled write made one call. `theme` (manual night choice), `auto_night`, `day_theme`, `night_theme` and `follow_omarchy` are separate user settings: every combination is meaningful and distinct (a day slot kept while following Omarchy, a manual choice kept under auto-night, high contrast over both), and each has its own writer (window toggle: `theme`; Appearance page: `auto_night`; editor: a slot). The only action that wrote several, `choose_app_theme`, is now `AppearancePrefs::choose_theme` (pure, tested). The old skip reason ("about 150 readers") was effort; this one is the meaning of the fields. |
+| 04-058 | `WorkMode::{WindowAndTray, TrayOnly, WindowOnly}` in the prefs (both-off cannot be stored), file keys `show_tray_icon` / `show_taskbar_icon` kept by serde. `minimize_to_tray` and `start_in_tray` are tdesktop's `closeBehavior` and `startMinimized` settings, independent of the mode; whether they apply is the tray availability gate at read time. |
+| 04-059 | `MediaGrouping::{AlwaysGrouped, Remembered{grouped}}`; file keys kept. |
+| 05-005 | `CallSummary::end: CallEnd::{Ended, Declined, Failed}`; `busy()` derives from it. Baseline line dropped. |
+| 05-006 | `GroupScreenShare::{Off, Starting{request, answer}, Sharing, Paused}`: pause exists only on a connected share and ends with it; `screen_share_paused` is deleted. |
+| 05-007 | `ActiveGroupCall::my_video: MyVideo::{Off, On, Paused}`. |
+| 05-008 | `ActiveGroupCall::rtmp: Option<RtmpInfo>`. |
+| 05-009 | The `HangingUp` copy is gone: the hang-up lives in the call as `CallAction::{Idle, Answered, HangingUp(HangUp)}` (replaces `CallProgress`, so it ends with its call), and `ActiveCall::phase()` says `HangingUp` while it is in flight; `ActiveCall::state` is always TDLib's last phase and `HangUp::resume` is deleted. `ready` stays: it is the Ready phase's payload and clock start, written at the one transition into Ready and kept through a hang-up; `transport` is the engine's own stage enum with its own exits. |
+| 05-010 | `ChatSummary::last: Option<LastPreview>` built by one constructor; the preview, style, sender, thumbnail and message identity cannot disagree. |
+| 05-011 | `LinkPreviewFetch::Asked(RequestId)`, settled in the reducer (`settle_composer_link_preview`) by the request: the side map `composer_preview_urls` and the connect-core captures are deleted. A swept request settles the chip as `Failed`. |
+| 05-012 | `ComposerReplyFetch::Loading{request, attempts}`; answers, errors and sweeps match the request. |
+| 05-061 | `GroupScreenShare::Starting{request, ..}`; `store_answer` and `fail_start` take only that request. |
+| 05-062 | Sticker lists, greeting stickers, emoji icon lists (profile, chat, background) and live story extras (streamer, donors, senders) record their request (`begin` + `sent`) and take `answered` / `failed` with it. The other ~290 `succeed` / `fail` callers are not migrated in this bundle: each needs its sender to record its request. `scripts/check-fetch-answers.py` freezes them per file (`fetch-unmatched-baseline.txt`) and fails a new one. |
+| 05-064 | `Loading(RequestId)` in `PollStatsFetch`, `InviteLinkCountsFetch`, `AdminRightsFetch`, `AdminListFetch`, `SupergroupMembersFetch`, `PollVotersFetch`, `InlineQueryFetch`; `ChatStatisticsFetch::Loading{is_dark, request}`; `ChatEventLogFetch::Loading(RequestId)`. Every answer and error is applied only to the stage that waits for its request. |
+| 05-065 | `ChatEventLogFetch::{Idle, Loading(request), Loaded(LoadedEventLog{page, older, poll}), Failed}`; `EventLogWait` is deleted. A refresh drops the stage and every request asked under the old query. |
+| 05-066 | `TransferStage::Sending{request, transfer}`, `OwnerLookup::Loading(RequestId)`, the check in `Fetch::Loading{request}`; `fail_ownership_transfer` ends only the transfer waiting for its request (it overwrote `Idle` and `Done`). |
+
+**Found on the second read (new-NN).**
+
+- new-01: `GramsHub::close` is the one place the screen closes (`open`,
+  `selected`, `withdraw`).
+- new-02: the pull edge was `finger_down` beside `spring` (never both):
+  `Edge::{Rest, Held, Returning{from, since}}`.
+- new-03: `ChatSummary::can_send_basic_messages` was a second copy of
+  `permissions.can_send_basic_messages`, written beside it and rolled back
+  beside it; it is a method of `permissions` now (`RequestRollback` loses
+  `previous_can_send`).
+- new-04: a `getChatMember` answer for a rights lookup of a member who is no
+  administrator wrote nothing, so the rights editor said "still loading" and
+  a refresh kept the stage; it lands in `Failed` now.
+- new-05: a late "load more" voters page could overwrite a fresh first page
+  that was loading; a next page joins only a `Loaded` list.
+- new-06: lookups whose stage draws "Loading" ended only by an answer; they
+  are sweepable now (`is_sweepable`) and settle as failures: link preview,
+  reply bar, poll voters and stats, chat statistics, invite link counts,
+  admin list and rights, member pages, event log, owner lookup, inline query.
+- new-07: the "request already in flight" guards beside the stages of the
+  admin list, admin rights and member list are gone: the stage holds the
+  request, so a refresh that drops it and asks again is not answered by the
+  request it replaced.
+
+**Left as they are, with the reason.**
+
+- `ActiveGroupCall::stream_mode` and `stream`: `stream` is written only by
+  the stream feeder while the call is in a stream mode; it is meaningful only
+  then. They do not change together (the mode is set once after the native
+  connect). Folding them is a change to the engine's `GroupCallMode`, which
+  this bundle does not own.
+- `ActiveGroupCall::is_joined` is TDLib's flag; `rejoin` is Quill's own
+  stage beside it and is reset by the joined update.

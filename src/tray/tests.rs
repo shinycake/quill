@@ -67,7 +67,6 @@ fn chat(id: i64, unread_count: i32) -> ChatSummary {
         my_restriction: Default::default(),
         is_forum: None,
         photo_file_id: None,
-        can_send_basic_messages: true,
         permissions: None,
         can_be_deleted_for_all_users: false,
         can_be_deleted_only_for_self: false,

@@ -11,16 +11,13 @@ fn chat_statistics_fetch_flow_loads_and_caches() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
     let extra = session.request(RequestPurpose::GetChatStatistics, Some(ChatId(13)));
-    session
-        .groups
-        .chat_statistics
-        .insert(
-            13,
-            ChatStatisticsFetch::Loading {
-                is_dark: true,
-                request: extra,
-            },
-        );
+    session.groups.chat_statistics.insert(
+        13,
+        ChatStatisticsFetch::Loading {
+            is_dark: true,
+            request: extra,
+        },
+    );
     let graph = r#"{"@type":"statisticalGraphData","json_data":"{}","zoom_token":""}"#;
     let value = r#"{"@type":"statisticalValue","value":1.0,"previous_value":1.0,"growth_rate_percentage":0.0}"#;
     apply_json(
@@ -104,20 +101,21 @@ fn optimistic_mutations_roll_back_on_error() {
     // Permissions: optimistic write, then the error.
     let mut chat = placeholder_chat(ChatId(13));
     chat.permissions = Some(ChatPermissions::all());
-    chat.can_send_basic_messages = true;
     session.chats.insert(13, chat);
+    let muted = ChatPermissions {
+        can_send_basic_messages: false,
+        ..ChatPermissions::all()
+    };
     let extra = session.request(RequestPurpose::SetChatPermissions, Some(ChatId(13)));
     if let Some(pending) = session.requests.pending_mut(extra) {
         pending.rollback = Some(RequestRollback::ChatPermissions {
-            previous: None,
-            previous_can_send: false,
+            previous: Some(muted),
             sent: ChatPermissions::all(),
         });
     }
     // Simulate the optimistic write the driver performs at send.
     if let Some(chat) = session.chats.get_mut(&13) {
         chat.permissions = Some(ChatPermissions::all());
-        chat.can_send_basic_messages = true;
     }
     apply_json(
         &mut session,
@@ -129,8 +127,8 @@ fn optimistic_mutations_roll_back_on_error() {
         ),
     );
     let chat = session.chats.get(&13).unwrap();
-    assert_eq!(chat.permissions, None);
-    assert!(!chat.can_send_basic_messages);
+    assert_eq!(chat.permissions, Some(muted));
+    assert!(!chat.can_send_basic_messages());
 
     // Join-by-request: previous flag restored.
     session.groups.supergroup_join_by_request.insert(21, true);
@@ -588,7 +586,7 @@ fn chat_permissions_gate_topic_composer() {
             permissions = permissions
         ),
     );
-    assert!(!session.chats.get(&16).unwrap().can_send_basic_messages);
+    assert!(!session.chats.get(&16).unwrap().can_send_basic_messages());
     let permissions_on = permissions.replace(
         "\"can_send_basic_messages\":false",
         "\"can_send_basic_messages\":true",
@@ -602,7 +600,7 @@ fn chat_permissions_gate_topic_composer() {
             permissions_on
         ),
     );
-    assert!(session.chats.get(&16).unwrap().can_send_basic_messages);
+    assert!(session.chats.get(&16).unwrap().can_send_basic_messages());
 }
 
 #[test]

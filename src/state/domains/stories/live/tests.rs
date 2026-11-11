@@ -239,7 +239,10 @@ fn a_donors_answer_older_than_a_commit_keeps_its_stars_in_the_total() {
         );
     }
     assert_eq!(live(&session).stars_total(), 13);
-    assert!(!live(&session).committed.is_empty(), "a dropped answer settles nothing");
+    assert!(
+        !live(&session).committed.is_empty(),
+        "a dropped answer settles nothing"
+    );
     if let Some(l) = session.live_story_mut(42) {
         l.set_donors(
             LiveStoryDonors {

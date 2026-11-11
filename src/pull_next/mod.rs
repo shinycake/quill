@@ -367,16 +367,29 @@ impl Expand {
 /// The longest a jump holds the indicator without the chat changing.
 const JUMP_HOLD_MS: u64 = JUMP_MAX_WAIT_MS + JUMP_PINNED_MAX_WAIT_MS + 1000;
 
+/// Where the edge is in its gesture (`Ui::ElasticScrollMovement` with the
+/// spring's data): at rest, held by a finger, or springing back from the
+/// stretch it was let go at. A finger down stops the spring where it is.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum Edge {
+    Rest,
+    Held,
+    /// Let go at `from` px of stretch at `since` ms.
+    Returning {
+        from: f32,
+        since: u64,
+    },
+}
+
 /// The edge and the controller (`ElasticScroll` bottom edge +
 /// `PullToNextChannel`).
 #[derive(Debug, Clone)]
 pub struct PullMachine {
     // ElasticScroll's bottom edge.
-    finger_down: bool,
+    edge: Edge,
     last_event: u64,
     accumulated: f32,
     overscroll: f32,
-    spring: Option<(f32, u64)>,
     // PullToNextChannel.
     stage: Stage,
     effective: f32,
@@ -394,11 +407,10 @@ pub struct PullMachine {
 impl Default for PullMachine {
     fn default() -> Self {
         Self {
-            finger_down: false,
+            edge: Edge::Rest,
             last_event: 0,
             accumulated: 0.,
             overscroll: 0.,
-            spring: None,
             stage: Stage::Idle,
             effective: 0.,
             expand: Expand::Settled(0.),
@@ -416,12 +428,10 @@ impl PullMachine {
     }
 
     fn movement(&self) -> Movement {
-        if self.finger_down {
-            Movement::Progress
-        } else if self.spring.is_some() {
-            Movement::Returning
-        } else {
-            Movement::None
+        match self.edge {
+            Edge::Held => Movement::Progress,
+            Edge::Returning { .. } => Movement::Returning,
+            Edge::Rest => Movement::None,
         }
     }
 
@@ -499,24 +509,22 @@ impl PullMachine {
         let mut step = Step::default();
         match phase {
             Phase::Started => {
-                self.finger_down = true;
                 // A new gesture during the bounce stops it where it is.
-                if self.spring.take().is_some() {
+                let was_returning = matches!(self.edge, Edge::Returning { .. });
+                self.edge = Edge::Held;
+                if was_returning {
                     self.accumulated = accumulated_from_overscroll(self.overscroll, PULL_THRESHOLD);
                 }
             }
             Phase::Ended | Phase::Cancelled => {
-                self.finger_down = false;
-                if self.overscroll > 0. {
-                    self.spring = Some((self.overscroll, now));
-                }
+                self.let_go(now);
                 step.consumed = self.overscroll > 0.;
                 step.merge(self.handle(active, now));
                 return step;
             }
             Phase::Moved => {}
         }
-        if !self.finger_down {
+        if self.edge != Edge::Held {
             // Momentum after the finger lifted never moves the edge, and
             // the list holds still while the edge springs back.
             step.consumed = self.overscroll > 0.;
@@ -545,11 +553,8 @@ impl PullMachine {
     /// Call on every frame while [`Self::animating`].
     pub fn frame(&mut self, active: bool, now: u64) -> Step {
         let mut step = Step::default();
-        if self.finger_down && now.saturating_sub(self.last_event) > STALE_GESTURE_MS {
-            self.finger_down = false;
-            if self.overscroll > 0. {
-                self.spring = Some((self.overscroll, now));
-            }
+        if self.edge == Edge::Held && now.saturating_sub(self.last_event) > STALE_GESTURE_MS {
+            self.let_go(now);
             step.merge(self.handle(active, now));
         }
         if let Some(due) = self.pull().dwell_due()
@@ -571,12 +576,12 @@ impl PullMachine {
                 step.redraw = true;
             }
         }
-        if let Some((from, start)) = self.spring {
-            let t_ms = now.saturating_sub(start);
+        if let Edge::Returning { from, since } = self.edge {
+            let t_ms = now.saturating_sub(since);
             let t = t_ms as f32 / 1000.;
             let value = from * (-RUBBER_BAND_STIFFNESS * t / RUBBER_BAND_PERIOD).exp();
             if value < 0.5 || t_ms >= RUBBER_BAND_MAX_RETURN_MS {
-                self.spring = None;
+                self.edge = Edge::Rest;
                 self.overscroll = 0.;
                 self.accumulated = 0.;
             } else {
@@ -608,8 +613,7 @@ impl PullMachine {
 
     /// Whether frames are still needed.
     pub fn animating(&self, now: u64) -> bool {
-        self.finger_down
-            || self.spring.is_some()
+        self.edge != Edge::Rest
             || self.pull().dwell_due().is_some()
             || matches!(self.expand, Expand::Running(_))
             || self.jumping()
@@ -738,10 +742,23 @@ impl PullMachine {
     /// The chat or topic changed: forget everything, the edge included.
     pub fn reset_all(&mut self, now: u64) {
         self.reset(false, now);
-        self.finger_down = false;
-        self.spring = None;
+        self.edge = Edge::Rest;
         self.overscroll = 0.;
         self.accumulated = 0.;
+    }
+
+    /// The finger lifted (or its end never came): a stretched edge springs
+    /// back from where it is, a plain one is at rest; a spring already
+    /// running goes on.
+    fn let_go(&mut self, now: u64) {
+        if self.overscroll > 0. {
+            self.edge = Edge::Returning {
+                from: self.overscroll,
+                since: now,
+            };
+        } else if self.edge == Edge::Held {
+            self.edge = Edge::Rest;
+        }
     }
 
     fn start_expand(&mut self, ready: bool, now: u64) {

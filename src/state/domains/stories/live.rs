@@ -376,8 +376,7 @@ impl Session {
                 if let Some(LiveStoryPurpose::GetStreamer { group_call_id }) = asked
                     && let Some(live) = self.live_story_mut(group_call_id)
                 {
-                    live.streamer
-                        .answered(pending.map(|p| p.id), participant);
+                    live.streamer.answered(pending.map(|p| p.id), participant);
                 }
             }
         }
@@ -508,7 +507,8 @@ impl Session {
                 live.donors.failed(failed, reason.to_string(), false);
             }
             LiveStoryPurpose::GetMessageSenders { .. } => {
-                live.message_senders.failed(failed, reason.to_string(), false);
+                live.message_senders
+                    .failed(failed, reason.to_string(), false);
             }
             LiveStoryPurpose::GetBursts => {}
             LiveStoryPurpose::AddPendingReaction { stars, .. } => {

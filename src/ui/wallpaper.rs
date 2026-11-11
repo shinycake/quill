@@ -372,7 +372,10 @@ impl QuillApp {
     pub(super) fn current_wallpaper(&self, cx: &App) -> Option<Wallpaper> {
         use gpui_kit::component::theme::ActiveTheme;
         let dark = cx.theme().is_dark();
-        resolve_wallpaper(self.appearance.wallpaper, self.account_telegram_wallpaper(dark))
+        resolve_wallpaper(
+            self.appearance.wallpaper,
+            self.account_telegram_wallpaper(dark),
+        )
         // Nothing chosen: the app theme's background (tdesktop's theme
         // wallpaper).
         .or_else(|| self.theme_wallpaper())

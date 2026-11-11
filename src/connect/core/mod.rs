@@ -3,8 +3,8 @@ use super::composer::ai_rich_draft_note;
 use super::*;
 use crate::credentials::TelegramCredentials;
 use crate::ids::{ChatId, ChatMessage, MessageId, RequestId};
-use crate::state::{InstantViewPage, RequestPurpose, Session, ShutdownPhase};
 use crate::state::{GroupsPurpose, MessagesPurpose, StickersPurpose, ThreadsPurpose};
+use crate::state::{InstantViewPage, RequestPurpose, Session, ShutdownPhase};
 use crate::telegram::client::OwnedEnvelope;
 use crate::telegram::envelope::StoryListView;
 use crate::telegram::envelope::{

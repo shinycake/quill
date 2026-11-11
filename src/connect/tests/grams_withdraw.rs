@@ -161,7 +161,9 @@ fn the_url_is_asked_only_from_the_password_box() {
     let grams = &p.0.session.payments.hub.grams;
     assert_eq!(
         grams.withdraw,
-        Some(GramWithdraw::Finished(WithdrawOutcome::Url(URL.to_string())))
+        Some(GramWithdraw::Finished(WithdrawOutcome::Url(
+            URL.to_string()
+        )))
     );
 }
 
@@ -216,7 +218,9 @@ fn an_answer_to_a_cancelled_try_is_not_taken_for_the_next_one() {
     let grams = &p.0.session.payments.hub.grams;
     assert_eq!(
         grams.withdraw,
-        Some(GramWithdraw::Finished(WithdrawOutcome::Url(URL.to_string())))
+        Some(GramWithdraw::Finished(WithdrawOutcome::Url(
+            URL.to_string()
+        )))
     );
     assert_no_password_kept(&p);
 }

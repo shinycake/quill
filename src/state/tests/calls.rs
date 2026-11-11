@@ -423,10 +423,7 @@ fn failed_hang_up_reverts_and_brings_the_swap_prompt_back() {
     let request = hanging_up(&mut session, 77);
     apply_json(&mut session, &seq, &sink, &error_json(request));
     let call = session.calls.active_call.as_ref().expect("call goes on");
-    assert_eq!(
-        (call.id, call.phase()),
-        (77, CallState::ExchangingKeys)
-    );
+    assert_eq!((call.id, call.phase()), (77, CallState::ExchangingKeys));
     assert_eq!(session.calls.second_call.prompt(), Some((78, 42, false)));
 }
 

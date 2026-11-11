@@ -325,10 +325,10 @@ fn set_chat_member_status_ok_invalidates_admin_list() {
 fn adding_members_marks_the_member_list_stale() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
-    session
-        .groups
-        .basic_group_members
-        .insert(13, crate::state::SupergroupMembersFetch::Loading(RequestId(1)));
+    session.groups.basic_group_members.insert(
+        13,
+        crate::state::SupergroupMembersFetch::Loading(RequestId(1)),
+    );
     let extra = session.request(RequestPurpose::AddChatMember, Some(ChatId(13)));
     apply_json(
         &mut session,

@@ -58,7 +58,9 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(ConnectSendError::InvalidRequest);
         }
         let call_id = match &self.session.calls.active_call {
-            Some(call) if !call.is_outgoing && matches!(call.phase(), CallState::Pending { .. }) => {
+            Some(call)
+                if !call.is_outgoing && matches!(call.phase(), CallState::Pending { .. }) =>
+            {
                 call.id
             }
             _ => return Err(ConnectSendError::InvalidRequest),
@@ -166,8 +168,8 @@ impl<S: JsonSender> ConnectDriver<S> {
                 CallState::HangingUp | CallState::Discarded { .. } | CallState::Error { .. }
             )
         });
-        let ringing = ringing_incoming_call(&self.session)
-            .is_some_and(|(id, _, _)| !calls.answered(id));
+        let ringing =
+            ringing_incoming_call(&self.session).is_some_and(|(id, _, _)| !calls.answered(id));
         running && !ringing
     }
 

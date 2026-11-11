@@ -186,7 +186,7 @@ impl QuillApp {
         let Some(chat) = session.chats.get(&chat_id.0) else {
             return false;
         };
-        if !(chat.can_post() && chat.can_send_basic_messages) {
+        if !(chat.can_post() && chat.can_send_basic_messages()) {
             return false;
         }
         if self
@@ -234,7 +234,7 @@ impl QuillApp {
             session
                 .open_chat_id()
                 .and_then(|chat| session.chats.get(&chat.0))
-                .is_some_and(|chat| chat.can_post() && chat.can_send_basic_messages)
+                .is_some_and(|chat| chat.can_post() && chat.can_send_basic_messages())
         });
         if !can_attach {
             return false;

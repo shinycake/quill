@@ -61,11 +61,7 @@ impl Session {
         // rejected — the pre-request value rides on
         // `PendingRequest::rollback`.
         match pending.and_then(|p| p.rollback.clone()) {
-            Some(RequestRollback::ChatPermissions {
-                previous,
-                previous_can_send,
-                ..
-            }) => {
+            Some(RequestRollback::ChatPermissions { previous, .. }) => {
                 // A save still out after this one decides what the box
                 // shows (its rollback holds the same values, or this
                 // chain's last confirmed ones).
@@ -77,7 +73,6 @@ impl Session {
                     && let Some(chat) = self.chats.get_mut(&chat_id.0)
                 {
                     chat.permissions = previous;
-                    chat.can_send_basic_messages = previous_can_send;
                 }
             }
             // Slice CL2: restore the pre-reorder `order` values

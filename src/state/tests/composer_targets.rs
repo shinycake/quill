@@ -281,7 +281,10 @@ fn a_reply_fetch_takes_only_its_own_requests_end() {
     session.reject_composer_reply_target(chat, message, RequestId(1), &TdError::from_code(404));
     assert!(matches!(
         session.messages.composer_reply_fetch.get(&(7, 999)),
-        Some(ComposerReplyFetch::Loading { request: RequestId(2), attempts: 1 })
+        Some(ComposerReplyFetch::Loading {
+            request: RequestId(2),
+            attempts: 1
+        })
     ));
     assert!(!session.message_deleted(chat, message));
     session.reject_composer_reply_target(chat, message, RequestId(2), &TdError::from_code(404));

@@ -31,7 +31,6 @@ impl Session {
         notification_settings: ChatNotificationSettings,
         draft: Option<ChatDraft>,
         photo: Option<ParsedFile>,
-        can_send_basic_messages: bool,
         permissions: Option<ChatPermissions>,
         can_be_deleted_for_all_users: bool,
         can_be_deleted_only_for_self: bool,
@@ -171,7 +170,6 @@ impl Session {
         chat.last_read_outbox_message_id = last_read_outbox_message_id;
         chat.notification_settings = notification_settings;
         let old_photo_file_id = std::mem::replace(&mut chat.photo_file_id, photo_file_id);
-        chat.can_send_basic_messages = can_send_basic_messages;
         // Slice G1: full default permissions block for the editor.
         chat.permissions = permissions;
         chat.can_be_deleted_for_all_users = can_be_deleted_for_all_users;

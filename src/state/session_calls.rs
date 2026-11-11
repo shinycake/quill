@@ -607,8 +607,10 @@ fn apply_group_call_fields(tracked: &mut ActiveGroupCall, group_call: &ParsedGro
     tracked.participant_count = group_call.participant_count;
     tracked.viewer_count = u32::try_from(group_call.participant_count).unwrap_or(0);
     tracked.loaded_all_participants = group_call.loaded_all_participants;
-    tracked.my_video =
-        MyVideo::from_server(group_call.is_my_video_enabled, group_call.is_my_video_paused);
+    tracked.my_video = MyVideo::from_server(
+        group_call.is_my_video_enabled,
+        group_call.is_my_video_paused,
+    );
     tracked.can_enable_video = group_call.can_enable_video;
     tracked.mute_new_participants = group_call.mute_new_participants;
     tracked.can_toggle_mute_new_participants = group_call.can_toggle_mute_new_participants;
