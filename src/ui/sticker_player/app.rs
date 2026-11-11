@@ -329,7 +329,12 @@ impl QuillApp {
     /// is open.
     fn ensure_sticker_closer(&self, cx: &mut Context<QuillApp>) {
         let player = &self.players.stickers;
-        if player.closer.borrow().is_running() || !player.has_clips() {
+        if player
+            .closer
+            .try_borrow()
+            .is_ok_and(|upkeep| upkeep.is_running())
+            || !player.has_clips()
+        {
             return;
         }
         // screen-scope: the sticker player is the app's; the closer
@@ -342,7 +347,9 @@ impl QuillApp {
                     drop_frames(closed.frames, cx);
                     player.trace_closed(closed.clips);
                     if !closed.open {
-                        player.closer.replace(Upkeep::Idle);
+                        if let Ok(mut upkeep) = player.closer.try_borrow_mut() {
+                            *upkeep = Upkeep::Idle;
+                        }
                         return None;
                     }
                     Some((closed.next, player.next_frame()))
@@ -372,7 +379,12 @@ impl QuillApp {
         let player = &self.players.stickers;
         // Tests run GPUI's deterministic scheduler, which a wake from a
         // worker thread would trip; they take frames with `Player::settle`.
-        if cfg!(test) || player.pump.borrow().is_running() {
+        if cfg!(test)
+            || player
+                .pump
+                .try_borrow()
+                .is_ok_and(|upkeep| upkeep.is_running())
+        {
             return;
         }
         // A wake while the task is not waiting is kept in `pending`; one

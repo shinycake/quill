@@ -462,9 +462,7 @@ impl QuillApp {
     /// fetch refires; demo re-injects the fixture.
     pub(in crate::ui) fn refresh_websites(&mut self, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
-            live.driver.session.settings.connected_websites = Fetch::Idle;
-            live.driver.session.settings.websites_op.refetched();
-            let _ = live.driver.maybe_fetch_connected_websites();
+            let _ = live.driver.refresh_connected_websites();
         } else if let Some(session) = self.demo_session.as_mut() {
             session.settings.connected_websites = Fetch::Ready(demo_websites());
         }

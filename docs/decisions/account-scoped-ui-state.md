@@ -8043,3 +8043,33 @@ whose variants carry the data, with a way out of every stage.
 - **A refused refetch of a stale proxy list** lands in
   `ProxyFetch::FailedStale`: the tick does not ask again, the list stays
   busy (never planned on), and Refresh is the way out.
+
+### Sweep fixes (r2-40)
+
+| id | outcome |
+| --- | --- |
+| 12-C011 | `PasteNotice::Showing` holds its 9 s timer `Task`; closing the notice drops it. |
+| 12-C019 | `RichPreview::blocks` takes both cells with `try_borrow_mut` (a busy one keeps the old blocks). |
+| 12-C009, 12-C010 | The two search debounce timers are held in `SearchUi::debounce`; the next typed query replaces (cancels) the one before it. |
+| 12-C008 | One `restart_chat_search_field` starts the in-chat field empty whenever its meaning changes (picker opens, closes or picks). The field stays one input: `from_picker` in the session decides what its text means, and the three transitions that change it all go through that helper. |
+| 12-C017 | The ready-search-in-chat seeder returns instead of `assert!`. |
+| 12-C012, 12-D004 | `refresh_active_sessions` and `refresh_connected_websites` in the driver own the reset: a fetch already in flight is the refresh (its stage is not overwritten with `Idle`). |
+| 12-D002 | The PIN focus ask is gone from the stage: the ticker focuses the field when the `NeedPin` event it just applied opens the sheet. |
+| 12-D001 | The delete confirmation no longer resets itself from the dialog builder: `QuillApp::passkey_confirm` answers `None` once its passkey left the list. |
+| 12-D003 | `once` in `passkeys.rs` (and the sticker set box's one-shot body cells) use `Cell::take`, no `RefCell`. |
+| 12-D015 | `Preview::stage` is one `PreviewStage` (`Waiting`, `Playing`, `Hiding(since)`); `begin_playing` is the one transition paint makes. |
+| 13-001 | `SettingsUi::nav` is one `SettingsNav` (`Closed`, `List`, `Page`, `Sub`): a subpage carries its parent and a closed window has no page. |
+| 13-002 | `Arrival::Seeking` gives up `TOTAL` after it began, so a row that shows up much later does not scroll the page. |
+| 13-003 | A send that fails for the exceptions list lands in `Fetch::Failed` (Retry), so the page render no longer re-sends it every frame. |
+| 13-004 | The activity filter drops a chat, agent or tool whose entries are gone (`effective`); rows and buttons read the same value. |
+| 13-015 | The sidebar's grace wake is held by `SidebarReveal` in its `Leaving` mode (`set_mode` is the one place the mode changes and drops it). |
+| 13-030 | The sticker player's upkeep slots use `try_borrow` / `try_borrow_mut`. |
+| 13-031 | See 12-D003. |
+| 13-026 | The set box's `Farewell` also clears the session's viewed set. |
+| 13-040 | `RowState::pending` is gone: the Add button asks the session where it draws. Baseline lines removed. |
+| 13-038 | `CoverStage::Probing` and `Ready` hold their probe and strip tasks, the preview cut holds its own; the serial and `NEXT_SERIAL` are gone because a closed picker drops its tasks. |
+| 13-042 | A save whose adds went out and whose removes did not send waits as `SavingPickerPartly`; once the adds are answered the picker counts them as held, so a retry does not resend them. |
+| 13-044 | A wait's answer acts only when the picker or view still is the one that asked (`Creating`, `SavingPicker { album_id }`, `Deleting { album_id }`). |
+| 13-034 | The picker asks for thumbnails once per candidate count, so later pages get theirs. |
+| 13-049 | Skipped: hosting is `ReplyRow::MediaPanel` inside the one `ViewerPanel` value, not a bool; the panel counts as the story's only while it is also open. |
+| 13-063, 13-064 | The touch bar's sync and followed composer are `Cell`-held stages (`SyncStage`, `Follow`); the observation lives in `Follow`. No `RefCell` borrow is left in them. |

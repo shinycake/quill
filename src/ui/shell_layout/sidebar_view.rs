@@ -119,13 +119,14 @@ impl QuillApp {
         if !self.frame.sidebar.pointer_left(Instant::now()) {
             return;
         }
-        cx.spawn(async move |this, cx| {
+        // The wake is held by the `Leaving` stage: dropped with it.
+        let wake = cx.spawn(async move |this, cx| {
             cx.background_executor()
                 .timer(LEAVE_GRACE + Duration::from_millis(10))
                 .await;
             let _ = this.update(cx, |_, cx| cx.notify());
-        })
-        .detach();
+        });
+        self.frame.sidebar.hold_wake(wake);
     }
 
     /// The chat list column in the layout: whole, narrowed while it slides

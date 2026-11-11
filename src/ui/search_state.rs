@@ -23,6 +23,16 @@ pub(crate) struct SearchUi {
     /// A press on the top-people strip: where the pointer and the scroll
     /// started, and whether it has become a drag.
     pub(super) top_drag: std::cell::Cell<Option<TopDrag>>,
+    /// The quiet-window timers of the two searches: a newer one replaces
+    /// (cancels) the one before it, and both go with the screen.
+    pub(super) debounce: Debounce,
+}
+
+/// The pending commit of a typed query. The driver's token still decides
+/// whether a fired timer is the newest.
+pub(super) struct Debounce {
+    pub(super) global: Task<()>,
+    pub(super) chat: Task<()>,
 }
 
 /// A drag that scrolls the top-people strip (`stripMouseMoveEvent`).
@@ -48,6 +58,10 @@ impl SearchUi {
             top_scroll: ScrollHandle::new(),
             top_toggled_at: std::cell::Cell::new(None),
             top_drag: std::cell::Cell::new(None),
+            debounce: Debounce {
+                global: Task::ready(()),
+                chat: Task::ready(()),
+            },
         }
     }
 }

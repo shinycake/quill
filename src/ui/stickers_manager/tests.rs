@@ -335,5 +335,5 @@ fn settings_chats_page_opens_the_box_and_holds_the_suggestion_choice(cx: &mut Te
         shell.read_with(vcx, |shell, _| shell.open_dialog),
         Some(DialogKind::ArchivedStickers)
     );
-    assert!(app.read_with(vcx, |app, _| app.settings.open));
+    assert!(app.read_with(vcx, |app, _| app.settings.open()));
 }

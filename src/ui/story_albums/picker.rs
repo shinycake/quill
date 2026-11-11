@@ -43,8 +43,9 @@ impl QuillApp {
         if let Some(page) = self.stories.page.as_mut() {
             page.view.disarm();
             page.picker = Some(AlbumPicker::new(target, initial));
+            page.thumbs_asked.reset();
         }
-        self.request_picker_thumbs(cx);
+        self.request_new_picker_thumbs(cx);
         self.picker_load_near_end(cx, false);
         cx.notify();
     }
@@ -150,6 +151,7 @@ impl QuillApp {
         if self.live.is_none() {
             return;
         }
+        self.request_new_picker_thumbs(cx);
         let loaded = self.archived_loaded();
         let Some(page) = self.stories.page.as_ref() else {
             return;
@@ -164,6 +166,20 @@ impl QuillApp {
         }
         self.load_more_archived_stories(cx);
         self.request_picker_thumbs(cx);
+    }
+
+    /// Ask for the thumbnails of the candidates once per candidate count: a
+    /// page that arrived since the last ask brings tiles with none yet.
+    fn request_new_picker_thumbs(&mut self, cx: &mut Context<Self>) {
+        let count = self.picker_candidates().len();
+        let fresh = self
+            .stories
+            .page
+            .as_ref()
+            .is_some_and(|page| page.thumbs_asked.allow(count, false));
+        if fresh {
+            self.request_picker_thumbs(cx);
+        }
     }
 
     /// Download the thumbnails of the candidates that are not local yet.

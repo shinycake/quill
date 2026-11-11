@@ -317,7 +317,7 @@ impl QuillApp {
     }
 
     pub(in crate::ui) fn schedule_search_commit(&mut self, token: u64, cx: &mut Context<Self>) {
-        self.spawn_screen(cx, async move |this, cx| {
+        self.search_ui.debounce.global = self.spawn_screen(cx, async move |this, cx| {
             cx.background_executor().timer(SEARCH_DEBOUNCE).await;
             this.update(cx, |this, cx| {
                 if let Some(live) = this.live.as_mut() {
@@ -334,8 +334,7 @@ impl QuillApp {
                 cx.notify();
             })
             .ok();
-        })
-        .detach();
+        });
     }
 
     /// Enter in the search field: open the selected result, else the

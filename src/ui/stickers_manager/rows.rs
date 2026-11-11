@@ -25,8 +25,6 @@ pub(super) struct RowState {
     pub tab: ManagerTab,
     /// Marked for removal in this box: the row dims and offers Undo.
     pub removed: bool,
-    /// A request for this set is on its way.
-    pub pending: bool,
 }
 
 /// The row being dragged, as the pointer carries it.
@@ -138,14 +136,19 @@ impl QuillApp {
                     }))
                     .into_any_element()
             }
-            ManagerTab::Trending | ManagerTab::Archived => Button::new(format!("manager-add-{id}"))
-                .label(tr(keys::STICKERS_FEATURED_ADD))
-                .primary()
-                .small()
-                .loading(row.pending)
-                .disabled(row.pending)
-                .on_click(cx.listener(move |this, _, _, cx| this.manager_add(kind, id, cx)))
-                .into_any_element(),
+            ManagerTab::Trending | ManagerTab::Archived => {
+                // Asked of the session where it is drawn: a request for
+                // this set is on its way.
+                let pending = self.manager_set_pending(kind, id);
+                Button::new(format!("manager-add-{id}"))
+                    .label(tr(keys::STICKERS_FEATURED_ADD))
+                    .primary()
+                    .small()
+                    .loading(pending)
+                    .disabled(pending)
+                    .on_click(cx.listener(move |this, _, _, cx| this.manager_add(kind, id, cx)))
+                    .into_any_element()
+            }
         }
     }
 

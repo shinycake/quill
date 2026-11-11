@@ -231,14 +231,14 @@ fn the_chat_menu_entry_opens_the_page_at_that_chat(cx: &mut TestAppContext) {
     guard::set_injecting(false);
     let _ = guard::take_refusals();
     assert!(
-        !app.read_with(vcx, |app, _| app.settings.open),
+        !app.read_with(vcx, |app, _| app.settings.open()),
         "Settings stays shut to the driver"
     );
 
     app.update(vcx, |app, cx| app.open_agent_access_for_chat(chat_id, cx));
     settle(vcx);
-    assert!(app.read_with(vcx, |app, _| app.settings.open
-        && app.settings.page == Some(Page::AgentAccess)));
+    assert!(app.read_with(vcx, |app, _| app.settings.open()
+        && app.settings.page() == Some(Page::AgentAccess)));
     assert!(
         vcx.debug_bounds("agent-focus-chat-card").is_some(),
         "the page scrolled to the chat's card"

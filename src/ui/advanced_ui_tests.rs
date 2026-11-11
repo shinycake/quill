@@ -72,7 +72,7 @@ fn debugmode_typed_in_settings_asks_before_turning_the_logs_on(cx: &mut TestAppC
     let (app, shell, mut vcx) = new_app(cx);
     let vcx = &mut vcx;
     app.update_in(vcx, |app, _, cx| {
-        app.settings.open = true;
+        app.settings.nav = crate::ui::settings_window::SettingsNav::List;
         cx.notify();
     });
     type_into(&app, vcx, "debugmode");
@@ -106,7 +106,7 @@ fn codes_do_nothing_where_no_screen_takes_them(cx: &mut TestAppContext) {
     let (app, _shell, mut vcx) = new_app(cx);
     let vcx = &mut vcx;
     app.update_in(vcx, |app, _, _| {
-        app.settings.open = false;
+        app.settings.nav = crate::ui::settings_window::SettingsNav::Closed;
     });
     type_into(&app, vcx, "debugmode");
     app.read_with(vcx, |app, _| {
@@ -115,16 +115,18 @@ fn codes_do_nothing_where_no_screen_takes_them(cx: &mut TestAppContext) {
     // A Settings subpage does not read them either (tdesktop reads them on
     // the settings pages, not on boxes and subpages opened from them).
     app.update_in(vcx, |app, _, _| {
-        app.settings.open = true;
-        app.settings.page = Some(Page::Advanced);
-        app.settings.sub = Some(SubPage::Experimental);
+        app.settings.nav = crate::ui::settings_window::SettingsNav::List;
+        app.settings.nav = crate::ui::settings_window::SettingsNav::Page(Page::Advanced);
+        app.settings.nav = crate::ui::settings_window::SettingsNav::Sub(SubPage::Experimental);
     });
     type_into(&app, vcx, "debugmode");
     app.read_with(vcx, |app, _| {
         assert_eq!(app.preferences.advanced.debug_confirm, DebugConfirm::Closed);
     });
     // Ctrl-chords are not typed text.
-    app.update_in(vcx, |app, _, _| app.settings.sub = None);
+    app.update_in(vcx, |app, _, _| {
+        app.settings.nav = crate::ui::settings_window::SettingsNav::Page(Page::Advanced)
+    });
     let chord = Keystroke {
         modifiers: Modifiers {
             control: true,
@@ -152,7 +154,9 @@ fn numberbuttons_switches_fast_buttons_mode_and_lists_it_on_the_page(cx: &mut Te
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
     experimental::set_fast_buttons_mode(false);
-    app.update_in(vcx, |app, _, _| app.settings.open = true);
+    app.update_in(vcx, |app, _, _| {
+        app.settings.nav = crate::ui::settings_window::SettingsNav::List
+    });
     type_into(&app, vcx, "numberbuttons");
     app.read_with(vcx, |app, _| {
         assert!(experimental::fast_buttons_mode());
@@ -191,8 +195,8 @@ fn the_experimental_row_on_the_advanced_page_opens_the_experimental_page(cx: &mu
     vcx.update(|window, cx| window.click("settings-experimental", cx));
     vcx.run_until_parked();
     app.update(vcx, |app, _| {
-        assert_eq!(app.settings.page, Some(Page::Advanced));
-        assert_eq!(app.settings.sub, Some(SubPage::Experimental));
+        assert_eq!(app.settings.page(), Some(Page::Advanced));
+        assert_eq!(app.settings.sub(), Some(SubPage::Experimental));
     });
 }
 
@@ -205,9 +209,9 @@ fn the_experimental_page_changes_restores_exports_and_imports(cx: &mut TestAppCo
         .unwrap_or_else(std::sync::PoisonError::into_inner);
     experimental::set_fast_buttons_mode(false);
     app.update_in(vcx, |app, _, cx| {
-        app.settings.open = true;
-        app.settings.page = Some(Page::Advanced);
-        app.settings.sub = Some(SubPage::Experimental);
+        app.settings.nav = crate::ui::settings_window::SettingsNav::List;
+        app.settings.nav = crate::ui::settings_window::SettingsNav::Page(Page::Advanced);
+        app.settings.nav = crate::ui::settings_window::SettingsNav::Sub(SubPage::Experimental);
         assert!(!app.experimental_values().changed());
         app.set_experimental_option(experimental::SPLIT_MEDIA_ID, true, cx);
         assert!(app.chat_prefs.profile_media_tabs_expanded);

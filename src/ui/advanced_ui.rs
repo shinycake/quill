@@ -312,8 +312,9 @@ crate::ui::screenshot_demo::register_demos![
     crate::ui::screenshot_demo::DemoSpec::chat_list("ready-settings-experimental").setup(
         |app, _, cx| {
             app.open_settings(None, cx);
-            app.settings.page = Some(quill::settings_catalog::Page::Advanced);
-            app.settings.sub = Some(super::settings_window::SubPage::Experimental);
+            app.settings.nav = crate::ui::settings_window::SettingsNav::Sub(
+                super::settings_window::SubPage::Experimental,
+            );
         }
     ),
 ];

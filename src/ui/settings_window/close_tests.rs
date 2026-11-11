@@ -147,7 +147,7 @@ fn closing_settings_closes_the_privacy_editor(cx: &mut TestAppContext) {
     });
     frames(vcx);
     app.read_with(vcx, |app, _| {
-        assert!(!app.settings.open);
+        assert!(!app.settings.open());
         assert!(app.privacy.layer.editor().is_none(), "the editor closed");
         assert!(
             app.privacy.layer.exceptions().is_none(),
@@ -179,8 +179,8 @@ fn a_chat_window_menu_action_leaves_the_main_windows_settings_open(cx: &mut Test
     .expect("the chat window");
     cx.run_until_parked();
     app.read_with(cx, |app, _| {
-        assert!(app.settings.open, "Settings stays open");
-        assert_eq!(app.settings.page, Some(Page::Language));
+        assert!(app.settings.open(), "Settings stays open");
+        assert_eq!(app.settings.page(), Some(Page::Language));
     });
 }
 
@@ -196,14 +196,14 @@ fn agent_access_from_a_chat_window_opens_in_the_main_window(cx: &mut TestAppCont
     let ran_in = app.update(cx, |app, cx| {
         app.in_window_scope(Some(OTHER), cx, |app, cx| {
             app.open_agent_access_for_chat(OTHER.0, cx);
-            app.settings.open
+            app.settings.open()
         })
     });
     assert_eq!(ran_in, Some(false), "nothing opens in the chat window");
     cx.run_until_parked();
     app.read_with(cx, |app, _| {
-        assert!(app.settings.open);
-        assert_eq!(app.settings.page, Some(Page::AgentAccess));
+        assert!(app.settings.open());
+        assert_eq!(app.settings.page(), Some(Page::AgentAccess));
         assert_eq!(app.agent_ui.page.focus_chat, Some(OTHER.0));
     });
     let main_active = cx
@@ -225,14 +225,14 @@ fn a_settings_link_in_a_chat_windows_box_opens_in_the_main_window(cx: &mut TestA
     let ran_in = app.update(cx, |app, cx| {
         app.in_window_scope(Some(OTHER), cx, |app, cx| {
             app.open_notification_settings(cx);
-            app.settings.open
+            app.settings.open()
         })
     });
     assert_eq!(ran_in, Some(false), "nothing opens in the chat window");
     cx.run_until_parked();
     app.read_with(cx, |app, _| {
-        assert!(app.settings.open);
-        assert_eq!(app.settings.page, Some(Page::Notifications));
+        assert!(app.settings.open());
+        assert_eq!(app.settings.page(), Some(Page::Notifications));
     });
     let main_active = cx
         .update_window(main, |_, window, _| window.is_window_active())

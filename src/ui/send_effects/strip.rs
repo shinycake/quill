@@ -93,7 +93,7 @@ impl QuillApp {
         // which stays in `preview` until the menu closes) lets it play.
         let paused = open
             .preview()
-            .is_some_and(|preview| preview.hiding.is_none());
+            .is_some_and(|preview| preview.hiding().is_none());
         let theme = cx.theme();
         let (hover_bg, muted) = (theme.accent, theme.muted_foreground);
         let mut row = div()

@@ -178,8 +178,8 @@ impl Harness {
                 .chain(others)
                 .map(String::from)
                 .collect();
-            if app.settings.open {
-                shown.push(format!("settings {:?}", app.settings.page));
+            if app.settings.open() {
+                shown.push(format!("settings {:?}", app.settings.page()));
             }
             shown
         });
@@ -634,7 +634,7 @@ fn leaving_a_settings_page_lets_go_of_what_it_made(cx: &mut TestAppContext) {
                         app.open_settings(Some(Page::$page), cx);
                         cx.notify();
                     });
-                    let page = h.app.read_with(&h.vcx, |app, _| app.settings.page);
+                    let page = h.app.read_with(&h.vcx, |app, _| app.settings.page());
                     assert_eq!(page, Some(Page::$page), "the row opens its page");
                 },
                 close: |h| h.act(|app, _, cx| {

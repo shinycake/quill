@@ -255,7 +255,7 @@ fn a_click_on_the_card_hides_it_and_one_outside_closes_the_menu(cx: &mut TestApp
     frames(vcx);
     app.update(vcx, |app, _| {
         let open = app.composer_ui.send_menu.open.as_ref().expect("still open");
-        assert!(open.preview().is_some_and(|p| p.hiding.is_some()));
+        assert!(open.preview().is_some_and(|p| p.hiding().is_some()));
     });
     // A hiding card takes no presses.
     assert!(!shown(vcx, card));

@@ -88,7 +88,7 @@ crate::ui::shell::register_dialogs! {
     /// Log out confirmation from the settings window.
     LogOut => DialogSpec::new(
         7310,
-        |app| app.settings.open && app.settings.box_open(crate::ui::settings_state::SettingsBox::LogOut),
+        |app| app.settings.open() && app.settings.box_open(crate::ui::settings_state::SettingsBox::LogOut),
         QuillApp::build_log_out_dialog,
     )
     .close(|app, _, cx| { app.settings.set_box(crate::ui::settings_state::SettingsBox::LogOut, false); cx.notify(); }),

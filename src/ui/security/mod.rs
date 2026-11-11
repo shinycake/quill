@@ -599,9 +599,7 @@ impl QuillApp {
     /// fetch refires; demo re-injects the fixture.
     pub(super) fn refresh_sessions(&mut self, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
-            live.driver.session.settings.sessions = Fetch::Idle;
-            live.driver.session.settings.sessions_op.refetched();
-            let _ = live.driver.maybe_fetch_active_sessions();
+            let _ = live.driver.refresh_active_sessions();
         } else if let Some(session) = self.demo_session.as_mut() {
             session.settings.sessions = Fetch::Ready(demo_sessions());
         }

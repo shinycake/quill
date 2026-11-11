@@ -311,7 +311,7 @@ impl QuillApp {
         if !matches!(self.first_run, FirstRun::Done) {
             return blocked("the welcome screen");
         }
-        if self.settings.open {
+        if self.settings.open() {
             return blocked("Settings");
         }
         if self.agent_ui.consent.is_some() || self.agent_request_open() {

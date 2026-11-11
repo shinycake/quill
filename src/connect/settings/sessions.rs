@@ -32,6 +32,21 @@ impl<S: JsonSender> ConnectDriver<S> {
         Ok(id)
     }
 
+    /// An explicit refresh: drop the held list and ask again. A fetch
+    /// already in flight is the refresh, so its stage is left alone.
+    pub fn refresh_active_sessions(&mut self) -> Result<Option<RequestId>, ConnectSendError> {
+        if self
+            .session
+            .requests
+            .has_purpose(RequestPurpose::GetActiveSessions)
+        {
+            return Ok(None);
+        }
+        self.session.settings.sessions = crate::state::fetch::Fetch::Idle;
+        self.session.settings.sessions_op.refetched();
+        self.maybe_fetch_active_sessions()
+    }
+
     /// Slice A3: `getActiveSessions` (schema 1.8.67, line 15102) — once
     /// per session unless the list was marked stale by a terminate or an
     /// explicit refresh (guarded by the cache and the in-flight purpose).
@@ -343,6 +358,21 @@ impl<S: JsonSender> ConnectDriver<S> {
                 Err(err)
             }
         }
+    }
+
+    /// An explicit refresh: drop the held list and ask again. A fetch
+    /// already in flight is the refresh, so its stage is left alone.
+    pub fn refresh_connected_websites(&mut self) -> Result<Option<RequestId>, ConnectSendError> {
+        if self
+            .session
+            .requests
+            .has_purpose(RequestPurpose::GetConnectedWebsites)
+        {
+            return Ok(None);
+        }
+        self.session.settings.connected_websites = crate::state::fetch::Fetch::Idle;
+        self.session.settings.websites_op.refetched();
+        self.maybe_fetch_connected_websites()
     }
 
     /// Slice A4: `getConnectedWebsites` (schema 1.8.67, line 15124) —

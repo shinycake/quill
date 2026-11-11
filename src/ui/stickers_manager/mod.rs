@@ -462,7 +462,6 @@ impl QuillApp {
                     kind,
                     tab: view.tab,
                     removed: edits.is_removed(set.id),
-                    pending: self.manager_set_pending(kind, set.id),
                 },
                 cx,
             ))

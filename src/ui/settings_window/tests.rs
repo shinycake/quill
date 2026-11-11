@@ -81,7 +81,7 @@ fn settings_cover_the_chats_and_esc_brings_them_back(cx: &mut TestAppContext) {
     assert!(shown(vcx, "settings-page-account"));
     vcx.simulate_keystrokes("escape");
     frames(vcx);
-    app.read_with(vcx, |app, _| assert!(!app.settings.open));
+    app.read_with(vcx, |app, _| assert!(!app.settings.open()));
     assert!(!shown(vcx, "settings-window"));
 }
 
@@ -105,9 +105,9 @@ fn pages_switch_and_esc_leaves_a_subpage_first(cx: &mut TestAppContext) {
     vcx.simulate_keystrokes("escape");
     frames(vcx);
     app.read_with(vcx, |app, _| {
-        assert!(app.settings.open);
-        assert_eq!(app.settings.page, Some(Page::About));
-        assert_eq!(app.settings.sub, None);
+        assert!(app.settings.open());
+        assert_eq!(app.settings.page(), Some(Page::About));
+        assert_eq!(app.settings.sub(), None);
     });
 }
 
@@ -127,7 +127,7 @@ fn a_box_opens_over_settings_and_closing_it_comes_back(cx: &mut TestAppContext) 
         cx.notify();
     });
     assert_eq!(open_dialog(&shell, vcx), None);
-    app.read_with(vcx, |app, _| assert!(app.settings.open));
+    app.read_with(vcx, |app, _| assert!(app.settings.open()));
     assert!(shown(vcx, "settings-page-account"));
 }
 
@@ -145,7 +145,7 @@ fn log_out_asks_before_signing_out(cx: &mut TestAppContext) {
     vcx.update(|window, cx| window.click("log-out-cancel", cx));
     assert_eq!(open_dialog(&shell, vcx), None);
     app.read_with(vcx, |app, _| {
-        assert!(app.settings.open);
+        assert!(app.settings.open());
         assert!(
             !app.settings
                 .box_open(crate::ui::settings_state::SettingsBox::LogOut)
@@ -172,7 +172,7 @@ fn opening_a_chat_closes_settings(cx: &mut TestAppContext) {
         app.select_listed_chat(chat, window, cx)
     });
     frames(vcx);
-    app.read_with(vcx, |app, _| assert!(!app.settings.open));
+    app.read_with(vcx, |app, _| assert!(!app.settings.open()));
     assert!(!shown(vcx, "settings-window"));
 }
 
@@ -195,8 +195,8 @@ fn a_narrow_window_shows_the_list_then_a_page_with_a_way_back(cx: &mut TestAppCo
     frames(vcx);
     assert!(shown(vcx, "settings-sidebar"));
     app.read_with(vcx, |app, _| {
-        assert!(app.settings.open);
-        assert_eq!(app.settings.page, None);
+        assert!(app.settings.open());
+        assert_eq!(app.settings.page(), None);
     });
 }
 
@@ -261,10 +261,10 @@ fn esc_clears_the_search_before_leaving_settings(cx: &mut TestAppContext) {
     frames(vcx);
     assert_eq!(query(&app, vcx), "");
     assert!(shown(vcx, "settings-page-calls"));
-    app.read_with(vcx, |app, _| assert!(app.settings.open));
+    app.read_with(vcx, |app, _| assert!(app.settings.open()));
     vcx.simulate_keystrokes("escape");
     frames(vcx);
-    app.read_with(vcx, |app, _| assert!(!app.settings.open));
+    app.read_with(vcx, |app, _| assert!(!app.settings.open()));
 }
 
 #[gpui_kit::test]
@@ -305,7 +305,7 @@ fn account_rows_open_their_editors(cx: &mut TestAppContext) {
     assert_eq!(open_dialog(&shell, vcx), None);
     vcx.update(|window, cx| window.click("settings-row-name-color", cx));
     assert!(open_dialog(&shell, vcx).is_some());
-    app.read_with(vcx, |app, _| assert!(app.settings.open));
+    app.read_with(vcx, |app, _| assert!(app.settings.open()));
 }
 
 #[gpui_kit::test]

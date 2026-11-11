@@ -210,7 +210,7 @@ impl QuillApp {
         // A screen of the page may be covering the row.
         // Leaving and arriving are one reset: the page's drafts go and its
         // visit asks again, though the page itself does not change.
-        if self.settings.page == Some(target.page()) {
+        if self.settings.page() == Some(target.page()) {
             self.leave_settings_page(target.page());
             self.arrive_settings_page(target.page());
         }

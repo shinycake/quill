@@ -338,7 +338,7 @@ impl QuillApp {
         // read receipts run here, chat opens wake the window.
         self.drain_background_clicks(cx);
         self.drain_account_clicks(cx);
-        let settings_open = self.settings.open;
+        let settings_open = self.settings.open();
         self.sync_rows_on_screen();
         // Asked of the platform: a hidden or minimized main window does not
         // draw, so its last render may predate its deactivation.

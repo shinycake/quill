@@ -37,8 +37,10 @@ pub(in crate::ui) struct Arrival {
 /// Where the arrival is: looking for the row, or lit over it.
 #[derive(Clone, Copy)]
 enum Stage {
-    /// The row has not been centered yet.
-    Seeking,
+    /// The row has not been centered yet; the arrival gives up on it
+    /// [`TOTAL`] after `since`, so a row that shows up much later does not
+    /// scroll the page by itself.
+    Seeking { since: Instant },
     /// The row was centered; the wash runs from `landed`.
     Washing {
         /// When the row was first centered.
@@ -54,7 +56,9 @@ impl Arrival {
         Arrival {
             target,
             row: Rc::default(),
-            stage: Stage::Seeking,
+            stage: Stage::Seeking {
+                since: Instant::now(),
+            },
         }
     }
 }
@@ -90,7 +94,7 @@ impl Arrival {
     pub(super) fn landed_row(&self) -> Option<Bounds<Pixels>> {
         match self.stage {
             Stage::Washing { .. } => self.row.get(),
-            Stage::Seeking => None,
+            Stage::Seeking { .. } => None,
         }
     }
 }
@@ -99,7 +103,7 @@ impl QuillApp {
     /// What scrolls `page`, or the screen open over it. Two pages keep their
     /// own handle for the scrolls and paging they do themselves.
     pub(super) fn settings_scroll(&self, page: Page) -> &ScrollHandle {
-        if self.settings.sub.is_some() {
+        if self.settings.sub().is_some() {
             return &self.settings.sub_scroll;
         }
         match page {
@@ -115,13 +119,17 @@ impl QuillApp {
         let Some(arrival) = &self.settings.arrival else {
             return;
         };
-        if matches!(arrival.stage, Stage::Washing { landed, .. } if landed.elapsed() >= TOTAL) {
+        let over = match arrival.stage {
+            Stage::Washing { landed, .. } => landed.elapsed() >= TOTAL,
+            Stage::Seeking { since } => arrival.row.get().is_none() && since.elapsed() >= TOTAL,
+        };
+        if over {
             self.settings.arrival = None;
             return;
         }
         let row = arrival.row.get();
         if let Some(row) = row
-            && let Some(page) = self.settings.page
+            && let Some(page) = self.settings.page()
         {
             let scroll = self.settings_scroll(page);
             let viewport = scroll.bounds();
@@ -129,7 +137,7 @@ impl QuillApp {
             let top = row.top() - viewport.top() - offset.y;
             let centered = match arrival.stage {
                 Stage::Washing { centered_at, .. } => Some(centered_at),
-                Stage::Seeking => None,
+                Stage::Seeking { .. } => None,
             };
             if centered != Some(top) {
                 let max = scroll.max_offset().y;
@@ -138,7 +146,7 @@ impl QuillApp {
                 if let Some(arrival) = &mut self.settings.arrival {
                     let landed = match arrival.stage {
                         Stage::Washing { landed, .. } => landed,
-                        Stage::Seeking => Instant::now(),
+                        Stage::Seeking { .. } => Instant::now(),
                     };
                     arrival.stage = Stage::Washing {
                         landed,
@@ -173,7 +181,7 @@ impl QuillApp {
                 Stage::Washing { landed, .. } => {
                     (wash_opacity(landed.elapsed(), cx.reduce_motion()), false)
                 }
-                Stage::Seeking => (0., true),
+                Stage::Seeking { .. } => (0., true),
             };
             (opacity, arrival.row.clone(), seeking)
         });

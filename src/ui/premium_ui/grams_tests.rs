@@ -99,7 +99,7 @@ fn settings_lists_my_grams_only_with_a_balance(cx: &mut TestAppContext) {
     assert!(row(&app, vcx));
     // The Settings list renders with the row.
     app.update_in(vcx, |app, _, cx| {
-        app.settings.open = true;
+        app.settings.nav = crate::ui::settings_window::SettingsNav::List;
         cx.notify();
     });
     vcx.run_until_parked();

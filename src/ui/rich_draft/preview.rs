@@ -49,19 +49,19 @@ impl RichPreview {
         text: &str,
         editor: &RefCell<MarkupBlocks>,
     ) -> Rc<Vec<Rc<RichBlock>>> {
-        let changed = {
-            let mut parsed = self.parsed.borrow_mut();
-            (parsed.revision != Some(revision)).then(|| {
-                let change = parsed.source.update(editor.borrow_mut().parse(text));
+        let Ok(mut parsed) = self.parsed.try_borrow_mut() else {
+            return Rc::default();
+        };
+        if parsed.revision != Some(revision) {
+            // A busy editor cell keeps the old blocks and retries next frame.
+            if let Ok(mut editor) = editor.try_borrow_mut() {
+                let (replaced, count) = parsed.source.update(editor.parse(text));
                 parsed.blocks = Rc::new(parsed.source.shown().to_vec());
                 parsed.revision = Some(revision);
-                change
-            })
-        };
-        if let Some((replaced, count)) = changed {
-            self.list.splice(replaced, count);
+                self.list.splice(replaced, count);
+            }
         }
-        self.parsed.borrow().blocks.clone()
+        parsed.blocks.clone()
     }
 }
 

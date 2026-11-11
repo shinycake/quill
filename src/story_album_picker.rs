@@ -37,6 +37,12 @@ impl AlbumPicker {
         self.selected.contains(&story_id)
     }
 
+    /// The album now holds `story_ids` (their add was answered): they are
+    /// no longer changes to send.
+    pub fn album_holds(&mut self, story_ids: &[i32]) {
+        self.initial.extend(story_ids.iter().copied());
+    }
+
     pub fn toggle(&mut self, story_id: i32) {
         if !self.selected.remove(&story_id) {
             self.selected.insert(story_id);

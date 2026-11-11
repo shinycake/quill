@@ -17,6 +17,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::motion::Glide;
+use gpui_kit::Task;
 use std::time::{Duration, Instant};
 
 /// How long the column takes to slide all the way in or out (Kit's
@@ -58,13 +59,33 @@ enum Mode {
 #[derive(Debug)]
 pub(crate) struct SidebarReveal {
     mode: Mode,
+    /// The redraw after the leave grace. It lives only in `Leaving`: every
+    /// change of mode drops it.
+    wake: Wake,
     docked: Glide,
     peek: Glide,
+}
+
+#[derive(Default)]
+enum Wake {
+    #[default]
+    Idle,
+    Waiting(Task<()>),
+}
+
+impl std::fmt::Debug for Wake {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Wake::Idle => "Idle",
+            Wake::Waiting(_) => "Waiting",
+        })
+    }
 }
 
 impl SidebarReveal {
     pub(crate) fn new(hidden: bool, now: Instant) -> Self {
         Self {
+            wake: Wake::Idle,
             mode: if hidden {
                 Mode::Hidden(Peek::Off)
             } else {
@@ -72,6 +93,22 @@ impl SidebarReveal {
             },
             docked: Glide::settled(if hidden { 0. } else { 1. }, now, ease_out_cubic),
             peek: Glide::settled(0., now, ease_out_cubic),
+        }
+    }
+
+    /// The one place the mode changes: the grace wake belongs to the
+    /// `Leaving` it was made for, so it goes with any change.
+    fn set_mode(&mut self, mode: Mode) {
+        self.mode = mode;
+        self.wake = Wake::Idle;
+    }
+
+    /// Keep the redraw after the leave grace: it runs while the pointer is
+    /// away and is dropped with it (a pointer back, Escape, or the grace
+    /// over). A wake for a mode that is no longer `Leaving` is dropped.
+    pub(crate) fn hold_wake(&mut self, task: Task<()>) {
+        if matches!(self.mode, Mode::Hidden(Peek::Leaving { .. })) {
+            self.wake = Wake::Waiting(task);
         }
     }
 
@@ -86,11 +123,11 @@ impl SidebarReveal {
         if self.hidden() == hidden {
             return;
         }
-        self.mode = if hidden {
+        self.set_mode(if hidden {
             Mode::Hidden(Peek::Off)
         } else {
             Mode::Docked
-        };
+        });
         if !hidden {
             let peeked = self.peek.value(now);
             if peeked > self.docked.value(now) {
@@ -115,7 +152,7 @@ impl SidebarReveal {
             // Still sliding out after Hide: no peek on top of it.
             return false;
         }
-        self.mode = Mode::Hidden(Peek::Hovering);
+        self.set_mode(Mode::Hidden(Peek::Hovering));
         self.peek.go(1., SLIDE_DURATION, animate, now);
         true
     }
@@ -126,7 +163,7 @@ impl SidebarReveal {
         if self.mode != Mode::Hidden(Peek::Hovering) {
             return false;
         }
-        self.mode = Mode::Hidden(Peek::Leaving { since: now });
+        self.set_mode(Mode::Hidden(Peek::Leaving { since: now }));
         true
     }
 
@@ -136,7 +173,7 @@ impl SidebarReveal {
             Mode::Hidden(Peek::Hovering | Peek::Leaving { .. }) => {}
             Mode::Hidden(Peek::Off) | Mode::Docked => return false,
         }
-        self.mode = Mode::Hidden(Peek::Off);
+        self.set_mode(Mode::Hidden(Peek::Off));
         self.peek.go(0., SLIDE_DURATION, animate, now);
         true
     }
@@ -149,7 +186,7 @@ impl SidebarReveal {
             && !held
             && now.saturating_duration_since(since) >= LEAVE_GRACE
         {
-            self.mode = Mode::Hidden(Peek::Off);
+            self.set_mode(Mode::Hidden(Peek::Off));
             self.peek.go(0., SLIDE_DURATION, animate, now);
         }
     }

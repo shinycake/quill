@@ -276,7 +276,9 @@ pub(super) fn apply_ready_search_in_chat(
     seq: &AtomicU64,
 ) {
     let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
-    assert!(session.open_chat_search());
+    if !session.open_chat_search() {
+        return;
+    }
     let search_gen = session.search.chat_search.begin_query("hello");
     let extra =
         session.request_chat_search(RequestPurpose::SearchChatMessages, ChatId(11), search_gen);
@@ -360,7 +362,7 @@ impl QuillApp {
         if self.dismiss_topmost_layer(window, cx) {
             return;
         }
-        if self.settings.open && self.preferences.keybinding.capture.waiting().is_none() {
+        if self.settings.open() && self.preferences.keybinding.capture.waiting().is_none() {
             self.settings_escape(window, cx);
         } else {
             self.escape_to_chat_list(window, cx);
@@ -661,7 +663,7 @@ impl QuillApp {
     }
 
     pub(super) fn schedule_chat_search_commit(&mut self, token: u64, cx: &mut Context<Self>) {
-        self.spawn_scoped(cx, async move |this, cx| {
+        self.search_ui.debounce.chat = self.spawn_scoped(cx, async move |this, cx| {
             cx.background_executor().timer(SEARCH_DEBOUNCE).await;
             this.update(cx, |this, cx| {
                 if let Some(live) = this.live.as_mut() {
@@ -677,8 +679,7 @@ impl QuillApp {
                 cx.notify();
             })
             .ok();
-        })
-        .detach();
+        });
     }
 
     pub(super) fn jump_selected_chat_search_hit(&mut self, cx: &mut Context<Self>) {
@@ -778,6 +779,17 @@ impl QuillApp {
         cx.notify();
     }
 
+    /// The in-chat search field means either the message query or, while
+    /// the "From:" picker is open, a member filter. Whenever the meaning
+    /// changes (the picker opens, closes or picks), the field starts empty
+    /// and takes focus: this is the one place that does it.
+    fn restart_chat_search_field(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.search_ui.chat_input.update(cx, |input, cx| {
+            input.set_value("", window, cx);
+            input.focus(window, cx);
+        });
+    }
+
     pub(super) fn chat_search_pick_sender(
         &mut self,
         sender: Option<MessageSender>,
@@ -794,12 +806,7 @@ impl QuillApp {
         }
         // The field's text was the member filter while choosing: start the
         // message query from scratch.
-        self.search_ui
-            .chat_input
-            .update(cx, |input, cx| input.set_value("", window, cx));
-        self.search_ui
-            .chat_input
-            .update(cx, |input, cx| input.focus(window, cx));
+        self.restart_chat_search_field(window, cx);
         cx.notify();
     }
 
@@ -842,12 +849,7 @@ impl QuillApp {
             session.open_from_picker();
         }
         // The field now filters members (or messages again): start empty.
-        self.search_ui
-            .chat_input
-            .update(cx, |input, cx| input.set_value("", window, cx));
-        self.search_ui
-            .chat_input
-            .update(cx, |input, cx| input.focus(window, cx));
+        self.restart_chat_search_field(window, cx);
         cx.notify();
     }
 

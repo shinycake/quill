@@ -41,7 +41,7 @@ fn the_strip_link_opens_the_proxy_list_over_sign_in(cx: &mut TestAppContext) {
     vcx.update(|window, cx| window.render_frame(cx));
     app.read_with(&vcx, |app, _| {
         assert!(app.settings.proxy.list_box);
-        assert!(!app.settings.open, "no Settings window while signed out");
+        assert!(!app.settings.open(), "no Settings window while signed out");
     });
     assert!(vcx.update(|window, cx| window.has_active_dialog(cx)));
     assert!(vcx.update(|window, _| window.try_find("proxy-add").is_some()));
