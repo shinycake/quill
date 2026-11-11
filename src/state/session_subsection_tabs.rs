@@ -55,11 +55,12 @@ pub struct RowTopic {
 }
 
 /// The topic titles of a forum row: not here yet (the row reads "Loading…"),
-/// or what the list answered (empty reads "No chats"; a failed list is
-/// listed empty too).
+/// failed with no list held (the row offers a retry), or what the list
+/// answered (empty reads "No chats").
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RowTopicsView {
     Loading,
+    Failed,
     Listed(Vec<RowTopic>),
 }
 
@@ -75,7 +76,7 @@ impl std::ops::Deref for RowTopicsView {
 
     fn deref(&self) -> &[RowTopic] {
         match self {
-            Self::Loading => &[],
+            Self::Loading | Self::Failed => &[],
             Self::Listed(topics) => topics,
         }
     }
@@ -297,14 +298,14 @@ impl Session {
             (muted, muted > 0)
         };
         let jump = topics.first().filter(|t| t.unread).map(|t| t.id);
-        let listed = self.threads.forum_topics.contains_key(&chat_id.0)
-            || self.threads.forum_topics_failed(chat_id.0);
         Some(RowForum {
             unread_topics: i32::try_from(shown).unwrap_or(i32::MAX),
             badge_muted,
             jump,
-            topics: if listed {
+            topics: if self.threads.forum_topics.contains_key(&chat_id.0) {
                 RowTopicsView::Listed(topics)
+            } else if self.threads.forum_topics_failed(chat_id.0) {
+                RowTopicsView::Failed
             } else {
                 RowTopicsView::Loading
             },

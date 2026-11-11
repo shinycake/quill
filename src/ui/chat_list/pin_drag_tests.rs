@@ -90,7 +90,7 @@ fn contacts_over_the_rows_end_a_pinned_drag_unsaved(cx: &mut TestAppContext) {
     assert!(app.read_with(&vcx, |app, _| app.chat_list.pin.drag().is_some()));
     // Cmd+J while the button is held: the rows give way to Contacts.
     app.update(&mut vcx, |app, cx| {
-        app.chat_list.tab = SidebarTab::Contacts;
+        app.chat_list.show_tab(SidebarTab::Contacts);
         cx.notify();
     });
     frames(&mut vcx);

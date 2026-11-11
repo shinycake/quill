@@ -466,8 +466,8 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// id (schema 1.8.67, line 9590: "Call createPrivateChat with
     /// getOption(\"my_id\") and open the chat"). The `chat` answer opens
     /// the chat via the `CreatePrivateChat` pending purpose. `Ok(None)`
-    /// = own id unknown (call `getMe` first) or a creation already in
-    /// flight; the UI prefers the already-listed self chat when one
+    /// = own id unknown (call `getMe` first) or a creation for the
+    /// own user already in flight; the UI prefers the already-listed self chat when one
     /// exists.
     pub fn create_private_chat_with_self(&mut self) -> Result<Option<RequestId>, ConnectSendError> {
         let Some(my_id) = self.session.my_user_id else {
@@ -479,7 +479,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// B1: `createPrivateChat` with an arbitrary user id (schema 1.8.67,
     /// line 9588) — the user button on an inline keyboard. The `chat`
     /// answer opens the chat via the `CreatePrivateChat` pending purpose.
-    /// `Ok(None)` = a creation already in flight; the UI prefers an
+    /// `Ok(None)` = a creation for the same user already in flight; the UI prefers an
     /// already-listed private chat with the user when one exists.
     pub fn create_private_chat_for(
         &mut self,
@@ -489,10 +489,14 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(ConnectSendError::InvalidRequest);
         }
         let purpose = RequestPurpose::CreatePrivateChat;
-        if self.session.requests.has_purpose(purpose) {
+        // A private chat's id is its user's id, so the request is keyed by
+        // the chat it creates: another user's creation in flight does not
+        // swallow this one, and only the same user's does.
+        let chat = ChatId(user_id);
+        if self.session.requests.has_purpose_for_chat(purpose, chat) {
             return Ok(None);
         }
-        let extra = self.session.request(purpose, None);
+        let extra = self.session.request(purpose, Some(chat));
         if let Err(err) = self
             .sender
             .send_json(&create_private_chat(extra, user_id, false))

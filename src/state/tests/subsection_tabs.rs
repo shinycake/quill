@@ -379,12 +379,9 @@ fn forum_rows_follow_display_as_forum() {
     let row = session.chat_row_forum(ChatId(16)).expect("a forum row");
     assert!(row.topics.is_loading() && row.topics.is_empty());
     session.threads.forum_topics.fail(16, "failed");
-    assert!(
-        !session
-            .chat_row_forum(ChatId(16))
-            .expect("row")
-            .topics
-            .is_loading()
+    assert_eq!(
+        session.chat_row_forum(ChatId(16)).expect("row").topics,
+        RowTopicsView::Failed
     );
 }
 

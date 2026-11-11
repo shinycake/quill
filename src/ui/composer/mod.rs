@@ -914,7 +914,7 @@ impl QuillApp {
     pub(super) fn close_mention_menu(&mut self, cx: &mut Context<Self>) -> bool {
         let showing = !self.mention_menu_items(cx).is_empty();
         if let Some(live) = self.live.as_mut() {
-            live.driver.session.messages.mention_search = None;
+            live.driver.end_mention_search();
         }
         if showing {
             cx.notify();
@@ -971,7 +971,7 @@ impl QuillApp {
         self.composer
             .update(cx, |input, cx| input.focus(window, cx));
         if let Some(live) = self.live.as_mut() {
-            live.driver.session.messages.mention_search = None;
+            live.driver.end_mention_search();
         }
         let completed = self.composer.read(cx).value().to_string();
         self.sync_composer_typing(&completed);

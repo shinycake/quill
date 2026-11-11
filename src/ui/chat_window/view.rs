@@ -5,7 +5,7 @@ use super::super::app::QuillApp;
 use super::super::command_shortcuts::CommandActions;
 use super::super::frame_clock::follow_app_unless_held;
 use super::super::glyph_sweep;
-use super::super::image_budget::{CacheScope, WindowDraw};
+use super::super::image_budget::{BoundedImageCache, CacheScope, WindowDraw};
 use super::super::shell::QuillShell;
 use super::super::window_actions::WindowActions;
 use super::cover::WindowPlace;
@@ -14,7 +14,7 @@ use gpui_kit::component::{Root, StyledExt, TitleBar};
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::ids::ChatId;
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 /// One chat window's view. `QuillApp` builds the body with this window's
@@ -23,13 +23,14 @@ pub(crate) struct ChatWindowView {
     owner: WeakEntity<QuillApp>,
     chat_id: ChatId,
     pub(super) slot: SharedSlot,
+    /// The window's image cache, the one its slot holds, kept here so the
+    /// render scopes the body to it without reading the shared slot.
+    images: Entity<BoundedImageCache>,
     /// Hosts this window's kit dialog (the same registry as the main
     /// window's shell; the dialog opens where the input asked for it).
     pub(super) shell: Entity<QuillShell>,
     /// The native title last handed to the platform.
     title_shown: String,
-    /// The geometry at the last render; a change is saved for next time.
-    bounds_seen: Option<Bounds<Pixels>>,
     /// This window is kept out of screen capture (a secret chat, or its
     /// viewer showing a secret chat's media): each window has its own.
     capture_blocked: bool,
@@ -66,10 +67,10 @@ impl ChatWindowView {
         Self {
             owner: owner.downgrade(),
             chat_id,
+            images: slot.images.clone(),
             slot: Rc::new(RefCell::new(slot)),
             shell,
             title_shown: String::new(),
-            bounds_seen: None,
             capture_blocked: false,
             _observe: observe,
             _placed: placed,
@@ -106,8 +107,6 @@ impl ChatWindowView {
     ) {
         let me = cx.entity_id();
         let chat_id = self.chat_id;
-        // Where the window stood, for "Reopen closed window".
-        let bounds = self.bounds_seen.filter(|_| reopenable);
         let _ = self.owner.update(cx, |app, cx| {
             // The app lists the window until its bookkeeping runs (the
             // bookkeeping unlists it): one that is not listed was closed
@@ -122,6 +121,8 @@ impl ChatWindowView {
                 app.close_window_boxes(chat_id, window, cx);
             }
             app.in_window_scope(Some(chat_id), cx, |app, cx| app.flush_leaving_draft(cx));
+            // Where the window stood, for "Reopen closed window".
+            let bounds = app.windows.window_bounds(chat_id).filter(|_| reopenable);
             app.chat_window_closed(chat_id, bounds, cx);
         });
     }
@@ -179,13 +180,13 @@ impl Render for ChatWindowView {
         }
         let active = window.is_window_active();
         let bounds = window.bounds();
-        let moved = self.bounds_seen.replace(bounds) != Some(bounds);
         let place = WindowPlace::of(window, window.display(cx).map(|display| display.id()));
         let view_id = cx.entity_id();
         // A window may draw in the middle of another window's input: the
         // scope in place then is restored afterwards.
         let (outer, outer_tick) = app.update(cx, |app, cx| {
-            if app.windows.note_place(chat_id, active, place, bounds) {
+            let placed = app.windows.note_place(chat_id, active, place, bounds);
+            if placed.activation_changed {
                 // The gate follows it now, not at the main window's next
                 // render, which a minimized main window never draws.
                 app.follow_windows(cx);
@@ -194,7 +195,7 @@ impl Render for ChatWindowView {
             // The call windows follow the call while this window is the one
             // drawing: the main window may be hidden or minimized.
             app.sync_call_windows(cx);
-            if moved {
+            if placed.moved {
                 app.schedule_chat_windows_save(cx);
             }
             app.chat_frame_starts(chat_id, WindowDraw::Whole, window, cx);
@@ -306,7 +307,7 @@ impl Render for ChatWindowView {
             .child(WindowScope {
                 app: self.owner.clone(),
                 target: Some(chat_id),
-                child: CacheScope::new(self.slot.borrow().images.clone(), body).into_any_element(),
+                child: CacheScope::new(self.images.clone(), body).into_any_element(),
             });
         // Middle-click autoscroll's mark and stop-on-press, as on the main
         // window's root.
@@ -526,11 +527,11 @@ pub(super) fn open_chat_window(
         inactive_frame_interval: Some(super::super::window_frame::INACTIVE_FRAME_INTERVAL),
         ..Default::default()
     };
-    let built: Rc<RefCell<Option<(WeakEntity<ChatWindowView>, SharedSlot)>>> = Rc::default();
+    let built: Rc<Cell<Option<(WeakEntity<ChatWindowView>, SharedSlot)>>> = Rc::default();
     let built_out = built.clone();
     let handle = cx.open_window(options, move |window, cx| {
         let view = cx.new(|cx| ChatWindowView::new(owner, chat_id, window, cx));
-        *built_out.borrow_mut() = Some((view.downgrade(), view.read(cx).slot.clone()));
+        built_out.set(Some((view.downgrade(), view.read(cx).slot.clone())));
         let weak = view.downgrade();
         window.on_window_should_close(cx, move |window, cx| {
             let _ = weak.update(cx, |this, cx| this.closing(true, Some(window), cx));
@@ -546,7 +547,6 @@ pub(super) fn open_chat_window(
     });
     let handle = handle.map_err(|err| err.to_string())?;
     let (view, slot) = built
-        .borrow_mut()
         .take()
         .ok_or_else(|| "the window built no view".to_string())?;
     Ok((handle.into(), view, slot))

@@ -116,9 +116,8 @@ impl QuillApp {
             .map(|dialog| dialog.search.read(cx).value().trim().to_string())
             .unwrap_or_default();
         if let Some(live) = self.live.as_mut() {
-            live.driver.session.groups.join_requests.remove(&chat_id.0);
+            live.driver.retry_join_requests(chat_id, &query);
         }
-        self.ask_join_requests(chat_id, &query, true);
         cx.notify();
     }
 

@@ -71,7 +71,7 @@ pub(crate) fn ban_start(
 impl QuillApp {
     /// Moves a waiting ban on once its member chats answered.
     pub(super) fn drain_pending_ban(&mut self, cx: &mut Context<Self>) -> bool {
-        let Some(pending) = self.admin.community.flow.ban_wait.clone() else {
+        let Some(pending) = self.admin.community.flow.ban_waits.front().cloned() else {
             return false;
         };
         let Some(step) = self.session().map(|s| {
@@ -85,12 +85,12 @@ impl QuillApp {
         match step {
             BanStep::Wait => false,
             BanStep::Cancel => {
-                self.admin.community.flow.ban_wait = None;
+                self.admin.community.flow.ban_waits.pop_front();
                 self.set_note(StatusNote::error(tr(keys::Q_COMMUNITY_BAN_UNAVAILABLE)));
                 true
             }
             BanStep::BanNow => {
-                self.admin.community.flow.ban_wait = None;
+                self.admin.community.flow.ban_waits.pop_front();
                 self.send_community_ban(pending.community_id, pending.member, cx);
                 true
             }
@@ -103,7 +103,7 @@ impl QuillApp {
                     Some(open) if Some(open) != pending.over => return false,
                     _ => {}
                 }
-                self.admin.community.flow.ban_wait = None;
+                self.admin.community.flow.ban_waits.pop_front();
                 self.show_community_box(
                     CommunityBox::BanWarning {
                         community_id: pending.community_id,

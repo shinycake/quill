@@ -507,12 +507,19 @@ impl<S: JsonSender> ConnectDriver<S> {
 }
 
 impl<S: JsonSender> ConnectDriver<S> {
+    /// The open chat's `@` menu closed or completed: its search ends. Another
+    /// window's search (another chat's) stays.
+    pub fn end_mention_search(&mut self) {
+        if let Some(chat_id) = self.session.open_chat_id() {
+            self.session.end_mention_search(chat_id);
+        }
+    }
+
     /// The composer's `@query` for the open chat changed: search its members
     /// (groups only; private chats and channels have no one to mention).
     /// `None` clears the suggestions.
     pub fn search_mentions(&mut self, query: Option<&str>) -> Result<(), ConnectSendError> {
         let Some(chat_id) = self.session.open_chat_id() else {
-            self.session.messages.mention_search = None;
             return Ok(());
         };
         let is_group = self.session.chats.get(&chat_id.0).is_some_and(|chat| {
@@ -526,7 +533,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             )
         });
         let Some(query) = query.filter(|_| is_group) else {
-            self.session.messages.mention_search = None;
+            self.session.end_mention_search(chat_id);
             return Ok(());
         };
         if self
@@ -560,7 +567,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             ))
         {
             self.session.requests.take(extra);
-            self.session.messages.mention_search = None;
+            self.session.end_mention_search(chat_id);
             return Err(err);
         }
         Ok(())

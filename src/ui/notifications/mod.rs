@@ -293,7 +293,7 @@ impl QuillApp {
                 self.account_boxes.notice,
                 super::account_state::OpenNotice::LoginPrevented(_)
             ),
-            self.folders.tab,
+            self.chat_list.view.folder(),
             self.connection_lost(),
         )
     }
@@ -449,7 +449,7 @@ impl QuillApp {
         let deliver = live.driver.session.force_reply_ready();
         // Parity slice: the selected folder tab may have been deleted or
         // removed remotely (`updateChatFolders`); fall back to Main.
-        if let Some(folder_id) = self.screen.folders.tab
+        if let Some(folder_id) = self.screen.chat_list.view.folder()
             && !live
                 .driver
                 .session
@@ -458,9 +458,10 @@ impl QuillApp {
                 .iter()
                 .any(|f| f.id == folder_id)
         {
-            // (Same rule as `set_chat_list_view`; `live` is borrowed here.)
-            self.screen.chat_list.selected.clear();
-            self.screen.folders.tab = None;
+            // (`live` is borrowed here, so the view changes on the chat
+            // list itself, the same transition `set_chat_list_view` runs.)
+            let filter = self.screen.chat_list.view.filter();
+            self.screen.chat_list.show_view(filter, None);
         }
         let err = live.driver.session.auth_state.last_auth_error;
         let new_auth = live.driver.session.auth.clone();

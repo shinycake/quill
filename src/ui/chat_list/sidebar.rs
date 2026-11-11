@@ -116,15 +116,6 @@ impl QuillApp {
         window: &Window,
         cx: &mut Context<Self>,
     ) -> Stateful<Div> {
-        // A pinned drag lives in the chat rows, which end it on release.
-        // Contacts, Calls or search in their place: the release can never
-        // reach them, so the drag ends now, unsaved (round 18 B #2).
-        if self.chat_list.tab != SidebarTab::Chats || self.search_is_open() {
-            self.chat_list.pin.end_drag();
-            // The rows laid out by the last chats render are not on screen
-            // now: key stepping and file drags must not use that list.
-            self.chat_list.items.clear();
-        }
         if self.chat_list.tab == SidebarTab::Contacts {
             return list.child(self.contacts_panel(cx));
         }
@@ -177,8 +168,8 @@ impl QuillApp {
         window: &Window,
         cx: &mut Context<Self>,
     ) -> Stateful<Div> {
-        let folder = self.folders.tab;
-        let filter = self.chat_list.filter;
+        let folder = self.chat_list.view.folder();
+        let filter = self.chat_list.view.filter();
         // Parity slice: folder names + tags flag for chat-row chips.
         let folder_tags = self.folder_tag_context();
         let mut chats: Vec<&ChatSummary> = self.listed_main_chats();
@@ -332,19 +323,16 @@ impl QuillApp {
                 });
             }
         }
-        // Pinned-drag animation: keep frames coming while rows slide, drop
-        // the state once everything settled.
-        if let Some((_, view)) = self.chat_list.pin.view() {
-            let now = std::time::Instant::now();
-            // A deactivated window never gets the release: the drag ends
-            // there, unsaved, instead of redrawing at 60 Hz for good.
-            if !self.frame.window_active.get() {
-                self.chat_list.pin.end_drag();
-            } else if view.settled(now) {
-                self.chat_list.pin.settle();
-            } else {
-                self.request_animation_tick(60, cx);
-            }
+        // Pinned-drag animation: keep frames coming while rows slide. The
+        // drag ends itself when its window lost focus, and settles when the
+        // slide is done.
+        let active = self.frame.window_active.get();
+        if self
+            .chat_list
+            .pin
+            .advance(std::time::Instant::now(), active)
+        {
+            self.request_animation_tick(60, cx);
         }
         // kit Phase 3: hand the flat item list to the kit `VirtualList`.
         // Item heights are fixed by construction (see `chat_row_height`),
@@ -366,7 +354,7 @@ impl QuillApp {
                 })
                 .collect(),
         );
-        self.chat_list.row_fx.borrow_mut().begin_pass();
+        self.chat_list.begin_row_pass();
         self.chat_list.items = items;
         self.chat_list.folder_tags = folder_tags;
         list.child(self.chat_list_rows(sizes, focus_visible, window, cx))

@@ -92,6 +92,19 @@ impl Session {
         search.members.answered(Some(request), user_ids);
     }
 
+    /// `chat`'s `@` search ends (its menu closed or completed, or its
+    /// query is gone). Another chat's search is another window's and stays.
+    pub fn end_mention_search(&mut self, chat: ChatId) {
+        if self
+            .messages
+            .mention_search
+            .as_ref()
+            .is_some_and(|search| search.chat_id == chat)
+        {
+            self.messages.mention_search = None;
+        }
+    }
+
     /// The `searchChatMembers` `request` failed: its search ends, so the
     /// same query is asked again. An older query's error changes nothing.
     pub(crate) fn fail_mention_search(&mut self, request: RequestId) {
