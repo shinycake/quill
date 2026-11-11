@@ -537,8 +537,8 @@ fn a_failed_upgrade_preview_is_not_asked_again() {
     assert!(f.driver.fetch_gift_upgrade_preview(802).is_ok());
 }
 
-/// Opening a resale list while a buy's `sendResoldGift` is out keeps that
-/// buy: its answer still lands in it.
+/// Opening a resale list while a buy's `sendResoldGift` is out is refused and
+/// keeps that buy: its answer still lands in it.
 #[test]
 fn opening_the_resale_list_keeps_a_buy_that_is_out() {
     let mut f = Fixture::new();
@@ -554,7 +554,10 @@ fn opening_the_resale_list_keeps_a_buy_that_is_out() {
     f.driver
         .buy_gift_resale(GiftPrice::Stars(1500), "", false)
         .unwrap();
-    f.driver.open_gift_resale(500, "Plush Pepe").unwrap();
+    assert!(
+        f.driver.open_gift_resale(500, "Plush Pepe").is_err(),
+        "refused while the buy is out"
+    );
     let buy = f.driver.session.payments.gift_market.buy.clone();
     assert!(buy.is_some_and(|buy| buy.sending), "the buy is still out");
     f.answer(

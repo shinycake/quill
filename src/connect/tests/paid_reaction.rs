@@ -149,10 +149,17 @@ fn a_refused_commit_releases_the_stars_and_the_next_tap_starts_fresh() {
         .to_string(),
     );
     // A refused commit is not tried again on its own: the Stars are let go
-    // and the note says why.
+    // and the user is told why.
     let paid = &driver.session.payments.paid;
     assert_eq!(paid.pending_stars(-100, 7), 0);
-    assert!(paid.note.is_some());
+    assert!(
+        driver
+            .session
+            .payments
+            .notices
+            .iter()
+            .any(|notice| notice.text.starts_with("Stars were not sent"))
+    );
     assert!(!driver.paid_reaction_tick(2 * ACCUMULATE_MS));
     assert_eq!(
         sent_count(&recorder, "commitPendingPaidMessageReactions"),
@@ -185,7 +192,14 @@ fn a_refused_undo_is_not_committed_later() {
         .to_string(),
     );
     assert_eq!(driver.session.payments.paid.pending_stars(-100, 7), 0);
-    assert!(driver.session.payments.paid.note.is_some());
+    assert!(
+        driver
+            .session
+            .payments
+            .notices
+            .iter()
+            .any(|notice| notice.text.starts_with("Couldn't undo the Stars"))
+    );
     assert!(!driver.paid_reaction_tick(2 * ACCUMULATE_MS));
     assert_eq!(
         sent_count(&recorder, "commitPendingPaidMessageReactions"),

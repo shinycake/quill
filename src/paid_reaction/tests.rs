@@ -104,7 +104,8 @@ fn a_late_refusal_does_not_touch_a_newer_entry_of_the_same_message() {
     paid.begin_commit(1, 10, RequestId(9));
     // The tap after the commit went out waits in its own entry.
     paid.add(1, 10, 2, None, 6_000, Some(RequestId(2)));
-    assert_eq!(paid.pending_stars(1, 10), 5);
+    assert_eq!(paid.pending_stars(1, 10), 2, "only the waiting entry");
+    assert_eq!(paid.total_pending(), 5);
     assert_eq!(paid.toast().map(|p| p.stars), Some(2));
     // The first tap's add is refused late: it comes off the committing
     // entry, not the newer one.
