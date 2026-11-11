@@ -417,6 +417,10 @@ pub struct PendingRequest {
     pub purpose: RequestPurpose,
     pub chat_id: Option<ChatId>,
     pub view_generation: Option<ViewGeneration>,
+    /// For a history page: the epoch of the chat's window it was asked for
+    /// ([`HistoryState::window_epoch`]). An answer for another epoch asks
+    /// about a window that has since been replaced.
+    pub window_epoch: Option<u64>,
     pub file_id: Option<i32>,
     pub search_generation: Option<u64>,
     pub around_message_id: Option<MessageId>,
@@ -526,6 +530,7 @@ impl RequestRegistry {
             purpose,
             chat_id: None,
             view_generation: None,
+            window_epoch: None,
             file_id: None,
             search_generation: None,
             around_message_id: None,

@@ -11,8 +11,26 @@ impl Session {
         } else {
             None
         };
-        self.requests
-            .register(self.account_generation, purpose, chat_id, view)
+        let id = self
+            .requests
+            .register(self.account_generation, purpose, chat_id, view);
+        if matches!(
+            purpose,
+            RequestPurpose::GetHistory | RequestPurpose::GetHistoryNewer
+        ) {
+            self.stamp_window_epoch(id, chat_id);
+        }
+        id
+    }
+
+    /// A history page asked for `chat_id` belongs to the window it has now.
+    pub(crate) fn stamp_window_epoch(&mut self, id: RequestId, chat_id: Option<ChatId>) {
+        let epoch = chat_id
+            .and_then(|chat| self.histories.get(&chat.0))
+            .map_or(0, |history| history.window_epoch);
+        if let Some(pending) = self.requests.pending_mut(id) {
+            pending.window_epoch = Some(epoch);
+        }
     }
 
     /// Slice bots-games: like `request`, but also stamps the message id for

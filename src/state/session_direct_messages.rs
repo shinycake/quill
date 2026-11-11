@@ -183,7 +183,7 @@ impl Session {
         let Some(chat_id) = pending.chat_id else {
             return;
         };
-        if self.stale_history_requests.contains(&pending.id.0) {
+        if self.history_request_stale(pending) {
             return;
         }
         if let Some(topic) = self.open_direct_topic(chat_id) {

@@ -22,12 +22,14 @@ impl Session {
     }
 
     pub fn request_history_around(&mut self, chat_id: ChatId, message_id: MessageId) -> RequestId {
-        self.requests.register_around(
+        let id = self.requests.register_around(
             self.account_generation,
             chat_id,
             self.view_generation,
             message_id,
-        )
+        );
+        self.stamp_window_epoch(id, Some(chat_id));
+        id
     }
 
     pub fn open_search(&mut self) {

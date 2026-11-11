@@ -130,7 +130,6 @@ fn account_loss_resets_the_loading_flags_of_pending_lookups() {
         9,
     );
     let user_action = session.request(RequestPurpose::SendMessage, Some(ChatId(5)));
-    session.stale_history_requests.insert(77);
 
     session.begin_logout();
 
@@ -141,7 +140,6 @@ fn account_loss_resets_the_loading_flags_of_pending_lookups() {
     assert!(!session.media.playlists[&9].loading);
     assert!(session.requests.is_empty());
     assert!(session.requests.get(user_action).is_none());
-    assert!(session.stale_history_requests.is_empty());
 }
 
 /// Sweep 05-200: a request dropped by logout settles (its busy marker

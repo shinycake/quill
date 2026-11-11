@@ -19,7 +19,6 @@ impl Session {
             chats_state: Box::new(ChatsState::new()),
             histories: HashMap::new(),
             history_pruning: HistoryPruning::default(),
-            stale_history_requests: HashSet::new(),
             revision: 0,
             messages: Box::new(MessagesState::new()),
             media: Box::new(MediaState::new()),

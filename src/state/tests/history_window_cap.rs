@@ -176,6 +176,48 @@ fn jumping_back_to_latest_refetches_after_a_trim() {
 }
 
 #[test]
+fn a_page_asked_for_a_replaced_window_is_dropped_and_forgotten() {
+    let (mut session, seq, sink) = opened_at_tail();
+    let stale = session.request_for_message(RequestPurpose::GetHistory, ChatId(CHAT), MessageId(0));
+    assert!(session.history_page_in_flight(
+        ChatId(CHAT),
+        crate::state::session_history_window::WindowEdge::First
+    ));
+    session.reset_history_window(ChatId(CHAT));
+    // The old page no longer holds back the page the new window needs.
+    assert!(!session.history_page_in_flight(
+        ChatId(CHAT),
+        crate::state::session_history_window::WindowEdge::First
+    ));
+    let fresh = session.request_for_message(RequestPurpose::GetHistory, ChatId(CHAT), MessageId(0));
+    assert!(session.history_page_in_flight(
+        ChatId(CHAT),
+        crate::state::session_history_window::WindowEdge::First
+    ));
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &page_json(stale.0, (4951..=5000).rev()),
+    );
+    assert!(
+        session.histories[&CHAT].messages.is_empty(),
+        "the old page is dropped"
+    );
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &page_json(fresh.0, (4951..=5000).rev()),
+    );
+    assert_eq!(
+        session.histories[&CHAT].newest_id(),
+        Some(MessageId(5000)),
+        "the page asked after the reset lands"
+    );
+}
+
+#[test]
 fn the_cap_constants_leave_headroom_between_trims() {
     const { assert!(HISTORY_WINDOW_TRIM_TO + 100 < HISTORY_WINDOW_CAP) };
     assert_ne!(WindowEnd::Oldest, WindowEnd::Newest);

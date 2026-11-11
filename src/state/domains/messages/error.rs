@@ -136,7 +136,7 @@ impl Session {
             Some(RequestPurpose::GetHistory | RequestPurpose::GetHistoryAround) => {
                 if let Some(pending) = pending
                     && let Some(chat_id) = pending.chat_id
-                    && !self.take_stale_history_request(pending)
+                    && !self.history_request_stale(pending)
                 {
                     // R5: the empty window shows "Couldn't load messages ·
                     // Retry" instead of a skeleton that never settles.
