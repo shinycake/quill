@@ -35,6 +35,8 @@ pub struct PlaceholderFacts {
     pub anonymous_admin: bool,
     /// The chat is a bot that makes its own topics, and none is open.
     pub bot_off_thread: bool,
+    /// Files wait to be sent: the field is their caption.
+    pub caption: bool,
 }
 
 /// One of the compose field's placeholders.
@@ -42,6 +44,7 @@ pub struct PlaceholderFacts {
 pub enum ComposerPlaceholder {
     Message,
     Edit,
+    Caption,
     Keyboard(String),
     Stars(i64),
     Topic(TopicPlaceholder),
@@ -53,11 +56,14 @@ pub enum ComposerPlaceholder {
 
 impl ComposerPlaceholder {
     /// The first case that applies (`HistoryWidget::updateFieldPlaceholder`):
-    /// edit, the bot keyboard's own, Stars, forum topic, broadcast, anonymous
+    /// edit, a caption for the files waiting to be sent (tdesktop's send box
+    /// field), the bot keyboard's own, Stars, forum topic, broadcast, anonymous
     /// admin, a bot's off-thread chat, plain.
     pub fn for_facts(facts: &PlaceholderFacts) -> Self {
         if facts.editing {
             Self::Edit
+        } else if facts.caption {
+            Self::Caption
         } else if !facts.keyboard.is_empty() {
             Self::Keyboard(facts.keyboard.clone())
         } else if facts.stars_per_message > 0 {
@@ -82,6 +88,7 @@ impl ComposerPlaceholder {
         match self {
             Self::Message => tr(keys::MESSAGE_PH).to_string(),
             Self::Edit => tr(keys::EDIT_MESSAGE_TEXT).to_string(),
+            Self::Caption => tr(keys::Q_CHAT_ADD_A_CAPTION).to_string(),
             Self::Keyboard(text) => text.clone(),
             Self::Stars(count) => trn(keys::MESSAGE_STARS_PH, *count),
             Self::Topic(topic) => {
@@ -168,6 +175,27 @@ mod tests {
         };
         assert_eq!(
             ComposerPlaceholder::for_facts(&all),
+            ComposerPlaceholder::Edit
+        );
+    }
+
+    #[test]
+    fn files_waiting_make_the_field_their_caption() {
+        let waiting = PlaceholderFacts {
+            caption: true,
+            keyboard: "Pick".into(),
+            ..facts(false, 5, true, false)
+        };
+        assert_eq!(
+            ComposerPlaceholder::for_facts(&waiting),
+            ComposerPlaceholder::Caption
+        );
+        let editing = PlaceholderFacts {
+            caption: true,
+            ..facts(true, 0, false, false)
+        };
+        assert_eq!(
+            ComposerPlaceholder::for_facts(&editing),
             ComposerPlaceholder::Edit
         );
     }

@@ -10,6 +10,7 @@ use gpui_kit::test::TestWindowExt;
 use gpui_kit::{AppContext, Entity, Focusable, TestAppContext, VisualTestContext, px, size};
 use quill::composer::{AttachmentKind, ComposerAttachment};
 use quill::ids::ChatId;
+use quill::lang::{keys, tr};
 use quill::telegram::envelope::{ChannelMemberStatus, SupergroupFullAdmin};
 use std::path::PathBuf;
 
@@ -222,20 +223,20 @@ fn the_same_picture_added_again_still_goes_as_its_jpeg(cx: &mut TestAppContext) 
 fn a_slot_whose_files_are_being_read_says_so_and_other_chats_are_free(cx: &mut TestAppContext) {
     let (app, mut vcx) = new_app(cx);
     let vcx = &mut vcx;
-    app.update_in(vcx, |app, _, cx| {
+    app.update_in(vcx, |app, _, _| {
         tray(app, &[("demo-thumb.png", AttachmentKind::Photo)]);
         let open = app.open_chat_id().expect("a chat is open");
         assert!(!app.tray_preparing());
-        assert!(app.send_box_option_controls(cx).is_empty());
+        assert_eq!(app.send_card_status(), None);
 
         let slot = app.send_slot().expect("an open slot");
         let job = app.composer_sends.prep.begin(slot);
         assert!(job.is_some());
         assert!(app.tray_preparing());
         assert_eq!(
-            app.send_box_option_controls(cx).len(),
-            1,
-            "the tray says the files are being prepared"
+            app.send_card_status(),
+            Some(tr(keys::Q_OPS_PREPARING_THE_FILES)),
+            "the card says the files are being prepared"
         );
 
         // Another chat's composer is not held by it.
@@ -252,7 +253,7 @@ fn a_slot_whose_files_are_being_read_says_so_and_other_chats_are_free(cx: &mut T
         // The job ends: the label goes with it, nothing else stored.
         app.composer_sends.prep.finish(job.unwrap());
         assert!(!app.tray_preparing());
-        assert!(app.send_box_option_controls(cx).is_empty());
+        assert_eq!(app.send_card_status(), None);
     });
 }
 

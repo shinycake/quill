@@ -40,6 +40,7 @@ impl QuillApp {
             silent: broadcast && self.composer_effective_silent(),
             anonymous_admin: !broadcast && session.chat_posts_anonymously(chat),
             bot_off_thread: session.bot_chat_off_thread(chat),
+            caption: !self.pending_attachments().is_empty(),
         }
     }
 

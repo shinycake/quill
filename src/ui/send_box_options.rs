@@ -14,14 +14,12 @@ use crate::ui::status_note::StatusNote;
 use gpui_kit::component::button::*;
 use gpui_kit::component::dialog::Dialog;
 use gpui_kit::component::input::{Input, InputState};
-use gpui_kit::component::menu::{DropdownMenu, PopupMenuItem};
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::composer::{
-    AttachmentKind, ComposerAttachment, MediaSendOptions, PriceInput, can_use_high_quality,
-    cover_send_path, is_gif_path, paid_media_fits, parse_paid_price, session_allows_cover,
-    session_allows_paid_media,
+    AttachmentKind, MediaSendOptions, PriceInput, can_use_high_quality, cover_send_path,
+    paid_media_fits, parse_paid_price, session_allows_paid_media,
 };
 use quill::lang::{keys, tr, tr_with};
 use std::cell::RefCell;
@@ -87,7 +85,7 @@ impl QuillApp {
     }
 
     /// Size from the file header, read once per photo.
-    fn tray_photo_size(&self, path: &Path) -> Option<(u32, u32)> {
+    pub(super) fn tray_photo_size(&self, path: &Path) -> Option<(u32, u32)> {
         *self
             .composer_sends
             .reads
@@ -155,6 +153,7 @@ impl QuillApp {
         }
         self.prepare_tray_file_thumbnails(cx);
         self.check_tray_media(cx);
+        self.read_tray_video_previews(cx);
     }
 
     /// Videos in the open slot's tray are still being read (a probe for
@@ -166,150 +165,16 @@ impl QuillApp {
             .any(|attachment| checking.is_reading(&attachment.path))
     }
 
-    /// The options row of the tray: High quality and the price.
-    pub(super) fn send_box_option_controls(&self, cx: &mut Context<Self>) -> Vec<AnyElement> {
-        let mut controls = Vec::new();
-        if self.tray_videos_checking() {
-            controls.push(
-                div()
-                    .text_sm()
-                    .text_color(cx.theme().muted_foreground)
-                    .child(tr(keys::Q_OPS_CHECKING_THE_VIDEO))
-                    .into_any_element(),
-            );
-        }
-        if self.tray_preparing() {
-            controls.push(
-                div()
-                    .text_sm()
-                    .text_color(cx.theme().muted_foreground)
-                    .child(tr(keys::Q_OPS_PREPARING_THE_FILES))
-                    .into_any_element(),
-            );
-        }
-        if self.tray_has_large_photo() {
-            controls.push(
-                gpui_kit::component::checkbox::Checkbox::new("composer-high-quality")
-                    .label(tr(keys::SEND_HIGH_QUALITY))
-                    .checked(self.pending_send().hd_photos)
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.update_pending_send(|send| send.hd_photos = !send.hd_photos);
-                        cx.notify();
-                    }))
-                    .into_any_element(),
-            );
-        }
-        if self.paid_media_available() {
-            let stars = self.pending_send().paid_stars;
-            controls.push(
-                Button::new("composer-paid-media")
-                    .icon(gpui_kit::assets::IconName::Star)
-                    .label(if stars > 0 {
-                        tr_with(
-                            keys::Q_OPS_UNLOCK_FOR_STARS,
-                            &[("stars", &stars.to_string())],
-                        )
-                    } else {
-                        tr(keys::Q_OPS_MAKE_PAID).to_string()
-                    })
-                    .ghost()
-                    .small()
-                    .selected(stars > 0)
-                    .tooltip(if stars > 0 {
-                        tr(keys::Q_OPS_CHANGE_THE_PRICE)
-                    } else {
-                        tr(keys::Q_OPS_ASK_FOR_STARS_TO_SEE)
-                    })
-                    .on_click(cx.listener(|this, _, window, cx| {
-                        this.open_price_dialog(window, cx);
-                    }))
-                    .into_any_element(),
-            );
-        }
-        controls
-    }
-
     /// Whether the tray hides the spoiler button: paid media is blurred by
     /// Telegram itself (tdesktop `hasPrice()` turns spoilers off).
     pub(super) fn tray_paid_price_set(&self) -> bool {
         self.paid_stars_in_effect() > 0
     }
 
-    /// "Edit video" and "Cover" for a video card.
-    pub(super) fn video_card_actions(
-        &self,
-        index: usize,
-        attachment: &ComposerAttachment,
-        cx: &mut Context<Self>,
-    ) -> Vec<AnyElement> {
-        // A `.gif` file is an animation already: nothing to edit.
-        if attachment.kind != AttachmentKind::Video || is_gif_path(&attachment.path) {
-            return Vec::new();
-        }
-        let mut actions = vec![
-            Button::new(("composer-attach-edit-video", index as u64))
-                .icon(gpui_kit::assets::IconName::Pencil)
-                .xsmall()
-                .ghost()
-                .tooltip(tr(keys::Q_OPS_EDIT_VIDEO))
-                .on_click(cx.listener(move |this, _, window, cx| {
-                    this.open_tray_video_editor(index, window, cx);
-                }))
-                .into_any_element(),
-        ];
-        // A video that goes out as a GIF has no cover.
-        let animation = attachment.sends_as_animation(
-            self.pending_attachments().len(),
-            self.composer_group_media_effective(),
-        );
-        let cover_ok = !animation
-            && self.session().is_some_and(|session| {
-                session
-                    .open_chat_id()
-                    .is_some_and(|chat| session_allows_cover(session, chat))
-            });
-        if cover_ok {
-            let owner = cx.entity().downgrade();
-            let has_cover = attachment.extras.cover.is_some();
-            actions.push(
-                Button::new(("composer-attach-cover", index as u64))
-                    .icon(gpui_kit::assets::IconName::Image)
-                    .xsmall()
-                    .ghost()
-                    .selected(has_cover)
-                    .tooltip(tr(keys::Q_OPS_COVER))
-                    .dropdown_menu(move |mut menu, _, _| {
-                        let edit = owner.clone();
-                        menu = menu.item(PopupMenuItem::new(tr(keys::Q_OPS_EDIT_COVER)).on_click(
-                            move |_, _, cx| {
-                                let _ = edit
-                                    .update(cx, |this, cx| this.pick_attachment_cover(index, cx));
-                            },
-                        ));
-                        if has_cover {
-                            let clear = owner.clone();
-                            menu = menu.item(
-                                PopupMenuItem::new(tr(keys::Q_OPS_CLEAR_COVER)).on_click(
-                                    move |_, _, cx| {
-                                        let _ = clear.update(cx, |this, cx| {
-                                            this.clear_attachment_cover(index, cx)
-                                        });
-                                    },
-                                ),
-                            );
-                        }
-                        menu
-                    })
-                    .into_any_element(),
-            );
-        }
-        actions
-    }
-
     /// "Edit Cover" on a tray video: choose an image (tdesktop
     /// `VideoCoverUploader::choose`). The picker answers later: the cover
     /// goes to this video in this chat, wherever the user is by then.
-    fn pick_attachment_cover(&mut self, index: usize, cx: &mut Context<Self>) {
+    pub(super) fn pick_attachment_cover(&mut self, index: usize, cx: &mut Context<Self>) {
         let Some(item) = self.tray_item(index) else {
             return;
         };
@@ -361,7 +226,7 @@ impl QuillApp {
         cx.notify();
     }
 
-    fn clear_attachment_cover(&mut self, index: usize, cx: &mut Context<Self>) {
+    pub(super) fn clear_attachment_cover(&mut self, index: usize, cx: &mut Context<Self>) {
         if self
             .update_pending_attachment(index, |attachment| attachment.extras.cover = None)
             .is_some()

@@ -996,3 +996,4 @@ pub(in crate::ui) use sent_text::{AiAsk, SentText};
 #[cfg(feature = "demo-capture")]
 mod send_options_to_tests;
 mod toggle_composer_silent;
+pub(in crate::ui) use toggle_composer_silent::option_chip;

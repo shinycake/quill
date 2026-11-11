@@ -8,10 +8,6 @@ use super::*;
 use crate::ui::status_note::StatusNote;
 use gpui_kit::TestSupportExt;
 use gpui_kit::assets::IconName;
-use gpui_kit::component::attachment::{
-    Attachment, AttachmentActions, AttachmentContent, AttachmentDescription, AttachmentGroup,
-    AttachmentMedia, AttachmentTitle,
-};
 use gpui_kit::component::button::*;
 use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::menu::{DropdownMenu, PopupMenuItem};
@@ -19,15 +15,13 @@ use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::composer::{
-    AttachmentKind, ComposerAttachment, ComposerEdit, ComposerReplyTo, LinkPreviewChoice,
-    PreviewMediaSize, find_urls,
+    ComposerEdit, ComposerReplyTo, LinkPreviewChoice, PreviewMediaSize, find_urls,
 };
 use quill::diagnostics::{DiagnosticSink, MemorySink};
 use quill::ids::{ChatId, FileId, MessageId};
 use quill::lang::{keys, tr, tr_with};
 use quill::state::{RequestPurpose, Session};
 use quill::telegram::client::copy_and_parse;
-use quill::telegram::requests::SelfDestructSend;
 use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
 use std::time::Duration;
@@ -518,243 +512,6 @@ impl QuillApp {
                         }),
                 )
             })
-    }
-
-    /// Picked files waiting to be sent: removable cards, plus the album and
-    /// self-destruct options that apply to them.
-    pub(super) fn composer_attachment_tray(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let mut group =
-            AttachmentGroup::new("composer-attachments").with_edge_fade(cx.theme().background);
-        for (index, attachment) in self.pending_attachments().iter().enumerate() {
-            let (icon, kind) = match attachment.kind {
-                AttachmentKind::Photo => (IconName::Image, tr(keys::Q_CHAT_PHOTO)),
-                AttachmentKind::Video => (IconName::Film, tr(keys::Q_CHAT_VIDEO)),
-                AttachmentKind::Document => (IconName::File, tr(keys::Q_CHAT_FILE)),
-                AttachmentKind::VideoNote => (IconName::Video, tr(keys::IN_DLG_VIDEO_MESSAGE)),
-            };
-            // Photos and videos show as preview tiles (the photo itself),
-            // files as compact rows — Telegram Desktop's send box shows the
-            // picture rather than the file name.
-            let is_media = matches!(
-                attachment.kind,
-                AttachmentKind::Photo | AttachmentKind::Video
-            );
-            // An image sent as a file still previews as the picture; a
-            // HEIC, AVIF or other picture the tile can't read shows the
-            // thumbnail made for sending (`send_box_thumbnails.rs`).
-            let image_file = attachment.kind == AttachmentKind::Document
-                && quill::composer::direct_media_kind_for(&attachment.path)
-                    == Some(AttachmentKind::Photo);
-            let file_thumbnail = (attachment.kind == AttachmentKind::Document)
-                .then_some(attachment.extras.file_thumbnail.as_ref())
-                .flatten();
-            // Like tdesktop, only the first album's worth of files decode
-            // a preview; the rest show their kind.
-            let previewed = index < quill::album::ALBUM_MAX_ITEMS;
-            let media = match (attachment.kind, file_thumbnail) {
-                _ if !previewed => AttachmentMedia::new().child(Icon::new(icon)),
-                // The JPEG of a HEIC or the like is still being made.
-                (AttachmentKind::Photo, _)
-                    if quill::composer::photo_needs_jpeg(attachment.photo_file()) =>
-                {
-                    AttachmentMedia::new().child(Icon::new(icon))
-                }
-                (AttachmentKind::Photo, _) => {
-                    AttachmentMedia::new().src(attachment.photo_file().to_path_buf())
-                }
-                (_, Some(thumb)) => AttachmentMedia::new().src(thumb.path.clone()),
-                _ if image_file => AttachmentMedia::new().src(attachment.path.clone()),
-                _ => AttachmentMedia::new().child(Icon::new(icon)),
-            };
-            let spoiler = attachment.spoiler;
-            let is_photo = attachment.kind == AttachmentKind::Photo;
-            let rendering = attachment.extras.photo_render().is_some();
-            // "Edit video" and "Cover" on a video, no spoiler on paid media
-            // (`send_box_options.rs`).
-            let video_actions = self.video_card_actions(index, attachment, cx);
-            let paid_price = self.tray_paid_price_set();
-            let card = Attachment::new()
-                .id(("composer-attach-item", index as u64))
-                .tooltip(attachment.file_name.clone());
-            let card = if is_media {
-                card.axis(Axis::Vertical)
-            } else {
-                card.small()
-            };
-            group = group.child(
-                card.media(media)
-                    .content(
-                        AttachmentContent::new()
-                            .title(AttachmentTitle::new(attachment.file_name.clone()))
-                            .description(AttachmentDescription::new(kind)),
-                    )
-                    .on_remove(cx.listener(move |this, _, _, cx| {
-                        this.remove_attachment(index, cx);
-                    }))
-                    // Telegram Desktop's "Hide with spoiler" on a photo or
-                    // video in the send box.
-                    .when(is_media, |card| {
-                        card.actions(
-                            AttachmentActions::new()
-                                .when(is_photo, |actions| {
-                                    actions.child(
-                                        Button::new(("composer-attach-edit", index as u64))
-                                            .map(|button| {
-                                                // Its edit is still being saved.
-                                                if rendering {
-                                                    button
-                                                        .icon(spinner::Spinner::new())
-                                                        .debug_selector(move || {
-                                                            format!(
-                                                                "composer-attach-rendering-{index}"
-                                                            )
-                                                        })
-                                                } else {
-                                                    button.icon(IconName::Pencil)
-                                                }
-                                            })
-                                            .xsmall()
-                                            .ghost()
-                                            .tooltip(tr(keys::Q_CHAT_EDIT))
-                                            .on_click(cx.listener(move |this, _, _, cx| {
-                                                this.open_photo_editor(index, cx);
-                                            })),
-                                    )
-                                })
-                                .children(video_actions)
-                                .when(!paid_price, |actions| {
-                                    actions.child(
-                                        Button::new(("composer-attach-spoiler", index as u64))
-                                            .icon(IconName::EyeOff)
-                                            .xsmall()
-                                            .ghost()
-                                            .selected(spoiler)
-                                            .tooltip(if spoiler {
-                                                tr(keys::Q_CHAT_REMOVE_SPOILER)
-                                            } else {
-                                                tr(keys::Q_CHAT_HIDE_WITH_SPOILER)
-                                            })
-                                            .on_click(cx.listener(move |this, _, _, cx| {
-                                                this.toggle_attachment_spoiler(index, cx);
-                                            })),
-                                    )
-                                }),
-                        )
-                    }),
-            );
-        }
-        let several = self.pending_attachments().len() >= 2;
-        let grouped = self.composer_group_media_effective();
-        // Telegram Desktop's "Send without compression".
-        let can_files = ComposerAttachment::can_send_as_files(self.pending_attachments());
-        let as_files = can_files
-            && self
-                .pending_attachments()
-                .iter()
-                .all(|attachment| attachment.kind == AttachmentKind::Document);
-        let remember = self
-            .session()
-            .map(|s| s.settings.media_prefs.remember_media_grouping)
-            .unwrap_or(false);
-        let timer = self.self_destruct_picker_visible().then(|| {
-            let owner = cx.entity().downgrade();
-            let current = self.pending_send().self_destruct;
-            Button::new("self-destruct-menu")
-                .icon(IconName::Timer)
-                .label(self.self_destruct_button_label())
-                .ghost()
-                .small()
-                .tooltip(tr(keys::Q_CHAT_SELF_DESTRUCT_TIMER))
-                .dropdown_menu(move |mut menu, _, _| {
-                    for choice in QuillApp::SELF_DESTRUCT_CHOICES {
-                        let owner = owner.clone();
-                        let label = match choice {
-                            None => tr(keys::Q_CHAT_OFF).to_string(),
-                            Some(SelfDestructSend::Timer(secs)) if secs < 60 => {
-                                format!("{secs} seconds")
-                            }
-                            Some(SelfDestructSend::Timer(secs)) => {
-                                format!("{} minute", secs / 60)
-                            }
-                            Some(SelfDestructSend::Immediately) => {
-                                tr(keys::Q_CHAT_VIEW_ONCE).to_string()
-                            }
-                        };
-                        menu = menu.item(
-                            PopupMenuItem::new(label)
-                                .checked(choice == current)
-                                .on_click(move |_, _, cx| {
-                                    let _ = owner.update(cx, |this, cx| {
-                                        this.set_composer_self_destruct(choice, cx);
-                                    });
-                                }),
-                        );
-                    }
-                    menu
-                })
-        });
-        div()
-            .id("composer-attach-tray")
-            .flex()
-            .flex_col()
-            .gap_2()
-            .child(group)
-            .child(
-                div()
-                    .flex()
-                    .flex_wrap()
-                    .items_center()
-                    .gap_4()
-                    .text_sm()
-                    .when(can_files, |row| {
-                        row.child(
-                            Checkbox::new("composer-send-as-files")
-                                .label(tr(keys::Q_CHAT_SEND_WITHOUT_COMPRESSION))
-                                .checked(as_files)
-                                .on_click(cx.listener(move |this, _, _, cx| {
-                                    this.update_pending_attachments(|tray| {
-                                        ComposerAttachment::set_send_as_files(tray, !as_files)
-                                    });
-                                    // Back to media: read the videos again.
-                                    this.composer_sends.reads.sound.clear_done();
-                                    this.check_tray_videos(cx);
-                                    cx.notify();
-                                })),
-                        )
-                    })
-                    .when(several, |row| {
-                        row.child(
-                            Checkbox::new("composer-group-media")
-                                .label(tr(keys::Q_CHAT_SEND_AS_ALBUM))
-                                .checked(grouped)
-                                .on_click(cx.listener(|this, _, _, cx| {
-                                    this.toggle_composer_group_media(cx);
-                                })),
-                        )
-                        .child(
-                            Checkbox::new("composer-remember-grouping")
-                                .label(tr(keys::Q_CHAT_REMEMBER_CHOICE))
-                                .checked(remember)
-                                .on_click(cx.listener(|this, _, _, cx| {
-                                    this.toggle_remember_media_grouping(cx);
-                                })),
-                        )
-                    })
-                    .children(self.send_box_option_controls(cx))
-                    .children(timer)
-                    .child(div().flex_1())
-                    .child(
-                        Button::new("clear-attach")
-                            .label(if several {
-                                tr(keys::Q_CHAT_REMOVE_ALL)
-                            } else {
-                                tr(keys::BOX_REMOVE)
-                            })
-                            .ghost()
-                            .small()
-                            .on_click(cx.listener(|this, _, _, cx| this.clear_attachment(cx))),
-                    ),
-            )
     }
 }
 
