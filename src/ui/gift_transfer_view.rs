@@ -5,7 +5,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
-use super::fragment_password::{PasswordBox, PasswordEntry, SecurityCheck};
+use super::fragment_password::{PasswordBox, PasswordView, SecurityCheck};
 use super::gift_market_ui::collectible_tile;
 use super::gift_resale_buy::attribute_row;
 use super::gift_transfer_ui::{balance_hint, transfer_price};
@@ -17,7 +17,7 @@ use gpui_kit::component::list::ListItem;
 use gpui_kit::component::*;
 use gpui_kit::*;
 use quill::gift_manage::{
-    ExportError, ExportState, TransferCandidate, TransferGate, TransferPicker, TransferStage,
+    ExportSend, ExportState, TransferCandidate, TransferGate, TransferPicker, TransferStage,
     UnlockIn, transfer_candidates,
 };
 use quill::ids::ChatId;
@@ -90,7 +90,12 @@ pub(super) fn stage_view(app: &QuillApp, cx: &mut Context<QuillApp>) -> Option<S
         TransferStage::ConfirmExport => confirm_export_view(&name, false, cx),
         TransferStage::Probing => confirm_export_view(&name, true, cx),
         TransferStage::Password { send, error } => {
-            password_view(app, session, send.is_out(), error.as_ref(), cx)
+            let entry = match (send, error.as_ref()) {
+                (ExportSend::Out(_) | ExportSend::Unlocked, _) => PasswordView::Sending,
+                (ExportSend::Idle, Some(error)) => PasswordView::Failed(error),
+                (ExportSend::Idle, None) => PasswordView::Idle,
+            };
+            password_view(app, session, entry, cx)
         }
         TransferStage::SecurityCheck { later } => security_check_view(*later, cx),
         TransferStage::ActionLocked => action_locked_view(cx),
@@ -505,15 +510,14 @@ fn confirm_export_view(gift_name: &str, probing: bool, cx: &mut Context<QuillApp
 fn password_view(
     app: &QuillApp,
     session: &Session,
-    sending: bool,
-    error: Option<&ExportError>,
+    entry: PasswordView<'_>,
     cx: &mut Context<QuillApp>,
 ) -> StageView {
     let (body, footer) = PasswordBox {
         id: "gift-transfer",
         input: &app.payments.gift_export_password,
         description: tr(keys::GIFT_TRANSFER_PASSWORD_DESCRIPTION),
-        entry: PasswordEntry::of(sending, error),
+        entry,
         on_submit: QuillApp::submit_gift_export_password,
         on_cancel: QuillApp::transfer_step_back,
         on_forgot: QuillApp::forgot_gift_export_password,

@@ -54,7 +54,7 @@ thread_local! {
 }
 
 fn active() -> Option<Rc<Atlas>> {
-    ACTIVE.with(|a| a.borrow().clone())
+    ACTIVE.with(|a| a.try_borrow().ok().and_then(|a| a.clone()))
 }
 
 /// The set in use (the system font when none is installed).
@@ -75,9 +75,17 @@ pub(super) fn install(set: Option<(EmojiSetId, PathBuf, Arc<SpritePack>)>, cx: &
             app: cx.to_async(),
         })
     });
-    let previous = ACTIVE.with(|a| a.replace(next));
+    let previous = ACTIVE.with(|a| {
+        a.try_borrow_mut()
+            .ok()
+            .and_then(|mut slot| std::mem::replace(&mut *slot, next))
+    });
     if let Some(previous) = previous {
-        let sheets = std::mem::take(&mut *previous.sheets.borrow_mut());
+        let sheets = previous
+            .sheets
+            .try_borrow_mut()
+            .map(|mut sheets| std::mem::take(&mut *sheets))
+            .unwrap_or_default();
         let images: Vec<Arc<RenderImage>> = sheets
             .into_iter()
             .filter_map(|sheet| match sheet {
@@ -92,10 +100,11 @@ pub(super) fn install(set: Option<(EmojiSetId, PathBuf, Arc<SpritePack>)>, cx: &
 
 /// Start decoding `sheet` if nothing has yet.
 fn request(atlas: &Rc<Atlas>, sheet: u16) {
-    if !matches!(
-        atlas.sheets.borrow().get(usize::from(sheet)),
-        Some(Sheet::Missing)
-    ) {
+    let missing = atlas
+        .sheets
+        .try_borrow()
+        .is_ok_and(|sheets| matches!(sheets.get(usize::from(sheet)), Some(Sheet::Missing)));
+    if !missing {
         return;
     }
     let path = sheet_path(&atlas.dir, sheet);
@@ -123,7 +132,9 @@ fn request(atlas: &Rc<Atlas>, sheet: u16) {
         let Some(atlas) = owner.upgrade() else {
             return;
         };
-        if let Some(slot) = atlas.sheets.borrow_mut().get_mut(usize::from(sheet)) {
+        if let Ok(mut sheets) = atlas.sheets.try_borrow_mut()
+            && let Some(slot) = sheets.get_mut(usize::from(sheet))
+        {
             *slot = match decoded {
                 Some(cells) => Sheet::Ready(Rc::new(cells)),
                 None => Sheet::Failed,
@@ -131,7 +142,9 @@ fn request(atlas: &Rc<Atlas>, sheet: u16) {
         }
         cx.update(|cx| cx.refresh_windows());
     });
-    if let Some(slot) = atlas.sheets.borrow_mut().get_mut(usize::from(sheet)) {
+    if let Ok(mut sheets) = atlas.sheets.try_borrow_mut()
+        && let Some(slot) = sheets.get_mut(usize::from(sheet))
+    {
         *slot = Sheet::Loading { _decode: decode };
     }
 }
@@ -171,11 +184,13 @@ fn decode_sheet(
 }
 
 fn image_of(atlas: &Rc<Atlas>, cell: Cell) -> Option<Arc<RenderImage>> {
-    let found = match atlas.sheets.borrow().get(usize::from(cell.sheet)) {
+    let sheets = atlas.sheets.try_borrow().ok()?;
+    let found = match sheets.get(usize::from(cell.sheet)) {
         Some(Sheet::Ready(cells)) => return cells.get(usize::from(cell.index)).cloned().flatten(),
         Some(Sheet::Missing) => true,
         _ => false,
     };
+    drop(sheets);
     if found {
         request(atlas, cell.sheet);
     }

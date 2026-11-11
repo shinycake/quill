@@ -254,7 +254,6 @@ Wallpaper::with_stored_rotation::r.borrow 1
 WindowZoom::fire_resize::resize.borrow_mut 1
 WindowZoom::register::list.borrow_mut 1
 ZoomWindow::on_resize::resize.borrow_mut 1
-active::a.borrow 1
 ai_apply_shortcut_text::keymap.borrow 1
 anchor::anchors.borrow 1
 anchor::seen.borrow 1
@@ -306,9 +305,7 @@ forget_window::slices.borrow_mut 1
 forget_window::whole.borrow_mut 1
 gpu_gone::slot.borrow 1
 hide_until_mouse_moves::slot.borrow 1
-image_of::sheets.borrow 1
 image_tile::tile.borrow_mut 1
-install::sheets.borrow_mut 1
 install::sync.borrow 1
 last_target::last.borrow 1
 locate::running.borrow_mut 1
@@ -344,7 +341,6 @@ release_unshown::cache.borrow_mut 1
 remember::slot.borrow_mut 1
 remember_gpu_gone::gone.borrow_mut 1
 report_gpu_gone::gone.borrow_mut 1
-request::sheets.borrow_mut 2
 retain_community_chats::chat.borrow 1
 retire_all::retired.borrow_mut 1
 retry_later::retry.borrow 1

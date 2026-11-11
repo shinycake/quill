@@ -12,7 +12,6 @@ detached:QuillApp::close_profile_modal 1
 detached:QuillApp::copy_folder_link 1
 detached:QuillApp::custom_emoji_card_body 1
 detached:QuillApp::download_update 1
-detached:QuillApp::emoji_sets_search_typed 1
 detached:QuillApp::ensure_call_tick 1
 detached:QuillApp::ensure_self_destruct_tick 1
 detached:QuillApp::general_link_handler_section 1

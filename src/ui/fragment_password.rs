@@ -32,25 +32,15 @@ fn footer() -> Div {
     div().flex().justify_end().gap_2()
 }
 
-/// Where the password box stands: waiting for the password, its answer
-/// pending, or refused. The answer pending hides an earlier refusal.
+/// What the password box draws, derived each frame from the caller's own
+/// stage (which holds the request and matches its answer): waiting for the
+/// password, its answer pending, or refused. The answer pending hides an
+/// earlier refusal.
 #[derive(Clone, Copy)]
-pub(super) enum PasswordEntry<'a> {
+pub(super) enum PasswordView<'a> {
     Idle,
     Sending,
     Failed(&'a ExportError),
-}
-
-impl<'a> PasswordEntry<'a> {
-    /// The entry for a caller that keeps whether its request is out and
-    /// the last refusal.
-    pub(super) fn of(sending: bool, error: Option<&'a ExportError>) -> Self {
-        match (sending, error) {
-            (true, _) => Self::Sending,
-            (false, Some(error)) => Self::Failed(error),
-            (false, None) => Self::Idle,
-        }
-    }
 }
 
 /// tdesktop `PasscodeBox` in check mode: the field, the error or the hint
@@ -60,7 +50,7 @@ pub(super) struct PasswordBox<'a> {
     pub(super) id: &'static str,
     pub(super) input: &'a Entity<InputState>,
     pub(super) description: &'static str,
-    pub(super) entry: PasswordEntry<'a>,
+    pub(super) entry: PasswordView<'a>,
     pub(super) on_submit: BoxAction,
     pub(super) on_cancel: BoxAction,
     pub(super) on_forgot: BoxAction,
@@ -82,10 +72,10 @@ impl PasswordBox<'_> {
             on_cancel,
             on_forgot,
         } = self;
-        let sending = matches!(entry, PasswordEntry::Sending);
+        let sending = matches!(entry, PasswordView::Sending);
         let error = match entry {
-            PasswordEntry::Failed(error) => Some(error),
-            PasswordEntry::Idle | PasswordEntry::Sending => None,
+            PasswordView::Failed(error) => Some(error),
+            PasswordView::Idle | PasswordView::Sending => None,
         };
         let muted = cx.theme().muted_foreground;
         let state = session.auth_state.password_state.as_ref();
