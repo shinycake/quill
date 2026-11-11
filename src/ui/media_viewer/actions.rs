@@ -606,8 +606,7 @@ impl QuillApp {
                         let done =
                             !this.viewer.state.is_open() || this.viewer.visibility.is_hidden();
                         // Never mid-drag (a seek, volume or speed thumb).
-                        let held =
-                            this.viewer.over_controls || this.viewer.controls.dragging();
+                        let held = this.viewer.over_controls || this.viewer.controls.dragging();
                         if !done && controls_should_hide(idle, held) {
                             this.viewer.visibility.hide(std::time::Instant::now());
                             this.redraw_viewer_after_fade(cx);

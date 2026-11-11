@@ -659,10 +659,9 @@ impl QuillApp {
             .open
             .iter()
             .find(|open| open.chat_id == chat_id)
+            && let Ok(mut closed) = self.main_window.dialogs_closed.try_borrow_mut()
         {
-            if let Ok(mut closed) = self.main_window.dialogs_closed.try_borrow_mut() {
-                closed.remove(&open.handle.window_id());
-            }
+            closed.remove(&open.handle.window_id());
         }
         self.windows.open.retain(|open| open.chat_id != chat_id);
         // Its media panel goes: the GIF downloads follow the panels left.

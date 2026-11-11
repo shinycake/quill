@@ -659,7 +659,7 @@ fn a_flow_in_progress_wins_over_another_link() {
     let mut driver = ready_driver(&recorder, prepared, &sink, &seq);
 
     let extra = driver
-        .request_deep_link_info("https://t.me/agentpick")
+        .request_deep_link_info_from("https://t.me/agentpick", true)
         .unwrap()
         .unwrap();
     assert!(
@@ -673,7 +673,7 @@ fn a_flow_in_progress_wins_over_another_link() {
     // The user's link waits: the flow in progress wins and keeps its origin.
     assert_eq!(
         driver
-            .request_deep_link_info("https://t.me/userpick")
+            .request_deep_link_info_from("https://t.me/userpick", false)
             .unwrap(),
         None
     );
