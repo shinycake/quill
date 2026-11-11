@@ -332,6 +332,6 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session.payments.hub.collectible = None;
             return Err(err);
         }
-        Ok(extra)
+        Ok(Some(extra))
     }
 }

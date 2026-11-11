@@ -218,7 +218,7 @@ fn a_refused_collectible_lookup_is_an_error_and_stores_nothing() {
     let seq = AtomicU64::new(0);
     let mut driver = ready_driver(&recorder, prepared, &sink, &seq);
     driver.session.auth = crate::telegram::envelope::AuthorizationState::WaitPhoneNumber;
-    let lookup = LookupSpec::new("durov", "P", None, String::new());
+    let lookup = crate::collectible_info::LookupSpec::new("durov", "P", None, String::new());
     assert!(driver.request_collectible_info(lookup).is_err());
     assert!(driver.session.payments.hub.collectible.is_none());
 }

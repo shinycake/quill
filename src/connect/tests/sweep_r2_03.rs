@@ -79,10 +79,10 @@ fn a_refused_collections_send_keeps_the_stale_mark() {
     t.sender.refuse(&[]);
     t.driver.refresh_gift_collections_if_stale().unwrap();
     assert_eq!(t.sender.count("getGiftCollections"), 1);
-    assert_eq!(
+    assert!(matches!(
         t.driver.session.payments.gifts_manage.collections_fetch,
-        CollectionsFetch::Loading
-    );
+        CollectionsFetch::Loading(_)
+    ));
 }
 
 #[test]
