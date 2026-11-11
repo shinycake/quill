@@ -609,7 +609,7 @@ impl QuillApp {
         let session = self.session()?;
         // The request never went out: failed, not pending.
         if dialog.ask == TranslateAsk::Refused {
-            return Some(Translation::Failed(String::new()));
+            return Some(Translation::failed(String::new()));
         }
         match dialog.source.as_ref()? {
             TranslateSource::Message {
@@ -742,7 +742,7 @@ impl QuillApp {
                     cx,
                 ))
                 .into_any_element(),
-            Some(Translation::Failed(_)) => div()
+            Some(Translation::Failed { .. }) => div()
                 .id("translate-failed")
                 .italic()
                 .text_sm()

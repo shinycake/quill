@@ -116,7 +116,7 @@ fn a_refused_selection_translation_shows_failed_not_loading(cx: &mut TestAppCont
         }
         assert!(matches!(
             app.dialog_translation(),
-            Some(Translation::Failed(_))
+            Some(Translation::Failed { .. })
         ));
     });
 }
