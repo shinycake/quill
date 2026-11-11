@@ -71,7 +71,7 @@ fn keycodes_for(control: &RustConnection, keysym: u32) -> Option<Vec<u8>> {
     let setup = control.setup();
     let (min, max) = (setup.min_keycode, setup.max_keycode);
     let map = control
-        .get_keyboard_mapping(min, max - min + 1)
+        .get_keyboard_mapping(min, max.saturating_sub(min).saturating_add(1))
         .ok()?
         .reply()
         .ok()?;

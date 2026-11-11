@@ -17,10 +17,9 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ToneProblem::Unreadable);
         }
-        if matches!(
-            self.session.settings.tone_upload,
-            ToneUpload::Uploading { .. }
-        ) {
+        // One file at a time, and not over an outcome the screen has not
+        // taken yet.
+        if self.session.settings.tone_upload != ToneUpload::Idle {
             return Err(ToneProblem::Unreadable);
         }
         let size = std::fs::metadata(path)
@@ -37,6 +36,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 self.session.settings.tone_upload = ToneUpload::Uploading {
                     name: display_name(path),
                     target,
+                    request: extra,
                 };
                 Ok(extra)
             }

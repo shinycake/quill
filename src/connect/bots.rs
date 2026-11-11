@@ -1,9 +1,10 @@
 //! Connect driver: bots, callback queries, login URLs.
 use super::*;
 use crate::ids::{ChatId, MessageId, RequestId};
-use crate::state::{BotsPurpose, CallbackButtonKey, CallbackPress, UsersPurpose};
+use crate::state::{BotsPurpose, CallbackButtonKey, CallbackPress, LoginUrlStage, UsersPurpose};
 use crate::state::{
-    InlineBotResolve, InlineQueryFetch, InlineQuerySlot, LoginUrlRequest, RequestPurpose,
+    InlineBotResolve, InlineMore, InlineQueryFetch, InlineQuerySlot, LoginUrlRequest,
+    RequestPurpose,
 };
 use crate::telegram::envelope::ChatKind;
 use crate::telegram::requests::{
@@ -198,7 +199,15 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        if self.session.bots.similar_bots.contains_key(&bot_user_id) {
+        // Asked once: an answer or a request in flight is not asked again,
+        // a refused one is.
+        if self
+            .session
+            .bots
+            .similar_bots
+            .get(&bot_user_id)
+            .is_some_and(|fetch| !fetch.can_ask())
+        {
             return Ok(None);
         }
         let purpose = RequestPurpose::GetBotSimilarBots;
@@ -212,10 +221,14 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         // The section is loading from the moment the request is out; its
         // answer or its refusal ends the stage.
-        self.session
+        let fetch = self
+            .session
             .bots
             .similar_bots
-            .insert(bot_user_id, crate::state::SimilarBotsFetch::Loading);
+            .entry(bot_user_id)
+            .or_default();
+        fetch.begin();
+        fetch.sent(extra);
         Ok(Some(extra))
     }
 
@@ -348,6 +361,14 @@ impl<S: JsonSender> ConnectDriver<S> {
         user_id: i64,
     ) -> Result<RequestId, ConnectSendError> {
         if !self.chats_path_active() {
+            self.session
+                .bots
+                .game_scores
+                .entry((chat_id.0, message_id.0))
+                .or_default()
+                .fail(crate::lang::tr(
+                    crate::lang::keys::Q_MISC_COULDNT_LOAD_THE_SCORES,
+                ));
             return Err(ConnectSendError::InvalidRequest);
         }
         let extra = self.session.request_for_message(
@@ -356,7 +377,28 @@ impl<S: JsonSender> ConnectDriver<S> {
             message_id,
         );
         let json = get_game_high_scores(extra, chat_id, message_id, user_id);
-        self.send_json_request(extra, &json)
+        // The panel waits for this request's answer and no other.
+        let scores = self
+            .session
+            .bots
+            .game_scores
+            .entry((chat_id.0, message_id.0))
+            .or_default();
+        scores.begin();
+        scores.sent(extra);
+        let sent = self.send_json_request(extra, &json);
+        if sent.is_err()
+            && let Some(scores) = self
+                .session
+                .bots
+                .game_scores
+                .get_mut(&(chat_id.0, message_id.0))
+        {
+            scores.fail(crate::lang::tr(
+                crate::lang::keys::Q_MISC_COULDNT_LOAD_THE_SCORES,
+            ));
+        }
+        sent
     }
 
     /// Slice bots-games: `sendMessage` + `inputMessageGame` (TDLib 1.8.67,
@@ -390,16 +432,22 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.send_json_request(extra, &json)
     }
 
-    /// The session holds one login-URL context, which the answer reads: a
-    /// second button waits until the first one's answer is in.
+    /// The session holds one login-URL press, which the answer reads: a
+    /// second button waits until the first one's answer is taken.
     fn refuse_login_url_overlap(&self) -> Result<(), ConnectSendError> {
-        let requests = &self.session.requests;
-        if requests.has_purpose(RequestPurpose::GetLoginUrlInfo)
-            || requests.has_purpose(RequestPurpose::GetLoginUrl)
-        {
-            return Err(ConnectSendError::InvalidRequest);
+        match &self.session.bots.login_url {
+            LoginUrlStage::Idle => Ok(()),
+            // A press whose request is gone from the session (lost with a
+            // reconnect) will never be answered: it does not block the next.
+            LoginUrlStage::Asking { request, .. }
+                if !self.session.requests.pending.contains_key(&request.0) =>
+            {
+                Ok(())
+            }
+            LoginUrlStage::Asking { .. } | LoginUrlStage::Answered { .. } => {
+                Err(ConnectSendError::InvalidRequest)
+            }
         }
-        Ok(())
     }
 
     /// B1: resolve a login-URL button (`getLoginUrlInfo`, schema 1.8.67,
@@ -415,15 +463,18 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.refuse_login_url_overlap()?;
         let extra =
             self.callback_query_extra(chat_id, message_id, RequestPurpose::GetLoginUrlInfo)?;
-        self.session.bots.login_url_request = Some(LoginUrlRequest {
+        let context = LoginUrlRequest {
             chat_id,
             message_id,
             button_id,
             raw_url: fallback_url.to_string(),
             from_agent: crate::agent::ui_driver::guard::injecting(),
-        });
+        };
         let json = get_login_url_info(extra, chat_id, message_id, button_id);
-        self.send_json_request(extra, &json)
+        // The press is recorded once the request went out.
+        let sent = self.send_json_request(extra, &json)?;
+        self.session.bots.login_url = LoginUrlStage::asking(sent, context);
+        Ok(sent)
     }
 
     /// B1: the authorized URL after the user consented to a
@@ -441,10 +492,10 @@ impl<S: JsonSender> ConnectDriver<S> {
             request.message_id,
             RequestPurpose::GetLoginUrl,
         )?;
-        self.session.bots.login_url_request = Some(LoginUrlRequest {
+        let context = LoginUrlRequest {
             from_agent: request.from_agent || crate::agent::ui_driver::guard::injecting(),
             ..request.clone()
-        });
+        };
         let json = get_login_url(
             extra,
             request.chat_id,
@@ -452,7 +503,9 @@ impl<S: JsonSender> ConnectDriver<S> {
             request.button_id,
             allow_write_access,
         );
-        self.send_json_request(extra, &json)
+        let sent = self.send_json_request(extra, &json)?;
+        self.session.bots.login_url = LoginUrlStage::asking(sent, context);
+        Ok(sent)
     }
 
     /// B1: `deleteChatReplyMarkup` after a one-time custom keyboard was used
@@ -501,28 +554,33 @@ impl<S: JsonSender> ConnectDriver<S> {
 
     /// `getRecentInlineBots`, once per session, when the user types "@".
     pub fn maybe_fetch_recent_inline_bots(&mut self) -> Result<(), ConnectSendError> {
+        // Asked once: a request out or an answer waits, a failed ask goes
+        // out again with the next "@".
         if !self.chats_path_active()
-            || self
+            || !self
                 .session
                 .bots
                 .reply_keyboards
                 .recent_inline_bots
-                .is_some()
-        {
-            return Ok(());
-        }
-        if self
-            .session
-            .requests
-            .has_purpose(RequestPurpose::GetRecentInlineBots)
+                .can_ask()
         {
             return Ok(());
         }
         let extra = self
             .session
             .request(RequestPurpose::GetRecentInlineBots, None);
-        self.send_json_request(extra, &get_recent_inline_bots(extra))
-            .map(|_| ())
+        let recent = &mut self.session.bots.reply_keyboards.recent_inline_bots;
+        recent.begin();
+        recent.sent(extra);
+        let sent = self.send_json_request(extra, &get_recent_inline_bots(extra));
+        if sent.is_err() {
+            self.session.bots.reply_keyboards.recent_inline_bots.failed(
+                Some(extra),
+                "not sent",
+                false,
+            );
+        }
+        sent.map(|_| ())
     }
 
     /// `shareUsersWithBot` after the user confirmed the picked users.
@@ -629,22 +687,36 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        if self
+        let first_page = offset.is_empty();
+        let slot = self
             .session
-            .requests
-            .has_inline_query_in_flight(chat_id, bot_user_id)
+            .bots
+            .inline_query
+            .as_ref()
+            .filter(|slot| slot.chat_id == chat_id && slot.bot_user_id == bot_user_id);
+        // One request at a time for the (chat, bot) pair, whatever the page;
+        // a next page needs the loaded page it continues, not asked twice
+        // for an offset that failed. The slot waits only while its request
+        // is still out: one that left the registry unanswered is over, and
+        // the next query replaces the slot.
+        if slot
+            .and_then(|slot| slot.fetch.request())
+            .is_some_and(|request| self.session.requests.get(request).is_some())
         {
             return Ok(None);
         }
-        let first_page = offset.is_empty();
-        if first_page {
-            self.session.bots.inline_query = Some(InlineQuerySlot {
-                chat_id,
-                bot_user_id,
-                query: query.to_string(),
-                fetch: InlineQueryFetch::Loading,
-                more_failed: None,
+        if !first_page {
+            let continues = slot.is_some_and(|slot| {
+                matches!(
+                    &slot.fetch,
+                    InlineQueryFetch::Loaded { next_offset, more, .. }
+                        if next_offset == offset
+                            && !matches!(more, InlineMore::Failed { offset: failed } if failed == offset)
+                )
             });
+            if !continues {
+                return Ok(None);
+            }
         }
         let extra = self.session.request(
             RequestPurpose::Bots(BotsPurpose::GetInlineQueryResults {
@@ -655,16 +727,27 @@ impl<S: JsonSender> ConnectDriver<S> {
             Some(chat_id),
         );
         let json = get_inline_query_results(extra, bot_user_id, chat_id, query, offset);
-        match self.sender.send_json(&json) {
-            Ok(()) => Ok(Some(extra)),
-            Err(err) => {
-                self.session.requests.take(extra);
-                if first_page {
-                    self.session.bots.inline_query = None;
-                }
-                Err(err)
-            }
+        // The slot changes once the request went out: a refused send leaves
+        // the previous query's results where they were.
+        if let Err(err) = self.sender.send_json(&json) {
+            self.session.requests.take(extra);
+            return Err(err);
         }
+        if first_page {
+            self.session.bots.inline_query = Some(InlineQuerySlot {
+                chat_id,
+                bot_user_id,
+                query: query.to_string(),
+                fetch: InlineQueryFetch::Loading { request: extra },
+            });
+        } else if let Some(InlineQuerySlot {
+            fetch: InlineQueryFetch::Loaded { more, .. },
+            ..
+        }) = self.session.bots.inline_query.as_mut()
+        {
+            *more = InlineMore::Asking { request: extra };
+        }
+        Ok(Some(extra))
     }
 
     /// Bots slice: resolve `@botname` → bot user id via `searchPublicChat`
@@ -755,7 +838,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         else {
             return Ok(None);
         };
-        if draft.draft_id != draft_id || !draft.can_stop {
+        if draft.draft_id != draft_id || !draft.can_stop() {
             return Ok(None);
         }
         let purpose = RequestPurpose::Bots(BotsPurpose::StopPendingMessage { topic_id, draft_id });
@@ -784,7 +867,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .filter(|draft| {
                 matches!(
                     draft.stop,
-                    crate::state::BotStopStage::Running | crate::state::BotStopStage::Failed
+                    crate::state::BotStopStage::Running { .. } | crate::state::BotStopStage::Failed
                 )
             })
         {

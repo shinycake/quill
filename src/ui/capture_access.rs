@@ -178,12 +178,13 @@ impl QuillApp {
                     } else {
                         keys::Q_LEFTOVERS_ALLOW_MICROPHONE
                     })));
-                    cx.notify();
                     let (sender, answer) = std::sync::mpsc::channel();
                     request(device, sender);
-                    // The recording starts in the window that asked, or
-                    // not at all once that window closed.
-                    let wait = self.spawn_scoped(cx, async move |this, cx| {
+                    // The wait belongs to the account on screen, so the stage
+                    // ends whichever window asked; the recording starts in
+                    // the window that asked, or not at all once it closed.
+                    let asker = self.scoped_app(cx);
+                    let wait = self.spawn_screen(cx, async move |this, cx| {
                         let granted = loop {
                             match answer.try_recv() {
                                 Ok(granted) => break granted,
@@ -195,10 +196,17 @@ impl QuillApp {
                                 Err(_) => break false,
                             }
                         };
-                        let _ = this.update(cx, |this, cx| {
-                            if !this.recording.finish_asking(ask) {
-                                return;
+                        let ended = this.update(cx, |this, cx| {
+                            let mine = this.recording.finish_asking(ask);
+                            if mine {
+                                cx.notify();
                             }
+                            mine
+                        });
+                        if !ended.is_ok_and(|mine| mine) {
+                            return;
+                        }
+                        let _ = asker.update(cx, |this, cx| {
                             // The call the press was for ended or changed
                             // while the prompt was up: nothing to start.
                             if call.is_some() && this.active_call_id() != call {
@@ -213,6 +221,7 @@ impl QuillApp {
                         });
                     });
                     self.recording.begin_asking(ask, wait);
+                    cx.notify();
                     return;
                 }
             }

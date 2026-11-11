@@ -583,7 +583,6 @@ impl Session {
             && pending.draft_id == draft_id
         {
             if pending.keep_on_stop {
-                pending.can_stop = false;
                 pending.stop = BotStopStage::Stopped;
             } else {
                 self.messages.pending_bot_messages.remove(&key);

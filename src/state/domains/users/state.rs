@@ -1,6 +1,7 @@
 //! Users: contacts, profiles, profile photos, secret chats and the info panel: the `users` domain's share of `Session`.
 //! Added to by features in this domain only; `Session::new` builds it
 //! with `new`.
+use crate::state::fetch::Fetch;
 use crate::state::*;
 
 /// The verdict of a `checkChatUsername`: the checked text and what the
@@ -166,6 +167,10 @@ pub struct UsersState {
     /// text (stale verdicts ignored), and an answer or error only counts
     /// for the request in flight, not for an earlier check's reply.
     pub username_check: ProfileUsernameCheck,
+    /// The `getMe` fallback for the own user id (the `my_id` option normally
+    /// brings it first): asked once per session, never again after a failure (it does not
+    /// matter to the id itself: the `my_id` option may still set it).
+    pub my_id_probe: Fetch<()>,
     /// `bio_length_max` option (TDLib default 70, Premium raises it):
     /// the edit-profile bio counter.
     pub bio_length_max: usize,
@@ -339,6 +344,7 @@ impl UsersState {
             user_full_infos: UserFullInfos::default(),
             userpic_full_info_asked: Default::default(),
             username_check: ProfileUsernameCheck::Idle,
+            my_id_probe: Fetch::Idle,
             bio_length_max: 70,
             background_emoji_icons: Default::default(),
             profile_photo_emoji_icons: Default::default(),

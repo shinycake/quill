@@ -48,7 +48,10 @@ fn the_toast_follows_the_latest_message() {
     paid.add(1, 11, 3, None, 500, None);
     assert_eq!(paid.toast().map(|p| p.message_id), Some(11));
     paid.add(1, 10, 1, None, 900, None);
-    assert_eq!(paid.toast().map(|p| (p.message_id, p.stars)), Some((10, 2)));
+    assert_eq!(
+        paid.toast().map(|p| (p.message_id, p.stars())),
+        Some((10, 2))
+    );
     assert_eq!(paid.total_pending(), 5);
     paid.undo(1, 10);
     assert_eq!(paid.toast().map(|p| p.message_id), Some(11));
@@ -70,6 +73,20 @@ fn the_cap_refuses_more_stars() {
 }
 
 #[test]
+fn star_totals_saturate() {
+    let mut paid = PaidReactions {
+        max_stars: Some(i64::MAX),
+        ..PaidReactions::default()
+    };
+    assert_eq!(
+        paid.add(1, 10, i64::MAX, None, u64::MAX, None),
+        Some(i64::MAX)
+    );
+    assert_eq!(paid.add(1, 11, i64::MAX, None, 0, None), Some(i64::MAX));
+    assert_eq!(paid.total_pending(), i64::MAX);
+}
+
+#[test]
 fn the_cap_has_a_fallback() {
     assert_eq!(PaidReactions::default().max(), FALLBACK_MAX);
 }
@@ -82,7 +99,7 @@ fn the_latest_sender_choice_wins() {
     paid.add(1, 10, 1, None, 20, None);
     let due = paid.due(u64::MAX);
     assert_eq!(due[0].sender, Some(PaidSender::Anonymous));
-    assert_eq!(due[0].stars, 52);
+    assert_eq!(due[0].stars(), 52);
 }
 
 #[test]
@@ -106,11 +123,11 @@ fn a_late_refusal_does_not_touch_a_newer_entry_of_the_same_message() {
     paid.add(1, 10, 2, None, 6_000, Some(RequestId(2)));
     assert_eq!(paid.pending_stars(1, 10), 2, "only the waiting entry");
     assert_eq!(paid.total_pending(), 5);
-    assert_eq!(paid.toast().map(|p| p.stars), Some(2));
+    assert_eq!(paid.toast().map(PendingPaid::stars), Some(2));
     // The first tap's add is refused late: it comes off the committing
     // entry, not the newer one.
     paid.rollback(RequestId(1));
-    assert_eq!(paid.toast().map(|p| p.stars), Some(2));
+    assert_eq!(paid.toast().map(PendingPaid::stars), Some(2));
     assert_eq!(paid.total_pending(), 2);
     // Undo only takes the waiting entry.
     assert!(paid.undo(1, 10));
@@ -118,13 +135,19 @@ fn a_late_refusal_does_not_touch_a_newer_entry_of_the_same_message() {
 }
 
 #[test]
-fn an_unsent_commit_releases_its_stars_and_is_not_retried() {
+fn an_unsent_commit_keeps_its_stars_stuck_and_is_not_retried() {
     let mut paid = PaidReactions::default();
     paid.add(1, 10, 3, None, 0, None);
     assert!(paid.commit_unsent(1, 10), "an entry was waiting");
-    assert_eq!(paid.total_pending(), 0);
+    // TDLib still holds them: reserved, not shown, never sent again alone.
+    assert_eq!(paid.total_pending(), 3);
+    assert!(!paid.has_pending());
     assert!(paid.due(u64::MAX).is_empty());
     assert!(!paid.commit_unsent(1, 10), "told once");
+    // The next tap on the message shows and commits everything TDLib holds.
+    assert_eq!(paid.add(1, 10, 2, None, 1_000, None), Some(5));
+    assert_eq!(paid.toast().map(PendingPaid::stars), Some(5));
+    assert_eq!(paid.total_pending(), 5);
 }
 
 #[test]
@@ -269,9 +292,42 @@ fn a_refused_commit_releases_the_stars_and_never_retries() {
     assert_eq!(paid.add(1, 10, 2, None, ACCUMULATE_MS + 100, None), Some(2));
     assert_eq!(paid.total_pending(), 7);
     paid.refused(RequestId(7));
-    // Only the newer tap is still held; the refused Stars are free.
+    // Only the newer tap is still held: TDLib took the refused Stars out of
+    // the message with the commit and unlocked them on the error.
     assert_eq!(paid.total_pending(), 2);
+    assert_eq!(paid.toast().map(PendingPaid::stars), Some(2));
     assert!(!paid.in_flight());
+    paid.begin_commit(1, 10, RequestId(8));
+    paid.settled(RequestId(8));
+    assert_eq!(paid.total_pending(), 0);
+}
+
+#[test]
+fn a_refused_undo_joins_the_next_tap_of_its_message() {
+    let mut paid = PaidReactions::default();
+    paid.add(1, 10, 3, None, 0, None);
+    paid.begin_undo(1, 10, RequestId(4));
+    paid.refused(RequestId(4));
+    // TDLib removed nothing: the next tap commits them together.
+    assert_eq!(paid.add(1, 10, 2, None, 1_000, None), Some(5));
+    assert_eq!(paid.toast().map(PendingPaid::stars), Some(5));
+    paid.begin_commit(1, 10, RequestId(5));
+    paid.settled(RequestId(5));
+    assert_eq!(paid.total_pending(), 0);
+}
+
+#[test]
+fn an_answered_commit_also_settles_stars_an_earlier_failure_left_stuck() {
+    let mut paid = PaidReactions::default();
+    paid.add(1, 10, 5, None, 0, None);
+    paid.commit_unsent(1, 10);
+    assert_eq!(paid.total_pending(), 5);
+    // A stuck entry cannot be re-committed alone; once any later commit of
+    // the message is answered, TDLib has spent or dropped all of it.
+    paid.add(2, 20, 1, None, 0, None);
+    paid.begin_commit(2, 20, RequestId(3));
+    paid.settled(RequestId(3));
+    assert_eq!(paid.total_pending(), 5, "another message is untouched");
 }
 
 #[test]
@@ -287,15 +343,16 @@ fn a_low_balance_commit_error_does_not_loop() {
 }
 
 #[test]
-fn a_refused_undo_releases_the_stars_and_does_not_commit() {
+fn a_refused_undo_keeps_the_stars_stuck_and_does_not_commit() {
     let mut paid = PaidReactions::default();
     paid.add(1, 10, 3, None, 0, None);
     paid.begin_undo(1, 10, RequestId(4));
     assert!(paid.toast().is_none());
     assert_eq!(paid.total_pending(), 3);
     paid.refused(RequestId(4));
-    assert_eq!(paid.total_pending(), 0);
+    assert_eq!(paid.total_pending(), 3);
     assert!(paid.due(u64::MAX).is_empty());
+    assert!(paid.toast().is_none());
 }
 
 /// The senders of a chat are asked for once; a failed ask may be tried

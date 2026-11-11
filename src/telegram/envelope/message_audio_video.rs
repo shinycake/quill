@@ -128,20 +128,26 @@ pub struct AnimationContent {
     pub has_spoiler: bool,
     pub is_secret: bool,
     pub file_id: FileId,
-    pub thumb_file_id: Option<FileId>,
-    pub thumb_width: i32,
-    pub thumb_height: i32,
+    /// The sender's thumbnail: a still picture, or an MP4 preview loop.
+    pub thumb: Thumb,
     /// The ~40 px blur TDLib sends with the clip.
     pub minithumbnail: Option<MiniThumbnail>,
-    /// The thumbnail is a still picture (JPEG, PNG or WebP), not an MPEG-4
-    /// clip or a GIF, which a tile cannot draw.
-    pub thumb_still: bool,
 }
 
 impl AnimationContent {
     /// JPEG/MPEG4 thumbnail file, when the sender attached one.
     pub fn thumb_file_id(&self) -> Option<FileId> {
-        self.thumb_file_id.filter(|id| id.0 != 0)
+        self.thumb.file_id()
+    }
+
+    /// The thumbnail, when it is a still picture.
+    pub fn still_thumb(&self) -> Option<FileId> {
+        self.thumb.still()
+    }
+
+    /// The thumbnail, when it is a short clip.
+    pub fn preview_clip(&self) -> Option<FileId> {
+        self.thumb.clip()
     }
 
     /// The clip itself (`animation.animation`).
@@ -169,14 +175,10 @@ pub struct VideoContent {
     pub supports_streaming: bool,
     pub has_stickers: bool,
     pub file_id: FileId,
-    pub thumb_file_id: Option<FileId>,
-    pub thumb_width: i32,
-    pub thumb_height: i32,
+    /// The sender's thumbnail: a still picture, or an MP4 preview loop.
+    pub thumb: Thumb,
     /// The ~40 px blur TDLib sends with the clip.
     pub minithumbnail: Option<MiniThumbnail>,
-    /// The thumbnail is a still picture (JPEG, PNG or WebP), not an MPEG-4
-    /// clip or a GIF, which a tile cannot draw.
-    pub thumb_still: bool,
     /// `messageVideo.alternative_videos`: other qualities of the clip.
     pub alternatives: Vec<VideoAlternative>,
 }
@@ -184,7 +186,17 @@ pub struct VideoContent {
 impl VideoContent {
     /// JPEG/MPEG4 thumbnail file, when the sender attached one.
     pub fn thumb_file_id(&self) -> Option<FileId> {
-        self.thumb_file_id.filter(|id| id.0 != 0)
+        self.thumb.file_id()
+    }
+
+    /// The thumbnail, when it is a still picture.
+    pub fn still_thumb(&self) -> Option<FileId> {
+        self.thumb.still()
+    }
+
+    /// The thumbnail, when it is a short clip.
+    pub fn preview_clip(&self) -> Option<FileId> {
+        self.thumb.clip()
     }
 
     /// The clip itself (`video.video`).
@@ -238,28 +250,99 @@ pub struct AnimationItem {
     pub file_name: String,
     pub mime_type: String,
     pub file_id: FileId,
-    pub thumb_file_id: Option<FileId>,
-    pub thumb_width: i32,
-    pub thumb_height: i32,
+    /// The sender's thumbnail: a still picture, or an MP4 preview loop.
+    pub thumb: Thumb,
     /// The ~40 px blur TDLib sends with the clip.
     pub minithumbnail: Option<MiniThumbnail>,
-    /// The thumbnail is a still picture (JPEG, PNG or WebP), not an MPEG-4
-    /// clip or a GIF, which a tile cannot draw.
-    pub thumb_still: bool,
 }
 
 impl AnimationItem {
+    /// The thumbnail file, when the sender attached one.
+    pub fn thumb_file_id(&self) -> Option<FileId> {
+        self.thumb.file_id()
+    }
+
     /// The thumbnail, when it is a still picture.
     pub fn still_thumb(&self) -> Option<FileId> {
-        self.thumb_file_id
-            .filter(|id| id.0 != 0 && self.thumb_still)
+        self.thumb.still()
     }
 
     /// The thumbnail, when it is a short clip (the MP4 preview loop
     /// Telegram sends with most GIFs).
     pub fn preview_clip(&self) -> Option<FileId> {
-        self.thumb_file_id
-            .filter(|id| id.0 != 0 && !self.thumb_still)
+        self.thumb.clip()
+    }
+}
+
+/// A thumbnail file and its size.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ThumbFile {
+    pub file_id: FileId,
+    pub width: i32,
+    pub height: i32,
+}
+
+/// A clip's thumbnail: none, a still picture (JPEG, PNG or WebP), or an
+/// MPEG-4 loop, which a tile cannot draw as an image.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum Thumb {
+    #[default]
+    None,
+    Still(ThumbFile),
+    Clip(ThumbFile),
+}
+
+impl Thumb {
+    /// `Still` or `Clip` by `is_still`; none without a real file.
+    pub fn of(file_id: Option<FileId>, width: i32, height: i32, is_still: bool) -> Self {
+        match file_id.filter(|id| id.0 != 0) {
+            None => Self::None,
+            Some(file_id) => {
+                let file = ThumbFile {
+                    file_id,
+                    width,
+                    height,
+                };
+                if is_still {
+                    Self::Still(file)
+                } else {
+                    Self::Clip(file)
+                }
+            }
+        }
+    }
+
+    fn file(&self) -> Option<&ThumbFile> {
+        match self {
+            Self::None => None,
+            Self::Still(file) | Self::Clip(file) => Some(file),
+        }
+    }
+
+    /// The thumbnail file, still or clip.
+    pub fn file_id(&self) -> Option<FileId> {
+        self.file().map(|file| file.file_id)
+    }
+
+    /// The file, when the thumbnail is a still picture.
+    pub fn still(&self) -> Option<FileId> {
+        match self {
+            Self::Still(file) => Some(file.file_id),
+            _ => None,
+        }
+    }
+
+    /// The file, when the thumbnail is an MP4 loop.
+    pub fn clip(&self) -> Option<FileId> {
+        match self {
+            Self::Clip(file) => Some(file.file_id),
+            _ => None,
+        }
+    }
+
+    /// The thumbnail's own size; 0 x 0 without one.
+    pub fn size(&self) -> (i32, i32) {
+        self.file().map_or((0, 0), |file| (file.width, file.height))
     }
 }
 
@@ -277,6 +360,27 @@ fn is_still_thumbnail(thumb: &Value) -> bool {
                 | "thumbnailFormatTgs"
                 | "thumbnailFormatWebm"
         )
+    )
+}
+
+/// A `thumbnail` object as a [`Thumb`]; its file joins `files`.
+fn parse_thumb(thumb: Option<&Value>, files: &mut Vec<ParsedFile>) -> Thumb {
+    let Some(thumb) = thumb.filter(|thumb| !thumb.is_null()) else {
+        return Thumb::None;
+    };
+    let id = match parse_file(thumb.get("file")) {
+        Ok(file) => {
+            let id = file.id;
+            files.push(file);
+            Some(id)
+        }
+        Err(_) => None,
+    };
+    Thumb::of(
+        id,
+        int53_or_zero(thumb.get("width")).sat_i32(),
+        int53_or_zero(thumb.get("height")).sat_i32(),
+        is_still_thumbnail(thumb),
     )
 }
 
@@ -315,11 +419,8 @@ pub(crate) fn parse_message_animation(value: &Value) -> (MessageContent, Vec<Par
                 .and_then(Value::as_bool)
                 .unwrap_or(false),
             file_id: item.file_id,
-            thumb_file_id: item.thumb_file_id,
-            thumb_width: item.thumb_width,
-            thumb_height: item.thumb_height,
+            thumb: item.thumb,
             minithumbnail: item.minithumbnail,
-            thumb_still: item.thumb_still,
         }),
         files,
     )
@@ -347,24 +448,7 @@ pub(crate) fn parse_message_video(value: &Value) -> (MessageContent, Vec<ParsedF
         }
         Err(_) => FileId(0),
     };
-    let thumb = video.get("thumbnail").filter(|thumb| !thumb.is_null());
-    let (thumb_file_id, thumb_width, thumb_height) = if let Some(thumb) = thumb {
-        let id = match parse_file(thumb.get("file")) {
-            Ok(file) => {
-                let id = file.id;
-                files.push(file);
-                Some(id)
-            }
-            Err(_) => None,
-        };
-        (
-            id.filter(|id| id.0 != 0),
-            int53_or_zero(thumb.get("width")).sat_i32(),
-            int53_or_zero(thumb.get("height")).sat_i32(),
-        )
-    } else {
-        (None, 0, 0)
-    };
+    let thumb = parse_thumb(video.get("thumbnail"), &mut files);
     let alternatives = super::video_alternatives::parse_video_alternatives(
         value.get("alternative_videos"),
         &mut files,
@@ -409,11 +493,8 @@ pub(crate) fn parse_message_video(value: &Value) -> (MessageContent, Vec<ParsedF
                 .and_then(Value::as_bool)
                 .unwrap_or(false),
             file_id,
-            thumb_file_id,
-            thumb_width,
-            thumb_height,
+            thumb,
             minithumbnail: parse_minithumbnail(video.get("minithumbnail")),
-            thumb_still: thumb.is_none_or(is_still_thumbnail),
             alternatives,
         }),
         files,
@@ -501,24 +582,7 @@ pub(crate) fn parse_animation_value(
         }
         Err(_) => FileId(0),
     };
-    let thumb = value.get("thumbnail").filter(|thumb| !thumb.is_null());
-    let (thumb_file_id, thumb_width, thumb_height) = if let Some(thumb) = thumb {
-        let id = match parse_file(thumb.get("file")) {
-            Ok(file) => {
-                let id = file.id;
-                files.push(file);
-                Some(id)
-            }
-            Err(_) => None,
-        };
-        (
-            id.filter(|id| id.0 != 0),
-            int53_or_zero(thumb.get("width")).sat_i32(),
-            int53_or_zero(thumb.get("height")).sat_i32(),
-        )
-    } else {
-        (None, 0, 0)
-    };
+    let thumb = parse_thumb(value.get("thumbnail"), &mut files);
     (
         Some(AnimationItem {
             duration: int53_or_zero(value.get("duration")).sat_i32(),
@@ -535,11 +599,8 @@ pub(crate) fn parse_animation_value(
                 .unwrap_or("")
                 .to_string(),
             file_id,
-            thumb_file_id,
-            thumb_width,
-            thumb_height,
+            thumb,
             minithumbnail: parse_minithumbnail(value.get("minithumbnail")),
-            thumb_still: thumb.is_none_or(is_still_thumbnail),
         }),
         files,
     )

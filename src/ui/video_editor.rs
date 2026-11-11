@@ -24,7 +24,9 @@ use crate::ui::status_note::StatusNote;
 use gpui_kit::component::dialog::Dialog;
 use gpui_kit::component::*;
 use gpui_kit::*;
-use quill::composer::{AttachmentExtras, AttachmentKind, EditMediaKind, GifMode};
+use quill::composer::{
+    AttachmentExtras, AttachmentKind, EditMediaKind, GifMode, VideoEdit, VideoPrep,
+};
 use quill::lang::{keys, tr};
 use quill::sticker_set_box::SetKind;
 use quill::video_edit::{VideoEdits, VideoSource, probe_source, render_edited, render_frame};
@@ -201,13 +203,12 @@ impl QuillApp {
         }
         let source = attachment
             .extras
-            .source
-            .clone()
-            .unwrap_or_else(|| attachment.path.clone());
+            .video_source()
+            .map_or_else(|| attachment.path.clone(), Path::to_path_buf);
         // A soundless video is a GIF from the start (tdesktop sets
         // `modifications.gif = !hasAudio`); the range is filled in once the
         // video is read.
-        let initial = attachment.extras.edits.or_else(|| {
+        let initial = attachment.extras.video_edits().or_else(|| {
             attachment.extras.is_gif().then(|| VideoEdits {
                 gif: true,
                 ..VideoEdits::full(0)
@@ -231,10 +232,9 @@ impl QuillApp {
         };
         let source = replacement
             .video_extras
-            .source
-            .clone()
-            .unwrap_or_else(|| replacement.path.clone());
-        let initial = replacement.video_extras.edits;
+            .video_source()
+            .map_or_else(|| replacement.path.clone(), Path::to_path_buf);
+        let initial = replacement.video_extras.video_edits();
         self.open_video_editor(EditorTarget::MessageEdit, source, initial, window, cx);
     }
 
@@ -533,13 +533,19 @@ impl QuillApp {
         let edited = output != source;
         let untouched = edits == VideoEdits::full(info.duration_ms);
         let mut extras = AttachmentExtras {
-            source: edited.then(|| source.clone()),
-            edits: (!untouched).then_some(edits),
-            start_timestamp: VideoEdits {
-                gif: edits.gif && info.has_audio,
-                ..edits
-            }
-            .start_timestamp_secs(info.duration_ms),
+            video: if untouched {
+                VideoPrep::Untouched
+            } else {
+                VideoPrep::Edited(VideoEdit {
+                    edits,
+                    start_timestamp: VideoEdits {
+                        gif: edits.gif && info.has_audio,
+                        ..edits
+                    }
+                    .start_timestamp_secs(info.duration_ms),
+                    source: edited.then(|| source.clone()),
+                })
+            },
             gif: match (edits.gif, info.has_audio) {
                 (false, _) => GifMode::Off,
                 (true, true) => GifMode::SoundRemoved,

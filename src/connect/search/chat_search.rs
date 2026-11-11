@@ -182,9 +182,9 @@ impl<S: JsonSender> ConnectDriver<S> {
             // text (tdesktop lists the member's messages on their own).
             self.clear_chat_search_debounce();
             let state = &self.session.search.chat_search;
-            if state.query.is_empty()
+            if state.query().is_empty()
                 && matches!(
-                    state.status,
+                    state.status(),
                     SearchStatus::Searching
                         | SearchStatus::Ready
                         | SearchStatus::Empty
@@ -197,9 +197,9 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         if trimmed.is_empty() {
             self.clear_chat_search_debounce();
-            if self.session.search.chat_search.query.is_empty()
+            if self.session.search.chat_search.query().is_empty()
                 && matches!(
-                    self.session.search.chat_search.status,
+                    self.session.search.chat_search.status(),
                     SearchStatus::Idle | SearchStatus::Closed
                 )
             {
@@ -215,14 +215,14 @@ impl<S: JsonSender> ConnectDriver<S> {
             .typed
             .armed()
             .is_some_and(|q| q == trimmed)
-            && self.session.search.chat_search.query == trimmed
+            && self.session.search.chat_search.query() == trimmed
         {
             return Ok(ChatSearchQueryOutcome::Unchanged);
         }
         if self.session.search.chat_search.typed.is_idle()
-            && self.session.search.chat_search.query == trimmed
+            && self.session.search.chat_search.query() == trimmed
             && matches!(
-                self.session.search.chat_search.status,
+                self.session.search.chat_search.status(),
                 SearchStatus::Searching
                     | SearchStatus::Ready
                     | SearchStatus::Empty
@@ -262,9 +262,9 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() || !self.session.search.chat_search.is_open() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        self.session.search.chat_search.sender = sender;
+        self.session.search.chat_search.set_sender(sender);
         self.session.close_from_picker();
-        let query = self.session.search.chat_search.query.clone();
+        let query = self.session.search.chat_search.query().to_owned();
         if query.is_empty() && !self.session.search.chat_search.has_criteria() {
             self.clear_chat_search_debounce();
             self.session.search.chat_search.clear_query();
@@ -281,8 +281,8 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() || !self.session.search.chat_search.is_open() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        self.session.search.chat_search.media = media;
-        let query = self.session.search.chat_search.query.clone();
+        self.session.search.chat_search.set_media(media);
+        let query = self.session.search.chat_search.query().to_owned();
         if query.is_empty() && !self.session.search.chat_search.has_criteria() {
             self.clear_chat_search_debounce();
             self.session.search.chat_search.clear_query();
@@ -309,23 +309,31 @@ impl<S: JsonSender> ConnectDriver<S> {
             .session
             .search
             .chat_search
-            .chat_id
+            .chat_id()
             .or(self.session.open_chat_id())
         else {
             return Err(ConnectSendError::InvalidRequest);
         };
-        let Some(picker) = self.session.search.chat_search.from_picker.as_ref() else {
+        let Some(picker) = self.session.search.chat_search.from_picker() else {
             return Ok(None);
         };
-        if picker.query == query && (picker.request.is_some() || !picker.members.is_empty()) {
+        // Asked for this text already: the answer is in flight or in.
+        if picker.query == query && !picker.members.can_ask() {
             return Ok(None);
         }
         let extra = self
             .session
             .request(RequestPurpose::SearchFromMembers, Some(chat_id));
-        if let Some(picker) = self.session.search.chat_search.from_picker.as_mut() {
+        if let Some(picker) = self
+            .session
+            .search
+            .chat_search
+            .open_mut()
+            .and_then(|open| open.from_picker.as_mut())
+        {
             picker.query = query.to_string();
-            picker.request = Some(extra);
+            picker.members.begin();
+            picker.members.sent(extra);
         }
         match self.sender.send_json(&search_chat_members(
             extra,
@@ -336,8 +344,14 @@ impl<S: JsonSender> ConnectDriver<S> {
             Ok(()) => Ok(Some(extra)),
             Err(err) => {
                 self.session.requests.take(extra);
-                if let Some(picker) = self.session.search.chat_search.from_picker.as_mut() {
-                    picker.request = None;
+                if let Some(picker) = self
+                    .session
+                    .search
+                    .chat_search
+                    .open_mut()
+                    .and_then(|open| open.from_picker.as_mut())
+                {
+                    picker.members.failed(Some(extra), "not sent", false);
                 }
                 Err(err)
             }
@@ -358,7 +372,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .session
             .search
             .chat_search
-            .chat_id
+            .chat_id()
             .or(self.session.open_chat_id())
         else {
             return Err(ConnectSendError::InvalidRequest);
@@ -366,9 +380,9 @@ impl<S: JsonSender> ConnectDriver<S> {
         let state = &self.session.search.chat_search;
         let (search_gen, query, sender, media) = (
             state.generation,
-            state.query.clone(),
-            state.sender,
-            state.media,
+            state.query().to_owned(),
+            state.sender(),
+            state.media(),
         );
         let extra = self.session.request_chat_search(
             RequestPurpose::SearchChatMessagesMore,
@@ -531,7 +545,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .session
             .search
             .chat_search
-            .chat_id
+            .chat_id()
             .or(self.session.open_chat_id())
         else {
             return Err(ConnectSendError::InvalidRequest);
@@ -543,8 +557,8 @@ impl<S: JsonSender> ConnectDriver<S> {
             search_gen,
         );
         let (sender, media) = (
-            self.session.search.chat_search.sender,
-            self.session.search.chat_search.media,
+            self.session.search.chat_search.sender(),
+            self.session.search.chat_search.media(),
         );
         match self.sender.send_json(&search_chat_messages_from(
             extra,
@@ -595,7 +609,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                     .session
                     .search
                     .chat_search
-                    .chat_id
+                    .chat_id()
                     .or(self.session.open_chat_id())
                 {
                     self.session.reset_history_window(chat_id);
@@ -638,8 +652,8 @@ impl<S: JsonSender> ConnectDriver<S> {
         // Prefetch the next page before the last loaded hit is reached.
         let state = &self.session.search.chat_search;
         if state
-            .selected
-            .is_some_and(|i| i + CHAT_SEARCH_PREFETCH >= state.hits.len())
+            .selected()
+            .is_some_and(|i| i + CHAT_SEARCH_PREFETCH >= state.hits().len())
         {
             let _ = self.load_more_chat_search();
         }

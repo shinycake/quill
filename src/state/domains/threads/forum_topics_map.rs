@@ -56,7 +56,85 @@ impl ForumTopicsMap {
         self.lists.entry(chat_id).or_default().begin();
     }
 
-    /// `getForumTopics` for `chat_id` failed.
+    /// The `begin` ask for `chat_id` went out as `request`: only its
+    /// answer or error acts.
+    pub fn sent(&mut self, chat_id: i64, request: RequestId) {
+        if let Some(list) = self.lists.get_mut(&chat_id) {
+            list.sent(request);
+        }
+    }
+
+    /// The topics changed on the server: what is held stays until the
+    /// refetch replaces it, and an ask in flight (it predates the change)
+    /// is no longer waited for. The chat list asks again.
+    pub fn outdate(&mut self, chat_id: i64) {
+        if let Some(list) = self.lists.get_mut(&chat_id) {
+            list.outdate();
+        }
+    }
+
+    /// A first page is owed: never asked, or outdated by a change.
+    pub fn wants_fetch(&self, chat_id: i64) -> bool {
+        self.lists.get(&chat_id).is_none_or(Fetch::wants_fetch)
+    }
+
+    /// `request` answered with `chat_id`'s first page: only the ask that
+    /// waits for it takes it.
+    pub fn answered(
+        &mut self,
+        chat_id: i64,
+        request: Option<RequestId>,
+        topics: Vec<ForumTopic>,
+    ) -> bool {
+        let unread = counted_unread(&topics);
+        let list = self.lists.entry(chat_id).or_default();
+        // An ask other than the one waited for, or one a change outdated,
+        // is stale; an answer nobody tracked (TDLib's own) is taken.
+        let taken = match list {
+            Fetch::Loading {
+                request: Some(_), ..
+            } => list.answered(request, topics),
+            _ => list.answer(topics),
+        };
+        if taken {
+            self.unread.insert(chat_id, unread);
+        }
+        taken
+    }
+
+    /// `request` was refused: only the ask that waits for it fails.
+    pub fn failed_request(
+        &mut self,
+        chat_id: i64,
+        request: Option<RequestId>,
+        error: impl Into<String>,
+    ) -> bool {
+        let list = self.lists.entry(chat_id).or_default();
+        // Another ask's refusal, or an outdated one's, is stale; one nobody
+        // tracked is taken.
+        let ours = match list {
+            Fetch::Loading {
+                request: Some(waiting),
+                ..
+            } => Some(*waiting) == request,
+            Fetch::Outdated(_) => false,
+            _ => true,
+        };
+        if ours {
+            list.fail(error);
+        }
+        ours
+    }
+
+    /// A failed ask for `chat_id` is forgotten (the held list, if any,
+    /// stays), so the next ask goes out: opening the chat retries it.
+    pub fn clear_failure(&mut self, chat_id: i64) {
+        if let Some(list) = self.lists.get_mut(&chat_id) {
+            list.clear_error();
+        }
+    }
+
+    /// `getForumTopics` for `chat_id` never left.
     pub fn fail(&mut self, chat_id: i64, error: impl Into<String>) {
         self.lists.entry(chat_id).or_default().fail(error);
     }

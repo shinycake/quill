@@ -78,11 +78,77 @@ pub(super) struct Frame {
     pub(super) moving: bool,
 }
 
-/// Which sweep of the current text comes next.
+/// Where the current text's reveal stands between texts and sweeps: one
+/// value, advanced by `text_changed`, the next frame and the first sweep.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Sweeps {
+    /// The text changed since the last frame: its lines show up in the next
+    /// one, which has to be drawn. The first sweep (at least
+    /// [`FIRST_SWEEP`], `startedForText`) has not started.
+    Fresh,
+    /// Drawn once; the first sweep has not started.
     First,
+    /// The first sweep has started.
     Later,
+}
+
+/// Whether the text is a draft or the final message (the rest then goes
+/// faster).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Pace {
+    Draft,
+    Final,
+}
+
+/// The current line's width sweep.
+#[derive(Clone, Copy, Debug)]
+enum WidthSweep {
+    /// No sweep runs. `target` is the width the current line was settled at
+    /// (0 before a line starts).
+    Settled { target: f32 },
+    Running {
+        start: f32,
+        target: f32,
+        duration: Duration,
+        tween: Tween,
+    },
+}
+
+impl WidthSweep {
+    fn target(&self) -> f32 {
+        match self {
+            Self::Settled { target } | Self::Running { target, .. } => *target,
+        }
+    }
+
+    fn running(&self) -> bool {
+        matches!(self, Self::Running { .. })
+    }
+}
+
+/// The bubble's height opening to the next line.
+#[derive(Clone, Copy, Debug)]
+enum HeightOpen {
+    /// Nothing opens. `target` is the height last settled at.
+    Settled {
+        target: f32,
+    },
+    Running {
+        target: f32,
+        tween: Tween,
+    },
+}
+
+impl HeightOpen {
+    fn target(&self) -> f32 {
+        match self {
+            Self::Settled { target } | Self::Running { target, .. } => *target,
+        }
+    }
+
+    fn running(&self) -> bool {
+        matches!(self, Self::Running { .. })
+    }
 }
 
 /// `TextAppearing`: where the reveal of one text is.
@@ -97,20 +163,11 @@ pub(super) struct Appearing {
     /// The footer's room and the text's width, as of this frame.
     skip: f32,
     real: f32,
-    start_width: f32,
-    target_width: f32,
-    width_duration: Duration,
-    width: Option<Tween>,
+    width: WidthSweep,
     shown_height: f32,
-    target_height: f32,
-    height: Option<Tween>,
-    /// `startedForText`: whether this text's first sweep (at least
-    /// [`FIRST_SWEEP`]) has started.
+    height: HeightOpen,
     sweeps: Sweeps,
-    finalizing: bool,
-    /// The text changed since the last frame: its lines show up in the
-    /// next one, which has to be drawn.
-    fresh: bool,
+    pace: Pace,
 }
 
 impl Appearing {
@@ -122,37 +179,32 @@ impl Appearing {
             shown_width: 0.,
             skip: 0.,
             real: 0.,
-            start_width: 0.,
-            target_width: 0.,
-            width_duration: Duration::ZERO,
-            width: None,
+            width: WidthSweep::Settled { target: 0. },
             shown_height: 0.,
-            target_height: 0.,
-            height: None,
-            sweeps: Sweeps::First,
-            finalizing: false,
-            fresh: true,
+            height: HeightOpen::Settled { target: 0. },
+            sweeps: Sweeps::Fresh,
+            pace: Pace::Draft,
         }
     }
 
     /// A new draft's text, or the final message's (`finalizing`): the
     /// next sweep is a first one again (`countOptimalSize`).
     pub(super) fn text_changed(&mut self, finalizing: bool) {
-        self.sweeps = Sweeps::First;
-        self.finalizing = finalizing;
-        self.fresh = true;
+        self.sweeps = Sweeps::Fresh;
+        self.pace = if finalizing { Pace::Final } else { Pace::Draft };
     }
 
     /// Step to `now` with the lines laid out last frame and the room the
     /// text leaves for the footer (`skip`).
     pub(super) fn frame(&mut self, lines: Vec<RevealLine>, skip: f32, now: Instant) -> Frame {
+        let fresh = self.sweeps == Sweeps::Fresh;
         if lines != self.lines {
             self.lines = lines;
         }
-        if let Some(width) = self.width {
-            self.revealed = width.value(now);
-            if width.done(now) {
-                self.width = None;
+        if let WidthSweep::Running { target, tween, .. } = self.width {
+            self.revealed = tween.value(now);
+            if tween.done(now) {
+                self.width = WidthSweep::Settled { target };
             }
         }
         let real = self.lines.iter().map(|line| line.width).fold(0., f32::max);
@@ -165,10 +217,10 @@ impl Appearing {
         } else {
             self.shown_width.max(self.revealed + skip).min(real)
         };
-        if let Some(height) = self.height {
-            self.shown_height = height.value(now);
-            if height.done(now) {
-                self.height = None;
+        if let HeightOpen::Running { target, tween } = self.height {
+            self.shown_height = tween.value(now);
+            if tween.done(now) {
+                self.height = HeightOpen::Settled { target };
             }
         }
         let using = self.validate(now);
@@ -180,12 +232,14 @@ impl Appearing {
             _ => RevealCut::All,
         };
         let width = (using && self.shown_width < real).then_some(self.shown_width);
+        if self.sweeps == Sweeps::Fresh {
+            self.sweeps = Sweeps::First;
+        }
         Frame {
             cut,
             height: self.shown_height,
             width,
-            moving: std::mem::take(&mut self.fresh)
-                || (using && (self.width.is_some() || self.height.is_some())),
+            moving: fresh || (using && (self.width.running() || self.height.running())),
         }
     }
 
@@ -196,13 +250,12 @@ impl Appearing {
             if !self.check_line(now) {
                 return false;
             }
-            if self.width.is_some() || self.height.is_some() {
+            if self.width.running() || self.height.running() {
                 return true;
             }
             self.shown_line += 1;
             self.revealed = 0.;
-            self.start_width = 0.;
-            self.target_width = 0.;
+            self.width = WidthSweep::Settled { target: 0. };
         }
         false
     }
@@ -213,8 +266,12 @@ impl Appearing {
         let count = self.lines.len();
         let shown = self.shown_line;
         let Some(line) = self.lines.get(shown).copied() else {
-            self.width = None;
-            self.height = None;
+            self.width = WidthSweep::Settled {
+                target: self.width.target(),
+            };
+            self.height = HeightOpen::Settled {
+                target: self.height.target(),
+            };
             // Everything shows: the bubble at the text's full height.
             if let Some(last) = self.lines.last() {
                 self.shown_height = last.bottom;
@@ -226,60 +283,71 @@ impl Appearing {
         if !using {
             return false;
         }
-        if self.target_width != line.width {
+        if self.width.target() != line.width {
             if self.revealed >= line.width {
-                self.width = None;
                 self.revealed = line.width;
-                self.target_width = line.width;
+                self.width = WidthSweep::Settled { target: line.width };
             } else {
                 self.start_width(line, last, now);
             }
         }
         let target = self.target_height_now();
-        if self.target_height != target {
+        if self.height.target() != target {
             if shown == 0
                 && let Some(first) = self.lines.first()
             {
                 self.shown_height = first.bottom;
             }
             if self.shown_height >= target {
-                self.height = None;
                 self.shown_height = target;
-                self.target_height = target;
-            } else {
-                let progress = if self.revealed >= self.target_width {
-                    1.
-                } else {
-                    (self.revealed - self.start_width)
-                        / (self.target_width - self.start_width).max(f32::EPSILON)
-                };
-                let left = self.width_duration.mul_f32((1. - progress).clamp(0., 1.));
-                // The footer sits past the revealed edge; once the edge
-                // runs into it, the next line opens to make room below.
-                let crowded =
-                    self.revealed + crate::ui::text_reveal::GRADIENT + self.skip > self.real;
-                if self.height.is_some()
-                    || self.width.is_none()
-                    || left <= self.height_duration()
-                    || crowded
-                {
-                    self.height = Some(Tween {
+                self.height = HeightOpen::Settled { target };
+            } else if self.opens_now() {
+                self.height = HeightOpen::Running {
+                    target,
+                    tween: Tween {
                         from: self.shown_height,
                         to: target,
                         start: now,
                         duration: self.height_duration(),
                         ease: ease_out_cubic,
-                    });
-                    self.target_height = target;
-                }
+                    },
+                };
             }
         }
         true
     }
 
+    /// Whether the next line opens now: no sweep runs, one opens already,
+    /// the sweep has the height's time or less to go, or the revealed edge
+    /// runs into the footer's room.
+    fn opens_now(&self) -> bool {
+        let WidthSweep::Running {
+            start,
+            target,
+            duration,
+            ..
+        } = self.width
+        else {
+            return true;
+        };
+        let progress = if self.revealed >= target {
+            1.
+        } else {
+            (self.revealed - start) / (target - start).max(f32::EPSILON)
+        };
+        let left = duration.mul_f32((1. - progress).clamp(0., 1.));
+        // The footer sits past the revealed edge; once the edge runs into
+        // it, the next line opens to make room below.
+        let crowded = self.revealed + crate::ui::text_reveal::GRADIENT + self.skip > self.real;
+        self.height.running() || left <= self.height_duration() || crowded
+    }
+
     /// `textAppearStartWidthAnimation`.
     fn start_width(&mut self, line: RevealLine, last: bool, now: Instant) {
-        let full = if self.finalizing { LINE_FINAL } else { LINE };
+        let full = match self.pace {
+            Pace::Final => LINE_FINAL,
+            Pace::Draft => LINE,
+        };
         let computed = if last {
             full
         } else {
@@ -288,25 +356,26 @@ impl Appearing {
         };
         let duration = match std::mem::replace(&mut self.sweeps, Sweeps::Later) {
             Sweeps::Later => computed,
-            Sweeps::First => computed.max(FIRST_SWEEP),
+            Sweeps::Fresh | Sweeps::First => computed.max(FIRST_SWEEP),
         };
-        self.width_duration = duration;
-        self.start_width = self.revealed;
-        self.target_width = line.width;
-        self.width = Some(Tween {
-            from: self.revealed,
-            to: line.width,
-            start: now,
+        self.width = WidthSweep::Running {
+            start: self.revealed,
+            target: line.width,
             duration,
-            ease: linear,
-        });
+            tween: Tween {
+                from: self.revealed,
+                to: line.width,
+                start: now,
+                duration,
+                ease: linear,
+            },
+        };
     }
 
     fn height_duration(&self) -> Duration {
-        if self.finalizing {
-            HEIGHT_FINAL
-        } else {
-            HEIGHT
+        match self.pace {
+            Pace::Final => HEIGHT_FINAL,
+            Pace::Draft => HEIGHT,
         }
     }
 

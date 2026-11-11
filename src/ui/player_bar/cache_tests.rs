@@ -213,9 +213,10 @@ fn a_saved_track_has_no_neighbours_in_the_chat(cx: &mut TestAppContext) {
     let (app, mut vcx) = open_app(cx);
     let vcx = &mut vcx;
     let saved = quill::state::playlist_message_id(quill::ids::FileId(5));
-    app.update(vcx, |app, cx| {
-        app.playback.active =
-            crate::ui::playback_state::ActiveTrack::for_test(cx, false, CHAT, saved, 30.0);
+    app.update(vcx, |app, _| {
+        app.playback.active = crate::ui::playback_state::ActiveTrack::Audio(
+            crate::ui::playback_state::Track::new(saved),
+        );
     });
     assert_eq!(
         app.read_with(vcx, |app, _| app.playlist_can_move()),
@@ -226,7 +227,7 @@ fn a_saved_track_has_no_neighbours_in_the_chat(cx: &mut TestAppContext) {
 /// User 77's saved music holds file 5, and it is the active track,
 /// started from chat 11.
 fn give_saved_track(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) {
-    app.update(vcx, |app, cx| {
+    app.update(vcx, |app, _| {
         let session = app.demo_session.as_mut().expect("demo session");
         let playlist = session.media.playlists.entry(77).or_default();
         playlist.set_ready(vec![quill::telegram::envelope::ProfileAudio {
@@ -236,12 +237,11 @@ fn give_saved_track(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) {
             file_name: String::new(),
             duration: 30,
         }]);
-        app.playback.active = crate::ui::playback_state::ActiveTrack::for_test(
-            cx,
-            false,
-            CHAT,
-            quill::state::playlist_message_id(quill::ids::FileId(5)),
-            30.0,
+        app.playback.active = crate::ui::playback_state::ActiveTrack::Audio(
+            crate::ui::playback_state::Track::new(quill::state::playlist_message_id(
+                quill::ids::FileId(5),
+            ))
+            .in_chat(CHAT),
         );
     });
 }

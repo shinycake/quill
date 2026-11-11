@@ -90,9 +90,12 @@ fn with_info(
 ) -> impl FnOnce(GiftValueLookup) -> Option<GiftValueLookup> {
     move |lookup| {
         Some(GiftValueLookup {
-            stage: info.map_or(GiftValueStage::Idle, |info| GiftValueStage::Ready {
-                info,
-                open,
+            stage: info.map_or(GiftValueStage::Idle, |info| {
+                if open {
+                    GiftValueStage::Open(info)
+                } else {
+                    GiftValueStage::Known(info)
+                }
             }),
             ..lookup
         })
@@ -239,7 +242,7 @@ fn a_lookup_asked_from_a_box_that_is_gone_does_not_open_later(cx: &mut TestAppCo
     // The gift box is left before the answer lands.
     app.update_in(vcx, |app, _, cx| {
         if let Some(session) = app.demo_session.as_mut() {
-            session.payments.hub.gift_view.select(None);
+            session.payments.hub.received.view.select(None);
         }
         app.gift_market.stack.clear();
         cx.notify();
@@ -268,9 +271,10 @@ fn a_lookup_for_one_gift_is_dropped_when_the_box_shows_another(cx: &mut TestAppC
     app.update_in(vcx, |app, _, cx| {
         if let Some(session) = app.demo_session.as_mut() {
             let hub = &mut session.payments.hub;
-            let selected = hub.gift_view.selected().map(str::to_string);
+            let selected = hub.received.view.selected().map(str::to_string);
             if let Some(c) = hub
-                .gifts
+                .received
+                .rows
                 .iter_mut()
                 .find(|g| Some(&g.id) == selected.as_ref())
                 .and_then(|g| g.gift.collectible.as_deref_mut())

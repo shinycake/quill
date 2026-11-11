@@ -61,7 +61,7 @@ pub(crate) fn call_picture_key(
     let (local, screen) = match picture {
         CallPicture::Local => (true, false),
         CallPicture::Remote => {
-            if !matches!(call.state, CallState::Ready) {
+            if !matches!(call.state, CallState::Ready(_)) {
                 return None;
             }
             if call.remote_screen == RemoteVideoState::Active {
@@ -399,6 +399,7 @@ mod tests {
             remote_audio_muted: false,
             remote_battery_low: false,
             signal_bars: None,
+            media_note: None,
         }
     }
 
@@ -414,7 +415,7 @@ mod tests {
     fn the_peer_shows_their_screen_before_their_camera() {
         let remote = |video, screen| {
             call_picture_key(
-                &call(CallState::Ready, video, screen),
+                &call(CallState::Ready(Default::default()), video, screen),
                 CallPicture::Remote,
                 true,
             )
@@ -441,7 +442,7 @@ mod tests {
 
     #[test]
     fn your_preview_follows_the_camera() {
-        let ready = call(CallState::Ready, Inactive, Inactive);
+        let ready = call(CallState::Ready(Default::default()), Inactive, Inactive);
         assert_eq!(
             call_picture_key(&ready, CallPicture::Local, true),
             key(true, false)

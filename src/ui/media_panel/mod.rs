@@ -485,7 +485,7 @@ impl QuillApp {
         let tab = self.pickers.media_panel.tab;
         // Emoji search adds TDLib's keyword matches (all typed languages).
         let keywords =
-            tab == PanelTab::Emoji && session.stickers.emoji.keyword_emojis.query != query;
+            tab == PanelTab::Emoji && session.stickers.emoji.keyword_emojis.query() != query;
         // Sticker search goes to TDLib (by emoji or keyword, or for a
         // category).
         let stickers = (tab == PanelTab::Stickers)

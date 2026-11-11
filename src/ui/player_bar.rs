@@ -43,6 +43,12 @@ pub(super) struct TrackMeta {
 /// Player-bar state that outlives a chat switch.
 #[derive(Default)]
 pub(super) struct PlayerBarState {
+    /// The bar's own progress slider (the row has another one), one for
+    /// each window that draws the bar (`None`: the main window). A slider
+    /// keeps the geometry of its last paint and maps a press through it,
+    /// so one slider drawn in two windows sought with the other window's
+    /// layout (docs/decisions/lock-field-per-window.md, "Rejected").
+    pub(super) sliders: std::collections::HashMap<Option<ChatId>, Entity<SliderState>>,
     pub(super) repeat: RepeatMode,
     pub(super) order: OrderMode,
     pub(super) shuffle: ShuffleState,
@@ -160,24 +166,26 @@ impl QuillApp {
         }
     }
 
+    /// The bar is about a new track (its chat and text are the track's own,
+    /// set with it); called when a track starts.
+    pub(super) fn note_track_started(&mut self, cx: &mut Context<Self>) {
+        // Each window makes its slider for the new track when it draws.
+        self.playback.player.sliders.clear();
+        cx.notify();
+    }
+
     /// The bar's slider in the window whose state is in place, made at its
     /// first draw for the track; the closed windows' go.
     fn player_bar_slider(&mut self, cx: &mut Context<Self>) -> Entity<SliderState> {
         let scope = self.windows.scope;
-        if let Some(slider) = self
-            .playback
-            .active
-            .track()
-            .and_then(|track| track.bars.get(&scope))
-        {
+        if let Some(slider) = self.playback.player.sliders.get(&scope) {
             return slider.clone();
         }
         let open: Vec<ChatId> = self.windows.open_windows().map(|(chat, _)| chat).collect();
-        if let Some(track) = self.playback.active.track_mut() {
-            track
-                .bars
-                .retain(|window, _| window.is_none_or(|chat| open.contains(&chat)));
-        }
+        self.playback
+            .player
+            .sliders
+            .retain(|window, _| window.is_none_or(|chat| open.contains(&chat)));
         let duration = self.playback.track_duration().map_or(0.1, |d| d.max(0.1));
         let offset = self.active_position_secs().unwrap_or(0.0);
         let slider = cx.new(|_| {
@@ -192,9 +200,7 @@ impl QuillApp {
             this.on_seek_event(event, cx);
         })
         .detach();
-        if let Some(track) = self.playback.active.track_mut() {
-            track.bars.insert(scope, slider.clone());
-        }
+        self.playback.player.sliders.insert(scope, slider.clone());
         slider
     }
 
@@ -418,15 +424,28 @@ impl QuillApp {
             media_session::publish(None);
             return;
         }
-        let (Some(track), Some(duration), Some(position)) = (
-            self.playback.active.track(),
+        let (Some(id), Some(duration), Some(position)) = (
+            self.active_playback_id(),
             self.playback.track_duration(),
             self.active_position_secs(),
         ) else {
             media_session::publish(None);
             return;
         };
-        let meta = track.meta.clone();
+        let meta = match (
+            self.playback
+                .active
+                .track()
+                .and_then(|track| track.meta.as_ref()),
+            self.playback.active.chat(),
+        ) {
+            (Some(meta), _) => meta.clone(),
+            (None, Some(chat)) => self.track_meta_for(chat, id, self.active_playback_kind()),
+            (None, None) => TrackMeta {
+                title: tr(keys::Q_AV_AUDIO).into(),
+                subtitle: String::new(),
+            },
+        };
         let (can_previous, can_next) = self.playlist_can_move();
         let info = NowPlaying {
             title: meta.title,
@@ -483,14 +502,31 @@ impl QuillApp {
     /// The outer function repeats this body's first check; keep the two in step.
     #[inline(never)]
     fn player_bar_body(&mut self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        self.active_playback_id()?;
+        let id = self.active_playback_id()?;
         let duration = self.playback.track_duration()?;
         let position = self.active_position_secs()?;
         let kind = self.active_playback_kind();
-        let meta = self.playback.active.track()?.meta.clone();
+        let meta = match (
+            self.playback
+                .active
+                .track()
+                .and_then(|track| track.meta.as_ref()),
+            self.playback.active.chat(),
+        ) {
+            (Some(meta), _) => meta.clone(),
+            (None, Some(chat)) => self.track_meta_for(chat, id, kind),
+            (None, None) => TrackMeta {
+                title: if kind == PlaybackKind::Audio {
+                    tr(keys::Q_AV_AUDIO).into()
+                } else {
+                    tr(keys::Q_AV_VOICE_MESSAGE).into()
+                },
+                subtitle: String::new(),
+            },
+        };
         let playing = self.is_playing();
         let slider = self.player_bar_slider(cx);
-        let elapsed = self.playback.active.scrub().preview().unwrap_or(position);
+        let elapsed = self.playback.scrub().preview().unwrap_or(position);
         let time = format!(
             "{} / {}",
             format_voice_duration(elapsed as i32),
@@ -503,11 +539,10 @@ impl QuillApp {
         };
         let hover = self
             .playback
-            .active
-            .hover()
+            .seek_hover()
             .filter(|hover| hover.site == SeekSite::PlayerBar)
             .map(|hover| hover.at);
-        let dragging = self.playback.active.scrub().is_dragging();
+        let dragging = self.playback.scrub().is_dragging();
         let music = kind == PlaybackKind::Audio;
         let (can_previous, can_next) = self.playlist_can_move();
         let (repeat, order) = (self.playback.player.repeat, self.playback.player.order);

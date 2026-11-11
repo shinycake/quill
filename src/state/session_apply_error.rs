@@ -60,69 +60,8 @@ impl Session {
         // Slice G1: roll back optimistic mutations the server
         // rejected — the pre-request value rides on
         // `PendingRequest::rollback`.
-        match pending.and_then(|p| p.rollback.clone()) {
-            Some(RequestRollback::ChatPermissions {
-                previous,
-                previous_can_send,
-                ..
-            }) => {
-                // A save still out after this one decides what the box
-                // shows (its rollback holds the same values, or this
-                // chain's last confirmed ones).
-                if let Some(chat_id) = pending.and_then(|p| p.chat_id)
-                    && self
-                        .requests
-                        .pending_extra_for(RequestPurpose::SetChatPermissions, Some(chat_id))
-                        .is_none()
-                    && let Some(chat) = self.chats.get_mut(&chat_id.0)
-                {
-                    chat.permissions = previous;
-                    chat.can_send_basic_messages = previous_can_send;
-                }
-            }
-            // Slice CL2: restore the pre-reorder `order` values
-            // the server refused, then rebuild the list order.
-            Some(RequestRollback::ChatPinOrder { previous, archived }) => {
-                for (chat_id, order) in previous {
-                    if let Some(chat) = self.chats.get_mut(&chat_id) {
-                        if archived {
-                            chat.archive_order = order;
-                        } else {
-                            chat.order = order;
-                        }
-                    }
-                }
-                self.rebuild_main_order();
-            }
-            // Slice CL2: drop the refused archive-settings flip;
-            // the panel re-fetches the truth on next open.
-            Some(RequestRollback::ArchiveChatListSettings { previous }) => {
-                self.chat_list.edit_archive_settings(previous);
-            }
-            Some(
-                rollback @ (RequestRollback::JoinByRequest { .. }
-                | RequestRollback::SupergroupUsername { .. }
-                | RequestRollback::DefaultReaction { .. }
-                | RequestRollback::AvailableReactions { .. }
-                | RequestRollback::SignMessages { .. }
-                | RequestRollback::ChatIsTranslatable { .. }
-                | RequestRollback::AutoTranslate { .. }
-                | RequestRollback::AntiSpam { .. }
-                | RequestRollback::GroupToggle { .. }
-                | RequestRollback::ProtectedContent { .. }
-                | RequestRollback::ChatPin { .. }
-                | RequestRollback::ChatMarkedAsUnread { .. }
-                | RequestRollback::ForumTopicMute { .. }
-                | RequestRollback::PollVote { .. }
-                | RequestRollback::BusinessBotBar { .. }
-                | RequestRollback::ChatLinkDelete { .. }
-                | RequestRollback::FolderOrder { .. }
-                | RequestRollback::FolderTags { .. }
-                | RequestRollback::RecentSearchRemoved { .. }
-                | RequestRollback::TopChatRemoved { .. }
-                | RequestRollback::TopChatsDisabled { .. }),
-            ) => self.restore_optimistic(rollback),
-            None => {}
+        if let Some(rollback) = pending.and_then(|p| p.rollback.clone()) {
+            self.restore_optimistic(rollback, pending.and_then(|p| p.chat_id));
         }
         // Everything else belongs to the request's domain
         // (`src/state/domains/<domain>/error.rs`).
@@ -196,7 +135,7 @@ impl Session {
                     self.auth_state.password_recovery == PasswordRecovery::Requested(extra)
                 })
             {
-                self.auth_state.password_recovery = PasswordRecovery::Idle;
+                self.cancel_password_recovery();
             }
         }
     }

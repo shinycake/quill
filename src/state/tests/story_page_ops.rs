@@ -39,11 +39,11 @@ fn a_failed_delete_shows_while_a_read_is_in_flight() {
         Some(StoryPageOpState::Failed(_))
     ));
     assert!(ops.loading(
-        11,
-        &story_page_op_label(RequestPurpose::GetChatArchivedStories)
+        ChatId(11),
+        story_page_op_label(RequestPurpose::GetChatArchivedStories)
     ));
     assert!(matches!(
-        ops.status_for(Some(11)).map(|op| &op.state),
+        ops.status_for(Some(ChatId(11))).map(|op| &op.state),
         Some(StoryPageOpState::Failed(_))
     ));
 }
@@ -58,17 +58,17 @@ fn a_mutation_does_not_hide_the_loading_read() {
         RequestPurpose::GetChatPostedToChatPageStories,
         Some(ChatId(11)),
     );
-    session.begin_story_page_check(label.clone(), read);
+    session.begin_story_page_check(label, read);
     let create = session.request(RequestPurpose::CreateStoryAlbum, Some(ChatId(11)));
     session.begin_story_page_op(
         story_page_op_label(RequestPurpose::CreateStoryAlbum),
         create,
     );
     let ops = &session.stories.page_ops;
-    assert!(ops.loading(11, &label));
-    assert!(ops.mutating(11));
-    assert!(!ops.mutating(12), "another chat's page is not busy");
-    assert!(!ops.loading(12, &label), "nor loading");
+    assert!(ops.loading(ChatId(11), label));
+    assert!(ops.mutating(ChatId(11)));
+    assert!(!ops.mutating(ChatId(12)), "another chat's page is not busy");
+    assert!(!ops.loading(ChatId(12), label), "nor loading");
 }
 
 /// A request that could not be sent fails its own op and leaves the ones
@@ -124,7 +124,7 @@ fn leaving_the_page_forgets_its_calls() {
         story_page_op_label(RequestPurpose::SetChatPinnedStories),
         other,
     );
-    session.leave_story_page(11);
+    session.leave_story_page(ChatId(11));
     assert!(session.stories.page_ops.get(pin).is_none());
     assert!(session.stories.page_ops.get(other).is_some());
     // A late answer for the forgotten call changes nothing.

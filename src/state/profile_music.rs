@@ -129,8 +129,7 @@ impl Session {
             }
             Some(RequestPurpose::Media(MediaPurpose::AddProfileAudio { file_id })) => {
                 self.local_remove_profile_audio(FileId(file_id));
-                self.media.profile_audio_ids.remove(&file_id);
-                self.mark_my_playlist_stale();
+                self.playlist_change_unsent(file_id);
                 self.messages.message_action_note.push(format!(
                     "could not save to your profile: {}",
                     error_reason(err)
@@ -141,7 +140,7 @@ impl Session {
                 | MediaPurpose::SetProfileAudioPosition { file_id },
             )) => {
                 self.media.profile_audio_ids.remove(&file_id);
-                self.mark_my_playlist_stale();
+                self.playlist_change_unsent(file_id);
                 self.messages.message_action_note.push(format!(
                     "could not change your playlist: {}",
                     error_reason(err)
@@ -151,7 +150,11 @@ impl Session {
         }
     }
 
-    fn mark_my_playlist_stale(&mut self) {
+    /// A remove or reorder of `file_id` did not happen (refused by the
+    /// server, or never sent): the local change is undone by loading the
+    /// list again.
+    pub fn playlist_change_unsent(&mut self, file_id: i32) {
+        self.media.profile_audio_ids.remove(&file_id);
         if let Some(playlist) = self.my_playlist_mut() {
             playlist.list.outdate();
         }
@@ -240,7 +243,7 @@ mod tests {
     fn failed_changes_reload_the_playlist() {
         let mut session = session_with(&[1, 2]);
         session.local_remove_profile_audio(FileId(1));
-        session.mark_my_playlist_stale();
+        session.playlist_change_unsent(1);
         assert_eq!(session.take_stale_playlists(), vec![7]);
         assert!(session.media.playlists[&7].list.is_outdated());
         // The reload going out leaves the outdated stage.

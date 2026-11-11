@@ -140,3 +140,35 @@ fn an_unsent_reply_waits_out_the_lock(cx: &mut TestAppContext) {
         assert!(app.delivery.unsent_replies.is_empty());
     });
 }
+
+/// Quill's own toast hands its typed text over like the platform's reply
+/// field: any outcome but a send keeps it for the chat that opens.
+#[gpui_kit::test]
+fn a_reply_typed_into_our_own_toast_is_kept_unless_sent(cx: &mut TestAppContext) {
+    use crate::ui::notifications::inline_reply::InlineReplyOutcome;
+    let (app, mut vcx) = demo_app(cx);
+    app.update_in(&mut vcx, |app, _, _| {
+        let account = app.current_account().expect("the demo account");
+        let key = (account.clone(), CHAT);
+        app.keep_unsent_reply(&account, CHAT, "sent".into(), InlineReplyOutcome::Sent);
+        assert!(
+            app.delivery.unsent_replies.is_empty(),
+            "a sent reply is gone"
+        );
+        app.keep_unsent_reply(&account, CHAT, "  ".into(), InlineReplyOutcome::Refused);
+        assert!(
+            app.delivery.unsent_replies.is_empty(),
+            "blank text is not kept"
+        );
+        app.keep_unsent_reply(
+            &account,
+            CHAT,
+            "no rights".into(),
+            InlineReplyOutcome::Refused,
+        );
+        assert_eq!(
+            app.delivery.unsent_replies.get(&key).map(String::as_str),
+            Some("no rights")
+        );
+    });
+}

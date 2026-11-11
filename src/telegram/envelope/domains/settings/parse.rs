@@ -276,29 +276,29 @@ pub(crate) fn parse_settings_payload(
                     .unwrap_or("")
                     .to_string()
             };
-            let (pending_email_pattern, pending_email_code_length) = value
+            let pending_email = value
                 .get("recovery_email_address_code_info")
                 .and_then(Value::as_object)
-                .map(|info| {
-                    (
-                        info.get("email_address_pattern")
-                            .and_then(Value::as_str)
-                            .map(str::to_string),
-                        info.get("length")
+                .and_then(|info| {
+                    Some(PendingRecoveryEmail {
+                        pattern: info
+                            .get("email_address_pattern")
+                            .and_then(Value::as_str)?
+                            .to_string(),
+                        code_length: info
+                            .get("length")
                             .and_then(Value::as_i64)
                             .unwrap_or(0)
                             .clamp(0, i32::MAX as i64) as i32,
-                    )
-                })
-                .unwrap_or((None, 0));
+                    })
+                });
             Ok(EnvelopePayload::Settings(SettingsPayload::PasswordState {
                 state: PasswordState {
                     has_password: bool_field("has_password"),
                     password_hint: str_field("password_hint"),
                     has_recovery_email_address: bool_field("has_recovery_email_address"),
                     has_passport_data: bool_field("has_passport_data"),
-                    pending_email_pattern,
-                    pending_email_code_length,
+                    pending_email,
                     login_email_address_pattern: str_field("login_email_address_pattern"),
                     pending_reset_date: value
                         .get("pending_reset_date")
@@ -408,13 +408,14 @@ pub(crate) fn parse_settings_payload(
                             let date = entry.get("birthdate")?;
                             Some(crate::chatlist_suggestions::CloseBirthday {
                                 user_id,
-                                day: date.get("day").and_then(Value::as_u64)? as u8,
-                                month: date.get("month").and_then(Value::as_u64)? as u8,
+                                day: u8::try_from(date.get("day").and_then(Value::as_u64)?).ok()?,
+                                month: u8::try_from(date.get("month").and_then(Value::as_u64)?)
+                                    .ok()?,
                                 year: date
                                     .get("year")
                                     .and_then(Value::as_i64)
                                     .filter(|year| *year > 0)
-                                    .map(|year| year as i32),
+                                    .and_then(|year| i32::try_from(year).ok()),
                             })
                         })
                         .collect()
@@ -456,7 +457,6 @@ pub(crate) fn parse_settings_payload(
             // field — the scope is correlated via the pending request.
             Ok(EnvelopePayload::Settings(
                 SettingsPayload::ScopeNotificationSettings {
-                    scope: NotificationSettingsScope::PrivateChats,
                     settings: parse_scope_notification_settings(Some(value)),
                 },
             ))

@@ -100,6 +100,24 @@ impl Session {
         self.run == Run::Running
     }
 
+    /// The transition from `Ended` back to `Running` for a pause that is
+    /// seen again with an agent connected: a new run from `now`, with no
+    /// action and no agent name (the one connected may not be the one the
+    /// user paused). Only [`observe`] calls it, and only for an ended
+    /// session; a running one is left as it is.
+    fn revive_unnamed(&mut self, now: u64) {
+        if self.running() {
+            return;
+        }
+        *self = Session {
+            agent: String::new(),
+            started_ms: now,
+            last_ms: now,
+            run: Run::Running,
+            action: None,
+        };
+    }
+
     /// When it ends: when it was cut short, else [`HOLD`] after the last
     /// command.
     fn end_ms(&self) -> u64 {
@@ -280,13 +298,8 @@ pub fn observe(facts: &mut Facts, live: Live, now: u64) {
     if live.connected && live.allowed {
         if facts.hold.paused().is_some()
             && let Some(session) = facts.session.as_mut()
-            && !session.running()
         {
-            session.started_ms = now;
-            session.last_ms = now;
-            session.run = Run::Running;
-            session.action = None;
-            session.agent.clear();
+            session.revive_unnamed(now);
         }
         return;
     }

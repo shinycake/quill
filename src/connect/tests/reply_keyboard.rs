@@ -233,3 +233,20 @@ fn recent_inline_bots_are_fetched_once_and_kept() {
     h.driver.maybe_fetch_recent_inline_bots().expect("cached");
     assert_eq!(h.recorder.snapshot().len(), before, "kept for the session");
 }
+
+/// r2-18 06-006: a failed `getRecentInlineBots` leaves the list askable:
+/// the next "@" asks again instead of finding it in flight for good.
+#[test]
+fn a_failed_recent_inline_bots_fetch_is_asked_again() {
+    let mut h = Harness::new();
+    h.driver.maybe_fetch_recent_inline_bots().expect("request");
+    let v = sent_request(&h.recorder, "getRecentInlineBots");
+    let asked = h.recorder.snapshot().len();
+    h.ingest(&format!(
+        r#"{{"@extra":"{}","@type":"error","code":500,"message":"INTERNAL"}}"#,
+        v["@extra"].as_str().unwrap()
+    ));
+    assert!(h.driver.session.recent_inline_bots().is_empty());
+    h.driver.maybe_fetch_recent_inline_bots().expect("again");
+    assert_eq!(h.recorder.snapshot().len(), asked + 1, "asked again");
+}

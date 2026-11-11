@@ -89,6 +89,17 @@ fn output_for(nv12: bool) -> PixelOutput {
     }
 }
 
+/// The picture last handed out: one value, so an image and a surface are
+/// never both held.
+enum OnScreen {
+    Nothing,
+    Image(Arc<RenderImage>),
+    /// An NV12 surface, to show as an image instead if the renderer
+    /// refuses it. Never made on macOS.
+    #[cfg_attr(target_os = "macos", allow(dead_code))]
+    Surface(Picture),
+}
+
 pub(super) struct FfmpegBackend {
     path: PathBuf,
     options: OpenOptions,
@@ -97,10 +108,7 @@ pub(super) struct FfmpegBackend {
     volume: f32,
     /// The transport's intent as last synced (its rate is the decoder's).
     want: Want,
-    image: Option<Arc<RenderImage>>,
-    /// The surface picture on screen (NV12), to show as an image
-    /// instead if the renderer refuses it.
-    surface: Option<Picture>,
+    on_screen: OnScreen,
     /// The layout last asked of the decoder.
     output: PixelOutput,
     /// Images only until then: the window refused a surface.
@@ -127,8 +135,7 @@ impl FfmpegBackend {
             sound: None,
             volume: 1.0,
             want: Want::default(),
-            image: None,
-            surface: None,
+            on_screen: OnScreen::Nothing,
             nv12_paused_until: None,
             pending_step: None,
         }
@@ -203,10 +210,14 @@ impl FfmpegBackend {
     }
 
     fn show_image(&mut self, image: Arc<RenderImage>) {
-        if let Some(old) = self.image.replace(image) {
+        self.retire_image(OnScreen::Image(image));
+    }
+
+    /// Show `next`; an image it replaces goes to the budget.
+    fn retire_image(&mut self, next: OnScreen) {
+        if let OnScreen::Image(old) = std::mem::replace(&mut self.on_screen, next) {
             super::super::image_budget::retire_all([old]);
         }
-        self.surface = None;
     }
 
     /// An NV12 picture as a surface when `nv12` ([`Self::nv12_now`]); the
@@ -229,11 +240,8 @@ impl FfmpegBackend {
             bytes: surface.bytes().len(),
             convert_us,
         };
-        if let Some(old) = self.image.take() {
-            super::super::image_budget::retire_all([old]);
-        }
         let picture = Picture::Surface(surface);
-        self.surface = Some(picture.clone());
+        self.retire_image(OnScreen::Surface(picture.clone()));
         Ok((picture, stats))
     }
 
@@ -312,6 +320,8 @@ impl Backend for FfmpegBackend {
     }
 
     fn seek(&mut self, secs: f64) {
+        // A picture stepped to before the seek is not the one to show next.
+        self.pending_step = None;
         self.player.seek(secs);
         if let Some(sound) = &self.sound {
             sound.flush();
@@ -323,18 +333,25 @@ impl Backend for FfmpegBackend {
     fn set_volume(&mut self, volume: f32) {
         self.volume = volume.clamp(0.0, 1.0);
         if self.volume > 0.0 && !self.options.want_audio {
-            self.options.want_audio = true;
-            self.options.output = self.output;
+            // Sound is wanted only once the reopen worked: a failed one
+            // leaves the clip as it was, and the next turn-up tries again.
+            let reopened = OpenOptions {
+                want_audio: true,
+                output: self.output,
+                ..self.options.clone()
+            };
             let position = self.player.position();
             let running = self.player.is_playing();
-            if let Ok(mut player) = Player::open(&self.path, self.options.clone()) {
+            if let Ok(mut player) = Player::open(&self.path, reopened.clone()) {
                 player.set_rate(self.want.rate);
                 player.seek(position);
                 if running {
                     player.play();
                 }
+                self.options = reopened;
                 self.player = player;
                 self.sound = None;
+                self.pending_step = None;
             }
         }
         if let Some(sound) = &self.sound {
@@ -348,6 +365,7 @@ impl Backend for FfmpegBackend {
                 self.pending_step = Some(frame);
             }
         } else {
+            self.pending_step = None;
             self.player.step_back();
         }
     }
@@ -388,7 +406,10 @@ impl Backend for FfmpegBackend {
     fn replace_refused(&mut self, now: Instant) -> Option<Picture> {
         self.nv12_paused_until = now.checked_add(NV12_RETRY);
         self.sync_output(false);
-        let image = self.surface.take()?.snapshot()?;
+        let OnScreen::Surface(surface) = &self.on_screen else {
+            return None;
+        };
+        let image = surface.snapshot()?;
         self.show_image(image.clone());
         Some(Picture::Image(image))
     }
@@ -396,9 +417,7 @@ impl Backend for FfmpegBackend {
 
 impl Drop for FfmpegBackend {
     fn drop(&mut self) {
-        if let Some(old) = self.image.take() {
-            super::super::image_budget::retire_all([old]);
-        }
+        self.retire_image(OnScreen::Nothing);
     }
 }
 
@@ -520,6 +539,20 @@ mod tests {
         output.settle_device();
         assert!(!backend.status().has_sound);
         assert!(!backend.player.has_sound(), "the wall clock is");
+    }
+
+    #[test]
+    fn a_seek_drops_the_picture_stepped_to_before_it() {
+        let options = OpenOptions::viewer();
+        let tone = Tone {
+            started: None,
+            pts: 0.0,
+        };
+        let player = Player::with_demuxer(Box::new(tone), options.clone()).unwrap();
+        let mut backend = FfmpegBackend::with_player(Path::new("tone"), options, player);
+        backend.pending_step = Some(VideoFrame::bgra(0.0, 2, 2, vec![0; 16]));
+        backend.seek(1.0);
+        assert!(backend.pending_step.is_none());
     }
 
     /// A BGRA picture's buffer goes back to its player once the image

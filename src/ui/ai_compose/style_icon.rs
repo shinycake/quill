@@ -24,7 +24,10 @@ impl QuillApp {
             let _ = live.driver.load_forum_topic_icons();
             let _ = live.driver.open_media_panel();
         }
-        self.set_ai_compose_view(AiComposeView::StyleIcon, cx);
+        if let Some(open) = self.ai_compose.open.as_mut() {
+            open.view.show_icon_picker();
+        }
+        cx.notify();
     }
 
     pub(super) fn ai_emoji_still(&self, id: i64) -> Option<PathBuf> {
@@ -72,7 +75,7 @@ impl QuillApp {
             .ai_compose
             .open
             .as_ref()
-            .is_some_and(|open| open.view == AiComposeView::StyleIcon);
+            .is_some_and(|open| matches!(open.view, AiComposeView::StyleIcon(_)));
         if !showing {
             return;
         }
@@ -171,7 +174,7 @@ impl QuillApp {
                     .ghost()
                     .label(tr(keys::CANCEL))
                     .on_click(cx.listener(|this, _, _, cx| {
-                        this.set_ai_compose_view(AiComposeView::StyleEditor, cx);
+                        this.show_ai_style_editor(cx);
                     })),
             )
             .into_any_element()
@@ -184,6 +187,14 @@ impl QuillApp {
                 editor.warning = None;
             }
         }
-        self.set_ai_compose_view(AiComposeView::StyleEditor, cx);
+        self.show_ai_style_editor(cx);
+    }
+
+    /// The icon picker closes: back to the editor it was over.
+    pub(super) fn show_ai_style_editor(&mut self, cx: &mut Context<Self>) {
+        if let Some(open) = self.ai_compose.open.as_mut() {
+            open.view.show_editor();
+        }
+        cx.notify();
     }
 }

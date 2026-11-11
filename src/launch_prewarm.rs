@@ -97,30 +97,64 @@ fn sysctl_string(name: &std::ffi::CStr) -> Option<String> {
     String::from_utf8(text.to_vec()).ok()
 }
 
-static GLYPHS_SAVED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// Where writing this launch's glyphs and line layouts stands.
+#[derive(Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(
+    not(all(target_os = "macos", feature = "ui")),
+    allow(dead_code, reason = "only the macOS launch writes its caches")
+)]
+enum GlyphSave {
+    /// Not written yet: the first drawn chat list starts it. Also where a
+    /// writer that could not be started leaves it, for the next frame to
+    /// try again.
+    Pending,
+    /// The writer thread runs.
+    Saving,
+    /// It ran (or panicked, which is not tried again).
+    Saved,
+}
+
+static GLYPH_SAVE: std::sync::Mutex<GlyphSave> = std::sync::Mutex::new(GlyphSave::Pending);
 
 /// Whether this launch's glyphs are still to be written.
 pub fn glyphs_pending() -> bool {
     cfg!(all(target_os = "macos", feature = "ui"))
-        && !GLYPHS_SAVED.load(std::sync::atomic::Ordering::Relaxed)
+        && *crate::locks::lock_or_recover(&GLYPH_SAVE) == GlyphSave::Pending
+}
+
+/// Ends the write, however the writer thread ends.
+#[cfg(all(target_os = "macos", feature = "ui"))]
+struct SaveEnd;
+
+#[cfg(all(target_os = "macos", feature = "ui"))]
+impl Drop for SaveEnd {
+    fn drop(&mut self) {
+        *crate::locks::lock_or_recover(&GLYPH_SAVE) = GlyphSave::Saved;
+    }
 }
 
 /// The chat list has been drawn once: the line layouts and glyph bitmaps
 /// made so far are written for the next launch, on a worker. Only the first
-/// call does anything.
+/// call does anything, unless the worker could not be started.
 #[cfg(all(target_os = "macos", feature = "ui"))]
 pub fn chat_list_drawn() {
-    if GLYPHS_SAVED.swap(true, std::sync::atomic::Ordering::Relaxed) {
-        return;
+    {
+        let mut save = crate::locks::lock_or_recover(&GLYPH_SAVE);
+        if *save != GlyphSave::Pending {
+            return;
+        }
+        *save = GlyphSave::Saving;
     }
-    let _ = std::thread::Builder::new()
-        .name("quill-glyph-cache".into())
-        .spawn(|| {
-            crate::launch_lines::save();
-            if let Some(path) = glyph_cache_path() {
-                let _ = gpui_macos::glyph_cache::save(&path, &cache_stamp());
-            }
-        });
+    let started = crate::thread_guard::spawn_guarded("quill-glyph-cache", || {
+        let _end = SaveEnd;
+        crate::launch_lines::save();
+        if let Some(path) = glyph_cache_path() {
+            let _ = gpui_macos::glyph_cache::save(&path, &cache_stamp());
+        }
+    });
+    if started.is_err() {
+        *crate::locks::lock_or_recover(&GLYPH_SAVE) = GlyphSave::Pending;
+    }
 }
 
 #[cfg(not(all(target_os = "macos", feature = "ui")))]

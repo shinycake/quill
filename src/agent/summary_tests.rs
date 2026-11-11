@@ -1,4 +1,5 @@
 use super::*;
+use crate::agent::activity::Outcome;
 use crate::agent::grants::ChatGrant;
 
 fn inputs() -> Inputs {
@@ -38,10 +39,8 @@ fn action(chat_id: i64, time: i64) -> Action {
         chat_id,
         chat_title: "Chat".into(),
         summary: String::new(),
-        ok: true,
-        declined: false,
+        outcome: Outcome::Done,
         message_ids: Vec::new(),
-        undone: false,
     }
 }
 

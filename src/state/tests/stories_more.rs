@@ -775,7 +775,7 @@ fn a_stale_answer_does_not_settle_the_op_tracked_now() {
     let purpose = RequestPurpose::SetChatActiveStoriesList;
     let label = crate::story_page::story_page_op_label(purpose);
     let first = session.request(purpose, Some(ChatId(11)));
-    session.begin_story_page_op(label.clone(), first);
+    session.begin_story_page_op(label, first);
     let second = session.request(purpose, Some(ChatId(12)));
     session.begin_story_page_op(label, second);
     apply_json(
@@ -905,7 +905,7 @@ fn close_friends_load_failure_survives_a_later_story_page_op() {
     session.stories.close_friends.begin_load(load);
     // Another op takes the viewer's page op before the failure lands.
     let other = session.request(RequestPurpose::SetChatActiveStoriesList, None);
-    session.begin_story_page_op("hiding", other);
+    session.begin_story_page_op(crate::story_page::StoryPageOpKind::Other, other);
     apply_json(
         &mut session,
         &seq,
@@ -941,4 +941,23 @@ fn an_account_going_away_ends_the_management_calls_on_their_way() {
         session.stories.manage.outcome(RequestId(30)),
         StoryManageOutcome::Lost
     );
+}
+
+/// r2-18 06-014: a report step of another story that never left does not
+/// replace a flow that has a request out, and the first one that never left
+/// still ends in a failed flow.
+#[test]
+fn an_unsent_story_report_leaves_a_flow_with_a_request_out_alone() {
+    let (mut session, _sink) = session();
+    session.fail_story_report_send(12, 6, "no".into());
+    assert!(matches!(
+        session.stories.report.as_ref().map(|flow| &flow.stage),
+        Some(StoryReportStage::Failed(_))
+    ));
+    let extra = session.request_for_story(RequestPurpose::ReportStory, ChatId(12), 6);
+    session.begin_story_report(12, 6, extra);
+    session.fail_story_report_send(13, 7, "no".into());
+    let flow = session.stories.report.as_ref().expect("flow");
+    assert!(flow.is_for(12, 6), "story 6 keeps its flow");
+    assert!(matches!(flow.stage, StoryReportStage::Checking { .. }));
 }

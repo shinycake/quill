@@ -77,7 +77,7 @@ impl Session {
             self.sign_in_origin = crate::account_data::SignInOrigin::Fresh;
         }
         if !matches!(state, AuthorizationState::WaitPassword { .. }) {
-            self.auth_state.password_recovery = PasswordRecovery::Idle;
+            self.cancel_password_recovery();
         }
         if !matches!(
             state,

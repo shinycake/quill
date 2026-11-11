@@ -161,3 +161,29 @@ fn closing_the_video_chat_window_closes_its_boxes(cx: &mut TestAppContext) {
     });
     assert_eq!(boxes(&app, &mut vcx), (false, false, false));
 }
+
+#[gpui_kit::test]
+fn esc_in_the_video_chat_window_closes_the_invite_and_share_boxes(cx: &mut TestAppContext) {
+    use crate::ui::group_call_state::CallBox;
+    let (app, mut vcx) = new_app(cx);
+    open_boxes(&app, &mut vcx);
+    app.update_in(&mut vcx, |app, _, cx| {
+        app.screen_share.chooser = Default::default();
+        app.group_call_screen.settings_open = false;
+        app.group_call_screen.title_dialog = None;
+        app.group_call_boxes.call_box = CallBox::Share {
+            call: Some(77),
+            speaker: false,
+            copied: false,
+        };
+        assert!(app.group_call_window_escape(cx), "Esc closes the share box");
+        assert!(matches!(app.group_call_boxes.call_box, CallBox::None));
+        app.group_call_boxes.call_box = CallBox::Invite { call: Some(77) };
+        assert!(
+            app.group_call_window_escape(cx),
+            "Esc closes the invite box"
+        );
+        assert!(matches!(app.group_call_boxes.call_box, CallBox::None));
+        assert!(!app.group_call_window_escape(cx), "nothing left to close");
+    });
+}

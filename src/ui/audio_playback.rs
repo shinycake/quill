@@ -94,37 +94,44 @@ impl QuillApp {
         self.players.audio.stop();
     }
 
+    /// Stop the voice note, if one is the active track. Nothing else is
+    /// touched: a music file that is active stays so.
     pub(super) fn stop_voice_playback(&mut self) {
-        if self.playback.active.voice().is_none() {
+        let Some(message) = self.playback.active.voice() else {
             return;
-        }
+        };
         self.kill_shared_player();
-        self.end_active_track();
+        // Save the position before the track goes: it reads the active one.
+        self.remember_active_position();
+        self.playback.active.take_voice();
+        self.drop_play_intent_for_message(message);
     }
 
+    /// Stop the music file, if one is the active track.
     pub(super) fn stop_audio_playback(&mut self) {
-        if self.playback.active.audio().is_none() {
+        let Some(message) = self.playback.active.audio() else {
             return;
-        }
+        };
         self.kill_shared_player();
-        self.end_active_track();
+        self.remember_active_position();
+        self.playback.active.take_audio();
+        self.drop_play_intent_for_message(message);
     }
 
-    /// The active track ends: its position is remembered (so a stopped row
-    /// still shows where it got to) and the track goes whole, with its
-    /// sliders, drag, hover and the chat claim that keeps its history
-    /// whole (`sync_history_holds`).
-    fn end_active_track(&mut self) {
+    /// The active track is ending: its position is kept (the remembered
+    /// per-message position in `playback.positions` lets a stopped row show
+    /// where it got to), and the bars' own sliders go with it. The track's
+    /// seek slider, scrub, hover, length, chat and bar text are the track's
+    /// own and go when it is dropped; with its chat goes the claim that
+    /// keeps that chat's history whole (`sync_history_holds`).
+    fn remember_active_position(&mut self) {
         if let (Some(key), Some(position)) =
             (self.active_playback_key(), self.active_position_secs())
         {
             self.playback.positions.insert(key, position);
         }
-        let ended = std::mem::take(&mut self.playback.active);
         quill::wake::CHROME.poke();
-        if let Some(message) = ended.id() {
-            self.drop_play_intent_for_message(message);
-        }
+        self.playback.player.sliders.clear();
     }
 
     /// Message id of the active (playing or paused) track, if any.
@@ -173,6 +180,7 @@ impl QuillApp {
         let _ = self.recording.take_preview();
         self.viewer.clip.clear_error();
         let playing = self.start_player(path, offset_secs, duration_secs, cx);
+        quill::wake::CHROME.poke();
         let slider = cx.new(|_| {
             SliderState::new()
                 .label(tr(keys::Q_AV_PLAYBACK_POSITION))
@@ -184,19 +192,27 @@ impl QuillApp {
         cx.subscribe(&slider, |this, entity, event: &SliderEvent, cx| {
             // A slider the element still holds from before the track
             // changed (a drag in progress) is not this track's.
-            if this.playback.active.slider() == Some(&entity) {
+            if this.playback.seek_slider() == Some(&entity) {
                 this.on_seek_event(event, cx);
             }
         })
         .detach();
+        // The track and all that is about it arrive as one value.
         let meta = self.track_meta_for(chat_id, message_id, kind);
-        let track = Track::new(message_id, chat_id, duration_secs.max(0.0), meta, slider);
+        let track = Track {
+            id: message_id,
+            chat: Some(chat_id),
+            meta: Some(meta),
+            length: Some(duration_secs.max(0.0)),
+            slider: Some(slider),
+            scrub: Scrub::Idle,
+            hover: None,
+        };
         self.playback.active = match kind {
             PlaybackKind::Voice => ActiveTrack::Voice(track),
             PlaybackKind::Audio => ActiveTrack::Audio(track),
         };
-        quill::wake::CHROME.poke();
-        cx.notify();
+        self.note_track_started(cx);
         self.spawn_playback_tick(cx);
         playing
     }
@@ -318,10 +334,10 @@ impl QuillApp {
                 cx.notify();
             }
             SliderEvent::Release(value) => {
-                // A drag released off the scrubber gets no leave event;
-                // the next move over it sets the hover again.
                 if let Some(track) = self.playback.active.track_mut() {
                     track.scrub = Scrub::Idle;
+                    // A drag released off the scrubber gets no leave event;
+                    // the next move over it sets the hover again.
                     track.hover = None;
                 }
                 self.seek_active_to(f64::from(value.end()), cx);
@@ -414,9 +430,9 @@ impl QuillApp {
                         // rounded duration).
                         this.players.audio.settle();
                         let finished = this.players.audio.is_ended();
-                        if finished && !this.playback.active.scrub().is_dragging() {
+                        if finished && !this.playback.scrub().is_dragging() {
                             // Capture the id first: the stops below save the
-                            // (now end-of-track) position via clear_playback_state,
+                            // (now end-of-track) position via remember_active_position,
                             // then reset to 0.0 so replay-after-finish starts at the top.
                             let finished_id = this.active_playback_key();
                             // What the playlist continues with (voice note
@@ -478,11 +494,11 @@ impl QuillApp {
     /// `&mut Window`, which `SliderState::set_value` needs). Skipped while
     /// scrubbing so the user's drag is never fought.
     pub(super) fn sync_seek_slider(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.playback.active.scrub().is_dragging() {
+        if self.playback.scrub().is_dragging() {
             return;
         }
         if let (Some(slider), Some(position)) =
-            (self.playback.active.slider(), self.active_position_secs())
+            (self.playback.seek_slider(), self.active_position_secs())
         {
             let value = position as f32;
             // `set_value` calls `cx.notify()` unconditionally — only push when
@@ -496,8 +512,7 @@ impl QuillApp {
             }
             // The player bar's own sliders, one per window, follow the
             // same position.
-            let bars = self.playback.active.track().map(|track| &track.bars);
-            for bar in bars.into_iter().flat_map(|bars| bars.values()) {
+            for bar in self.playback.player.sliders.values() {
                 if bar.read(cx).value() != SliderValue::Single(value) {
                     bar.update(cx, |state, cx| {
                         state.set_value(value, window, cx);
@@ -520,10 +535,10 @@ impl QuillApp {
             // A late leave from one control never clears the other's hover.
             None => self
                 .playback
-                .active
-                .hover()
+                .seek_hover()
                 .filter(|hover| hover.site != site),
         };
+        // Only the active track has a seek control to be over.
         if let Some(track) = self.playback.active.track_mut()
             && next != track.hover
         {
@@ -561,12 +576,11 @@ impl QuillApp {
         if active {
             let display = self
                 .playback
-                .active
                 .scrub()
                 .preview()
                 .or_else(|| self.active_position_secs());
             SeekBarView {
-                slider: self.playback.active.slider().cloned(),
+                slider: self.playback.seek_slider().cloned(),
                 display_secs: display.unwrap_or(0.0),
                 duration_secs,
                 is_playing: self.is_playing(),
@@ -576,11 +590,10 @@ impl QuillApp {
                 error: self.players.audio.error().map(audio_error_text),
                 hover: self
                     .playback
-                    .active
-                    .hover()
+                    .seek_hover()
                     .filter(|hover| hover.site == SeekSite::Row)
                     .map(|hover| hover.at),
-                dragging: self.playback.active.scrub().is_dragging(),
+                dragging: self.playback.scrub().is_dragging(),
             }
         } else {
             SeekBarView {

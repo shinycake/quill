@@ -8,7 +8,9 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
+use super::composer::ScheduledDialog;
 use super::composer_sends::SendSlot;
+use super::danger_dark;
 use super::message_text::format_unix_date_time;
 use super::shell::DialogKind;
 use super::shell::QuillShell;
@@ -24,7 +26,7 @@ use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::composer::{ComposerEdit, ComposerScheduling};
-use quill::ids::MessageId;
+use quill::ids::{MessageId, RequestId};
 use quill::lang::{keys, tr, tr_with};
 use quill::schedule::{
     MAX_SCHEDULE_SECS, MIN_SCHEDULE_SECS, ScheduleError, ScheduleKind, default_schedule_time,
@@ -90,8 +92,9 @@ pub(super) enum ScheduleTarget {
 pub(super) enum ScheduleFlow {
     #[default]
     Closed,
-    /// The scheduled-messages dialog.
-    List,
+    /// The scheduled-messages dialog, with the stage of the load that fills
+    /// it (never `ScheduledDialog::Closed`: that is this flow's `Closed`).
+    List(ScheduledDialog),
     /// The picker popup with the date+time picker it holds (created when
     /// the popup opens, see `open_schedule_picker`).
     Picking(SchedulePicker),
@@ -101,14 +104,14 @@ impl ScheduleFlow {
     pub(super) fn picker(&self) -> Option<&SchedulePicker> {
         match self {
             Self::Picking(picker) => Some(picker),
-            Self::Closed | Self::List => None,
+            Self::Closed | Self::List(_) => None,
         }
     }
 
     pub(super) fn picker_mut(&mut self) -> Option<&mut SchedulePicker> {
         match self {
             Self::Picking(picker) => Some(picker),
-            Self::Closed | Self::List => None,
+            Self::Closed | Self::List(_) => None,
         }
     }
 
@@ -125,14 +128,43 @@ impl ScheduleFlow {
     }
 
     pub(super) fn list_open(&self) -> bool {
-        matches!(self, Self::List)
+        matches!(self, Self::List(_))
     }
 
-    /// The list closes; a picker that replaced it stays.
-    pub(super) fn close_list(&mut self) {
-        if self.list_open() {
-            *self = Self::Closed;
+    /// The dialog's load stage; `Closed` while the list is not the open box.
+    pub(super) fn dialog(&self) -> &ScheduledDialog {
+        match self {
+            Self::List(stage) => stage,
+            Self::Closed | Self::Picking(_) => &ScheduledDialog::Closed,
         }
+    }
+
+    /// The list opens at `stage` (a picker or an earlier list goes).
+    pub(super) fn open_list(&mut self, stage: ScheduledDialog) {
+        *self = if stage.is_open() {
+            Self::List(stage)
+        } else {
+            Self::Closed
+        };
+    }
+
+    /// The load moves to `stage`; only an open list has a load.
+    pub(super) fn set_list_stage(&mut self, stage: ScheduledDialog) {
+        if let Self::List(current) = self {
+            *current = stage;
+        }
+    }
+
+    /// The list closes, with the load it still waits for (its request); a
+    /// picker that replaced it stays.
+    pub(super) fn close_list(&mut self) -> Option<RequestId> {
+        if !self.list_open() {
+            return None;
+        }
+        let Self::List(stage) = std::mem::take(self) else {
+            return None;
+        };
+        stage.loading()
     }
 }
 
@@ -335,6 +367,8 @@ impl QuillApp {
             ScheduleTarget::Composer => self.send_slot(),
             _ => None,
         };
+        // The picker replaces the list: a load still out is let go of.
+        self.close_scheduled_dialog();
         self.chat_ui.schedule = ScheduleFlow::Picking(SchedulePicker {
             target,
             date,
@@ -622,7 +656,7 @@ impl QuillApp {
     ) -> Dialog {
         let on_close =
             QuillShell::on_close_kind(app, shell, DialogKind::Scheduled, |this, _, cx| {
-                this.chat_ui.schedule.close_list();
+                this.close_scheduled_dialog();
                 cx.notify();
             });
         app.update(cx, |this, cx| {
@@ -751,6 +785,7 @@ impl QuillApp {
                     .ghost()
                     .small()
                     .on_click(cx.listener(|this, _, window, cx| {
+                        this.close_scheduled_dialog();
                         this.open_schedule_picker(ScheduleTarget::RescheduleSelected, window, cx);
                         this.close_kit_dialog_if_done(DialogKind::Scheduled, window, cx);
                     })),
@@ -781,6 +816,43 @@ impl QuillApp {
     /// `scheduled_dialog` — kept pure (no custom scrim/panel).
     pub(super) fn scheduled_dialog_body(&self, cx: &mut Context<Self>) -> AnyElement {
         let kind = self.schedule_kind();
+        match self.chat_ui.schedule.dialog() {
+            // The list is on its way (or did not come): never the empty
+            // text, which says there is nothing scheduled.
+            ScheduledDialog::Loading(_) => {
+                return div()
+                    .id("scheduled-loading")
+                    .text_sm()
+                    .text_color(cx.theme().muted_foreground)
+                    .child(tr(keys::Q_CHAT_LOADING_SCHEDULED_MESSAGES))
+                    .into_any_element();
+            }
+            ScheduledDialog::Failed(line) => {
+                return div()
+                    .id("scheduled-failed")
+                    .flex()
+                    .flex_col()
+                    .gap_2()
+                    .child(
+                        div()
+                            .text_sm()
+                            .text_color(danger_dark())
+                            .child(line.clone()),
+                    )
+                    .child(
+                        div().flex().child(
+                            Button::new("scheduled-retry")
+                                .label(tr(keys::Q_MONEY_RETRY))
+                                .small()
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.open_scheduled_dialog(cx);
+                                })),
+                        ),
+                    )
+                    .into_any_element();
+            }
+            ScheduledDialog::Ready | ScheduledDialog::Closed => {}
+        }
         let messages: Vec<ParsedMessage> = self
             .session()
             .and_then(|session| {
@@ -842,6 +914,7 @@ impl QuillApp {
                         .label(tr(keys::Q_OPS_RESCHEDULE))
                         .ghost()
                         .on_click(cx.listener(move |this, _, window, cx| {
+                            this.close_scheduled_dialog();
                             this.open_schedule_picker(ScheduleTarget::Reschedule(id), window, cx);
                             this.close_kit_dialog_if_done(DialogKind::Scheduled, window, cx);
                         })),
@@ -852,7 +925,7 @@ impl QuillApp {
                         .label(tr(keys::Q_OPS_EDIT))
                         .ghost()
                         .on_click(cx.listener(move |this, _, window, cx| {
-                            this.chat_ui.schedule.close_list();
+                            this.close_scheduled_dialog();
                             this.begin_edit(edit.clone(), window, cx);
                             this.close_kit_dialog_if_done(DialogKind::Scheduled, window, cx);
                         })),
@@ -928,7 +1001,7 @@ crate::ui::shell::register_dialogs! {
     )
     .per_window()
     .close(|app, _, cx| {
-            app.chat_ui.schedule.close_list();
+            app.close_scheduled_dialog();
             cx.notify();
         }),
 }

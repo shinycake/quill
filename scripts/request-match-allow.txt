@@ -1,0 +1,4 @@
+# Purpose checks and unmatched answers that need no RequestId (scripts/check-request-match.py).
+# One per line: <rule>:<Type::function> <reason>
+unmatched:Session::apply_earn the own account's "has Stars statistics" fact (EarnState::self_stats, a Fetch<()>): any getStarRevenueStatistics answer for the own account proves it, the probe's or the open page's, so it is not tied to one request. The page's own data in the same arm is matched by waits_for
+purpose:QuillApp::auth_submit_busy a double-submit guard, not an answer match: Enter in a sign-in field is refused while any sign-in submit is in the registry, the same test the driver makes before it sends one (connect/auth.rs). The answers are matched by the step's own request.

@@ -235,13 +235,10 @@ fn run(command: UiCommand) -> Result<UiReply, ToolError> {
 }
 
 /// [`run`] with the screenshot `asked` for after the command. A command
-/// that fails takes no picture, so its rate-limit slot goes back.
-fn run_shot(command: UiCommand, asked: &mut Asked) -> Result<UiReply, ToolError> {
-    let reply = run_with(command, asked.options);
-    if reply.is_err() {
-        asked.give_back();
-    }
-    reply
+/// that fails takes no picture, and `asked` dropping on the error return
+/// gives its rate-limit slot back.
+fn run_shot(command: UiCommand, asked: &Asked) -> Result<UiReply, ToolError> {
+    run_with(command, asked.options())
 }
 
 fn run_with(command: UiCommand, shot: Option<ShotOptions>) -> Result<UiReply, ToolError> {
@@ -415,7 +412,7 @@ fn done_output(
     reply: UiReply,
     lead: String,
     extra: Value,
-    mut asked: Asked,
+    asked: Asked,
 ) -> Result<ToolOutput, ToolError> {
     let UiReply::Done {
         tree,
@@ -429,10 +426,8 @@ fn done_output(
             "Quill's window gave an unexpected answer. Retry.",
         ));
     };
-    if !matches!(shot, Some(Ok(_))) {
-        asked.give_back();
-    }
     let sent = ui_send.map(finish_ui_send).transpose()?;
+    let skipped = asked.settle(matches!(shot, Some(Ok(_))));
     let focus = tree.focus.as_deref().and_then(|id| tree.node(id));
     let mut text = lead;
     if let Some(sent) = &sent {
@@ -464,7 +459,7 @@ fn done_output(
             map.insert(key.clone(), value.clone());
         }
     }
-    let images = ui_shot::add_to_answer(shot, asked.skipped, tree.frame, &mut text, &mut data);
+    let images = ui_shot::add_to_answer(shot, skipped, tree.frame, &mut text, &mut data);
     Ok(ToolOutput { text, data, images })
 }
 
@@ -522,14 +517,14 @@ pub fn click_element(args: &Value) -> Result<ToolOutput, ToolError> {
         }
     };
     let count = super::int_arg(args, "count", 1, 1, 3)? as u32;
-    let mut asked = ui_shot::asked(args);
+    let asked = ui_shot::asked(args);
     let reply = run_shot(
         UiCommand::Click {
             target: target.clone(),
             button,
             count,
         },
-        &mut asked,
+        &asked,
     )?;
     let clicked = match &reply {
         UiReply::Done { tree, .. } => target_json(&target, tree),
@@ -564,12 +559,12 @@ pub fn type_text(args: &Value) -> Result<ToolOutput, ToolError> {
     if text.contains('\t') {
         return Err(ToolError::new(policy::tab_in_text()));
     }
-    let mut asked = ui_shot::asked(args);
+    let asked = ui_shot::asked(args);
     let reply = run_shot(
         UiCommand::TypeText {
             text: text.to_string(),
         },
-        &mut asked,
+        &asked,
     )?;
     let typed = text.chars().count();
     done_output(
@@ -595,8 +590,8 @@ pub fn press_keys(args: &Value) -> Result<ToolOutput, ToolError> {
         }
     }
     let pressed: Vec<String> = chords.iter().map(|chord| chord.describe()).collect();
-    let mut asked = ui_shot::asked(args);
-    let reply = run_shot(UiCommand::PressKeys { chords }, &mut asked)?;
+    let asked = ui_shot::asked(args);
+    let reply = run_shot(UiCommand::PressKeys { chords }, &asked)?;
     done_output(
         reply,
         format!("Pressed {}.", pressed.join(", ")),
@@ -623,8 +618,8 @@ pub fn scroll_view(args: &Value) -> Result<ToolOutput, ToolError> {
             "Pass dx or dy: pixels to scroll, dy > 0 scrolls down.",
         ));
     }
-    let mut asked = ui_shot::asked(args);
-    let reply = run_shot(UiCommand::Scroll { target, dx, dy }, &mut asked)?;
+    let asked = ui_shot::asked(args);
+    let reply = run_shot(UiCommand::Scroll { target, dx, dy }, &asked)?;
     done_output(
         reply,
         format!("Scrolled by ({dx}, {dy})."),
@@ -635,12 +630,12 @@ pub fn scroll_view(args: &Value) -> Result<ToolOutput, ToolError> {
 
 pub fn hover_element(args: &Value) -> Result<ToolOutput, ToolError> {
     let target = target_arg(args)?;
-    let mut asked = ui_shot::asked(args);
+    let asked = ui_shot::asked(args);
     let reply = run_shot(
         UiCommand::Hover {
             target: target.clone(),
         },
-        &mut asked,
+        &asked,
     )?;
     let hovered = match &reply {
         UiReply::Done { tree, .. } => target_json(&target, tree),
@@ -656,8 +651,8 @@ pub fn hover_element(args: &Value) -> Result<ToolOutput, ToolError> {
 
 pub fn open_menu(args: &Value) -> Result<ToolOutput, ToolError> {
     let target = target_arg(args)?;
-    let mut asked = ui_shot::asked(args);
-    let reply = run_shot(UiCommand::OpenMenu { target }, &mut asked)?;
+    let asked = ui_shot::asked(args);
+    let reply = run_shot(UiCommand::OpenMenu { target }, &asked)?;
     let menu: Vec<Value> = match &reply {
         UiReply::Done { added, .. } => added
             .iter()
@@ -775,11 +770,12 @@ mod tests {
         crate::fast_buttons::set_persistence(false);
         crate::agent::access::set_enabled(false);
         crate::agent::ui_driver::shot::reset_limits();
-        let mut asked = ui_shot::asked(&json!({"screenshot": true}));
-        assert!(asked.options.is_some());
-        assert!(run_shot(UiCommand::ReadTree, &mut asked).is_err());
+        let asked = ui_shot::asked(&json!({"screenshot": true}));
+        assert!(asked.options().is_some());
+        assert!(run_shot(UiCommand::ReadTree, &asked).is_err());
+        drop(asked);
         let again = ui_shot::asked(&json!({"screenshot": true}));
-        assert!(again.options.is_some(), "{:?}", again.skipped);
+        assert!(again.options().is_some());
         crate::agent::ui_driver::shot::reset_limits();
     }
 

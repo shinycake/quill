@@ -28,12 +28,24 @@ impl ContactContent {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DiceContent {
     pub emoji: String,
-    pub value: i32,
-    /// `initial_state`: the roll that plays until the value is known.
-    pub initial: Option<DiceStickers>,
-    /// `final_state`: the throw that lands on `value`. `None` while the
-    /// value is unknown and when TDLib has not sent the stickers yet.
-    pub landing: Option<DiceStickers>,
+    pub state: DiceState,
+}
+
+/// Whether the roll is known, with what each stage draws. The value exists
+/// only once rolled, so the label and the animation cannot disagree.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DiceState {
+    /// `value` is 0: the roll plays until it is known. `initial` is
+    /// `initial_state`.
+    Rolling { initial: Option<DiceStickers> },
+    /// The rolled number. `landing` is `final_state`, the throw that lands
+    /// on it, `None` when TDLib has not sent the stickers yet (the roll
+    /// plays until then).
+    Landed {
+        value: i32,
+        initial: Option<DiceStickers>,
+        landing: Option<DiceStickers>,
+    },
 }
 
 /// `DiceStickers`: what a dice draws.
@@ -127,10 +139,33 @@ impl DiceContent {
     /// What draws now (Telegram Desktop `Dice::draw`): the throw once its
     /// stickers are here, the roll until then; `None` before either is.
     pub fn animation(&self) -> Option<(DicePhase, &DiceStickers)> {
-        match (&self.landing, &self.initial) {
-            (Some(landing), _) => Some((DicePhase::Landing, landing)),
-            (None, Some(initial)) => Some((DicePhase::Rolling, initial)),
-            (None, None) => None,
+        match &self.state {
+            DiceState::Landed {
+                landing: Some(landing),
+                ..
+            } => Some((DicePhase::Landing, landing)),
+            DiceState::Landed { initial, .. } | DiceState::Rolling { initial } => initial
+                .as_ref()
+                .map(|initial| (DicePhase::Rolling, initial)),
+        }
+    }
+
+    /// The roll's and the landing's stickers, whichever are here.
+    pub fn stickers(&self) -> impl Iterator<Item = &DiceStickers> {
+        let (initial, landing) = match &self.state {
+            DiceState::Rolling { initial } => (initial, &None),
+            DiceState::Landed {
+                initial, landing, ..
+            } => (initial, landing),
+        };
+        [initial, landing].into_iter().flatten()
+    }
+
+    /// The rolled number; `None` while the roll is not known yet.
+    pub fn value(&self) -> Option<i32> {
+        match &self.state {
+            DiceState::Rolling { .. } => None,
+            DiceState::Landed { value, .. } => Some(*value),
         }
     }
 
@@ -138,11 +173,11 @@ impl DiceContent {
     /// darts, the three reels for a slot machine ("Seven · Seven · Seven,
     /// jackpot!" when all three match on sevens); the glyph while rolling.
     pub fn result_line(&self) -> String {
-        if self.value <= 0 {
+        let Some(value) = self.value() else {
             return self.face().to_string();
-        }
+        };
         if self.is_slot_machine()
-            && let Some(symbols) = slot_symbols(self.value)
+            && let Some(symbols) = slot_symbols(value)
         {
             let reels = symbols.map(SlotSymbol::name).join(" · ");
             if symbols == [SlotSymbol::Seven; 3] {
@@ -150,16 +185,16 @@ impl DiceContent {
             }
             return reels;
         }
-        format!("Rolled {}", self.value)
+        format!("Rolled {value}")
     }
 
     /// Short line for chat-list previews and the composer reply target,
     /// e.g. `🎲 4`; just the glyph while rolling.
     pub fn label(&self) -> String {
-        if self.value <= 0 {
-            return self.face().to_string();
+        match self.value() {
+            Some(value) => format!("{} {value}", self.face()),
+            None => self.face().to_string(),
         }
-        format!("{} {}", self.face(), self.value)
     }
 }
 
@@ -237,9 +272,15 @@ pub(crate) fn parse_message_dice(value: &Value) -> (MessageContent, Vec<ParsedFi
     (
         MessageContent::Dice(DiceContent {
             emoji,
-            value,
-            initial,
-            landing,
+            state: if value > 0 {
+                DiceState::Landed {
+                    value,
+                    initial,
+                    landing,
+                }
+            } else {
+                DiceState::Rolling { initial }
+            },
         }),
         files,
     )

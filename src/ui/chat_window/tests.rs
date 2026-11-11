@@ -330,7 +330,7 @@ fn a_dialog_asked_for_in_a_chat_window_opens_there(cx: &mut TestAppContext) {
     // (Accounts): the window the input happened in hosts it.
     h.app.update(cx, |app, _| {
         app.note_window_press(Some(OTHER));
-        app.account.accounts.open = true;
+        app.account.accounts.dialog = crate::ui::accounts::AccountsDialog::opened();
         app.set_window_scope(None);
     });
     cx.update_window(h.main, |_, window, cx| window.render_frame(cx))
@@ -352,14 +352,14 @@ fn a_dialog_asked_for_in_a_chat_window_opens_there(cx: &mut TestAppContext) {
     // The flag cleared: the window's dialog goes, and the next one asked
     // for from the main window opens in the main window.
     h.app.update(cx, |app, _| {
-        app.account.accounts.open = false;
+        app.account.accounts.dialog = crate::ui::accounts::AccountsDialog::Closed;
     });
     cx.update_window(chat_window, |_, window, cx| window.render_frame(cx))
         .unwrap();
     assert!(!window_shell.read_with(cx, |shell, _| shell.dialog_open()));
     h.app.update(cx, |app, _| {
         app.note_window_press(None);
-        app.account.accounts.open = true;
+        app.account.accounts.dialog = crate::ui::accounts::AccountsDialog::opened();
     });
     cx.update_window(chat_window, |_, window, cx| window.render_frame(cx))
         .unwrap();
@@ -654,8 +654,8 @@ fn toast_shown(h: &Harness, chat: Option<ChatId>, cx: &mut TestAppContext) -> bo
         Some(chat) => app
             .windows
             .slot_for(chat)
-            .is_some_and(|slot| slot.borrow().viewer.extra.saved_toast.is_some()),
-        None => app.viewer.extra.saved_toast.is_some(),
+            .is_some_and(|slot| slot.borrow().viewer.extra.saved_toast.toast().is_some()),
+        None => app.viewer.extra.saved_toast.toast().is_some(),
     })
 }
 

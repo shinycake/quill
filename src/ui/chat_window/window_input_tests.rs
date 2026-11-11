@@ -167,7 +167,6 @@ fn each_saved_view_has_its_own_history_key(cx: &mut TestAppContext) {
                 session.threads.saved.sublist = Some(SavedSublistView {
                     topic_id,
                     history: TopicHistory::default(),
-                    page: quill::state::SavedPage::Idle,
                 });
             }
             scopes.push(app.saved_view_scope());
@@ -180,7 +179,6 @@ fn each_saved_view_has_its_own_history_key(cx: &mut TestAppContext) {
                         emoji: emoji.to_string(),
                     },
                     history: TopicHistory::default(),
-                    page: quill::state::SavedPage::Idle,
                 });
             }
             scopes.push(app.saved_view_scope());

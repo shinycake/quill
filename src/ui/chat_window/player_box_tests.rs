@@ -41,8 +41,9 @@ fn the_bar_title_jumps_in_the_tracks_own_window(cx: &mut TestAppContext) {
     let h = new_app(cx);
     let _chat_window = h.open_in_new_window(OTHER, cx);
     in_window(&h, h.main, None, cx, |app, window, cx| {
-        app.playback.active =
-            crate::ui::playback_state::ActiveTrack::for_test(cx, true, OTHER, OTHER_LAST, 10.0);
+        app.playback.active = crate::ui::playback_state::ActiveTrack::Voice(
+            crate::ui::playback_state::Track::new(OTHER_LAST).in_chat(OTHER),
+        );
         app.jump_to_playing(window, cx);
     });
     assert_eq!(
@@ -313,8 +314,9 @@ fn attached_stickers_close_the_box_in_the_other_window(cx: &mut TestAppContext) 
 fn deleting_the_tracks_chat_stops_the_player_and_releases_its_history(cx: &mut TestAppContext) {
     let h = new_app(cx);
     in_window(&h, h.main, None, cx, |app, _, cx| {
-        app.playback.active =
-            crate::ui::playback_state::ActiveTrack::for_test(cx, true, OTHER, OTHER_LAST, 10.0);
+        app.playback.active = crate::ui::playback_state::ActiveTrack::Voice(
+            crate::ui::playback_state::Track::new(OTHER_LAST).in_chat(OTHER),
+        );
         app.sync_history_holds();
         assert!(app.session().is_some_and(|s| s.chat_history_in_use(OTHER)));
         app.check_playing_track(cx);
@@ -339,7 +341,6 @@ fn the_next_song_downloading_keeps_its_chats_history(cx: &mut TestAppContext) {
     use crate::ui::play_intent::{PlayIntent, PlayTarget};
     let h = new_app(cx);
     in_window(&h, h.main, None, cx, |app, _, _| {
-        assert_eq!(app.playback.active.chat(), None, "no track is active");
         app.playback.intent = Some(PlayIntent {
             file: quill::ids::FileId(9001),
             target: PlayTarget::Audio {
@@ -399,8 +400,11 @@ fn the_checkout_prefills_in_the_window_that_hosts_it(cx: &mut TestAppContext) {
     });
     h.app.update(cx, |app, _| {
         if let Some(session) = app.demo_session.as_mut() {
-            session.payments.checkout = quill::state::CheckoutForm::Ready(
+            session.payments.checkout = quill::state::CheckoutForm::ready(
                 crate::ui::payments::card_form_demo::stripe_checkout(true, false),
+                quill::state::PaymentRequest {
+                    invoice: quill::payment_invoice::InputInvoice::Name("demo".into()),
+                },
             );
         }
     });

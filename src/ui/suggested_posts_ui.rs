@@ -21,7 +21,8 @@ use quill::lang::{keys, tr};
 use quill::state::Session;
 use quill::suggested_posts::{
     BAR_PRICED_TAIL, BAR_PROMPT, BarLine, DirectMessagesRole, SuggestBar, SuggestTerms,
-    SuggestedPostPurpose, SuggestedPrice, bar_both_tail, bar_dated, time_value,
+    SuggestedPostFailure, SuggestedPostPurpose, SuggestedPrice, bar_both_tail, bar_dated,
+    time_value,
 };
 use quill::telegram::envelope::MessageSender;
 
@@ -393,17 +394,23 @@ impl QuillApp {
     /// Errors of approve, decline and offers become status toasts.
     pub(super) fn drain_suggested_post_notes(&mut self, cx: &mut Context<Self>) {
         self.close_decided_accept(cx);
+        // A locked app shows nothing: the failures wait, capped, for the
+        // unlock.
+        if self.refused_while_locked() {
+            return;
+        }
         let Some(live) = self.live.as_mut() else {
             return;
         };
-        let notes = live.driver.session.take_suggested_post_notes();
-        let balance_low = live.driver.session.take_suggested_post_balance_low();
-        // Every failure toasts, and every refused payment asks for its top-up.
-        for note in notes {
-            self.set_note(StatusNote::info(note));
-        }
-        for purpose in balance_low {
-            self.ask_after_balance_error(purpose, cx);
+        // Every failure toasts, and every refused payment asks for its
+        // top-up, in the order they failed.
+        for failure in live.driver.session.take_suggested_post_failures() {
+            match failure {
+                SuggestedPostFailure::Note(note) => self.set_note(StatusNote::info(note)),
+                SuggestedPostFailure::BalanceLow(purpose) => {
+                    self.ask_after_balance_error(purpose, cx);
+                }
+            }
         }
     }
 

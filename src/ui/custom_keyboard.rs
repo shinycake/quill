@@ -221,12 +221,14 @@ impl QuillApp {
     /// reply-to and focus the composer (TGX behavior for
     /// `replyMarkupForceReply`). Only when the target chat is open, the
     /// message still exists, and the user has no reply draft already.
+    /// Returns whether the reply was armed; a target that was refused is
+    /// still waiting for its turn.
     pub(super) fn apply_force_reply(
         &mut self,
         target: ForceReplyTarget,
         window: &mut Window,
         cx: &mut Context<Self>,
-    ) {
+    ) -> bool {
         let ready = self
             .session()
             .filter(|session| session.open_chat_id() == Some(target.chat_id))
@@ -235,17 +237,15 @@ impl QuillApp {
                     .reply_target(target.chat_id, target.message_id)
                     .is_some()
             });
-        if !ready {
-            return;
-        }
-        if self.chat_ui.has_reply() {
-            return;
+        if !ready || self.chat_ui.has_reply() {
+            return false;
         }
         self.begin_reply_to(
             ComposerReplyTo::new(target.chat_id, target.message_id),
             window,
             cx,
         );
+        true
     }
 
     /// B1: set the status-bar note and refresh.
@@ -338,11 +338,8 @@ impl QuillApp {
                     );
                 }))
             }
-            KeyboardButtonType::RequestPoll {
-                force_regular,
-                force_quiz,
-            } => {
-                let lock = QuizLock::from_button(*force_regular, *force_quiz);
+            KeyboardButtonType::RequestPoll(request) => {
+                let lock = QuizLock::from_button(*request);
                 element.on_click(cx.listener(move |this, _, window, cx| {
                     this.open_poll_dialog_locked(lock, window, cx);
                     // A one-time keyboard hides when the poll is sent: a

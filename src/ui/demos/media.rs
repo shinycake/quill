@@ -269,11 +269,11 @@ impl QuillApp {
                 pack(2, "Animals", &["🐶", "🐱", "🦊", "🐼"], true),
                 pack(3, "Food and drink", &["🍕", "🍣", "🍩", "☕"], true),
             ];
-            session.stickers.emoji.trending_sets = vec![
+            session.stickers.emoji.lists.trending = quill::emoji::TrendingSets::ready(vec![
                 pack(4, "Travel", &["✈️", "🏝️", "🗺️", "🚆"], false),
                 pack(5, "Weather", &["☀️", "🌧️", "⛄", "🌈"], false),
                 pack(2, "Animals", &["🐶", "🐱", "🦊", "🐼"], true),
-            ];
+            ]);
             session.settings.media_prefs.recent_emoji_packs = vec![2, 1, 3];
         }
     }

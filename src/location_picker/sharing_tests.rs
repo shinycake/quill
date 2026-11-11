@@ -16,6 +16,32 @@ fn cafe() -> Venue {
     }
 }
 
+/// The answer of a lookup that is not the one waited for (an older option
+/// value, another request) changes nothing.
+#[test]
+fn a_venue_bot_answer_of_another_request_is_dropped() {
+    let resolve = || PickerRequest::ResolveVenueBot {
+        username: "foursquare".into(),
+    };
+    let mut sharing = LocationSharing::default();
+    sharing.set_venue_bot_username("foursquare".into());
+    sharing.open(ChatId(3), None);
+    sharing.geolocated(GeoOutcome::Found(point(10., 20.)));
+    assert_eq!(sharing.next_requests(), vec![resolve()]);
+    sharing.request_sent(&resolve(), 7);
+    sharing.venue_bot_resolved(8, Some(99));
+    sharing.venue_bot_failed(8);
+    assert!(sharing.next_requests().is_empty(), "still waiting for 7");
+    sharing.venue_bot_resolved(7, Some(99));
+    assert!(matches!(
+        sharing.next_requests().first(),
+        Some(PickerRequest::Venues {
+            bot_user_id: 99,
+            ..
+        })
+    ));
+}
+
 #[test]
 fn venues_resolve_the_bot_first_then_ask_it() {
     let mut sharing = LocationSharing::default();
@@ -30,7 +56,8 @@ fn venues_resolve_the_bot_first_then_ask_it() {
         }]
     );
     assert!(sharing.next_requests().is_empty(), "resolving once");
-    sharing.venue_bot_resolved(Some(99));
+    sharing.request_sent(&requests[0], 7);
+    sharing.venue_bot_resolved(7, Some(99));
     let requests = sharing.next_requests();
     let Some(PickerRequest::Venues {
         generation,
@@ -71,8 +98,6 @@ fn no_bot_means_nothing_found_not_a_spinner() {
         })
     );
     sharing.set_venue_bot_username("bot".into());
-    let _ = sharing.next_requests();
-    sharing.venue_bot_resolved(None);
     assert!(sharing.next_requests().is_empty());
 }
 
@@ -88,15 +113,22 @@ fn a_failed_bot_lookup_is_asked_again_by_the_next_picker() {
     sharing.open(ChatId(3), None);
     sharing.geolocated(GeoOutcome::Found(point(10., 20.)));
     assert_eq!(sharing.next_requests(), vec![resolve()]);
-    sharing.venue_bot_failed();
+    sharing.request_sent(&resolve(), 7);
+    sharing.venue_bot_failed(7);
     assert!(
         sharing.next_requests().is_empty(),
         "not again in this picker"
     );
-    assert!(matches!(
+    assert_eq!(
         sharing.picker().map(|p| p.venues().clone()),
-        Some(VenueList::NothingFound { .. })
-    ));
+        Some(VenueList::Failed)
+    );
+    sharing.retry_venues();
+    assert_eq!(
+        sharing.next_requests(),
+        vec![resolve()],
+        "Retry looks again"
+    );
     sharing.close();
     sharing.open(ChatId(3), None);
     sharing.geolocated(GeoOutcome::Found(point(10., 21.)));
@@ -124,10 +156,10 @@ fn unsent_requests_roll_back() {
     sharing.geolocated(GeoOutcome::Found(point(10., 20.)));
     let resolve = sharing.next_requests();
     sharing.request_unsent(&resolve[0]);
-    assert!(matches!(
+    assert_eq!(
         sharing.picker().map(|p| p.venues().clone()),
-        Some(VenueList::NothingFound { .. })
-    ));
+        Some(VenueList::Failed)
+    );
     if let Some(picker) = sharing.picker_mut() {
         picker.set_map_size(super::MapSize::new(364., 220., 2.));
     }
@@ -145,8 +177,9 @@ fn a_closed_pickers_late_answer_is_dropped_by_the_next_picker() {
     sharing.set_venue_bot_username("foursquare".into());
     sharing.open(ChatId(3), None);
     sharing.geolocated(GeoOutcome::Found(point(10., 20.)));
-    let _ = sharing.next_requests();
-    sharing.venue_bot_resolved(Some(99));
+    let resolve = sharing.next_requests();
+    sharing.request_sent(&resolve[0], 7);
+    sharing.venue_bot_resolved(7, Some(99));
     let generation = |requests: Vec<PickerRequest>| {
         requests.into_iter().find_map(|request| match request {
             PickerRequest::Venues { generation, .. } => Some(generation),
@@ -185,8 +218,9 @@ fn a_new_picker_asks_again_after_a_lost_or_missing_bot_lookup() {
         sharing.open(ChatId(3), None);
         sharing.geolocated(GeoOutcome::Found(point(10., 20.)));
         assert_eq!(sharing.next_requests(), vec![resolve()]);
+        sharing.request_sent(&resolve(), 7);
         if missing {
-            sharing.venue_bot_resolved(None);
+            sharing.venue_bot_resolved(7, None);
         }
         sharing.close();
         sharing.open(ChatId(3), None);
@@ -207,8 +241,9 @@ fn a_new_picker_asks_again_for_icons_that_failed_or_never_answered() {
     sharing.set_venue_bot_username("foursquare".into());
     sharing.open(ChatId(3), None);
     sharing.geolocated(GeoOutcome::Found(point(10., 20.)));
-    let _ = sharing.next_requests();
-    sharing.venue_bot_resolved(Some(99));
+    let resolve = sharing.next_requests();
+    sharing.request_sent(&resolve[0], 7);
+    sharing.venue_bot_resolved(7, Some(99));
     let generation = sharing
         .next_requests()
         .into_iter()
@@ -241,4 +276,36 @@ fn a_new_picker_asks_again_for_icons_that_failed_or_never_answered() {
             .any(|request| matches!(request, PickerRequest::VenueIcon { .. })),
         "the icon is asked again"
     );
+}
+
+/// An answer to a lookup that a new picker dropped changes nothing, and an
+/// answer for another request does not settle the live one.
+#[test]
+fn a_bot_answer_is_matched_to_the_lookup_that_asked() {
+    let resolve = || PickerRequest::ResolveVenueBot {
+        username: "foursquare".into(),
+    };
+    let mut sharing = LocationSharing::default();
+    sharing.set_venue_bot_username("foursquare".into());
+    sharing.open(ChatId(3), None);
+    sharing.geolocated(GeoOutcome::Found(point(10., 20.)));
+    assert_eq!(sharing.next_requests(), vec![resolve()]);
+    sharing.request_sent(&resolve(), 7);
+    sharing.close();
+    sharing.open(ChatId(3), None);
+    sharing.geolocated(GeoOutcome::Found(point(10., 21.)));
+    assert_eq!(sharing.next_requests(), vec![resolve()]);
+    sharing.request_sent(&resolve(), 8);
+    // The first picker's lookup answers late: not the live lookup.
+    sharing.venue_bot_resolved(7, Some(99));
+    sharing.venue_bot_failed(7);
+    assert!(sharing.next_requests().is_empty(), "still resolving");
+    sharing.venue_bot_resolved(8, Some(99));
+    assert!(matches!(
+        sharing.next_requests().as_slice(),
+        [PickerRequest::Venues {
+            bot_user_id: 99,
+            ..
+        }]
+    ));
 }

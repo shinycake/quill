@@ -132,3 +132,36 @@ fn a_running_export_shows_its_progress_and_hides(cx: &mut TestAppContext) {
     });
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[gpui_kit::test]
+fn a_folder_pick_goes_to_the_draft_that_asked(cx: &mut TestAppContext) {
+    let (app, _shell, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    app.update_in(vcx, |app, _, cx| app.open_account_export(cx));
+    let first = app.read_with(vcx, |app, _| {
+        app.dialogs.account_export.draft().map(|d| d.key())
+    });
+    // The box is cancelled and opened again while the first dialog is up.
+    app.update_in(vcx, |app, _, cx| {
+        app.dialogs.account_export.reset();
+        app.open_account_export(cx);
+    });
+    let picked = std::path::PathBuf::from("/picked-by-the-first-dialog");
+    app.update_in(vcx, |app, _, _| {
+        app.apply_account_export_folder(first, picked.clone());
+    });
+    app.read_with(vcx, |app, _| {
+        let draft = app.dialogs.account_export.draft().expect("box open");
+        assert_ne!(draft.settings.dir, picked);
+    });
+    let current = app.read_with(vcx, |app, _| {
+        app.dialogs.account_export.draft().map(|d| d.key())
+    });
+    app.update_in(vcx, |app, _, _| {
+        app.apply_account_export_folder(current, picked.clone());
+    });
+    app.read_with(vcx, |app, _| {
+        let draft = app.dialogs.account_export.draft().expect("box open");
+        assert_eq!(draft.settings.dir, picked);
+    });
+}

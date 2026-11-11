@@ -292,7 +292,10 @@ fn an_input_brings_back_a_screenshot_of_the_frame_after(cx: &mut TestAppContext)
         ["ui_screenshot", "ui_click", "ui_screenshot"],
         "{log:?}"
     );
-    assert!(log.iter().all(|a| a.chat_id == 11 && a.ok));
+    assert!(
+        log.iter()
+            .all(|a| a.chat_id == 11 && a.outcome == activity::Outcome::Done)
+    );
 }
 
 #[gpui_kit::test]

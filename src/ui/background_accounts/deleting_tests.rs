@@ -88,7 +88,7 @@ fn a_removed_account_waits_for_its_client_to_close_before_its_folder_goes(cx: &m
         app.remove_account_in(root.clone(), &account(1), cx);
         // A second click while it closes changes nothing.
         app.remove_account_in(root.clone(), &account(1), cx);
-        assert!(app.account.accounts.error.is_none());
+        assert!(app.account.accounts.dialog.error().is_none());
     });
     assert!(
         !registered(&root, &account(1)),

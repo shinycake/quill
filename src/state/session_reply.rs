@@ -9,17 +9,24 @@ use crate::ids::UserId;
 /// `HistoryItem::requestReply`). Keyed by the *replying* message.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ReplyTarget {
-    /// `getRepliedMessage` sent as this request, answer pending.
-    Loading(RequestId),
+    /// `getRepliedMessage` sent as this request, answer pending. `attempts`
+    /// is how many asks already failed with an error that may pass.
+    Loading { request: RequestId, attempts: u8 },
     /// The answer: the replied message (own chat or another one).
     Loaded(Box<HistoryMessage>),
     /// TDLib said it does not exist (deleted, or no access).
     Missing,
     /// The ask failed with an error that may pass (network, timeout, rate
     /// limit, a 500): the strip keeps loading, and the row is asked for
-    /// again once `until` is over.
-    Retry { until: std::time::Instant },
+    /// again once `until` is over, up to [`MAX_REPLY_ATTEMPTS`] asks.
+    Retry {
+        until: std::time::Instant,
+        attempts: u8,
+    },
 }
+
+/// How many asks a reply target gets before it is taken for gone.
+pub const MAX_REPLY_ATTEMPTS: u8 = 5;
 
 /// The wait before a failed `getRepliedMessage` is asked again.
 pub const REPLY_RETRY_WAIT: std::time::Duration = std::time::Duration::from_secs(10);
@@ -550,7 +557,7 @@ impl Session {
                 .get(&(message.chat_id.0, message.id.0))
             {
                 None => {}
-                Some(ReplyTarget::Retry { until }) if std::time::Instant::now() >= *until => {}
+                Some(ReplyTarget::Retry { until, .. }) if std::time::Instant::now() >= *until => {}
                 Some(_) => continue,
             }
             let target_chat = if reply.chat_id().0 == 0 {
@@ -601,9 +608,14 @@ impl Session {
             },
             Some(chat_id),
         );
-        self.messages
-            .reply_targets
-            .insert((chat_id.0, message_id.0), ReplyTarget::Loading(request));
+        let attempts = match self.messages.reply_targets.get(&(chat_id.0, message_id.0)) {
+            Some(ReplyTarget::Retry { attempts, .. }) => *attempts,
+            _ => 0,
+        };
+        self.messages.reply_targets.insert(
+            (chat_id.0, message_id.0),
+            ReplyTarget::Loading { request, attempts },
+        );
         request
     }
 
@@ -611,9 +623,33 @@ impl Session {
     /// asked for again later.
     pub fn cancel_reply_fetch(&mut self, request: RequestId) {
         self.requests.take(request);
-        self.messages
+        // Back to where the ask started from: a retry waiting for its next
+        // ask keeps its count, a first ask leaves no entry.
+        let held: Vec<_> = self
+            .messages
             .reply_targets
-            .retain(|_, target| *target != ReplyTarget::Loading(request));
+            .iter()
+            .filter_map(|(key, target)| match target {
+                ReplyTarget::Loading {
+                    request: asked,
+                    attempts,
+                } if *asked == request => Some((*key, *attempts)),
+                _ => None,
+            })
+            .collect();
+        for (key, attempts) in held {
+            if attempts == 0 {
+                self.messages.reply_targets.remove(&key);
+            } else {
+                self.messages.reply_targets.insert(
+                    key,
+                    ReplyTarget::Retry {
+                        until: std::time::Instant::now(),
+                        attempts,
+                    },
+                );
+            }
+        }
     }
 
     /// Keep at most [`MAX_REPLY_TARGETS_OUTSIDE_WINDOW`] of `chat_id`'s
@@ -685,11 +721,18 @@ impl Session {
         code: i32,
         now: std::time::Instant,
     ) {
-        let target = if matches!(code, 400 | 404) {
+        let attempts = match self.messages.reply_targets.get(&(chat_id.0, message_id.0)) {
+            Some(ReplyTarget::Loading { attempts, .. } | ReplyTarget::Retry { attempts, .. }) => {
+                attempts.saturating_add(1)
+            }
+            _ => 1,
+        };
+        let target = if matches!(code, 400 | 404) || attempts >= MAX_REPLY_ATTEMPTS {
             ReplyTarget::Missing
         } else {
             ReplyTarget::Retry {
                 until: now.checked_add(REPLY_RETRY_WAIT).unwrap_or(now),
+                attempts,
             }
         };
         self.messages

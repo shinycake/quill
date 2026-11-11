@@ -206,3 +206,25 @@ fn video_chat_invites_use_invite_video_chat_participants() {
     assert_eq!(request["group_call_id"], 77);
     assert_eq!(request["user_ids"], serde_json::json!([42]));
 }
+
+#[test]
+fn a_refused_send_is_not_remembered_as_no_speaker_link() {
+    let (_dir, recorder, mut driver, _seq) = group_call_test_driver();
+    driver.session.calls.active_group_call = Some(video_chat(true, false));
+    recorder.refuse_sends(true);
+    assert!(driver.request_video_chat_share_links().is_err());
+    let links = &driver
+        .session
+        .calls
+        .active_group_call
+        .as_ref()
+        .unwrap()
+        .share_links;
+    assert!(!links.generating(), "nothing is in flight");
+    recorder.refuse_sends(false);
+    let before = recorder.snapshot().len();
+    driver.request_video_chat_share_links().unwrap();
+    let requests: Vec<Value> = sent(&recorder).split_off(before);
+    assert_eq!(requests.len(), 2, "both links are asked for again");
+    assert_eq!(requests[1]["can_self_unmute"], true);
+}

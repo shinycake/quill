@@ -23,6 +23,10 @@ impl QuillApp {
         {
             quill::wake::isolate_current_thread();
             quill::power_saving::isolate_for_tests();
+            // The Linux handler read runs on its own thread and wakes the UI
+            // from there, which the deterministic test executor rejects:
+            // tests answer it instead, so no read ever starts.
+            quill::link_handler::demo_pin(Some(quill::link_handler::LinkHandlerState::Unset));
         }
         super::tooltip_timing::install(cx);
         super::image_budget::start_sweeper(cx);

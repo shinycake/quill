@@ -171,10 +171,9 @@ impl QuillApp {
             return;
         };
         let play_once = self.recording.play_once() && self.once_allowed_in(Some(target.chat_id));
-        let Some(capture) = self.recording.take_voice() else {
+        let Some(capture) = self.take_voice_capture() else {
             return;
         };
-        self.stop_record_preview();
         self.consume_composer_for_send(&target, true, window, cx);
         let finish = capture.close_microphone();
         self.sync_voice_action();

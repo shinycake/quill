@@ -76,9 +76,13 @@ pub(super) const ACTIVITY_PAGE: usize = 50;
 /// its task ends any other way: the next one then re-checks every switch).
 pub(crate) enum Driver {
     Idle,
-    /// The input command with this request id runs.
+    /// The input command with this request id runs, as `task`: dropping the
+    /// stage cancels it. A task that ends without reaching its finish
+    /// (the window closed under it) leaves through
+    /// `QuillApp::agent_command_abandoned`.
     Running {
         id: u64,
+        _task: gpui_kit::Task<()>,
         waiting: std::collections::VecDeque<quill::agent::ui_driver::bridge::Pending>,
     },
 }
