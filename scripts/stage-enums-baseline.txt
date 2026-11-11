@@ -138,7 +138,6 @@ bare:Sent::Queued 1
 bare:SetFiles::Asked 1
 bare:ShareLink::Fetching 1
 bare:SharedMediaTabStatus::Loading 1
-bare:Sheet::Loading 1
 bare:Showing::Sending 1
 bare:ShutdownPhase::Running 1
 bare:SimilarBotsFetch::Loading 1
@@ -286,5 +285,4 @@ unkeyed:UsernameCheck::Checking 1
 unkeyed:VcardImport::Reading 1
 unkeyed:WaitingCheck::Pending 1
 unkeyed:Watch::Running 1
-unkeyed:WordBar::Asking 1
 unkeyed:Writer::Running 1

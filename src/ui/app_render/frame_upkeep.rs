@@ -43,6 +43,8 @@ impl QuillApp {
         // main-only: they are pages of the session's info panel, which only
         // the main window's right column draws (chat windows have none).
         self.earn_frame_upkeep(window, cx);
+        // main-only: the "Stop and quit?" alert is the main window's.
+        self.quit_gate_upkeep(window, cx);
         // main-only: the composer button's blink follows the main window's
         // field; the box, the shortcut, the style notices and their emoji
         // are their window's (`ai_compose_window_upkeep`).
