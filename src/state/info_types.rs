@@ -560,14 +560,19 @@ pub enum InlineMore {
 impl InlineQueryFetch {
     /// A request of this fetch is out.
     pub fn in_flight(&self) -> bool {
-        matches!(
-            self,
-            Self::Loading { .. }
-                | Self::Loaded {
-                    more: InlineMore::Asking { .. },
-                    ..
-                }
-        )
+        self.request().is_some()
+    }
+
+    /// The request this fetch waits for: the first page, or the next one.
+    pub fn request(&self) -> Option<RequestId> {
+        match self {
+            Self::Loading { request }
+            | Self::Loaded {
+                more: InlineMore::Asking { request },
+                ..
+            } => Some(*request),
+            Self::Loaded { .. } | Self::Failed(_) => None,
+        }
     }
 }
 

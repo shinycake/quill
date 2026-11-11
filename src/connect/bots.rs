@@ -650,8 +650,13 @@ impl<S: JsonSender> ConnectDriver<S> {
             .filter(|slot| slot.chat_id == chat_id && slot.bot_user_id == bot_user_id);
         // One request at a time for the (chat, bot) pair, whatever the page;
         // a next page needs the loaded page it continues, not asked twice
-        // for an offset that failed.
-        if slot.is_some_and(|slot| slot.fetch.in_flight()) {
+        // for an offset that failed. The slot waits only while its request
+        // is still out: one that left the registry unanswered is over, and
+        // the next query replaces the slot.
+        if slot
+            .and_then(|slot| slot.fetch.request())
+            .is_some_and(|request| self.session.requests.get(request).is_some())
+        {
             return Ok(None);
         }
         if !first_page {

@@ -163,5 +163,29 @@ fn a_failed_next_inline_page_is_remembered_until_the_next_query() {
             .and_then(|slot| slot.more_failed().map(str::to_string)),
         None
     );
+    // While that query is out a second one waits for it.
+    assert!(
+        driver
+            .inline_query(77, ChatId(1), "birds", "")
+            .expect("query")
+            .is_none()
+    );
+    // A request that left the registry unanswered holds nothing: the slot
+    // still names it, and the next query goes out.
+    let out = driver
+        .session
+        .bots
+        .inline_query
+        .as_ref()
+        .and_then(|slot| slot.fetch.request())
+        .expect("the dogs query is out");
+    driver.session.requests.take(out);
+    assert!(
+        driver
+            .inline_query(77, ChatId(1), "birds", "")
+            .expect("query")
+            .is_some(),
+        "a lost request does not block the pair for good"
+    );
     let _ = std::fs::remove_dir_all(&dir);
 }

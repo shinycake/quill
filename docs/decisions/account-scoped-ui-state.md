@@ -3930,7 +3930,7 @@ roundtrip test reads the stage.
 **The send-gift lists are one stage each (dodge).** `SendGiftState` kept
 `gifts_loading`, `gifts_loaded` and `gifts_request`, and `premium_loaded`
 with `premium_request`, in step by hand. Each list is now one
-`GiftListFetch` (`Off`, `Asking(id)`, `Answered`, `Failed`).
+`GiftListFetch` (`NotAsked`, `Asking(id)`, `Answered`, `Failed`).
 `asked_gifts` / `asked_premium` match the id in `Asking`. A Premium
 options request that fails to send now ends as `Failed` instead of
 staying unanswered. "No gifts are available" shows only after an answer,
@@ -4681,7 +4681,7 @@ Media and players. Entry ids in brackets; a skipped entry says why.
   reading (02-140; the low-disk and saved-pause loops follow the same
   order). The saved-pause search is `DiskSearch::{NotAsked, Asked { request,
   keys }, Done}`: set after the send succeeded, its answer matched by
-  request id, and a failed search goes back to `Off`; so does a lost
+  request id, and a failed search goes back to `NotAsked`; so does a lost
   one, because the search is swept like the other dedupe-guarded lookups
   and the sweep settles it through the error arm (05-082).
 - **Quick reaction.** `setDefaultReactionType` carries
@@ -6547,7 +6547,7 @@ Twenty-two S4 entries; each was proved against the code first.
   (03-010; the `close_friends_pending` field is gone). The viewers panel and
   the public story search keep their page in one `PageFetch` (`Idle`,
   `Loading(request)`, `Failed(text)`); the story forwards list keeps it in
-  `ForwardsPage` (`Off`, `Loading { request, offset }`, `Ready`,
+  `ForwardsPage` (`NotAsked`, `Loading { request, offset }`, `Ready`,
   `Failed`), which also knows whether the first page was ever asked and makes
   a first page replace the rows (03-007). Either way an answer or an error
   lands only when it is the request the page waits for, so a stale one from
@@ -6556,7 +6556,7 @@ Twenty-two S4 entries; each was proved against the code first.
   next one back. `StoryViewersState`, `StoryInsightsState` and
   `StorySearchState` drop their `loading`/`error` pairs (baseline lines
   removed). A reopened insights panel that replaced another story's starts
-  at `Off` and asks its first forwards page again. A search page the
+  at `NotAsked` and asks its first forwards page again. A search page the
   sender refuses leaves the pages already found and a retryable error
   instead of clearing the panel (03-008).
 - **Viewers panel (13-145).** The spinner shows only for `Loading`; a failed
