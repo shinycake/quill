@@ -158,26 +158,6 @@ impl Session {
             seq,
         );
     }
-
-    /// The account is going away (logout, close): no answer can land any
-    /// more, so settle every pending lookup the way a failure would and
-    /// forget the stale-window marks. The settle is a plain failure of kind
-    /// 408, which is no flood, so no flood notice follows.
-    pub(crate) fn settle_account_requests(&mut self) {
-        // Settling clears the busy markers; the failure notes it would
-        // write are not the user's to see (see `logout_notes`).
-        let notes = self.take_user_notes();
-        for pending in self.requests.drain_all() {
-            // Every request but a login submit settles: a Set / Create /
-            // Toggle that was in flight holds a busy marker or a spinner
-            // the Session keeps when the account signs in again.
-            if pending.purpose.kind() != super::request_kind::RequestKind::Auth {
-                self.settle_lost_request(pending);
-            }
-        }
-        self.restore_user_notes(notes);
-        self.stale_history_requests.clear();
-    }
 }
 
 pub fn is_auth_submit(purpose: RequestPurpose) -> bool {
