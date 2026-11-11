@@ -106,7 +106,7 @@ fn a_refused_welcome_load_for_a_plain_chat_stores_no_pack() {
     let (_dir, mut driver, sender, _sink, _seq) = toggle_driver();
     sender.refuse(true);
     assert!(driver.load_chat_welcome_messages(ChatId(77)).is_ok());
-    assert!(driver.session.groups.welcome_messages.get(&77).is_none());
+    assert!(!driver.session.groups.welcome_messages.contains_key(&77));
 }
 
 /// 10-022: the giveaway price lists whose send fails are `Failed` (the form
