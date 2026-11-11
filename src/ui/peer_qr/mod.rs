@@ -119,6 +119,38 @@ pub(super) fn plain_picks(picks: &[quill::peer_qr::theme::ThemeEmoji]) -> Vec<St
         .collect()
 }
 
+/// The share chooser the box opened. Another window's chooser (a group
+/// link row's Share) picks or cancels without touching the box.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub(super) enum QrShare {
+    #[default]
+    Idle,
+    /// The chooser of the window `window` (`None`: the main window), with
+    /// the card image to attach in the chat it picks.
+    Chooser {
+        window: Option<ChatId>,
+        image: Option<PathBuf>,
+    },
+}
+
+impl QrShare {
+    #[cfg(test)]
+    pub(super) fn image(&self) -> Option<&PathBuf> {
+        match self {
+            Self::Idle => None,
+            Self::Chooser { image, .. } => image.as_ref(),
+        }
+    }
+
+    /// The chooser is over (or never was): its card image, if any.
+    fn finish(&mut self) -> Option<PathBuf> {
+        match std::mem::take(self) {
+            Self::Idle => None,
+            Self::Chooser { image, .. } => image,
+        }
+    }
+}
+
 /// The box on screen.
 pub(super) struct OpenQr {
     pub(super) state: PeerQrBox,
@@ -129,8 +161,8 @@ pub(super) struct OpenQr {
     /// When the shown gift's pattern began to come in (tdesktop
     /// `PeerQrGiftField::startEntry`).
     pub(super) gift_entry: Instant,
-    /// The card image to attach in the chat the share chooser opens.
-    pub(super) share_image: Option<PathBuf>,
+    /// Whether the box opened a share chooser, and which.
+    pub(super) share: QrShare,
     /// A card image is being made for copy or share.
     pub(super) exporting: bool,
     /// The gifts grid's scroll position, kept across frames and reset
@@ -162,6 +194,8 @@ impl crate::ui::on_screen::Farewell for PeerQrUi {
         if app.peer_qr.open.is_some() {
             app.close_qr_box(cx);
         }
+        // A shared card still waiting for its chat is a file on disk.
+        app.drop_shared_card(cx);
     }
 }
 
@@ -218,7 +252,7 @@ impl QuillApp {
             toast: None,
             swap: None,
             gift_entry: now,
-            share_image: None,
+            share: QrShare::Idle,
             exporting: false,
             gifts_scroll: gpui_kit::base::VirtualListScrollHandle::new(),
             clock_running: false,
@@ -253,7 +287,12 @@ impl QuillApp {
     /// when the box is destroyed).
     pub(super) fn close_qr_box(&mut self, cx: &mut Context<Self>) {
         self.qr_act(QrAction::Closing, cx);
-        if let Some(path) = self.peer_qr.open.take().and_then(|open| open.share_image) {
+        if let Some(path) = self
+            .peer_qr
+            .open
+            .take()
+            .and_then(|mut open| open.share.finish())
+        {
             remove_card_file(path, cx);
         }
         self.peer_qr.art.clear();
@@ -563,11 +602,14 @@ impl QuillApp {
     /// The box hides under the share chooser; a cancelled share brings it
     /// back as it was, and its card file goes.
     pub(super) fn qr_share_cancelled(&mut self, cx: &mut Context<Self>) {
+        let asker = self.asking_window().flatten();
+        let ours = |open: &OpenQr| matches!(&open.share, QrShare::Chooser { window, .. } if *window == asker);
         if let Some(path) = self
             .peer_qr
             .open
             .as_mut()
-            .and_then(|open| open.share_image.take())
+            .filter(|open| ours(open))
+            .and_then(|open| open.share.finish())
         {
             remove_card_file(path, cx);
         }
@@ -576,10 +618,15 @@ impl QuillApp {
     /// A chat was picked for the shared link: the box is done, and the
     /// card waits to go into that chat's composer.
     pub(super) fn qr_share_chosen(&mut self, chat_id: ChatId, cx: &mut Context<Self>) {
+        let asker = self.asking_window().flatten();
         let Some(open) = self.peer_qr.open.as_mut() else {
             return;
         };
-        let card = open.share_image.take();
+        // Another window's chooser is not this box's.
+        if !matches!(&open.share, QrShare::Chooser { window, .. } if *window == asker) {
+            return;
+        }
+        let card = open.share.finish();
         self.drop_shared_card(cx);
         self.peer_qr.pending_attach = card.map(|path| (chat_id, path));
         self.close_qr_box(cx);

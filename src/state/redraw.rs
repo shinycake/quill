@@ -279,10 +279,20 @@ fn file_need(session: &Session, file: &ParsedFile) -> RedrawNeed {
             .files
             .get(&id)
             .is_some_and(|known| known.local.is_downloading_completed);
-    let open_chat = session.media.open_chat_media_downloads.contains(&id);
+    let asked_by = session.media.open_chat_media_downloads.get(&id).copied();
+    let open_chat = asked_by.is_some();
+    // Only the main window reports its rows; a chat window that draws
+    // the chat shows the row's progress live.
+    let in_chat_window = asked_by.is_some_and(|chat| {
+        session
+            .views_shown()
+            .any(|view| view.window.is_some() && view.draws_chat(chat))
+    });
     if completes || session.media.downloads.is_user(id) {
         RedrawNeed::Now
-    } else if open_chat && session.row_on_screen(|rows| rows.auto_download_files.contains(&id)) {
+    } else if in_chat_window
+        || (open_chat && session.row_on_screen(|rows| rows.auto_download_files.contains(&id)))
+    {
         RedrawNeed::Conversation
     } else if open_chat
         || session.media.downloads.is_requested(id)

@@ -5,7 +5,7 @@
 use super::*;
 use crate::ids::{ChatId, MessageId, RequestId};
 use crate::state::{PaymentsPurpose, RequestPurpose};
-use crate::suggested_posts::{SuggestTerms, SuggestedPostPurpose};
+use crate::suggested_posts::{BarSend, SuggestTerms, SuggestedPostPurpose};
 use crate::telegram::requests::{
     add_offer, approve_suggested_post, decline_suggested_post, send_suggested_change,
 };
@@ -82,6 +82,16 @@ impl<S: JsonSender> ConnectDriver<S> {
         is_media: bool,
         terms: SuggestTerms,
     ) -> Result<RequestId, ConnectSendError> {
+        if self
+            .session
+            .payments
+            .suggested_posts
+            .bars
+            .get(&chat_id.0)
+            .is_some_and(|bar| bar.send.is_sending())
+        {
+            return Err(ConnectSendError::InvalidRequest);
+        }
         let purpose = SuggestedPostPurpose::SendChange {
             chat_id: chat_id.0,
             message_id: message_id.0,
@@ -96,12 +106,17 @@ impl<S: JsonSender> ConnectDriver<S> {
         let result = self.send_suggested(purpose, chat_id, message_id, |extra| {
             send_suggested_change(extra, chat_id, message_id, topic_id, text, is_media, terms)
         });
-        if result.is_ok() {
-            self.session
+        // The bar stays up until the send answers (`apply_suggested_post_ok`
+        // takes it down, the error returns it to `Idle`).
+        if let Ok(request) = result
+            && let Some(bar) = self
+                .session
                 .payments
                 .suggested_posts
                 .bars
-                .remove(&chat_id.0);
+                .get_mut(&chat_id.0)
+        {
+            bar.send = BarSend::Sending(request);
         }
         result
     }

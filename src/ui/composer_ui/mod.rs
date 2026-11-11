@@ -125,14 +125,14 @@ impl QuillApp {
         &mut self,
         chat_id: ChatId,
         message_id: MessageId,
-        quote: &str,
+        (quote, nth): (&str, usize),
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         let quote = quote.trim();
         let Some(selection) = self
             .message_quotable(chat_id, message_id)
-            .and_then(|text| text.quote_for(quote))
+            .and_then(|text| text.quote_for_nth(quote, nth))
         else {
             // Not verbatim text of the message (it shouldn't happen for a
             // selection); reply to the whole message instead.

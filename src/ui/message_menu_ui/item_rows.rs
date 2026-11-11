@@ -257,8 +257,16 @@ impl QuillApp {
         item: &ReplyItem,
         cx: &mut Context<Self>,
     ) {
-        if let Some(live) = self.live.as_mut() {
-            let _ = live.driver.get_item_link(chat_id, message_id, item);
+        // A request that cannot be sent has no answer to report it later.
+        if let Some(live) = self.live.as_mut()
+            && live
+                .driver
+                .get_item_link(chat_id, message_id, item)
+                .is_err()
+        {
+            self.set_note(StatusNote::error(tr(
+                keys::Q_MEDIA_COULDNT_REACH_TELEGRAM_TRY_AGAIN,
+            )));
         }
         cx.notify();
     }
@@ -346,11 +354,17 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         // A refused or failed request reaches the status line through
-        // `message_action_note`.
-        if let Some(live) = self.live.as_mut() {
-            let _ = live
+        // `message_action_note`; one that cannot be sent has no answer, so
+        // it says so here.
+        if let Some(live) = self.live.as_mut()
+            && live
                 .driver
-                .delete_poll_option(chat_id, message_id, option_id);
+                .delete_poll_option(chat_id, message_id, option_id)
+                .is_err()
+        {
+            self.set_note(StatusNote::error(tr(
+                keys::Q_MEDIA_COULDNT_REACH_TELEGRAM_TRY_AGAIN,
+            )));
         }
         cx.notify();
     }

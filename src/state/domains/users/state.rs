@@ -68,6 +68,10 @@ pub struct UsersState {
     /// `setProfilePhoto`/`deleteProfilePhoto`), shown in the
     /// edit-profile dialog. Cleared when the dialog opens.
     pub profile_edit_error: Option<String>,
+    /// The last "Your color" request that failed (`setAccentColor`,
+    /// `setProfileAccentColor`, `setUpgradedGiftColors`). Only the color
+    /// box reads it, so a username or photo failure never shows there.
+    pub peer_color_error: Option<String>,
     /// `getDefaultBackgroundCustomEmojiStickers` answer: the custom emoji
     /// the color editor offers as reply and profile icons.
     pub background_emoji_icons: Vec<StickerItem>,
@@ -171,6 +175,7 @@ impl UsersState {
             username_check_pending: None,
             bio_length_max: 70,
             profile_edit_error: None,
+            peer_color_error: None,
             background_emoji_icons: Vec::new(),
             background_emoji_icons_failed: false,
             profile_photo_emoji_icons: Vec::new(),

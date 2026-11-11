@@ -643,6 +643,7 @@ pub(in crate::ui) mod item_rows;
 #[cfg(feature = "demo-capture")]
 mod media_order_tests;
 mod menu_add_to_set_rows;
+mod menu_audience_page;
 mod menu_save_to_rows;
 pub(in crate::ui) mod origin_rows;
 mod read_date_row;

@@ -60,8 +60,19 @@ impl ComposerLinkPreviews {
             url: url.to_string(),
             fetch: LinkPreviewFetch::Asked,
         });
-        let over = self.0.len().saturating_sub(Self::KEPT);
-        self.0.drain(..over);
+        // Oldest answered entries go first: an entry still `Asked` waits
+        // for its answer and is never evicted (the in-flight requests
+        // bound how many stay beyond `KEPT`).
+        while self.0.len() > Self::KEPT {
+            let Some(at) = self
+                .0
+                .iter()
+                .position(|preview| !matches!(preview.fetch, LinkPreviewFetch::Asked))
+            else {
+                break;
+            };
+            self.0.remove(at);
+        }
     }
 
     /// The request for `url` could not be sent: kept as failed, so the
@@ -89,5 +100,32 @@ impl ComposerLinkPreviews {
         if matches!(fetch, LinkPreviewFetch::Loaded(_)) || !loaded {
             slot.fetch = fetch;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{ComposerLinkPreviews, LinkPreviewFetch};
+
+    /// Sweep 05-056: more links than `KEPT` never evict one still waiting
+    /// for its answer, so that answer lands.
+    #[test]
+    fn an_asked_link_is_not_evicted_before_its_answer() {
+        let mut previews = ComposerLinkPreviews::default();
+        for n in 0..ComposerLinkPreviews::KEPT + 4 {
+            previews.asked(&format!("https://example.com/{n}"));
+        }
+        assert!(
+            previews.get("https://example.com/0").is_some(),
+            "the oldest, still asked"
+        );
+        previews.answered("https://example.com/0", LinkPreviewFetch::NotFound);
+        assert!(matches!(
+            previews.get("https://example.com/0").map(|p| &p.fetch),
+            Some(LinkPreviewFetch::NotFound)
+        ));
+        // Once answered it is the first to go.
+        previews.asked("https://example.com/new");
+        assert!(previews.get("https://example.com/0").is_none());
     }
 }

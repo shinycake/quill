@@ -72,7 +72,8 @@ pub enum ChatsPurpose {
     /// `setChatTheme`. Response is `ok`; `updateChatTheme` carries it.
     SetChatTheme,
     /// `getBackgroundUrl` for the wallpaper preview's Share. Response is
-    /// `httpUrl` (`Session::chats_state.background_url`).
+    /// `httpUrl`, taken by the preview that asked
+    /// (`Session::chats_state.background_answers`, keyed by request).
     GetBackgroundUrl,
     /// `setChatAccentColor`: a channel's name color and reply icon.
     /// Response is `ok`; `updateChatAccentColors` carries the result.

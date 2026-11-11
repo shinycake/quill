@@ -11,6 +11,10 @@ fn chat_statistics_fetch_flow_loads_and_caches() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
     let extra = session.request(RequestPurpose::GetChatStatistics, Some(ChatId(13)));
+    session
+        .groups
+        .chat_statistics
+        .insert(13, ChatStatisticsFetch::Loading { is_dark: true });
     let graph = r#"{"@type":"statisticalGraphData","json_data":"{}","zoom_token":""}"#;
     let value = r#"{"@type":"statisticalValue","value":1.0,"previous_value":1.0,"growth_rate_percentage":0.0}"#;
     apply_json(
@@ -24,7 +28,10 @@ fn chat_statistics_fetch_flow_loads_and_caches() {
             v = value,
         ),
     );
-    let ChatStatisticsFetch::Loaded(boxed) = session
+    let ChatStatisticsFetch::Loaded {
+        stats: boxed,
+        is_dark,
+    } = session
         .groups
         .chat_statistics
         .get(&13)
@@ -32,6 +39,8 @@ fn chat_statistics_fetch_flow_loads_and_caches() {
     else {
         panic!("expected loaded channel statistics");
     };
+    // The theme the answered request asked for (13-032).
+    assert!(*is_dark);
     let ChatStatistics::Channel(stats) = boxed.as_ref() else {
         panic!("expected channel statistics");
     };

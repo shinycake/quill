@@ -69,6 +69,12 @@ fn every_sweepable_purpose_leaves_the_registry_and_the_session_alive() {
         RequestPurpose::SearchMessages,
         RequestPurpose::SearchChatMessages,
         RequestPurpose::SearchChatMessagesMore,
+        RequestPurpose::SearchMessagesMore,
+        RequestPurpose::SearchPublicPosts,
+        RequestPurpose::SearchPublicPostsMore,
+        RequestPurpose::SearchPublicMessagesByTag,
+        RequestPurpose::GetRecommendedChats,
+        RequestPurpose::CanTransferOwnership,
         RequestPurpose::SearchChats,
         RequestPurpose::SearchPublicChats,
         RequestPurpose::GetSharedMedia {
@@ -169,4 +175,49 @@ fn a_swept_user_action_still_says_it_failed() {
     let pending = session.requests.take(id).expect("registered");
     session.settle_lost_request(pending);
     assert!(!session.messages.message_action_note.is_empty());
+}
+
+/// Sweep 05-193: a lost `canTransferOwnership` answer settles as a failed
+/// check, so the next dialog open asks again.
+#[test]
+fn sweeping_a_lost_transfer_check_lets_the_next_open_ask_again() {
+    let mut session = ready_session();
+    session.begin_ownership_check();
+    session.request(RequestPurpose::CanTransferOwnership, None);
+
+    assert!(sweep(&mut session));
+
+    assert!(!session.groups.ownership.check_in_flight);
+    assert!(session.groups.ownership.check_error.is_some());
+}
+
+/// Sweep 05-202: a lost recommended-channels answer ends its loading state.
+#[test]
+fn sweeping_lost_recommended_channels_clears_their_loading_flag() {
+    let mut session = ready_session();
+    session.search.search.tabs.recommended_loading = true;
+    session.request(RequestPurpose::GetRecommendedChats, None);
+
+    assert!(sweep(&mut session));
+
+    assert!(!session.search.search.tabs.recommended_loading);
+}
+
+/// A swept upgrade or history toggle takes its waiting step with it and
+/// tells the person (02-074).
+#[test]
+fn a_swept_request_drops_its_admin_followups_and_says_so() {
+    let mut session = ready_session();
+    let id = session.request(RequestPurpose::UpgradeBasicGroup, Some(ChatId(5)));
+    session.queue_admin_followup(
+        id,
+        AdminFollowup::HistoryAfterUpgrade {
+            old: ChatId(5),
+            visible: true,
+        },
+    );
+    let pending = session.requests.take(id).expect("registered");
+    session.settle_lost_request(pending);
+    assert!(session.take_admin_followup(id).is_none());
+    assert!(!session.chats_state.chat_action_error.is_empty());
 }

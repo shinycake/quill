@@ -278,6 +278,14 @@ impl SearchState {
         self.generation
     }
 
+    /// The filter bar changed: what was asked under the old tab is no
+    /// longer wanted, and its answers are dropped by the new generation.
+    pub fn restart_for_filters(&mut self) {
+        self.generation = self.generation.saturating_add(1);
+        self.clear_results();
+        self.recents = false;
+    }
+
     fn mark_all_pending(&mut self) {
         self.chats = Leg::Pending;
         self.messages_leg = Leg::Pending;

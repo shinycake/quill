@@ -237,7 +237,7 @@ fn ui_main(args: &[String]) {
     // as argv instead (handled above and via the single-instance socket).
     application.on_open_urls(|urls| {
         for url in urls {
-            if !quill::deep_link_inbox::push_external_link(&url) {
+            if !quill::deep_link_inbox::push_external_link(&url).is_link() {
                 quill::start_files::push_file_url(&url);
             }
         }

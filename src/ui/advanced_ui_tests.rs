@@ -469,3 +469,25 @@ fn update_quill_in_the_title_bar_downloads_the_release(cx: &mut TestAppContext) 
     assert!(shown(vcx, "title-bar-update"));
     quill::update_install::force_self_update_available(None);
 }
+
+/// Sweep 07-023: the page reads the clipboard once, not on every render,
+/// and again after the window is activated or Export wrote to it.
+#[gpui_kit::test]
+fn the_import_offer_reads_the_clipboard_once_until_it_may_have_changed(cx: &mut TestAppContext) {
+    let (app, _shell, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    let reads = std::cell::Cell::new(0);
+    app.read_with(vcx, |app, _| {
+        let advanced = &app.preferences.advanced;
+        let read = |offered: bool| {
+            reads.set(reads.get() + 1);
+            offered
+        };
+        assert!(advanced.import_offered(|| read(true)));
+        assert!(advanced.import_offered(|| read(false)), "kept, not read");
+        assert_eq!(reads.get(), 1);
+        advanced.forget_import_offer();
+        assert!(!advanced.import_offered(|| read(false)));
+        assert_eq!(reads.get(), 2);
+    });
+}

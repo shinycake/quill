@@ -485,6 +485,27 @@ fn driver_welcome_message_mutations_send_and_gate() {
         .add_chat_welcome_message(ChatId(13), "welcome!")
         .unwrap()
         .expect("add sent");
+    // Another chat's add is not held back by this one; the same chat's is.
+    assert_eq!(
+        driver
+            .add_chat_welcome_message(ChatId(13), "again")
+            .unwrap(),
+        None
+    );
+    ingest_json(
+        &mut driver,
+        r#"{"@type":"updateNewChat","chat":{"id":14,"title":"h","type":{"@type":"chatTypeSupergroup","supergroup_id":14,"is_channel":false},"unread_count":0}}"#,
+    );
+    ingest_json(
+        &mut driver,
+        r#"{"@type":"updateSupergroup","supergroup":{"@type":"supergroup","id":14,"status":{"@type":"chatMemberStatusCreator","is_member":true}}}"#,
+    );
+    assert!(
+        driver
+            .add_chat_welcome_message(ChatId(14), "other")
+            .unwrap()
+            .is_some()
+    );
     driver
         .edit_chat_welcome_message(ChatId(13), 7, "welcome back")
         .unwrap()
@@ -564,13 +585,18 @@ fn driver_recognize_speech_sends_and_gates() {
         .unwrap();
     let extra = driver
         .recognize_speech(ChatId(11), MessageId(90))
-        .expect("real message sends");
+        .expect("real message sends")
+        .expect("a request went out");
     let last = recorder.snapshot().into_iter().last().unwrap();
     let value: Value = serde_json::from_str(&last).unwrap();
     assert_eq!(value["@type"], "recognizeSpeech");
     assert_eq!(value["chat_id"], 11);
     assert_eq!(value["message_id"], 90);
     assert_eq!(value["@extra"], extra.0.to_string());
+    // A second press before the answer sends nothing more.
+    let sent = recorder.snapshot().len();
+    assert_eq!(driver.recognize_speech(ChatId(11), MessageId(90)), Ok(None));
+    assert_eq!(recorder.snapshot().len(), sent);
     // Pending (unsent) message: rejected.
     let history = driver.session.histories.get_mut(&11).unwrap();
     let mut pending_msg = history.messages.get(&90).unwrap().clone();

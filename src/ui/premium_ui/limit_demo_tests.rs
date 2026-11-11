@@ -145,9 +145,9 @@ fn a_story_refused_over_a_limit_opens_its_box_over_the_composer(cx: &mut TestApp
             app.open_story_composer(window, cx);
             if let Some(session) = app.demo_session.as_mut() {
                 session.payments.hub.limit_box = None;
-                session.stories.post.eligibility = Some(answer.clone());
             }
-            app.story_composer_after_check(cx);
+            let target = app.story_composer_target_chat();
+            app.story_composer_after_check(target, Ok(answer.clone()), cx);
         });
         vcx.run_until_parked();
         assert_eq!(limit_box(&app, vcx), kind, "{answer:?}");

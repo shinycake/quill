@@ -3,29 +3,100 @@ use super::*;
 
 /// Phase 9.3: honest `postStory` UI states — pending while TDLib uploads,
 /// succeeded / failed when `updateStoryPostSucceeded` /
-/// `updateStoryPostFailed` arrive.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+/// `updateStoryPostFailed` arrive. Every state names the `postStory`
+/// request it is about.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StoryPostOutcome {
-    #[default]
-    None,
     /// `postStory` answered with a `story`; `story_id` is the temporary
     /// id the succeeded/failed updates correlate against
     /// (`old_story_id` / `story.id`).
     Posting {
+        request: RequestId,
         story_id: i32,
     },
-    Succeeded,
-    Failed(String),
+    Succeeded {
+        request: RequestId,
+    },
+    Failed {
+        request: RequestId,
+        message: String,
+    },
 }
 
-/// Phase 9.3: the composer's server-side state — latest `canPostStory`
-/// answer (checked before every post), its last error, and the
-/// `postStory` outcome.
+impl StoryPostOutcome {
+    /// The `postStory` call this outcome is about.
+    pub fn request(&self) -> RequestId {
+        match self {
+            Self::Posting { request, .. }
+            | Self::Succeeded { request }
+            | Self::Failed { request, .. } => *request,
+        }
+    }
+}
+
+/// The `postStory` outcomes by request, so a composer reads only the
+/// outcome of its own post and another post's outcome never replaces it.
+/// `clear` runs when a composer starts a post, so it stays small.
+#[derive(Debug, Clone, Default)]
+pub struct StoryPostOutcomes {
+    by_request: HashMap<RequestId, StoryPostOutcome>,
+}
+
+impl StoryPostOutcomes {
+    pub fn get(&self, request: RequestId) -> Option<&StoryPostOutcome> {
+        self.by_request.get(&request)
+    }
+
+    pub fn record(&mut self, outcome: StoryPostOutcome) {
+        self.by_request.insert(outcome.request(), outcome);
+    }
+
+    /// The post that is `Posting` as the temporary story `story_id`.
+    pub fn posting_as(&self, story_id: i32) -> Option<RequestId> {
+        self.by_request.values().find_map(|outcome| match outcome {
+            StoryPostOutcome::Posting {
+                request,
+                story_id: id,
+            } if *id == story_id => Some(*request),
+            _ => None,
+        })
+    }
+
+    pub fn clear(&mut self) {
+        self.by_request.clear();
+    }
+}
+
+/// The `canPostStory` answers by the call they answer, so a late answer to
+/// an earlier check never hides the answer the composer waits for.
+#[derive(Debug, Clone, Default)]
+pub struct StoryChecks {
+    answers: HashMap<RequestId, Result<CanPostStoryResult, String>>,
+}
+
+impl StoryChecks {
+    /// The eligibility, or why the check failed, for `request`.
+    pub fn answer_to(&self, request: RequestId) -> Option<&Result<CanPostStoryResult, String>> {
+        self.answers.get(&request)
+    }
+
+    pub fn record(&mut self, request: RequestId, result: Result<CanPostStoryResult, String>) {
+        self.answers.insert(request, result);
+    }
+
+    pub fn clear(&mut self) {
+        self.answers.clear();
+    }
+}
+
+/// Phase 9.3: the composer's server-side state — the latest `canPostStory`
+/// answer (checked before every post), why the "Post as" list failed to
+/// load, and the `postStory` outcome.
 #[derive(Debug, Clone, Default)]
 pub struct StoryPostState {
-    pub eligibility: Option<CanPostStoryResult>,
-    pub check_error: Option<String>,
-    pub outcome: StoryPostOutcome,
+    pub check: StoryChecks,
+    pub post_as_error: Option<String>,
+    pub outcomes: StoryPostOutcomes,
 }
 
 /// Phase 9.5: honest pending/failed states for `editStory` /
@@ -38,16 +109,44 @@ pub struct StoryViewersState {
     pub total_count: i32,
     pub rows: Vec<StoryInteractionView>,
     pub next_offset: String,
-    pub loading: bool,
-    pub error: Option<String>,
+    /// Where the page request stands.
+    pub page: ViewersPage,
+}
+
+/// The viewers page request of one panel. A page is applied only when the
+/// answer carries the id it is `Loading` for, so a page asked for by a
+/// panel that was closed and reopened never lands in the new one.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum ViewersPage {
+    /// Nothing is on its way.
+    #[default]
+    Idle,
+    Loading {
+        request: RequestId,
+    },
+    /// The last page failed; Retry asks again.
+    Failed(String),
 }
 
 impl StoryViewersState {
+    /// A page is on its way.
+    pub fn is_loading(&self) -> bool {
+        matches!(self.page, ViewersPage::Loading { .. })
+    }
+
+    /// Why the last page failed.
+    pub fn error(&self) -> Option<&str> {
+        match &self.page {
+            ViewersPage::Failed(error) => Some(error),
+            _ => None,
+        }
+    }
+
     /// Whether scrolling near the end should ask for the next page: one is
     /// left, none is on its way, and the last one did not fail (a failed
     /// page waits for the Retry button, not for the next scroll).
     pub fn wants_next_page(&self) -> bool {
-        !self.loading && self.error.is_none() && !self.next_offset.is_empty()
+        self.page == ViewersPage::Idle && !self.next_offset.is_empty()
     }
 }
 
@@ -56,16 +155,21 @@ impl StoryViewersState {
 /// then `TextRequired` (optional details), then `Ok`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StoryReportStage {
-    /// The initial `reportStory` is in flight.
-    Checking,
+    /// The initial `reportStory` is in flight as `request`; only its
+    /// answer moves the flow.
+    Checking {
+        request: RequestId,
+    },
     /// The user must pick a reason before the flow can continue.
     PickOption {
         title: String,
         options: Vec<ReportOption>,
     },
     /// A follow-up `reportStory` (option picked, or details submitted)
-    /// is in flight.
-    Sending,
+    /// is in flight as `request`; only its answer moves the flow.
+    Sending {
+        request: RequestId,
+    },
     /// The server wants extra text details for `option_id`.
     TextRequired {
         option_id: String,
@@ -81,6 +185,16 @@ pub struct StoryReportFlow {
     pub chat_id: i64,
     pub story_id: i32,
     pub stage: StoryReportStage,
+}
+
+impl StoryReportStage {
+    /// The `reportStory` call the flow waits for, in `Checking` or `Sending`.
+    pub fn waiting_for(&self) -> Option<RequestId> {
+        match self {
+            Self::Checking { request } | Self::Sending { request } => Some(*request),
+            _ => None,
+        }
+    }
 }
 
 impl StoryReportFlow {
@@ -112,23 +226,34 @@ impl StoryStealthMode {
     }
 }
 
-/// `editStoryCover` / `setStoryPrivacySettings` — all `= Ok` calls, so
-/// success only clears the spinner (the edited story itself arrives via
-/// `updateStory`); failures surface the sanitized TDLib error. One slot:
-/// a new call takes it over, and only the answer to the call it holds
-/// (`request`) settles it. `story` is the story the call or the error is
-/// about, so the viewer shows them under that story only.
+/// `editStory` / `editStoryCover` / `setStoryPrivacySettings` — all `= Ok`
+/// calls, so success only clears the spinner (the edited story itself
+/// arrives via `updateStory`); failures surface the sanitized TDLib error.
+/// The slot (`pending`, `error`, `story`) is the status line of the latest
+/// call, shown under its story. Each call is also tracked by its own
+/// request (`in_flight`, `settled`): whoever sent it (the composer's Save,
+/// the cover picker, the privacy editor) reads the answer to its own
+/// request with `outcome`, whatever call took the slot after it.
 #[derive(Debug, Clone, Default)]
 pub struct StoryManageState {
-    pub pending: bool,
     pub error: Option<String>,
     /// `(chat_id, story_id)` of the story the call or error is about.
     pub story: Option<(i64, i32)>,
-    /// The call in flight.
+    /// The call the slot shows.
     pub request: Option<RequestId>,
-    /// The last call to settle and its failure, so whoever sent it can
-    /// tell its own answer from a later call's.
-    pub settled: Option<(RequestId, Option<String>)>,
+    /// Every call still on its way.
+    in_flight: Vec<RequestId>,
+    /// The latest calls to settle and their failures.
+    settled: Vec<(RequestId, Option<String>)>,
+}
+
+impl StoryManageState {
+    /// The account is going away: no call still on its way will be answered,
+    /// so each reads as `Lost` (its sender leaves its stage) instead of
+    /// `InFlight` for good.
+    pub fn forget_in_flight(&mut self) {
+        self.in_flight.clear();
+    }
 }
 
 /// What became of one management call (`StoryManageState::outcome`).
@@ -137,58 +262,81 @@ pub enum StoryManageOutcome {
     /// Still on its way.
     InFlight,
     Saved,
-    /// Refused; the reason is in `StoryManageState::error`.
+    /// Refused; the reason is `StoryManageState::failure`.
     Failed,
-    /// Let go without an answer (another call took the slot).
+    /// Never answered in this session (the account went away).
     Lost,
 }
 
+/// Settled calls kept for their senders to read.
+const STORY_MANAGE_SETTLED_CAP: usize = 16;
+
 impl StoryManageState {
     /// A call for the story went out as `request`.
-    pub(crate) fn start(&mut self, request: RequestId, chat_id: ChatId, story_id: i32) {
-        self.pending = true;
+    pub fn start(&mut self, request: RequestId, chat_id: ChatId, story_id: i32) {
         self.error = None;
         self.story = Some((chat_id.0, story_id));
         self.request = Some(request);
+        self.in_flight.push(request);
     }
 
-    /// The answer to `request` landed; `error` is its failure. An answer
-    /// to a call the slot no longer holds changes nothing.
-    pub(crate) fn settle(&mut self, request: RequestId, error: Option<String>) {
-        if self.request != Some(request) {
+    /// The answer to `request` landed; `error` is its failure. The slot
+    /// follows only when it still shows that call, but the call's own
+    /// sender always gets its answer.
+    pub fn settle(&mut self, request: RequestId, error: Option<String>) {
+        let was_in_flight = self.in_flight.len();
+        self.in_flight.retain(|id| *id != request);
+        if self.in_flight.len() == was_in_flight {
             return;
         }
-        self.pending = false;
-        self.request = None;
-        self.settled = Some((request, error.clone()));
-        self.error = error;
+        if self.settled.len() >= STORY_MANAGE_SETTLED_CAP {
+            self.settled.remove(0);
+        }
+        self.settled.push((request, error.clone()));
+        if self.request == Some(request) {
+            self.request = None;
+            self.error = error;
+        }
     }
 
     /// What became of `request`, matched by its id: a later call's
     /// answer is never taken for it.
     pub fn outcome(&self, request: RequestId) -> StoryManageOutcome {
-        if self.request == Some(request) {
+        if self.in_flight.contains(&request) {
             return StoryManageOutcome::InFlight;
         }
-        match &self.settled {
-            Some((id, None)) if *id == request => StoryManageOutcome::Saved,
-            Some((id, Some(_))) if *id == request => StoryManageOutcome::Failed,
-            _ => StoryManageOutcome::Lost,
+        match self.settled.iter().find(|(id, _)| *id == request) {
+            Some((_, None)) => StoryManageOutcome::Saved,
+            Some((_, Some(_))) => StoryManageOutcome::Failed,
+            None => StoryManageOutcome::Lost,
         }
     }
 
-    /// The story's call could not be made: `error` says why. Any call in
-    /// flight for another story is let go, so its answer stays silent.
+    /// Why `request` failed.
+    pub fn failure(&self, request: RequestId) -> Option<&str> {
+        self.settled
+            .iter()
+            .find(|(id, _)| *id == request)
+            .and_then(|(_, error)| error.as_deref())
+    }
+
+    /// The story's call could not be made: `error` says why. The slot
+    /// shows it under the story and lets go of the call it showed, so
+    /// that call's answer stays off this story's line.
     pub fn fail_locally(&mut self, chat_id: i64, story_id: i32, error: String) {
-        self.pending = false;
         self.request = None;
         self.story = Some((chat_id, story_id));
         self.error = Some(error);
     }
 
+    /// The slot shows a call still on its way.
+    pub fn is_pending(&self) -> bool {
+        self.request.is_some()
+    }
+
     /// A call for this story is in flight.
     pub fn pending_for(&self, chat_id: i64, story_id: i32) -> bool {
-        self.pending && self.story == Some((chat_id, story_id))
+        self.request.is_some() && self.story == Some((chat_id, story_id))
     }
 
     /// This story's failure line.
@@ -232,8 +380,13 @@ mod viewers_page_tests {
             total_count: 10,
             rows: Vec::new(),
             next_offset: next.to_string(),
-            loading,
-            error: error.map(str::to_string),
+            page: match (loading, error) {
+                (true, _) => ViewersPage::Loading {
+                    request: RequestId(1),
+                },
+                (false, Some(error)) => ViewersPage::Failed(error.to_string()),
+                (false, None) => ViewersPage::Idle,
+            },
         }
     }
 

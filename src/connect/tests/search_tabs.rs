@@ -486,3 +486,87 @@ fn a_refused_load_more_waits_for_a_retry_instead_of_asking_every_frame() {
     assert!(recorder.snapshot().is_empty());
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn a_recents_answer_of_the_old_tab_does_not_land_under_the_new_one() {
+    let mut fx = Fixture::new();
+    fx.driver.open_search().unwrap();
+    // The Recent chats request is out; the user switches to Channels with
+    // an empty field before it answers.
+    fx.open_tab(SearchTab::Channels);
+    fx.answer(
+        "searchRecentlyFoundChats",
+        "chats",
+        r#""total_count":1,"chat_ids":[5]"#,
+    );
+    assert!(fx.driver.session.search.search.chat_ids.is_empty());
+}
+
+#[test]
+fn picking_a_chat_drops_the_typing_debounce() {
+    let mut fx = Fixture::new();
+    fx.driver.open_search().unwrap();
+    let SearchQueryOutcome::Debounced { token } = fx.driver.set_search_query("abc").unwrap() else {
+        panic!("typing debounces");
+    };
+    fx.driver
+        .select_search_chat(
+            ChatId(8),
+            crate::composer::DraftContent::Text(String::new()),
+            None,
+            1_000,
+        )
+        .unwrap();
+    assert!(fx.driver.commit_debounced_search(token).unwrap().is_none());
+    assert!(fx.requests("searchChats").is_empty());
+    assert!(fx.requests("searchMessages").is_empty());
+}
+
+#[test]
+fn a_calendar_day_with_no_media_keeps_the_box_open_with_a_note() {
+    let mut fx = Fixture::new();
+    fx.driver.session.media.shared_media.open_for(ChatId(7));
+    fx.driver.open_shared_media_calendar().unwrap();
+    // The month has not loaded any day: nothing to land on.
+    fx.driver.jump_to_date(19_000).unwrap();
+    let search = &fx.driver.session.search;
+    assert!(search.history_calendar.is_some());
+    assert!(search.date_jump_note.is_some());
+    assert!(fx.requests("searchChatMessages").is_empty());
+}
+
+#[test]
+fn a_calendar_left_over_from_another_chat_is_dropped_without_a_jump() {
+    let mut fx = Fixture::new();
+    fx.driver.session.media.shared_media.open_for(ChatId(7));
+    fx.driver.open_shared_media_calendar().unwrap();
+    fx.driver.session.media.shared_media.open_for(ChatId(8));
+    fx.driver.jump_to_date(19_000).unwrap();
+    assert!(fx.driver.session.search.history_calendar.is_none());
+    assert!(fx.requests("searchChatMessages").is_empty());
+}
+
+#[test]
+fn the_quota_of_an_older_query_does_not_label_the_new_one() {
+    let mut fx = Fixture::new();
+    fx.driver.open_search().unwrap();
+    commit_typed_search(&mut fx.driver, "dune");
+    fx.open_tab(SearchTab::Posts);
+    let old = fx.requests("getPublicPostSearchLimits").pop().unwrap();
+    commit_typed_search(&mut fx.driver, "arrakis");
+    let new = fx.requests("getPublicPostSearchLimits").pop().unwrap();
+    assert_eq!(new["query"], "arrakis");
+    assert!(fx.driver.session.search.search.tabs.limits.is_none());
+    let body = |extra: &Value, free: bool, stars: i64| {
+        format!(
+            r#"{{"@type":"publicPostSearchLimits","@extra":"{}","daily_free_query_count":5,"remaining_free_query_count":0,"next_free_query_in":60,"star_count":{stars},"is_current_query_free":{free}}}"#,
+            extra["@extra"].as_str().unwrap()
+        )
+    };
+    // The answer for "arrakis" lands; the late one for "dune" is dropped.
+    fx.feed(&body(&new, false, 25));
+    fx.feed(&body(&old, true, 99));
+    let quota = fx.driver.session.search.search.tabs.limits.unwrap();
+    assert_eq!(quota.star_count, 25);
+    assert!(!quota.current_query_free);
+}

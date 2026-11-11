@@ -336,7 +336,11 @@ impl<S: JsonSender> ConnectDriver<S> {
             RequestPurpose::Bots(BotsPurpose::ToggleBotInAttachmentMenu { bot_user_id, added }),
             None,
         )?;
-        self.session.bots.web_apps.attachment_menu_toggled = None;
+        self.session
+            .bots
+            .web_apps
+            .attachment_menu_toggled
+            .retain(|toggle| toggle.bot_user_id != bot_user_id);
         let json =
             toggle_bot_is_added_to_attachment_menu(extra, bot_user_id, added, allow_write_access);
         self.send_json_request(extra, &json)

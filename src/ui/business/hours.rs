@@ -460,10 +460,13 @@ impl QuillApp {
         };
         let wanted = if enabled && !week.is_empty() {
             // The saved zone needs no list: only a fresh one waits for it.
-            let zone = self
-                .business_zone()
-                .map(|z| z.id)
-                .or_else(|| (!saved_zone.is_empty()).then_some(saved_zone));
+            // A saved id that TDLib's list lacks stays: the closest zone is
+            // only for hours that never had one.
+            let zone = if saved_zone.is_empty() {
+                self.business_zone().map(|z| z.id)
+            } else {
+                Some(saved_zone)
+            };
             let Some(zone) = zone else {
                 // A list that failed to load is asked for again here: it
                 // was asked only on the way in, and Back would wait for it

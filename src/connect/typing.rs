@@ -1,8 +1,9 @@
 //! Connect driver: typing and recording indicators.
 use super::*;
+use crate::ids::TopicId;
 use crate::ids::{ChatId, RequestId};
 use crate::state::RequestPurpose;
-use crate::telegram::requests::{send_chat_action, send_chat_action_kind};
+use crate::telegram::requests::send_chat_action_in;
 
 impl<S: JsonSender> ConnectDriver<S> {
     /// Send a prebuilt request JSON; roll the reserved `@extra` back when
@@ -61,14 +62,30 @@ impl<S: JsonSender> ConnectDriver<S> {
             return self.cancel_outgoing_voice();
         };
         let _ = self.cancel_outgoing_typing();
+        let topic = self.typing_topic(chat_id);
         if let Some(prev) = &self.outgoing_voice {
-            if prev.chat_id != chat_id {
+            if (prev.chat_id, prev.topic) != (chat_id, topic) {
                 self.cancel_outgoing_voice()?;
             } else if now_ms.saturating_sub(prev.last_sent_ms) < OUTGOING_TYPING_INTERVAL_MS {
                 return Ok(());
             }
         }
-        self.send_voice_action(chat_id, true, now_ms, action)
+        self.send_voice_action(chat_id, topic, true, now_ms, action)
+    }
+
+    /// Where an action in `chat_id` goes now: the open comment or reply
+    /// thread (inside a forum topic, that topic), else the forum topic or
+    /// direct messages conversation the composer is in, else the chat.
+    fn typing_topic(&self, chat_id: ChatId) -> TopicId {
+        if let Some((thread_id, _)) = self.session.thread_send_target(chat_id) {
+            return match self.session.thread_forum_topic(chat_id) {
+                Some(topic) => TopicId::forum(topic),
+                None => TopicId::Thread {
+                    message_thread_id: thread_id,
+                },
+            };
+        }
+        self.session.send_topic(chat_id).unwrap_or_default()
     }
 
     fn cancel_outgoing_voice(&mut self) -> Result<(), ConnectSendError> {
@@ -78,12 +95,19 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.typing_chat_allowed(prev.chat_id) {
             return Ok(());
         }
-        self.send_voice_action(prev.chat_id, false, 0, "chatActionRecordingVoiceNote")
+        self.send_voice_action(
+            prev.chat_id,
+            prev.topic,
+            false,
+            0,
+            "chatActionRecordingVoiceNote",
+        )
     }
 
     fn send_voice_action(
         &mut self,
         chat_id: ChatId,
+        topic: TopicId,
         recording: bool,
         now_ms: u64,
         action: &str,
@@ -91,20 +115,21 @@ impl<S: JsonSender> ConnectDriver<S> {
         let extra = self
             .session
             .request(RequestPurpose::SendChatAction, Some(chat_id));
-        let json = send_chat_action_kind(
+        let json = send_chat_action_in(
             extra,
             chat_id,
+            topic,
             if recording {
                 action
             } else {
                 "chatActionCancel"
             },
         );
-        let json = self.thread_routed(chat_id, json);
         match self.sender.send_json(&json) {
             Ok(()) => {
                 self.outgoing_voice = recording.then_some(OutgoingTyping {
                     chat_id,
+                    topic,
                     last_sent_ms: now_ms,
                 });
                 Ok(())
@@ -138,14 +163,15 @@ impl<S: JsonSender> ConnectDriver<S> {
         let Some(chat_id) = chat_id.filter(|_| composing) else {
             return self.cancel_outgoing_typing();
         };
+        let topic = self.typing_topic(chat_id);
         if let Some(prev) = &self.outgoing_typing {
-            if prev.chat_id != chat_id {
+            if (prev.chat_id, prev.topic) != (chat_id, topic) {
                 self.cancel_outgoing_typing()?;
             } else if now_ms.saturating_sub(prev.last_sent_ms) < OUTGOING_TYPING_INTERVAL_MS {
                 return Ok(());
             }
         }
-        self.send_outgoing_action(chat_id, true, now_ms)
+        self.send_outgoing_action(chat_id, topic, true, now_ms)
     }
 
     fn typing_chat_allowed(&self, chat_id: ChatId) -> bool {
@@ -164,23 +190,30 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.typing_chat_allowed(prev.chat_id) {
             return Ok(());
         }
-        self.send_outgoing_action(prev.chat_id, false, 0)
+        self.send_outgoing_action(prev.chat_id, prev.topic, false, 0)
     }
 
     fn send_outgoing_action(
         &mut self,
         chat_id: ChatId,
+        topic: TopicId,
         typing: bool,
         now_ms: u64,
     ) -> Result<(), ConnectSendError> {
         let extra = self
             .session
             .request(RequestPurpose::SendChatAction, Some(chat_id));
-        let json = self.thread_routed(chat_id, send_chat_action(extra, chat_id, typing));
+        let action = if typing {
+            "chatActionTyping"
+        } else {
+            "chatActionCancel"
+        };
+        let json = send_chat_action_in(extra, chat_id, topic, action);
         match self.sender.send_json(&json) {
             Ok(()) => {
                 self.outgoing_typing = typing.then_some(OutgoingTyping {
                     chat_id,
+                    topic,
                     last_sent_ms: now_ms,
                 });
                 Ok(())

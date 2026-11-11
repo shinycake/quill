@@ -11,7 +11,6 @@ AudioEngine::start_failed
 AudioEngine::start_failed+error
 AuthState::change_number_loading
 AuthState::change_number_loading+last_auth_error
-AuthState::password_state_loading
 AwardMembers::done
 AwardMembers::loading
 AwardMembers::loading+error
@@ -55,9 +54,6 @@ DragSelect::pending
 Drawn::leaving
 DropTopic::load_failed
 EarnLimits::app_config_loaded
-EmojiBarUi::sets_asked
-EmojiPanel::failed
-EmojiPanel::installed_loaded
 EmojiPanel::mutation_failed
 EmojiStyleUi::started
 EmojiStyleUi::started+file_error
@@ -65,7 +61,6 @@ FastShareFacts::sent
 FieldResult::finished
 FirstRunPrefs::completed
 FooterMeta::pending
-FrameUi::window_state_save_pending
 GifPanel::failed
 GifPanel::loaded
 GifPanel::loading
@@ -74,7 +69,6 @@ GifPanel::search_loading
 GiftCodeLookup::loading
 GiftCodeLookup::loading+error
 GiftManageState::collections_loading
-GiftMarketState::auction_loading
 GiftPurchase::completed
 GiftPurchase::loading
 GiftPurchase::sending
@@ -104,7 +98,6 @@ InviteLinkMembersState::loading+error
 InvoiceWatch::failed
 InvoiceWatch::pending
 InvoiceWatch::sending
-JoinBox::joining
 JoinedLines::started
 LanguageLinkLookup::loading
 LanguageLinkLookup::loading+error
@@ -150,8 +143,6 @@ PasswordBox::sending+error
 PaymentsState::form_loading
 PaymentsState::form_loading+receipt_error
 PaymentsState::verification_started
-PeerColorDialog::sent
-PendingBotMessage::stop_failed
 PhotoSources::busy
 PlayHead::started
 PlaybackHealth::output_failed
@@ -170,8 +161,6 @@ PremiumHub::tx_loading
 ProfileModal::closing
 ProxyState::loading
 ProxyState::loading+error
-PublicForwardsList::loading
-PublicForwardsList::loading+error
 PublicLinkRevoke::failed
 PullMachine::expand_pending
 Queued::failed
@@ -216,24 +205,14 @@ StarPacksState::loaded
 StarPacksState::loading
 StarPacksState::loading+error
 State::started
-StealthFacts::requested
 Step::started
 StickerPanel::greeting_loaded
 StickerPanel::installed_loaded
 StickerPanel::suggest_waiting_for_sets
 StickerSetView::files_requested
 StorageScroll::pending
-StoryComposer::check_sent
-StoryComposer::check_sent+local_error
-StoryComposer::post_sent
-StoryInsightsState::forwards_loading
-StoryInsightsState::forwards_loading+forwards_error
-StoryManageState::pending
-StoryManageState::pending+error
 StorySearchState::loading
 StorySearchState::loading+error
-StoryViewersState::loading
-StoryViewersState::loading+error
 StreamFacts::transport_failed
 StyleExamples::loading
 Tempo::done

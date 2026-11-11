@@ -486,7 +486,7 @@ fn suggestions_follow_updates_and_hide_with_rollback() {
             .contains(ACTION_PHOTO)
     );
     assert_eq!(
-        f.1.session.chats_state.chat_action_error.as_deref(),
+        f.1.session.chats_state.chat_action_error.last(),
         Some("could not hide the suggestion (error 400)")
     );
 

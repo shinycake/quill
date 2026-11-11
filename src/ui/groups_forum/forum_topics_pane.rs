@@ -336,14 +336,11 @@ impl QuillApp {
         // view or the previous topic): save it there, then restore the new
         // topic's draft once the switch is done.
         self.flush_leaving_draft(cx);
-        // An opened topic lands at its bottom, never where it was left.
-        if let Some(chat_id) = self.session().and_then(|s| s.open_chat) {
-            self.history
-                .scroll_memory
-                .forget((chat_id.0, Some(forum_topic_id), 0));
-        }
+        let open_chat = self.session().and_then(|s| s.open_chat);
+        let mut opened = true;
         if let Some(live) = self.live.as_mut() {
             let result = live.driver.select_topic(forum_topic_id);
+            opened = result.is_ok();
             self.set_note(match result {
                 Ok(_) => StatusNote::silent(tr(keys::Q_PEOPLE_TOPIC_SELECTED)),
                 Err(_) => StatusNote::error(tr(keys::Q_PEOPLE_COULD_NOT_OPEN_TOPIC)),
@@ -353,7 +350,16 @@ impl QuillApp {
         {
             session.select_topic(chat_id, forum_topic_id);
         }
-        self.request_draft_restore();
+        // An opened topic lands at its bottom, never where it was left; a
+        // refused open changes nothing, so it forgets nothing either.
+        if opened {
+            if let Some(chat_id) = open_chat {
+                self.history
+                    .scroll_memory
+                    .forget((chat_id.0, Some(forum_topic_id), 0));
+            }
+            self.request_draft_restore();
+        }
         cx.notify();
     }
 

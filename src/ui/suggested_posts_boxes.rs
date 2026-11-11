@@ -197,16 +197,16 @@ impl QuillApp {
     ) {
         match target {
             SuggestTarget::Bar(chat_id) => {
-                let edit_of = self
+                let old = self
                     .session()
-                    .and_then(|session| session.suggest_bar(chat_id))
-                    .and_then(|bar| bar.edit_of);
+                    .and_then(|session| session.suggest_bar(chat_id));
                 self.set_suggest_bar(
                     chat_id,
                     Some(SuggestBar {
                         terms,
                         mode,
-                        edit_of,
+                        edit_of: old.and_then(|bar| bar.edit_of),
+                        send: old.map(|bar| bar.send).unwrap_or_default(),
                     }),
                     cx,
                 );

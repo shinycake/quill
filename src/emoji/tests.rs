@@ -503,11 +503,11 @@ fn a_chat_windows_custom_emoji_count_as_shown() {
 #[test]
 fn an_empty_installed_list_is_loaded_only_after_its_answer() {
     let (mut session, _) = session();
-    assert!(!session.stickers.emoji.installed_loaded);
+    assert!(session.stickers.emoji.installed.can_ask());
     session.accept_installed_emoji_sets(Vec::new());
-    assert!(session.stickers.emoji.installed_loaded);
+    assert!(!session.stickers.emoji.installed.can_ask());
     session.invalidate_installed_emoji_sets();
-    assert!(!session.stickers.emoji.installed_loaded);
+    assert!(session.stickers.emoji.installed.can_ask());
 }
 
 /// A failed custom emoji lookup (message text, a live story's comments,

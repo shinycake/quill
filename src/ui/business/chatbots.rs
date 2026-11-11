@@ -193,8 +193,16 @@ impl QuillApp {
             return Found::Nothing;
         };
         let text = username.read(cx).value().to_string();
-        if parse_username_query(&text).is_none() || lookup.query.is_empty() {
+        let Some(query) = parse_username_query(&text) else {
             return Found::Nothing;
+        };
+        if lookup.query.is_empty() {
+            return Found::Nothing;
+        }
+        // Typing on while the lookup is debounced: the results on hand are
+        // for the previous text.
+        if lookup.query != query {
+            return Found::Loading;
         }
         if !lookup.done() {
             return Found::Loading;

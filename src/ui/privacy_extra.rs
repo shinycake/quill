@@ -56,7 +56,7 @@ pub(crate) struct PrivacyUi {
     pub renaming_device: bool,
     pub rename_input: Entity<gpui_kit::component::input::InputState>,
     /// "Reset statistics" is awaiting its confirmation.
-    pub network_reset_confirm: bool,
+    pub network_reset: crate::ui::dialogs::data_extra::NetworkReset,
 }
 
 impl PrivacyUi {
@@ -79,7 +79,7 @@ impl PrivacyUi {
                 gpui_kit::component::input::InputState::new(window, cx)
                     .placeholder(quill::settings::DEFAULT_DEVICE_MODEL)
             }),
-            network_reset_confirm: false,
+            network_reset: Default::default(),
         }
     }
 }

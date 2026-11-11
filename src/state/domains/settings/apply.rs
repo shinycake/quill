@@ -223,8 +223,9 @@ impl Session {
                         op: PasswordOp::ResetPassword
                     }))
                 ) {
-                    self.auth_state.password_state_loading = false;
-                    self.auth_state.password_op_error = None;
+                    if self.auth_state.settle_password_op(pending.map(|p| p.id)) {
+                        self.auth_state.password_op_error = None;
+                    }
                     self.apply_reset_password_result(outcome);
                 }
             }
@@ -240,10 +241,12 @@ impl Session {
                 ) {
                     let has_password = state.has_password;
                     self.auth_state.password_state = Some(state);
-                    self.auth_state.password_state_loading = false;
+                    let ours = self.auth_state.settle_password_op(pending.map(|p| p.id));
                     self.route_gift_export_on_password(has_password);
                     self.route_gram_withdrawal_on_password(has_password);
-                    self.auth_state.password_op_error = None;
+                    if ours {
+                        self.auth_state.password_op_error = None;
+                    }
                     if let Some(RequestPurpose::Auth(AuthPurpose::PasswordStateOp { op })) =
                         pending.map(|p| p.purpose)
                     {

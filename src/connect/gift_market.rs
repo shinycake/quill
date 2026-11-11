@@ -5,8 +5,8 @@
 //! called from a button that names the price or the gifts.
 use super::*;
 use crate::gift_market::{
-    AuctionFollow, CraftGift, CraftSession, GiftMarketPurpose, ResaleBuy, ResaleFilter,
-    ResaleSearch,
+    AuctionFetch, AuctionFollow, CraftGift, CraftSession, GiftMarketPurpose, ResaleBuy,
+    ResaleFilter, ResaleSearch,
 };
 use crate::ids::RequestId;
 use crate::local_time::now_unix;
@@ -245,9 +245,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         });
         let market = &mut self.session.payments.gift_market;
         if let Ok(extra) = &result {
-            market.auction_request = extra.0;
-            market.auction_ready = None;
-            market.auction_loading = true;
+            market.auction = AuctionFetch::Loading { request: extra.0 };
         }
         result
     }

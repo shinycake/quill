@@ -196,6 +196,16 @@ impl QuillApp {
     /// "From file…" in the chat colors dialog: the picked image previews
     /// and is uploaded for this chat on Apply.
     fn choose_chat_wallpaper_file(&mut self, cx: &mut Context<Self>) {
+        // The answer belongs to the dialog that asked, not to whichever one
+        // is open when the native picker closes.
+        let Some(asked) = self
+            .dialogs
+            .chat_look_dialog
+            .as_ref()
+            .map(|d| d.target.clone())
+        else {
+            return;
+        };
         let picker = cx.prompt_for_paths(PathPromptOptions {
             files: true,
             directories: false,
@@ -209,7 +219,12 @@ impl QuillApp {
                 let _ = this.update(cx, |this, cx| {
                     if !is_wallpaper_image(&path) {
                         this.set_note(StatusNote::silent(tr(keys::Q_MISC_CHOOSE_A_JPEG_PNG_OR)));
-                    } else if let Some(d) = this.dialogs.chat_look_dialog.as_mut() {
+                    } else if let Some(d) = this
+                        .dialogs
+                        .chat_look_dialog
+                        .as_mut()
+                        .filter(|d| d.target == asked)
+                    {
                         d.file = Some(path);
                         d.background = None;
                         d.remove_wallpaper = false;

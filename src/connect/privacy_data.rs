@@ -292,6 +292,13 @@ impl<S: JsonSender> ConnectDriver<S> {
         &mut self,
         action: &'static str,
     ) -> Result<RequestId, ConnectSendError> {
+        // The user said no: the suggestion is gone here whether or not the
+        // server can be told (a closing connection), so a box that offers it
+        // does not open again and again.
+        self.session.chat_list.suggestions.remove_action(action);
+        if action == crate::chatlist_suggestions::ACTION_PASSWORD {
+            self.session.settings.privacy_data.check_password_suggested = false;
+        }
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
@@ -302,10 +309,6 @@ impl<S: JsonSender> ConnectDriver<S> {
         if let Err(err) = self.sender.send_json(&hide_suggested_action(extra, action)) {
             self.session.requests.take(extra);
             return Err(err);
-        }
-        self.session.chat_list.suggestions.remove_action(action);
-        if action == crate::chatlist_suggestions::ACTION_PASSWORD {
-            self.session.settings.privacy_data.check_password_suggested = false;
         }
         Ok(extra)
     }

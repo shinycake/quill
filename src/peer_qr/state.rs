@@ -122,6 +122,8 @@ pub enum QrToast {
         free_code: bool,
     },
     Unavailable,
+    /// The code or its colors changed while a Copy or Share picture was made.
+    Changed,
     /// The server's reason a request failed.
     Failed(String),
     /// The card image is on the clipboard.

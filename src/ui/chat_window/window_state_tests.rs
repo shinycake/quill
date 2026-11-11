@@ -207,12 +207,10 @@ fn each_window_reveals_its_own_topic_tab(cx: &mut TestAppContext) {
             tab_count: 5,
             strip_width: 400,
         };
-        app.history.subsection_tabs.revealed.set(Some(key));
-        let theirs = app.in_window_scope(Some(OTHER), cx, |app, _| {
-            app.history.subsection_tabs.revealed.get()
-        });
+        app.chat_ui.tabs_revealed.set(Some(key));
+        let theirs = app.in_window_scope(Some(OTHER), cx, |app, _| app.chat_ui.tabs_revealed.get());
         assert_eq!(theirs, Some(None), "the chat window has revealed nothing");
-        assert_eq!(app.history.subsection_tabs.revealed.get(), Some(key));
+        assert_eq!(app.chat_ui.tabs_revealed.get(), Some(key));
     });
 }
 

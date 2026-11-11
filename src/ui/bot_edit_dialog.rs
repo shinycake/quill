@@ -28,8 +28,34 @@ pub(super) struct BotEditDialog {
     about: Entity<TextareaState>,
     /// The fields hold the server's texts (set once they arrive).
     filled: bool,
-    /// A problem found before anything was sent.
-    local_error: Option<&'static str>,
+    /// What the last Save press found before anything was sent.
+    check: SaveCheck,
+}
+
+/// The outcome of the last Save press that sent nothing. A rejection holds
+/// the texts it was found for and stands only while the fields still hold
+/// them: the next edit puts the box back to editing.
+enum SaveCheck {
+    Editing,
+    Rejected {
+        problem: &'static str,
+        name: String,
+        about: String,
+    },
+}
+
+impl SaveCheck {
+    /// The problem to show for the texts in the fields now.
+    fn problem_for(&self, name: &str, about: &str) -> Option<&'static str> {
+        match self {
+            Self::Rejected {
+                problem,
+                name: rejected_name,
+                about: rejected_about,
+            } if rejected_name == name && rejected_about == about => Some(problem),
+            _ => None,
+        }
+    }
 }
 
 /// Whether a picked file can be a profile photo.
@@ -99,7 +125,7 @@ impl QuillApp {
             name,
             about,
             filled: false,
-            local_error: None,
+            check: SaveCheck::Editing,
         });
         self.open_box(DialogKind::BotEdit);
         // The texts arrive from the session on the poll; fill the fields
@@ -127,8 +153,20 @@ impl QuillApp {
                             .ok()
                             .and_then(Result::ok)
                     });
-                if filled != Some(false) {
-                    break;
+                match filled {
+                    Some(true) => break,
+                    Some(false) => {}
+                    // No window could take the texts just now (the opening
+                    // one closed and the main one is hidden): try again
+                    // while the box is still open.
+                    None => {
+                        let open = this
+                            .update(cx, |this, _| this.dialogs.bot_edit_dialog.is_some())
+                            .unwrap_or(false);
+                        if !open {
+                            break;
+                        }
+                    }
                 }
             }
         })
@@ -194,14 +232,18 @@ impl QuillApp {
             Ok(changes) => changes,
             Err(problem) => {
                 if let Some(dialog) = self.dialogs.bot_edit_dialog.as_mut() {
-                    dialog.local_error = Some(problem);
+                    dialog.check = SaveCheck::Rejected {
+                        problem,
+                        name,
+                        about,
+                    };
                 }
                 cx.notify();
                 return;
             }
         };
         if let Some(dialog) = self.dialogs.bot_edit_dialog.as_mut() {
-            dialog.local_error = None;
+            dialog.check = SaveCheck::Editing;
         }
         if let Some(live) = self.live.as_mut()
             && !changes.is_empty()
@@ -285,7 +327,6 @@ impl QuillApp {
                 return dialog.on_close(on_close);
             };
             let (bot_id, name, about) = (state.bot_id, state.name.clone(), state.about.clone());
-            let local_error = state.local_error;
             let muted = cx.theme().muted_foreground;
             let danger = cx.theme().danger;
             let edit = this.session().and_then(|s| s.bots.owned.edit.clone());
@@ -297,7 +338,6 @@ impl QuillApp {
                     .is_some_and(|e| e.name.is_some() && e.about.is_some());
             let load_failed = edit.as_ref().is_some_and(|e| e.load_failed);
             let saving = edit.as_ref().is_some_and(|e| e.saving() > 0);
-            let saved = edit.as_ref().is_some_and(|e| e.saved > 0);
             let server_error = edit.as_ref().and_then(|e| e.error.clone());
             let username = this
                 .session()
@@ -306,6 +346,26 @@ impl QuillApp {
                 .unwrap_or_default();
             let name_len = name.read(cx).value().chars().count();
             let about_len = about.read(cx).value().chars().count();
+            let (typed_name, typed_about) = (
+                name.read(cx).value().to_string(),
+                about.read(cx).value().to_string(),
+            );
+            let local_error = state.check.problem_for(&typed_name, &typed_about);
+            // "Saved" says the fields hold what the server has: an edit
+            // after the save takes it away.
+            let unsaved =
+                edit.as_ref()
+                    .is_none_or(|e| match (e.name.as_deref(), e.about.as_deref()) {
+                        (Some(current_name), Some(current_about)) => !owned_bots::edit_changes(
+                            current_name,
+                            current_about,
+                            &typed_name,
+                            &typed_about,
+                        )
+                        .is_ok_and(|changes| changes.is_empty()),
+                        _ => true,
+                    });
+            let saved = edit.as_ref().is_some_and(|e| e.saved > 0) && !unsaved;
 
             let status = if load_failed {
                 Some((tr(keys::Q_MEDIA_COULD_NOT_LOAD_THE_BOTS).to_string(), true))

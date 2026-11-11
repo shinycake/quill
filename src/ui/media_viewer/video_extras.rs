@@ -97,7 +97,15 @@ impl QuillApp {
         }
         self.close_media_viewer(cx);
         self.begin_forward_one(chat_id, message_id, false, window, cx);
-        self.viewer.extra.share_at = Some((chat_id, message_id, secs));
+        // Only a picker that opened over this very message holds the
+        // position (a refused forward, or a toggle that took the message
+        // out of the draft, leaves none).
+        let picking =
+            self.share.forward.picker_open()
+                && self.share.forward.draft().is_some_and(|draft| {
+                    draft.from_chat_id == chat_id && draft.contains(message_id)
+                });
+        self.viewer.extra.share_at = picking.then_some((chat_id, message_id, secs));
     }
 
     /// The picker's "Copy link" for the message the viewer was shared at a

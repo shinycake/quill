@@ -22,7 +22,7 @@ impl Session {
         match pending.map(|p| p.purpose) {
             Some(RequestPurpose::GetLanguagePackInfo) => self.apply_language_pack_error(pending),
             Some(RequestPurpose::Settings(SettingsPurpose::Language(purpose))) => {
-                self.apply_language_error(err, purpose)
+                self.apply_language_error(err, purpose, pending.map(|p| p.id))
             }
             // Slice S4: Data & Storage request failures surface
             // on the screen (the S3 pattern) — never as toasts.
@@ -31,6 +31,7 @@ impl Session {
                     "Couldn't save auto-download settings: {}",
                     error_reason(err)
                 ));
+                self.settings.auto_download_answer = extra.map(AutoDownloadAnswer::Refused);
             }
             Some(RequestPurpose::OptimizeStorage) => {
                 self.settings.storage_clearing = false;

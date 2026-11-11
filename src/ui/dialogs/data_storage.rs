@@ -15,6 +15,7 @@
 use super::super::app::QuillApp;
 use super::super::index_sliders::{StepSlider, cap_slider_start};
 use super::super::*;
+use super::storage_editor::StorageEditor;
 use crate::ui::settings_window::rows::{detail_row, group, switch_row};
 use gpui_kit::component::button::*;
 use gpui_kit::component::switch::Switch;
@@ -119,7 +120,7 @@ impl QuillApp {
     /// storage + presets fetches (both guarded: once per session).
     pub(crate) fn open_data_storage(&mut self, cx: &mut Context<Self>) {
         self.open_settings(Some(quill::settings_catalog::Page::DataStorage), cx);
-        self.settings.data_storage_editor = None;
+        self.settings.data_storage_editor = StorageEditor::Closed;
         self.forget_storage_sliders();
         self.settings.storage_confirm = None;
         if let Some(live) = self.live.as_mut() {
@@ -128,7 +129,7 @@ impl QuillApp {
             let _ = live.driver.fetch_auto_download_presets();
             let _ = live.driver.fetch_network_statistics();
         }
-        self.privacy.extra.network_reset_confirm = false;
+        self.privacy.extra.network_reset = Default::default();
         if let Some(demo) = self.demo_session.as_mut() {
             demo.settings.storage_freed = None;
             if demo.settings.privacy_data.network.data().is_none() {
@@ -143,7 +144,7 @@ impl QuillApp {
     /// is open, otherwise the overview with a refresh button.
     pub(crate) fn data_storage_page(&mut self, cx: &mut Context<Self>) -> Div {
         self.ensure_storage_sliders(cx);
-        let Some((network, draft)) = self.settings.data_storage_editor else {
+        let Some((network, draft)) = self.settings.data_storage_editor.shown() else {
             return div()
                 .flex()
                 .flex_col()
@@ -178,7 +179,7 @@ impl QuillApp {
                             .label(tr(keys::Q_OPS_BACK))
                             .ghost()
                             .on_click(cx.listener(|this, _, _, cx| {
-                                this.settings.data_storage_editor = None;
+                                this.settings.data_storage_editor = StorageEditor::Closed;
                                 cx.notify();
                             })),
                     )
@@ -194,30 +195,34 @@ impl QuillApp {
     }
 
     fn save_data_storage_editor(&mut self, cx: &mut Context<Self>) {
-        let Some((network, draft)) = self.settings.data_storage_editor.take() else {
+        let StorageEditor::Open { network, draft } = self.settings.data_storage_editor else {
             return;
         };
         if let Some(live) = self.live.as_mut() {
-            // Applied on the confirmed `ok`, never optimistically; a failed
-            // send restores the draft so nothing is lost.
-            if live
-                .driver
-                .set_auto_download_settings(network, draft)
-                .is_err()
-            {
-                self.settings.data_storage_editor = Some((network, draft));
+            // Applied on the confirmed `ok`, never optimistically. The draft
+            // stays in the editor until TDLib answers (`drain_storage_editor`):
+            // a refused or unsent save reopens it as it was.
+            if let Ok(request) = live.driver.set_auto_download_settings(network, draft) {
+                self.settings.data_storage_editor = StorageEditor::Saving {
+                    network,
+                    draft,
+                    request,
+                };
             }
         } else if let Some(demo) = self.demo_session.as_mut() {
             *demo.settings.data_storage.for_network_mut(network) = draft;
             demo.settings.data_storage.seeded = true;
+            self.settings.data_storage_editor = StorageEditor::Closed;
         }
         cx.notify();
     }
 
     /// Leaving the page drops an unsaved editor and any pending confirm.
     pub(crate) fn leave_data_storage(&mut self) {
-        self.settings.data_storage_editor = None;
+        self.apply_unreleased_storage_drag();
+        self.settings.data_storage_editor = StorageEditor::Closed;
         self.settings.storage_confirm = None;
+        self.privacy.extra.network_reset = Default::default();
         self.forget_storage_sliders();
     }
 
@@ -447,7 +452,7 @@ impl QuillApp {
                             cx,
                         );
                     }
-                    this.settings.data_storage_editor = Some((network, draft));
+                    this.settings.data_storage_editor = StorageEditor::open(network, draft);
                     cx.notify();
                 }
             }),
@@ -496,7 +501,7 @@ impl QuillApp {
                         .checked(draft.is_auto_download_enabled)
                         .accessibility_label(tr(keys::Q_OPS_AUTOMATIC_DOWNLOAD))
                         .on_click(cx.listener(|this, &on, _, cx| {
-                            if let Some((_, draft)) = this.settings.data_storage_editor.as_mut() {
+                            if let Some(draft) = this.settings.data_storage_editor.draft_mut() {
                                 draft.is_auto_download_enabled = on;
                             }
                             cx.notify();
@@ -527,7 +532,7 @@ impl QuillApp {
                         .checked(draft.use_less_data_for_calls)
                         .accessibility_label(tr(keys::Q_OPS_USE_LESS_DATA_FOR_CALLS))
                         .on_click(cx.listener(|this, &on, _, cx| {
-                            if let Some((_, draft)) = this.settings.data_storage_editor.as_mut() {
+                            if let Some(draft) = this.settings.data_storage_editor.draft_mut() {
                                 draft.use_less_data_for_calls = on;
                             }
                             cx.notify();
@@ -602,8 +607,7 @@ impl QuillApp {
                                     .preferences
                                     .index_sliders
                                     .index(StepSlider::DataCap(kind), cx);
-                                if let Some((_, draft)) = this.settings.data_storage_editor.as_mut()
-                                {
+                                if let Some(draft) = this.settings.data_storage_editor.draft_mut() {
                                     draft.set_cap_enabled(kind, on);
                                     if let Some(index) = index.filter(|_| on) {
                                         draft.set_cap(kind, cap_at(index));

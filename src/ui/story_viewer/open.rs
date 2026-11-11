@@ -244,8 +244,8 @@ impl QuillApp {
         // Opened over an open viewer (a "Reposted from" label, a story
         // card in a chat window, the live PiP's return): the story shown
         // until now is left, its reply and editors with it, as a step to
-        // another story would.
-        self.leave_story_item(cx);
+        // another story would, draft included.
+        self.replace_story_item(previous, current, cx);
         self.stories.viewer = viewer;
         self.switch_open_story(previous, current);
         // Phase 9.6: (re)start the playback clock + tick whenever the

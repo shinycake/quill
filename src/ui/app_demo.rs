@@ -263,6 +263,7 @@ impl QuillApp {
             }
             // The gate counts the chat windows too: one may be in front.
             this.frame.main_active.set(active);
+            this.preferences.advanced.forget_import_offer();
             this.follow_windows(cx);
             super::glyph_sweep::window_activation(window.window_handle().window_id(), active);
             this.viewer_window_activation(window, cx);

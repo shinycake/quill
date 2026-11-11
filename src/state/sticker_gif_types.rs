@@ -225,6 +225,9 @@ pub struct GifPanel {
     pub search_loading: bool,
     pub search_failed: bool,
     pub search_query: String,
+    /// The chat of the window that asked (the inline query's chat); paging
+    /// keeps it.
+    pub search_chat: Option<crate::ids::ChatId>,
     pub search_bot_username: String,
     pub search_bot_user_id: Option<i64>,
     pub loading: bool,

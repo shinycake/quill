@@ -216,7 +216,7 @@ impl QuillApp {
                     )),
             );
         }
-        if self.privacy.extra.network_reset_confirm {
+        if self.privacy.extra.network_reset == NetworkReset::Confirming {
             section.child(
                 div()
                     .flex()
@@ -233,13 +233,7 @@ impl QuillApp {
                             .danger()
                             .small()
                             .on_click(cx.listener(|this, _, _, cx| {
-                                this.privacy.extra.network_reset_confirm = false;
-                                if let Some(live) = this.live.as_mut() {
-                                    let _ = live.driver.reset_network_statistics();
-                                } else if let Some(demo) = this.demo_session.as_mut() {
-                                    demo.settings.privacy_data.network =
-                                        quill::state::fetch::Fetch::Ready(NetworkUsage::default());
-                                }
+                                this.reset_network_usage();
                                 cx.notify();
                             })),
                     )
@@ -249,7 +243,7 @@ impl QuillApp {
                             .ghost()
                             .small()
                             .on_click(cx.listener(|this, _, _, cx| {
-                                this.privacy.extra.network_reset_confirm = false;
+                                this.privacy.extra.network_reset = NetworkReset::Idle;
                                 cx.notify();
                             })),
                     ),
@@ -262,12 +256,37 @@ impl QuillApp {
                         .outline()
                         .small()
                         .on_click(cx.listener(|this, _, _, cx| {
-                            this.privacy.extra.network_reset_confirm = true;
+                            this.privacy.extra.network_reset = NetworkReset::Confirming;
                             cx.notify();
                         })),
                 ),
             )
         }
+    }
+}
+
+/// "Reset statistics": asking for the confirmation, or not.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) enum NetworkReset {
+    #[default]
+    Idle,
+    Confirming,
+}
+
+impl QuillApp {
+    /// The confirmed reset. The box stays until the request went out; a
+    /// failed send says so on the page (the `data_storage_error` pattern).
+    pub(crate) fn reset_network_usage(&mut self) {
+        if let Some(live) = self.live.as_mut() {
+            if live.driver.reset_network_statistics().is_err() {
+                live.driver.session.settings.data_storage_error =
+                    Some(tr(keys::Q_OPS_RESET_STATISTICS_FAILED).to_string());
+                return;
+            }
+        } else if let Some(demo) = self.demo_session.as_mut() {
+            demo.settings.privacy_data.network_usage = Some(NetworkUsage::default());
+        }
+        self.privacy.extra.network_reset = NetworkReset::Idle;
     }
 }
 

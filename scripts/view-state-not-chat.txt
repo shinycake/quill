@@ -25,7 +25,6 @@ HistoryUi.reported_visible | carries its chat: a repeat check, a new chat never 
 HistoryUi.sponsored.spots * | rebuilt from the open chat's placed ads after every history render (sync_sponsored_spots)
 HistoryUi.ends | compared with the history synced next; a new chat's ends differ
 HistoryUi.last_highlight | compared with the session's highlight, which is the open chat's
-HistoryUi.self_destruct_tick_chat | marks a running tick task, as slow_mode_tick_chat
 HistoryUi.live_location_tick_chat | marks a running tick task, as slow_mode_tick_chat
 ShareUi.forward.Bar.dest | the chat the forward bar waits in; kept across chats on purpose (dismiss_forward_for_view)
 ShareUi.forward.Picking.bar | the forward bar the share box was opened over, which leaving the box returns to; it goes with the bar (dismiss_forward_for_view)
@@ -48,7 +47,6 @@ ViewerUi.extra.caption.key | carries its chat and message: the caption built for
 # a sticker set, an effect).
 ComposerUi.inline_return * | carries the chat it came from (`origin`) and the bot's; it acts only once the bot's chat answers
 ComposerUi.send_menu * | the send menu carries its chat; it closes when the chat viewed is another (`send_effects`); the rest are effect ids
-ComposerUi.date_dialog * | a date box over the composer text; `initial` is a unix time, not an id
 ComposerUi.send_box * | the attachment tray's video editor: a sticker set id and times in ms, no chat's ids; the tray is keyed by draft slot
 MessageUi.menu * | carries its chat and message; its actions use them
 MessageUi.pending_link * | carries its chat and message (`msg_key`); run at the next render

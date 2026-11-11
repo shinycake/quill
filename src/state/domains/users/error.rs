@@ -12,15 +12,20 @@ impl Session {
         _seq: u64,
     ) {
         // The failed check is over: its text no longer reads "Checking…".
-        if extra.is_some()
+        // A superseded check (the person typed on) is not the current one:
+        // its failure says nothing about the text now being checked.
+        let current_check = extra.is_some()
             && self
                 .users_state
                 .username_check_pending
                 .as_ref()
                 .map(|(id, _)| *id)
-                == extra
-        {
+                == extra;
+        if current_check {
             self.users_state.username_check_pending = None;
+        }
+        if pending.map(|p| p.purpose) == Some(RequestPurpose::CheckUsername) && !current_check {
+            return;
         }
         match pending.map(|p| p.purpose) {
             // A5: profile-edit failures surface in the
@@ -34,12 +39,17 @@ impl Session {
                 | RequestPurpose::ReorderActiveUsernames
                 | RequestPurpose::ToggleUsernameIsActive
                 | RequestPurpose::SetProfilePhoto
-                | RequestPurpose::DeleteProfilePhoto
-                | RequestPurpose::SetProfileAccentColor
+                | RequestPurpose::DeleteProfilePhoto,
+            ) => {
+                self.users_state.profile_edit_error =
+                    Some(format!("Profile update failed: {}", error_reason(err)));
+            }
+            Some(
+                RequestPurpose::SetProfileAccentColor
                 | RequestPurpose::SetAccentColor
                 | RequestPurpose::SetUpgradedGiftColors,
             ) => {
-                self.users_state.profile_edit_error =
+                self.users_state.peer_color_error =
                     Some(format!("Profile update failed: {}", error_reason(err)));
             }
             Some(RequestPurpose::GetUserFullInfo) => {
@@ -53,6 +63,13 @@ impl Session {
                     self.users_state
                         .user_full_infos
                         .fail(user, error_reason(err));
+                }
+            }
+            // One filter's count failed: drop the chat's entry so the next
+            // open asks for all of them again, not a zero for good.
+            Some(RequestPurpose::Users(UsersPurpose::GetChatMessageCount { .. })) => {
+                if let Some(chat_id) = pending.and_then(|p| p.chat_id) {
+                    self.media.chat_media_counts.remove(&chat_id.0);
                 }
             }
             Some(RequestPurpose::GetProfilePhotoEmojiIcons) => {
@@ -101,27 +118,29 @@ impl Session {
                 | RequestPurpose::SetUserNote
                 | RequestPurpose::SetUserPersonalPhoto,
             ) => {
-                self.chats_state.chat_action_error =
-                    Some(format!("could not save the change (error {})", err.code));
+                self.chats_state
+                    .chat_action_error
+                    .push(format!("could not save the change (error {})", err.code));
             }
             Some(RequestPurpose::ReportChatPhoto) => {
-                self.chats_state.chat_action_error =
-                    Some(format!("could not send the report (error {})", err.code));
+                self.chats_state
+                    .chat_action_error
+                    .push(format!("could not send the report (error {})", err.code));
             }
             Some(RequestPurpose::SharePhoneNumber) => {
-                self.chats_state.chat_action_error = Some(format!(
+                self.chats_state.chat_action_error.push(format!(
                     "could not share your phone number (error {})",
                     err.code
                 ));
             }
             Some(RequestPurpose::Users(UsersPurpose::SetMessageSenderBlockList { .. })) => {
-                self.chats_state.chat_action_error = Some(format!(
+                self.chats_state.chat_action_error.push(format!(
                     "could not change the block state (error {})",
                     err.code
                 ));
             }
             Some(RequestPurpose::BlockSenderFromReplies) => {
-                self.chats_state.chat_action_error = Some(
+                self.chats_state.chat_action_error.push(
                     crate::lang::tr(crate::lang::keys::Q_CHAT_COULDNT_BLOCK_THE_SENDER_TRY_AGAIN)
                         .to_string(),
                 );
