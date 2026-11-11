@@ -81,10 +81,6 @@ impl QuillApp {
             self.set_note(StatusNote::error(err));
             progressed = true;
         }
-        // The same for a color change after the box closed.
-        if self.dialogs.peer_color_dialog.is_none() && self.take_peer_color_error() {
-            progressed = true;
-        }
         // Message widgets: their bots' answers and public data polls.
         let answers = self
             .live
@@ -355,6 +351,7 @@ impl QuillApp {
             | self.drive_folder_invite(cx)
             | self.drain_folder_limit(cx)
             | self.drain_chat_look(cx)
+            | self.drain_peer_color(cx)
             | self.drain_wallpaper_preview(cx)
             | self.drain_chat_appearance(cx)
             | self.drain_earn(cx)

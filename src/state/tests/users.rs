@@ -381,6 +381,7 @@ fn failed_color_requests_surface_the_error_and_icons_flag() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
     let extra = session.request(RequestPurpose::SetAccentColor, None);
+    session.acks.expect(extra);
     apply_json(
         &mut session,
         &seq,
@@ -390,7 +391,10 @@ fn failed_color_requests_surface_the_error_and_icons_flag() {
             extra.0
         ),
     );
-    assert!(session.users_state.peer_color_error.is_some());
+    assert!(
+        matches!(session.acks.take(extra), Some(crate::state::Answer::Failed(_))),
+        "the box that sent it gets its own refusal"
+    );
     assert!(
         session.users_state.profile_edit_error.is_none(),
         "a color failure is not a profile-edit failure"

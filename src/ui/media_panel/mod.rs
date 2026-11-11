@@ -348,6 +348,8 @@ impl QuillApp {
             return false;
         }
         self.set_media_panel_mode(PanelMode::Closed);
+        // A GIF search waiting on typing is for a panel that is gone.
+        self.pickers.gif_debounce.cancel();
         self.pickers.media_panel.hovered = None;
         self.sync_gif_downloads();
         cx.notify();
@@ -360,6 +362,7 @@ impl QuillApp {
             self.pickers.media_panel.category = None;
             self.pickers.media_panel.key = None;
             self.pickers.media_panel.active_section = 0;
+            self.pickers.gif_debounce.cancel();
             // GIFs download and play only while their tab shows.
             self.sync_gif_downloads();
         }

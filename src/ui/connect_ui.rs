@@ -271,7 +271,7 @@ impl super::app::QuillApp {
         match result {
             Ok(mut live) => {
                 quill::startup_trace::mark("client_open");
-                live.driver.set_stream_volume(self.players.volume);
+                live.driver.set_stream_volume(self.players.volume());
                 self.disk.seed(&mut live.driver);
                 self.put_on_screen(live);
             }

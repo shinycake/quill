@@ -35,14 +35,6 @@ impl Session {
                 self.users_state.profile_edit_error =
                     Some(format!("Profile update failed: {}", error_reason(err)));
             }
-            Some(
-                RequestPurpose::SetProfileAccentColor
-                | RequestPurpose::SetAccentColor
-                | RequestPurpose::SetUpgradedGiftColors,
-            ) => {
-                self.users_state.peer_color_error =
-                    Some(format!("Profile update failed: {}", error_reason(err)));
-            }
             Some(RequestPurpose::GetUserFullInfo) => {
                 let user = pending.and_then(|p| {
                     p.user_id.or_else(|| {

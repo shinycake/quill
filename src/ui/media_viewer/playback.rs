@@ -253,7 +253,7 @@ impl QuillApp {
             return;
         }
         if let Some(slider) = self.viewer.controls.volume.as_ref() {
-            let value = (self.players.volume * 100.0).round();
+            let value = (self.players.volume() * 100.0).round();
             let changed = slider.read(cx).value() != SliderValue::Single(value);
             if changed {
                 slider.update(cx, |state, cx| {
@@ -421,24 +421,25 @@ impl QuillApp {
     /// MED1: mute toggle — 0 volume remembers the previous level and
     /// restores it on unmute; the sound restarts at the new volume.
     pub(in crate::ui) fn toggle_playback_mute(&mut self, cx: &mut Context<Self>) {
-        if self.players.volume > 0.01 {
-            self.players.unmuted_volume = self.players.volume;
-            self.set_playback_volume(0.0, cx);
-        } else {
-            let restore = self.players.unmuted_volume.max(0.01);
-            self.set_playback_volume(restore, cx);
-        }
+        self.players.volume = self.players.volume.toggled();
+        self.apply_playback_volume(cx);
     }
 
     /// MED1: set playback volume 0.0–1.0 and restart any active player so
     /// the sound picks up the new volume.
     pub(in crate::ui) fn set_playback_volume(&mut self, volume: f32, cx: &mut Context<Self>) {
-        self.players.volume = volume.clamp(0.0, 1.0);
-        self.players.audio.set_volume(self.players.volume);
+        self.players.volume = self.players.volume.set(volume);
+        self.apply_playback_volume(cx);
+    }
+
+    /// Push the volume in `players` to the engine, the stream and every
+    /// window's clip player.
+    fn apply_playback_volume(&mut self, cx: &mut Context<Self>) {
+        self.players.audio.set_volume(self.players.volume());
         if let Some(live) = self.live.as_mut() {
-            live.driver.set_stream_volume(self.players.volume);
+            live.driver.set_stream_volume(self.players.volume());
         }
-        let volume = self.players.volume;
+        let volume = self.players.volume();
         self.in_every_window(cx, |app, _| {
             if let Some(player) = app.viewer.clip.player().filter(|_| !app.viewer_loops()) {
                 player.set_volume(volume);

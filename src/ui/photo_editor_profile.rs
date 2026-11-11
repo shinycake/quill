@@ -21,7 +21,7 @@ use gpui_kit::*;
 use image::RgbaImage;
 use quill::lang::{keys, tr};
 use quill::profile_photo_sources::ChatPhotoInput;
-use std::cell::RefCell;
+use std::cell::Cell;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
@@ -325,6 +325,11 @@ impl QuillApp {
                 Some((saved, preview_of(&square)))
             },
             move |this, done, cx| {
+                // The box that asked may have closed while the square
+                // rendered: its photo is not set on whatever opened since.
+                if this.photo_target() != Some(target) {
+                    return;
+                }
                 let Some((saved, preview)) = done else {
                     this.photo_target_note(
                         target,
@@ -361,7 +366,7 @@ impl QuillApp {
                 this.close_photo_editor(cx);
             });
         let body = app.update(cx, |this, cx| this.photo_editor_overlay_body(cx));
-        let body = Rc::new(RefCell::new(body));
+        let body = Rc::new(Cell::new(body));
         dialog
             .overlay(true)
             .close_button(false)
@@ -374,7 +379,6 @@ impl QuillApp {
                 let margin = cx.theme().spacing_tokens().lg;
                 let height = (window.viewport_size().height - margin * 2.).max(px(320.));
                 let body = body
-                    .borrow_mut()
                     .take()
                     .unwrap_or_else(|| div().into_any_element());
                 content.child(div().relative().h(height).w_full().child(body))

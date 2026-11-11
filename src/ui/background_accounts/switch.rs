@@ -92,7 +92,7 @@ impl QuillApp {
         // So is the interface language: the pack it made in the background
         // is not installed over the one shown.
         let _ = live.driver.adopt_saved_language();
-        live.driver.set_stream_volume(self.players.volume);
+        live.driver.set_stream_volume(self.players.volume());
         live.bridge.wake_with(&quill::wake::UPDATES);
         self.put_on_screen(live);
         self.reload_account_keybindings(cx);

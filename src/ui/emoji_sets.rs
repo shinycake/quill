@@ -38,7 +38,7 @@ impl QuillApp {
         // The box opens on Installed with an empty field, as its list does:
         // a search typed in an earlier visit does not stay in the field
         // (and a search still waiting on its pause does not fire).
-        self.pickers.emoji_set_keystroke = self.pickers.emoji_set_keystroke.wrapping_add(1);
+        self.pickers.emoji_set_debounce.cancel();
         self.pickers
             .emoji_set_search_input
             .update(cx, |input, cx| input.set_value("", window, cx));
@@ -57,7 +57,7 @@ impl QuillApp {
     }
     pub(super) fn close_emoji_sets(&mut self, cx: &mut Context<Self>) {
         // A search still waiting on its pause is for a box that is gone.
-        self.pickers.emoji_set_keystroke = self.pickers.emoji_set_keystroke.wrapping_add(1);
+        self.pickers.emoji_set_debounce.cancel();
         if let Some(live) = self.live.as_mut() {
             live.driver.session.stickers.emoji.open = false;
         } else if let Some(session) = self.demo_session.as_mut() {
@@ -71,7 +71,7 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.pickers.emoji_set_keystroke = self.pickers.emoji_set_keystroke.wrapping_add(1);
+        self.pickers.emoji_set_debounce.cancel();
         self.pickers.emoji_set_return_tab = tab;
         self.pickers
             .emoji_set_search_input
@@ -96,9 +96,7 @@ impl QuillApp {
     /// The search field changed: once typing pauses, the packs matching it
     /// replace the list; clearing the field brings the last tab back.
     pub(super) fn emoji_sets_search_typed(&mut self, cx: &mut Context<Self>) {
-        self.pickers.emoji_set_keystroke = self.pickers.emoji_set_keystroke.wrapping_add(1);
-        let keystroke = self.pickers.emoji_set_keystroke;
-        let query = self
+                let query = self
             .pickers
             .emoji_set_search_input
             .read(cx)
@@ -115,16 +113,16 @@ impl QuillApp {
             }
             return;
         }
-        self.spawn_scoped(cx, async move |this, cx| {
+        let timer = self.spawn_scoped(cx, async move |this, cx| {
             cx.background_executor().timer(SEARCH_DELAY).await;
             this.update(cx, |this, cx| {
-                if this.pickers.emoji_set_keystroke == keystroke {
+                if let Some(query) = this.pickers.emoji_set_debounce.fire() {
                     this.search_emoji_sets_for(&query, cx);
                 }
             })
             .ok();
-        })
-        .detach();
+        });
+        self.pickers.emoji_set_debounce.arm(query, timer);
     }
     fn search_emoji_sets_for(&mut self, query: &str, cx: &mut Context<Self>) {
         self.pickers

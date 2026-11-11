@@ -133,8 +133,6 @@ impl QuillApp {
     /// The search field changed: an empty field shows the saved GIFs at
     /// once, text searches once typing pauses.
     pub(super) fn gif_search_typed(&mut self, cx: &mut Context<Self>) {
-        self.pickers.gif_keystroke = self.pickers.gif_keystroke.wrapping_add(1);
-        let keystroke = self.pickers.gif_keystroke;
         let query = self
             .pickers
             .gif_search_input
@@ -146,16 +144,16 @@ impl QuillApp {
             self.choose_gif_section(GifSection::Saved, cx);
             return;
         }
-        self.spawn_scoped(cx, async move |this, cx| {
+        let timer = self.spawn_scoped(cx, async move |this, cx| {
             cx.background_executor().timer(SEARCH_DELAY).await;
             this.update(cx, |this, cx| {
-                if this.pickers.gif_keystroke == keystroke {
+                if let Some(query) = this.pickers.gif_debounce.fire() {
                     this.search_gifs_for(&query, cx);
                 }
             })
             .ok();
-        })
-        .detach();
+        });
+        self.pickers.gif_debounce.arm(query, timer);
     }
 
     fn search_gifs_for(&mut self, query: &str, cx: &mut Context<Self>) {
@@ -209,7 +207,7 @@ impl QuillApp {
     /// search) and the section's GIFs show from the top.
     pub(super) fn choose_gif_section(&mut self, section: GifSection, cx: &mut Context<Self>) {
         // Typing that was waiting no longer searches.
-        self.pickers.gif_keystroke = self.pickers.gif_keystroke.wrapping_add(1);
+        self.pickers.gif_debounce.cancel();
         self.pickers.gif_scroll.set_offset(point(px(0.), px(0.)));
         self.request_gifs(GifWanted::of_section(&section), cx);
     }

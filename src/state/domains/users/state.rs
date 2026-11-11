@@ -175,10 +175,6 @@ pub struct UsersState {
     /// `setProfilePhoto`/`deleteProfilePhoto`), shown in the
     /// edit-profile dialog. Cleared when the dialog opens.
     pub profile_edit_error: Option<String>,
-    /// The last "Your color" request that failed (`setAccentColor`,
-    /// `setProfileAccentColor`, `setUpgradedGiftColors`). Only the color
-    /// box reads it, so a username or photo failure never shows there.
-    pub peer_color_error: Option<String>,
     /// `getDefaultBackgroundCustomEmojiStickers` answer: the custom emoji
     /// the color editor offers as reply and profile icons.
     pub background_emoji_icons: crate::state::fetch::Fetch<Vec<StickerItem>>,
@@ -351,7 +347,6 @@ impl UsersState {
             username_check: ProfileUsernameCheck::Idle,
             bio_length_max: 70,
             profile_edit_error: None,
-            peer_color_error: None,
             background_emoji_icons: Default::default(),
             profile_photo_emoji_icons: Default::default(),
             chat_photo_emoji_icons: Default::default(),
