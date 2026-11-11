@@ -386,24 +386,16 @@ impl<S: JsonSender> ConnectDriver<S> {
         let Some(withdraw) = self.session.payments.earn.withdraw.as_mut() else {
             return Err(ConnectSendError::InvalidRequest);
         };
-        if password.is_empty()
-            || matches!(withdraw.step, WithdrawStep::Password { sending: true, .. })
-        {
+        if password.is_empty() || matches!(withdraw.step, WithdrawStep::SendingPassword) {
             return Ok(());
         }
-        withdraw.step = WithdrawStep::Password {
-            sending: true,
-            error: None,
-        };
+        withdraw.step = WithdrawStep::SendingPassword;
         let target = withdraw.target;
         let result = self.send_withdrawal(target, password);
         if result.is_err()
             && let Some(withdraw) = self.session.payments.earn.withdraw.as_mut()
         {
-            withdraw.step = WithdrawStep::Password {
-                sending: false,
-                error: None,
-            };
+            withdraw.step = WithdrawStep::Password { error: None };
         }
         result
     }
@@ -457,7 +449,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .and_then(|info| info.as_ref()?.affiliate_program);
         let earn = &mut self.session.payments.earn;
         earn.setup = Some(SetupPage::new(bot_user_id, program));
-        earn.setup_closed = false;
+        earn.effects.retain(|effect| *effect != EarnEffect::CloseSetup);
         let _ = self.ensure_earn_app_config();
         Ok(())
     }
@@ -518,7 +510,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if let Ok(extra) = result
             && let Some(setup) = self.session.payments.earn.setup.as_mut()
         {
-            setup.saving = Some(*extra);
+            setup.saving = BoxSend::Sending(*extra);
         }
     }
 

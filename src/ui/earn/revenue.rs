@@ -105,8 +105,7 @@ fn open_learn(cx: &mut Context<QuillApp>) -> impl Fn(&mut Window, &mut App) + 's
     let owner = cx.entity().downgrade();
     move |_, cx| {
         let _ = owner.update(cx, |this, cx| {
-            this.earn.learn = true;
-            this.open_box(crate::ui::shell::DialogKind::EarnLearn);
+            this.open_earn_box(crate::ui::earn_state::EarnBox::Learn { diamonds: 0 });
             cx.notify();
         });
     }
@@ -512,8 +511,7 @@ impl QuillApp {
                     ))
                     .tab_index(0)
                     .on_click(cx.listener(move |this, _, _, cx| {
-                        this.earn.ton_tx = Some(row_tx.clone());
-                        this.open_box(crate::ui::shell::DialogKind::EarnTonTx);
+                        this.open_earn_box(crate::ui::earn_state::EarnBox::TonTx(row_tx.clone()));
                         cx.notify();
                     }))
                     .child(
@@ -572,8 +570,7 @@ impl QuillApp {
                 ("earn-star-tx", ix + filter as usize * 100_000),
                 tx,
                 move |this, cx| {
-                    this.earn.star_tx = Some(row_tx.clone());
-                    this.open_box(crate::ui::shell::DialogKind::EarnStarTx);
+                    this.open_earn_box(crate::ui::earn_state::EarnBox::StarTx(row_tx.clone()));
                     cx.notify();
                 },
                 cx,
@@ -771,12 +768,13 @@ impl QuillApp {
             .child(Switch::new(("earn-ads-off", 1u64)).checked(off).small())
             .on_click(cx.listener(move |this, _, _, cx| {
                 if locked && !off {
-                    this.earn.ask_boost = Some(crate::ui::earn_state::AskBoost {
-                        chat_id,
-                        level: required.unwrap_or(0),
-                        reason: crate::ui::earn_state::AskBoostReason::Cpm,
-                    });
-                    this.open_box(crate::ui::shell::DialogKind::EarnAskBoost);
+                    this.open_earn_box(crate::ui::earn_state::EarnBox::AskBoost(
+                        crate::ui::earn_state::AskBoost {
+                            chat_id,
+                            level: required.unwrap_or(0),
+                            reason: crate::ui::earn_state::AskBoostReason::Cpm,
+                        },
+                    ));
                     if let Some(live) = this.live.as_mut() {
                         let _ = live
                             .driver

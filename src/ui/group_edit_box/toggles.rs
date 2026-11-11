@@ -7,7 +7,7 @@
 
 use super::manage::{divider_text, management_toggle_row, value_row};
 use crate::ui::app::QuillApp;
-use crate::ui::earn_state::{AskBoost, AskBoostReason};
+use crate::ui::earn_state::{AskBoost, AskBoostReason, EarnBox};
 use gpui_kit::assets::IconName as I;
 use gpui_kit::*;
 use quill::connect::ConnectSendError;
@@ -103,12 +103,11 @@ impl QuillApp {
                 }
             }
             AutoTranslateClick::AskBoost(level) => {
-                self.earn.ask_boost = Some(AskBoost {
+                self.open_earn_box(EarnBox::AskBoost(AskBoost {
                     chat_id: chat_id.0,
                     level,
                     reason: AskBoostReason::Autotranslate,
-                });
-                self.open_box(crate::ui::shell::DialogKind::EarnAskBoost);
+                }));
                 if let Some(live) = self.live.as_mut() {
                     let _ = live.driver.fetch_chat_boost_link(chat_id);
                 }

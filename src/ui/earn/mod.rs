@@ -335,18 +335,22 @@ impl QuillApp {
         else {
             return false;
         };
-        let notes = std::mem::take(&mut earn.notes);
-        let url = earn.open_url.take();
-        let closed = std::mem::replace(&mut earn.setup_closed, false);
-        let progressed = !notes.is_empty() || url.is_some() || closed;
-        // Every note toasts, one after another through the toast queue.
-        for note in notes {
-            self.set_note(StatusNote::info(note));
-        }
-        // The revenue and affiliate pages are the main window's
-        // (`earn_frame_upkeep`): a Telegram link from them opens there.
-        if let Some(url) = url {
-            self.as_asked_by(None, |this| this.open_link(&url, cx));
+        let effects = std::mem::take(&mut earn.effects);
+        let progressed = !effects.is_empty();
+        let mut closed = false;
+        for effect in effects {
+            match effect {
+                // Every note toasts, one after another through the toast
+                // queue.
+                quill::earn::EarnEffect::Note(note) => self.set_note(StatusNote::info(note)),
+                // The revenue and affiliate pages are the main window's
+                // (`earn_frame_upkeep`): a Telegram link from them opens
+                // there.
+                quill::earn::EarnEffect::OpenUrl(url) => {
+                    self.as_asked_by(None, |this| this.open_link(&url, cx));
+                }
+                quill::earn::EarnEffect::CloseSetup => closed = true,
+            }
         }
         if closed
             && matches!(
@@ -381,12 +385,6 @@ impl QuillApp {
         }
         self.join_upkeep();
         self.earn_balances_upkeep();
-        let link_open = self.earn_state().is_some_and(|e| e.link_box.is_some());
-        match (link_open, self.earn.link_shown) {
-            (true, None) => self.earn.link_shown = Some(std::time::Instant::now()),
-            (false, Some(_)) => self.earn.link_shown = None,
-            _ => {}
-        }
     }
 
     /// The content of an earn page under the layer's top bar: the page,

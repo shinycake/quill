@@ -188,7 +188,7 @@ impl Session {
                     && !program.url.is_empty()
                     && !program.is_disconnected
                 {
-                    earn.link_box = Some(LinkBox { program, recipient });
+                    earn.link_box = Some(LinkBox::new(program, recipient));
                     earn.drop_parked_join();
                 } else {
                     self.open_join_box_after_resolve(bot_user_id, recipient, choose_recipient);
@@ -214,7 +214,7 @@ impl Session {
                     }
                 }
                 if asked || earn.join_box.is_none() {
-                    earn.link_box = Some(LinkBox { program, recipient });
+                    earn.link_box = Some(LinkBox::new(program, recipient));
                 }
             }
             (EarnPayload::Connected(program), Some(EarnPurpose::Disconnect)) => {
@@ -300,7 +300,7 @@ impl Session {
                 if earn.withdraw.as_ref().is_some_and(|w| w.waits_for(id)) {
                     earn.withdraw = None;
                     if !url.is_empty() {
-                        earn.open_url = Some(url);
+                        earn.effects.push(EarnEffect::OpenUrl(url));
                     }
                 }
                 true
@@ -334,7 +334,7 @@ impl Session {
         // either way.
         if ours {
             earn.setup = None;
-            earn.setup_closed = true;
+            earn.effects.push(EarnEffect::CloseSetup);
         }
         earn.note(if end {
             "Affiliate program ended. Participating affiliates have been notified. All referral links will be disabled in 24 hours."
@@ -494,7 +494,7 @@ impl Session {
                             &[("reason", &reason)],
                         ));
                         // tdesktop toasts the error too.
-                        earn.notes.push(reason.clone());
+                        earn.note(reason.clone());
                     }
                 }
             }
@@ -508,7 +508,7 @@ impl Session {
                         &[("reason", &reason)],
                     ));
                     // tdesktop toasts the error too.
-                    earn.notes.push(reason.clone());
+                    earn.note(reason.clone());
                 }
             }
             EarnPurpose::TonTransactions { peer, .. } => {
@@ -536,7 +536,7 @@ impl Session {
                 if let Some(setup) = earn.setup.as_mut()
                     && setup.waits_for(request)
                 {
-                    setup.saving = None;
+                    setup.saving = BoxSend::Idle;
                 }
                 // tdesktop `UpdateProgram`: "Failed: " and the error.
                 earn.note(format!("Failed: {reason}"));
@@ -613,23 +613,16 @@ impl Session {
             }
             Some(EarnErrorHint::PasswordInvalid) if with_password => {
                 withdraw.step = WithdrawStep::Password {
-                    sending: false,
                     error: Some("Wrong cloud password".into()),
                 };
             }
             _ if !with_password => {
                 // Any other answer to the password-less try opens the
                 // password box (tdesktop `processOut`).
-                withdraw.step = WithdrawStep::Password {
-                    sending: false,
-                    error: None,
-                };
+                withdraw.step = WithdrawStep::Password { error: None };
             }
             _ => {
-                withdraw.step = WithdrawStep::Password {
-                    sending: false,
-                    error: None,
-                };
+                withdraw.step = WithdrawStep::Password { error: None };
                 // tdesktop toasts the error as it is.
                 earn.note(reason);
             }

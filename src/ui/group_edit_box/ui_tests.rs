@@ -278,7 +278,7 @@ fn locked_auto_translate_asks_for_boosts(cx: &mut TestAppContext) {
     let (choice, ask) = app.read_with(vcx, |app, _| {
         (
             app.group_edit_box().and_then(|edit| edit.auto_translate),
-            app.earn.ask_boost,
+            app.earn.ask_boost(),
         )
     });
     assert_eq!(choice, None);

@@ -199,7 +199,7 @@ impl QuillApp {
                 .and_then(|e| e.join.as_ref())
                 .map(|j| j.peer);
             if let (Some(recipient), Some(earn)) = (recipient, self.earn_mut()) {
-                earn.link_box = Some(LinkBox { program, recipient });
+                earn.link_box = Some(LinkBox::new(program, recipient));
             }
             cx.notify();
             return;

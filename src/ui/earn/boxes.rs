@@ -5,7 +5,7 @@
 use super::revenue::ton_amount;
 use super::*;
 use crate::ui::chat_theme::{danger, success};
-use crate::ui::earn_state::AskBoostReason;
+use crate::ui::earn_state::{AskBoostReason, EarnBox};
 use crate::ui::os_open::open_link_in;
 use crate::ui::shell::{DialogKind, QuillShell};
 use crate::ui::status_note::StatusNote;
@@ -45,7 +45,7 @@ fn diamonds_toast(count: u32) -> String {
 
 impl QuillApp {
     fn close_earn_learn(&mut self, cx: &mut Context<Self>) {
-        self.earn.learn = false;
+        self.earn.close_box_if(|b| matches!(b, EarnBox::Learn { .. }));
         cx.notify();
     }
 
@@ -134,12 +134,16 @@ impl QuillApp {
                                 .debug_selector(|| "earn-learn-diamond".into())
                                 .cursor_pointer()
                                 .on_click(cx.listener(|this, _, _, cx| {
-                                    if this.earn.diamonds < 100 {
-                                        this.earn.diamonds += 1;
+                                    let mut count = 0;
+                                    if let Some(EarnBox::Learn { diamonds }) =
+                                        this.earn.open_box.as_mut()
+                                    {
+                                        if *diamonds < 100 {
+                                            *diamonds += 1;
+                                        }
+                                        count = *diamonds;
                                     }
-                                    this.set_note(StatusNote::info(diamonds_toast(
-                                        this.screen.earn.diamonds,
-                                    )));
+                                    this.set_note(StatusNote::info(diamonds_toast(count)));
                                     cx.notify();
                                 }))
                                 .child(ton_icon(20., primary)),
@@ -176,8 +180,8 @@ impl QuillApp {
     }
 
     fn close_earn_tx(&mut self, cx: &mut Context<Self>) {
-        self.earn.ton_tx = None;
-        self.earn.star_tx = None;
+        self.earn
+            .close_box_if(|b| matches!(b, EarnBox::TonTx(_) | EarnBox::StarTx(_)));
         cx.notify();
     }
 
@@ -193,7 +197,7 @@ impl QuillApp {
                 this.close_earn_tx(cx);
             });
         app.update(cx, |this, cx| {
-            let (Some(tx), Some(session)) = (this.earn.ton_tx.clone(), this.session()) else {
+            let (Some(tx), Some(session)) = (this.earn.ton_tx().cloned(), this.session()) else {
                 return dialog.on_close(on_close);
             };
             let incoming = tx.is_incoming();
@@ -263,7 +267,7 @@ impl QuillApp {
                 this.close_earn_tx(cx);
             });
         app.update(cx, |this, cx| {
-            let (Some(tx), Some(session)) = (this.earn.star_tx.clone(), this.session()) else {
+            let (Some(tx), Some(session)) = (this.earn.star_tx().cloned(), this.session()) else {
                 return dialog.on_close(on_close);
             };
             let body = crate::ui::premium_ui::star_tx_facts(session, &tx, cx);
@@ -286,7 +290,8 @@ impl QuillApp {
     }
 
     fn close_earn_ask_boost(&mut self, cx: &mut Context<Self>) {
-        self.earn.ask_boost = None;
+        self.earn
+            .close_box_if(|b| matches!(b, EarnBox::AskBoost(_)));
         cx.notify();
     }
 
@@ -303,7 +308,7 @@ impl QuillApp {
                 this.close_earn_ask_boost(cx);
             });
         app.update(cx, |this, cx| {
-            let (Some(ask), Some(session)) = (this.earn.ask_boost, this.session()) else {
+            let (Some(ask), Some(session)) = (this.earn.ask_boost(), this.session()) else {
                 return dialog.on_close(on_close);
             };
             let (chat_id, level) = (ask.chat_id, ask.level);
@@ -388,26 +393,26 @@ impl QuillApp {
 
 crate::ui::shell::register_dialogs! {
     /// The Monetization page's "Learn more" box.
-    EarnLearn => DialogSpec::new(7610, |app| app.earn.learn, QuillApp::build_earn_learn_dialog)
+    EarnLearn => DialogSpec::new(7610, |app| app.earn.learn_open(), QuillApp::build_earn_learn_dialog)
     .close(|app, _, cx| app.close_earn_learn(cx)),
     /// A TON transaction's details.
     EarnTonTx => DialogSpec::new(
         7611,
-        |app| app.earn.ton_tx.is_some(),
+        |app| app.earn.ton_tx().is_some(),
         QuillApp::build_earn_ton_tx_dialog,
     )
     .close(|app, _, cx| app.close_earn_tx(cx)),
     /// A Stars transaction's receipt from a revenue page.
     EarnStarTx => DialogSpec::new(
         7613,
-        |app| app.earn.star_tx.is_some(),
+        |app| app.earn.star_tx().is_some(),
         QuillApp::build_earn_star_tx_dialog,
     )
     .close(|app, _, cx| app.close_earn_tx(cx)),
     /// The boost box of a locked "Switch Off Ads".
     EarnAskBoost => DialogSpec::new(
         7614,
-        |app| app.earn.ask_boost.is_some(),
+        |app| app.earn.ask_boost().is_some(),
         QuillApp::build_earn_ask_boost_dialog,
     )
     .close(|app, _, cx| app.close_earn_ask_boost(cx)),

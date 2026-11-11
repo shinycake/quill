@@ -232,12 +232,13 @@ fn withdrawal_asks_without_password_then_with_it() {
     let withdraw = p.0.session.payments.earn.withdraw.clone().unwrap();
     assert_eq!(
         withdraw.step,
-        WithdrawStep::Password {
-            sending: false,
-            error: None
-        }
+        WithdrawStep::Password { error: None }
     );
     p.0.submit_withdrawal_password("hunter2").unwrap();
+    assert_eq!(
+        p.0.session.payments.earn.withdraw.clone().unwrap().step,
+        WithdrawStep::SendingPassword
+    );
     assert_eq!(
         sent_request(&p.1, "getStarWithdrawalUrl")["password"],
         "hunter2"
@@ -256,7 +257,7 @@ fn withdrawal_asks_without_password_then_with_it() {
     );
     let earn = &p.0.session.payments.earn;
     assert!(earn.withdraw.is_none());
-    assert_eq!(earn.open_url.as_deref(), Some("https://fragment.com/w"));
+    assert_eq!(earn.open_url(), Some("https://fragment.com/w"));
 }
 
 /// An answer to a withdrawal the user cancelled opens nothing, and it
@@ -280,7 +281,7 @@ fn a_cancelled_withdrawals_answer_opens_nothing() {
         json!({"@type": "httpUrl", "url": "https://fragment.com/w", "@extra": cancelled}),
     );
     let earn = &p.0.session.payments.earn;
-    assert_eq!(earn.open_url, None, "Fragment does not open after Cancel");
+    assert_eq!(earn.open_url(), None, "Fragment does not open after Cancel");
     assert_eq!(
         earn.withdraw.as_ref().map(|w| &w.step),
         Some(&WithdrawStep::Checking),
@@ -330,10 +331,7 @@ fn withdrawal_errors_follow_tdesktop() {
     error(&mut p, "getChatRevenueWithdrawalUrl", "AMOUNT_TOO_SMALL");
     let earn = &p.0.session.payments.earn;
     assert!(earn.withdraw.is_none());
-    assert_eq!(
-        earn.notes,
-        vec!["The amount is too small to withdraw.".to_string()]
-    );
+    assert_eq!(earn.notes(), vec!["The amount is too small to withdraw."]);
     // No Stars, no request.
     assert!(
         p.0.start_withdrawal(WithdrawTarget::Stars {
@@ -433,8 +431,8 @@ fn setup_starts_updates_and_ends_a_program() {
     answer(&mut p, "setChatAffiliateProgram", json!({"@type": "ok"}));
     let earn = &p.0.session.payments.earn;
     assert!(earn.setup.is_none());
-    assert!(earn.setup_closed);
-    assert!(earn.notes[0].starts_with("Affiliate program started."));
+    assert!(earn.setup_closed());
+    assert!(earn.notes()[0].starts_with("Affiliate program started."));
 
     p.0.open_starref_setup(BOT).unwrap();
     p.0.end_starref_program().unwrap();
@@ -443,7 +441,7 @@ fn setup_starts_updates_and_ends_a_program() {
     error(&mut p, "setChatAffiliateProgram", "STARREF_HASH_REVOKED");
     let earn = &p.0.session.payments.earn;
     assert!(!earn.setup.as_ref().unwrap().is_saving());
-    assert!(earn.notes[1].starts_with("Failed: "));
+    assert!(earn.notes()[1].starts_with("Failed: "));
 }
 
 /// Save, go back, open the setup page again: the first save's late answer
@@ -457,7 +455,7 @@ fn a_reopened_setup_page_stays_open_for_an_earlier_save() {
     p.0.open_starref_setup(BOT).unwrap();
     answer(&mut p, "setChatAffiliateProgram", json!({"@type": "ok"}));
     let earn = &p.0.session.payments.earn;
-    assert!(earn.setup.is_some() && !earn.setup_closed);
+    assert!(earn.setup.is_some() && !earn.setup_closed());
 
     p.0.end_starref_program().unwrap();
     p.0.session.payments.earn.setup = None;
@@ -540,7 +538,7 @@ fn join_page_lists_sorts_and_joins_for_a_channel() {
     assert!(join.mine.programs.is_empty());
     assert_eq!(join.found.programs[0].bot_user_id, BOT);
     assert_eq!(
-        earn.notes.last().unwrap(),
+        *earn.notes().last().unwrap(),
         "Link removed. It will no longer work."
     );
 }
@@ -656,7 +654,7 @@ fn a_closed_join_boxs_answer_leaves_the_box_open_now_alone() {
             "the open box is still the second program's, idle"
         );
         assert!(earn.link_box.is_none());
-        assert!(earn.notes.is_empty(), "a closed box does not toast");
+        assert!(earn.notes().is_empty(), "a closed box does not toast");
     }
 }
 

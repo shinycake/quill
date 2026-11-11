@@ -308,11 +308,11 @@ pub enum WithdrawTarget {
 pub enum WithdrawStep {
     /// The first request, without a password, is out.
     Checking,
-    /// tdesktop's password box: "Two-step verification".
-    Password {
-        sending: bool,
-        error: Option<String>,
-    },
+    /// tdesktop's password box: "Two-step verification", asking for the
+    /// password (`error` is why the last one was refused).
+    Password { error: Option<String> },
+    /// The password went out: its answer, or a Cancel, ends this.
+    SendingPassword,
     /// tdesktop `TransferPasswordError`: no password (`later` false) or a
     /// password or session that is too fresh (`later` true).
     SecurityCheck { later: bool },
@@ -345,7 +345,7 @@ pub struct SetupPage {
     pub params: ProgramParams,
     pub confirm: Option<SetupConfirm>,
     /// The save or end this page waits for; only its answer closes it.
-    pub(crate) saving: Option<crate::ids::RequestId>,
+    pub(crate) saving: BoxSend,
 }
 
 impl SetupPage {
@@ -355,18 +355,18 @@ impl SetupPage {
             program,
             params: setup_start(program),
             confirm: None,
-            saving: None,
+            saving: BoxSend::Idle,
         }
     }
 
     /// A save or end is in flight.
     pub fn is_saving(&self) -> bool {
-        self.saving.is_some()
+        self.saving.is_sending()
     }
 
     /// `request` is the save this page waits for.
     pub(crate) fn waits_for(&self, request: Option<crate::ids::RequestId>) -> bool {
-        self.saving.is_some() && self.saving == request
+        self.saving.waits_for(request)
     }
 
     /// A running program (Update instead of Start, End shown, sliders
@@ -506,6 +506,19 @@ impl Resolve {
 pub struct LinkBox {
     pub program: ConnectedProgram,
     pub recipient: EarnPeer,
+    /// When the answer landed: the link icon plays once from here
+    /// (tdesktop's `starref_link` animation).
+    pub opened: std::time::Instant,
+}
+
+impl LinkBox {
+    pub fn new(program: ConnectedProgram, recipient: EarnPeer) -> Self {
+        Self {
+            program,
+            recipient,
+            opened: std::time::Instant::now(),
+        }
+    }
 }
 
 /// The "Revoke Link" confirmation of a joined program.
@@ -549,6 +562,18 @@ impl Recipients {
     }
 }
 
+/// Something the UI does once for the earn state, in the order it came.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum EarnEffect {
+    /// A toast.
+    Note(String),
+    /// A URL to open in the browser (a Fragment withdrawal page).
+    OpenUrl(String),
+    /// The setup page saved or ended the program: go back from it
+    /// (tdesktop `showBackFromStack`).
+    CloseSetup,
+}
+
 /// Everything the revenue and affiliate screens keep.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct EarnState {
@@ -576,19 +601,38 @@ pub struct EarnState {
     /// Who may receive commissions: the user, owned public channels the
     /// user can post in, and owned bots (tdesktop `ResolveRecipients`).
     pub recipients: Recipients,
-    /// Set when the setup page saved or ended the program: the UI goes
-    /// back from it (tdesktop `showBackFromStack`).
-    pub setup_closed: bool,
-    /// One-shot notices the UI shows as toasts.
-    pub notes: Vec<String>,
-    /// A URL the UI opens in the browser (a Fragment withdrawal page).
-    pub open_url: Option<String>,
+    /// What the UI does next, in order; it drains the queue every poll.
+    pub effects: Vec<EarnEffect>,
     /// `getStarRevenueStatistics` for the user worked: the Stars dialog
     /// shows "View Statistics" (tdesktop `Credits::statsEnabled`).
     pub self_stats: Option<bool>,
 }
 
 impl EarnState {
+    /// The toasts waiting, oldest first.
+    pub fn notes(&self) -> Vec<&str> {
+        self.effects
+            .iter()
+            .filter_map(|effect| match effect {
+                EarnEffect::Note(text) => Some(text.as_str()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// The URL waiting to open, the latest one.
+    pub fn open_url(&self) -> Option<&str> {
+        self.effects.iter().rev().find_map(|effect| match effect {
+            EarnEffect::OpenUrl(url) => Some(url.as_str()),
+            _ => None,
+        })
+    }
+
+    /// The setup page is to be left.
+    pub fn setup_closed(&self) -> bool {
+        self.effects.contains(&EarnEffect::CloseSetup)
+    }
+
     /// Show `join` now, or park it in the recipients' wait when the user
     /// picks the recipient and the lists are still on their way.
     pub fn open_join_box(&mut self, join: JoinBox) {
@@ -645,7 +689,7 @@ impl EarnState {
     }
 
     pub fn note(&mut self, text: impl Into<String>) {
-        self.notes.push(text.into());
+        self.effects.push(EarnEffect::Note(text.into()));
     }
 
     /// The Stars balance of `peer`, when known.

@@ -344,7 +344,8 @@ impl QuillApp {
     pub(in crate::ui) fn close_group_edit_box(&mut self, cx: &mut Context<Self>) {
         self.close_group_title_emoji(cx);
         self.admin.group_edit_box = None;
-        self.earn.ask_boost = None;
+        self.earn
+            .close_box_if(|b| matches!(b, crate::ui::earn_state::EarnBox::AskBoost(_)));
         cx.notify();
     }
 
