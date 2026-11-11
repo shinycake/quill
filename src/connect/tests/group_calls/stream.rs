@@ -494,7 +494,7 @@ fn call_invalid_marks_the_stream_ended() {
         .active_group_call
         .as_ref()
         .expect("call");
-    assert!(!call.transport_ready);
+    assert!(!call.transport.is_ready());
     assert!(call.join_failed(), "the call shows its failure and a retry");
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -629,12 +629,12 @@ fn a_refused_stream_connect_is_a_join_error_not_a_crash() {
         .active_group_call
         .as_ref()
         .expect("call");
-    assert!(!call.transport_ready);
-    assert!(call.transport_error.is_some());
+    assert!(!call.transport.is_ready());
+    assert!(call.transport.error().is_some());
     assert_ne!(call.stream, StreamState::Live);
     // The spent answer is not tried again by the next update: the engine
     // would accept it now, and the call must still be failed.
-    assert!(call.join_payload.is_empty());
+    assert!(call.transport.payload().is_none());
     driver
         .pump_group_call_transport([Some(555), None])
         .expect("pump");
@@ -644,8 +644,8 @@ fn a_refused_stream_connect_is_a_join_error_not_a_crash() {
         .active_group_call
         .as_ref()
         .expect("call");
-    assert!(!call.transport_ready, "no retry from an update");
-    assert!(call.transport_error.is_some());
+    assert!(!call.transport.is_ready(), "no retry from an update");
+    assert!(call.transport.error().is_some());
     let _ = std::fs::remove_dir_all(&dir);
 }
 

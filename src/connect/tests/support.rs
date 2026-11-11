@@ -398,7 +398,11 @@ pub(crate) fn tracked_group_call(
         is_video_chat: false,
         is_live_story: false,
         is_joined: true,
-        need_rejoin,
+        rejoin: if need_rejoin {
+            crate::state::GroupCallRejoin::Wanted { attempts: 0 }
+        } else {
+            crate::state::GroupCallRejoin::Idle
+        },
         can_be_managed,
         is_owned,
         is_muted_self: true,

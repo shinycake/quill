@@ -561,13 +561,11 @@ impl<S: JsonSender> ConnectDriver<S> {
             // until TDLib's `updateGroupCall` says otherwise.
             self.teardown_group_call_transport(group_call_id);
             if let Some(call) = self.session.calls.group_call_mut(group_call_id) {
-                call.transport_ready = false;
-                call.join_payload.clear();
                 // The call is gone for good (`GROUPCALL_INVALID`), so no
                 // rejoin is started; the failed join is what the UI shows
                 // (its Join button is the manual retry).
-                call.transport_error =
-                    Some(crate::lang::tr(crate::lang::keys::Q_OPS_THE_CALL_HAS_ENDED).to_string());
+                call.transport
+                    .handshake_failed(crate::lang::tr(crate::lang::keys::Q_OPS_THE_CALL_HAS_ENDED));
             }
         }
         if outcome == ReplyOutcome::Rejoin

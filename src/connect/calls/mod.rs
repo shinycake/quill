@@ -437,12 +437,14 @@ impl<S: JsonSender> ConnectDriver<S> {
         active_call_before: Option<i32>,
         bridge_signaling: Option<(i32, Vec<u8>)>,
     ) -> Result<(), ConnectSendError> {
-        let active_call_after = self
-            .session
-            .calls
-            .active_call
-            .as_ref()
-            .map(|call| (call.id, call.user_id, call.is_outgoing, call.ready.clone()));
+        let active_call_after = self.session.calls.active_call.as_ref().map(|call| {
+            (
+                call.id,
+                call.user_id,
+                call.is_outgoing,
+                call.ready_params().cloned(),
+            )
+        });
         let tracked_call_id = active_call_after
             .as_ref()
             .map(|(call_id, _, _, _)| *call_id);

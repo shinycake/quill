@@ -142,7 +142,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         // A join starts over: a transport error left by the last time in
         // the call is not this join's failure.
         if let Some(call) = self.session.calls.active_group_call.as_mut() {
-            call.transport_error = None;
+            call.transport.clear_error();
         }
         self.decline_ringing_invite(None);
         Ok(self.start_group_join(group_call_id))
@@ -481,11 +481,8 @@ impl<S: JsonSender> ConnectDriver<S> {
             // handshake again — reset the transport gate, the stale
             // answer, and the stale screen-share state so the pump
             // doesn't drop the new `joinVideoChat` answer.
-            call.transport_ready = false;
-            call.join_payload.clear();
-            call.screen_sharing = false;
-            call.screen_share_pending = false;
-            call.screen_share_answer.clear();
+            call.transport.reset();
+            call.screen_share.end();
         }
         match conference.flatten() {
             Some(input) => {

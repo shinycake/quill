@@ -28,10 +28,10 @@ fn a_busy_camera_at_join_still_connects_with_audio_and_reports_the_camera() {
 
     // The call is up (the microphone follows `transport_ready`) ...
     let call = driver.session.calls.group_call(555).expect("tracked");
-    assert!(call.transport_ready);
+    assert!(call.transport.is_ready());
     // ... and the camera's failure is what the window shows.
     assert_eq!(
-        call.transport_error.as_deref(),
+        call.transport.error(),
         Some(
             crate::calls::engine::EngineError::NoCamera
                 .to_string()
@@ -48,8 +48,8 @@ fn a_busy_camera_at_join_still_connects_with_audio_and_reports_the_camera() {
         vec![(555, Some("cam-1".to_string()))]
     );
     let call = driver.session.calls.group_call(555).expect("tracked");
-    assert!(call.transport_ready);
-    assert_eq!(call.transport_error, None);
+    assert!(call.transport.is_ready());
+    assert_eq!(call.transport.error(), None);
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -58,9 +58,9 @@ fn a_failed_join_offers_rejoin_but_a_failed_camera_does_not() {
     let mut call = crate::state::ActiveGroupCall::fresh(555);
     assert!(!call.offers_rejoin());
     // The join failed: nothing connected, an error stands.
-    call.transport_error = Some("join failed".into());
+    call.transport.set_error("join failed");
     assert!(call.offers_rejoin());
     // Connected with audio and a camera error: no Rejoin.
-    call.transport_ready = true;
+    call.transport.connected();
     assert!(!call.offers_rejoin());
 }

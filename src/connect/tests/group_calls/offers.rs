@@ -125,7 +125,7 @@ fn a_failed_payload_sends_no_join_and_the_button_starts_over() {
     let extra = driver.join_video_chat(555).expect("the press is taken");
     assert_eq!(sent_count(&recorder, "joinVideoChat"), 0);
     assert!(driver.session.requests.get(extra).is_none());
-    assert!(tracked(&driver).transport_error.is_some());
+    assert!(tracked(&driver).transport.error().is_some());
     assert!(handle.group_leaves().contains(&555));
 
     driver.join_video_chat(555).expect("join again");
@@ -163,7 +163,7 @@ fn a_rejoin_waits_without_touching_the_missing_instance() {
         r#"{"@type":"updateConnectionState","state":{"@type":"connectionStateReady"}}"#,
     );
     assert_eq!(handle.group_video_syncs().len(), syncs);
-    assert_eq!(tracked(&driver).transport_error, None);
+    assert_eq!(tracked(&driver).transport.error(), None);
     assert!(matches!(
         tracked(&driver).rejoin,
         crate::state::GroupCallRejoin::InFlight { attempt: 1, .. }
@@ -216,11 +216,11 @@ fn stopping_a_share_during_the_wait_sends_neither_start_nor_end() {
     let start = driver
         .toggle_group_call_screen_share()
         .expect("start sharing");
-    assert!(tracked(&driver).screen_share_pending);
+    assert!(tracked(&driver).screen_share.is_pending());
     driver
         .toggle_group_call_screen_share()
         .expect("changed my mind");
-    assert!(!tracked(&driver).screen_share_pending);
+    assert!(!tracked(&driver).screen_share.is_pending());
     assert!(driver.session.requests.get(start).is_none());
     land(&mut driver, &handle);
     assert_eq!(sent_count(&recorder, "startGroupCallScreenSharing"), 0);
@@ -263,7 +263,7 @@ fn an_unwanted_share_offer_clears_the_pending_share() {
     driver
         .toggle_group_call_screen_share()
         .expect("start sharing");
-    assert!(tracked(&driver).screen_share_pending);
+    assert!(tracked(&driver).screen_share.is_pending());
     // The call stopped being joined while the payload was made.
     driver
         .session
@@ -274,7 +274,7 @@ fn an_unwanted_share_offer_clears_the_pending_share() {
         .is_joined = false;
     land(&mut driver, &handle);
     assert_eq!(sent_count(&recorder, "startGroupCallScreenSharing"), 0);
-    assert!(!tracked(&driver).screen_share_pending);
+    assert!(!tracked(&driver).screen_share.is_pending());
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -288,9 +288,9 @@ fn a_failed_share_payload_clears_the_pending_share() {
         .expect("the press is taken");
     assert_eq!(sent_count(&recorder, "startGroupCallScreenSharing"), 0);
     let call = tracked(&driver);
-    assert!(!call.screen_share_pending);
-    assert!(call.screen_share_error.is_some());
-    assert_eq!(call.transport_error, None, "the call itself still works");
+    assert!(!call.screen_share.is_pending());
+    assert!(call.screen_share.error().is_some());
+    assert_eq!(call.transport.error(), None, "the call itself still works");
     assert!(!handle.presentation_active(555));
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -307,12 +307,12 @@ fn a_new_join_drops_the_last_transport_error() {
         .expect("the press is taken");
     if let Some(call) = driver.session.calls.active_group_call.as_mut() {
         call.is_joined = false;
-        call.transport_error = Some("set_muted failed".into());
+        call.transport.set_error("set_muted failed");
     }
     driver.join_video_chat(555).expect("join again");
     let call = tracked(&driver);
-    assert_eq!(call.transport_error, None);
-    assert!(call.screen_share_error.is_some());
+    assert_eq!(call.transport.error(), None);
+    assert!(call.screen_share.error().is_some());
     let _ = std::fs::remove_dir_all(&dir);
 }
 

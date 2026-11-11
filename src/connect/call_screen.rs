@@ -364,7 +364,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             return (call.screen_sharing && up).then_some(CaptureTarget::Private(call.id));
         }
         let call = self.session.calls.active_group_call.as_ref()?;
-        (call.is_joined && call.screen_sharing).then_some(CaptureTarget::Group(call.id))
+        (call.is_joined && call.screen_share.is_live()).then_some(CaptureTarget::Group(call.id))
     }
 
     /// Start, follow and stop the shared screen. Called from the driver
@@ -461,7 +461,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         let Some(target) = wanted else {
             self.call_screen.engine_wait = EngineWait::Idle;
             if let Some(call) = self.session.calls.active_group_call.as_mut() {
-                call.screen_share_paused = false;
+                call.screen_share.set_paused(false);
             }
             return;
         };
@@ -546,8 +546,8 @@ impl<S: JsonSender> ConnectDriver<S> {
         else {
             return;
         };
-        let was = call.screen_share_paused;
-        call.screen_share_paused = paused;
+        let was = call.screen_share.is_paused();
+        call.screen_share.set_paused(paused);
         // A fresh share starts unpaused on the server: only edges go out.
         if !changed && was == paused {
             return;
@@ -586,12 +586,12 @@ impl<S: JsonSender> ConnectDriver<S> {
             .calls
             .active_group_call
             .as_ref()
-            .is_some_and(|call| call.screen_sharing || call.screen_share_pending);
+            .is_some_and(|call| call.screen_share.is_active());
         if sharing {
             let _ = self.toggle_group_call_screen_share();
         }
         if let Some(call) = self.session.calls.active_group_call.as_mut() {
-            call.screen_share_paused = false;
+            call.screen_share.set_paused(false);
         }
     }
 

@@ -445,7 +445,6 @@ fn active_call(is_outgoing: bool, state: CallState) -> ActiveCall {
         is_video: false,
         state,
         started_at: Instant::now(),
-        ready_at: None,
         ready: None,
         transport: Default::default(),
         signaling_queue: Vec::new(),

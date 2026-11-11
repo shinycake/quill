@@ -704,7 +704,6 @@ impl QuillApp {
                         is_received: true,
                     },
                     started_at: Instant::now(),
-                    ready_at: None,
                     ready: None,
                     transport: Default::default(),
                     signaling_queue: Vec::new(),

@@ -256,7 +256,6 @@ fn creating_while_a_one_to_one_call_hangs_up_is_allowed() {
         is_video: false,
         state: CallState::Ready,
         started_at: std::time::Instant::now(),
-        ready_at: None,
         ready: None,
         transport: Default::default(),
         signaling_queue: Vec::new(),

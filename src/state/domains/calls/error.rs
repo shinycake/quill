@@ -209,7 +209,7 @@ impl Session {
                         "Could not join the voice chat",
                     ));
                 } else {
-                    call.transport_error = Some(call_request_error_line(
+                    call.transport.set_error(call_request_error_line(
                         err,
                         "Could not join the live story",
                     ));
@@ -229,9 +229,7 @@ impl Session {
                 if let Some(tracked) = self.calls.active_group_call.as_mut()
                     && tracked.id == group_call_id
                 {
-                    tracked.screen_share_pending = false;
-                    tracked.screen_sharing = false;
-                    tracked.screen_share_answer.clear();
+                    tracked.screen_share.end();
                 }
                 self.calls.group_call_error = Some(call_request_error_line(
                     err,
@@ -244,9 +242,7 @@ impl Session {
                 if let Some(tracked) = self.calls.active_group_call.as_mut()
                     && tracked.id == group_call_id
                 {
-                    tracked.screen_share_pending = false;
-                    tracked.screen_sharing = false;
-                    tracked.screen_share_answer.clear();
+                    tracked.screen_share.end();
                 }
                 self.calls.group_call_error = Some(call_request_error_line(
                     err,
@@ -262,9 +258,9 @@ impl Session {
             })) => {
                 if let Some(tracked) = self.calls.active_group_call.as_mut()
                     && tracked.id == group_call_id
-                    && tracked.screen_share_paused == paused
+                    && tracked.screen_share.is_paused() == paused
                 {
-                    tracked.screen_share_paused = !paused;
+                    tracked.screen_share.set_paused(!paused);
                 }
             }
             Some(

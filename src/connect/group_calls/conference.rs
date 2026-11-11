@@ -75,8 +75,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             Some(call)
                 if matches!(call.state, CallState::Ready)
                     && call
-                        .ready
-                        .as_ref()
+                        .ready_params()
                         .is_some_and(|ready| ready.is_group_call_supported) =>
             {
                 ConferenceUpgrade {

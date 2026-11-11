@@ -41,7 +41,7 @@ fn group_join_answer_connects_native_transport() {
             .calls
             .active_group_call
             .as_ref()
-            .is_some_and(|call| call.transport_ready)
+            .is_some_and(|call| call.transport.is_ready())
     );
     // A second pump (no new answer) must not reconnect.
     ingest_call_json(
@@ -79,7 +79,7 @@ fn group_rejoin_answer_reconnects_native_transport() {
             .calls
             .active_group_call
             .as_ref()
-            .is_some_and(|call| call.transport_ready)
+            .is_some_and(|call| call.transport.is_ready())
     );
     assert_eq!(handle.group_connects().len(), 1);
     // A live presentation plus tracked screen-share state: the
@@ -92,14 +92,7 @@ fn group_rejoin_answer_reconnects_native_transport() {
         .active_group_call
         .as_mut()
         .expect("tracked call")
-        .screen_sharing = true;
-    driver
-        .session
-        .calls
-        .active_group_call
-        .as_mut()
-        .expect("tracked call")
-        .screen_share_answer = "old-answer".into();
+        .screen_share = crate::state::ScreenShare::Answered("old-answer".into());
     // `need_rejoin` auto-rejoins with a fresh offer and a reset
     // handshake gate.
     ingest_call_json(&mut driver, &seq, &sink, need_rejoin);
@@ -111,10 +104,10 @@ fn group_rejoin_answer_reconnects_native_transport() {
         .active_group_call
         .as_ref()
         .expect("tracked call");
-    assert!(!call.transport_ready);
-    assert!(call.join_payload.is_empty());
-    assert!(!call.screen_sharing && !call.screen_share_pending);
-    assert!(call.screen_share_answer.is_empty());
+    assert!(!call.transport.is_ready());
+    assert!(call.transport.payload().is_none());
+    assert!(!call.screen_share.is_live() && !call.screen_share.is_pending());
+    assert!(call.screen_share.answer().is_none());
     // The new answer reconnects the fresh native context.
     let extra = sent_request(&recorder, "joinVideoChat")["@extra"]
         .as_str()
@@ -133,7 +126,7 @@ fn group_rejoin_answer_reconnects_native_transport() {
             .calls
             .active_group_call
             .as_ref()
-            .is_some_and(|call| call.transport_ready)
+            .is_some_and(|call| call.transport.is_ready())
     );
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -389,7 +382,7 @@ fn group_screen_share_toggle_handshake() {
             .calls
             .active_group_call
             .as_ref()
-            .is_some_and(|call| call.transport_ready)
+            .is_some_and(|call| call.transport.is_ready())
     );
     // TDLib confirms the join via `updateGroupCall is_joined`; the
     // toggle gates on it.
@@ -413,7 +406,7 @@ fn group_screen_share_toggle_handshake() {
             .calls
             .active_group_call
             .as_ref()
-            .is_some_and(|call| call.screen_share_pending && !call.screen_sharing)
+            .is_some_and(|call| call.screen_share.is_pending() && !call.screen_share.is_live())
     );
     ingest_call_json(
         &mut driver,
@@ -434,7 +427,7 @@ fn group_screen_share_toggle_handshake() {
             .calls
             .active_group_call
             .as_ref()
-            .is_some_and(|call| call.screen_sharing && !call.screen_share_pending)
+            .is_some_and(|call| call.screen_share.is_live() && !call.screen_share.is_pending())
     );
     driver
         .toggle_group_call_screen_share()
@@ -448,7 +441,7 @@ fn group_screen_share_toggle_handshake() {
             .calls
             .active_group_call
             .as_ref()
-            .is_some_and(|call| !call.screen_sharing && !call.screen_share_pending)
+            .is_some_and(|call| !call.screen_share.is_live() && !call.screen_share.is_pending())
     );
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -501,8 +494,8 @@ fn a_presentation_that_cannot_connect_is_ended_on_telegram() {
         .active_group_call
         .as_ref()
         .expect("call");
-    assert!(!call.screen_sharing && !call.screen_share_pending);
-    assert!(call.screen_share_error.is_some());
+    assert!(!call.screen_share.is_live() && !call.screen_share.is_pending());
+    assert!(call.screen_share.error().is_some());
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -541,9 +534,7 @@ fn group_screen_share_failure_stops_native_presentation() {
     // Simulate the reducer's error arm: flags cleared, error
     // surfaced, native presentation untouched.
     if let Some(call) = driver.session.calls.active_group_call.as_mut() {
-        call.screen_share_pending = false;
-        call.screen_sharing = false;
-        call.screen_share_answer.clear();
+        call.screen_share.end();
     }
     ingest_call_json(
         &mut driver,
@@ -576,7 +567,7 @@ fn group_screen_share_rejected_without_screen_source() {
             .calls
             .active_group_call
             .as_ref()
-            .is_some_and(|call| call.screen_share_pending || call.screen_sharing)
+            .is_some_and(|call| call.screen_share.is_pending() || call.screen_share.is_live())
     );
     assert!(
         recorder
@@ -734,7 +725,7 @@ fn transport_error(driver: &ConnectDriver<Arc<RecordingSender>>) -> Option<Strin
         .calls
         .active_group_call
         .as_ref()
-        .and_then(|call| call.transport_error.clone())
+        .and_then(|call| call.transport.error().map(str::to_string))
 }
 
 /// Muting fails closed: when the engine refuses, the flag still says
@@ -758,7 +749,7 @@ fn group_call_mute_failure_fails_closed_and_the_pump_retries() {
     let first = transport_error(&driver);
     assert!(first.is_some(), "the retry failure is surfaced");
     if let Some(call) = driver.session.calls.active_group_call.as_mut() {
-        call.transport_error = Some("kept".into());
+        call.transport.set_error("kept");
     }
     ingest_call_json(&mut driver, &seq, &sink, &me);
     assert_eq!(transport_error(&driver).as_deref(), Some("kept"));

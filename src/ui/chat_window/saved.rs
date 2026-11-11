@@ -294,7 +294,7 @@ mod tests {
     use super::{Restore, split_ready, to_restore, windows_to_save};
     use gpui_kit::{point, px, size};
     use quill::ids::ChatId;
-    use quill::settings::{ChatWindowsState, SavedChatWindow};
+    use quill::settings::{ChatWindowsState, RestoreAnswer, SavedChatWindow};
 
     fn saved(chat_id: i64) -> SavedChatWindow {
         SavedChatWindow {

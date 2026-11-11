@@ -90,8 +90,8 @@ fn sent_of(driver: &ConnectDriver<Arc<RecordingSender>>, kind: &str) -> Vec<Valu
 
 fn sharing_group_call() -> ActiveGroupCall {
     let mut call = tracked_group_call(false, false, false);
-    call.transport_ready = true;
-    call.screen_sharing = true;
+    call.transport.connected();
+    call.screen_share.connected();
     let json: Value =
         serde_json::from_str(&group_participant_json(777, true, "null", "null")).unwrap();
     let me = parse_group_call_participant(json.get("participant")).unwrap();
@@ -159,7 +159,8 @@ fn the_chosen_window_feeds_the_group_presentation() {
         .active_group_call
         .as_mut()
         .unwrap()
-        .screen_sharing = false;
+        .screen_share
+        .end();
     pump_until_screen_answers(&mut driver);
     until(|| screens.stopped.load(Ordering::SeqCst));
     assert_eq!(driver.call_screen().target(), None);
@@ -189,7 +190,8 @@ fn a_hidden_window_pauses_once_per_edge() {
             .active_group_call
             .as_ref()
             .unwrap()
-            .screen_share_paused
+            .screen_share
+            .is_paused()
     );
     // Frames while paused are dropped, not sent.
     sink.push(frame(3));
@@ -241,7 +243,7 @@ fn a_refused_pause_edge_puts_the_tile_back_without_a_box_error() {
         .ingest(copy_and_parse(&json, &seq, &sink).unwrap())
         .unwrap();
     let call = driver.session.calls.active_group_call.as_ref().unwrap();
-    assert!(!call.screen_share_paused);
+    assert!(!call.screen_share.is_paused());
     assert_eq!(driver.session.calls.group_call_error, None);
     std::fs::remove_dir_all(dir).ok();
 }
@@ -260,7 +262,7 @@ fn a_closed_window_ends_the_share() {
     until(|| screens.stopped.load(Ordering::SeqCst));
     assert_eq!(sent_of(&driver, "endGroupCallScreenSharing").len(), 1);
     let call = driver.session.calls.active_group_call.as_ref().unwrap();
-    assert!(!call.screen_sharing && !call.screen_share_paused);
+    assert!(!call.screen_share.is_live() && !call.screen_share.is_paused());
     assert!(driver.call_screen().chosen().is_none());
     std::fs::remove_dir_all(dir).ok();
 }
@@ -281,7 +283,7 @@ fn a_refused_capture_ends_the_share_with_its_error() {
 fn starting_needs_a_chosen_source_but_stopping_does_not() {
     let (dir, mut driver, _engine, _screens) = group_driver();
     let mut call = sharing_group_call();
-    call.screen_sharing = false;
+    call.screen_share.end();
     call.is_joined = true;
     driver.session.calls.active_group_call = Some(call);
     assert!(!driver.group_call_screen_source_available());
@@ -486,7 +488,8 @@ fn shared_system_audio_reaches_the_microphone_while_the_share_runs() {
         .active_group_call
         .as_mut()
         .unwrap()
-        .screen_sharing = false;
+        .screen_share
+        .end();
     pump_until_screen_answers(&mut driver);
     until(|| loopbacks.stopped.load(Ordering::SeqCst));
     assert!(mic_mix(&controls).is_none());

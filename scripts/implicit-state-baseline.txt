@@ -1,8 +1,6 @@
 # Implicit-state debt (scripts/check-implicit-state.py). Only remove lines.
 ActiveGroupCall::join_as_requested
 ActiveGroupCall::loaded_all_participants
-ActiveGroupCall::loaded_all_participants+transport_error
-ActiveGroupCall::screen_share_pending
 AppearancePrefs::ignore_battery_saving
 Assembly::started
 AudioEngine::failed
@@ -82,7 +80,6 @@ InviteLinkMembersState::loading+error
 InvoiceWatch::failed
 InvoiceWatch::pending
 InvoiceWatch::sending
-JoinedLines::started
 LanguageLinkLookup::loading
 LanguageLinkLookup::loading+error
 Latest::wake_pending
