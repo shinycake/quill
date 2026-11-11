@@ -255,7 +255,6 @@ impl Session {
                     // tdesktop `AddContactBox::save`: a user id means the
                     // phone is on Telegram (open the chat), 0 means not.
                     self.users_state.contacts = Default::default();
-                    self.users_state.contacts.clear_error();
                     // A box closed before its answer opens nothing.
                     let Some(id) = pending.map(|p| p.id) else {
                         return;
@@ -273,7 +272,6 @@ impl Session {
                     };
                 } else if pending.map(|p| p.purpose) == Some(RequestPurpose::ImportContacts) {
                     self.users_state.contacts = Default::default();
-                    self.users_state.contacts.clear_error();
                     self.users_state.contacts_notice = Some("Contacts imported.".to_string());
                 }
             }

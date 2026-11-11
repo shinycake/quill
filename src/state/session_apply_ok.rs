@@ -792,7 +792,6 @@ impl Session {
             // (`is_contact` flips); invalidate the list so the
             // contacts tab refetches it.
             self.users_state.contacts = Default::default();
-            self.users_state.contacts.clear_error();
         }
         // Slice A6: a contacts mutation landed — never optimistic:
         // the new list arrives via the `getContacts` refetch the
@@ -800,7 +799,6 @@ impl Session {
         match pending.map(|p| p.purpose) {
             Some(RequestPurpose::RemoveContact) => {
                 self.users_state.contacts = Default::default();
-                self.users_state.contacts.clear_error();
                 // The delete-synced-contacts batch remove shares
                 // this purpose but carries no user_id — its notice
                 // must not read as a single delete (or overwrite
@@ -835,12 +833,10 @@ impl Session {
             }
             Some(RequestPurpose::ImportContacts) => {
                 self.users_state.contacts = Default::default();
-                self.users_state.contacts.clear_error();
                 self.users_state.contacts_notice = Some("Contacts imported.".to_string());
             }
             Some(RequestPurpose::ClearImportedContacts) => {
                 self.users_state.contacts = Default::default();
-                self.users_state.contacts.clear_error();
                 self.users_state.contacts_notice =
                     Some("Synced contacts deleted from the servers.".to_string());
             }

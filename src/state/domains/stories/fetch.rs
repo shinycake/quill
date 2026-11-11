@@ -25,8 +25,9 @@ pub(super) fn next_retry(
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StoryFetch {
     /// `getStory` was sent for a reply strip or a story card, so a refresh
-    /// does not send it again.
-    Asked,
+    /// does not send it again. `wait` is the wait of the failure this ask
+    /// follows, so the next failure doubles it.
+    Asked { wait: Option<Duration> },
     /// TDLib answered 400 or 404: the story is gone or not reachable.
     Gone,
     /// `getStory` failed with an error that may pass (a timeout,
@@ -44,14 +45,21 @@ impl StoryFetches {
         self.0.get(&story)
     }
 
-    /// `getStory` was sent for `story`. A wait left by an earlier failure
-    /// stays, so the next failure doubles it.
+    /// `getStory` was sent for `story`: it is asked now, and the wait of an
+    /// earlier failure rides along so the next failure doubles it. A story
+    /// known gone stays gone.
     pub fn asked(&mut self, story: (i64, i32)) {
-        self.0.entry(story).or_insert(StoryFetch::Asked);
+        let wait = match self.0.get(&story) {
+            Some(StoryFetch::Gone) => return,
+            Some(StoryFetch::Retry { wait, .. }) => Some(*wait),
+            Some(StoryFetch::Asked { wait }) => *wait,
+            None => None,
+        };
+        self.0.insert(story, StoryFetch::Asked { wait });
     }
 
     pub fn is_asked(&self, story: (i64, i32)) -> bool {
-        matches!(self.0.get(&story), Some(StoryFetch::Asked))
+        matches!(self.0.get(&story), Some(StoryFetch::Asked { .. }))
     }
 
     /// TDLib said the story is gone.
@@ -67,6 +75,7 @@ impl StoryFetches {
     pub fn failed(&mut self, story: (i64, i32), now: Instant) {
         let previous = match self.0.get(&story) {
             Some(StoryFetch::Retry { until, wait }) => Some((*until, *wait)),
+            Some(StoryFetch::Asked { wait: Some(wait) }) => Some((now, *wait)),
             _ => None,
         };
         let (until, wait) = next_retry(previous, now);
@@ -95,8 +104,12 @@ impl StoryFetches {
 
     /// Every wait ends (back online).
     pub fn forget_retries(&mut self) {
-        self.0
-            .retain(|_, fetch| !matches!(fetch, StoryFetch::Retry { .. }));
+        self.0.retain(|_, fetch| {
+            if let StoryFetch::Asked { wait } = fetch {
+                *wait = None;
+            }
+            !matches!(fetch, StoryFetch::Retry { .. })
+        });
     }
 
     /// The story arrived: whatever said it was gone or waiting is over.
@@ -113,7 +126,13 @@ impl StoryFetches {
     /// Gone stories and waits go (a new session of the list); stories asked
     /// for stay asked.
     pub fn forget_outcomes(&mut self) {
-        self.0.retain(|_, fetch| matches!(fetch, StoryFetch::Asked));
+        self.0.retain(|_, fetch| match fetch {
+            StoryFetch::Asked { wait } => {
+                *wait = None;
+                true
+            }
+            _ => false,
+        });
     }
 
     /// The wait of `story` is over now (a test lets time pass).
@@ -126,5 +145,35 @@ impl StoryFetches {
 
     pub fn is_empty(&self) -> bool {
         self.0.is_empty()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_story_asked_after_a_wait_is_asked_and_its_next_failure_doubles() {
+        let mut fetches = StoryFetches::default();
+        let story = (7, 3);
+        let now = Instant::now();
+        fetches.failed(story, now);
+        assert_eq!(
+            fetches.retry(story).map(|(_, wait)| wait),
+            Some(STORIES_RETRY_FIRST)
+        );
+        // The wait is over and the story is asked again: it is asked now.
+        fetches.asked(story);
+        assert!(fetches.is_asked(story));
+        assert!(fetches.retry(story).is_none());
+        fetches.failed(story, now);
+        assert_eq!(
+            fetches.retry(story).map(|(_, wait)| wait),
+            Some(STORIES_RETRY_FIRST * 2)
+        );
+        // A story known gone is not asked again by a late ask.
+        fetches.gone(story);
+        fetches.asked(story);
+        assert!(fetches.is_gone(story));
     }
 }
