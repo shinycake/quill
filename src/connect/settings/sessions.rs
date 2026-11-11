@@ -1,6 +1,6 @@
 //! Connect driver: device login, active sessions, account TTL, auto-delete and connected websites.
 use super::*;
-use crate::state::{DeviceLogin, ListEdit};
+use crate::state::DeviceLogin;
 
 impl<S: JsonSender> ConnectDriver<S> {
     /// Authorize only a validated scan after explicit user confirmation.
@@ -97,12 +97,12 @@ impl<S: JsonSender> ConnectDriver<S> {
             RequestPurpose::Settings(SettingsPurpose::TerminateSession { session_id }),
             None,
         );
-        self.session.settings.sessions_edit = ListEdit::InFlight;
+        self.session.settings.sessions_edit.begin_write();
         match self.sender.send_json(&terminate_session(extra, session_id)) {
             Ok(()) => Ok(extra),
             Err(err) => {
                 self.session.requests.take(extra);
-                self.session.settings.sessions_edit = ListEdit::Idle;
+                self.session.settings.sessions_edit.write_failed();
                 Err(err)
             }
         }
@@ -119,12 +119,12 @@ impl<S: JsonSender> ConnectDriver<S> {
         let extra = self
             .session
             .request(RequestPurpose::TerminateAllOtherSessions, None);
-        self.session.settings.sessions_edit = ListEdit::InFlight;
+        self.session.settings.sessions_edit.begin_write();
         match self.sender.send_json(&terminate_all_other_sessions(extra)) {
             Ok(()) => Ok(extra),
             Err(err) => {
                 self.session.requests.take(extra);
-                self.session.settings.sessions_edit = ListEdit::Idle;
+                self.session.settings.sessions_edit.write_failed();
                 Err(err)
             }
         }
@@ -325,12 +325,12 @@ impl<S: JsonSender> ConnectDriver<S> {
             }
         };
         self.session.settings.sessions.clear_error();
-        self.session.settings.sessions_edit = ListEdit::InFlight;
+        self.session.settings.sessions_edit.begin_write();
         match self.sender.send_json(&json) {
             Ok(()) => Ok(extra),
             Err(err) => {
                 self.session.requests.take(extra);
-                self.session.settings.sessions_edit = ListEdit::Idle;
+                self.session.settings.sessions_edit.write_failed();
                 Err(err)
             }
         }
@@ -404,7 +404,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             RequestPurpose::Settings(SettingsPurpose::DisconnectWebsite { website_id }),
             None,
         );
-        self.session.settings.websites_edit = ListEdit::InFlight;
+        self.session.settings.websites_edit.begin_write();
         match self
             .sender
             .send_json(&disconnect_website(extra, website_id))
@@ -412,7 +412,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             Ok(()) => Ok(extra),
             Err(err) => {
                 self.session.requests.take(extra);
-                self.session.settings.websites_edit = ListEdit::Idle;
+                self.session.settings.websites_edit.write_failed();
                 Err(err)
             }
         }
@@ -438,12 +438,12 @@ impl<S: JsonSender> ConnectDriver<S> {
         let extra = self
             .session
             .request(RequestPurpose::DisconnectAllWebsites, None);
-        self.session.settings.websites_edit = ListEdit::InFlight;
+        self.session.settings.websites_edit.begin_write();
         match self.sender.send_json(&disconnect_all_websites(extra)) {
             Ok(()) => Ok(extra),
             Err(err) => {
                 self.session.requests.take(extra);
-                self.session.settings.websites_edit = ListEdit::Idle;
+                self.session.settings.websites_edit.write_failed();
                 Err(err)
             }
         }

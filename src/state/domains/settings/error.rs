@@ -188,7 +188,7 @@ impl Session {
                 RequestPurpose::Settings(SettingsPurpose::TerminateSession { .. })
                 | RequestPurpose::TerminateAllOtherSessions,
             ) => {
-                self.settings.sessions_edit = ListEdit::Idle;
+                self.settings.sessions_edit.write_failed();
                 self.settings
                     .sessions
                     .fail(sessions_error_line("terminate the session", err));
@@ -200,7 +200,7 @@ impl Session {
                 RequestPurpose::Settings(SettingsPurpose::ToggleSessionSecretChats { .. })
                 | RequestPurpose::Settings(SettingsPurpose::ToggleSessionCalls { .. }),
             ) => {
-                self.settings.sessions_edit = ListEdit::Idle;
+                self.settings.sessions_edit.write_failed();
                 self.settings
                     .sessions
                     .fail(sessions_error_line("change the session setting", err));
@@ -262,7 +262,7 @@ impl Session {
                 RequestPurpose::Settings(SettingsPurpose::DisconnectWebsite { .. })
                 | RequestPurpose::DisconnectAllWebsites,
             ) => {
-                self.settings.websites_edit = ListEdit::Idle;
+                self.settings.websites_edit.write_failed();
                 self.settings
                     .connected_websites
                     .fail(sessions_error_line("disconnect the website", err));

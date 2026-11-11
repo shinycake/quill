@@ -239,7 +239,7 @@ fn terminate_session_ok_keeps_cache_and_marks_stale() {
         location: "Tel Aviv, Israel".into(),
         ..Default::default()
     }]);
-    session.settings.sessions_edit = crate::state::ListEdit::InFlight;
+    session.settings.sessions_edit = crate::state::ListEdit::InFlight { refetch: false };
     let extra = session.request(
         RequestPurpose::Settings(SettingsPurpose::TerminateSession { session_id: 22 }),
         None,
@@ -262,7 +262,7 @@ fn terminate_session_ok_keeps_cache_and_marks_stale() {
 fn terminate_session_error_surfaces_honestly() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
-    session.settings.sessions_edit = crate::state::ListEdit::InFlight;
+    session.settings.sessions_edit = crate::state::ListEdit::InFlight { refetch: false };
     let extra = session.request(
         RequestPurpose::Settings(SettingsPurpose::TerminateSession { session_id: 22 }),
         None,
@@ -281,6 +281,45 @@ fn terminate_session_error_surfaces_honestly() {
         session.settings.sessions.error(),
         Some("Could not terminate the session: Telegram refused the request")
     );
+}
+
+#[test]
+fn a_failed_write_keeps_the_refetch_that_went_stale_meanwhile() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    session.settings.sessions_edit.begin_write();
+    let extra = session.request(
+        RequestPurpose::Settings(SettingsPurpose::TerminateSession { session_id: 22 }),
+        None,
+    );
+    // Another device logs in while the write is out.
+    session.settings.sessions_edit.mark_stale();
+    assert!(session.settings.sessions_edit.in_flight());
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"error","@extra":"{}","code":400,"message":"SESSION_REVOKED"}}"#,
+            extra.0
+        ),
+    );
+    assert!(!session.settings.sessions_edit.in_flight());
+    assert!(session.settings.sessions_edit.needs_refetch());
+}
+
+#[test]
+fn a_failed_website_write_keeps_the_refetch_that_went_stale_meanwhile() {
+    let mut edit = crate::state::ListEdit::Idle;
+    edit.begin_write();
+    edit.mark_stale();
+    edit.write_failed();
+    assert!(edit.needs_refetch());
+    // With nothing stale, a failed write goes back to idle.
+    edit.refetched();
+    edit.begin_write();
+    edit.write_failed();
+    assert_eq!(edit, crate::state::ListEdit::Idle);
 }
 
 #[test]
@@ -504,7 +543,7 @@ fn disconnect_website_ok_keeps_cache_and_marks_stale() {
         ip_address: "9.9.9.9".into(),
         location: "Boston, United States".into(),
     }]);
-    session.settings.websites_edit = crate::state::ListEdit::InFlight;
+    session.settings.websites_edit = crate::state::ListEdit::InFlight { refetch: false };
     let extra = session.request(
         RequestPurpose::Settings(SettingsPurpose::DisconnectWebsite { website_id: 55 }),
         None,
@@ -527,7 +566,7 @@ fn disconnect_website_ok_keeps_cache_and_marks_stale() {
 fn disconnect_all_websites_error_surfaces_honestly() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
-    session.settings.websites_edit = crate::state::ListEdit::InFlight;
+    session.settings.websites_edit = crate::state::ListEdit::InFlight { refetch: false };
     let extra = session.request(RequestPurpose::DisconnectAllWebsites, None);
     apply_json(
         &mut session,
@@ -595,7 +634,7 @@ fn toggle_session_calls_ok_marks_sessions_stale() {
         location: "Tel Aviv, Israel".into(),
         ..Default::default()
     }]);
-    session.settings.sessions_edit = crate::state::ListEdit::InFlight;
+    session.settings.sessions_edit = crate::state::ListEdit::InFlight { refetch: false };
     let extra = session.request(
         RequestPurpose::Settings(SettingsPurpose::ToggleSessionCalls { session_id: 22 }),
         None,
@@ -619,7 +658,7 @@ fn toggle_session_calls_ok_marks_sessions_stale() {
 fn toggle_session_secret_chats_error_surfaces_honestly() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
-    session.settings.sessions_edit = crate::state::ListEdit::InFlight;
+    session.settings.sessions_edit = crate::state::ListEdit::InFlight { refetch: false };
     let extra = session.request(
         RequestPurpose::Settings(SettingsPurpose::ToggleSessionSecretChats { session_id: 22 }),
         None,

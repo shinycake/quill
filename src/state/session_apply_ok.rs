@@ -125,7 +125,7 @@ impl Session {
                     | RequestPurpose::TerminateAllOtherSessions
             )
         ) {
-            self.settings.sessions_edit = ListEdit::Refetch;
+            self.settings.sessions_edit.write_succeeded();
             self.settings.sessions.clear_error();
         }
         // Slice A4: a `toggleSessionCanAcceptSecretChats` /
@@ -139,7 +139,7 @@ impl Session {
                     | RequestPurpose::Settings(SettingsPurpose::ToggleSessionCalls { .. })
             )
         ) {
-            self.settings.sessions_edit = ListEdit::Refetch;
+            self.settings.sessions_edit.write_succeeded();
             self.settings.sessions.clear_error();
         }
         if let Some(RequestPurpose::Settings(SettingsPurpose::SetDefaultAutoDelete { seconds })) =
@@ -263,7 +263,7 @@ impl Session {
                     | RequestPurpose::DisconnectAllWebsites
             )
         ) {
-            self.settings.websites_edit = ListEdit::Refetch;
+            self.settings.websites_edit.write_succeeded();
             self.settings.connected_websites.clear_error();
         }
         // Slice `parity:bots-payment-recurring`: an

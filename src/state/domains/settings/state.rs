@@ -106,8 +106,10 @@ pub enum ListEdit {
     /// No write in flight and the list is current.
     #[default]
     Idle,
-    /// A write is in flight: its buttons stay disabled.
-    InFlight,
+    /// A write is in flight: its buttons stay disabled. `refetch` is set
+    /// when the list went stale before or while the write was out, so a
+    /// failed write still leaves the refetch owed.
+    InFlight { refetch: bool },
     /// A write succeeded: the cache stays visible and is refetched from
     /// the authoritative answer on the next ingest (never an optimistic
     /// change). Also set when an update says the list changed elsewhere.
@@ -116,12 +118,33 @@ pub enum ListEdit {
 
 impl ListEdit {
     pub fn in_flight(self) -> bool {
-        self == Self::InFlight
+        matches!(self, Self::InFlight { .. })
     }
 
     /// The list is out of date and should be asked for again.
     pub fn needs_refetch(self) -> bool {
         self == Self::Refetch
+    }
+
+    /// A write went out. A refetch owed before it stays owed.
+    pub fn begin_write(&mut self) {
+        *self = Self::InFlight {
+            refetch: matches!(self, Self::Refetch | Self::InFlight { refetch: true }),
+        };
+    }
+
+    /// The write succeeded: the list is refetched from the answer.
+    pub fn write_succeeded(&mut self) {
+        *self = Self::Refetch;
+    }
+
+    /// The write failed or never left: back to where the list stood, so a
+    /// refetch owed meanwhile is still asked for.
+    pub fn write_failed(&mut self) {
+        *self = match *self {
+            Self::InFlight { refetch: true } | Self::Refetch => Self::Refetch,
+            _ => Self::Idle,
+        };
     }
 
     /// The refetch answered or failed: the list is current again (or the
@@ -132,11 +155,13 @@ impl ListEdit {
         }
     }
 
-    /// Something changed elsewhere: ask again, unless a write is out (its
-    /// own answer ends in a refetch).
+    /// Something changed elsewhere: ask again. A write that is out keeps
+    /// the need, so its failure does not forget it.
     pub fn mark_stale(&mut self) {
-        if *self == Self::Idle {
-            *self = Self::Refetch;
+        match self {
+            Self::Idle => *self = Self::Refetch,
+            Self::InFlight { refetch } => *refetch = true,
+            Self::Refetch => {}
         }
     }
 }
