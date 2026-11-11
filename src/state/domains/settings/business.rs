@@ -23,6 +23,14 @@ pub struct BusinessSettingsState {
     pub own_info_error: Option<String>,
 }
 
+impl BusinessSettingsState {
+    /// The refusal the Business screens draw: the last refused save, else
+    /// why the time zones failed to load.
+    pub fn refusal(&self) -> Option<&str> {
+        self.error.as_deref().or_else(|| self.time_zones.error())
+    }
+}
+
 impl Session {
     pub(crate) fn apply_time_zones(&mut self, zones: Vec<TimeZone>) {
         self.settings.business.time_zones.succeed(zones);
@@ -84,9 +92,12 @@ impl Session {
         let state = &mut self.settings.business;
         match purpose {
             Some(RequestPurpose::Settings(SettingsPurpose::GetTimeZones)) => {
-                let line = format!("Couldn't load the time zones: {}", error_reason(err));
-                state.time_zones.fail(line.clone());
-                state.error = Some(line);
+                // The failure line lives in the fetch only; the screens read
+                // it from there ([`BusinessSettingsState::refusal`]).
+                state.time_zones.fail(format!(
+                    "Couldn't load the time zones: {}",
+                    error_reason(err)
+                ));
             }
             Some(RequestPurpose::Settings(SettingsPurpose::SaveBusinessSetting { kind })) => {
                 state.saving.retain(|k| *k != kind);

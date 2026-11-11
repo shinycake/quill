@@ -6850,20 +6850,53 @@ files, each rebuilt as one value per stage.
   when the refetch goes out, so a change that lands during the refetch is
   not lost (02-034, 05-219, 05-023 partly). Folder specs are `FolderSpecs`
   with `Fresh`, `Stale` and `Failed` per folder (02-021).
-- **Skipped or partly done.** 02-002: `CollectibleLookup` already is one
-  `LookupStage`. 05-222: `folder_invite_done` is gone. 02-018: the call
-  privacy asks are already per-setting `PrivacyAsk` matched to a request.
-  02-097: `ComposerDoc` is a value built whole and normalized, with no
-  stage. 02-033: links, bot and the chat-link save are `Fetch` and an enum;
-  `business.saving` is the set of saves in flight, and `error` also carries
-  local validation lines. 02-034: the own full info is read from the shared
-  cache and the request table. 02-021: `folder_remove_queue` is a work list
-  of intents; each folder's stage comes from the request table. 05-023:
-  the two "code sent to" patterns are independent steps; the `refetch`
-  mark is the driver's one-shot upkeep. 02-036: `call_sound_watch` is the
-  call-keyed watch. 05-219: the gift hub's `gift_mutating` and
-  `gifts_stale` (about seventy sites over many flows that clear it without
-  a request id) and the call-keyed `muted` flag are left.
+- **Review fixes.**
+  - Recent calls (02-003, 05-218, 02-017): a reopen of the tab or a scroll
+    is refused while a `Clearing` is out (`fetch_call_history` and the page
+    fetch return without touching the stage), so Clear all cannot be
+    offered again before its answer.
+  - Terms (02-077, 05-021): `TermsState::offer` keeps `Accepting` or
+    `Failed` when the pushed terms have the same id.
+  - Held send (08-160): `PendingSend::end_render` owns the release. A
+    render that lands hands the held Send out once no render is left, a
+    render that fails drops it; no caller clears it by hand.
+  - Change number (02-078, 05-220): `Sending`, `Resending` and `Checking`
+    carry their `RequestId`; a resend under a check is `Checking.resend`.
+    Answers and errors act only for the request they answer, so the old
+    "a resend failure leaves a check alone" guard is gone.
+  - Gifts (05-219): `PremiumHub::gifts_op` is a `ListOp`
+    (`Idle`/`Mutating(request)`/`Stale`) and replaces `gift_mutating` and
+    `gifts_stale`; an older request's late answer leaves a newer mutation
+    locked.
+  - Two "code sent to" fields (05-023): one `CodeWait` (`None`,
+    `Recovery(to)`, `LoginEmail(to)`) in `TwofaFlow`.
+  - Time zones (02-033 nit): the failure line lives in the `Fetch` only;
+    the Business screens read it through `BusinessSettingsState::refusal`.
+  - A refused microphone with nothing wanted keeps its error for the pass
+    it arrives in. A sessions or websites refetch whose send fails gives
+    the stale mark back. A finished login review's follow-up is kept
+    until the UI takes it: a new press is refused meanwhile.
+  - Merge: the group call's screen share and transport are is-04's
+    `GroupScreenShare` and `GroupTransport`; the paused mark stays the
+    `screen_share_paused` bool beside it (the driver and the error arm
+    write it with the share's stage).
+- **Skipped.** 02-002: `CollectibleLookup` already is one `LookupStage`.
+  05-222: `folder_invite_done` is gone. 02-018: the call privacy asks are
+  already per-setting `PrivacyAsk` matched to a request. 02-097:
+  `ComposerDoc` is a value built whole and normalized, with no stage.
+  02-033: links, bot and the chat-link save are `Fetch` and an enum;
+  `business.saving` is the set of saves in flight (independent kinds, not
+  one stage) and `business.error` is the last refusal line, taken once by
+  the UI. 02-034: `own_info_error` holds only a failure reason; whether the
+  info is in or on its way is read from the cache and the request table,
+  so no second field is kept in step. 02-021: `folder_remove_queue` is a
+  work list of intents (data); each folder's stage is `FolderSpecs`
+  (`Fresh`, `Stale`, `Failed`) plus the request table. 05-023: `refetch`
+  is the driver's take-once upkeep trigger, read by the pump in the same
+  pass; it is not a stage of the code wait. 02-036: `muted` is the user's
+  mic switch (a setting), and `call_sound_watch` is the driver's
+  diagnostics watch keyed by call; neither is a stage of the other.
+
 ### Sweep fixes (is-01)
 
 Implicit-state entries: each names a struct whose stages were kept in step by

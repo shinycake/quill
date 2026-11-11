@@ -50,6 +50,9 @@ impl<S: JsonSender> ConnectDriver<S> {
         let extra = self
             .session
             .request(RequestPurpose::GetActiveSessions, None);
+        // The mark is taken as the request goes out (a change landing during
+        // the refetch marks the list again); a send that fails gives it back.
+        let was_stale = self.session.settings.sessions_op.is_stale();
         self.session.settings.sessions_op.refetched();
         self.session.settings.sessions.begin();
         match self.sender.send_json(&get_active_sessions(extra)) {
@@ -57,6 +60,9 @@ impl<S: JsonSender> ConnectDriver<S> {
             Err(err) => {
                 self.session.requests.take(extra);
                 self.session.settings.sessions.cancel();
+                if was_stale {
+                    self.session.settings.sessions_op.mark_stale();
+                }
                 Err(err)
             }
         }
@@ -358,6 +364,9 @@ impl<S: JsonSender> ConnectDriver<S> {
         let extra = self
             .session
             .request(RequestPurpose::GetConnectedWebsites, None);
+        // The mark is taken as the request goes out (a change landing during
+        // the refetch marks the list again); a send that fails gives it back.
+        let was_stale = self.session.settings.websites_op.is_stale();
         self.session.settings.websites_op.refetched();
         self.session.settings.connected_websites.begin();
         match self.sender.send_json(&get_connected_websites(extra)) {
@@ -365,6 +374,9 @@ impl<S: JsonSender> ConnectDriver<S> {
             Err(err) => {
                 self.session.requests.take(extra);
                 self.session.settings.connected_websites.cancel();
+                if was_stale {
+                    self.session.settings.websites_op.mark_stale();
+                }
                 Err(err)
             }
         }

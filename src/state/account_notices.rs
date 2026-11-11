@@ -219,15 +219,57 @@ pub struct AccountNotices {
 /// Where the two-step recovery/reset flow is, as the dialog needs it.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct TwofaFlow {
-    /// `requestPasswordRecovery` answered: the emailed code is awaited.
-    pub recovery_code_sent_to: Option<String>,
-    /// `setLoginEmailAddress` answered: the emailed code is awaited.
-    pub login_email_code_sent_to: Option<String>,
+    /// The emailed code the open step awaits.
+    pub code_wait: CodeWait,
     /// A finished step the dialog reports once.
     pub notice: Option<TwofaNotice>,
     /// The cached password state is out of date (cancel reset, login
     /// email changed): the driver refetches it.
     pub refetch: bool,
+}
+
+/// The emailed code a two-step step waits for, with the pattern of the
+/// address it went to. One step waits at a time: a new one replaces it.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum CodeWait {
+    #[default]
+    None,
+    /// `requestPasswordRecovery` answered.
+    Recovery(String),
+    /// `setLoginEmailAddress` answered.
+    LoginEmail(String),
+}
+
+impl CodeWait {
+    /// Where the recovery code went, while it is awaited.
+    pub fn recovery(&self) -> Option<&str> {
+        match self {
+            Self::Recovery(to) => Some(to),
+            _ => None,
+        }
+    }
+
+    /// Where the login-email code went, while it is awaited.
+    pub fn login_email(&self) -> Option<&str> {
+        match self {
+            Self::LoginEmail(to) => Some(to),
+            _ => None,
+        }
+    }
+
+    /// The recovery step is over; another step's wait stays.
+    pub fn end_recovery(&mut self) {
+        if matches!(self, Self::Recovery(_)) {
+            *self = Self::None;
+        }
+    }
+
+    /// The login-email step is over; another step's wait stays.
+    pub fn end_login_email(&mut self) {
+        if matches!(self, Self::LoginEmail(_)) {
+            *self = Self::None;
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -361,17 +403,17 @@ impl Session {
     pub(crate) fn apply_email_code_info(&mut self, op: PasswordOp, pattern: String) {
         match op {
             PasswordOp::RequestRecoveryCode => {
-                self.auth_state.twofa_flow.recovery_code_sent_to = Some(pattern);
+                self.auth_state.twofa_flow.code_wait = CodeWait::Recovery(pattern);
             }
             PasswordOp::SetLoginEmail => {
-                self.auth_state.twofa_flow.login_email_code_sent_to = Some(pattern);
+                self.auth_state.twofa_flow.code_wait = CodeWait::LoginEmail(pattern);
             }
             _ => {}
         }
     }
 
     pub(crate) fn apply_reset_password_result(&mut self, outcome: ResetPasswordOutcome) {
-        self.auth_state.twofa_flow.recovery_code_sent_to = None;
+        self.auth_state.twofa_flow.code_wait.end_recovery();
         self.auth_state.twofa_flow.notice = Some(match outcome {
             ResetPasswordOutcome::Ok => TwofaNotice::PasswordRemoved,
             ResetPasswordOutcome::Pending { reset_date } => {
@@ -389,7 +431,7 @@ impl Session {
     pub(crate) fn apply_password_state_op(&mut self, op: PasswordOp) {
         match op {
             PasswordOp::RecoverPassword => {
-                self.auth_state.twofa_flow.recovery_code_sent_to = None;
+                self.auth_state.twofa_flow.code_wait.end_recovery();
                 let still_on = self
                     .auth_state
                     .password_state
@@ -417,7 +459,7 @@ impl Session {
                 self.auth_state.twofa_flow.refetch = true;
             }
             PasswordOp::CheckLoginEmailCode => {
-                self.auth_state.twofa_flow.login_email_code_sent_to = None;
+                self.auth_state.twofa_flow.code_wait.end_login_email();
                 self.auth_state.twofa_flow.notice = Some(TwofaNotice::LoginEmailChanged);
                 self.auth_state.twofa_flow.refetch = true;
             }

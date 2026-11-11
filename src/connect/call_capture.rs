@@ -403,21 +403,25 @@ impl<S: JsonSender> ConnectDriver<S> {
                     CaptureEvent::Paused | CaptureEvent::Resumed => None,
                 })
         });
+        let reported = failure.is_some();
         if let Some((err, refused)) = failure {
             capture.mic = match (refused, wanted) {
                 (true, Some((target, muted))) => Mic::Refused {
                     wanted: (target, device.clone(), muted),
                     error: err,
                 },
-                (true, None) => Mic::Off,
-                (false, _) => Mic::Failed {
+                // Nothing is wanted any more, but the refusal is still
+                // the call window's note for this pass.
+                (true, None) | (false, _) => Mic::Failed {
                     at: now,
                     error: err,
                 },
             };
         }
         let Some((target, muted)) = wanted else {
-            capture.mic = Mic::Off;
+            if !reported {
+                capture.mic = Mic::Off;
+            }
             return;
         };
         let noise_suppression = denoises(target, group_pref);

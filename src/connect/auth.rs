@@ -467,7 +467,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.password_op_send(PasswordOp::RequestRecoveryCode, request_password_recovery)?;
         // Only a request that went out drops the "code sent to" step: a
         // refused one leaves the emailed code's dialog where it was.
-        self.session.auth_state.twofa_flow.recovery_code_sent_to = None;
+        self.session.auth_state.twofa_flow.code_wait.end_recovery();
         Ok(sent)
     }
 
@@ -528,7 +528,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         let sent = self.password_op_send(PasswordOp::SetLoginEmail, |extra| {
             set_login_email_address(extra, email.trim())
         })?;
-        self.session.auth_state.twofa_flow.login_email_code_sent_to = None;
+        self.session.auth_state.twofa_flow.code_wait.end_login_email();
         Ok(sent)
     }
 
@@ -538,7 +538,8 @@ impl<S: JsonSender> ConnectDriver<S> {
             .session
             .auth_state
             .twofa_flow
-            .login_email_code_sent_to
+            .code_wait
+            .login_email()
             .is_none()
         {
             return Err(ConnectSendError::InvalidRequest);
@@ -553,7 +554,8 @@ impl<S: JsonSender> ConnectDriver<S> {
                 .session
                 .auth_state
                 .twofa_flow
-                .login_email_code_sent_to
+                .code_wait
+                .login_email()
                 .is_none()
         {
             return Err(ConnectSendError::InvalidRequest);
