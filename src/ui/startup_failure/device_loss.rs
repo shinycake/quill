@@ -61,6 +61,14 @@ async fn attach_in_time(
     .await
 }
 
+/// Whether the device was already recovered once. Quill recovers once;
+/// the device going a second time gives up.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Recovery {
+    Healthy,
+    Recovered,
+}
+
 /// A window has closed.
 #[derive(Debug, Clone, Copy)]
 struct Closed {
@@ -68,7 +76,7 @@ struct Closed {
     gpu_gone: bool,
     /// It was the main window, and Quill had not asked to quit.
     main_lost: bool,
-    recovered_before: bool,
+    recovered_before: Recovery,
 }
 
 /// What to do when a window has closed.
@@ -94,11 +102,12 @@ fn after_window_closed(closed: Closed) -> Step {
         main_lost,
         recovered_before,
     } = closed;
+    use Recovery::{Healthy, Recovered};
     match (gpu_gone, windows_left, main_lost, recovered_before) {
         (true, 1.., _, _) => Step::CloseTheRest,
-        (true, 0, _, false) => Step::Recover,
-        (false, _, true, false) => Step::Reopen,
-        (_, _, true, true) | (true, 0, false, true) => Step::GiveUp,
+        (true, 0, _, Healthy) => Step::Recover,
+        (false, _, true, Healthy) => Step::Reopen,
+        (_, _, true, Recovered) | (true, 0, false, Recovered) => Step::GiveUp,
         (false, 0, false, _) => Step::Quit,
         (false, 1.., false, _) => Step::Nothing,
     }
@@ -159,7 +168,7 @@ fn watch_closed_windows(
 ) {
     cx.set_quit_mode(QuitMode::Explicit);
     let reopen = Rc::new(reopen);
-    let recovered = Rc::new(Cell::new(false));
+    let recovered = Rc::new(Cell::new(Recovery::Healthy));
     let kept = RefCell::new(None);
     cx.on_window_closed(move |cx, window_id| {
         // Taken even when it will not be used: until dropped it holds the
@@ -189,7 +198,7 @@ fn watch_closed_windows(
                 }
             }),
             step @ (Step::Recover | Step::Reopen) => {
-                recovered.set(true);
+                recovered.set(Recovery::Recovered);
                 let Some(left) = kept.borrow_mut().take() else {
                     give_up(tr(keys::Q_MISC_GPU_STOPPED_WORKING_AGAIN), cx);
                     return;
@@ -234,14 +243,18 @@ mod reset_tests;
 
 #[cfg(test)]
 mod tests {
-    use super::{Closed, Step, after_window_closed};
+    use super::{Closed, Recovery, Step, after_window_closed};
 
     fn step(windows_left: usize, gpu_gone: bool, main_lost: bool, recovered_before: bool) -> Step {
         after_window_closed(Closed {
             windows_left,
             gpu_gone,
             main_lost,
-            recovered_before,
+            recovered_before: if recovered_before {
+                Recovery::Recovered
+            } else {
+                Recovery::Healthy
+            },
         })
     }
 

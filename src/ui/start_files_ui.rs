@@ -60,16 +60,15 @@ impl QuillApp {
 
     /// Open the chooser for `files`; files already being chosen for stay.
     pub(super) fn begin_start_files(&mut self, files: Vec<PathBuf>, cx: &mut Context<Self>) {
-        for file in files {
-            if !self.start_files.choosing.contains(&file) {
-                self.start_files.choosing.push(file);
-            }
+        // An empty list opens no chooser.
+        if !files.is_empty() {
+            self.start_files.choosing.add(files);
         }
         cx.notify();
     }
 
     fn close_start_files(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.start_files.choosing.clear();
+        self.start_files.choosing.take();
         self.start_files
             .search
             .update(cx, |input, cx| input.set_value("", window, cx));
@@ -78,7 +77,7 @@ impl QuillApp {
 
     /// The typed query changed: ask the server too (`searchChatsOnServer`).
     pub(super) fn start_files_search_changed(&mut self, text: &str, cx: &mut Context<Self>) {
-        if self.start_files.choosing.is_empty() {
+        if !self.start_files.choosing.is_choosing() {
             return;
         }
         if let Some(live) = self.live.as_mut() {
@@ -131,7 +130,7 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.start_files.choosing.is_empty() {
+        if !self.start_files.choosing.is_choosing() {
             return;
         }
         if let Some(note) = self.start_files_refusal(chat) {
@@ -142,7 +141,7 @@ impl QuillApp {
         self.select_listed_chat(chat, window, cx);
         if self.open_chat_id() == Some(chat) {
             // The files are taken only now that their chat is open.
-            let files = std::mem::take(&mut self.start_files.choosing);
+            let files = self.start_files.choosing.take();
             self.start_files
                 .search
                 .update(cx, |input, cx| input.set_value("", window, cx));
@@ -231,7 +230,7 @@ crate::ui::shell::register_dialogs! {
     /// Files sent to Quill from outside: the "Forward to…" chat chooser.
     StartFiles => DialogSpec::new(
         2905,
-        |app| !app.start_files.choosing.is_empty(),
+        |app| app.start_files.choosing.is_choosing(),
         QuillApp::build_start_files_dialog,
     )
     .close(|app, window, cx| app.close_start_files(window, cx)),

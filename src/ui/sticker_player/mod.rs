@@ -38,7 +38,9 @@ use quill::sticker_playback::player::{
     AHEAD, ClipKey, ClipState, Engine, PlayHead, PlayMode, Timeline, edge_for,
 };
 use smallvec::SmallVec;
-use std::cell::{Cell, RefCell};
+use std::cell::RefCell;
+#[cfg(test)]
+use std::cell::Cell;
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -84,10 +86,36 @@ pub(super) struct ScreenStats {
     pub(super) late: u64,
 }
 
+/// A background task the player keeps going: holding it is the running
+/// stage, dropping it (or the player) stops it.
+#[derive(Default)]
+pub(super) enum Upkeep {
+    #[default]
+    Idle,
+    Running {
+        _task: Task<()>,
+    },
+}
+
+impl Upkeep {
+    pub(super) fn is_running(&self) -> bool {
+        matches!(self, Self::Running { .. })
+    }
+}
+
+/// Whether a clip opened.
+#[derive(Clone, Copy, Default)]
+enum Opening {
+    /// Not answered yet.
+    #[default]
+    Pending,
+    Ready(Timeline),
+    Failed,
+}
+
 #[derive(Default)]
 struct UiClip {
-    timeline: Option<Timeline>,
-    failed: bool,
+    opening: Opening,
     /// Frames drawn and not shown yet, by grid index.
     ready: BTreeMap<u32, Arc<RenderImage>>,
     /// The frame last shown.
@@ -103,6 +131,19 @@ struct UiClip {
     ready_at: Option<Instant>,
     /// Where views asked for it since it opened.
     places: Places,
+}
+
+impl UiClip {
+    fn failed(&self) -> bool {
+        matches!(self.opening, Opening::Failed)
+    }
+
+    fn timeline(&self) -> Option<Timeline> {
+        match self.opening {
+            Opening::Ready(timeline) => Some(timeline),
+            Opening::Pending | Opening::Failed => None,
+        }
+    }
 }
 
 /// What a head drawing a clip wants.
@@ -201,9 +242,9 @@ pub(crate) struct Player {
     engine: Engine,
     inner: RefCell<Inner>,
     /// The task waking the app when a clip's first frame is ready.
-    pump: Cell<bool>,
+    pump: RefCell<Upkeep>,
     /// The task closing clips once no window shows them (`close_stale`).
-    closer: Cell<bool>,
+    closer: RefCell<Upkeep>,
     /// Wakes the closer at the next frame of any window.
     next_frame: RefCell<Option<oneshot::Sender<()>>>,
     #[cfg(test)]
@@ -227,8 +268,8 @@ impl Player {
         Self {
             engine: Engine::new(Engine::default_workers(), BUDGET),
             inner: RefCell::new(Inner::default()),
-            pump: Cell::new(false),
-            closer: Cell::new(false),
+            pump: RefCell::new(Upkeep::Idle),
+            closer: RefCell::new(Upkeep::Idle),
             next_frame: RefCell::new(None),
             #[cfg(test)]
             fixtures: RefCell::new(HashMap::new()),
@@ -476,14 +517,14 @@ impl Player {
             clip.used = Some(now);
             note_drawn(&mut clip.drawn, drawn);
             note_place(&mut clip.places, place);
-            if clip.timeline.is_none() && !clip.failed {
+            if matches!(clip.opening, Opening::Pending) {
                 match self.engine.state(&key) {
-                    Some(ClipState::Ready(info)) => clip.timeline = Some(info.timeline),
-                    Some(ClipState::Failed(_)) | None => clip.failed = true,
+                    Some(ClipState::Ready(info)) => clip.opening = Opening::Ready(info.timeline),
+                    Some(ClipState::Failed(_)) | None => clip.opening = Opening::Failed,
                     Some(ClipState::Opening) => {}
                 }
             }
-            match clip.timeline {
+            match clip.timeline() {
                 Some(timeline) => {
                     let entry = inner.heads.entry((head, key.file)).or_insert_with(|| Head {
                         state: PlayHead::default(),
@@ -552,7 +593,7 @@ impl Player {
                         Some(image)
                     })
                 }
-                None if clip.failed => None,
+                None if matches!(clip.opening, Opening::Failed) => None,
                 None => {
                     // Opening: another size's frame meanwhile, on screen
                     // as that clip's.
@@ -903,7 +944,7 @@ impl Player {
             .clips
             .iter()
             .filter(|(key, _)| key.file == file)
-            .find_map(|(_, clip)| clip.timeline)?
+            .find_map(|(_, clip)| clip.timeline())?
             .duration();
         Some((state.pos(), total))
     }

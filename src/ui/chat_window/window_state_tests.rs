@@ -88,10 +88,10 @@ fn underlined(app: &Entity<QuillApp>, scope: Option<ChatId>, cx: &mut TestAppCon
     app.update(cx, |app, cx| {
         app.in_window_scope(scope, cx, |app, _| {
             let spelling = &app.composer_ui.spelling;
-            if spelling.misspellings.is_empty() {
+            if spelling.underlines.found.is_empty() {
                 String::new()
             } else {
-                spelling.checked_text.clone()
+                spelling.underlines.text.clone()
             }
         })
     })

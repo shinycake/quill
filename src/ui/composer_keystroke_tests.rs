@@ -114,7 +114,7 @@ fn a_spell_check_result_redraws_only_the_composer(cx: &mut TestAppContext) {
     vcx.update(|window, cx| window.draw(cx).clear(cx));
     let underlined = |app: &Entity<QuillApp>, vcx: &mut VisualTestContext| {
         app.read_with(vcx, |app, _| {
-            !app.composer_ui.spelling.misspellings.is_empty()
+            !app.composer_ui.spelling.underlines.found.is_empty()
         })
     };
     assert!(!underlined(&app, vcx), "the check waits for the pause");

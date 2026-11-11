@@ -22,6 +22,7 @@ use std::time::Duration;
 use super::actions::{SpellingIgnore, SpellingLearn, SpellingReplace, SpellingUnlearn};
 use super::app::QuillApp;
 use super::chat_theme::danger;
+use super::spell_state::Check;
 use gpui_kit::component::input::{Copy, Cut, Paste, SelectAll, TextareaState};
 use gpui_kit::component::native_menu::NativeMenu;
 use gpui_kit::*;
@@ -211,8 +212,8 @@ impl QuillApp {
         self.spell.info = info;
         // Every window's composer is checked again with the new engine.
         self.in_every_window(cx, |this, cx| {
-            this.composer_ui.spelling.misspellings.clear();
-            this.composer_ui.spelling.checked_text = this.composer.read(cx).value().to_string();
+            this.composer_ui.spelling.underlines.found.clear();
+            this.composer_ui.spelling.underlines.text = this.composer.read(cx).value().to_string();
             this.notify_composer(cx);
             this.schedule_spellcheck(WARM_DELAY, cx);
         });
@@ -236,35 +237,35 @@ impl QuillApp {
     /// the debounced background re-check. Cheap — no dictionary calls.
     pub(super) fn sync_spellcheck(&mut self, text: &str, cx: &mut Context<Self>) {
         if !self.chat_prefs.spellcheck_enabled {
-            self.composer_ui.spelling.task = None;
-            self.composer_ui.spelling.checked_text.clear();
-            if !self.composer_ui.spelling.misspellings.is_empty() {
-                self.composer_ui.spelling.misspellings.clear();
+            self.composer_ui.spelling.check = Check::Idle;
+            self.composer_ui.spelling.underlines.text.clear();
+            if !self.composer_ui.spelling.underlines.found.is_empty() {
+                self.composer_ui.spelling.underlines.found.clear();
                 cx.notify();
             }
             return;
         }
-        if text == self.composer_ui.spelling.checked_text && !text.is_empty() {
+        if text == self.composer_ui.spelling.underlines.text && !text.is_empty() {
             return;
         }
         let shifted = shift_misspellings(
-            &self.composer_ui.spelling.checked_text,
+            &self.composer_ui.spelling.underlines.text,
             text,
-            &self.composer_ui.spelling.misspellings,
+            &self.composer_ui.spelling.underlines.found,
         );
-        let delay = if !self.composer_ui.spelling.checked_text.is_empty()
-            && is_typing_word(&self.composer_ui.spelling.checked_text, text)
+        let delay = if !self.composer_ui.spelling.underlines.text.is_empty()
+            && is_typing_word(&self.composer_ui.spelling.underlines.text, text)
         {
             COLD_DELAY
         } else {
             WARM_DELAY
         };
-        if shifted != self.composer_ui.spelling.misspellings {
-            self.composer_ui.spelling.misspellings = shifted;
+        if shifted != self.composer_ui.spelling.underlines.found {
+            self.composer_ui.spelling.underlines.found = shifted;
             // The underlines are drawn in the composer.
             self.notify_composer(cx);
         }
-        self.composer_ui.spelling.checked_text = text.to_string();
+        self.composer_ui.spelling.underlines.text = text.to_string();
         self.schedule_spellcheck(delay, cx);
     }
 
@@ -272,44 +273,46 @@ impl QuillApp {
     /// `delay`; replaces (cancels) any pending check. The result is
     /// dropped if the draft changed meanwhile — that edit scheduled its own.
     fn schedule_spellcheck(&mut self, delay: Duration, cx: &mut Context<Self>) {
-        let text = self.composer_ui.spelling.checked_text.clone();
+        let text = self.composer_ui.spelling.underlines.text.clone();
         if text.trim().is_empty() {
-            self.composer_ui.spelling.task = None;
+            self.composer_ui.spelling.check = Check::Idle;
             return;
         }
         let checker = self.spell.checker.clone();
         // The result lands in the window whose composer was checked and
         // redraws that composer (`notify_composer`, its slices in place).
-        self.composer_ui.spelling.task = Some(self.spawn_scoped(cx, async move |this, cx| {
-            cx.background_executor().timer(delay).await;
-            let checked = text.clone();
-            let found = cx
-                .background_spawn(async move { checker.check_text(&checked) })
-                .await;
-            let _ = this.update(cx, |this, cx| {
-                if this.chat_prefs.spellcheck_enabled
-                    && this.composer_ui.spelling.checked_text == text
-                    && this.composer_ui.spelling.misspellings != found
-                {
-                    this.composer_ui.spelling.misspellings = found;
-                    // The underlines are drawn in the composer.
-                    this.notify_composer(cx);
-                }
-            });
-        }));
+        self.composer_ui.spelling.check = Check::Checking {
+            _task: self.spawn_scoped(cx, async move |this, cx| {
+                cx.background_executor().timer(delay).await;
+                let checked = text.clone();
+                let found = cx
+                    .background_spawn(async move { checker.check_text(&checked) })
+                    .await;
+                let _ = this.update(cx, |this, cx| {
+                    if this.chat_prefs.spellcheck_enabled
+                        && this.composer_ui.spelling.underlines.text == text
+                        && this.composer_ui.spelling.underlines.found != found
+                    {
+                        this.composer_ui.spelling.underlines.found = found;
+                        // The underlines are drawn in the composer.
+                        this.notify_composer(cx);
+                    }
+                });
+            }),
+        };
     }
 
     /// Check the current draft synchronously (screenshot fixtures, so the
     /// first captured frame already has its underlines).
     pub(super) fn spellcheck_now(&mut self, cx: &mut Context<Self>) {
         let text = self.composer.read(cx).value().to_string();
-        self.composer_ui.spelling.task = None;
-        self.composer_ui.spelling.misspellings = if self.chat_prefs.spellcheck_enabled {
+        self.composer_ui.spelling.check = Check::Idle;
+        self.composer_ui.spelling.underlines.found = if self.chat_prefs.spellcheck_enabled {
             self.spell.checker.check_text(&text)
         } else {
             Vec::new()
         };
-        self.composer_ui.spelling.checked_text = text;
+        self.composer_ui.spelling.underlines.text = text;
         cx.notify();
     }
 
@@ -330,11 +333,12 @@ impl QuillApp {
     fn recheck_spelling(&mut self, accepted: Option<&str>, cx: &mut Context<Self>) {
         self.in_every_window(cx, |this, cx| {
             let text = this.composer.read(cx).value().to_string();
-            this.composer_ui.spelling.checked_text = text;
+            this.composer_ui.spelling.underlines.text = text;
             if let Some(word) = accepted {
                 this.composer_ui
                     .spelling
-                    .misspellings
+                    .underlines
+                    .found
                     .retain(|m| m.word != word);
             }
             this.notify_composer(cx);
@@ -452,12 +456,13 @@ impl QuillApp {
     /// The red wavy underlines, as an overlay over the composer Textarea
     /// (place it after the Textarea inside a `relative()` wrapper).
     pub(super) fn spellcheck_underlines(&self, cx: &App) -> Option<AnyElement> {
-        if !self.chat_prefs.spellcheck_enabled || self.composer_ui.spelling.misspellings.is_empty()
+        if !self.chat_prefs.spellcheck_enabled
+            || self.composer_ui.spelling.underlines.found.is_empty()
         {
             return None;
         }
         // Only paint ranges that match the text on screen.
-        if self.composer.read(cx).value().as_ref() != self.composer_ui.spelling.checked_text {
+        if self.composer.read(cx).value().as_ref() != self.composer_ui.spelling.underlines.text {
             return None;
         }
         let composer = self.composer.clone();
@@ -483,7 +488,8 @@ impl QuillApp {
         let misspellings: Vec<_> = self
             .composer_ui
             .spelling
-            .misspellings
+            .underlines
+            .found
             .iter()
             .filter(|m| !skip.iter().any(|r| r.start < m.end && m.start < r.end))
             .cloned()

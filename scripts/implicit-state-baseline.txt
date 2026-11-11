@@ -204,7 +204,6 @@ TopPerson::saved_messages
 TopicHistory::loaded_complete
 TopicHistory::newer_failed
 TransportMachine::loop_sent
-UiClip::failed
 UpdatePill::downloading
 UsersState::background_emoji_icons_failed
 UsersState::background_emoji_icons_failed+profile_edit_error

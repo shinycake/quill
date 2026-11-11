@@ -4,7 +4,7 @@
 
 use super::super::app::QuillApp;
 use super::{
-    CLOSE_SLACK, ClipSpec, HeadId, Leaving, Part, Place, StickerView, display_of, edge_for,
+    CLOSE_SLACK, ClipSpec, HeadId, Leaving, Part, Place, StickerView, Upkeep, display_of, edge_for,
 };
 use futures_channel::oneshot;
 use gpui_kit::*;
@@ -329,13 +329,12 @@ impl QuillApp {
     /// is open.
     fn ensure_sticker_closer(&self, cx: &mut Context<QuillApp>) {
         let player = &self.players.stickers;
-        if player.closer.get() || !player.has_clips() {
+        if player.closer.borrow().is_running() || !player.has_clips() {
             return;
         }
-        player.closer.set(true);
         // screen-scope: the sticker player is the app's; the closer
         // drops clips no window draws, whatever is on screen.
-        cx.spawn(async move |this, cx| {
+        let task = cx.spawn(async move |this, cx| {
             loop {
                 let wait = this.update(cx, |this, cx| {
                     let player = this.players.stickers.clone();
@@ -343,7 +342,7 @@ impl QuillApp {
                     drop_frames(closed.frames, cx);
                     player.trace_closed(closed.clips);
                     if !closed.open {
-                        player.closer.set(false);
+                        player.closer.replace(Upkeep::Idle);
                         return None;
                     }
                     Some((closed.next, player.next_frame()))
@@ -361,8 +360,8 @@ impl QuillApp {
                     None => after_frame.await,
                 }
             }
-        })
-        .detach();
+        });
+        *player.closer.borrow_mut() = Upkeep::Running { _task: task };
     }
 
     /// Starts the task that redraws the app when a clip opened or its first
@@ -371,7 +370,7 @@ impl QuillApp {
         let player = &self.players.stickers;
         // Tests run GPUI's deterministic scheduler, which a wake from a
         // worker thread would trip; they take frames with `Player::settle`.
-        if cfg!(test) || player.pump.replace(true) {
+        if cfg!(test) || player.pump.borrow().is_running() {
             return;
         }
         // A wake while the task is not waiting is kept in `pending`; one
@@ -392,7 +391,7 @@ impl QuillApp {
         // redraws the app, which redraws them all.
         // screen-scope: same: a frame wake redraws the app for the
         // account on screen at that time.
-        cx.spawn(async move |this, cx| {
+        let task = cx.spawn(async move |this, cx| {
             loop {
                 let (tx, rx) = oneshot::channel::<()>();
                 *lock_or_recover(&slot) = Some(tx);
@@ -412,8 +411,8 @@ impl QuillApp {
                     break;
                 }
             }
-        })
-        .detach();
+        });
+        *player.pump.borrow_mut() = Upkeep::Running { _task: task };
     }
 
     /// A history row's animated sticker, `side` points across, with its

@@ -14,6 +14,7 @@ use gpui_kit::*;
 use quill::ids::ChatId;
 use quill::lang::{keys, tr};
 use quill::stat_chart::{ChartKind, overview_delta};
+use quill::state::fetch::Fetch;
 use quill::state::{GraphFetch, Session};
 use quill::telegram::envelope::{StatisticalGraph, StatisticalValue};
 
@@ -195,20 +196,24 @@ impl QuillApp {
         let mut view = StatChartView::new(id.to_string(), title.to_string(), kind, chart);
         if !zoom_token.is_empty() {
             let zoomed = stats.zoomed.get(zoom_token).map(|&x| {
-                let (chart, error) = match stats.graph(chat_id, zoom_token, x) {
+                let failed = |message: String| Fetch::Failed {
+                    error: message,
+                    stale: None,
+                };
+                let fetch = match stats.graph(chat_id, zoom_token, x) {
                     Some(GraphFetch::Loaded(StatisticalGraph::Data { json_data, .. })) => {
                         match parsed_chart(json_data) {
-                            Some(chart) => (Some(chart), None),
-                            None => (None, Some(tr(keys::Q_MONEY_THIS_DAY_HAS_NO_CHART).into())),
+                            Some(chart) => Fetch::Ready(chart),
+                            None => failed(tr(keys::Q_MONEY_THIS_DAY_HAS_NO_CHART).to_string()),
                         }
                     }
                     Some(GraphFetch::Loaded(StatisticalGraph::Error { error_message })) => {
-                        (None, Some(error_message.clone().into()))
+                        failed(error_message.clone())
                     }
-                    Some(GraphFetch::Failed(message)) => (None, Some(message.clone().into())),
-                    _ => (None, None),
+                    Some(GraphFetch::Failed(message)) => failed(message.clone()),
+                    _ => Fetch::Loading { stale: None },
                 };
-                ZoomedDay { x, chart, error }
+                ZoomedDay { x, fetch }
             });
             let zoom_weak = cx.weak_entity();
             let unzoom_weak = cx.weak_entity();
