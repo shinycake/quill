@@ -138,7 +138,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             serde_json::json!({"quill_account_export": extra.as_extra()}),
         );
         if let Some(link) = link(&mut self.session) {
-            link.pending = Some(extra);
+            link.await_answer(extra);
         }
         if self.sender.send_json(&request.to_string()).is_err() {
             self.session.requests.take(extra);

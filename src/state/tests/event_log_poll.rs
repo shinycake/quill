@@ -18,7 +18,7 @@ fn page_json(extra: u64, ids: &[i64]) -> String {
 }
 
 fn loaded_ids(session: &Session) -> Option<(Vec<i64>, bool)> {
-    match session.groups.event_logs.get(&13)? {
+    match session.groups.event_log_fetch(13)? {
         ChatEventLogFetch::Loaded(page) => {
             Some((page.events.iter().map(|e| e.id).collect(), page.has_more))
         }
@@ -73,12 +73,11 @@ fn poll_answer_without_a_loaded_page_is_dropped() {
     let seq = AtomicU64::new(0);
     session
         .groups
-        .event_logs
-        .insert(13, ChatEventLogFetch::Loading);
+        .set_event_log_fetch(13, ChatEventLogFetch::Loading);
     let extra = event_log_request(&mut session, GroupsPurpose::PollChatEventLog);
     apply_json(&mut session, &seq, &sink, &page_json(extra.0, &[5, 4]));
     assert_eq!(
-        session.groups.event_logs.get(&13),
+        session.groups.event_log_fetch(13),
         Some(&ChatEventLogFetch::Loading)
     );
 }

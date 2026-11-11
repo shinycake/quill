@@ -76,23 +76,16 @@ pub struct UsersState {
     pub peer_color_error: Option<String>,
     /// `getDefaultBackgroundCustomEmojiStickers` answer: the custom emoji
     /// the color editor offers as reply and profile icons.
-    pub background_emoji_icons: Vec<StickerItem>,
-    /// The icon request failed; the editor shows a retry hint.
-    pub background_emoji_icons_failed: bool,
+    pub background_emoji_icons: crate::state::fetch::Fetch<Vec<StickerItem>>,
     /// `getDefaultProfilePhotoCustomEmojiStickers` answer: the emoji the
     /// avatar builder offers.
-    pub profile_photo_emoji_icons: Vec<StickerItem>,
-    /// The builder request failed.
-    pub profile_photo_emoji_icons_failed: bool,
+    pub profile_photo_emoji_icons: crate::state::fetch::Fetch<Vec<StickerItem>>,
     /// `getDefaultChatPhotoCustomEmojiStickers` answer: the emoji the
     /// builder offers for a group or channel photo.
-    pub chat_photo_emoji_icons: Vec<StickerItem>,
-    pub chat_photo_emoji_icons_failed: bool,
+    pub chat_photo_emoji_icons: crate::state::fetch::Fetch<Vec<StickerItem>>,
     /// Gifts with wearable colors (`getReceivedGifts` with
     /// `exclude_without_colors`), for the color editor.
-    pub wearable_gifts: Vec<crate::premium_hub::ReceivedGift>,
-    /// The wearable gifts request answered or failed.
-    pub wearable_gifts_loaded: bool,
+    pub wearable_gifts: crate::state::fetch::Fetch<Vec<crate::premium_hub::ReceivedGift>>,
     /// Phase B1: secret-chat records keyed by `secret_chat_id`
     /// (`updateSecretChat` / `getSecretChat` answers). Kept at the
     /// session level because `updateSecretChat` is guaranteed to arrive
@@ -178,14 +171,10 @@ impl UsersState {
             bio_length_max: 70,
             profile_edit_error: None,
             peer_color_error: None,
-            background_emoji_icons: Vec::new(),
-            background_emoji_icons_failed: false,
-            profile_photo_emoji_icons: Vec::new(),
-            profile_photo_emoji_icons_failed: false,
-            chat_photo_emoji_icons: Vec::new(),
-            chat_photo_emoji_icons_failed: false,
-            wearable_gifts: Vec::new(),
-            wearable_gifts_loaded: false,
+            background_emoji_icons: Default::default(),
+            profile_photo_emoji_icons: Default::default(),
+            chat_photo_emoji_icons: Default::default(),
+            wearable_gifts: Default::default(),
             secret_chat_states: HashMap::new(),
             secret_chat_fetch_queue: Vec::new(),
             user_chat_to_open: None,
