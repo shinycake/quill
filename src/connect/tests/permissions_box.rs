@@ -213,3 +213,54 @@ fn a_second_save_while_one_is_out_is_sent_and_rolls_back_to_the_original() {
     }
     assert_eq!(current(&rig), original);
 }
+
+/// Round 2, 167: the first save is accepted (TDLib sends
+/// `updateChatPermissions` for it) and the second refused: the box shows
+/// the first's permissions, which the server has, not the original.
+#[test]
+fn a_refused_second_save_restores_what_the_accepted_first_saved() {
+    let mut rig = Rig::new();
+    rig.owned_supergroup();
+    let original = current(&rig);
+    let first = toggle(original, Permission::SendText, false);
+    let second = toggle(first, Permission::Videos, false);
+    let a = rig.driver.set_chat_permissions(ChatId(13), &first).unwrap();
+    let b = rig
+        .driver
+        .set_chat_permissions(ChatId(13), &second)
+        .unwrap();
+    let (Some(a), Some(b)) = (a, b) else {
+        panic!("both saves are sent");
+    };
+    rig.ingest(&format!(r#"{{"@type":"ok","@extra":"{}"}}"#, a.0));
+    rig.ingest(&format!(
+        r#"{{"@type":"error","@extra":"{}","code":400,"message":"X"}}"#,
+        b.0
+    ));
+    assert_eq!(current(&rig), first);
+}
+
+/// The first refused while the second is out: the second decides.
+#[test]
+fn an_accepted_second_save_stands_after_a_refused_first() {
+    let mut rig = Rig::new();
+    rig.owned_supergroup();
+    let original = current(&rig);
+    let first = toggle(original, Permission::SendText, false);
+    let second = toggle(first, Permission::Videos, false);
+    let a = rig.driver.set_chat_permissions(ChatId(13), &first).unwrap();
+    let b = rig
+        .driver
+        .set_chat_permissions(ChatId(13), &second)
+        .unwrap();
+    let (Some(a), Some(b)) = (a, b) else {
+        panic!("both saves are sent");
+    };
+    rig.ingest(&format!(
+        r#"{{"@type":"error","@extra":"{}","code":400,"message":"X"}}"#,
+        a.0
+    ));
+    assert_eq!(current(&rig), second, "the later save is still out");
+    rig.ingest(&format!(r#"{{"@type":"ok","@extra":"{}"}}"#, b.0));
+    assert_eq!(current(&rig), second);
+}

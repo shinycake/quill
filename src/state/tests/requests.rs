@@ -89,6 +89,7 @@ fn optimistic_mutations_roll_back_on_error() {
         pending.rollback = Some(RequestRollback::ChatPermissions {
             previous: None,
             previous_can_send: false,
+            sent: ChatPermissions::all(),
         });
     }
     // Simulate the optimistic write the driver performs at send.

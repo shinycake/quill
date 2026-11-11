@@ -45,6 +45,7 @@ impl Session {
         self.apply_ai_compose_ok(pending);
         self.apply_hang_up_ok(pending);
         self.apply_communities_ok(pending);
+        self.settle_permissions_save(pending);
         match pending.map(|p| p.purpose) {
             Some(
                 RequestPurpose::SetChatTheme
@@ -827,6 +828,33 @@ impl Session {
         }
         if pending.is_some_and(|p| is_auth_submit(p.purpose)) {
             self.auth_state.last_auth_error = None;
+        }
+    }
+}
+
+impl Session {
+    /// A `setChatPermissions` the server accepted: saves still out for the
+    /// chat now roll back to its values, not to the ones from before it.
+    fn settle_permissions_save(&mut self, pending: Option<&PendingRequest>) {
+        let Some(pending) = pending else {
+            return;
+        };
+        let (Some(RequestRollback::ChatPermissions { sent, .. }), Some(chat_id)) =
+            (&pending.rollback, pending.chat_id)
+        else {
+            return;
+        };
+        let sent = *sent;
+        for later in self.requests.pending_chat_permissions_mut(chat_id) {
+            if let Some(RequestRollback::ChatPermissions {
+                previous,
+                previous_can_send,
+                ..
+            }) = &mut later.rollback
+            {
+                *previous = Some(sent);
+                *previous_can_send = sent.can_send_basic_messages;
+            }
         }
     }
 }

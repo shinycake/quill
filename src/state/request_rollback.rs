@@ -6,11 +6,15 @@ use super::*;
 /// the error arm below restores it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RequestRollback {
-    /// `setChatPermissions`: the chat's previous permission block and
-    /// `can_send_basic_messages`.
+    /// `setChatPermissions`: the permission block and
+    /// `can_send_basic_messages` a refusal puts back (what the server has
+    /// once the saves ahead of this one are settled), and the block this
+    /// save sent, which a later save's rollback takes over when this one
+    /// succeeds.
     ChatPermissions {
         previous: Option<ChatPermissions>,
         previous_can_send: bool,
+        sent: ChatPermissions,
     },
     /// `toggleSupergroupJoinByRequest`: the previous join-by-request flag
     /// (`None` = unknown, treated as disabled).

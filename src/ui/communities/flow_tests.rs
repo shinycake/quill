@@ -180,6 +180,7 @@ fn open_box(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> &'static str
         Some(CommunityBox::CreateVisibility { .. }) => "create-visibility",
         Some(CommunityBox::Pick { .. }) => "pick",
         Some(CommunityBox::MuteFor { .. }) => "mute-for",
+        Some(CommunityBox::BanWarning { .. }) => "ban-warning",
         Some(_) => "other",
         None => "none",
     })
@@ -364,16 +365,13 @@ fn a_community_send_that_did_not_go_is_told_not_shown_as_done(cx: &mut TestAppCo
     assert!(sent);
 }
 
-#[gpui_kit::test]
-fn a_ban_warning_does_not_open_over_a_box_the_person_moved_to(cx: &mut TestAppContext) {
+fn ban_waiting_for_a_warning(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) {
     use super::PendingBan;
     use quill::state::{CommunityMember, fetch::Fetch};
     use quill::telegram::envelope::CommunityMemberChats;
-    let (app, mut vcx) = new_app(cx);
-    frames(&mut vcx);
     let member = CommunityMember::User(5);
-    app.update(&mut vcx, |app, cx| {
-        // Ban was pressed with no box open; the person then opened Pick.
+    app.update(vcx, |app, _| {
+        // Ban was pressed with no box open; the member owns a chat.
         app.admin.community.flow.ban_wait = Some(PendingBan {
             community_id: RUSTACEANS,
             member,
@@ -389,9 +387,37 @@ fn a_ban_warning_does_not_open_over_a_box_the_person_moved_to(cx: &mut TestAppCo
                 }),
             );
         }
-        app.show_community_box(CommunityBox::Pick { chat_id: 65 }, cx);
-        assert!(app.drain_pending_ban(cx));
     });
-    assert!(app.read_with(&vcx, |app, _| app.admin.community.flow.ban_wait.is_none()));
+}
+
+#[gpui_kit::test]
+fn a_ban_warning_waits_while_another_box_is_open_then_opens(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    frames(&mut vcx);
+    ban_waiting_for_a_warning(&app, &mut vcx);
+    app.update(&mut vcx, |app, cx| {
+        app.show_community_box(CommunityBox::Pick { chat_id: 65 }, cx);
+        // The confirmed ban is kept, not dropped, and nothing opens over Pick.
+        assert!(!app.drain_pending_ban(cx));
+    });
+    assert!(app.read_with(&vcx, |app, _| app.admin.community.flow.ban_wait.is_some()));
     assert_eq!(open_box(&app, &mut vcx), "pick");
+    app.update(&mut vcx, |app, cx| {
+        app.admin.community.flow.open = None;
+        cx.notify();
+    });
+    frames(&mut vcx);
+    app.update(&mut vcx, |app, cx| assert!(app.drain_pending_ban(cx)));
+    assert!(app.read_with(&vcx, |app, _| app.admin.community.flow.ban_wait.is_none()));
+    assert_eq!(open_box(&app, &mut vcx), "ban-warning");
+}
+
+#[gpui_kit::test]
+fn a_ban_warning_opens_at_once_when_no_box_is_open(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    frames(&mut vcx);
+    ban_waiting_for_a_warning(&app, &mut vcx);
+    app.update(&mut vcx, |app, cx| assert!(app.drain_pending_ban(cx)));
+    assert!(app.read_with(&vcx, |app, _| app.admin.community.flow.ban_wait.is_none()));
+    assert_eq!(open_box(&app, &mut vcx), "ban-warning");
 }

@@ -170,7 +170,9 @@ impl<S: JsonSender> ConnectDriver<S> {
         let purpose = RequestPurpose::SetChatPermissions;
         // A save while an earlier one is out sends too (TDLib applies them
         // in order, the later one wins); its rollback restores the values
-        // from before the first, not the ones the first showed.
+        // from before the first, not the ones the first showed. When the
+        // first succeeds, the later rollbacks take its values
+        // (`Session::settle_permissions_save`).
         let original = self
             .session
             .requests
@@ -180,6 +182,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 Some(RequestRollback::ChatPermissions {
                     previous,
                     previous_can_send,
+                    ..
                 }) => Some((*previous, *previous_can_send)),
                 _ => None,
             });
@@ -201,6 +204,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             let rollback = RequestRollback::ChatPermissions {
                 previous,
                 previous_can_send,
+                sent: *permissions,
             };
             chat.permissions = Some(*permissions);
             chat.can_send_basic_messages = permissions.can_send_basic_messages;

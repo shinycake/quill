@@ -43,8 +43,16 @@ impl Session {
             Some(RequestRollback::ChatPermissions {
                 previous,
                 previous_can_send,
+                ..
             }) => {
+                // A save still out after this one decides what the box
+                // shows (its rollback holds the same values, or this
+                // chain's last confirmed ones).
                 if let Some(chat_id) = pending.and_then(|p| p.chat_id)
+                    && self
+                        .requests
+                        .pending_extra_for(RequestPurpose::SetChatPermissions, Some(chat_id))
+                        .is_none()
                     && let Some(chat) = self.chats.get_mut(&chat_id.0)
                 {
                     chat.permissions = previous;

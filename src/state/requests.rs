@@ -988,6 +988,16 @@ impl RequestRegistry {
             .map(|p| p.id)
     }
 
+    /// The `setChatPermissions` saves still out for a chat.
+    pub fn pending_chat_permissions_mut(
+        &mut self,
+        chat_id: ChatId,
+    ) -> impl Iterator<Item = &mut PendingRequest> {
+        self.pending.values_mut().filter(move |p| {
+            p.purpose == RequestPurpose::SetChatPermissions && p.chat_id == Some(chat_id)
+        })
+    }
+
     pub fn has_download(&self, file_id: FileId) -> bool {
         self.downloads.contains_key(&file_id.0)
     }
