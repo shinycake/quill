@@ -152,7 +152,7 @@ impl QuillApp {
         });
         let Some(call) = call else {
             let summary = summary?;
-            let busy = summary.busy;
+            let busy = summary.busy();
             return Some(CallSnap {
                 user_id,
                 is_video,
@@ -185,18 +185,18 @@ impl QuillApp {
             });
         };
         let (status, connecting) = call_status(
-            &call.state,
+            &call.phase(),
             call.is_outgoing,
             call.transport.state(),
             call.connected_secs(),
         );
-        let ready = matches!(call.state, CallState::Ready);
+        let ready = matches!(call.phase(), CallState::Ready);
         Some(CallSnap {
             user_id,
             is_video,
             name,
             photo,
-            phase: if matches!(call.state, CallState::Pending { .. }) && !call.is_outgoing {
+            phase: if matches!(call.phase(), CallState::Pending { .. }) && !call.is_outgoing {
                 CallPhase::Incoming
             } else {
                 CallPhase::Active
@@ -332,12 +332,12 @@ impl QuillApp {
             ) {
                 (Some(call), _) => (
                     Some(call.id),
-                    (matches!(call.state, CallState::Pending { .. }) && !call.is_outgoing)
+                    (matches!(call.phase(), CallState::Pending { .. }) && !call.is_outgoing)
                         .then_some(call.id),
                     false,
                     false,
                 ),
-                (None, Some(summary)) => (Some(summary.call_id), None, true, summary.busy),
+                (None, Some(summary)) => (Some(summary.call_id), None, true, summary.busy()),
                 _ => match super::call_conference_ui::ringing_invite_key(session) {
                     Some(key) => (Some(key), Some(key), false, false),
                     None => (None, None, false, false),
@@ -358,7 +358,7 @@ impl QuillApp {
             .map(|u| u.display_name())
             .unwrap_or_else(|| tr(keys::Q_OPS_TELEGRAM_USER).into());
         let (status, _) = call_status(
-            &call.state,
+            &call.phase(),
             call.is_outgoing,
             call.transport.state(),
             call.connected_secs(),

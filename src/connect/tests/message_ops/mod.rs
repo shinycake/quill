@@ -573,13 +573,8 @@ fn driver_link_preview_prefetch_ingest() {
     driver
         .session
         .messages
-        .composer_preview_urls
-        .insert(extra, "https://example.com/story".to_string());
-    driver
-        .session
-        .messages
         .composer_previews
-        .asked("https://example.com/story");
+        .asked("https://example.com/story", extra);
 
     let json = format!(
         r#"{{"@type":"linkPreview","url":"https://example.com/story","display_url":"example.com","site_name":"Example","title":"A short story","description":{{"@type":"formattedText","text":"Preview body","entities":[]}},"author":"","type":{{"@type":"linkPreviewTypeArticle"}},"has_large_media":true,"show_large_media":false,"show_media_above_description":false,"skip_confirmation":true,"show_above_text":false,"instant_view_version":0,"@extra":"{id}"}}"#,
@@ -602,11 +597,6 @@ fn driver_link_preview_prefetch_ingest() {
 
     // A superseded URL's late answer must not clobber the chip.
     let stale = driver.session.request(RequestPurpose::GetLinkPreview, None);
-    driver
-        .session
-        .messages
-        .composer_preview_urls
-        .insert(stale, "https://example.com/old".to_string());
     let json = format!(
         r#"{{"@type":"linkPreview","url":"https://example.com/old","display_url":"example.com","site_name":"","title":"Old","description":{{"@type":"formattedText","text":"","entities":[]}},"author":"","type":{{"@type":"linkPreviewTypeArticle"}},"has_large_media":false,"show_large_media":false,"show_media_above_description":false,"skip_confirmation":false,"show_above_text":false,"instant_view_version":0,"@extra":"{id}"}}"#,
         id = stale.0,
@@ -635,13 +625,8 @@ fn driver_link_preview_prefetch_ingest() {
     driver
         .session
         .messages
-        .composer_preview_urls
-        .insert(miss, "https://example.com/story".to_string());
-    driver
-        .session
-        .messages
         .composer_previews
-        .asked("https://example.com/story");
+        .asked("https://example.com/story", miss);
     let json = format!(
         r#"{{"@type":"error","code":404,"message":"Not Found","@extra":"{id}"}}"#,
         id = miss.0,
@@ -664,9 +649,8 @@ fn driver_link_preview_prefetch_ingest() {
     driver
         .session
         .messages
-        .composer_preview_urls
-        .insert(flood, url.to_string());
-    driver.session.messages.composer_previews.asked(url);
+        .composer_previews
+        .asked(url, flood);
     let json = format!(
         r#"{{"@type":"error","code":429,"message":"FLOOD_WAIT_5","@extra":"{id}"}}"#,
         id = flood.0,

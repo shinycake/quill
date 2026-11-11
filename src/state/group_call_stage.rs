@@ -4,6 +4,8 @@
 //! `screen_share_answer`, which were kept in step by hand and could say two
 //! things at once (ready and failed, pending and sharing).
 
+use crate::ids::RequestId;
+
 /// Where the call's native transport stands.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum GroupTransport {
@@ -102,16 +104,26 @@ impl GroupTransport {
 pub enum GroupScreenShare {
     #[default]
     Off,
-    /// `startGroupCallScreenSharing` is in flight; `answer` is its `Text`
-    /// answer once it arrived, for the pump to connect.
-    Starting { answer: String },
+    /// `startGroupCallScreenSharing` is in flight as `request` (only its
+    /// answer or error counts); `answer` is its `Text` answer once it
+    /// arrived, for the pump to connect. Leaves by the connect, the
+    /// request's error, a cancel or a stop.
+    Starting { request: RequestId, answer: String },
     /// The presentation transport is connected.
     Sharing,
+    /// Connected, and the capture is held (the system picker's pause): the
+    /// own tile shows paused. A start, a stop or a connect leaves it.
+    Paused,
 }
 
 impl GroupScreenShare {
+    /// Connected, paused or not (the capture runs while it is).
     pub fn is_sharing(&self) -> bool {
-        matches!(self, Self::Sharing)
+        matches!(self, Self::Sharing | Self::Paused)
+    }
+
+    pub fn is_paused(&self) -> bool {
+        matches!(self, Self::Paused)
     }
 
     pub fn is_starting(&self) -> bool {
@@ -126,21 +138,40 @@ impl GroupScreenShare {
     /// The stored presentation answer, empty unless one waits.
     pub fn answer(&self) -> &str {
         match self {
-            Self::Starting { answer } => answer,
+            Self::Starting { answer, .. } => answer,
             _ => "",
         }
     }
 
-    pub fn start(&mut self) {
+    /// A start went out as `request`; a start already in flight is replaced
+    /// and its late answer is then dropped.
+    pub fn start(&mut self, request: RequestId) {
         *self = Self::Starting {
+            request,
             answer: String::new(),
         };
     }
 
-    /// The answer of a start in flight; with none in flight it is stale.
-    pub fn store_answer(&mut self, payload: String) {
-        if let Self::Starting { answer } = self {
+    /// The answer of `request`, the start in flight; any other is stale.
+    pub fn store_answer(&mut self, request: Option<RequestId>, payload: String) {
+        if let Self::Starting {
+            request: waiting,
+            answer,
+        } = self
+            && request == Some(*waiting)
+        {
             *answer = payload;
+        }
+    }
+
+    /// `request` came back with an error: only the start it asked ends.
+    pub fn fail_start(&mut self, request: Option<RequestId>) {
+        if let Self::Starting {
+            request: waiting, ..
+        } = self
+            && request.is_none_or(|request| request == *waiting)
+        {
+            *self = Self::Off;
         }
     }
 
@@ -155,6 +186,15 @@ impl GroupScreenShare {
         *self = Self::Sharing;
     }
 
+    /// The capture was held or let go: only a connected share has one.
+    pub fn set_paused(&mut self, paused: bool) {
+        match (&*self, paused) {
+            (Self::Sharing, true) => *self = Self::Paused,
+            (Self::Paused, false) => *self = Self::Sharing,
+            _ => {}
+        }
+    }
+
     /// Stopped, failed or reset.
     pub fn stop(&mut self) {
         *self = Self::Off;
@@ -164,6 +204,7 @@ impl GroupScreenShare {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ids::RequestId;
 
     #[test]
     fn a_late_answer_does_not_end_a_connection() {
@@ -195,14 +236,52 @@ mod tests {
     #[test]
     fn a_stale_screen_answer_is_not_kept() {
         let mut share = GroupScreenShare::default();
-        share.store_answer("stale".into());
-        share.start();
+        share.store_answer(Some(RequestId(1)), "stale".into());
+        share.start(RequestId(2));
         assert_eq!(share.answer(), "");
-        share.store_answer("fresh".into());
+        // The first start's answer lands during the second.
+        share.store_answer(Some(RequestId(1)), "first".into());
+        share.store_answer(None, "unmatched".into());
+        assert_eq!(share.answer(), "");
+        share.store_answer(Some(RequestId(2)), "fresh".into());
         assert_eq!(share.answer(), "fresh");
         share.connected();
         assert!(share.is_sharing() && share.is_on() && !share.is_starting());
         share.stop();
         assert!(!share.is_on());
+    }
+
+    #[test]
+    fn only_the_start_in_flight_fails() {
+        let mut share = GroupScreenShare::default();
+        share.start(RequestId(1));
+        share.start(RequestId(2));
+        share.fail_start(Some(RequestId(1)));
+        assert!(share.is_starting(), "the older start's error is dropped");
+        share.fail_start(Some(RequestId(2)));
+        assert!(!share.is_on());
+        // A connected share is not ended by a start's error.
+        share.connected();
+        share.fail_start(Some(RequestId(2)));
+        assert!(share.is_sharing());
+    }
+
+    #[test]
+    fn pausing_needs_a_connected_share_and_ends_with_it() {
+        let mut share = GroupScreenShare::default();
+        share.set_paused(true);
+        assert!(!share.is_paused(), "off cannot be paused");
+        share.start(RequestId(1));
+        share.set_paused(true);
+        assert!(!share.is_paused(), "starting cannot be paused");
+        share.connected();
+        share.set_paused(true);
+        assert!(share.is_paused() && share.is_sharing());
+        share.set_paused(false);
+        assert!(!share.is_paused() && share.is_sharing());
+        share.set_paused(true);
+        share.stop();
+        share.connected();
+        assert!(!share.is_paused(), "a new share starts unpaused");
     }
 }

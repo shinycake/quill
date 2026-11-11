@@ -91,10 +91,12 @@ fn rtmp_url_answer_caches_on_tracked_call() {
     );
     let call = session.calls.active_group_call.as_ref().unwrap();
     assert_eq!(
-        call.rtmp_url.as_deref(),
-        Some("rtmp://dc1-rtmp.telegram.org:443/live")
+        call.rtmp,
+        Some(crate::calls::rtmp_start::RtmpInfo {
+            url: "rtmp://dc1-rtmp.telegram.org:443/live".into(),
+            key: "secret-key".into(),
+        })
     );
-    assert_eq!(call.rtmp_stream_key.as_deref(), Some("secret-key"));
 }
 
 #[test]
@@ -371,12 +373,9 @@ fn swap_accept_queued_survives_active_call_end() {
 
 fn hanging_up(session: &mut Session, call_id: i32) -> RequestId {
     let request = session.request(RequestPurpose::DiscardCall, None);
-    let call = session.calls.active_call.as_mut().expect("active call");
-    let resume = std::mem::replace(&mut call.state, CallState::HangingUp);
     session
         .calls
-        .progress
-        .hang_up_sent(crate::state::HangUp::new(request, call_id, resume));
+        .hang_up_sent(crate::state::HangUp::new(request, call_id));
     request
 }
 
@@ -401,12 +400,12 @@ fn non_terminal_update_keeps_a_hang_up_in_flight() {
     let request = hanging_up(&mut session, 78);
     // An update queued before the discard lands.
     apply_json(&mut session, &seq, &sink, &swap_active_json(78, 42));
-    let state = |s: &Session| s.calls.active_call.as_ref().map(|c| c.state.clone());
+    let state = |s: &Session| s.calls.active_call.as_ref().map(|c| c.phase());
     assert_eq!(state(&session), Some(CallState::HangingUp));
     // The hang-up fails: the call is back in the phase it moved to.
     apply_json(&mut session, &seq, &sink, &error_json(request));
     assert_eq!(state(&session), Some(CallState::ExchangingKeys));
-    assert!(session.calls.progress.hang_up().is_none());
+    assert!(session.calls.hang_up().is_none());
     assert!(session.calls.error.is_some());
 }
 
@@ -425,7 +424,7 @@ fn failed_hang_up_reverts_and_brings_the_swap_prompt_back() {
     apply_json(&mut session, &seq, &sink, &error_json(request));
     let call = session.calls.active_call.as_ref().expect("call goes on");
     assert_eq!(
-        (call.id, call.state.clone()),
+        (call.id, call.phase()),
         (77, CallState::ExchangingKeys)
     );
     assert_eq!(session.calls.second_call.prompt(), Some((78, 42, false)));
@@ -441,14 +440,15 @@ fn other_discard_errors_leave_the_hang_up_alone() {
     let other = session.request(RequestPurpose::DiscardCall, None);
     apply_json(&mut session, &seq, &sink, &error_json(other));
     let call = session.calls.active_call.as_ref().expect("active call");
-    assert_eq!(call.state, CallState::HangingUp);
-    assert!(session.calls.progress.hang_up().is_some());
+    assert_eq!(call.phase(), CallState::HangingUp);
+    assert!(session.calls.hang_up().is_some());
     // TDLib's own hanging-up update is kept as the phase to go back to.
     apply_json(&mut session, &seq, &sink, &hanging_up_update_json(77, 41));
     assert_eq!(
-        session.calls.progress.hang_up().map(|h| h.resume.clone()),
+        session.calls.active_call.as_ref().map(|c| c.state.clone()),
         Some(CallState::HangingUp)
     );
+    assert!(session.calls.hang_up().is_some());
 }
 
 /// Sweep 05-251: a send that failed marks only its own rule, so the answer

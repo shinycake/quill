@@ -346,10 +346,12 @@ fn the_reply_bar_copy_shows_an_edit_and_the_oldest_copy_is_the_one_dropped() {
     // Past the cap the oldest settled copy goes, whatever its id.
     let session = &mut t.driver.session;
     for id in (1..=40).rev() {
-        session.begin_composer_reply_fetch(ChatId(21), MessageId(id));
+        let request = crate::ids::RequestId(id as u64);
+        session.begin_composer_reply_fetch(ChatId(21), MessageId(id), request);
         session.reject_composer_reply_target(
             ChatId(21),
             MessageId(id),
+            request,
             &crate::telegram::envelope::TdError::from_code(500),
         );
     }

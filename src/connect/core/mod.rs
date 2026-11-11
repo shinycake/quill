@@ -3,9 +3,7 @@ use super::composer::ai_rich_draft_note;
 use super::*;
 use crate::credentials::TelegramCredentials;
 use crate::ids::{ChatId, ChatMessage, MessageId, RequestId};
-use crate::state::{
-    ComposerLinkPreview, InstantViewPage, LinkPreviewFetch, RequestPurpose, Session, ShutdownPhase,
-};
+use crate::state::{InstantViewPage, RequestPurpose, Session, ShutdownPhase};
 use crate::state::{GroupsPurpose, MessagesPurpose, StickersPurpose, ThreadsPurpose};
 use crate::telegram::client::OwnedEnvelope;
 use crate::telegram::envelope::StoryListView;
@@ -366,31 +364,6 @@ impl<S: JsonSender> ConnectDriver<S> {
         // no Instant View) falls back to the browser like TGX — the URL
         // is stashed for the UI drain, never rendered as a reader.
         let instant_view_fallback = self.take_instant_view_fallback(&owned.envelope);
-        // MED4b: capture the `getLinkPreview` answer before `apply` takes
-        // the pending request; the composer chip reads
-        // `Session::composer_previews`. A late answer for a URL no longer
-        // kept is dropped.
-        let link_preview_answer = self.take_link_preview_answer(&owned.envelope);
-        // MED4b: a 404/400 or an empty answer is "no link info" (TGX
-        // `isNotFound`); any other error is `Failed`, asked again when the URL
-        // is typed again. Every answer ends "Getting link info".
-        let link_preview_failed: Option<(String, LinkPreviewFetch)> = match &owned.envelope.payload
-        {
-            EnvelopePayload::Messages(MessagesPayload::LinkPreview { .. }) => None,
-            payload => owned.envelope.extra.and_then(|id| {
-                let miss = match payload {
-                    EnvelopePayload::Error(err) if err.code == 404 || err.code == 400 => {
-                        LinkPreviewFetch::NotFound
-                    }
-                    EnvelopePayload::Error(_) => LinkPreviewFetch::Failed,
-                    _ => LinkPreviewFetch::NotFound,
-                };
-                (self.session.requests.purpose(id) == Some(RequestPurpose::GetLinkPreview))
-                    .then_some(id)
-                    .and_then(|id| self.session.messages.composer_preview_urls.remove(&id))
-                    .map(|url| (url, miss))
-            }),
-        };
         // Slice CL2: our `createPrivateChat` answer — the bare `chat`
         // parses as `UpdateNewChat`; the `@extra` tells it apart from a
         // genuine `updateNewChat`. Captured before `apply` takes the
@@ -576,18 +549,6 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         if let Some(fallback) = instant_view_fallback {
             self.session.messages.instant_view_fallbacks.push(fallback);
-        }
-        // MED4b: stash the `getLinkPreview` answer for the composer
-        // chip; a 404 becomes "no link info" (`Some(None)`); answers for
-        // superseded URLs are dropped.
-        if let Some(answer) = link_preview_answer {
-            self.session
-                .messages
-                .composer_previews
-                .answered(&answer.url, answer.fetch);
-        }
-        if let Some((url, miss)) = link_preview_failed {
-            self.session.messages.composer_previews.answered(&url, miss);
         }
         if paid_prices_change {
             self.sync_paid_guard();

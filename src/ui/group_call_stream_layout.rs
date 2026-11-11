@@ -250,7 +250,7 @@ impl QuillApp {
             joined: call.is_joined,
             manager: call.can_be_managed,
             viewers: call.viewer_count,
-            server_known: call.rtmp_url.as_deref().is_some_and(|url| !url.is_empty()),
+            server_known: call.rtmp.as_ref().is_some_and(|rtmp| !rtmp.url.is_empty()),
             recording: call.record_duration > 0,
             share_link: self.group_call_can_share_link(call),
             transport_failed: call.transport.error().is_some(),

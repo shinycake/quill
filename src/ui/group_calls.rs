@@ -228,7 +228,7 @@ impl QuillApp {
                 .calls
                 .active_group_call
                 .as_ref()
-                .is_some_and(|call| !call.is_my_video_enabled)
+                .is_some_and(|call| !call.my_video.is_enabled())
         });
         if turning_on {
             self.with_camera_access(Self::flip_group_call_video, cx);
@@ -245,7 +245,7 @@ impl QuillApp {
                 .calls
                 .active_group_call
                 .as_ref()
-                .is_some_and(|call| !call.is_my_video_enabled);
+                .is_some_and(|call| !call.my_video.is_enabled());
             // Others would see your camera as on with nothing sent.
             if turning_on && let Err(err) = live.driver.camera_to_turn_on() {
                 self.set_note(super::calls::camera_toggle_note(Err(err), false));

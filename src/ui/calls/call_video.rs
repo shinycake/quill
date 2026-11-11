@@ -61,7 +61,7 @@ pub(crate) fn call_picture_key(
     let (local, screen) = match picture {
         CallPicture::Local => (true, false),
         CallPicture::Remote => {
-            if !matches!(call.state, CallState::Ready) {
+            if !matches!(call.phase(), CallState::Ready) {
                 return None;
             }
             if call.remote_screen == RemoteVideoState::Active {
@@ -388,6 +388,7 @@ mod tests {
             is_video: true,
             state,
             started_at: Instant::now(),
+            action: quill::state::CallAction::Idle,
             ready: None,
             transport: Default::default(),
             signaling_queue: Vec::new(),

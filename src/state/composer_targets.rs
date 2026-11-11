@@ -22,6 +22,9 @@ const COMPOSER_REPLY_RETRY_BASE: Duration = Duration::from_secs(2);
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ComposerReplyFetch {
     Loading {
+        /// The `getMessage` in flight: only its answer or error counts, a
+        /// late one of an earlier try changes nothing.
+        request: RequestId,
         /// Requests sent before this one (retries of a failed fetch).
         attempts: u8,
     },
@@ -172,9 +175,15 @@ impl Session {
         }
     }
 
-    /// `getMessage` was sent for the reply bar. Past the entry cap, other
-    /// settled entries make room (never one in flight, never this one).
-    pub fn begin_composer_reply_fetch(&mut self, chat_id: ChatId, message_id: MessageId) {
+    /// `getMessage` was sent for the reply bar as `request`. Past the entry
+    /// cap, other settled entries make room (never one in flight, never
+    /// this one).
+    pub fn begin_composer_reply_fetch(
+        &mut self,
+        chat_id: ChatId,
+        message_id: MessageId,
+        request: RequestId,
+    ) {
         let key = (chat_id.0, message_id.0);
         let fetch = &mut self.messages.composer_reply_fetch;
         let attempts = match fetch.get(&key) {
@@ -184,22 +193,46 @@ impl Session {
         if fetch.len() >= COMPOSER_REPLY_FETCH_MAX && !fetch.contains_key(&key) {
             fetch.make_room(COMPOSER_REPLY_FETCH_MAX);
         }
-        fetch.renew(key, ComposerReplyFetch::Loading { attempts });
+        fetch.renew(key, ComposerReplyFetch::Loading { request, attempts });
     }
 
     /// The request never left (the sender is closed): counts as a failed
     /// attempt, so the bar does not retry every frame.
-    pub fn fail_composer_reply_fetch(&mut self, chat_id: ChatId, message_id: MessageId) {
-        self.settle_composer_reply_failure(chat_id, message_id);
+    pub fn fail_composer_reply_fetch(
+        &mut self,
+        chat_id: ChatId,
+        message_id: MessageId,
+        request: RequestId,
+    ) {
+        self.settle_composer_reply_failure(chat_id, message_id, request);
     }
 
-    fn settle_composer_reply_failure(&mut self, chat_id: ChatId, message_id: MessageId) {
+    /// The fetch waiting for `request`, if it still is the one in flight.
+    fn composer_reply_attempts(
+        &self,
+        key: (i64, i64),
+        request: RequestId,
+    ) -> Option<u8> {
+        match self.messages.composer_reply_fetch.get(&key) {
+            Some(ComposerReplyFetch::Loading {
+                request: asked,
+                attempts,
+            }) if *asked == request => Some(*attempts),
+            _ => None,
+        }
+    }
+
+    fn settle_composer_reply_failure(
+        &mut self,
+        chat_id: ChatId,
+        message_id: MessageId,
+        request: RequestId,
+    ) {
         let key = (chat_id.0, message_id.0);
-        let attempts = match self.messages.composer_reply_fetch.get(&key) {
-            Some(ComposerReplyFetch::Loading { attempts }) => attempts.saturating_add(1),
-            Some(ComposerReplyFetch::Failed { attempts, .. }) => attempts.saturating_add(1),
-            _ => 1,
+        let Some(before) = self.composer_reply_attempts(key, request) else {
+            return;
         };
+        let attempts = before.saturating_add(1);
         self.messages.composer_reply_fetch.insert(
             key,
             ComposerReplyFetch::Failed {
@@ -209,13 +242,21 @@ impl Session {
         );
     }
 
-    /// The `getMessage` answer for the reply bar.
+    /// The `getMessage` answer for the reply bar: taken only by the fetch
+    /// that waits for `request`.
     pub(crate) fn accept_composer_reply_target(
         &mut self,
         chat_id: ChatId,
         message_id: MessageId,
+        request: RequestId,
         message: ParsedMessage,
     ) {
+        if self
+            .composer_reply_attempts((chat_id.0, message_id.0), request)
+            .is_none()
+        {
+            return;
+        }
         self.remember_files(&message.files);
         self.messages.composer_reply_fetch.insert(
             (chat_id.0, message_id.0),
@@ -223,21 +264,27 @@ impl Session {
         );
     }
 
-    /// `getMessage` failed for the reply bar.
+    /// `getMessage` failed for the reply bar: taken only by the fetch that
+    /// waits for `request`.
     pub(crate) fn reject_composer_reply_target(
         &mut self,
         chat_id: ChatId,
         message_id: MessageId,
+        request: RequestId,
         err: &TdError,
     ) {
+        let key = (chat_id.0, message_id.0);
+        if self.composer_reply_attempts(key, request).is_none() {
+            return;
+        }
         // Only a definite answer means the message is gone. A lost request
         // (408), a flood wait (429) or a server fault says nothing about it.
         if matches!(err.code, 400 | 403 | 404) {
             self.messages
                 .composer_reply_fetch
-                .insert((chat_id.0, message_id.0), ComposerReplyFetch::Gone);
+                .insert(key, ComposerReplyFetch::Gone);
         } else {
-            self.settle_composer_reply_failure(chat_id, message_id);
+            self.settle_composer_reply_failure(chat_id, message_id, request);
         }
     }
 

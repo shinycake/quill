@@ -183,8 +183,13 @@ fn a_message_deleted_only_in_the_thread_or_topic_it_was_found_in_is_gone() {
 }
 
 fn reject(session: &mut Session, code: i32) {
-    session.begin_composer_reply_fetch(ChatId(7), MessageId(999));
-    session.reject_composer_reply_target(ChatId(7), MessageId(999), &TdError::from_code(code));
+    session.begin_composer_reply_fetch(ChatId(7), MessageId(999), RequestId(1));
+    session.reject_composer_reply_target(
+        ChatId(7),
+        MessageId(999),
+        RequestId(1),
+        &TdError::from_code(code),
+    );
 }
 
 #[test]
@@ -243,10 +248,16 @@ fn a_failed_reply_fetch_is_retried_when_online_with_a_wait_and_a_limit() {
 #[test]
 fn the_fetch_cap_keeps_the_in_flight_and_the_new_entry() {
     let (mut session, _sink, _seq) = seeded();
-    session.begin_composer_reply_fetch(ChatId(7), MessageId(1));
+    session.begin_composer_reply_fetch(ChatId(7), MessageId(1), RequestId(1));
     for id in 2..=40 {
-        session.begin_composer_reply_fetch(ChatId(7), MessageId(id));
-        session.reject_composer_reply_target(ChatId(7), MessageId(id), &TdError::from_code(500));
+        let request = RequestId(id as u64);
+        session.begin_composer_reply_fetch(ChatId(7), MessageId(id), request);
+        session.reject_composer_reply_target(
+            ChatId(7),
+            MessageId(id),
+            request,
+            &TdError::from_code(500),
+        );
     }
     let fetch = &session.messages.composer_reply_fetch;
     assert!(fetch.len() <= 32);
@@ -255,4 +266,24 @@ fn the_fetch_cap_keeps_the_in_flight_and_the_new_entry() {
         Some(ComposerReplyFetch::Loading { .. })
     ));
     assert!(fetch.contains_key(&(7, 40)));
+}
+
+/// Sweep r2-17 (05-012): a re-asked reply fetch answers only to its own
+/// request; the older request's late error leaves the newer one loading.
+#[test]
+fn a_reply_fetch_takes_only_its_own_requests_end() {
+    let (mut session, _sink, _seq) = seeded();
+    let (chat, message) = (ChatId(7), MessageId(999));
+    session.begin_composer_reply_fetch(chat, message, RequestId(1));
+    session.reject_composer_reply_target(chat, message, RequestId(1), &TdError::from_code(500));
+    session.begin_composer_reply_fetch(chat, message, RequestId(2));
+    // The first try's late 404 would mark the message gone.
+    session.reject_composer_reply_target(chat, message, RequestId(1), &TdError::from_code(404));
+    assert!(matches!(
+        session.messages.composer_reply_fetch.get(&(7, 999)),
+        Some(ComposerReplyFetch::Loading { request: RequestId(2), attempts: 1 })
+    ));
+    assert!(!session.message_deleted(chat, message));
+    session.reject_composer_reply_target(chat, message, RequestId(2), &TdError::from_code(404));
+    assert!(session.message_deleted(chat, message));
 }

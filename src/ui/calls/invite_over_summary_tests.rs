@@ -37,7 +37,7 @@ fn ended_without_rating(call_id: i32) -> CallSummary {
         duration_secs: 30,
         had_audio: true,
         end_line: String::new(),
-        busy: false,
+        end: quill::state::CallEnd::Ended,
         rating: quill::state::CallRating::NotNeeded,
         debug_information: quill::state::CallUpload::NotNeeded,
         log: quill::state::CallUpload::NotNeeded,

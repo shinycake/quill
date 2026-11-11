@@ -142,7 +142,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .map(|call| {
                 (
                     call.transport.answer().to_string(),
-                    call.is_my_video_enabled && !call.is_my_video_paused,
+                    call.my_video.is_live(),
                 )
             });
         if let Some((answer, video_enabled)) = join_answer
@@ -232,7 +232,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .session
             .calls
             .group_call(group_call_id)
-            .is_some_and(|call| call.is_my_video_enabled && !call.is_my_video_paused)
+            .is_some_and(|call| call.my_video.is_live())
             .then(|| self.call_camera_device())
             .flatten();
         if self.group_camera_state.get(&group_call_id) != Some(&wanted_camera) {

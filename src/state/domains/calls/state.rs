@@ -60,9 +60,6 @@ pub struct CallsState {
     /// active: its swap prompt, or the accept queued behind the current
     /// call's hang-up. Further incoming calls go to `busy_decline_queue`.
     pub second_call: SecondCall,
-    /// What this side did to the active call: answered it, or hung it up
-    /// (the `discardCall` in flight owns the `HangingUp` phase).
-    pub progress: CallProgress,
     /// Phase C2i: "who can call me"
     /// (`userPrivacySettingAllowCalls`, schema 1.8.67 :9006).
     pub privacy_allow_calls: Option<PrivacyWho>,
@@ -231,7 +228,6 @@ impl CallsState {
             busy_declined_calls: std::collections::VecDeque::new(),
             busy_declined: Vec::new(),
             second_call: SecondCall::None,
-            progress: CallProgress::Idle,
             privacy_allow_calls: None,
             privacy_p2p: None,
             privacy_asks: CallPrivacyAsks::default(),

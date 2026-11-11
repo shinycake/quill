@@ -204,6 +204,7 @@ impl Session {
                     is_created: true,
                     is_received: false,
                 },
+                action: CallAction::Idle,
                 started_at: Instant::now(),
                 ready: None,
                 transport: CallTransport::default(),

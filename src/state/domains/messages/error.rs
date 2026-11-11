@@ -45,12 +45,13 @@ impl Session {
         {
             self.reject_replied_message(chat_id, message_id, err.code, std::time::Instant::now());
         }
-        if let Some(RequestPurpose::Messages(MessagesPurpose::GetComposerReplyTarget {
-            chat_id,
-            message_id,
-        })) = pending.map(|p| p.purpose)
+        if let Some(p) = pending
+            && let RequestPurpose::Messages(MessagesPurpose::GetComposerReplyTarget {
+                chat_id,
+                message_id,
+            }) = p.purpose
         {
-            self.reject_composer_reply_target(chat_id, message_id, err);
+            self.reject_composer_reply_target(chat_id, message_id, p.id, err);
         }
         // The option menu's facts: a refusal leaves `Loading` so the page
         // stops waiting for rows that will not come.

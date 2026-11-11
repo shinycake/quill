@@ -87,6 +87,7 @@ impl Session {
     ) {
         // A box waiting on this request takes its end from here.
         self.chat_list.dialog_answers.note(pending, &payload);
+        self.settle_composer_link_preview(pending, &payload);
         match payload {
             // Each domain applies its own payloads
             // (`src/state/domains/<domain>/apply.rs`).

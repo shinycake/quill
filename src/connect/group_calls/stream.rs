@@ -267,8 +267,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             return;
         };
         if let Some(call) = self.session.calls.group_call_mut(group_call_id) {
-            call.rtmp_url = Some(url).filter(|url| !url.is_empty());
-            call.rtmp_stream_key = Some(key).filter(|key| !key.is_empty());
+            call.rtmp = (!url.is_empty()).then_some(crate::calls::rtmp_start::RtmpInfo { url, key });
         }
     }
 

@@ -156,7 +156,10 @@ fn the_admin_sees_the_server_hint_and_an_ended_stream_closes(cx: &mut TestAppCon
     app.update(&mut call, |app, cx| {
         let session = app.demo_session.as_mut().expect("demo");
         if let Some(active) = session.calls.active_group_call.as_mut() {
-            active.rtmp_url = Some("rtmps://dc4-1.rtmp.t.me/s/".into());
+            active.rtmp = Some(quill::calls::rtmp_start::RtmpInfo {
+                url: "rtmps://dc4-1.rtmp.t.me/s/".into(),
+                key: String::new(),
+            });
         }
         cx.notify();
     });

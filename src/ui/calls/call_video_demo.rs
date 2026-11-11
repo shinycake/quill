@@ -114,6 +114,7 @@ pub(in crate::ui) fn seed_video_call(
         is_video: std::env::var_os("QUILL_DEMO_VOICE").is_none(),
         state: CallState::Ready,
         started_at: ready_at,
+        action: quill::state::CallAction::Idle,
         ready: Some(quill::state::CallReady {
             params: Some(ReadyParams {
                 encryption_key: Vec::new(),

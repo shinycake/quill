@@ -276,3 +276,47 @@ fn an_answer_dropped_as_out_of_order_does_not_leave_its_download_running() {
     assert!(session.requests.is_empty());
     assert!(!session.requests.has_download(file));
 }
+
+/// Sweep r2-17 (05-011): a swept `getLinkPreview` leaves "Getting link
+/// info" for "could not load", so the URL asks again when typed again.
+#[test]
+fn sweeping_a_link_preview_request_settles_its_chip() {
+    let mut session = ready_session();
+    let url = "https://example.com/slow";
+    let request = session.request(RequestPurpose::GetLinkPreview, None);
+    session.messages.composer_previews.asked(url, request);
+    assert!(matches!(
+        session.messages.composer_previews.get(url).map(|p| &p.fetch),
+        Some(LinkPreviewFetch::Asked(id)) if *id == request
+    ));
+
+    assert!(sweep(&mut session));
+
+    assert!(matches!(
+        session.messages.composer_previews.get(url).map(|p| &p.fetch),
+        Some(LinkPreviewFetch::Failed)
+    ));
+}
+
+/// Sweep r2-17 (05-012): a swept reply-bar fetch is a failed attempt that
+/// the bar asks again, not "Loading" for good.
+#[test]
+fn sweeping_a_reply_bar_fetch_leaves_loading() {
+    let mut session = ready_session();
+    let (chat, message) = (ChatId(7), MessageId(999));
+    let request = session.request(
+        RequestPurpose::Messages(MessagesPurpose::GetComposerReplyTarget {
+            chat_id: chat,
+            message_id: message,
+        }),
+        Some(chat),
+    );
+    session.begin_composer_reply_fetch(chat, message, request);
+
+    assert!(sweep(&mut session));
+
+    assert!(matches!(
+        session.messages.composer_reply_fetch.get(&(7, 999)),
+        Some(ComposerReplyFetch::Failed { attempts: 1, .. })
+    ));
+}

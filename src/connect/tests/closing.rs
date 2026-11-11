@@ -444,6 +444,7 @@ fn active_call(is_outgoing: bool, state: CallState) -> ActiveCall {
         is_outgoing,
         is_video: false,
         state,
+        action: crate::state::CallAction::Idle,
         started_at: Instant::now(),
         ready: None,
         transport: Default::default(),

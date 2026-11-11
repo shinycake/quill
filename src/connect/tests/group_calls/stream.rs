@@ -760,8 +760,13 @@ fn an_rtmp_join_answer_for_the_admin_keeps_the_server_url() {
         .active_group_call
         .as_ref()
         .expect("tracked call");
-    assert_eq!(call.rtmp_url.as_deref(), Some("rtmps://dc4-1.rtmp.t.me/s/"));
-    assert_eq!(call.rtmp_stream_key.as_deref(), Some("1:abc"));
+    assert_eq!(
+        call.rtmp,
+        Some(crate::calls::rtmp_start::RtmpInfo {
+            url: "rtmps://dc4-1.rtmp.t.me/s/".into(),
+            key: "1:abc".into(),
+        })
+    );
     let _ = std::fs::remove_dir_all(&dir);
 }
 

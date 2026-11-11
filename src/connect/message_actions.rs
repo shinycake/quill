@@ -69,7 +69,8 @@ impl<S: JsonSender> ConnectDriver<S> {
             }),
             Some(chat_id),
         );
-        self.session.begin_composer_reply_fetch(chat_id, message_id);
+        self.session
+            .begin_composer_reply_fetch(chat_id, message_id, extra);
         if let Err(err) = self
             .sender
             .send_json(&crate::telegram::requests::get_message(
@@ -77,7 +78,8 @@ impl<S: JsonSender> ConnectDriver<S> {
             ))
         {
             self.session.requests.take(extra);
-            self.session.fail_composer_reply_fetch(chat_id, message_id);
+            self.session
+                .fail_composer_reply_fetch(chat_id, message_id, extra);
             return Err(err);
         }
         Ok(true)
@@ -606,13 +608,9 @@ impl<S: JsonSender> ConnectDriver<S> {
         let json = get_link_preview(extra, url);
         match self.sender.send_json(&json) {
             Ok(()) => {
-                self.session
-                    .messages
-                    .composer_preview_urls
-                    .insert(extra, url.to_string());
                 // Loading state — the chip shows "Getting link info…"
                 // (TGX `LinkPreview.isLoading`).
-                self.session.messages.composer_previews.asked(url);
+                self.session.messages.composer_previews.asked(url, extra);
                 Ok(())
             }
             Err(err) => {

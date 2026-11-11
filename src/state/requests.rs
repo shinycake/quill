@@ -134,6 +134,10 @@ impl RequestPurpose {
                 | RequestPurpose::Media(MediaPurpose::GetSharedMediaMore { .. })
                 | RequestPurpose::Media(MediaPurpose::SearchDiskPausedDownloads)
                 | RequestPurpose::GetPinnedMessages
+                // The composer's link chip and reply bar wait on these:
+                // a lost one settles as a failure they draw and ask again.
+                | RequestPurpose::GetLinkPreview
+                | RequestPurpose::Messages(MessagesPurpose::GetComposerReplyTarget { .. })
                 | RequestPurpose::GetUserFullInfo
                 | RequestPurpose::GetSupergroupFullInfo
                 | RequestPurpose::GetBasicGroupFullInfo

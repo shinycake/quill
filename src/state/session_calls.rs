@@ -47,14 +47,9 @@ impl Session {
                     }
                 }
                 active.is_video = call.is_video;
-                // A hang-up in flight keeps showing: the update is where
-                // the call goes back to if the discardCall fails.
-                match self.calls.progress.hang_up_mut() {
-                    Some(hang_up) if hang_up.call_id == call.id => {
-                        hang_up.resume = call.state.clone();
-                    }
-                    _ => active.state = call.state.clone(),
-                }
+                // A hang-up in flight keeps showing ([`ActiveCall::phase`]);
+                // the update is where the call stands if it fails.
+                active.state = call.state.clone();
             }
             return;
         }
@@ -189,7 +184,6 @@ impl Session {
         if !self.note_call_migration(call, &summary) {
             self.calls.summary = Some(summary);
         }
-        self.calls.progress.call_ended(call.id);
         self.calls
             .busy_decline_queue
             .retain(|(id, _, _)| *id != call.id);
@@ -574,11 +568,16 @@ impl Session {
     /// Phase C2g: store the `startGroupCallScreenSharing` `Text`
     /// response on the tracked call; the driver pump consumes it to
     /// finish the presentation handshake.
-    pub fn set_group_call_screen_share_answer(&mut self, group_call_id: i32, payload: String) {
+    pub fn set_group_call_screen_share_answer(
+        &mut self,
+        group_call_id: i32,
+        request: Option<RequestId>,
+        payload: String,
+    ) {
         if let Some(tracked) = self.calls.active_group_call.as_mut()
             && tracked.id == group_call_id
         {
-            tracked.screen_share.store_answer(payload);
+            tracked.screen_share.store_answer(request, payload);
         }
     }
 
@@ -608,8 +607,8 @@ fn apply_group_call_fields(tracked: &mut ActiveGroupCall, group_call: &ParsedGro
     tracked.participant_count = group_call.participant_count;
     tracked.viewer_count = u32::try_from(group_call.participant_count).unwrap_or(0);
     tracked.loaded_all_participants = group_call.loaded_all_participants;
-    tracked.is_my_video_enabled = group_call.is_my_video_enabled;
-    tracked.is_my_video_paused = group_call.is_my_video_paused;
+    tracked.my_video =
+        MyVideo::from_server(group_call.is_my_video_enabled, group_call.is_my_video_paused);
     tracked.can_enable_video = group_call.can_enable_video;
     tracked.mute_new_participants = group_call.mute_new_participants;
     tracked.can_toggle_mute_new_participants = group_call.can_toggle_mute_new_participants;

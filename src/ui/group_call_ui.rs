@@ -51,7 +51,7 @@ impl QuillApp {
         if !matches!(participant.participant_id, MessageSender::User { .. }) {
             return div().child(initials_avatar(name, 56.)).into_any_element();
         }
-        if !call.is_my_video_enabled {
+        if !call.my_video.is_enabled() {
             return div().child(initials_avatar(name, 56.)).into_any_element();
         }
         let key = quill::calls::live_video::LiveKey::Local { call_id: call.id };

@@ -497,12 +497,13 @@ impl Session {
                     self.accept_replied_message(chat_id, message_id, message);
                     return;
                 }
-                if let Some(RequestPurpose::Messages(MessagesPurpose::GetComposerReplyTarget {
-                    chat_id,
-                    message_id,
-                })) = pending.map(|p| p.purpose)
+                if let Some(p) = pending
+                    && let RequestPurpose::Messages(MessagesPurpose::GetComposerReplyTarget {
+                        chat_id,
+                        message_id,
+                    }) = p.purpose
                 {
-                    self.accept_composer_reply_target(chat_id, message_id, message);
+                    self.accept_composer_reply_target(chat_id, message_id, p.id, message);
                     return;
                 }
                 // M1 fix-up: editing a scheduled send returns the edited

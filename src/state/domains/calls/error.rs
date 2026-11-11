@@ -47,7 +47,7 @@ impl Session {
             Some(RequestPurpose::Calls(CallsPurpose::AcceptCall { call_id })) => {
                 // The call was never answered and keeps ringing, so a
                 // close must leave it to ring.
-                self.calls.progress.answer_failed(call_id);
+                self.calls.answer_call_failed(call_id);
                 // An answer that fails after its call went must not land on
                 // the next one (tdesktop drops the request with its call).
                 if self.calls.active_call.as_ref().map(|call| call.id) == Some(call_id) {
@@ -58,12 +58,7 @@ impl Session {
             Some(RequestPurpose::DiscardCall) => {
                 // The active call's hang-up failed: the call goes on in
                 // the phase it had, and a swap waiting on it asks again.
-                if let Some(hang_up) = self.calls.progress.hang_up_failed(extra) {
-                    if let Some(call) = self.calls.active_call.as_mut()
-                        && call.id == hang_up.call_id
-                    {
-                        call.state = hang_up.resume;
-                    }
+                if let Some(hang_up) = self.calls.hang_up_failed(extra) {
                     self.calls.second_call.back_to_prompt();
                     // The call stays up, so no link waits for it to end.
                     self.calls
@@ -234,7 +229,7 @@ impl Session {
                 if let Some(tracked) = self.calls.active_group_call.as_mut()
                     && tracked.id == group_call_id
                 {
-                    tracked.screen_share.stop();
+                    tracked.screen_share.fail_start(pending.map(|p| p.id));
                 }
                 self.calls.group_call_error = Some(call_request_error_line(
                     err,
@@ -263,9 +258,9 @@ impl Session {
             })) => {
                 if let Some(tracked) = self.calls.active_group_call.as_mut()
                     && tracked.id == group_call_id
-                    && tracked.screen_share_paused == paused
+                    && tracked.screen_share.is_paused() == paused
                 {
-                    tracked.screen_share_paused = !paused;
+                    tracked.screen_share.set_paused(!paused);
                 }
             }
             Some(

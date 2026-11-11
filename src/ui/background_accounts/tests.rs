@@ -142,7 +142,7 @@ fn an_older_call_summary_does_not_silence_another_accounts_ring(cx: &mut TestApp
             duration_secs: 30,
             had_audio: true,
             end_line: String::new(),
-            busy: false,
+            end: quill::state::CallEnd::Ended,
             rating: quill::state::CallRating::NotNeeded,
             debug_information: quill::state::CallUpload::NotNeeded,
             log: quill::state::CallUpload::NotNeeded,

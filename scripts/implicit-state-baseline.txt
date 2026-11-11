@@ -7,7 +7,6 @@ ActiveGroupCall::loaded_all_participants
 BackendStatus::failed
 BarFacts::bot_start_pending
 CallSnap::connecting
-CallSummary::busy
 
 ChatSwipeFacts::is_saved
 

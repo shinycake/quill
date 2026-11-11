@@ -143,7 +143,7 @@ impl QuillApp {
         } else {
             tr(keys::Q_OPS_VOICE_CALL)
         };
-        let (status, clock): (String, Option<String>) = match &call.state {
+        let (status, clock): (String, Option<String>) = match &call.phase() {
             CallState::Pending { .. } => {
                 let elapsed = call.started_at.elapsed().as_secs();
                 if call.is_outgoing {
@@ -247,7 +247,7 @@ impl QuillApp {
         // repeats the note below; accepting/placing starts no media in
         // this build.
         let no_transport_note = matches!(
-            call.state,
+            call.phase(),
             CallState::Ready | CallState::ExchangingKeys | CallState::Pending { .. }
         );
         if no_transport_note {
@@ -280,7 +280,7 @@ impl QuillApp {
         // Phase C1b: local-only mute state. Tracked on the call but a
         // no-op without media transport — labeled honestly.
         let show_mute_note =
-            call.muted && matches!(call.state, CallState::Ready | CallState::Unknown(_));
+            call.muted && matches!(call.phase(), CallState::Ready | CallState::Unknown(_));
         if show_mute_note {
             card = card.child(
                 div()
@@ -293,7 +293,7 @@ impl QuillApp {
         // the screen instead of the camera (one video track); the flag
         // is the tracked toggle intent.
         let show_screen_share_note =
-            call.screen_sharing() && matches!(call.state, CallState::Ready | CallState::Unknown(_));
+            call.screen_sharing() && matches!(call.phase(), CallState::Ready | CallState::Unknown(_));
         if show_screen_share_note {
             card = card.child(
                 div()
@@ -318,7 +318,7 @@ impl QuillApp {
                     .child(error.to_string()),
             );
         }
-        if matches!(call.state, CallState::Ready) {
+        if matches!(call.phase(), CallState::Ready) {
             // Phase C2c: microphone/speaker pickers. Live state comes
             // from the driver; the screenshot demo injects demo devices
             // only (no live Telegram, no real hardware). Empty means the
@@ -456,7 +456,7 @@ impl QuillApp {
             }
         }
         let mut buttons = div().flex().gap_2();
-        match &call.state {
+        match &call.phase() {
             CallState::Pending { .. } if !call.is_outgoing => {
                 buttons = buttons
                     .child(

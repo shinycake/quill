@@ -28,33 +28,4 @@ impl<S: JsonSender> ConnectDriver<S> {
             _ => None,
         }
     }
-
-    /// MED4b: the `getLinkPreview` answer for a URL still kept.
-    pub(super) fn take_link_preview_answer(
-        &mut self,
-        envelope: &Envelope,
-    ) -> Option<ComposerLinkPreview> {
-        match &envelope.payload {
-            EnvelopePayload::Messages(MessagesPayload::LinkPreview { preview }) => envelope
-                .extra
-                .and_then(|id| {
-                    (self.session.requests.purpose(id) == Some(RequestPurpose::GetLinkPreview))
-                        .then_some(id)
-                })
-                .and_then(|id| {
-                    self.session
-                        .messages
-                        .composer_preview_urls
-                        .remove(&id)
-                        .map(|url| ComposerLinkPreview {
-                            url,
-                            fetch: match preview.clone() {
-                                Some(preview) => LinkPreviewFetch::Loaded(Box::new(preview)),
-                                None => LinkPreviewFetch::NotFound,
-                            },
-                        })
-                }),
-            _ => None,
-        }
-    }
 }

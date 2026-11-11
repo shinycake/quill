@@ -52,7 +52,7 @@ impl BarsStyle {
 /// The signal bars to show for `call`: tgcalls' count once the call is
 /// established (connected, or reconnecting after it was), nothing before.
 pub(super) fn shown_signal_bars(call: &ActiveCall) -> Option<u8> {
-    let established = matches!(call.state, CallState::Ready)
+    let established = matches!(call.phase(), CallState::Ready)
         && matches!(
             call.transport.state(),
             Some(TransportState::Connected | TransportState::Reconnecting)
@@ -212,6 +212,7 @@ mod tests {
             is_video: false,
             state,
             started_at: std::time::Instant::now(),
+            action: quill::state::CallAction::Idle,
             ready: None,
             transport: transport.map_or_else(Default::default, |state| {
                 CallTransport::reported(state, Default::default()).unwrap_or(

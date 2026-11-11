@@ -333,8 +333,8 @@ impl QuillApp {
     /// Server URL and Stream Key for managers, once the URL is known.
     fn stream_rtmp_rows(&self, key_shown: bool, cx: &mut Context<Self>) -> Option<AnyElement> {
         let call = self.session()?.calls.active_group_call.as_ref()?;
-        let url = call.rtmp_url.clone().filter(|url| !url.is_empty())?;
-        let key = call.rtmp_stream_key.clone().unwrap_or_default();
+        let quill::calls::rtmp_start::RtmpInfo { url, key } =
+            call.rtmp.clone().filter(|rtmp| !rtmp.url.is_empty())?;
         Some(rtmp_info_rows(
             RtmpRows {
                 prefix: "group-call-stream",
