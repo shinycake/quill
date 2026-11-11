@@ -123,10 +123,12 @@ pub struct StyleEditAnswer {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StyleNotice {
-    /// The style of this name was added.
-    Added(String),
-    Removed,
-    Deleted,
+    /// The style of this name was added, by this request.
+    Added { name: String, request: RequestId },
+    /// The style was removed by this request.
+    Removed { request: RequestId },
+    /// The style was deleted by this request.
+    Deleted { request: RequestId },
     Limit(StyleLimitNotice),
     Invalid,
     /// Any other error, by its type.
@@ -150,6 +152,9 @@ pub struct AiComposeState {
     /// then another style opened) does not close the next one.
     pub(crate) style_save: Option<RequestId>,
     pub style_notice: Option<StyleNotice>,
+    /// Add, remove and delete requests that failed: the preview that waits
+    /// on one leaves its in-flight stage (a delete's failure is silent).
+    pub style_op_failures: Vec<RequestId>,
     /// The style named by an in-flight delete, remove or add.
     pub(crate) op_names: HashMap<RequestId, String>,
 }
@@ -366,22 +371,23 @@ impl Session {
         let Some(purpose) = ai_purpose(pending) else {
             return;
         };
+        let Some(request) = pending.map(|pending| pending.id) else {
+            return;
+        };
         let state = &mut self.messages.ai_compose;
-        let name = pending
-            .and_then(|pending| state.op_names.remove(&pending.id))
-            .unwrap_or_default();
+        let name = state.op_names.remove(&request).unwrap_or_default();
         state.style_notice = match purpose {
             AiComposePurpose::AddStyle => {
                 state.styles.promote_name(&name);
-                Some(StyleNotice::Added(name))
+                Some(StyleNotice::Added { name, request })
             }
             AiComposePurpose::RemoveStyle => {
                 state.styles.forget(&name);
-                Some(StyleNotice::Removed)
+                Some(StyleNotice::Removed { request })
             }
             AiComposePurpose::DeleteStyle => {
                 state.styles.forget(&name);
-                Some(StyleNotice::Deleted)
+                Some(StyleNotice::Deleted { request })
             }
             _ => return,
         };
@@ -438,8 +444,11 @@ impl Session {
             }
             AiComposePurpose::AddStyle | AiComposePurpose::RemoveStyle => {
                 state.style_notice = Some(notice);
+                state.style_op_failures.extend(pending.map(|p| p.id));
             }
-            AiComposePurpose::DeleteStyle => {}
+            AiComposePurpose::DeleteStyle => {
+                state.style_op_failures.extend(pending.map(|p| p.id));
+            }
             AiComposePurpose::SearchStyle { token } => {
                 if let Some(lookup) = state.style_lookup.as_mut()
                     && lookup.token == token

@@ -180,17 +180,32 @@ impl QuillApp {
     }
 
     pub(super) fn ai_style_notice_upkeep(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        // A request that failed frees the preview that waited on it.
+        let failed = session_mut(self)
+            .map(|s| std::mem::take(&mut s.messages.ai_compose.style_op_failures))
+            .unwrap_or_default();
+        if let Some(preview) = self.ai_compose.preview.as_mut()
+            && failed.iter().any(|request| preview.waits_on(*request))
+        {
+            preview.show_again();
+            cx.notify();
+        }
         let Some(notice) =
             session_mut(self).and_then(|s| s.messages.ai_compose.style_notice.take())
         else {
             return;
         };
         let toast = match notice {
-            StyleNotice::Added(name) => {
-                let style = self
+            StyleNotice::Added { name, request } => {
+                // Only the Add this preview sent closes it.
+                let own = self
                     .ai_compose
                     .preview
-                    .take()
+                    .as_ref()
+                    .is_some_and(|preview| preview.is_adding_as(request));
+                let style = own
+                    .then(|| self.ai_compose.preview.take())
+                    .flatten()
                     .and_then(|preview| preview.into_style())
                     .filter(|style| style.name == name)
                     .or_else(|| {
@@ -208,16 +223,16 @@ impl QuillApp {
                     )
                 })
             }
-            StyleNotice::Removed | StyleNotice::Deleted => {
+            StyleNotice::Removed { request } | StyleNotice::Deleted { request } => {
                 let asked = self
                     .ai_compose
                     .preview
                     .as_ref()
-                    .is_some_and(|preview| preview.removing());
+                    .is_some_and(|preview| preview.is_removing_as(request));
                 asked.then(|| {
                     self.ai_compose.preview = None;
                     let key = match notice {
-                        StyleNotice::Deleted => keys::AI_COMPOSE_TONE_DELETED,
+                        StyleNotice::Deleted { .. } => keys::AI_COMPOSE_TONE_DELETED,
                         _ => keys::AI_COMPOSE_TONE_REMOVED,
                     };
                     Notification::new().icon(IconName::Trash).message(tr(key))

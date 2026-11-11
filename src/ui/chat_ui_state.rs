@@ -113,6 +113,9 @@ pub(crate) struct ChatUi {
     pub(super) send_as_open: bool,
     /// The copy menu of a phone number, card number or date.
     pub(super) link_popup: Option<super::entity_links::LinkPopup>,
+    /// The address tooltip of the link under the pointer. It goes with the
+    /// chat: another chat under a resting pointer shows none.
+    pub(super) link_tooltip: Option<super::entity_links::LinkTooltip>,
     /// The bot command list above the composer: closed, opened by a typed
     /// `/` token, or opened by the bot's Menu button.
     pub(super) command_menu: super::composer::CommandMenu,

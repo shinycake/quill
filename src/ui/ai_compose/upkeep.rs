@@ -19,7 +19,7 @@ use gpui_kit::component::notification::Notification;
 use gpui_kit::component::*;
 use gpui_kit::*;
 use quill::ai_compose::AiBoxError;
-use quill::ids::{FileId, OfAccount};
+use quill::ids::FileId;
 use quill::lang::{keys, tr};
 
 impl QuillApp {
@@ -169,7 +169,6 @@ impl QuillApp {
             .as_ref()
             .and_then(|preview| preview.style())
             .map(|style| style.custom_emoji_id);
-        let account = self.current_account();
         let mut unresolved = Vec::new();
         let mut files: Vec<FileId> = Vec::new();
         for id in pills.chain(editor).chain(previewed) {
@@ -191,12 +190,9 @@ impl QuillApp {
                     );
                 }
                 Some(_) => {}
-                None if !account.as_ref().is_some_and(|account| {
-                    self.ai_compose
-                        .emoji_asked
-                        .contains(&OfAccount::new(account.clone(), id))
-                }) =>
-                {
+                // The session's own lookup stage per id says whether it is
+                // out, answered or gave up; a failed lookup frees the id.
+                None if !session.stickers.emoji.custom_lookups.attempted(id) => {
                     unresolved.push(id)
                 }
                 None => {}
@@ -207,16 +203,10 @@ impl QuillApp {
         };
         let _ = live.driver.ensure_media_files(&files);
         for id in unresolved {
-            match live.driver.resolve_custom_emoji(id) {
-                Ok(None) => break,
-                Ok(Some(_)) | Err(_) => {
-                    if let Some(account) = account.clone() {
-                        self.screen
-                            .ai_compose
-                            .emoji_asked
-                            .insert(OfAccount::new(account, id));
-                    }
-                }
+            // A lookup already out, or one that did not go out, ends the
+            // pass; the id is asked for again next frame.
+            if !matches!(live.driver.resolve_custom_emoji(id), Ok(Some(_))) {
+                break;
             }
         }
     }

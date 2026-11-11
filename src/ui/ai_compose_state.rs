@@ -8,9 +8,8 @@ use super::app::QuillApp;
 use gpui_kit::component::input::{InputEvent, TextareaState};
 use gpui_kit::*;
 use quill::ai_compose::{AiComposeBox, StyleExample, StyleExamples, TextCompositionStyle};
-use quill::ids::{AccountKey, ChatId, ConversationKey, OfAccount};
+use quill::ids::{AccountKey, ChatId, ConversationKey, RequestId};
 use quill::lang::{keys, tr};
-use std::collections::HashSet;
 use std::ops::Range;
 use std::time::Instant;
 
@@ -59,16 +58,27 @@ pub(crate) enum StyleSave {
 }
 
 /// Where the style preview stands: the lookup its link started, the style
-/// it shows, and whether Remove or Delete was confirmed in it.
+/// it shows, and the Add, Remove or Delete sent from it.
 pub(crate) enum PreviewStage {
     /// The `searchTextCompositionStyle` request with this token runs.
     LookingUp {
         token: u64,
     },
     Shown(TextCompositionStyle),
-    /// Remove or Delete was confirmed here, so its toast shows and the
-    /// preview closes (tdesktop shows those toasts only from this box).
-    Removing(TextCompositionStyle),
+    /// Add Style was sent as `request`: the button waits, and only that
+    /// request's answer closes the preview (its error shows it again).
+    Adding {
+        style: TextCompositionStyle,
+        request: RequestId,
+    },
+    /// Remove or Delete was confirmed here and sent as `request`, so its
+    /// toast shows and the preview closes on that request's answer
+    /// (tdesktop shows those toasts only from this box); an error shows
+    /// the preview again.
+    Removing {
+        style: TextCompositionStyle,
+        request: RequestId,
+    },
 }
 
 /// The style preview an `addstyle/<name>` link opens (tdesktop
@@ -90,14 +100,18 @@ impl AiStylePreview {
     pub(super) fn style(&self) -> Option<&TextCompositionStyle> {
         match &self.stage {
             PreviewStage::LookingUp { .. } => None,
-            PreviewStage::Shown(style) | PreviewStage::Removing(style) => Some(style),
+            PreviewStage::Shown(style)
+            | PreviewStage::Adding { style, .. }
+            | PreviewStage::Removing { style, .. } => Some(style),
         }
     }
 
     pub(super) fn into_style(self) -> Option<TextCompositionStyle> {
         match self.stage {
             PreviewStage::LookingUp { .. } => None,
-            PreviewStage::Shown(style) | PreviewStage::Removing(style) => Some(style),
+            PreviewStage::Shown(style)
+            | PreviewStage::Adding { style, .. }
+            | PreviewStage::Removing { style, .. } => Some(style),
         }
     }
 
@@ -109,8 +123,37 @@ impl AiStylePreview {
         }
     }
 
-    pub(super) fn removing(&self) -> bool {
-        matches!(self.stage, PreviewStage::Removing(_))
+    /// Whether Add Style was sent and not answered.
+    pub(super) fn adding(&self) -> bool {
+        matches!(self.stage, PreviewStage::Adding { .. })
+    }
+
+    /// Whether `request` is the Add, Remove or Delete this preview waits on.
+    pub(super) fn waits_on(&self, request: RequestId) -> bool {
+        matches!(
+            &self.stage,
+            PreviewStage::Adding { request: asked, .. }
+                | PreviewStage::Removing { request: asked, .. } if *asked == request
+        )
+    }
+
+    pub(super) fn is_adding_as(&self, request: RequestId) -> bool {
+        matches!(&self.stage, PreviewStage::Adding { request: asked, .. } if *asked == request)
+    }
+
+    pub(super) fn is_removing_as(&self, request: RequestId) -> bool {
+        matches!(&self.stage, PreviewStage::Removing { request: asked, .. } if *asked == request)
+    }
+
+    /// The Add, Remove or Delete failed or never left: show the style again.
+    pub(super) fn show_again(&mut self) {
+        let stage = std::mem::replace(&mut self.stage, PreviewStage::LookingUp { token: 0 });
+        self.stage = match stage {
+            PreviewStage::Adding { style, .. } | PreviewStage::Removing { style, .. } => {
+                PreviewStage::Shown(style)
+            }
+            other => other,
+        };
     }
 }
 
@@ -168,8 +211,6 @@ pub(crate) struct AiComposeUi {
     /// When the composer's AI button appeared (its sparkle blinks from
     /// here); `None` while it is hidden.
     pub(super) button_shown_at: Option<Instant>,
-    /// Custom emoji ids the style pills already asked TDLib for.
-    pub(super) emoji_asked: HashSet<OfAccount<i64>>,
 }
 
 impl crate::ui::on_screen::Farewell for AiComposeUi {}
@@ -222,7 +263,6 @@ impl AiComposeUi {
             preview: None,
             apply_in_place: None,
             button_shown_at: None,
-            emoji_asked: HashSet::new(),
         }
     }
 }

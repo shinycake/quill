@@ -64,12 +64,19 @@ pub(super) struct LinkPopup {
 }
 
 /// The tooltip of the link under the pointer.
-#[derive(Debug, Clone, PartialEq)]
 pub(super) struct LinkTooltip {
     position: Point<Pixels>,
     text: SharedString,
-    token: u64,
-    shown: bool,
+    stage: TooltipStage,
+}
+
+/// Where a link tooltip stands: waiting out the show delay, or shown. The
+/// waiting stage owns the timer, so dropping the tooltip (the pointer left,
+/// another link, another chat) cancels it and an old timer cannot show a
+/// newer tooltip.
+enum TooltipStage {
+    Waiting { _timer: Task<()> },
+    Shown,
 }
 
 impl QuillApp {
@@ -80,7 +87,7 @@ impl QuillApp {
         msg_key: (i64, u64),
         cx: &mut Context<Self>,
     ) {
-        self.message_ui.link_tooltip = None;
+        self.chat_ui.link_tooltip = None;
         self.message_ui.pending_link = Some(PendingLink {
             link,
             msg_key,
@@ -386,9 +393,23 @@ impl QuillApp {
 
     /// Remember a right-press on a link; the message menu picks it up if
     /// it opens at this very point.
-    pub(super) fn note_right_clicked_link(&mut self, position: Point<Pixels>, link: LinkTarget) {
-        self.message_ui.link_tooltip = None;
+    ///
+    /// The note lives for this press only: the menu opens in the same
+    /// event, and whatever is left when it ends is dropped, so a press
+    /// where no menu opened cannot hand its link to a later menu at the
+    /// same point.
+    pub(super) fn note_right_clicked_link(
+        &mut self,
+        position: Point<Pixels>,
+        link: LinkTarget,
+        cx: &mut Context<Self>,
+    ) {
+        self.chat_ui.link_tooltip = None;
         self.message_ui.right_clicked_link = Some((position, link));
+        let owner = cx.entity().downgrade();
+        cx.defer(move |cx| {
+            let _ = owner.update(cx, |this, _| this.message_ui.right_clicked_link = None);
+        });
     }
 
     /// The link under the right-click that opened a menu at `position`.
@@ -411,30 +432,30 @@ impl QuillApp {
     ) {
         match hover {
             Some((position, text)) => {
-                let token = self.message_ui.link_tooltip.as_ref().map_or(0, |t| t.token) + 1;
-                self.message_ui.link_tooltip = Some(LinkTooltip {
-                    position,
-                    text: text.into(),
-                    token,
-                    shown: false,
-                });
                 // Same delay as every kit tooltip (`ui::tooltip_timing`).
                 let delay = super::tooltip_timing::show_delay(cx);
-                self.spawn_scoped(cx, async move |this, cx| {
+                let timer = self.spawn_scoped(cx, async move |this, cx| {
                     cx.background_executor().timer(delay).await;
                     let _ = this.update(cx, |this, cx| {
-                        if let Some(tooltip) = this.message_ui.link_tooltip.as_mut()
-                            && tooltip.token == token
-                        {
-                            tooltip.shown = true;
+                        if let Some(tooltip) = this.chat_ui.link_tooltip.as_mut() {
+                            tooltip.stage = TooltipStage::Shown;
                             cx.notify();
                         }
                     });
-                })
-                .detach();
+                });
+                self.chat_ui.link_tooltip = Some(LinkTooltip {
+                    position,
+                    text: text.into(),
+                    stage: TooltipStage::Waiting { _timer: timer },
+                });
             }
             None => {
-                if self.message_ui.link_tooltip.take().is_some_and(|t| t.shown) {
+                if self
+                    .chat_ui
+                    .link_tooltip
+                    .take()
+                    .is_some_and(|t| matches!(t.stage, TooltipStage::Shown))
+                {
                     cx.notify();
                 }
             }
@@ -443,7 +464,11 @@ impl QuillApp {
 
     /// The link tooltip, once the pointer has rested on the link.
     pub(super) fn link_tooltip_overlay(&self, cx: &App) -> Option<AnyElement> {
-        let tooltip = self.message_ui.link_tooltip.as_ref().filter(|t| t.shown)?;
+        let tooltip = self
+            .chat_ui
+            .link_tooltip
+            .as_ref()
+            .filter(|t| matches!(t.stage, TooltipStage::Shown))?;
         Some(
             div()
                 .id("link-tooltip")

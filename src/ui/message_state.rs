@@ -24,7 +24,6 @@ pub(crate) struct MessageUi {
     pub(super) menu_item: quill::composer::ReplyItem,
     /// The task or option under the latest right-press, and where.
     pub(super) right_clicked_item: Option<(Point<Pixels>, quill::composer::ReplyItem)>,
-    pub(super) link_tooltip: Option<super::entity_links::LinkTooltip>,
     /// The "Open this link?" box (`DialogKind::OpenLink`).
     pub(super) open_link_confirm: Option<super::entity_links::OpenLinkConfirm>,
     /// A clicked message entity (mention, hashtag, link…) waiting for
@@ -92,7 +91,6 @@ impl MessageUi {
             right_clicked_link: None,
             menu_item: quill::composer::ReplyItem::Message,
             right_clicked_item: None,
-            link_tooltip: None,
             open_link_confirm: None,
             pending_link: None,
             selection_drag: None,

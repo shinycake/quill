@@ -521,23 +521,37 @@ fn add_remove_and_delete_answers() {
     h.answer(extra, json!({"@type": "ok"}));
     assert_eq!(
         h.ai().style_notice,
-        Some(StyleNotice::Added("shared".into()))
+        Some(StyleNotice::Added {
+            name: "shared".into(),
+            request: extra
+        })
     );
     assert_eq!(h.ai().styles.names(), ["shared", "formal"]);
 
     let extra = h.driver.remove_text_composition_style("shared").unwrap();
     h.answer(extra, json!({"@type": "ok"}));
-    assert_eq!(h.ai().style_notice, Some(StyleNotice::Removed));
+    assert_eq!(
+        h.ai().style_notice,
+        Some(StyleNotice::Removed { request: extra })
+    );
     assert_eq!(h.ai().styles.names(), ["formal"]);
 
     let extra = h.driver.delete_text_composition_style("mine").unwrap();
     h.answer(extra, json!({"@type": "ok"}));
-    assert_eq!(h.ai().style_notice, Some(StyleNotice::Deleted));
+    assert_eq!(
+        h.ai().style_notice,
+        Some(StyleNotice::Deleted { request: extra })
+    );
 
     h.driver.session.messages.ai_compose.style_notice = None;
     let extra = h.driver.delete_text_composition_style("mine").unwrap();
     h.fail(extra, "SOMETHING_ELSE");
     assert_eq!(h.ai().style_notice, None, "a failed delete is silent");
+    assert_eq!(
+        h.ai().style_op_failures,
+        [extra],
+        "but the preview waiting on it is told"
+    );
     assert!(h.ai().op_names.is_empty());
 }
 

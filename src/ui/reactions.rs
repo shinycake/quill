@@ -63,7 +63,7 @@ impl QuillApp {
         ) {
             self.message_ui.menu_ui.page = super::message_menu_ui::MessageMenuPage::PollOption;
         }
-        self.message_ui.link_tooltip = None;
+        self.chat_ui.link_tooltip = None;
         // A right-click keeps the text selection; the menu then acts on it
         // (Telegram Desktop's Quote & Reply, Copy Selected Text).
         self.message_ui.menu_selection = super::selectable_text::selected_message_text(window, cx)
