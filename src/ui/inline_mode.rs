@@ -489,10 +489,10 @@ impl QuillApp {
         self.chat_ui.inline_results_open = false;
         self.chat_ui.inline_results_selected = 0;
         self.chat_ui.inline_query_armed = None;
-        let sent = self
-            .live
-            .as_mut()
-            .map(|live| live.driver.send_inline_query_result(chat_id, query_id, &result_id));
+        let sent = self.live.as_mut().map(|live| {
+            live.driver
+                .send_inline_query_result(chat_id, query_id, &result_id)
+        });
         match sent {
             // TDLib's answer gives the text back if it refuses the pick
             // (`settle_sent_text`).

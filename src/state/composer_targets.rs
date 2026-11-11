@@ -43,7 +43,9 @@ impl Session {
     pub fn force_reply_ready(&self) -> bool {
         self.bots.pending_force_replies.values().any(|target| {
             self.chat_is_shown(target.chat_id)
-                && self.reply_target(target.chat_id, target.message_id).is_some()
+                && self
+                    .reply_target(target.chat_id, target.message_id)
+                    .is_some()
         })
     }
 

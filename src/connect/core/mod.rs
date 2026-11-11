@@ -259,7 +259,8 @@ impl<S: JsonSender> ConnectDriver<S> {
         // chat id rides `PendingRequest::chat_id` (the purposes are unit
         // variants); the UI drains `Session::ai_composer_text` into the
         // composer draft.
-        let ai_text_answer: Option<(Option<ChatId>, ChatId, String)> = match &owned.envelope.payload {
+        let ai_text_answer: Option<(Option<ChatId>, ChatId, String)> = match &owned.envelope.payload
+        {
             EnvelopePayload::Messages(MessagesPayload::AiCompose(
                 AiComposePayload::FixedText { text, .. },
             ))

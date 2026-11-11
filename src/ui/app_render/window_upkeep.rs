@@ -255,7 +255,9 @@ impl QuillApp {
         // The answer is for the draft that was asked about: text typed
         // since, a message sent meanwhile or an edit begun after the ask
         // keeps the field as it is.
-        let for_here = ai_text.as_ref().is_some_and(|(_, c, _)| open_chat == Some(*c))
+        let for_here = ai_text
+            .as_ref()
+            .is_some_and(|(_, c, _)| open_chat == Some(*c))
             || ai_blocks
                 .as_ref()
                 .is_some_and(|(_, c, _, _)| open_chat == Some(*c));
