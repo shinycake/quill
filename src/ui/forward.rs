@@ -148,6 +148,8 @@ impl QuillApp {
         if !self.selection_forwardable(draft.from_chat_id) || !self.share.forward.open_picker() {
             return;
         }
+        // The forward box ends the reply chooser: both draw this box.
+        self.chat_ui.close_reply_chooser();
         self.share.selection.clear();
         self.share
             .comment_input

@@ -8,12 +8,9 @@ detached:QuillApp::begin_chat_preview_press 1
 detached:QuillApp::bot_username_changed 1
 detached:QuillApp::business_bot_watch 1
 detached:QuillApp::close_earn_layer 1
-detached:QuillApp::close_profile_modal 1
 detached:QuillApp::custom_emoji_card_body 1
-detached:QuillApp::emoji_sets_search_typed 1
 detached:QuillApp::ensure_self_destruct_tick 1
 detached:QuillApp::general_link_handler_section 1
-detached:QuillApp::gif_search_typed 1
 detached:QuillApp::live_story_header 1
 detached:QuillApp::new_chatbot_draft 2
 detached:QuillApp::ptt_release 1

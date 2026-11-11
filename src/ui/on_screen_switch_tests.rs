@@ -340,7 +340,8 @@ fn a_switch_closes_reply_in_another_chat(cx: &mut TestAppContext) {
             .expect("a message");
         app.chat_ui
             .set_reply(Some(ComposerReplyTo::new(CHAT, MessageId(message))));
-        app.share.forward.open_reply_chooser();
+        app.chat_ui
+            .show_reply_panel(crate::ui::reply_options_ui::ReplyPanel::chooser());
         cx.notify();
     });
     frames(&mut vcx);
@@ -349,7 +350,7 @@ fn a_switch_closes_reply_in_another_chat(cx: &mut TestAppContext) {
     });
     switch(&app, &mut vcx);
     app.read_with(&vcx, |app, _| {
-        assert!(!app.share.forward.reply_chooser_open());
+        assert!(!app.reply_chooser_open());
         assert!(!app.reply_quote_open());
     });
 }

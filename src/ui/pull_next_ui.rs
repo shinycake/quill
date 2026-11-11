@@ -127,11 +127,11 @@ impl PullUi {
         self.route = Route::Unfound;
     }
 
-    fn now(&mut self) -> u64 {
-        self.epoch
-            .get_or_insert_with(Instant::now)
-            .elapsed()
-            .as_millis() as u64
+    /// Milliseconds since the first call, `at` being the executor's clock
+    /// (the manual one in tests).
+    fn now(&mut self, at: Instant) -> u64 {
+        let epoch = *self.epoch.get_or_insert(at);
+        at.saturating_duration_since(epoch).as_millis() as u64
     }
 
     #[cfg(test)]
@@ -245,12 +245,17 @@ impl QuillApp {
         true
     }
 
+    /// The pull's clock now, from the executor's.
+    fn pull_now(&mut self, cx: &App) -> u64 {
+        self.history.pull.now(cx.background_executor().now())
+    }
+
     /// Keep the pull on the history shown now: another chat or topic
     /// starts over (`setHistory` / `setTopic` → `reset(instant)`).
-    fn pull_sync(&mut self) {
+    fn pull_sync(&mut self, cx: &App) {
         let target = self.pull_target();
         if self.history.pull.target != target {
-            let now = self.history.pull.now();
+            let now = self.pull_now(cx);
             let pull = &mut self.history.pull;
             pull.target = target;
             pull.restart(now);
@@ -277,7 +282,7 @@ impl QuillApp {
         let ScrollDelta::Pixels(delta) = event.delta else {
             return false;
         };
-        self.pull_sync();
+        self.pull_sync(cx);
         let Some(target) = self.history.pull.target else {
             return false;
         };
@@ -293,7 +298,7 @@ impl QuillApp {
         let at_bottom = self.pull_at_bottom(target, cx);
         let active = self.pull_can_start(target, cx);
         let gesture_window = (window.window_handle(), self.windows.scope);
-        let now = self.history.pull.now();
+        let now = self.pull_now(cx);
         let step = self
             .history
             .pull
@@ -316,7 +321,7 @@ impl QuillApp {
         window: Option<PullWindow>,
         cx: &mut Context<Self>,
     ) {
-        let now = self.history.pull.now();
+        let now = self.pull_now(cx);
         if step.started {
             self.pull_find_next(target, window, now);
         }
@@ -431,7 +436,7 @@ impl QuillApp {
                         end_jump_without_window(&this, scope, cx);
                     }
                 });
-                let now = self.history.pull.now();
+                let now = self.pull_now(cx);
                 self.history.pull.begin_jump(Next::Topic(next), task, now);
             }
         }
@@ -501,7 +506,7 @@ impl QuillApp {
                                 // pull starts over instead of staying in
                                 // the jump.
                                 this.history.pull.slide = None;
-                                let now = this.history.pull.now();
+                                let now = this.pull_now(cx);
                                 this.history.pull.restart(now);
                                 cx.notify();
                             }
@@ -517,7 +522,7 @@ impl QuillApp {
                 end_jump_without_window(&this, scope, cx);
             }
         });
-        let now = self.history.pull.now();
+        let now = self.pull_now(cx);
         self.history.pull.begin_jump(Next::Chat(next), task, now);
     }
 
@@ -527,10 +532,10 @@ impl QuillApp {
     /// behind the lock, or opened nothing), the machine leaves `jumping`
     /// instead of holding the indicator full and refusing every new pull.
     fn pull_jump_ended(&mut self, cx: &mut Context<Self>) {
-        self.pull_sync();
+        self.pull_sync(cx);
         if self.history.pull.machine.jumping() {
             self.history.pull.slide = None;
-            let now = self.history.pull.now();
+            let now = self.pull_now(cx);
             self.history.pull.restart(now);
             cx.notify();
         }
@@ -543,12 +548,12 @@ impl QuillApp {
         &mut self,
         cx: &mut Context<Self>,
     ) -> (f32, Option<AnyElement>, AnyElement) {
-        self.pull_sync();
+        self.pull_sync(cx);
         let listener = self.pull_listener(cx);
         let Some(target) = self.history.pull.target else {
             return (0., None, listener);
         };
-        let now = self.history.pull.now();
+        let now = self.pull_now(cx);
         if self.history.pull.machine.animating(now) {
             let active = self.pull_active(target, cx);
             let step = self.history.pull.machine.frame(active, now);
@@ -802,7 +807,11 @@ impl QuillApp {
     pub(super) fn pull_hint_overlay(&self, cx: &App) -> Option<AnyElement> {
         let target = self.history.pull.target?;
         let epoch = self.history.pull.epoch?;
-        let now = epoch.elapsed().as_millis() as u64;
+        let now = cx
+            .background_executor()
+            .now()
+            .saturating_duration_since(epoch)
+            .as_millis() as u64;
         let HintState { panel, release } = self.history.pull.machine.hint(now)?;
         let text = |release_text: bool, opacity: f32, shift: f32| {
             div()

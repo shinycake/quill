@@ -278,18 +278,30 @@ impl QuillApp {
         if self.windows.scope == target {
             return true;
         }
-        if let Some(current) = self.windows.scope.take()
-            && let Some(slot) = self.windows.slot_for(current)
-        {
-            self.swap_slot(&slot);
+        if let Some(current) = self.windows.scope {
+            if let Some(slot) = self.windows.slot_for(current)
+                && !self.swap_slot(&slot)
+            {
+                // The slot is borrowed elsewhere, so its state cannot go
+                // back now. Nothing moved: the window stays in place, this
+                // call reports that `target` is not, and the next call (the
+                // next frame's) swaps.
+                return false;
+            }
+            self.windows.scope = None;
         }
         let slot = target.and_then(|chat_id| Some((chat_id, self.windows.slot_for(chat_id)?)));
         let view = slot.as_ref().map(|(chat_id, _)| *chat_id);
         if self.enter_session_view(view)
             && let Some((chat_id, slot)) = slot
         {
-            self.swap_slot(&slot);
-            self.windows.scope = Some(chat_id);
+            if self.swap_slot(&slot) {
+                self.windows.scope = Some(chat_id);
+            } else {
+                // Busy: the main window stays in place (as for a window
+                // with no view) and the next call tries again.
+                self.enter_session_view(None);
+            }
         }
         self.windows.scope == target
     }
@@ -306,9 +318,12 @@ impl QuillApp {
         }
     }
 
-    /// Exchange the app's view state with the slot's (symmetric).
-    fn swap_slot(&mut self, slot: &SharedSlot) {
-        let mut slot = slot.borrow_mut();
+    /// Exchange the app's view state with the slot's (symmetric). `false`,
+    /// with nothing exchanged, when the slot is borrowed elsewhere.
+    fn swap_slot(&mut self, slot: &SharedSlot) -> bool {
+        let Ok(mut slot) = slot.try_borrow_mut() else {
+            return false;
+        };
         std::mem::swap(&mut self.history, &mut slot.history);
         std::mem::swap(&mut self.composer, &mut slot.composer);
         std::mem::swap(&mut self.composer_ui, &mut slot.composer_ui);
@@ -323,6 +338,7 @@ impl QuillApp {
         std::mem::swap(&mut self.frame.surfaces, &mut slot.surfaces);
         std::mem::swap(&mut self.frame.motion, &mut slot.motion);
         std::mem::swap(&mut self.frame.menu, &mut slot.menu);
+        true
     }
 
     /// Run `f` as `window_chat`'s window (`None`: the main window), for
@@ -434,10 +450,13 @@ impl QuillApp {
             return;
         };
         let frame = window.frame_number();
-        let (started, images) = {
-            let slot = slot.borrow();
-            (slot.frame_started.replace(frame), slot.images.clone())
+        // A slot borrowed elsewhere starts no frame now: `frame_started` is
+        // untouched, so the next call of this frame (or the next frame) does.
+        let Ok(slot) = slot.try_borrow() else {
+            return;
         };
+        let (started, images) = (slot.frame_started.replace(frame), slot.images.clone());
+        drop(slot);
         if started == frame {
             return;
         }

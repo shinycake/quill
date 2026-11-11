@@ -156,9 +156,10 @@ fn pulling_past_the_bottom_of_a_channel_opens_the_next_unread_one(cx: &mut TestA
         assert_eq!(pull.next_chat_for_tests(), Some(ChatId(14)));
     });
     // Held past the threshold for the dwell, the pull is ready.
-    std::thread::sleep(std::time::Duration::from_millis(
-        quill::pull_next::READY_DWELL_MS + 30,
-    ));
+    vcx.executor()
+        .advance_clock(std::time::Duration::from_millis(
+            quill::pull_next::READY_DWELL_MS + 30,
+        ));
     vcx.update(|window, cx| window.render_frame(cx));
     assert!(app.read_with(vcx, |app, _| app.history.pull.machine_for_tests().reached()));
     // Letting go opens the next channel.

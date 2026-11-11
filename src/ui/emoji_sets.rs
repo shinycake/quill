@@ -20,8 +20,6 @@ use quill::lang::{keys, tr, trn};
 use quill::local_path::sandboxed_display_path;
 use quill::state::RequestPurpose;
 use quill::telegram::envelope::StickerSetInfo;
-use std::cell::RefCell;
-use std::rc::Rc;
 use std::time::Duration;
 
 /// How long typing pauses before the search goes out.
@@ -96,6 +94,9 @@ impl QuillApp {
     /// The search field changed: once typing pauses, the packs matching it
     /// replace the list; clearing the field brings the last tab back.
     pub(super) fn emoji_sets_search_typed(&mut self, cx: &mut Context<Self>) {
+        // A search typed earlier is over with this keystroke: even when the
+        // field is now empty, its timer must not fire over the restored list.
+        self.pickers.emoji_set_debounce.cancel();
         let query = self
             .pickers
             .emoji_set_search_input
@@ -400,19 +401,13 @@ impl QuillApp {
             if let Some(live) = this.live.as_mut() {
                 let _ = live.driver.ensure_emoji_pack_covers();
             }
-            let body = Rc::new(RefCell::new(Some(this.emoji_sets_panel(cx))));
+            let body = this.emoji_sets_panel(cx);
             dialog
                 .overlay(true)
                 .title(crate::ui::shell::dialog_title(tr(
                     keys::Q_MEDIA_EMOJI_PACKS,
                 )))
-                .content(move |content, _, _| {
-                    content.child(
-                        body.borrow_mut()
-                            .take()
-                            .unwrap_or_else(|| div().into_any_element()),
-                    )
-                })
+                .content(crate::ui::shell::one_shot_dialog_content(body))
                 .on_close(close)
         })
     }

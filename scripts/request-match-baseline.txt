@@ -90,7 +90,6 @@ purpose:QuillApp::gif_grid 2
 purpose:QuillApp::manager_set_pending 1
 purpose:QuillApp::manager_view 3
 purpose:QuillApp::onboarding 1
-purpose:QuillApp::peer_color_body 2
 purpose:QuillApp::pump_saved_messages 1
 purpose:QuillApp::registration_form 1
 purpose:QuillApp::saved_topics_in_flight 1

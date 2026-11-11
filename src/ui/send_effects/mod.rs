@@ -340,12 +340,14 @@ impl QuillApp {
         let Some(open) = self.composer_ui.send_menu.open.as_mut() else {
             return;
         };
+        // The areas are measured at paint; one being written right now is
+        // skipped, and the card then opens at the menu's own position.
         let center = open
             .areas
             .cells
-            .borrow()
-            .get(&effect_id)
-            .map(|bounds| bounds.center())
+            .try_borrow()
+            .ok()
+            .and_then(|cells| cells.get(&effect_id).map(|bounds| bounds.center()))
             .unwrap_or(open.position);
         let now = cx.background_executor().now();
         let next = Preview::new(effect_id, center, now);

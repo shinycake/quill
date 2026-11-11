@@ -247,8 +247,7 @@ pub(super) static ESC_LAYERS: &[EscLayer] = &[
     }),
     layer!(
         "reply-panels",
-        |app| (app.share.forward.reply_chooser_open() && app.chat_ui.has_reply())
-            || app.reply_quote_open(),
+        |app| app.chat_ui.reply_panel() != crate::ui::reply_options_ui::ReplyPanel::None,
         |app, window, cx| app.close_reply_panels(window, cx)
     ),
     layer!(

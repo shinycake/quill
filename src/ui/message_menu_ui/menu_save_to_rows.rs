@@ -675,16 +675,7 @@ impl QuillApp {
             }
             dialog
                 .title(shell::dialog_title(report_title))
-                .content(shell::scrollable_dialog_content({
-                    let body = Rc::new(RefCell::new(Some(body.into_any_element())));
-                    move |content, _, _| {
-                        let body = body
-                            .borrow_mut()
-                            .take()
-                            .unwrap_or_else(|| div().into_any_element());
-                        content.child(body)
-                    }
-                }))
+                .content(shell::one_shot_dialog_content(body.into_any_element()))
                 .footer(footer)
                 .on_close(on_close)
         })

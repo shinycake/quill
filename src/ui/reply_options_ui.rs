@@ -23,30 +23,29 @@ use quill::reply_options::{ReplyOption, reply_options};
 use quill::telegram::envelope::{ChatKind, effective_content};
 
 /// Which panel of the reply bar is open: the quote picker, or the chat
-/// chooser behind "Reply in Another Chat". The picker is the reply bar's
-/// and the chooser is the share box's stage (shared with the forward box),
-/// so every opening and closing goes through [`QuillApp::show_reply_panel`],
-/// the one place that keeps at most one of them open.
+/// chooser behind "Reply in Another Chat". One value held by the reply bar
+/// (`ChatUi`), so at most one is open and both go with the reply. The
+/// chooser draws the share box's destinations: opening it ends the forward
+/// box (`show_reply_panel`), and opening the forward box ends it
+/// (`open_forward_picker`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(in crate::ui) enum ReplyPanel {
     None,
     QuotePicker,
-    Chooser,
+    /// The chooser, with its opening stage (its search field takes focus on
+    /// the first draw after the dialog has mounted).
+    Chooser(crate::ui::mount::Mount),
+}
+
+impl ReplyPanel {
+    /// The chooser, just opened.
+    pub(in crate::ui) fn chooser() -> Self {
+        Self::Chooser(crate::ui::mount::Mount::Mounting)
+    }
 }
 
 impl QuillApp {
-    /// The panel open now.
-    pub(in crate::ui) fn reply_panel(&self) -> ReplyPanel {
-        if self.share.forward.reply_chooser_open() {
-            ReplyPanel::Chooser
-        } else if self.chat_ui.quote_picker_open() {
-            ReplyPanel::QuotePicker
-        } else {
-            ReplyPanel::None
-        }
-    }
-
-    /// Open `panel` (or none), closing the other one. The chooser's search
+    /// Open `panel` (or none) in place of the one open. The chooser's search
     /// field starts empty each time it opens and is emptied when it closes.
     pub(in crate::ui) fn show_reply_panel(
         &mut self,
@@ -54,27 +53,25 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let was_chooser = self.reply_panel() == ReplyPanel::Chooser;
-        match panel {
-            ReplyPanel::None => {
-                self.share.forward.close_reply_chooser();
-                self.chat_ui.close_quote_picker();
-            }
-            ReplyPanel::QuotePicker => {
-                self.share.forward.close_reply_chooser();
-                self.chat_ui.open_quote_picker();
-            }
-            ReplyPanel::Chooser => {
-                self.chat_ui.close_quote_picker();
-                self.share.forward.open_reply_chooser();
-            }
+        let was_chooser = matches!(self.chat_ui.reply_panel(), ReplyPanel::Chooser(_));
+        let chooser = matches!(panel, ReplyPanel::Chooser(_));
+        if chooser {
+            // The forward box ends as the chooser opens: both draw the share
+            // box's destinations.
+            self.share.forward.close_picker();
         }
-        if was_chooser || panel == ReplyPanel::Chooser {
+        self.chat_ui.show_reply_panel(panel);
+        if was_chooser || chooser {
             self.share
                 .search_input
                 .update(cx, |input, cx| input.set_value("", window, cx));
         }
         cx.notify();
+    }
+
+    /// "Reply in Another Chat"'s chooser is open.
+    pub(in crate::ui) fn reply_chooser_open(&self) -> bool {
+        matches!(self.chat_ui.reply_panel(), ReplyPanel::Chooser(_))
     }
 
     /// The quotable text of a loaded message, with its formatting.
@@ -207,7 +204,7 @@ impl QuillApp {
             return;
         }
         // One stage with the forward box: that box closes as this opens.
-        self.show_reply_panel(ReplyPanel::Chooser, window, cx);
+        self.show_reply_panel(ReplyPanel::chooser(), window, cx);
     }
 
     pub(super) fn close_reply_panels(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -288,7 +285,7 @@ impl QuillApp {
     /// The quote picker is open: Update Quote opened it for the message
     /// the composer replies to now.
     pub(in crate::ui) fn reply_quote_open(&self) -> bool {
-        self.chat_ui.quote_picker_open()
+        self.chat_ui.reply_panel() == ReplyPanel::QuotePicker
     }
 
     /// The quote picker: the parts of the message, one click each.

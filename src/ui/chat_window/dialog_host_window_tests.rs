@@ -121,9 +121,8 @@ fn each_window_shows_its_own_per_window_box(cx: &mut TestAppContext) {
     let chat_window = h.open_in_new_window(OTHER, cx);
     h.app.update(cx, |app, _| {
         app.set_window_scope(None);
-        app.chat_ui.schedule = crate::ui::scheduled::ScheduleFlow::List(
-            crate::ui::composer::ScheduledDialog::Ready,
-        );
+        app.chat_ui.schedule =
+            crate::ui::scheduled::ScheduleFlow::List(crate::ui::composer::ScheduledDialog::Ready);
     });
     draw_both(&h, chat_window, cx);
     assert_eq!(shown(&h.shell, cx), Some(DialogKind::Scheduled));
@@ -132,8 +131,8 @@ fn each_window_shows_its_own_per_window_box(cx: &mut TestAppContext) {
     h.app.update(cx, |app, cx| {
         app.in_window_scope(Some(OTHER), cx, |app, _| {
             app.chat_ui.schedule = crate::ui::scheduled::ScheduleFlow::List(
-            crate::ui::composer::ScheduledDialog::Ready,
-        );
+                crate::ui::composer::ScheduledDialog::Ready,
+            );
         });
     });
     draw_both(&h, chat_window, cx);
@@ -154,13 +153,12 @@ fn a_closing_window_closes_only_its_own_boxes(cx: &mut TestAppContext) {
     let chat_window = h.open_in_new_window(OTHER, cx);
     h.app.update(cx, |app, cx| {
         app.set_window_scope(None);
-        app.chat_ui.schedule = crate::ui::scheduled::ScheduleFlow::List(
-            crate::ui::composer::ScheduledDialog::Ready,
-        );
+        app.chat_ui.schedule =
+            crate::ui::scheduled::ScheduleFlow::List(crate::ui::composer::ScheduledDialog::Ready);
         app.in_window_scope(Some(OTHER), cx, |app, _| {
             app.chat_ui.schedule = crate::ui::scheduled::ScheduleFlow::List(
-            crate::ui::composer::ScheduledDialog::Ready,
-        );
+                crate::ui::composer::ScheduledDialog::Ready,
+            );
         });
     });
     draw_both(&h, chat_window, cx);

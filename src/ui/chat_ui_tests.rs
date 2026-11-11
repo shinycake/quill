@@ -305,9 +305,8 @@ fn another_chat_drops_the_reschedule_picker_and_the_scheduled_list(cx: &mut Test
     let other = other_chat(&app, &mut vcx);
     open(&app, &mut vcx, CHAT);
     app.update_in(&mut vcx, |app, window, cx| {
-        app.chat_ui.schedule = crate::ui::scheduled::ScheduleFlow::List(
-            crate::ui::composer::ScheduledDialog::Ready,
-        );
+        app.chat_ui.schedule =
+            crate::ui::scheduled::ScheduleFlow::List(crate::ui::composer::ScheduledDialog::Ready);
         app.open_schedule_picker(ScheduleTarget::Reschedule(MessageId(5)), window, cx);
         assert!(
             !app.chat_ui.schedule.list_open(),

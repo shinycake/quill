@@ -532,6 +532,7 @@ mod round_seek;
 mod saved_sublists;
 mod schedule_repeat;
 mod scheduled;
+mod scheduled_flow;
 mod screen_chooser;
 mod screen_chooser_demo;
 mod screenshot_demo;

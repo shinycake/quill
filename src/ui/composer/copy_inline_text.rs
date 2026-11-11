@@ -486,7 +486,6 @@ impl QuillApp {
         // tdesktop FieldHeader Escape / replyCancelled: header only — keep typed text.
         let kept = cancel_reply_draft(self.chat_ui.take_reply(), String::new()).0;
         self.chat_ui.set_reply(kept);
-        self.share.forward.close_reply_chooser();
         self.note_open_draft(true, cx);
         self.set_note(StatusNote::silent(tr(keys::Q_CHAT_REPLY_CANCELLED)));
         cx.notify();
