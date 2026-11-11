@@ -137,6 +137,22 @@ fn chat_reply_markup_message_id_is_fetched_when_not_loaded() {
 }
 
 #[test]
+fn a_newer_reply_markup_message_replaces_one_not_yet_fetched() {
+    let mut h = Harness::new();
+    let chat = |message: i64| {
+        format!(
+            r#"{{"@type":"updateNewChat","chat":{{"id":8,"title":"Bot","type":{{"@type":"chatTypePrivate","user_id":8}},"unread_count":0,"reply_markup_message_id":{message}}}}}"#
+        )
+    };
+    h.ingest(&chat(55));
+    h.ingest(&chat(60));
+    assert_eq!(
+        h.driver.session.reply_markup_message_to_fetch(ChatId(8)),
+        Some(MessageId(60))
+    );
+}
+
+#[test]
 fn a_failed_keyboard_fetch_is_not_asked_again_on_reselect() {
     let mut h = Harness::new();
     h.ingest(

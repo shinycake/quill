@@ -54,14 +54,17 @@ impl Session {
     }
 
     /// `chat.reply_markup_message_id` from `updateNewChat`: the message to
-    /// fetch, unless TDLib already told the keyboard or the fetch runs.
+    /// fetch (the newest name wins), unless TDLib already told the keyboard
+    /// or the fetch runs.
     pub(crate) fn note_reply_markup_message(&mut self, chat_id: ChatId, message: MessageId) {
         self.bots
             .reply_keyboards
             .by_chat
             .entry(chat_id.0)
             .and_modify(|stage| {
-                if matches!(stage, KeyboardFetch::Failed(_)) {
+                // A newer name replaces one not yet fetched; a fetch out
+                // finishes first, and a known answer stands.
+                if matches!(stage, KeyboardFetch::Failed(_) | KeyboardFetch::Wanted(_)) {
                     *stage = KeyboardFetch::Wanted(message);
                 }
             })
