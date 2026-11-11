@@ -335,7 +335,10 @@ pub fn shortcut_rows() -> Vec<ShortcutRow> {
         .unwrap_or(rows.len());
     rows.splice(
         at..at,
-        chat_nav_rows().into_iter().chain(pinned_chat_rows()),
+        chat_nav_rows()
+            .into_iter()
+            .chain(pinned_chat_rows())
+            .chain(account_rows()),
     );
     let at = rows
         .iter()
