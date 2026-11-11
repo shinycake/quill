@@ -7,18 +7,48 @@
 //! same error path as any other.
 
 /// Where the gifts list's pending change stands.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub enum GiftMutation {
     #[default]
     Idle,
     /// The change sent as request `request` is out.
     Running { request: u64 },
+    /// The change was refused; the line is drawn until the next change or
+    /// the next list.
+    Failed(String),
 }
 
 impl GiftMutation {
     /// A change is out: further ones wait.
-    pub fn is_running(self) -> bool {
+    pub fn is_running(&self) -> bool {
         matches!(self, Self::Running { .. })
+    }
+
+    /// The line of the last refused change.
+    pub fn failure(&self) -> Option<&str> {
+        match self {
+            Self::Failed(line) => Some(line),
+            _ => None,
+        }
+    }
+
+    /// A list opens: the last list's failure is not shown again; a change
+    /// still out keeps its lock until its own answer.
+    pub fn for_new_list(&mut self) {
+        if matches!(self, Self::Failed(_)) {
+            *self = Self::Idle;
+        }
+    }
+
+    /// `request` was refused: only the change it sent fails, with `line`.
+    /// `false` for another request's error.
+    pub fn fail(&mut self, request: Option<u64>, line: String) -> bool {
+        if self.settle(request) {
+            *self = Self::Failed(line);
+            true
+        } else {
+            false
+        }
     }
 
     /// The change sent as `request` goes out.
@@ -61,6 +91,19 @@ mod tests {
         assert!(!change.is_running());
         change.begin(8);
         change.cancel();
+        assert_eq!(change, GiftMutation::Idle);
+        change.begin(9);
+        assert!(!change.fail(Some(8), "late".into()), "another request");
+        assert!(change.is_running() && change.failure().is_none());
+        assert!(change.fail(Some(9), "refused".into()));
+        assert_eq!(change.failure(), Some("refused"));
+        assert!(!change.is_running());
+        change.begin(10);
+        assert!(change.failure().is_none(), "a new change clears the line");
+        change.for_new_list();
+        assert!(change.is_running(), "a change out keeps its lock");
+        assert!(change.fail(Some(10), "again".into()));
+        change.for_new_list();
         assert_eq!(change, GiftMutation::Idle);
     }
 }

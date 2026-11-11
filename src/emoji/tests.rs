@@ -536,3 +536,20 @@ fn a_failed_custom_emoji_lookup_asks_again() {
     assert!(session.custom_emoji_needs_resolving(42));
     assert!(session.stickers.emoji.status_note.is_none());
 }
+
+#[test]
+fn only_the_matching_answer_settles_a_pack_change() {
+    use super::SetMutation;
+    use crate::ids::RequestId;
+    let asked = SetMutation::started(RequestId(7), 3, true);
+    assert_eq!(asked.answered(RequestId(6), true), asked);
+    assert_eq!(asked.answered(RequestId(6), false), asked);
+    assert_eq!(asked.answered(RequestId(7), false), SetMutation::Failed);
+    assert_eq!(asked.answered(RequestId(7), true), SetMutation::Idle);
+    assert_eq!(asked.for_new_box(), asked);
+    assert_eq!(SetMutation::Failed.for_new_box(), SetMutation::Idle);
+    assert_eq!(
+        SetMutation::Failed.answered(RequestId(7), true),
+        SetMutation::Failed
+    );
+}

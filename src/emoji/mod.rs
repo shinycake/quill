@@ -86,13 +86,20 @@ impl EmojiLists {
 }
 
 /// The install or archive of one emoji pack, as the pack browser shows it.
+/// The request that asked is in the stage: only its answer settles it.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum SetMutation {
     #[default]
     Idle,
-    /// Pack `set_id` is being installed (`installed`) or removed.
-    Changing { set_id: i64, installed: bool },
-    /// The last change was refused: the browser says so until the next one.
+    /// Pack `set_id` is being installed (`installed`) or removed, under
+    /// `request`.
+    Changing {
+        request: crate::ids::RequestId,
+        set_id: i64,
+        installed: bool,
+    },
+    /// The last change was refused: the browser says so until the next
+    /// change or the next box.
     Failed,
 }
 
@@ -100,8 +107,42 @@ impl SetMutation {
     /// The pack being changed, and which way.
     pub fn changing(self) -> Option<(i64, bool)> {
         match self {
-            Self::Changing { set_id, installed } => Some((set_id, installed)),
+            Self::Changing {
+                set_id, installed, ..
+            } => Some((set_id, installed)),
             _ => None,
+        }
+    }
+
+    /// A change left as `request`; it replaces a failure shown before.
+    pub fn started(request: crate::ids::RequestId, set_id: i64, installed: bool) -> Self {
+        Self::Changing {
+            request,
+            set_id,
+            installed,
+        }
+    }
+
+    /// The answer to `request`: only the change in flight is settled by it.
+    pub fn answered(self, request: crate::ids::RequestId, accepted: bool) -> Self {
+        match self {
+            Self::Changing { request: asked, .. } if asked == request => {
+                if accepted {
+                    Self::Idle
+                } else {
+                    Self::Failed
+                }
+            }
+            other => other,
+        }
+    }
+
+    /// A new pack browser opens: the last box's failure is not shown again,
+    /// a change still in flight stays.
+    pub fn for_new_box(self) -> Self {
+        match self {
+            Self::Failed => Self::Idle,
+            other => other,
         }
     }
 }
@@ -682,9 +723,13 @@ impl Session {
 
     /// Slice S10: an emoji-status or emoji-set mutation succeeded — drop the
     /// affected cache so the next fetch shows the server-confirmed state.
-    pub fn invalidate_emoji_caches(&mut self, purpose: Option<RequestPurpose>) {
-        if purpose == Some(RequestPurpose::ChangeEmojiSet) {
-            self.stickers.emoji.mutation = SetMutation::Idle;
+    pub fn invalidate_emoji_caches(&mut self, pending: Option<&crate::state::PendingRequest>) {
+        let purpose = pending.map(|p| p.purpose);
+        if let Some(p) = pending
+            && p.purpose == RequestPurpose::ChangeEmojiSet
+        {
+            let emoji = &mut self.stickers.emoji;
+            emoji.mutation = emoji.mutation.answered(p.id, true);
         }
         if matches!(
             purpose,

@@ -778,11 +778,9 @@ pub struct PremiumHub {
     pub gifts: Vec<ReceivedGift>,
     pub gifts_total: i32,
     pub gifts_offset: String,
-    pub gifts_loaded: bool,
-    pub gifts_loading: bool,
-    pub gifts_error: Option<String>,
-    /// `@extra` of the newest gifts request (stale answers are dropped).
-    pub gifts_request: u64,
+    /// Where the newest page of the list stands; its request is in the
+    /// stage, so older answers are dropped.
+    pub gifts_page: crate::state::PageStage,
     pub gift_selected: Option<String>,
     /// `sellGift` awaiting confirmation for this gift id.
     pub gift_convert_confirm: Option<String>,
@@ -851,10 +849,14 @@ impl PremiumHub {
         }
     }
 
+    /// The line the gifts list draws for a failure: a refused change, or the
+    /// page that failed to load.
+    pub fn gifts_error(&self) -> Option<&str> {
+        self.gift_mutation.failure().or(self.gifts_page.error())
+    }
+
     pub fn apply_gifts(&mut self, page: GiftsPage, append: bool) {
-        self.gifts_loading = false;
-        self.gifts_error = None;
-        self.gifts_loaded = true;
+        self.gifts_page.ready();
         // Only a first page answers a refetch; an appended page of the old
         // list leaves the list stale.
         if !append {

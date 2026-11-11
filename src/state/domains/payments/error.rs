@@ -179,27 +179,27 @@ impl Session {
             Some(RequestPurpose::Payments(PaymentsPurpose::GetReceivedGifts { .. })) => {
                 // Only the newest page's error counts (an older page's is
                 // not the list on screen's).
-                if pending.is_some_and(|p| p.id.0 == self.payments.hub.gifts_request) {
-                    self.payments.hub.gifts_loading = false;
+                if let Some(p) = pending
+                    && self.payments.hub.gifts_page.waits_for(p.id.0)
+                {
                     // A failed refetch is not asked again every frame.
                     self.payments.hub.gifts_stale = false;
-                    self.payments.hub.gifts_error = Some(crate::lang::tr_with(
+                    let line = crate::lang::tr_with(
                         crate::lang::keys::Q_MONEY_COULD_NOT_LOAD_GIFTS_REASON,
                         &[("reason", &error_reason(err))],
-                    ));
+                    );
+                    self.payments.hub.gifts_page.fail(p.id.0, line);
                 }
             }
             Some(
                 RequestPurpose::Payments(PaymentsPurpose::ToggleGiftSaved { .. })
                 | RequestPurpose::SellGift,
             ) => {
-                self.payments
-                    .hub
-                    .gift_mutation
-                    .settle(pending.map(|p| p.id.0));
                 self.payments.hub.gift_convert_confirm = None;
-                self.payments.hub.gifts_error =
-                    Some(format!("Couldn't update the gift: {}", error_reason(err)));
+                self.payments.hub.gift_mutation.fail(
+                    pending.map(|p| p.id.0),
+                    format!("Couldn't update the gift: {}", error_reason(err)),
+                );
             }
             // The Business screen keeps tdesktop's fallback order.
             Some(RequestPurpose::GetBusinessFeatures) => {

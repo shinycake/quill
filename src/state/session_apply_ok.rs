@@ -296,7 +296,6 @@ impl Session {
                     .hub
                     .gift_mutation
                     .settle(pending.map(|p| p.id.0));
-                self.payments.hub.gifts_error = None;
                 self.payments.hub.gifts_stale = true;
             }
             Some(RequestPurpose::SellGift) => {
@@ -304,7 +303,6 @@ impl Session {
                     .hub
                     .gift_mutation
                     .settle(pending.map(|p| p.id.0));
-                self.payments.hub.gifts_error = None;
                 // The panel and the box close only when they are still the
                 // sold gift's: the user may have opened another meanwhile.
                 let sold = pending.and_then(|p| p.subject_id.as_deref());
@@ -367,7 +365,7 @@ impl Session {
         }
         self.finish_mask_mutation(pending.map(|p| p.purpose));
         // Slice S10: emoji mutations invalidate emoji caches (see emoji.rs).
-        self.invalidate_emoji_caches(pending.map(|p| p.purpose));
+        self.invalidate_emoji_caches(pending);
         // Slice S9: a saved-GIF mutation (`addSavedAnimation` /
         // `removeSavedAnimation`) succeeded — drop the saved list so
         // the panel refetches the server-confirmed list instead of

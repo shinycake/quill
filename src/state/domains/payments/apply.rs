@@ -233,7 +233,7 @@ impl Session {
                 } else if let Some(p) = pending
                     && let RequestPurpose::Payments(PaymentsPurpose::GetReceivedGifts { append }) =
                         p.purpose
-                    && p.id.0 == self.payments.hub.gifts_request
+                    && self.payments.hub.gifts_page.waits_for(p.id.0)
                 {
                     let files: Vec<ParsedFile> = page
                         .gifts

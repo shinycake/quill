@@ -115,8 +115,8 @@ impl<S: JsonSender> ConnectDriver<S> {
         hub.gifts.clear();
         hub.gifts_total = 0;
         hub.gifts_offset.clear();
-        hub.gifts_loaded = false;
-        hub.gifts_error = None;
+        hub.gifts_page = crate::state::PageStage::Idle;
+        hub.gift_mutation.for_new_list();
         hub.gift_selected = None;
         hub.gift_convert_confirm = None;
         // `gift_mutation` is not reset: a toggle or sale still out keeps its
@@ -132,7 +132,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(ConnectSendError::InvalidRequest);
         }
         if self.session.payments.hub.gifts_offset.is_empty()
-            || self.session.payments.hub.gifts_loading
+            || self.session.payments.hub.gifts_page.is_loading()
         {
             return Ok(None);
         }
@@ -158,15 +158,15 @@ impl<S: JsonSender> ConnectDriver<S> {
             RequestPurpose::Payments(PaymentsPurpose::GetReceivedGifts { append }),
             None,
         );
-        self.session.payments.hub.gifts_loading = true;
-        self.session.payments.hub.gifts_request = extra.0;
+        self.session.payments.hub.gifts_page.begin(append);
+        self.session.payments.hub.gifts_page.sent(extra.0);
         let collection = self.session.payments.gifts_manage.active_collection;
         let json = get_received_gifts_in(extra, owner, collection, &offset, GIFT_PAGE);
         if let Err(err) = self.send_json_request(extra, &json) {
             let hub = &mut self.session.payments.hub;
-            hub.gifts_loading = false;
-            hub.gifts_error =
-                Some(crate::lang::tr(crate::lang::keys::Q_MONEY_COULD_NOT_LOAD_GIFTS).into());
+            hub.gifts_page.send_failed(
+                crate::lang::tr(crate::lang::keys::Q_MONEY_COULD_NOT_LOAD_GIFTS).into(),
+            );
             return Err(err);
         }
         Ok(extra)
@@ -180,7 +180,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         let hub = &self.session.payments.hub;
         // A page already out settles first (its answer is not the refetch);
         // the list stays stale until a first page answers or fails.
-        if !hub.gifts_stale || hub.gifts_owner.is_none() || hub.gifts_loading {
+        if !hub.gifts_stale || hub.gifts_owner.is_none() || hub.gifts_page.is_loading() {
             return Ok(None);
         }
         let sent = self.fetch_received_gifts_page(false);
@@ -219,7 +219,6 @@ impl<S: JsonSender> ConnectDriver<S> {
             None,
         );
         self.session.payments.hub.gift_mutation.begin(extra.0);
-        self.session.payments.hub.gifts_error = None;
         let json = toggle_gift_is_saved(extra, received_gift_id, saved);
         if let Err(err) = self.send_json_request(extra, &json) {
             self.session.payments.hub.gift_mutation.cancel();
@@ -256,7 +255,6 @@ impl<S: JsonSender> ConnectDriver<S> {
             .session
             .request_for_subject(RequestPurpose::SellGift, received_gift_id);
         self.session.payments.hub.gift_mutation.begin(extra.0);
-        self.session.payments.hub.gifts_error = None;
         let json = sell_gift(extra, received_gift_id);
         if let Err(err) = self.send_json_request(extra, &json) {
             self.session.payments.hub.gift_mutation.cancel();

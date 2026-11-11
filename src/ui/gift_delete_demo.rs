@@ -62,7 +62,7 @@ pub(super) fn seed_gift_delete_session(sink: Arc<MemorySink>) -> Session {
     .filter_map(parse_received_gift)
     .collect();
     hub.gifts_total = 2;
-    hub.gifts_loaded = true;
+    hub.gifts_page.ready();
     hub.gift_selected = Some(DELETABLE.into());
     session
 }

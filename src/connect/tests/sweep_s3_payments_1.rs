@@ -595,7 +595,7 @@ fn a_star_history_or_gifts_first_page_that_cannot_be_sent_shows_its_error() {
             .is_err()
     );
     let hub = &t.driver.session.payments.hub;
-    assert!(hub.gifts_error.is_some() && !hub.gifts_loading);
+    assert!(hub.gifts_error().is_some() && !hub.gifts_page.is_loading());
 }
 
 #[test]
@@ -623,7 +623,7 @@ fn a_stale_gift_refetch_waits_for_a_page_in_flight_and_is_cleared_by_its_answer(
     t.sender.refuse(&["getReceivedGifts"]);
     assert!(t.driver.refresh_received_gifts_if_stale().is_err());
     assert!(!t.driver.session.payments.hub.gifts_stale);
-    assert!(t.driver.session.payments.hub.gifts_error.is_some());
+    assert!(t.driver.session.payments.hub.gifts_error().is_some());
 }
 
 #[test]

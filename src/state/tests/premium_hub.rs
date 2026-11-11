@@ -54,8 +54,8 @@ fn gifts_page_applies_and_registers_sticker_files() {
         RequestPurpose::Payments(PaymentsPurpose::GetReceivedGifts { append: false }),
         None,
     );
-    session.payments.hub.gifts_request = extra.0;
-    session.payments.hub.gifts_loading = true;
+    session.payments.hub.gifts_page.begin(false);
+    session.payments.hub.gifts_page.sent(extra.0);
     apply_json(
         &mut session,
         &seq,
@@ -66,7 +66,7 @@ fn gifts_page_applies_and_registers_sticker_files() {
         ),
     );
     assert_eq!(session.payments.hub.gifts.len(), 1);
-    assert!(session.payments.hub.gifts_loaded && !session.payments.hub.gifts_loading);
+    assert!(session.payments.hub.gifts_page.is_ready());
     assert!(session.media.files.contains_key(&88));
 }
 
@@ -102,7 +102,7 @@ fn gift_mutation_ok_marks_the_list_stale_and_errors_release_the_lock() {
     );
     assert!(!session.payments.hub.gift_mutation.is_running());
     assert!(session.payments.hub.gift_convert_confirm.is_none());
-    assert!(session.payments.hub.gifts_error.is_some());
+    assert!(session.payments.hub.gifts_error().is_some());
 }
 
 #[test]

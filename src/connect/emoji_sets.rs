@@ -366,9 +366,8 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.session.stickers.emoji.open = true;
         // "Could not update emoji packs" was the last box's; a change
         // still in flight sets it again if it fails.
-        if self.session.stickers.emoji.mutation == SetMutation::Failed {
-            self.session.stickers.emoji.mutation = SetMutation::Idle;
-        }
+        let emoji = &mut self.session.stickers.emoji;
+        emoji.mutation = emoji.mutation.for_new_box();
         self.select_emoji_set_tab(EmojiSetTab::Installed)
     }
 
@@ -596,14 +595,11 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() || set_id <= 0 {
             return Err(ConnectSendError::InvalidRequest);
         }
-        if self.session.stickers.emoji.mutation == SetMutation::Failed {
-            self.session.stickers.emoji.mutation = SetMutation::Idle;
-        }
         let request = self.emoji_set_request(RequestPurpose::ChangeEmojiSet, |id| {
             change_sticker_set(id, set_id, installed, false)
         })?;
-        if request.is_some() {
-            self.session.stickers.emoji.mutation = SetMutation::Changing { set_id, installed };
+        if let Some(request) = request {
+            self.session.stickers.emoji.mutation = SetMutation::started(request, set_id, installed);
         }
         Ok(request)
     }

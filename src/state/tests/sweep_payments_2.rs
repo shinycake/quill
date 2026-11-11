@@ -55,14 +55,14 @@ fn an_older_received_gifts_failure_leaves_the_live_request_loading() {
         RequestPurpose::Payments(PaymentsPurpose::GetReceivedGifts { append: false }),
         None,
     );
-    session.payments.hub.gifts_request = new.0;
-    session.payments.hub.gifts_loading = true;
+    session.payments.hub.gifts_page.begin(false);
+    session.payments.hub.gifts_page.sent(new.0);
     fail(&mut session, old, &sink);
-    assert!(session.payments.hub.gifts_loading);
-    assert!(session.payments.hub.gifts_error.is_none());
+    assert!(session.payments.hub.gifts_page.is_loading());
+    assert!(session.payments.hub.gifts_error().is_none());
     fail(&mut session, new, &sink);
-    assert!(!session.payments.hub.gifts_loading);
-    assert!(session.payments.hub.gifts_error.is_some());
+    assert!(!session.payments.hub.gifts_page.is_loading());
+    assert!(session.payments.hub.gifts_error().is_some());
 }
 
 #[test]

@@ -109,8 +109,11 @@ impl Session {
         }
         self.fail_mask_request(pending);
         self.fail_sticker_creator(err, pending);
-        if pending.map(|p| p.purpose) == Some(RequestPurpose::ChangeEmojiSet) {
-            self.stickers.emoji.mutation = crate::emoji::SetMutation::Failed;
+        if let Some(p) = pending
+            && p.purpose == RequestPurpose::ChangeEmojiSet
+        {
+            let emoji = &mut self.stickers.emoji;
+            emoji.mutation = emoji.mutation.answered(p.id, false);
         }
         // Suggestions that waited for the installed sets stop waiting: the
         // next emoji typed asks again.

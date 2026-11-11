@@ -92,7 +92,7 @@ pub(super) fn seed_gift_transfer_session(sink: Arc<MemorySink>) -> Session {
     .into_iter()
     .collect();
     hub.gifts_total = 1;
-    hub.gifts_loaded = true;
+    hub.gifts_page.ready();
     hub.gift_selected = Some(DEMO_GIFT.into());
     // The chat with Maya is open: her row comes first.
     if mode == "open-chat" {

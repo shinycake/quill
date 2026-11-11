@@ -113,8 +113,6 @@ Playlist::loaded
 Playlist::loaded+error
 Playlist::loading
 PremiumHub::business_features_loading
-PremiumHub::gifts_loaded
-PremiumHub::gifts_loading
 PremiumHub::premium_loading
 PremiumHub::premium_stickers_asked
 PremiumHub::premium_stickers_loading

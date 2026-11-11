@@ -47,11 +47,11 @@ impl QuillApp {
         };
         if !hub.gifts_open
             || hub.gift_selected.is_some()
-            || (hub.gifts_error.is_some() && !scrolled)
+            || (hub.gifts_error().is_some() && !scrolled)
             || !load_due(
                 scrolled_near_end(&self.payments.gifts_scroll),
                 !hub.gifts_offset.is_empty(),
-                hub.gifts_loading,
+                hub.gifts_page.is_loading(),
             )
             || !self.payments.gifts_asked.allow(hub.gifts.len(), scrolled)
         {

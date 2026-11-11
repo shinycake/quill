@@ -62,13 +62,11 @@ impl Session {
                     .hub
                     .gift_mutation
                     .settle(pending.map(|p| p.id.0));
-                self.payments.hub.gifts_error = None;
                 self.payments.hub.gifts_stale = true;
             }
             (GiftManagePayload::Upgraded(summary), PaymentsPurpose::UpgradeGift) => {
                 let hub = &mut self.payments.hub;
                 hub.gift_mutation.settle(pending.map(|p| p.id.0));
-                hub.gifts_error = None;
                 hub.gift_selected = None;
                 hub.gifts_stale = true;
                 hub.tx_loaded = false;
@@ -120,13 +118,11 @@ impl Session {
         match purpose {
             PaymentsPurpose::SetPinnedGifts => {
                 hub.gift_mutation.settle(pending.map(|p| p.id.0));
-                hub.gifts_error = None;
                 hub.gifts_stale = true;
                 manage.note = Some("Pinned gifts updated.".into());
             }
             PaymentsPurpose::TransferGift => {
                 hub.gift_mutation.settle(pending.map(|p| p.id.0));
-                hub.gifts_error = None;
                 hub.gifts_stale = true;
                 hub.tx_loaded = false;
                 // tdesktop `ShowGiftTransferredToast`, then the recipient's
@@ -150,14 +146,12 @@ impl Session {
             }
             PaymentsPurpose::SetGiftResalePrice => {
                 hub.gift_mutation.settle(pending.map(|p| p.id.0));
-                hub.gifts_error = None;
                 hub.gifts_stale = true;
                 manage.close_flow_answered_by(PaymentsPurpose::SetGiftResalePrice);
                 manage.note = Some("Resale price updated.".into());
             }
             PaymentsPurpose::DeleteGiftCollection => {
                 hub.gift_mutation.settle(pending.map(|p| p.id.0));
-                hub.gifts_error = None;
                 hub.gifts_stale = true;
                 manage.close_flow_answered_by(PaymentsPurpose::DeleteGiftCollection);
                 manage.active_collection = 0;
@@ -213,7 +207,6 @@ impl Session {
         let hub = &mut self.payments.hub;
         let manage = &mut self.payments.gifts_manage;
         hub.gift_mutation.settle(request);
-        hub.gifts_error = None;
         if let Some(id) = manage.deleting.take() {
             let before = hub.gifts.len();
             hub.gifts.retain(|g| g.id != id);
@@ -409,11 +402,10 @@ impl Session {
                 }
             }
             _ => {
-                self.payments
-                    .hub
-                    .gift_mutation
-                    .settle(pending.map(|p| p.id.0));
-                self.payments.hub.gifts_error = Some(format!("Couldn't update the gift: {reason}"));
+                self.payments.hub.gift_mutation.fail(
+                    pending.map(|p| p.id.0),
+                    format!("Couldn't update the gift: {reason}"),
+                );
             }
         }
     }
