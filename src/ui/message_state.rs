@@ -13,7 +13,7 @@ pub(crate) struct MessageUi {
     /// Page, report and sticker-set dialogs of the message menu's extras.
     pub(super) menu_ui: super::message_menu_ui::MessageMenuUi,
     /// The link under the latest right-press, and where it was pressed.
-    pub(super) right_clicked_link: Option<(Point<Pixels>, quill::text::LinkTarget)>,
+    pub(super) right_clicked_link: Option<super::entity_links::RightClickedLink>,
     /// The task or option under the latest right-press, and where.
     pub(super) right_clicked_item: Option<(Point<Pixels>, quill::composer::ReplyItem)>,
     /// The "Open this link?" box (`DialogKind::OpenLink`).

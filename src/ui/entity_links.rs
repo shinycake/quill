@@ -79,6 +79,14 @@ enum TooltipStage {
     Shown,
 }
 
+/// The link under the latest right-press, where it was pressed, and the
+/// task that drops it when the press ends without a menu.
+pub(super) struct RightClickedLink {
+    pub(super) at: Point<Pixels>,
+    pub(super) link: LinkTarget,
+    _clear: Task<()>,
+}
+
 impl QuillApp {
     /// A link was clicked: act on it at the next render.
     pub(super) fn queue_link(
@@ -407,11 +415,16 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         self.chat_ui.link_tooltip = None;
-        self.message_ui.right_clicked_link = Some((position, link));
-        self.spawn_scoped(cx, async move |this, cx| {
+        // The clearing task is part of the note: a second press replaces
+        // both, so the first press's task can never drop the second's link.
+        let clear = self.spawn_scoped(cx, async move |this, cx| {
             let _ = this.update(cx, |this, _| this.message_ui.right_clicked_link = None);
-        })
-        .detach();
+        });
+        self.message_ui.right_clicked_link = Some(RightClickedLink {
+            at: position,
+            link,
+            _clear: clear,
+        });
     }
 
     /// The link under the right-click that opened a menu at `position`.
@@ -422,8 +435,8 @@ impl QuillApp {
         self.message_ui
             .right_clicked_link
             .take()
-            .filter(|(at, _)| *at == position)
-            .map(|(_, link)| link)
+            .filter(|noted| noted.at == position)
+            .map(|noted| noted.link)
     }
 
     /// The pointer entered a link that has a tooltip (or left one).
