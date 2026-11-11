@@ -117,12 +117,9 @@ impl<S: JsonSender> ConnectDriver<S> {
         let grams = &mut self.session.payments.hub.grams;
         grams.open = true;
         grams.restart(TxFilter::All);
-        let page = match self.fetch_grams_page(false) {
-            Ok(page) => page,
-            // The dialog is open: the page is `Failed`, which says why it is
-            // empty.
-            Err(err) => return Err(err),
-        };
+        // The dialog is open: a page that cannot be sent is `Failed`, which
+        // says why it is empty.
+        let page = self.fetch_grams_page(false)?;
         let _ = self.send_grams(GramsPurpose::Revenue, |extra| {
             get_gram_revenue_statistics(extra, is_dark)
         });

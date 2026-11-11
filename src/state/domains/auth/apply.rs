@@ -24,7 +24,7 @@ impl Session {
                 if let Some(RequestPurpose::Auth(AuthPurpose::PasswordStateOp { op })) =
                     pending.map(|p| p.purpose)
                 {
-                    if self.auth_state.settle_password_op(pending.map(|p| p.id)) {}
+                    self.auth_state.settle_password_op(pending.map(|p| p.id));
                     self.apply_email_code_info(op, pattern);
                 }
             }
