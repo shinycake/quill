@@ -137,7 +137,7 @@ fn the_app_config_gives_the_gift_boosts_and_changes_the_notice() {
         r#"{{"@type":"jsonValueObject","@extra":"{}","members":[{{"key":"boosts_per_sent_gift","value":{{"@type":"jsonValueNumber","value":3}}}}]}}"#,
         extra.0
     ));
-    assert_eq!(rig.driver.session.groups.boosts_per_gift, Some(3));
+    assert_eq!(rig.driver.session.groups.boosts_per_gift.data(), Some(&3));
     // Asked once.
     rig.driver.open_boost_box(ChatId(13)).unwrap();
     assert_eq!(rig.sent_all("getApplicationConfig").len(), 1);

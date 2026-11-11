@@ -242,6 +242,15 @@ impl Session {
                     );
                 }
             }
+            // The boost box reads the level table without it; the next box
+            // asks again.
+            Some(RequestPurpose::GetBoostsPerGift) => {
+                self.groups.boosts_per_gift.failed(
+                    pending.map(|p| p.id),
+                    call_request_error_line(err, "Could not load the boost settings"),
+                    false,
+                );
+            }
             Some(RequestPurpose::GetChatInviteLinks) => {
                 // An older request's error leaves a newer one waiting, and a
                 // list that already loaded stays.

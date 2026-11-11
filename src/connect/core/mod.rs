@@ -27,6 +27,7 @@ mod answer_captures;
 pub(crate) mod batch;
 mod lifecycle;
 mod pumps;
+mod stale_fetches;
 
 use std::sync::{Arc, Mutex};
 
@@ -645,12 +646,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             let _ = self.refresh_password_state();
         }
         if let Some(chat_id) = unpinned_all {
-            self.session
-                .messages
-                .pinned_messages
-                .entry(chat_id.0)
-                .or_default()
-                .succeed(Vec::new());
+            self.session.messages.pins_cleared(chat_id.0);
         }
         if let Some(chat_id) = pins_changed.filter(|chat| self.session.chat_is_shown(*chat)) {
             let _ = self.fetch_pinned_messages(chat_id);
@@ -844,11 +840,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.maybe_search_gifs(false)?;
         }
         if gif_mutation_ok || gif_saved_changed {
-            drop(
-                self.session
-                    .requests
-                    .take_purpose(RequestPurpose::GetSavedAnimations),
-            );
+            self.drop_in_flight(RequestPurpose::GetSavedAnimations);
         }
         if installed_stickers_answer
             && let crate::state::SuggestFor::WaitingForSets(emoji) =
@@ -900,50 +892,30 @@ impl<S: JsonSender> ConnectDriver<S> {
         // and invites the people picked; the other side follows the link.
         let _ = self.maybe_continue_conference();
         if archive_catalog_changed {
-            drop(
-                self.session
-                    .requests
-                    .take_purpose(RequestPurpose::GetArchivedStickerSets),
-            );
+            self.drop_in_flight(RequestPurpose::GetArchivedStickerSets);
             if self.session.stickers.stickers.open
                 && self.session.stickers.stickers.tab == crate::state::StickerTab::Archived
             {
-                drop(
-                    self.session
-                        .requests
-                        .take_purpose(RequestPurpose::GetStickerSet),
-                );
+                self.drop_in_flight(RequestPurpose::GetStickerSet);
                 self.session.stickers.stickers.set = crate::state::StickerSetStage::Idle;
                 self.fetch_archived_stickers(false)?;
             }
         }
         if sticker_set_changed {
-            drop(
-                self.session
-                    .requests
-                    .take_purpose(RequestPurpose::GetInstalledStickerSets),
-            );
+            self.drop_in_flight(RequestPurpose::GetInstalledStickerSets);
             if self.session.stickers.stickers.open {
                 self.refresh_installed_sticker_sets()?;
             }
         }
         if sticker_mutation_ok {
             // An older fetch can answer after the mutation with stale contents.
-            drop(
-                self.session
-                    .requests
-                    .take_purpose(RequestPurpose::GetFavoriteStickers),
-            );
+            self.drop_in_flight(RequestPurpose::GetFavoriteStickers);
             if self.session.stickers.stickers.open {
                 self.sticker_request_favorites()?;
             }
         }
         if recent_cleared {
-            drop(
-                self.session
-                    .requests
-                    .take_purpose(RequestPurpose::GetRecentStickers),
-            );
+            self.drop_in_flight(RequestPurpose::GetRecentStickers);
         }
         if trending_answer {
             self.mark_trending_stickers_viewed()?;

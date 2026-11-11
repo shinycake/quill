@@ -1129,3 +1129,30 @@ fn a_refreshed_invite_link_list_takes_only_the_newest_answer_in_either_order() {
         }
     }
 }
+
+#[test]
+fn a_refused_boost_settings_ask_fails_and_is_asked_again() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    let asked = session.request(RequestPurpose::GetBoostsPerGift, None);
+    session.groups.boosts_per_gift.begin();
+    session.groups.boosts_per_gift.sent(asked);
+    let error = |extra: RequestId| {
+        format!(
+            r#"{{"@type":"error","@extra":"{}","code":500,"message":"INTERNAL"}}"#,
+            extra.0
+        )
+    };
+    apply_json(&mut session, &seq, &sink, &error(asked));
+    assert!(session.groups.boosts_per_gift.error().is_some());
+    assert!(
+        session.groups.boosts_per_gift.can_ask(),
+        "Failed asks again"
+    );
+    // Another request's answer does not fill it.
+    let other = session.request(RequestPurpose::GetBoostsPerGift, None);
+    session.groups.boosts_per_gift.begin();
+    session.groups.boosts_per_gift.sent(other);
+    apply_json(&mut session, &seq, &sink, &error(asked));
+    assert!(session.groups.boosts_per_gift.is_loading());
+}

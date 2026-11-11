@@ -8051,17 +8051,18 @@ admin panels and boxes, the forum column and sharing requests.
 
 | ids | what changed |
 | --- | --- |
-| 09-056 | `WelcomeDialog::row` is one `RowEdit { Closed, Open { id, save } }`; opening another row replaces it whole and is refused while the open row's Save is out. |
+| 09-056 | The welcome editor's row, its Save and the edit text are the integration branch's `WelcomeEdit { Idle, Row { welcome_id, save } }` (merged from the round 2 follow-up; this bundle's own `RowEdit` is gone). Opening another row is refused while the open row's Save is out. |
 | 09-069/070/071, 10-053/077/078 | `ui/dialog_body.rs::one_shot_body` hands a dialog body over through a `Cell`; the `RefCell` takes are gone (and their baseline lines). |
 | 09-072/073 | `EarnUi::layer` is one `EarnLayer { Closed, Open { back, restore, fade, refused } }`; the close timer is the `Task` inside the fade's `Closing` stage. |
 | 09-074 | A refused app-config or balance ask leaves `Failed`, so the per-frame upkeep does not ask again. |
 | 09-075 | A refused page load is `refused` in the layer; Monetization, Setup and Join draw the error with Retry. |
 | 09-076/077 | The boost box shows Retry while its link is empty; the locked "Switch Off Ads" click asks for the boost level again until it is known. |
 | 09-078, 09-080 | "End anyway" and the withdrawal password Submit are disabled while a save or send is in flight; a second Submit keeps the typed password. |
-| 09-113 | A second `addlist` link keeps an Adding box; a replaced Checking drops its arrived answer. |
-| 09-114 | `FolderLoad::Ready { error }` carries the line; `FolderEditorDialog::error` is gone. |
-| 09-116 | `FolderUi::deletes` holds each delete's request; the toast waits for its answer (`DeleteChatFolder` is answered to a box). |
-| 10-037 | An unasked invite-link, join-request or administrator list draws Retry, not a spinner; a refresh replaces the request in flight and an older answer or error is dropped. |
+| 09-113 | A second `addlist` link keeps an Adding box; a replaced or closed Checking takes its request out of the registry (and its arrived answer), so a late answer is noted by nobody. |
+| 09-114 | `FolderLoad::Ready { error }` carries the line; `FolderEditorDialog::error` is gone. `FolderLoad::Loading(RequestId)` carries the `getChatFolder` request: the stage ends when that request is gone (the spec, or the error, or `Failed` with Retry); with no connection the open ends in `Failed`, not in a load that never ends. |
+| 09-116 | `FolderUi::deletes` is the set of `deleteChatFolder` requests out, keyed by request: a second delete of the same folder is a second entry that settles on its own answer. The set lives in the account's `OnScreen`, so a switch drops it. The screenshot demo's "no chats to leave" seed moved to `apply_demo_no_chats_to_leave`. |
+| 10-037 | An unasked invite-link, join-request or administrator list draws Retry, not a spinner. `AdminListFetch::Loading(RequestId)`; the administrator, invite-link and revoked-link answers and errors land only while the list waits for that request (or has no entry), so an older answer is dropped in both orders (`answer_administrators`, `answer_invite_links`, `answer_revoked_links`, `fail_administrators`). |
+| 10-061, 10-075 (guard) | `EditBoxState` was never stored: it is derived from `SaveStage` and the registry on each call. It is renamed `EditBoxView` (a derived view); `SaveStage` is the stored stage and holds the request ids. |
 | 10-038 | `GroupsState::chat_boost_status` is `Fetch<(level, count)>`: the old level stays beside a refetch, a failure draws Retry, answers match their request. |
 | 10-060 | `PermissionsSubmit::Partial { sent, reason }` keeps tracking the part that left. |
 | 10-061, 10-075, 10-076 | Delete/Leave/Remove wait while the Edit box's Save is out; Remove from list tracks its request like Delete; unsent bulk removals stay selected. |
@@ -8069,6 +8070,13 @@ admin panels and boxes, the forum column and sharing requests.
 | 10-064 | An unknown supergroup or basic group draws its name alone; its id is never used as a chat id. |
 | 10-074 | `HistoryUi::forum_peek` is only the user's choice (`ForumPeek`, keyed by the forum); the column layout is a pure function, nothing is written from render. |
 | 10-088 | Accept/Reject are disabled while the answer is out; the driver already ignored a second press. |
+
+Review round (r2-37 fix round):
+
+- `GroupsState::boosts_per_gift` is `Fetch<i32>` (asked once, answered and failed by request, `Failed` asks again); the TON explorer and the earn app config fetch record their request with `sent` and take only their own answer or error. A push (`updateChatWelcomeMessages`) and a confirmed unpin-all replace their list in `welcome_pack_pushed` and `pins_cleared`, and the stale sticker fetch cancels go through `ConnectDriver::drop_in_flight`: each of the three is an allow line whose reason says why no request id applies.
+- `schedule_idle_image_trim` sleeps once to the due time and re-arms itself from the wake-up when newer activity moved it (no loop); the `Task` stays in `idle_trim`.
+- The chat-appearance and group-settings dialog bodies use `one_shot_body` / a `Cell`.
+- Left as it is: Remove from list with nothing sent (`Ok(None)`) keeps the Edit box open, because `None` means the same request is already out and its answer closes the box. The administrator, invite-link and join-request sections draw "could not refresh" only for a list never asked; every page is entered through `set_group_settings_view`, which asks before the next draw.
 
 ### Sweep fixes (r2-05)
 

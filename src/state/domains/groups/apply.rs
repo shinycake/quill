@@ -188,11 +188,7 @@ impl Session {
             // schema 1.8.67, line 10649) — the full pack replaces the
             // cache; the welcome dialog renders it.
             GroupsPayload::UpdateChatWelcomeMessages { chat_id, messages } => {
-                self.groups
-                    .welcome_messages
-                    .entry(chat_id)
-                    .or_default()
-                    .succeed(messages);
+                self.groups.welcome_pack_pushed(chat_id, messages);
             }
             // Slice G2: `updateChatHasWelcomeMessages` (schema 1.8.67,
             // line 10600).
@@ -230,12 +226,9 @@ impl Session {
                 if passkeys.max.is_some() {
                     self.settings.passkeys.max_passkeys = passkeys.max;
                 }
-                if pending.map(|p| p.purpose) == Some(RequestPurpose::GetBoostsPerGift) {
-                    self.groups.boosts_per_gift = Some(boosts_per_gift);
-                }
-                if pending.map(|p| p.purpose) == Some(RequestPurpose::GetTonExplorerUrl) {
-                    self.ton_wallet.explorer.succeed(());
-                }
+                let asked = pending.map(|p| p.id);
+                self.groups.boosts_per_gift.answered(asked, boosts_per_gift);
+                self.ton_wallet.explorer.answered(asked, ());
                 // Any app-config answer carries the current explorer.
                 if ton_explorer_url.is_some() {
                     self.ton_wallet.explorer_url = ton_explorer_url;
@@ -250,7 +243,7 @@ impl Session {
                 let limits = &mut self.payments.earn.limits;
                 limits.starref_join_allowed = starref_join;
                 limits.starref_setup_allowed = starref_setup;
-                limits.app_config.succeed(());
+                limits.app_config.answered(asked, ());
                 self.payments.hub.purchase = premium_purchase;
                 self.payments.hub.fragment = fragment;
                 self.stickers.reaction_limits = reaction_limits;

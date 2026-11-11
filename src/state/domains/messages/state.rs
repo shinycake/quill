@@ -192,6 +192,17 @@ impl MessagesState {
         self.pinned_messages.get(&chat_id)?.data()
     }
 
+    /// A confirmed unpin-all left the chat with no pinned message. That is
+    /// the new truth whichever fetch was in flight: a late answer of an
+    /// older one finds the list `Ready` and is dropped (`Fetch::answered`
+    /// takes only a waiting fetch).
+    pub(crate) fn pins_cleared(&mut self, chat_id: i64) {
+        self.pinned_messages
+            .entry(chat_id)
+            .or_default()
+            .succeed(Vec::new());
+    }
+
     pub(crate) fn new() -> Self {
         Self {
             mention_search: None,

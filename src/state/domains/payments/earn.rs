@@ -537,7 +537,11 @@ impl Session {
                 }
             }
             // Failed: the next info panel to open asks again.
-            EarnPurpose::AppConfig => earn.limits.app_config.fail(reason.clone()),
+            EarnPurpose::AppConfig => {
+                earn.limits
+                    .app_config
+                    .failed(request, reason.clone(), false);
+            }
             EarnPurpose::TonBalance { peer } | EarnPurpose::StarBalance { peer } => {
                 earn.fail_balance(peer, request);
             }

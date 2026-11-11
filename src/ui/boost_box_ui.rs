@@ -91,7 +91,7 @@ impl QuillApp {
     fn boost_box_toggle(&mut self, slot_id: i32, cx: &mut Context<Self>) {
         let now = quill::local_time::now_unix();
         if let Some(session) = self.boost_session_mut() {
-            let receive = session.groups.boosts_per_gift.unwrap_or(0);
+            let receive = session.groups.boosts_per_gift.data().copied().unwrap_or(0);
             if let Some(state) = session.groups.boost_box.as_mut() {
                 state.toggle_slot(slot_id, now, receive);
             }
@@ -349,7 +349,7 @@ impl QuillApp {
                 .text_color(text_muted())
                 .child(reassign_text(
                     &name,
-                    session.groups.boosts_per_gift.unwrap_or(0),
+                    session.groups.boosts_per_gift.data().copied().unwrap_or(0),
                 )),
         );
         for slot in slots {
@@ -425,7 +425,7 @@ impl QuillApp {
                     let working = matches!(state.phase, BoostPhase::Working(_));
                     footer = footer.child(close_button(tr(keys::CLOSE)));
                     if let Some(counters) = counters {
-                        let allow_multi = session.groups.boosts_per_gift.unwrap_or(0) > 0;
+                        let allow_multi = session.groups.boosts_per_gift.data().copied().unwrap_or(0) > 0;
                         let button = counters.button(state.group, allow_multi);
                         footer = footer.child(
                             Button::new("boost-box-boost")
