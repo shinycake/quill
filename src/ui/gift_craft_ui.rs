@@ -152,8 +152,7 @@ impl QuillApp {
         let gate = gift.gate(true, now_unix());
         if let Some(notice) = gate_notice(gate) {
             self.gift_market.push(notice);
-        } else if gate == CraftGate::Ready {
-            self.gift_market.craft = CraftStage::Chosen(gift);
+        } else if gate == CraftGate::Ready && self.gift_market.craft.choose(gift) {
             self.gift_market.push(MarketBox::CraftInfo);
         }
         self.open_box(crate::ui::shell::DialogKind::GiftMarket);

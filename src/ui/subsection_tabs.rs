@@ -19,7 +19,6 @@ use super::chat_theme::{accent, accent_strong, text_on_fill};
 use super::folder_tabs_fit::{RevealKey, needs_reveal};
 use super::pressable::PressableDiv;
 use super::subsection_tabs_fit::{LABEL_MAX_WIDTH, label_may_be_cut, selected_child};
-use crate::ui::chat_ui_state::InfoCard;
 use crate::ui::status_note::StatusNote;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::menu::{ContextMenuExt as _, PopupMenuItem};
@@ -623,7 +622,7 @@ impl QuillApp {
             // The card is the topic's: take the new topic's `ChatUi` first,
             // so the next frame's sync does not drop the card with the old.
             self.sync_chat_ui(cx);
-            self.chat_ui.info_card = InfoCard::Topic;
+            self.chat_ui.info_card.open_topic();
             cx.notify();
             return;
         }

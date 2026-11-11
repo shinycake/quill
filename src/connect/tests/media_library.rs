@@ -78,6 +78,18 @@ fn opening_the_panel_requests_both_set_lists_recent_and_favorites_once() {
     );
     assert_eq!(h.sent("getRecentStickers").len(), 1);
     assert_eq!(h.sent("getFavoriteStickers").len(), 1);
+    // One fetch per list tracks the send, so the group sticker box shows
+    // "Loading" and does not ask again.
+    assert!(
+        h.driver
+            .session
+            .stickers
+            .stickers
+            .lists
+            .installed
+            .is_loading()
+    );
+    assert!(h.driver.session.stickers.emoji.lists.installed.is_loading());
 }
 
 #[test]

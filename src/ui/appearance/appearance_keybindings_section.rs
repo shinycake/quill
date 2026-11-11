@@ -1,7 +1,6 @@
 //! Methods moved out of `appearance.rs` to keep files under 1000 lines.
 
 use super::*;
-use crate::ui::keybindings::KeyCapture;
 use quill::lang::{keys, tr};
 
 impl QuillApp {
@@ -108,10 +107,9 @@ impl QuillApp {
                                         if this.preferences.keybinding_capture.armed_id()
                                             == Some(id.as_str())
                                         {
-                                            this.preferences.keybinding_capture = KeyCapture::Idle;
+                                            this.preferences.keybinding_capture.disarm();
                                         } else {
-                                            this.preferences.keybinding_capture =
-                                                KeyCapture::Armed { id: id.clone() };
+                                            this.preferences.keybinding_capture.arm(id.clone());
                                             window.focus(&this.preferences.keybinding_focus, cx);
                                         }
                                         cx.notify();
@@ -215,7 +213,7 @@ impl QuillApp {
             return;
         }
         if keystroke.key == "escape" && !keystroke.modifiers.modified() {
-            self.preferences.keybinding_capture = KeyCapture::Idle;
+            self.preferences.keybinding_capture.disarm();
             cx.notify();
             return;
         }
@@ -228,10 +226,9 @@ impl QuillApp {
             .map(|live| live.driver.load_custom_keybindings())
             .unwrap_or_default();
         if let Some(conflict) = keybinding_conflict(&id, &chord, &customs) {
-            self.preferences.keybinding_capture = KeyCapture::Rejected {
-                message: conflict_message(&chord, &conflict),
-                id,
-            };
+            self.preferences
+                .keybinding_capture
+                .reject(id, conflict_message(&chord, &conflict));
             cx.notify();
             return;
         }
@@ -246,7 +243,7 @@ impl QuillApp {
         if let Some(customs) = saved {
             apply_custom_bindings(cx, &customs);
         }
-        self.preferences.keybinding_capture = KeyCapture::Idle;
+        self.preferences.keybinding_capture.disarm();
         cx.notify();
     }
 }

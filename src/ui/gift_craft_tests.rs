@@ -119,6 +119,25 @@ fn the_info_box_starts_a_craft(cx: &mut TestAppContext) {
     });
 }
 
+/// Opening the craft info for another gift while the forge runs leaves
+/// the forge as it is, so its answer still ends it.
+#[gpui_kit::test]
+fn the_craft_info_does_not_replace_a_running_forge(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    vcx.run_until_parked();
+    app.update_in(vcx, |app, _, cx| {
+        let other = app
+            .craft_session()
+            .and_then(|craft| craft.slots.get(1).cloned())
+            .expect("a second gift");
+        app.gift_market.craft.start_forge(Instant::now());
+        app.open_craft_info(other, cx);
+        assert!(app.gift_market.craft.forge_since().is_some());
+        assert_ne!(app.gift_market.top(), Some(&MarketBox::CraftInfo));
+    });
+}
+
 #[gpui_kit::test]
 fn the_forge_ends_in_the_result(cx: &mut TestAppContext) {
     let (app, mut vcx) = new_app(cx);

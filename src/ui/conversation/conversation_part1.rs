@@ -1,7 +1,6 @@
 //! Methods moved out of `conversation.rs` to keep files under 1000 lines.
 
 use super::*;
-use crate::ui::chat_ui_state::InfoCard;
 use quill::lang::{keys, tr};
 
 impl QuillApp {
@@ -542,7 +541,7 @@ impl QuillApp {
             .when_some(
                 topic_info
                     .clone()
-                    .filter(|_| self.chat_ui.info_card == InfoCard::Topic),
+                    .filter(|_| self.chat_ui.info_card.topic()),
                 |this, info| this.child(self.topic_info_card(&info, cx)),
             )
             .children(self.subsection_tabs_strip(SubsectionTabsMode::Top, cx))
@@ -747,7 +746,7 @@ impl QuillApp {
             .min_h_0()
             .min_w_0()
             .children(self.thread_root_bar(cx))
-            .when(self.chat_ui.info_card == InfoCard::Thread, |this| {
+            .when(self.chat_ui.info_card.thread(), |this| {
                 this.children(self.thread_info_card(cx))
             })
             .child(list)

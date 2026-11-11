@@ -8,7 +8,6 @@ use super::dialogs::TopicEditor;
 use super::pressable::PressableDiv;
 use super::shell::{DialogKind, QuillShell};
 use super::*;
-use crate::ui::chat_ui_state::InfoCard;
 use crate::ui::status_note::StatusNote;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::*;
@@ -775,7 +774,7 @@ impl QuillApp {
                     .tooltip(tr(keys::Q_PEOPLE_TOPIC_INFO))
                     .accessibility_label(tr(keys::Q_PEOPLE_TOPIC_INFO))
                     .on_click(cx.listener(|this, _, _, cx| {
-                        this.chat_ui.info_card.toggle(InfoCard::Topic);
+                        this.chat_ui.info_card.toggle_topic();
                         cx.notify();
                     })),
             )

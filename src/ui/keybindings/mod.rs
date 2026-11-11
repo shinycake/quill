@@ -87,19 +87,64 @@ const COMPOSER_INPUT_CONTEXT: &str = "QuillComposer > Input";
 /// captured chord, Escape, the Reset of a row, a refusal (`Rejected`), the
 /// page closing, the lock and an account change; `Rejected` (the chip keeps
 /// showing the chord that is really bound, with the conflict under it)
-/// leaves when a row is armed again or any of the other exits.
+/// leaves when its own row is armed again, is reset, or by any of the
+/// other exits. Arming another row leaves it showing.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) enum KeyCapture {
     #[default]
     Idle,
-    /// The row `id` waits for a keystroke.
-    Armed { id: String },
-    /// The chord typed for row `id` collides with fixed chrome or another
-    /// live shortcut; `message` says with what.
-    Rejected { id: String, message: String },
+    /// The row `id` waits for a keystroke; `kept` is another row's refusal
+    /// that stays under it.
+    Armed { id: String, kept: Option<Refusal> },
+    /// The chord typed for a row collides with fixed chrome or another
+    /// live shortcut.
+    Rejected(Refusal),
+}
+
+/// The refusal shown under row `id`; `message` says what the chord
+/// collides with.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct Refusal {
+    pub(crate) id: String,
+    pub(crate) message: String,
 }
 
 impl KeyCapture {
+    /// Row `id` is armed; another row's refusal stays, its own goes.
+    pub(crate) fn arm(&mut self, id: String) {
+        let kept = std::mem::take(self).into_refusal().filter(|r| r.id != id);
+        *self = Self::Armed { id, kept };
+    }
+
+    /// The armed row got no chord (Escape, a saved chord): back to showing
+    /// only the refusal that was kept.
+    pub(crate) fn disarm(&mut self) {
+        *self = match std::mem::take(self) {
+            Self::Armed {
+                kept: Some(refusal),
+                ..
+            } => Self::Rejected(refusal),
+            Self::Rejected(refusal) => Self::Rejected(refusal),
+            _ => Self::Idle,
+        };
+    }
+
+    /// The chord typed for row `id` was refused. The armed row ends.
+    pub(crate) fn reject(&mut self, id: String, message: String) {
+        *self = Self::Rejected(Refusal { id, message });
+    }
+
+    fn into_refusal(self) -> Option<Refusal> {
+        match self {
+            Self::Rejected(refusal)
+            | Self::Armed {
+                kept: Some(refusal),
+                ..
+            } => Some(refusal),
+            _ => None,
+        }
+    }
+
     pub(crate) fn is_armed(&self) -> bool {
         matches!(self, Self::Armed { .. })
     }
@@ -107,7 +152,7 @@ impl KeyCapture {
     /// The row waiting for a keystroke.
     pub(crate) fn armed_id(&self) -> Option<&str> {
         match self {
-            Self::Armed { id } => Some(id),
+            Self::Armed { id, .. } => Some(id),
             _ => None,
         }
     }
@@ -115,14 +160,20 @@ impl KeyCapture {
     /// The refusal shown for row `id`.
     pub(crate) fn rejected_for(&self, id: &str) -> Option<&str> {
         match self {
-            Self::Rejected { id: row, message } if row == id => Some(message),
+            Self::Rejected(Refusal { id: row, message })
+            | Self::Armed {
+                kept: Some(Refusal { id: row, message }),
+                ..
+            } if row == id => Some(message),
             _ => None,
         }
     }
 
-    /// Back to `Idle`, unless the refusal is another row's.
+    /// Row `id` was reset: its own refusal goes and an armed row stops
+    /// waiting; another row's refusal stays.
     pub(crate) fn reset_row(&mut self, id: &str) {
-        if self.rejected_for(id).is_some() || self.is_armed() {
+        self.disarm();
+        if self.rejected_for(id).is_some() {
             *self = Self::Idle;
         }
     }
@@ -876,14 +927,9 @@ mod tests {
     fn capture_only_consumes_keys_while_shortcuts_are_shown_and_armed() {
         let mut capture = KeyCapture::Idle;
         assert!(!capture_active(true, &mut capture));
-        capture = KeyCapture::Armed {
-            id: "focus-composer".to_string(),
-        };
+        capture.arm("focus-composer".to_string());
         assert!(capture_active(true, &mut capture));
-        capture = KeyCapture::Rejected {
-            id: "focus-composer".to_string(),
-            message: "Conflict".to_string(),
-        };
+        capture.reject("focus-composer".to_string(), "Conflict".to_string());
         assert!(
             !capture_active(true, &mut capture),
             "a refusal is not armed"
@@ -893,11 +939,29 @@ mod tests {
     }
 
     #[test]
+    fn arming_a_row_keeps_another_rows_refusal() {
+        let mut capture = KeyCapture::Idle;
+        capture.arm("a".to_string());
+        capture.reject("a".to_string(), "taken".to_string());
+        capture.arm("b".to_string());
+        assert_eq!(capture.armed_id(), Some("b"));
+        assert_eq!(capture.rejected_for("a"), Some("taken"));
+        // Escape on `b` leaves the refusal under `a`.
+        capture.disarm();
+        assert_eq!(capture.rejected_for("a"), Some("taken"));
+        // Arming `a` again drops its own refusal; Reset of `b` keeps it.
+        capture.arm("b".to_string());
+        capture.reset_row("b");
+        assert_eq!(capture.rejected_for("a"), Some("taken"));
+        capture.arm("a".to_string());
+        assert_eq!(capture.rejected_for("a"), None);
+    }
+
+    #[test]
     fn account_change_invalidates_applied_bindings_and_capture() {
         let mut applied = true;
-        let mut capture = KeyCapture::Armed {
-            id: "focus-composer".to_string(),
-        };
+        let mut capture = KeyCapture::Idle;
+        capture.arm("focus-composer".to_string());
         invalidate_account_keybindings(&mut applied, &mut capture);
         assert!(!applied);
         assert_eq!(capture, KeyCapture::Idle);

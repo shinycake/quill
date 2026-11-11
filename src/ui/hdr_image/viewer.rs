@@ -75,13 +75,36 @@ enum Outcome {
 
 /// The window's layer against the viewer. `Lost`: the renderer could not
 /// draw in extended range and left it, so frames aim at standard range
-/// until the viewer shows no HDR frame (the check runs again after that).
+/// until the viewer shows no HDR frame (on Windows the check runs again
+/// after that; on macOS the loss is for good).
 #[derive(Clone, Copy, Default, PartialEq, Eq)]
 enum Edr {
     #[default]
     Off,
     On,
+    /// Lost, with the window's layer still in extended-range mode.
     Lost,
+    /// Lost for good (not Windows), with the layer back in standard range.
+    LostOff,
+}
+
+impl Edr {
+    fn is_lost(self) -> bool {
+        matches!(self, Self::Lost | Self::LostOff)
+    }
+
+    /// The state once the window's layer is back in standard range.
+    fn layer_off(self) -> Self {
+        if self.is_lost() && !cfg!(windows) {
+            Self::LostOff
+        } else {
+            Self::Off
+        }
+    }
+
+    fn window_on(self) -> bool {
+        matches!(self, Self::On | Self::Lost)
+    }
 }
 
 /// The display headroom re-read while an HDR frame shows.
@@ -119,6 +142,14 @@ impl Decode {
         }
     }
 
+    fn frame_mut(&mut self) -> Option<&mut Shown> {
+        match self {
+            Self::Hdr { shown, .. } => Some(shown),
+            Self::Decoding { showing, .. } => showing.as_mut(),
+            _ => None,
+        }
+    }
+
     fn is_decoding(&self) -> bool {
         matches!(self, Self::Decoding { .. })
     }
@@ -132,7 +163,7 @@ impl HdrViewer {
 
     pub(crate) fn badge(&self) -> Option<HdrBadge> {
         match &self.decode {
-            Decode::Hdr { .. } if self.edr == Edr::Lost => Some(HdrBadge::StandardRange),
+            Decode::Hdr { .. } if self.edr.is_lost() => Some(HdrBadge::StandardRange),
             Decode::Hdr { .. } => Some(HdrBadge::Shown),
             Decode::StandardRange(_) => Some(HdrBadge::StandardRange),
             Decode::Idle | Decode::Decoding { .. } | Decode::Sdr(_) => None,
@@ -143,14 +174,13 @@ impl HdrViewer {
     /// was asked (`edge`), not cut down to the picture's own size or the
     /// pixel cap.
     fn can_grow(&self, edge: u32) -> bool {
-        match &self.decode {
-            Decode::Hdr { shown, .. } => shown.pixels.size.0.max(shown.pixels.size.1) >= edge,
-            _ => false,
-        }
+        self.decode
+            .frame()
+            .is_some_and(|shown| shown.pixels.size.0.max(shown.pixels.size.1) >= edge)
     }
 
     fn has_frame(&self) -> bool {
-        matches!(self.decode, Decode::Hdr { .. })
+        self.decode.frame().is_some()
     }
 
     /// The headroom the frame is drawn for on a display reporting
@@ -158,7 +188,7 @@ impl HdrViewer {
     /// whatever the display says. The draw and the headroom poll both read
     /// it, so they agree on when it changed.
     fn display_headroom(&self, headroom: super::Headroom) -> f32 {
-        if self.edr == Edr::Lost {
+        if self.edr.is_lost() {
             super::Headroom::SDR.effective()
         } else {
             headroom.effective()
@@ -179,7 +209,29 @@ impl HdrViewer {
     #[cfg(test)]
     #[cfg(all(target_os = "macos", feature = "demo-capture"))]
     pub(crate) fn edr_on(&self) -> bool {
-        self.edr != Edr::Off
+        self.edr.window_on()
+    }
+
+    /// Tests: a bigger decode of the shown frame is running, as a zoom
+    /// starts it. Returns whether a frame was showing.
+    #[cfg(test)]
+    #[cfg(all(target_os = "macos", feature = "demo-capture"))]
+    pub(crate) fn regrow_for_test(&mut self) -> bool {
+        let Decode::Hdr { key, shown } = std::mem::take(&mut self.decode) else {
+            return false;
+        };
+        self.decode = Decode::Decoding {
+            key,
+            showing: Some(shown),
+        };
+        true
+    }
+
+    /// Tests: a frame shows (a running decode keeps the old one up).
+    #[cfg(test)]
+    #[cfg(all(target_os = "macos", feature = "demo-capture"))]
+    pub(crate) fn shows_frame(&self) -> bool {
+        self.decode.frame().is_some()
     }
 }
 
@@ -233,9 +285,8 @@ impl QuillApp {
         }
         let hdr = &mut self.viewer.hdr;
         let display = hdr.display_headroom(headroom);
-        let Decode::Hdr { shown, .. } = &mut hdr.decode else {
-            return None;
-        };
+        // A bigger re-decode keeps drawing the frame it replaces.
+        let shown = hdr.decode.frame_mut()?;
         // Back in 8-bit, the frame is tone-mapped into standard range
         // instead of clipping its highlights.
         if shown.headroom != display {
@@ -354,10 +405,10 @@ impl QuillApp {
     /// record and leave the layer in extended range.
     pub(crate) fn leave_viewer_edr(&mut self, window: &Window) {
         let hdr = &mut self.viewer.hdr;
-        if hdr.edr != Edr::Off {
+        if hdr.edr.window_on() {
             super::set_window_edr(window, false);
-            hdr.edr = Edr::Off;
         }
+        hdr.edr = hdr.edr.layer_off();
     }
 
     /// Called every render: the window is in extended-range mode exactly
@@ -376,9 +427,13 @@ impl QuillApp {
                 super::set_window_edr(window, true);
                 hdr.edr = Edr::On;
             }
+            (true, Edr::LostOff) => {
+                super::set_window_edr(window, true);
+                hdr.edr = Edr::Lost;
+            }
             (false, Edr::On | Edr::Lost) => {
                 super::set_window_edr(window, false);
-                hdr.edr = Edr::Off;
+                hdr.edr = hdr.edr.layer_off();
             }
             _ => {}
         }
@@ -444,7 +499,19 @@ fn frame_element(frame: &super::Frame, _fit: (f32, f32)) -> Option<AnyElement> {
 
 #[cfg(test)]
 mod tests {
-    use super::bucket;
+    use super::{Edr, bucket};
+
+    #[test]
+    fn a_lost_layer_stays_lost_off_windows_once_switched_off() {
+        let off = Edr::Lost.layer_off();
+        if cfg!(windows) {
+            assert_eq!(off, Edr::Off);
+        } else {
+            assert_eq!(off, Edr::LostOff);
+            assert!(off.is_lost() && !off.window_on());
+        }
+        assert_eq!(Edr::On.layer_off(), Edr::Off);
+    }
 
     #[test]
     fn long_edges_round_up_to_the_step() {

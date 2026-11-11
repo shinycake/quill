@@ -6796,13 +6796,13 @@ the converted fields are gone (`ResaleSearch` x3, `HistoryUi::anchor_pending`,
 
 | Entry | Result |
 |---|---|
-| 10-019 | `GiftMarketUi::bid`: the custom field is a part of the bid slider's value, so it cannot outlive it. |
+| 10-019 | `GiftMarketUi::bid` is gone: the slider (and its custom field) sits in `MarketBox::AuctionBid { slider }` and goes with the box. A rebuild of the slider after another bid moved its bounds carries the open custom field over. |
 | 10-017 | Already `AuctionOpen { Idle, Waiting }` (and the session's auction fetch). Skipped. |
 | 10-018 | `CraftStage { Idle, Chosen, Forging { primary, since } }`. |
 | 10-025 | `ResaleSearch::stage: SearchStage { Idle, Loading { request, loaded }, Ready, Failed }`; an answer applies only to the search waiting for that request. |
 | 10-020 | `GiveawayPage::Confirming` replaces `confirming`. |
 | 10-045 | `Sweep { Idle, Marked }`, `IdleTrigger { Foreground, Left }` and `GlyphCounts` for kept/seen. |
-| 10-030 | Already `StreamOverlay::Settings { key_shown }`. Skipped. |
+| 10-030 | `key_shown` is the whole data of the `Settings` variant: no second field moves with it, and the box that reveals it is a variant of the same enum, so every way out hides the key again. Skipped. |
 | 10-034 | The hide timer already is `Option<Task>` alone. The photo is `StreamPhoto { None, Blurring { path, task }, Blurred }`. `title_pressed` is one `Option<Point>` (a press position), not a stage. |
 | 10-059 | The group Edit box's pack buttons read the `Fetch` of the two installed lists, begun at the send, not request purposes. |
 | 10-057, 10-058 | `SaveStage::TitleInvalid`, `GroupEditBox::sub: EditSub { None, Type, History }`, and the title emoji panel is `PanelMode::GroupTitle`, so the panel's mode is its owner. |
@@ -6810,10 +6810,10 @@ the converted fields are gone (`ResaleSearch` x3, `HistoryUi::anchor_pending`,
 | 10-081 | The thumb's keyed state is `Thumb { Dragging, Synced(value) }`. |
 | 10-082 | `LinkCheck { Idle, Typed { version }, Refused { version } }`; choosing Public or Private ends a refusal. |
 | 10-072, 10-111 | `ForumColumnUi { Hidden, Column, Peek }` in `HistoryUi`, laid out in `forum_column_layout`; `HistoryWidthSource { Seeded, Measured }`. `window_active` is an observation of the window, not a stage; skipped. |
-| 10-071 | `InfoCard { Closed, Topic, Thread }` in `ChatUi`. |
+| 10-071 | `InfoCard { Closed, Topic, Thread, Both }` in `ChatUi`: a thread's card opens over a topic's and the topic's is back when the thread closes, as with the two flags. |
 | 10-077 | An edit of a welcome message that left the list is dropped (`settle_welcome_dialog`). |
 | 10-105 | The probe's background job records its own answer (and a panic counts as unreadable), so `Probing` always ends. |
-| 10-096 | `Decode { Idle, Decoding { key, showing }, Sdr, StandardRange, Hdr }`, `Edr { Off, On, Lost }` and `HeadroomPoll::Running(Task)`; an answer is matched by its key. |
+| 10-096 | `Decode { Idle, Decoding { key, showing }, Sdr, StandardRange, Hdr }`, `Edr { Off, On, Lost }` and `HeadroomPoll::Running(Task)`; an answer is matched by its key. A bigger re-decode keeps drawing and counting the frame it replaces (`Decoding { showing }`), so the window stays in extended range; `Edr::LostOff` keeps the loss for good off Windows after the layer is switched off. |
 | 10-101 | `HistoryFocus { Away, Focused, ArmedForFirst(chat) }`; focus leaving drops the wait. |
 | 10-106 | `PillStage { Hidden, Showing { since, last_scroll, hide_after, wake } }`. |
 | 10-108 | `Anchor { Idle, Pending { key, epoch }, Anchored }` replaces `key`, `window_epoch` and `anchor_pending`. `ends`, `landing`, `last_highlight` and `highlight_fade` stay: a landing is its own struct, the others are a de-duplication key and a clock. |
@@ -6828,11 +6828,19 @@ the converted fields are gone (`ResaleSearch` x3, `HistoryUi::anchor_pending`,
 | 10-130 | `GifPlayback { Idle, Waiting, Playing { playing, clip, started } }`. |
 | 10-127, 14-011 | `Presence { InView, OffScreen { since }, Asleep, Stuck }` and `Audio { Muted, Sounding { paused }, Seeking }` for inline players; `SlotStage` for userpic players. `sweep_due` and `history_listed` are a frame's own marks; skipped. |
 | 10-135, 10-138 | Already `DemandStage` and `InlineStage`. Skipped. |
-| 10-148 | The focus request is inside `CustomBox::Limit { input, focus_pending }`. |
+| 10-148 | `CustomBox::Limit { input, focus: LimitFocus }`: `Requested` moves to `Done` when the dialog is built, not in drawing code. |
 | 10-151 | `Checkout { Idle, LoadingForm { request }, Open, Verifying, Paid }` replaces `form`, `form_loading`, `form_request`, `form_paid` and `verification_started`. |
-| 10-154 | `KeyCapture { Idle, Armed { id }, Rejected { id, message } }`. `keybindings_applied` is the process keymap's validity mark and stays. |
-| 10-158 | `SwitchOutcome { None, Ready, Failed }` and `refresh: LateChange` replace `ready`, `error`, `patch` and `reload`. |
+| 10-154 | `KeyCapture { Idle, Armed { id, kept }, Rejected(Refusal) }`: arming a row keeps another row's refusal (`kept`). `keybindings_applied` is the process keymap's validity mark and stays. |
+| 10-158 | Taken from main (is-04): `LanguageStage` and `LanguageEvent` replace the four fields. |
 | 10-174 | `LayerStage { Idle, Ticked, Redrawn(at) }`. |
+
+Review fixes (is-15): the installed sticker and emoji lists go out through
+`sticker_request` / `emoji_set_request` at every sender (media panel, message
+menu, sticker creator, composer suggestions), so one `Fetch` per list tracks
+every send and the group sticker box shows "Loading" instead of asking twice;
+`emoji.installed` is gone (`emoji.lists.installed` is the one). The craft info
+box never replaces a running forge (`CraftStage::choose`). Choosing Public or
+Private in the Type box leaves a refused link line as it was.
 
 ### Sweep fixes (is-01)
 

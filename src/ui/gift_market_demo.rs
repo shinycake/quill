@@ -281,7 +281,7 @@ impl QuillApp {
             .unwrap_or_default()
             .as_str()
         {
-            "bid" => Some(MarketBox::AuctionBid { gift_id }),
+            "bid" => Some(MarketBox::bid(gift_id)),
             "info" => Some(MarketBox::AuctionInfo { gift_id }),
             "about" => Some(MarketBox::AuctionAbout { gift_id }),
             "send" => Some(MarketBox::AuctionSend { gift_id }),

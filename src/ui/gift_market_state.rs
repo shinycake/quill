@@ -26,7 +26,11 @@ pub(crate) enum MarketBox {
     /// "Send a Gift" for an auction gift: message and "Hide My Name".
     AuctionSend { gift_id: i64 },
     /// "Place a Bid": the slider, the places and the top winners.
-    AuctionBid { gift_id: i64 },
+    AuctionBid {
+        gift_id: i64,
+        /// Built on the first draw; goes with the box.
+        slider: Option<BidSliderUi>,
+    },
     /// "{n} Items Bought".
     AuctionBought { gift_id: i64 },
     /// "Change Recipient": the bid is for someone else.
@@ -49,12 +53,20 @@ pub(crate) enum MarketBox {
 }
 
 impl MarketBox {
+    /// A "Place a Bid" box without its slider yet.
+    pub(super) fn bid(gift_id: i64) -> Self {
+        Self::AuctionBid {
+            gift_id,
+            slider: None,
+        }
+    }
+
     /// The auction this box shows, to follow its updates.
     pub(super) fn auction(&self) -> Option<i64> {
         match self {
             Self::AuctionInfo { gift_id }
             | Self::AuctionSend { gift_id }
-            | Self::AuctionBid { gift_id }
+            | Self::AuctionBid { gift_id, .. }
             | Self::AuctionBought { gift_id }
             | Self::ChangeRecipient { gift_id } => Some(*gift_id),
             _ => None,
@@ -63,8 +75,8 @@ impl MarketBox {
 }
 
 /// The bid slider of the open bid box.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct BidSliderUi {
-    pub(super) gift_id: i64,
     pub(super) state: Entity<SliderState>,
     /// The amount the slider (or the custom field) chose.
     pub(super) chosen: i64,
@@ -76,6 +88,7 @@ pub(crate) struct BidSliderUi {
 }
 
 /// "Custom Amount" for a bid.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct CustomBidUi {
     pub(super) input: Entity<InputState>,
     pub(super) error: Option<String>,
@@ -100,9 +113,6 @@ pub(crate) struct GiftMarketUi {
     /// user.
     pub(super) recipient: Option<GiftRecipient>,
     pub(super) hide_name: bool,
-    /// The open bid box's slider and its custom field: one value that
-    /// goes with the bid box.
-    pub(super) bid: Option<BidSliderUi>,
     /// A tile or link asked for an auction; its box opens when the state
     /// arrives.
     pub(super) auction_open: AuctionOpen,
@@ -149,6 +159,17 @@ impl CraftStage {
         }
     }
 
+    /// The craft info box opens for `gift`. A running forge is never
+    /// replaced (its answer would have no stage to end): returns whether
+    /// the gift was taken.
+    pub(super) fn choose(&mut self, gift: CraftGift) -> bool {
+        if matches!(self, Self::Forging { .. }) {
+            return false;
+        }
+        *self = Self::Chosen(gift);
+        true
+    }
+
     /// The forge starts (or restarts) at `since`.
     pub(super) fn start_forge(&mut self, since: Instant) {
         let primary = self.primary().cloned();
@@ -188,7 +209,6 @@ impl GiftMarketUi {
             stack: Vec::new(),
             recipient: None,
             hide_name: false,
-            bid: None,
             auction_open: AuctionOpen::Idle,
             requested_files: Vec::new(),
             #[cfg(test)]
@@ -216,18 +236,10 @@ impl GiftMarketUi {
         self.drop_orphans();
     }
 
-    /// The bid slider and custom field belong to a bid box, and "Hide My
-    /// Name" to the send, change and bid boxes of one bid: when the last
-    /// box that owns them leaves the stack, however it left (back, replace,
-    /// clear), they go, so the next auction starts clean.
+    /// "Hide My Name" belongs to the send, change and bid boxes of one bid:
+    /// when the last box that owns it leaves the stack, however it left
+    /// (back, replace, clear), it goes, so the next auction starts clean.
     fn drop_orphans(&mut self) {
-        let bid = self
-            .stack
-            .iter()
-            .any(|entry| matches!(entry, MarketBox::AuctionBid { .. }));
-        if !bid {
-            self.bid = None;
-        }
         let naming = self.stack.iter().any(|entry| {
             matches!(
                 entry,
@@ -239,6 +251,32 @@ impl GiftMarketUi {
         if !naming {
             self.hide_name = false;
         }
+    }
+
+    /// The slider (and custom field) of the open bid box.
+    pub(super) fn bid(&self) -> Option<&BidSliderUi> {
+        self.stack.iter().rev().find_map(|entry| match entry {
+            MarketBox::AuctionBid { slider, .. } => slider.as_ref(),
+            _ => None,
+        })
+    }
+
+    pub(super) fn bid_mut(&mut self) -> Option<&mut BidSliderUi> {
+        self.stack.iter_mut().rev().find_map(|entry| match entry {
+            MarketBox::AuctionBid { slider, .. } => slider.as_mut(),
+            _ => None,
+        })
+    }
+
+    /// The slider slot of the bid box for `gift_id`.
+    pub(super) fn bid_slot(&mut self, gift_id: i64) -> Option<&mut Option<BidSliderUi>> {
+        self.stack.iter_mut().rev().find_map(|entry| match entry {
+            MarketBox::AuctionBid {
+                gift_id: id,
+                slider,
+            } if *id == gift_id => Some(slider),
+            _ => None,
+        })
     }
 
     pub(super) fn top(&self) -> Option<&MarketBox> {

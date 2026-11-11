@@ -39,8 +39,7 @@ pub(crate) struct GroupTypeBox {
 
 /// Where the link field stands. `version` counts keystrokes: a check timer
 /// for an older one does nothing. `Refused` (Save found the link unusable;
-/// the line under the field says why) leaves with the next keystroke or a
-/// change of the Public / Private choice.
+/// the line under the field says why) leaves with the next keystroke.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 enum LinkCheck {
     #[default]
@@ -326,9 +325,6 @@ impl QuillApp {
             return;
         };
         type_box.draft.public = public;
-        type_box.link = LinkCheck::Typed {
-            version: type_box.link.version(),
-        };
         if !join_approval_applies(public, facts.group) {
             type_box.draft.request_to_join = false;
         }

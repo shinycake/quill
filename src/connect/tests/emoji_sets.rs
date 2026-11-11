@@ -482,7 +482,16 @@ fn the_suggestion_bar_asks_for_the_installed_sets_until_they_answer() {
     driver
         .ingest(copy_and_parse(&failure.to_string(), &seq, &sink).unwrap())
         .unwrap();
-    assert!(driver.session.stickers.emoji.installed.error().is_some());
+    assert!(
+        driver
+            .session
+            .stickers
+            .emoji
+            .lists
+            .installed
+            .error()
+            .is_some()
+    );
     driver.ensure_suggestion_emoji_sets().unwrap();
     assert_eq!(asked(&recorder), 2, "a failed list is asked for again");
     let _ = dir;

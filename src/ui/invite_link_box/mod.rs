@@ -44,11 +44,17 @@ pub(crate) enum CustomBox {
     Date(TimePicker),
     Limit {
         input: Entity<InputState>,
-        /// The number field takes focus when its content is first drawn
-        /// (shared with that content, which clears it): the kit focuses a
-        /// dialog as it opens. It goes with the box.
-        focus_pending: std::rc::Rc<std::cell::Cell<bool>>,
+        focus: LimitFocus,
     },
+}
+
+/// Whether the number field still has to take focus: the kit focuses a
+/// dialog as it opens, so the field asks once the dialog is built. It goes
+/// with the box.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum LimitFocus {
+    Requested,
+    Done,
 }
 
 impl QuillApp {

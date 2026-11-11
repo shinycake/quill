@@ -345,6 +345,24 @@ fn another_chat_closes_the_info_cards(cx: &mut TestAppContext) {
     });
 }
 
+/// A thread's card opens over a topic's; closing the thread brings the
+/// topic's back.
+#[test]
+fn a_thread_card_keeps_the_topic_card_under_it() {
+    use crate::ui::chat_ui_state::InfoCard;
+    let mut card = InfoCard::Closed;
+    card.toggle_topic();
+    card.toggle_thread();
+    assert!(card.topic() && card.thread());
+    card.close_thread();
+    assert_eq!(card, InfoCard::Topic);
+    card.toggle_thread();
+    card.toggle_thread();
+    assert_eq!(card, InfoCard::Topic);
+    card.toggle_topic();
+    assert_eq!(card, InfoCard::Closed);
+}
+
 /// Round 8, 2a: a new poll or checklist goes to the chat shown at Create,
 /// so its box goes when another chat opens (a notification click opens
 /// one under the box).

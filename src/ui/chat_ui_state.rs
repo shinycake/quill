@@ -20,11 +20,8 @@ use gpui_kit::*;
 use quill::composer::{ComposerEdit, ComposerReplyTo, DeleteConfirm};
 use quill::ids::{ChatId, MessageId, TopicId};
 
-/// The composer while a message is edited: the edit, the normal draft and
-/// reply stashed for it (`DraftType::Normal`), and the "Cancel editing?" box
-/// (`DialogKind::CancelEditConfirm`). One value, so the box cannot outlive
-/// the edit.
-/// Which info card is open in a chat.
+/// Which info cards are open in a chat. A thread's card opens over a
+/// topic's and the topic's is back when the thread closes.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) enum InfoCard {
     #[default]
@@ -33,22 +30,54 @@ pub(crate) enum InfoCard {
     Topic,
     /// Under the open reply thread's root bar.
     Thread,
+    /// Both: the topic's card stays under the thread's.
+    Both,
 }
 
 impl InfoCard {
-    /// The thread view closed (or another opened): its card goes, a
-    /// topic's stays.
-    pub(super) fn close_thread(&mut self) {
-        if *self == Self::Thread {
-            *self = Self::Closed;
+    pub(crate) fn topic(self) -> bool {
+        matches!(self, Self::Topic | Self::Both)
+    }
+
+    pub(crate) fn thread(self) -> bool {
+        matches!(self, Self::Thread | Self::Both)
+    }
+
+    fn of(topic: bool, thread: bool) -> Self {
+        match (topic, thread) {
+            (false, false) => Self::Closed,
+            (true, false) => Self::Topic,
+            (false, true) => Self::Thread,
+            (true, true) => Self::Both,
         }
     }
 
-    /// A tap on the card's button: opens `card`, or closes it again.
-    pub(super) fn toggle(&mut self, card: Self) {
-        *self = if *self == card { Self::Closed } else { card };
+    /// The thread view closed (or another opened): its card goes, a
+    /// topic's stays.
+    pub(super) fn close_thread(&mut self) {
+        *self = Self::of(self.topic(), false);
+    }
+
+    /// The topic's card opens (its menu's Info).
+    pub(super) fn open_topic(&mut self) {
+        *self = Self::of(true, self.thread());
+    }
+
+    /// A tap on the topic card's button.
+    pub(super) fn toggle_topic(&mut self) {
+        *self = Self::of(!self.topic(), self.thread());
+    }
+
+    /// A tap on the thread card's button.
+    pub(super) fn toggle_thread(&mut self) {
+        *self = Self::of(self.topic(), !self.thread());
     }
 }
+
+/// The composer while a message is edited: the edit, the normal draft and
+/// reply stashed for it (`DraftType::Normal`), and the "Cancel editing?" box
+/// (`DialogKind::CancelEditConfirm`). One value, so the box cannot outlive
+/// the edit.
 
 #[derive(Debug)]
 pub(super) struct EditMode {

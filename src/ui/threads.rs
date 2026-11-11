@@ -9,7 +9,6 @@ use super::history_state::ScrollGoal;
 use super::message_text::kit_avatar_element;
 use super::nested_click::SwallowPress;
 use super::*;
-use crate::ui::chat_ui_state::InfoCard;
 use crate::ui::status_note::StatusNote;
 use gpui_kit::component::button::*;
 use gpui_kit::component::*;
@@ -388,7 +387,7 @@ impl QuillApp {
                         // Keep the root bar's own click (jump to the original) out of it.
                         .swallow_press()
                         .on_click(cx.listener(|this, _, _, cx| {
-                            this.chat_ui.info_card.toggle(InfoCard::Thread);
+                            this.chat_ui.info_card.toggle_thread();
                             cx.notify();
                         })),
                 )
