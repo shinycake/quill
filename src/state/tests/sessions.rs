@@ -527,6 +527,7 @@ fn disconnect_all_websites_error_surfaces_honestly() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
     let extra = session.request(RequestPurpose::DisconnectAllWebsites, None);
+    session.settings.websites_op = crate::state::fetch::ListOp::Running(extra);
     apply_json(
         &mut session,
         &seq,
@@ -536,7 +537,6 @@ fn disconnect_all_websites_error_surfaces_honestly() {
             extra.0
         ),
     );
-    session.settings.websites_op = crate::state::fetch::ListOp::Running(extra);
     assert!(!session.settings.websites_op.is_running());
     assert_eq!(
         session.settings.connected_websites.error(),
