@@ -50,10 +50,10 @@ impl Session {
                 }
             }
             BotsPayload::FoundWebApp(app) => {
-                if let Some(RequestPurpose::Bots(BotsPurpose::SearchWebApp { bot_user_id })) =
-                    purpose
+                if let Some(RequestPurpose::Bots(BotsPurpose::SearchWebApp { .. })) = purpose
+                    && let Some(pending) = pending
                 {
-                    self.bots.web_apps.found = Some((bot_user_id, Ok(app)));
+                    self.bots.web_apps.found = Some((pending.id, Ok(app)));
                 }
             }
             BotsPayload::AttachmentMenuBot(bot) => {
@@ -196,13 +196,13 @@ impl Session {
                         }));
                 }
             }
-            RequestPurpose::Bots(BotsPurpose::SearchWebApp { bot_user_id }) => {
+            RequestPurpose::Bots(BotsPurpose::SearchWebApp { .. }) => {
                 let message = if err.code == 404 {
                     "This bot has no app with that name.".into()
                 } else {
                     web_app_error_text(err)
                 };
-                self.bots.web_apps.found = Some((bot_user_id, Err(message)));
+                self.bots.web_apps.found = Some((p.id, Err(message)));
             }
             RequestPurpose::Bots(BotsPurpose::CanBotSendMessages { bot_user_id }) => {
                 self.bots.web_apps.write_access = Some(WriteAnswer::new(

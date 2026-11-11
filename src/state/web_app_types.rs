@@ -147,9 +147,10 @@ pub struct WebApps {
     /// `(bot_user_id, done)`.
     pub emoji_access: Option<(i64, bool)>,
     /// One-shot: `searchWebApp` answer for a `t.me/bot/app` link, the app
-    /// or a failure message, with the bot it was asked for: a second link
-    /// clicked before the first answered takes only its own answer.
-    pub found: Option<(i64, Result<FoundWebApp, String>)>,
+    /// or a failure message, with the request it answers: a second link
+    /// (of the same bot too) clicked before the first answered takes only
+    /// its own answer.
+    pub found: Option<(crate::ids::RequestId, Result<FoundWebApp, String>)>,
     /// `req_id`s of custom requests in flight, by `RequestId`.
     pub custom_requests: HashMap<u64, String>,
     /// One-shot: custom request answers.

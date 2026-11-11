@@ -3,6 +3,7 @@
 //! and a reply is matched to the bot that asked.
 
 use super::{Awaited, WebAppConfirm};
+use quill::ids::RequestId;
 
 /// The launch in progress: waiting on one answer, or on the person's box.
 /// A newer launch replaces an older one; an answer for another bot is
@@ -11,8 +12,12 @@ use super::{Awaited, WebAppConfirm};
 pub(super) enum LaunchFlow {
     #[default]
     Idle,
-    /// `searchWebApp` before the open box.
-    Searching(Awaited),
+    /// `searchWebApp` before the open box; only the answer of `request`
+    /// goes on (another link of the same bot is another request).
+    Searching {
+        request: RequestId,
+        awaited: Awaited,
+    },
     /// `getAttachmentMenuBot` (deep link) before the launch can go on.
     FetchingAttachBot(Awaited),
     /// `toggleBotIsAddedToAttachmentMenu` before the launch.
@@ -26,7 +31,7 @@ impl LaunchFlow {
     pub(super) fn is_waiting(&self) -> bool {
         matches!(
             self,
-            Self::Searching(_) | Self::FetchingAttachBot(_) | Self::Adding(_)
+            Self::Searching { .. } | Self::FetchingAttachBot(_) | Self::Adding(_)
         )
     }
 
@@ -63,8 +68,8 @@ impl LaunchFlow {
         drop(self.take_confirm());
     }
 
-    pub(super) fn search(&mut self, awaited: Awaited) {
-        *self = Self::Searching(awaited);
+    pub(super) fn search(&mut self, request: RequestId, awaited: Awaited) {
+        *self = Self::Searching { request, awaited };
     }
 
     pub(super) fn fetch_attach_bot(&mut self, awaited: Awaited) {
@@ -75,10 +80,10 @@ impl LaunchFlow {
         *self = Self::Adding(awaited);
     }
 
-    /// The search answer for `bot_id`; the flow ends with it.
-    pub(super) fn take_search_for(&mut self, bot_id: i64) -> Option<Awaited> {
+    /// The search answer of `request`; the flow ends with it.
+    pub(super) fn take_search_for(&mut self, answered: RequestId) -> Option<Awaited> {
         match std::mem::take(self) {
-            Self::Searching(awaited) if awaited.bot_id() == bot_id => Some(awaited),
+            Self::Searching { request, awaited } if request == answered => Some(awaited),
             other => {
                 *self = other;
                 None
@@ -149,20 +154,20 @@ mod tests {
     #[test]
     fn an_answer_for_another_bot_keeps_the_flow_waiting() {
         let mut flow = LaunchFlow::default();
-        flow.search(waiting(7));
-        assert!(flow.take_search_for(8).is_none());
+        flow.search(RequestId(5), waiting(7));
+        assert!(flow.take_search_for(RequestId(4)).is_none());
         assert!(flow.is_waiting());
         assert!(flow.take_attach_bot_for(7).is_none(), "wrong stage");
-        assert!(flow.take_search_for(7).is_some());
+        assert!(flow.take_search_for(RequestId(5)).is_some());
         assert!(!flow.is_waiting());
     }
 
     #[test]
     fn a_newer_launch_replaces_the_older_wait() {
         let mut flow = LaunchFlow::default();
-        flow.search(waiting(7));
+        flow.search(RequestId(5), waiting(7));
         flow.add(waiting(9));
-        assert!(flow.take_search_for(7).is_none());
+        assert!(flow.take_search_for(RequestId(5)).is_none());
         assert!(flow.take_add_for(9).is_some());
     }
 

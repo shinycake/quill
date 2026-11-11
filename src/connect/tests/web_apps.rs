@@ -422,8 +422,8 @@ fn a_search_answer_names_its_bot_even_when_refused() {
         r#"{{"@type":"error","@extra":"{}","code":404,"message":"Not Found"}}"#,
         extra.as_extra()
     ));
-    let (bot_id, app) = h.driver.session.bots.web_apps.found.clone().unwrap();
-    assert_eq!(bot_id, 42);
+    let (answered, app) = h.driver.session.bots.web_apps.found.clone().unwrap();
+    assert_eq!(answered, extra);
     assert!(app.is_err());
 }
 
@@ -452,9 +452,9 @@ fn named_app_links_search_first() {
         r#"{{"@type":"foundWebApp","@extra":"{}","web_app":{{"@type":"webApp","short_name":"shop","title":"Shop","description":""}},"request_write_access":true,"skip_confirmation":false}}"#,
         extra.as_extra()
     ));
-    let (bot_id, app) = h.driver.session.bots.web_apps.found.clone().unwrap();
+    let (answered, app) = h.driver.session.bots.web_apps.found.clone().unwrap();
     let app = app.unwrap();
-    assert_eq!(bot_id, 42);
+    assert_eq!(answered, extra);
     assert_eq!(app.title, "Shop");
     assert!(app.request_write_access);
     let theme = ThemeParams::light_default();

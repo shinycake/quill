@@ -555,17 +555,20 @@ impl QuillApp {
                     .live
                     .as_mut()
                     .map(|live| live.driver.search_web_app(bot_id, short_name));
-                if matches!(sent, Some(Ok(_))) {
+                if let Some(Ok(request)) = sent {
                     let window = self.asking_window_or_last_press();
-                    self.mini_apps.flow.search(Awaited {
-                        then: PendingOpen::Link {
-                            chat_id: Some(chat_id),
-                            bot_id,
-                            short_name: short_name.clone(),
-                            start_parameter: start_parameter.clone(),
+                    self.mini_apps.flow.search(
+                        request,
+                        Awaited {
+                            then: PendingOpen::Link {
+                                chat_id: Some(chat_id),
+                                bot_id,
+                                short_name: short_name.clone(),
+                                start_parameter: start_parameter.clone(),
+                            },
+                            window,
                         },
-                        window,
-                    });
+                    );
                     self.open_box(DialogKind::WebAppConfirm);
                     self.ensure_mini_app_poll(cx);
                 } else {
