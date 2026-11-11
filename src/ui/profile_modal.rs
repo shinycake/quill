@@ -28,13 +28,36 @@ const CLOSE_FADE: Duration = Duration::from_millis(110);
 /// How far the card rises while fading in.
 const RISE: f32 = 14.;
 
-/// Where the modal's fade stands.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum ModalStage {
+/// Where the modal's fade stands; the glide (0 = hidden, 1 = shown) is
+/// part of the stage.
+enum ModalFade {
     /// Shown (or fading in).
-    Open,
+    Open(Glide),
     /// Fading out; the panel closes when the fade ends.
-    Closing,
+    Closing(Glide),
+}
+
+impl ModalFade {
+    fn glide(&self) -> &Glide {
+        match self {
+            Self::Open(glide) | Self::Closing(glide) => glide,
+        }
+    }
+
+    fn is_closing(&self) -> bool {
+        matches!(self, Self::Closing(_))
+    }
+
+    /// The close: the glide runs to hidden. A modal already closing stays.
+    fn close(self, animate: bool, now: Instant) -> Self {
+        match self {
+            Self::Open(mut glide) => {
+                glide.go(0., CLOSE_FADE, animate, now);
+                Self::Closing(glide)
+            }
+            closing @ Self::Closing(_) => closing,
+        }
+    }
 }
 
 /// The open profile modal: which panel it shows and its fade.
@@ -43,9 +66,7 @@ pub(super) struct ProfileModal {
     /// What the info column showed before the modal took it over: the
     /// modal's close puts it back.
     previous: Option<InfoPanelTarget>,
-    /// 0 = hidden, 1 = shown.
-    glide: Glide,
-    stage: ModalStage,
+    fade: ModalFade,
 }
 
 impl QuillApp {
@@ -84,8 +105,7 @@ impl QuillApp {
         self.dialogs.profile_modal = Some(ProfileModal {
             target,
             previous,
-            glide,
-            stage: ModalStage::Open,
+            fade: ModalFade::Open(glide),
         });
         self.open_info_panel_target(target, window, cx);
     }
@@ -105,13 +125,16 @@ impl QuillApp {
         let Some(modal) = self.dialogs.profile_modal.as_mut() else {
             return;
         };
-        if modal.stage == ModalStage::Closing {
+        if modal.fade.is_closing() {
             return;
         }
         let now = Instant::now();
-        modal.stage = ModalStage::Closing;
-        modal.glide.go(0., CLOSE_FADE, animate, now);
-        if !animate || !modal.glide.animating(now) {
+        modal.fade = std::mem::replace(
+            &mut modal.fade,
+            ModalFade::Open(Glide::settled(0., now, ease_out_circ)),
+        )
+        .close(animate, now);
+        if !animate || !modal.fade.glide().animating(now) {
             let previous = modal.previous;
             self.dialogs.profile_modal = None;
             self.restore_info_panel(previous, cx);
@@ -124,7 +147,7 @@ impl QuillApp {
                 if let Some(modal) = this
                     .dialogs
                     .profile_modal
-                    .take_if(|modal| modal.stage == ModalStage::Closing && modal.target == target)
+                    .take_if(|modal| modal.fade.is_closing() && modal.target == target)
                 {
                     this.restore_info_panel(modal.previous, cx);
                 }
@@ -230,8 +253,8 @@ impl QuillApp {
         }
         let modal = self.dialogs.profile_modal.as_ref()?;
         let now = Instant::now();
-        let shown = modal.glide.value(now).clamp(0., 1.);
-        if modal.glide.animating(now) {
+        let shown = modal.fade.glide().value(now).clamp(0., 1.);
+        if modal.fade.glide().animating(now) {
             self.request_animation_tick(60, cx);
         }
         let (title, content) = self.info_panel_parts(cx)?;

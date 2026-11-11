@@ -922,11 +922,12 @@ fn a_set_less_sticker_message_lists_the_owned_sets_to_join(cx: &mut TestAppConte
             premium_animation: None,
             set_id: 0,
         });
-        app.message_ui.menu = Some(crate::ui::menu_states::MessageMenuState {
-            chat_id: ChatId(11),
-            message_id: MessageId(101),
-            position: gpui_kit::point(px(420.), px(200.)),
-        });
+        app.message_ui
+            .set_menu(crate::ui::menu_states::MessageMenuState {
+                chat_id: ChatId(11),
+                message_id: MessageId(101),
+                position: gpui_kit::point(px(420.), px(200.)),
+            });
         cx.notify();
     });
     frames(vcx);

@@ -4,12 +4,12 @@
 use super::*;
 use crate::ids::RequestId;
 use crate::proxy::{
-    PingStatus, ProxyDraft, ProxyEntry, ProxyFetch, RotationAction, SystemStepState,
+    LinkCheck, PingStatus, ProxyDraft, ProxyEntry, ProxyFetch, RotationAction, SystemStepState,
 };
 use crate::proxy_sync::{ProxySyncStep, plan_proxy_sync};
 use crate::settings::save_proxy_prefs;
 use crate::state::SettingsPurpose;
-use crate::state::{LINK_PING_ID, RequestPurpose, ShutdownPhase};
+use crate::state::{RequestPurpose, ShutdownPhase};
 use crate::system_proxy::{Detected, SYSTEM_PROXY_COMMENT, SystemProxyStep, plan_system_proxy};
 use crate::telegram::envelope::ConnectionState;
 use crate::telegram::requests::{
@@ -235,9 +235,25 @@ impl<S: JsonSender> ConnectDriver<S> {
     }
 
     /// `pingProxy` for the link-confirmation box's proxy (not in the
-    /// list; result kept under [`LINK_PING_ID`]).
+    /// list); the box's stage becomes `Checking` with this request.
     pub fn ping_link_proxy(&mut self, draft: &ProxyDraft) -> Result<RequestId, ConnectSendError> {
-        self.ping_draft(LINK_PING_ID, draft)
+        if !self.proxy_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let extra = self.session.request(
+            RequestPurpose::Settings(SettingsPurpose::PingLinkProxy),
+            None,
+        );
+        match self.sender.send_json(&ping_proxy(extra, draft)) {
+            Ok(()) => {
+                self.session.settings.proxy.link = LinkCheck::Checking(extra);
+                Ok(extra)
+            }
+            Err(err) => {
+                self.session.requests.take(extra);
+                Err(err)
+            }
+        }
     }
 
     fn ping_draft(&mut self, slot: i32, draft: &ProxyDraft) -> Result<RequestId, ConnectSendError> {

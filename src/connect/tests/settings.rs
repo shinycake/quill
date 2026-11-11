@@ -497,7 +497,7 @@ fn sessions_terminate_ok_triggers_authoritative_refetch() {
     assert!(snapshot[sent].contains("\"@type\":\"getActiveSessions\""));
     assert_eq!(driver.session.settings.sessions.data().unwrap().len(), 2);
     assert!(driver.session.settings.sessions_stale);
-    assert!(!driver.session.settings.sessions_mutating);
+    assert!(!driver.session.settings.sessions_op.is_running());
     // The authoritative answer lands — the @extra comes from the
     // recorded outbound JSON (what TDLib would echo back).
     let fetch_extra: i64 = {
@@ -755,7 +755,7 @@ fn device_login_qr_requires_confirmation_and_correlated_native_acceptance() {
             serde_json::json!({"@type":"session","id":11}),
         ))
         .unwrap();
-    assert!(driver.session.settings.sessions_mutating);
+    assert!(driver.session.settings.sessions_op.is_running());
     assert_eq!(driver.session.settings.device_login_result, None);
     driver
         .ingest(response(
@@ -767,7 +767,7 @@ fn device_login_qr_requires_confirmation_and_correlated_native_acceptance() {
         driver.session.settings.device_login_result,
         Some(crate::auth::DeviceLoginResult::Linked)
     );
-    assert!(!driver.session.settings.sessions_mutating);
+    assert!(!driver.session.settings.sessions_op.is_running());
     assert!(
         recorder.snapshot()[sent..]
             .iter()
@@ -783,7 +783,7 @@ fn device_login_qr_requires_confirmation_and_correlated_native_acceptance() {
             driver.session.settings.device_login_result,
             Some(crate::auth::DeviceLoginResult::Failed)
         );
-        assert!(!driver.session.settings.sessions_mutating);
+        assert!(!driver.session.settings.sessions_op.is_running());
     }
     let request = driver.confirm_device_login(link).unwrap();
     driver

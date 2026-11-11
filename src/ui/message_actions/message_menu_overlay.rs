@@ -80,7 +80,7 @@ impl QuillApp {
         // Reactions lead the menu (Telegram Desktop): the chat's quick
         // strip in its own pill above the menu, expandable to every
         // reaction it allows.
-        let page = self.message_ui.menu_ui.page;
+        let page = self.message_ui.menu_page();
         let can_react = self.session().is_some_and(|s| s.can_react_to(&message));
         let strip = (can_react && page == MessageMenuPage::Main)
             .then(|| self.reaction_strip(chat_id, message_id, &message, cx))
@@ -123,15 +123,13 @@ impl QuillApp {
         // (Telegram Desktop: "Quote & Reply", "Copy Selected Text").
         let selection = self
             .message_ui
-            .menu_target
-            .selection
-            .as_ref()
+            .menu_target()
+            .and_then(|target| target.selection.as_ref())
             .map(|selected| selected.text.clone());
         let selection_nth = self
             .message_ui
-            .menu_target
-            .selection
-            .as_ref()
+            .menu_target()
+            .and_then(|target| target.selection.as_ref())
             .map_or(0, |selected| selected.nth);
         let content = effective_content(&message.content, message.ephemeral.as_ref());
         // Over a checklist task, Reply becomes "Reply to Task".
@@ -269,9 +267,8 @@ impl QuillApp {
         // only while the chat is not already shown translated).
         if let Some(selected) = self
             .message_ui
-            .menu_target
-            .selection
-            .as_ref()
+            .menu_target()
+            .and_then(|target| target.selection.as_ref())
             .map(|selected| selected.text.clone())
             .filter(|selected| self.translate_menu_offered(chat_id, selected))
         {
@@ -322,7 +319,7 @@ impl QuillApp {
         // Over a link, the menu leads with what Telegram Desktop adds for it:
         // a copy entry named for the kind of link (`copyToClipboardContextItemText`),
         // and, for web links, Open.
-        if let Some(link) = self.message_ui.menu_target.link.clone() {
+        if let Some(link) = self.message_ui.menu_target().and_then(|t| t.link.clone()) {
             let msg_key = (chat_id.0, message_id.0 as u64);
             if matches!(link, quill::text::LinkTarget::Url { .. }) {
                 let open = link.clone();
@@ -888,7 +885,7 @@ impl QuillApp {
                     &self.frame.menu.items,
                     cx,
                     |this, _, cx| {
-                        this.message_ui.menu_ui.page = MessageMenuPage::Main;
+                        this.message_ui.set_menu_page(MessageMenuPage::Main);
                         cx.notify();
                     },
                 )];

@@ -1,5 +1,6 @@
 //! Connect driver: device login, active sessions, account TTL, auto-delete and connected websites.
 use super::*;
+use crate::state::fetch::ListOp;
 
 impl<S: JsonSender> ConnectDriver<S> {
     /// Authorize only a validated scan after explicit user confirmation.
@@ -8,7 +9,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         scanned_link: &str,
     ) -> Result<RequestId, ConnectSendError> {
         if !self.chats_path_active()
-            || self.session.settings.sessions_mutating
+            || self.session.settings.sessions_op.is_running()
             || !crate::auth::is_device_login_qr(scanned_link)
         {
             return Err(ConnectSendError::InvalidRequest);
@@ -17,14 +18,14 @@ impl<S: JsonSender> ConnectDriver<S> {
             .session
             .request(RequestPurpose::ConfirmDeviceLogin, None);
         self.session.settings.device_login_result = None;
-        self.session.settings.sessions_mutating = true;
+        self.session.settings.sessions_op = ListOp::Running(id);
         self.session.settings.sessions.clear_error();
         let request = zeroize::Zeroizing::new(
             crate::telegram::requests::confirm_qr_code_authentication(id, scanned_link),
         );
         if let Err(error) = self.sender.send_json(&request) {
             self.session.requests.take(id);
-            self.session.settings.sessions_mutating = false;
+            self.session.settings.sessions_op = ListOp::Idle;
             return Err(error);
         }
         Ok(id)
@@ -80,7 +81,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// (no such session in the cache) is rejected before it leaves;
     /// TDLib is the authority for the rest.
     pub fn terminate_session(&mut self, session_id: i64) -> Result<RequestId, ConnectSendError> {
-        if !self.chats_path_active() || self.session.settings.sessions_mutating {
+        if !self.chats_path_active() || self.session.settings.sessions_op.is_running() {
             return Err(ConnectSendError::InvalidRequest);
         }
         if !self
@@ -97,12 +98,12 @@ impl<S: JsonSender> ConnectDriver<S> {
             RequestPurpose::Settings(SettingsPurpose::TerminateSession { session_id }),
             None,
         );
-        self.session.settings.sessions_mutating = true;
+        self.session.settings.sessions_op = ListOp::Running(extra);
         match self.sender.send_json(&terminate_session(extra, session_id)) {
             Ok(()) => Ok(extra),
             Err(err) => {
                 self.session.requests.take(extra);
-                self.session.settings.sessions_mutating = false;
+                self.session.settings.sessions_op = ListOp::Idle;
                 Err(err)
             }
         }
@@ -112,19 +113,19 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// 15108). One mutation at a time; the list is refetched from the
     /// authoritative `ok` response — never optimistic.
     pub fn terminate_all_other_sessions(&mut self) -> Result<RequestId, ConnectSendError> {
-        if !self.chats_path_active() || self.session.settings.sessions_mutating {
+        if !self.chats_path_active() || self.session.settings.sessions_op.is_running() {
             return Err(ConnectSendError::InvalidRequest);
         }
         self.session.settings.sessions.clear_error();
         let extra = self
             .session
             .request(RequestPurpose::TerminateAllOtherSessions, None);
-        self.session.settings.sessions_mutating = true;
+        self.session.settings.sessions_op = ListOp::Running(extra);
         match self.sender.send_json(&terminate_all_other_sessions(extra)) {
             Ok(()) => Ok(extra),
             Err(err) => {
                 self.session.requests.take(extra);
-                self.session.settings.sessions_mutating = false;
+                self.session.settings.sessions_op = ListOp::Idle;
                 Err(err)
             }
         }
@@ -290,7 +291,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         session_id: i64,
         kind: ToggleSessionKind,
     ) -> Result<RequestId, ConnectSendError> {
-        if !self.chats_path_active() || self.session.settings.sessions_mutating {
+        if !self.chats_path_active() || self.session.settings.sessions_op.is_running() {
             return Err(ConnectSendError::InvalidRequest);
         }
         let flags = self
@@ -330,12 +331,12 @@ impl<S: JsonSender> ConnectDriver<S> {
             }
         };
         self.session.settings.sessions.clear_error();
-        self.session.settings.sessions_mutating = true;
+        self.session.settings.sessions_op = ListOp::Running(extra);
         match self.sender.send_json(&json) {
             Ok(()) => Ok(extra),
             Err(err) => {
                 self.session.requests.take(extra);
-                self.session.settings.sessions_mutating = false;
+                self.session.settings.sessions_op = ListOp::Idle;
                 Err(err)
             }
         }
@@ -392,7 +393,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// (no such website in the cache) is rejected before it leaves;
     /// TDLib is the authority for the rest.
     pub fn disconnect_website(&mut self, website_id: i64) -> Result<RequestId, ConnectSendError> {
-        if !self.chats_path_active() || self.session.settings.websites_mutating {
+        if !self.chats_path_active() || self.session.settings.websites_op.is_running() {
             return Err(ConnectSendError::InvalidRequest);
         }
         if !self
@@ -409,7 +410,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             RequestPurpose::Settings(SettingsPurpose::DisconnectWebsite { website_id }),
             None,
         );
-        self.session.settings.websites_mutating = true;
+        self.session.settings.websites_op = ListOp::Running(extra);
         match self
             .sender
             .send_json(&disconnect_website(extra, website_id))
@@ -417,7 +418,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             Ok(()) => Ok(extra),
             Err(err) => {
                 self.session.requests.take(extra);
-                self.session.settings.websites_mutating = false;
+                self.session.settings.websites_op = ListOp::Idle;
                 Err(err)
             }
         }
@@ -427,7 +428,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// 15130). One mutation at a time; the list is refetched from the
     /// authoritative `ok` response — never optimistic.
     pub fn disconnect_all_websites(&mut self) -> Result<RequestId, ConnectSendError> {
-        if !self.chats_path_active() || self.session.settings.websites_mutating {
+        if !self.chats_path_active() || self.session.settings.websites_op.is_running() {
             return Err(ConnectSendError::InvalidRequest);
         }
         if !self
@@ -443,12 +444,12 @@ impl<S: JsonSender> ConnectDriver<S> {
         let extra = self
             .session
             .request(RequestPurpose::DisconnectAllWebsites, None);
-        self.session.settings.websites_mutating = true;
+        self.session.settings.websites_op = ListOp::Running(extra);
         match self.sender.send_json(&disconnect_all_websites(extra)) {
             Ok(()) => Ok(extra),
             Err(err) => {
                 self.session.requests.take(extra);
-                self.session.settings.websites_mutating = false;
+                self.session.settings.websites_op = ListOp::Idle;
                 Err(err)
             }
         }

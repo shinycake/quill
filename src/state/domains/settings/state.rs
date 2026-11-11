@@ -155,7 +155,7 @@ pub struct SettingsState {
     pub sessions: Fetch<Vec<ParsedSession>>,
     /// Slice A3: a `terminateSession` / `terminateAllOtherSessions` round
     /// trip is in flight — terminate buttons stay disabled meanwhile.
-    pub sessions_mutating: bool,
+    pub sessions_op: crate::state::fetch::ListOp,
     pub device_login_result: Option<crate::auth::DeviceLoginResult>,
     /// Slice A3: a terminate succeeded — the old cache stays visible and
     /// is refetched from the authoritative answer on the next ingest
@@ -184,7 +184,7 @@ pub struct SettingsState {
     pub passkeys: crate::passkeys::PasskeysState,
     /// Slice A4: a `disconnectWebsite` / `disconnectAllWebsites` round trip
     /// is in flight — disconnect buttons stay disabled meanwhile.
-    pub websites_mutating: bool,
+    pub websites_op: crate::state::fetch::ListOp,
     /// Slice A4: a disconnect succeeded — the old cache stays visible and
     /// is refetched from the authoritative answer on the next ingest
     /// (the `saved_sounds_stale` pattern); never an optimistic delete.
@@ -378,7 +378,7 @@ impl SettingsState {
             privacy_data: Default::default(),
             notices: AccountNotices::default(),
             sessions: Fetch::Idle,
-            sessions_mutating: false,
+            sessions_op: Default::default(),
             device_login_result: None,
             sessions_stale: false,
             account_ttl_days: None,
@@ -387,7 +387,7 @@ impl SettingsState {
             account_error: None,
             passkeys: Default::default(),
             connected_websites: Fetch::Idle,
-            websites_mutating: false,
+            websites_op: Default::default(),
             websites_stale: false,
             sound_file_ids: HashMap::new(),
             pending_sound_downloads: HashSet::new(),

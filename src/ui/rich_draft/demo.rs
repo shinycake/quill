@@ -70,7 +70,7 @@ impl QuillApp {
         }
         self.restore_open_draft(window, cx);
         match variant.as_str() {
-            "discard" => self.chat_ui.rich.set_box(super::RichDraftBox::Discard),
+            "discard" => self.chat_ui.rich.ask_discard(),
             "editor" => self.open_rich_draft(window, cx),
             "choice" | "toast" => {
                 let _ = self.submit_rich_draft(window, cx);

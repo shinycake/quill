@@ -151,7 +151,7 @@ impl Session {
             // Refresh button. The old cache stays visible.
             Some(RequestPurpose::ConfirmDeviceLogin) => {
                 self.settings.device_login_result = Some(crate::auth::DeviceLoginResult::Failed);
-                self.settings.sessions_mutating = false;
+                self.settings.sessions_op.settle(pending.map(|p| p.id));
                 self.settings
                     .sessions
                     .fail(sessions_error_line("link the device", err));
@@ -160,6 +160,7 @@ impl Session {
                 purpose @ (RequestPurpose::GetProxies
                 | RequestPurpose::MutateProxy
                 | RequestPurpose::Settings(SettingsPurpose::PingProxy { .. })
+                | RequestPurpose::Settings(SettingsPurpose::PingLinkProxy)
                 | RequestPurpose::Settings(SettingsPurpose::SetPreferIpv6 { .. })),
             ) => self.apply_proxy_error(purpose, pending, err),
             Some(
@@ -194,7 +195,7 @@ impl Session {
                 RequestPurpose::Settings(SettingsPurpose::TerminateSession { .. })
                 | RequestPurpose::TerminateAllOtherSessions,
             ) => {
-                self.settings.sessions_mutating = false;
+                self.settings.sessions_op.settle(pending.map(|p| p.id));
                 self.settings
                     .sessions
                     .fail(sessions_error_line("terminate the session", err));
@@ -206,7 +207,7 @@ impl Session {
                 RequestPurpose::Settings(SettingsPurpose::ToggleSessionSecretChats { .. })
                 | RequestPurpose::Settings(SettingsPurpose::ToggleSessionCalls { .. }),
             ) => {
-                self.settings.sessions_mutating = false;
+                self.settings.sessions_op.settle(pending.map(|p| p.id));
                 self.settings
                     .sessions
                     .fail(sessions_error_line("change the session setting", err));
@@ -263,7 +264,7 @@ impl Session {
                 RequestPurpose::Settings(SettingsPurpose::DisconnectWebsite { .. })
                 | RequestPurpose::DisconnectAllWebsites,
             ) => {
-                self.settings.websites_mutating = false;
+                self.settings.websites_op.settle(pending.map(|p| p.id));
                 self.settings
                     .connected_websites
                     .fail(sessions_error_line("disconnect the website", err));

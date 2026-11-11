@@ -294,7 +294,7 @@ impl QuillApp {
                             }),
                         ))
                         .on_click(cx.listener(|this, _, _, cx| {
-                            this.message_ui.menu_ui.page = MessageMenuPage::Audience;
+                            this.message_ui.set_menu_page(MessageMenuPage::Audience);
                             this.message_ui.menu_ui.audience_tab = None;
                             cx.notify();
                         }))
@@ -343,7 +343,7 @@ impl QuillApp {
             .and_then(|s| s.histories.get(&menu.chat_id.0))
             .and_then(|h| h.messages.get(&menu.message_id.0))
             .is_some_and(|m| m.reaction_chips().len() > 1);
-        self.message_ui.menu_ui.page = MessageMenuPage::Audience;
+        self.message_ui.set_menu_page(MessageMenuPage::Audience);
         self.message_ui.menu_ui.audience_tab = several.then(|| reaction.clone());
         if several && let Some(live) = self.live.as_mut() {
             live.driver.session.messages.wanted_reactor_tab =

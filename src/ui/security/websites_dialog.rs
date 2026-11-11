@@ -26,7 +26,7 @@ impl QuillApp {
                 .unwrap_or_default();
             websites.sort_by_key(|a| std::cmp::Reverse(a.last_active_date));
             let loading = session.is_some_and(|s| s.settings.connected_websites.is_loading());
-            let mutating = session.is_some_and(|s| s.settings.websites_mutating);
+            let mutating = session.is_some_and(|s| s.settings.websites_op.is_running());
             let stale = session.is_some_and(|s| s.settings.websites_stale);
             let error = session
                 .as_ref()

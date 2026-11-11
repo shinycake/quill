@@ -204,11 +204,12 @@ pub(super) fn open_chat_menu(app: &Entity<QuillApp>, vcx: &mut VisualTestContext
 
 fn open_message_menu(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) {
     app.update_in(vcx, |app, _, cx| {
-        app.message_ui.menu = Some(crate::ui::menu_states::MessageMenuState {
-            chat_id: quill::ids::ChatId(11),
-            message_id: quill::ids::MessageId(101),
-            position: point(px(500.), px(200.)),
-        });
+        app.message_ui
+            .set_menu(crate::ui::menu_states::MessageMenuState {
+                chat_id: quill::ids::ChatId(11),
+                message_id: quill::ids::MessageId(101),
+                position: point(px(500.), px(200.)),
+            });
         cx.notify();
     });
     vcx.run_until_parked();
@@ -449,11 +450,12 @@ fn a_menu_whose_target_is_gone_closes_instead_of_swallowing_the_arrows(cx: &mut 
         let vcx = &mut vcx;
         app.update_in(vcx, |app, _, cx| {
             if message {
-                app.message_ui.menu = Some(crate::ui::menu_states::MessageMenuState {
-                    chat_id: quill::ids::ChatId(1),
-                    message_id: quill::ids::MessageId(987_654),
-                    position: point(px(500.), px(200.)),
-                });
+                app.message_ui
+                    .set_menu(crate::ui::menu_states::MessageMenuState {
+                        chat_id: quill::ids::ChatId(1),
+                        message_id: quill::ids::MessageId(987_654),
+                        position: point(px(500.), px(200.)),
+                    });
             } else {
                 app.chat_list.menu = Some(crate::ui::menu_states::ChatMenuState::at(
                     quill::ids::ChatId(987_654),

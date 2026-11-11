@@ -139,12 +139,12 @@ impl QuillApp {
                         MessageId(sc::HIKERS_FIRST_MESSAGE),
                     );
                 }
-                self.message_ui.menu = Some(MessageMenuState {
+                self.message_ui.set_menu(MessageMenuState {
                     chat_id: ChatId(sc::HIKERS),
                     message_id: MessageId(sc::HIKERS_FIRST_MESSAGE),
                     position: point(px(560.), px(150.)),
                 });
-                self.message_ui.menu_target.reactions_expanded = true;
+                self.message_ui.expand_menu_reactions(true);
             }
             "viewer" => {
                 self.open_media_viewer(ChatId(sc::HIKERS), MessageId(sc::HIKERS_PHOTO_MESSAGE), cx);

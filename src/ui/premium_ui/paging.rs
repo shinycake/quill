@@ -47,7 +47,7 @@ impl QuillApp {
         };
         if !hub.gifts_open
             || hub.gift_view.selected().is_some()
-            || (hub.gifts_page.error().is_some() && !scrolled)
+            || ((hub.gifts_page.error().is_some() || hub.gift_notice.is_some()) && !scrolled)
             || !load_due(
                 scrolled_near_end(&self.payments.gifts_scroll),
                 !hub.gifts_offset.is_empty(),

@@ -51,7 +51,6 @@ pub(super) enum MessageMenuPage {
 
 /// UI state of the message menu's extras.
 pub(super) struct MessageMenuUi {
-    pub page: MessageMenuPage,
     /// The report dialog (`DialogKind::MessageReport`) is open.
     pub report_open: bool,
     /// The sticker set dialog (`DialogKind::StickerSet`) is open.
@@ -65,7 +64,6 @@ pub(super) struct MessageMenuUi {
 impl MessageMenuUi {
     pub(super) fn new(window: &mut Window, cx: &mut App) -> Self {
         Self {
-            page: MessageMenuPage::Main,
             report_open: false,
             sticker_set_open: false,
             audience_tab: None,
@@ -345,12 +343,13 @@ impl QuillApp {
                             this.save_message_tone(target.file_id, cx)
                         }
                         MediaAction::SaveTo => {
-                            this.message_ui.menu_ui.page = MessageMenuPage::SaveTo;
+                            this.message_ui.set_menu_page(MessageMenuPage::SaveTo);
                             cx.notify();
                             return;
                         }
                         MediaAction::AddToSet { emoji } => {
-                            this.message_ui.menu_ui.page = MessageMenuPage::AddToSet { emoji };
+                            this.message_ui
+                                .set_menu_page(MessageMenuPage::AddToSet { emoji });
                             cx.notify();
                             return;
                         }

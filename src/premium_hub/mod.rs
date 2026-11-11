@@ -903,27 +903,22 @@ impl PremiumHub {
 
     /// The limit toast waiting to be shown.
     pub fn limit_toast(&self) -> Option<crate::premium_limits::PremiumLimitKind> {
-        match self.limit_notice {
-            Some(limit_notice::LimitNotice::Toast(kind)) => Some(kind),
-            _ => None,
-        }
+        self.limit_notice.and_then(|notice| notice.toast())
     }
 
-    /// The limit toast to show now; the window takes it once.
+    /// The limit toast to show now; the window takes it once. An open box
+    /// stays.
     pub fn take_limit_toast(&mut self) -> Option<crate::premium_limits::PremiumLimitKind> {
-        match self.limit_notice {
-            Some(limit_notice::LimitNotice::Toast(kind)) => {
-                self.limit_notice = None;
-                Some(kind)
-            }
-            _ => None,
-        }
+        let notice = self.limit_notice?;
+        let kind = notice.toast()?;
+        self.limit_notice = notice.without_toast();
+        Some(kind)
     }
 
     /// Close the limit box (a toast waiting stays).
     pub fn close_limit_box(&mut self) {
-        if self.limit_box().is_some() {
-            self.limit_notice = None;
+        if let Some(limit_notice::LimitNotice::Box { toast, .. }) = self.limit_notice {
+            self.limit_notice = toast.map(limit_notice::LimitNotice::Toast);
         }
     }
 

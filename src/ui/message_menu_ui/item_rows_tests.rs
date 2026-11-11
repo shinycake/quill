@@ -74,7 +74,7 @@ fn open_chat(app: &Entity<QuillApp>, cx: &mut VisualTestContext, chat: ChatId) {
 }
 
 fn menu_item(app: &Entity<QuillApp>, cx: &mut VisualTestContext) -> ReplyItem {
-    app.read_with(cx, |app, _| app.message_ui.menu_target.item.clone())
+    app.read_with(cx, |app, _| app.message_ui.menu_item())
 }
 
 fn menu_open(app: &Entity<QuillApp>, cx: &mut VisualTestContext) -> bool {

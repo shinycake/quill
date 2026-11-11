@@ -128,7 +128,7 @@ impl Session {
             )
         ) {
             self.settings.sessions_stale = true;
-            self.settings.sessions_mutating = false;
+            self.settings.sessions_op.settle(pending.map(|p| p.id));
             self.settings.sessions.clear_error();
         }
         // Slice A4: a `toggleSessionCanAcceptSecretChats` /
@@ -143,7 +143,7 @@ impl Session {
             )
         ) {
             self.settings.sessions_stale = true;
-            self.settings.sessions_mutating = false;
+            self.settings.sessions_op.settle(pending.map(|p| p.id));
             self.settings.sessions.clear_error();
         }
         if let Some(RequestPurpose::Settings(SettingsPurpose::SetDefaultAutoDelete { seconds })) =
@@ -272,7 +272,7 @@ impl Session {
             )
         ) {
             self.settings.websites_stale = true;
-            self.settings.websites_mutating = false;
+            self.settings.websites_op.settle(pending.map(|p| p.id));
             self.settings.connected_websites.clear_error();
         }
         // Slice `parity:bots-payment-recurring`: an

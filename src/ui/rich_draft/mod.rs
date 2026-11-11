@@ -32,85 +32,90 @@ use quill::rich::RichDraft;
 use quill::state::Session;
 
 /// What the composer shows for a rich draft, and the box open over it:
-/// the plain field (with the stored draft's preview in its place) or the
-/// rich editor, and "discard" or "Remove Formatting" over either. One
-/// value, so the editor and the box are set together by methods and go
-/// together when the window shows another chat.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// one value, so the editor and the box move together through its
+/// transitions and go together when the window shows another chat.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(in crate::ui) enum RichComposer {
     /// The field (or the stored draft's preview).
-    Field(RichDraftBox),
+    #[default]
+    Field,
     /// The rich editor is open: the field is interpreted as block markup
     /// (`quill::rich::markup_to_blocks`) and sends via
     /// `inputMessageRichMessage`.
-    Editor(RichDraftBox),
-}
-
-impl Default for RichComposer {
-    fn default() -> Self {
-        Self::Field(RichDraftBox::Closed)
-    }
+    Editor,
+    /// "Discard this message?" over the field's preview (the preview shows
+    /// only while the editor is closed).
+    Discard,
+    /// "Remove Formatting" over the field, with the draft flattened to
+    /// message markup for "Send Without Formatting".
+    Choice(String),
+    /// The same box over the open editor; closing it leaves the editor.
+    EditorChoice(String),
 }
 
 impl RichComposer {
     pub(in crate::ui) fn editor_open(&self) -> bool {
-        matches!(self, Self::Editor(_))
+        matches!(self, Self::Editor | Self::EditorChoice(_))
     }
 
-    /// The box open over the composer.
-    pub(in crate::ui) fn draft_box(&self) -> &RichDraftBox {
+    /// Whether the discard box is open.
+    pub(in crate::ui) fn discarding(&self) -> bool {
+        matches!(self, Self::Discard)
+    }
+
+    /// The flattened text the "Remove Formatting" box holds.
+    pub(in crate::ui) fn choice(&self) -> Option<&str> {
         match self {
-            Self::Field(over) | Self::Editor(over) => over,
+            Self::Choice(plain) | Self::EditorChoice(plain) => Some(plain),
+            _ => None,
         }
     }
 
-    /// Open (`true`) or close the editor; the box over it stays.
+    /// Open (`true`) or close the editor. A "Remove Formatting" box stays
+    /// over it; the discard box (its draft moves into the editor) goes.
     pub(in crate::ui) fn set_editor(&mut self, open: bool) {
-        let over = self.take_box();
-        *self = if open {
-            Self::Editor(over)
-        } else {
-            Self::Field(over)
+        *self = match (std::mem::take(self), open) {
+            (Self::Field | Self::Editor, true) | (Self::Discard, true) => Self::Editor,
+            (Self::Field | Self::Editor, false) => Self::Field,
+            (Self::Discard, false) => Self::Discard,
+            (Self::Choice(plain) | Self::EditorChoice(plain), true) => Self::EditorChoice(plain),
+            (Self::Choice(plain) | Self::EditorChoice(plain), false) => Self::Choice(plain),
         };
     }
 
-    /// Open `over`, or close the box with `RichDraftBox::Closed`.
-    pub(in crate::ui) fn set_box(&mut self, over: RichDraftBox) {
+    /// Ask "discard this message?". The preview it belongs to shows only
+    /// while the editor is closed, so an open editor ignores it.
+    pub(in crate::ui) fn ask_discard(&mut self) {
+        if !self.editor_open() {
+            *self = Self::Discard;
+        }
+    }
+
+    /// Ask "Remove Formatting" for `plain`, over the editor when it is open.
+    pub(in crate::ui) fn ask_choice(&mut self, plain: String) {
         *self = if self.editor_open() {
-            Self::Editor(over)
+            Self::EditorChoice(plain)
         } else {
-            Self::Field(over)
+            Self::Choice(plain)
         };
     }
 
-    /// Take the box off the composer; the editor stays as it was.
-    pub(in crate::ui) fn take_box(&mut self) -> RichDraftBox {
-        let (editor, over) = match std::mem::take(self) {
-            Self::Editor(over) => (true, over),
-            Self::Field(over) => (false, over),
-        };
-        *self = if editor {
-            Self::Editor(RichDraftBox::Closed)
+    /// Close the box; the editor stays as it was.
+    pub(in crate::ui) fn dismiss(&mut self) {
+        *self = if self.editor_open() {
+            Self::Editor
         } else {
-            Self::Field(RichDraftBox::Closed)
+            Self::Field
         };
-        over
     }
-}
 
-/// The rich draft's box open for the chat shown: "discard this message?"
-/// or "Remove Formatting". A field of `ChatUi`, so it goes when the
-/// window shows another chat (its buttons act on the draft of the chat
-/// it was opened for).
-#[derive(Default, Debug, Clone, PartialEq, Eq)]
-pub(in crate::ui) enum RichDraftBox {
-    #[default]
-    Closed,
-    /// "Discard this message?".
-    Discard,
-    /// "Remove Formatting", with the draft flattened to message markup
-    /// for "Send Without Formatting".
-    PremiumChoice(String),
+    /// Take the "Remove Formatting" text with its box; any other state
+    /// stays as it was.
+    pub(in crate::ui) fn take_choice(&mut self) -> Option<String> {
+        let plain = self.choice()?.to_string();
+        self.dismiss();
+        Some(plain)
+    }
 }
 
 /// The composer's rich draft surfaces that are not the stored draft
@@ -228,7 +233,7 @@ impl QuillApp {
                     if event.modifiers().secondary(cx) {
                         this.discard_rich_draft(cx);
                     } else {
-                        this.chat_ui.rich.set_box(RichDraftBox::Discard);
+                        this.chat_ui.rich.ask_discard();
                         cx.notify();
                     }
                 }))
@@ -356,9 +361,7 @@ impl QuillApp {
         });
         match plain {
             Some(plain) => {
-                self.chat_ui
-                    .rich
-                    .set_box(RichDraftBox::PremiumChoice(plain));
+                self.chat_ui.rich.ask_choice(plain);
                 cx.notify();
             }
             None => self.show_rich_premium_toast(window, cx),

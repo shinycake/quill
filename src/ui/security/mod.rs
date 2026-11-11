@@ -129,7 +129,7 @@ impl QuillApp {
                 .and_then(|s| s.settings.sessions.data().cloned())
                 .unwrap_or_default();
             let loading = session.is_some_and(|s| s.settings.sessions.is_loading());
-            let mutating = session.is_some_and(|s| s.settings.sessions_mutating);
+            let mutating = session.is_some_and(|s| s.settings.sessions_op.is_running());
             let stale = session.is_some_and(|s| s.settings.sessions_stale);
             let error = session
                 .as_ref()

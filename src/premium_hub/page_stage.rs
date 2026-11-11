@@ -62,10 +62,13 @@ impl PageStage {
     }
 
     /// The loaded list is out of date (a conversion changed the balance):
-    /// the next first-page ask goes out again. A page in flight stays.
+    /// the next first-page ask goes out again. A page in flight stays; a
+    /// failure keeps its error line (the ask clears it by starting).
     pub fn invalidate(&mut self) {
-        if !self.is_loading() {
-            *self = Self::Idle;
+        match self {
+            Self::Loading { .. } => {}
+            Self::Failed { kind, .. } => *kind = PageKind::First,
+            Self::Idle | Self::Ready => *self = Self::Idle,
         }
     }
 
@@ -124,5 +127,14 @@ mod tests {
         let mut loading = out(5, PageKind::First);
         loading.invalidate();
         assert!(loading.waits_for(RequestId(5)));
+    }
+
+    #[test]
+    fn invalidating_a_failed_follow_up_keeps_the_error_and_asks_again() {
+        let mut stage = out(6, PageKind::Next);
+        stage.fail(RequestId(6), "x".into());
+        stage.invalidate();
+        assert_eq!(stage.error(), Some("x"));
+        assert!(stage.first_page_due());
     }
 }

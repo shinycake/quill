@@ -183,12 +183,12 @@ impl QuillApp {
         if let Some(session) = self.demo_session.as_mut() {
             super::reaction_fixtures::seed_reaction_options(session, ChatId(11), MessageId(101));
         }
-        self.message_ui.menu = Some(MessageMenuState {
+        self.message_ui.set_menu(MessageMenuState {
             chat_id: ChatId(11),
             message_id: MessageId(101),
             position: point(px(420.), px(200.)),
         });
-        self.message_ui.menu_target.reactions_expanded = true;
+        self.message_ui.expand_menu_reactions(true);
         self.set_note(StatusNote::silent(
             "screenshot demo — react · unreact · chips",
         ));
@@ -196,7 +196,7 @@ impl QuillApp {
 
     fn demo_ready_secret_chat_menu(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.demo_ready_reactions(window, cx);
-        self.message_ui.menu_target.reactions_expanded = false;
+        self.message_ui.expand_menu_reactions(false);
         if let Some(session) = self.demo_session.as_mut() {
             if let Some(chat) = session.chats.get_mut(&11) {
                 chat.kind = ChatKind::Secret {
@@ -209,7 +209,7 @@ impl QuillApp {
                 message_id: MessageId(102),
             };
         }
-        self.message_ui.menu = Some(MessageMenuState {
+        self.message_ui.set_menu(MessageMenuState {
             chat_id: ChatId(11),
             message_id: MessageId(102),
             position: point(px(420.), px(200.)),

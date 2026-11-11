@@ -14,7 +14,7 @@ impl QuillApp {
         let Some(session) = self.session() else {
             return;
         };
-        let message_gone = self.message_ui.menu.is_some_and(|menu| {
+        let message_gone = self.message_ui.menu_at().is_some_and(|menu| {
             !session
                 .histories
                 .get(&menu.chat_id.0)

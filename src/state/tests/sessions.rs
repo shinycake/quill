@@ -239,11 +239,11 @@ fn terminate_session_ok_keeps_cache_and_marks_stale() {
         location: "Tel Aviv, Israel".into(),
         ..Default::default()
     }]);
-    session.settings.sessions_mutating = true;
     let extra = session.request(
         RequestPurpose::Settings(SettingsPurpose::TerminateSession { session_id: 22 }),
         None,
     );
+    session.settings.sessions_op = crate::state::fetch::ListOp::Running(extra);
     apply_json(
         &mut session,
         &seq,
@@ -254,7 +254,7 @@ fn terminate_session_ok_keeps_cache_and_marks_stale() {
     // replaces it — no optimistic deletion.
     assert_eq!(session.settings.sessions.data().unwrap().len(), 1);
     assert!(session.settings.sessions_stale);
-    assert!(!session.settings.sessions_mutating);
+    assert!(!session.settings.sessions_op.is_running());
     assert!(session.settings.sessions.error().is_none());
 }
 
@@ -262,11 +262,11 @@ fn terminate_session_ok_keeps_cache_and_marks_stale() {
 fn terminate_session_error_surfaces_honestly() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
-    session.settings.sessions_mutating = true;
     let extra = session.request(
         RequestPurpose::Settings(SettingsPurpose::TerminateSession { session_id: 22 }),
         None,
     );
+    session.settings.sessions_op = crate::state::fetch::ListOp::Running(extra);
     apply_json(
         &mut session,
         &seq,
@@ -276,7 +276,7 @@ fn terminate_session_error_surfaces_honestly() {
             extra.0
         ),
     );
-    assert!(!session.settings.sessions_mutating);
+    assert!(!session.settings.sessions_op.is_running());
     assert_eq!(
         session.settings.sessions.error(),
         Some("Could not terminate the session: Telegram refused the request")
@@ -503,11 +503,11 @@ fn disconnect_website_ok_keeps_cache_and_marks_stale() {
         ip_address: "9.9.9.9".into(),
         location: "Boston, United States".into(),
     }]);
-    session.settings.websites_mutating = true;
     let extra = session.request(
         RequestPurpose::Settings(SettingsPurpose::DisconnectWebsite { website_id: 55 }),
         None,
     );
+    session.settings.websites_op = crate::state::fetch::ListOp::Running(extra);
     apply_json(
         &mut session,
         &seq,
@@ -518,7 +518,7 @@ fn disconnect_website_ok_keeps_cache_and_marks_stale() {
     // replaces it — no optimistic deletion.
     assert_eq!(session.settings.connected_websites.data().unwrap().len(), 1);
     assert!(session.settings.websites_stale);
-    assert!(!session.settings.websites_mutating);
+    assert!(!session.settings.websites_op.is_running());
     assert!(session.settings.connected_websites.error().is_none());
 }
 
@@ -526,7 +526,6 @@ fn disconnect_website_ok_keeps_cache_and_marks_stale() {
 fn disconnect_all_websites_error_surfaces_honestly() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
-    session.settings.websites_mutating = true;
     let extra = session.request(RequestPurpose::DisconnectAllWebsites, None);
     apply_json(
         &mut session,
@@ -537,7 +536,8 @@ fn disconnect_all_websites_error_surfaces_honestly() {
             extra.0
         ),
     );
-    assert!(!session.settings.websites_mutating);
+    session.settings.websites_op = crate::state::fetch::ListOp::Running(extra);
+    assert!(!session.settings.websites_op.is_running());
     assert_eq!(
         session.settings.connected_websites.error(),
         Some("Could not disconnect the website: Telegram refused the request")
@@ -594,11 +594,11 @@ fn toggle_session_calls_ok_marks_sessions_stale() {
         location: "Tel Aviv, Israel".into(),
         ..Default::default()
     }]);
-    session.settings.sessions_mutating = true;
     let extra = session.request(
         RequestPurpose::Settings(SettingsPurpose::ToggleSessionCalls { session_id: 22 }),
         None,
     );
+    session.settings.sessions_op = crate::state::fetch::ListOp::Running(extra);
     apply_json(
         &mut session,
         &seq,
@@ -610,7 +610,7 @@ fn toggle_session_calls_ok_marks_sessions_stale() {
     let sessions = session.settings.sessions.data().unwrap();
     assert!(sessions[0].can_accept_calls);
     assert!(session.settings.sessions_stale);
-    assert!(!session.settings.sessions_mutating);
+    assert!(!session.settings.sessions_op.is_running());
     assert!(session.settings.sessions.error().is_none());
 }
 
@@ -618,11 +618,11 @@ fn toggle_session_calls_ok_marks_sessions_stale() {
 fn toggle_session_secret_chats_error_surfaces_honestly() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
-    session.settings.sessions_mutating = true;
     let extra = session.request(
         RequestPurpose::Settings(SettingsPurpose::ToggleSessionSecretChats { session_id: 22 }),
         None,
     );
+    session.settings.sessions_op = crate::state::fetch::ListOp::Running(extra);
     apply_json(
         &mut session,
         &seq,
@@ -632,7 +632,7 @@ fn toggle_session_secret_chats_error_surfaces_honestly() {
             extra.0
         ),
     );
-    assert!(!session.settings.sessions_mutating);
+    assert!(!session.settings.sessions_op.is_running());
     assert_eq!(
         session.settings.sessions.error(),
         Some("Could not change the session setting: Telegram refused the request")

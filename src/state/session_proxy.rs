@@ -3,11 +3,7 @@
 //! `Session::proxy`. Mutations never touch the list optimistically: the
 //! answer marks it stale and the driver refetches `getProxies`.
 use super::*;
-use crate::proxy::{PingStatus, ProxyFetch};
-
-/// Ping slot used by the "enable this proxy?" link box, whose proxy is
-/// not in the list (TDLib ids are non-negative).
-pub const LINK_PING_ID: i32 = -1;
+use crate::proxy::{LinkCheck, PingStatus, ProxyFetch};
 
 impl Session {
     /// `getProxies` answer: replaces the list; pings of proxies that no
@@ -28,7 +24,7 @@ impl Session {
         }
         proxy
             .pings
-            .retain(|id, _| *id == LINK_PING_ID || proxies.iter().any(|p| p.id == *id));
+            .retain(|id, _| proxies.iter().any(|p| p.id == *id));
         // The system proxy's entries stay out of the list (never listed,
         // shared or rotated).
         let (system, list) = proxies
@@ -138,10 +134,25 @@ impl Session {
         .then_some(proxy_id)
     }
 
+    /// The link box's check answered: only the request its `Checking`
+    /// stage carries settles it.
+    fn settle_link_check(&mut self, pending: Option<&PendingRequest>, status: PingStatus) {
+        let Some(pending) = pending else { return };
+        if self.settings.proxy.link == LinkCheck::Checking(pending.id) {
+            self.settings.proxy.link = LinkCheck::Done(status);
+        }
+    }
+
     /// `pingProxy` answer, in seconds.
     pub(crate) fn apply_proxy_ping(&mut self, pending: Option<&PendingRequest>, seconds: f64) {
+        let ms = (seconds * 1000.0).round().clamp(0.0, f64::from(u32::MAX)) as u32;
+        if pending
+            .is_some_and(|p| p.purpose == RequestPurpose::Settings(SettingsPurpose::PingLinkProxy))
+        {
+            self.settle_link_check(pending, PingStatus::Available(ms));
+            return;
+        }
         if let Some(proxy_id) = self.take_awaited_ping(pending) {
-            let ms = (seconds * 1000.0).round().clamp(0.0, f64::from(u32::MAX)) as u32;
             self.settings
                 .proxy
                 .pings
@@ -187,6 +198,9 @@ impl Session {
                 }
             }
             // A failed ping is the answer: the proxy is not available.
+            RequestPurpose::Settings(SettingsPurpose::PingLinkProxy) => {
+                self.settle_link_check(pending, PingStatus::Unavailable);
+            }
             RequestPurpose::Settings(SettingsPurpose::PingProxy { .. }) => {
                 if let Some(proxy_id) = self.take_awaited_ping(pending) {
                     self.settings

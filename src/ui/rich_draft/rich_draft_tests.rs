@@ -3,7 +3,6 @@
 //! it, discards, and asks a non-Premium sender about its formatting. Over
 //! the `ready-chats` demo; nothing reaches Telegram.
 
-use super::RichDraftBox;
 use crate::ui::app::QuillApp;
 use crate::ui::keybindings::bind_keys;
 use crate::ui::screenshot_demo::ScreenshotDemo;
@@ -173,11 +172,8 @@ fn sending_without_premium_offers_the_text_without_formatting(cx: &mut TestAppCo
         app.update(cx, |app, cx| app.submit_from_send_button(window, cx));
     });
     frames(vcx);
-    let choice = app.read_with(vcx, |app, _| app.chat_ui.rich.draft_box().clone());
-    assert_eq!(
-        choice,
-        RichDraftBox::PremiumChoice("Plan\n**ship it**".into())
-    );
+    let choice = app.read_with(vcx, |app, _| app.chat_ui.rich.choice().map(String::from));
+    assert_eq!(choice.as_deref(), Some("Plan\n**ship it**"));
     assert!(shown(vcx, "rich-choice-plain"));
 }
 
@@ -222,8 +218,8 @@ fn a_rich_draft_box_goes_with_its_chat(cx: &mut TestAppContext) {
     });
     frames(vcx);
     assert_eq!(
-        app.read_with(vcx, |app, _| app.chat_ui.rich.draft_box().clone()),
-        RichDraftBox::Closed
+        app.read_with(vcx, |app, _| app.chat_ui.rich.clone()),
+        super::RichComposer::Field
     );
     assert!(!shown(vcx, "rich-choice-plain"));
     assert_eq!(

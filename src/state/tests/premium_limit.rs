@@ -253,6 +253,45 @@ fn toast_kinds_queue_a_toast_instead_of_a_box() {
 }
 
 #[test]
+fn a_toast_kind_raised_over_an_open_box_still_toasts_and_the_box_stays() {
+    let (mut session, _sink) = session();
+    session.open_premium_limit(PremiumLimitKind::Pins, 0);
+    session.open_premium_limit(PremiumLimitKind::FavoriteStickers, 0);
+    assert_eq!(
+        session.payments.hub.take_limit_toast(),
+        Some(PremiumLimitKind::FavoriteStickers)
+    );
+    assert_eq!(session.payments.hub.take_limit_toast(), None, "once");
+    assert_eq!(
+        session.payments.hub.limit_box(),
+        Some((PremiumLimitKind::Pins, 0))
+    );
+    // A toast still waiting when the box closes is shown after it.
+    session.open_premium_limit(PremiumLimitKind::OwnedBots, 0);
+    session.payments.hub.close_limit_box();
+    assert_eq!(session.payments.hub.limit_box(), None);
+    assert_eq!(
+        session.payments.hub.take_limit_toast(),
+        Some(PremiumLimitKind::OwnedBots)
+    );
+}
+
+#[test]
+fn a_box_raised_before_the_window_drains_a_toast_keeps_the_toast() {
+    let (mut session, _sink) = session();
+    session.open_premium_limit(PremiumLimitKind::FavoriteStickers, 0);
+    session.open_premium_limit(PremiumLimitKind::Pins, 0);
+    assert_eq!(
+        session.payments.hub.limit_box(),
+        Some((PremiumLimitKind::Pins, 0))
+    );
+    assert_eq!(
+        session.payments.hub.take_limit_toast(),
+        Some(PremiumLimitKind::FavoriteStickers)
+    );
+}
+
+#[test]
 fn the_public_links_box_lists_the_chats_afresh_each_time() {
     let (mut session, _sink) = session();
     session.groups.group_type.public_chats = PublicChatsFetch::Failed;

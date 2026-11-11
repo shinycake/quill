@@ -20,6 +20,30 @@ pub enum Fetch<T> {
     Failed { error: String, stale: Option<T> },
 }
 
+/// A mutation of a fetched list (terminate a session, disconnect a website):
+/// one at a time, and only the answer of the request it carries ends it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ListOp {
+    #[default]
+    Idle,
+    /// This request is in flight; its `ok` or its error ends it.
+    Running(crate::ids::RequestId),
+}
+
+impl ListOp {
+    pub fn is_running(&self) -> bool {
+        matches!(self, Self::Running(_))
+    }
+
+    /// The answer of `answered` came in: ends the mutation when it is the
+    /// one in flight; an older request's answer leaves it running.
+    pub fn settle(&mut self, answered: Option<crate::ids::RequestId>) {
+        if answered.is_some_and(|id| *self == Self::Running(id)) {
+            *self = Self::Idle;
+        }
+    }
+}
+
 impl<T> Fetch<T> {
     pub fn is_idle(&self) -> bool {
         matches!(self, Self::Idle)

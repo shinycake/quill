@@ -226,21 +226,30 @@ impl QuillApp {
             self.share_with_system_picker(target, cx);
             return true;
         }
-        match &self.screen_share.chooser {
-            Chooser::Open(OpenChooser {
-                window: Some(handle),
-                ..
-            }) => {
-                // tdesktop `activate()`: one chooser per call, brought forward.
-                let _ = handle.update(cx, |_, window, _| window.activate_window());
+        let epoch = self.screen_epoch();
+        // A second ask while a chooser is up or being made retargets it
+        // (the old `for_call` was set on every ask).
+        match &mut self.screen_share.chooser {
+            Chooser::Open(open) => {
+                open.target = target;
+                if let Some(handle) = open.window {
+                    // tdesktop `activate()`: one chooser per call, brought forward.
+                    let _ = handle.update(cx, |_, window, _| window.activate_window());
+                }
+                // Without a window yet, it is being made.
                 return true;
             }
-            // Its window is being made.
-            Chooser::Open(_) => return true,
             // Listing on this screen already. One started on an earlier
             // screen does not count: its continuation was dropped with
             // that screen and will never finish it.
-            Chooser::Listing { epoch, .. } if *epoch == self.screen_epoch() => return true,
+            Chooser::Listing {
+                target: listing,
+                epoch: listing_epoch,
+                ..
+            } if *listing_epoch == epoch => {
+                *listing = target;
+                return true;
+            }
             Chooser::Listing { .. } | Chooser::Closed | Chooser::PrivacyBox(_) => {}
         }
         self.screen_share.generation = self.screen_share.generation.wrapping_add(1);

@@ -42,13 +42,23 @@ impl Default for MenuTarget {
     }
 }
 
+/// The open message menu: where it is, the page it shows and what it was
+/// opened over. One value, so closing the menu drops all of it.
+#[derive(Clone, Debug)]
+pub(super) struct OpenMenu {
+    /// The message and the window position.
+    pub(super) at: super::menu_states::MessageMenuState,
+    /// Which page of the menu shows (a reactor list, "Save to...").
+    pub(super) page: super::message_menu_ui::MessageMenuPage,
+    /// What the menu was opened over: a link, a task or option, a text
+    /// selection.
+    pub(super) target: MenuTarget,
+}
+
 pub(crate) struct MessageUi {
-    /// M1: right-click context menu target + window position.
-    pub(super) menu: Option<MessageMenuState>,
-    /// What the open message menu was opened over: a link, a task or
-    /// option, a text selection. Replaced whole each time a menu opens.
-    pub(super) menu_target: MenuTarget,
-    /// Page, report and sticker-set dialogs of the message menu's extras.
+    /// M1: right-click context menu (target, page and window position).
+    pub(super) menu: Option<OpenMenu>,
+    /// Report and sticker-set dialogs of the message menu's extras.
     pub(super) menu_ui: super::message_menu_ui::MessageMenuUi,
     /// The link under the latest right-press, and where it was pressed.
     pub(super) right_clicked_link: Option<(Point<Pixels>, quill::text::LinkTarget)>,
@@ -108,10 +118,61 @@ pub(crate) struct MessageUi {
 }
 
 impl MessageUi {
+    /// Open the menu at `at`, on its main page and over nothing.
+    pub(super) fn set_menu(&mut self, at: super::menu_states::MessageMenuState) {
+        self.menu = Some(OpenMenu {
+            at,
+            page: Default::default(),
+            target: MenuTarget::default(),
+        });
+    }
+
+    /// Where the open menu is.
+    pub(super) fn menu_at(&self) -> Option<super::menu_states::MessageMenuState> {
+        self.menu.as_ref().map(|open| open.at)
+    }
+
+    /// The page the open menu shows (the main one when none is open).
+    pub(super) fn menu_page(&self) -> super::message_menu_ui::MessageMenuPage {
+        self.menu.as_ref().map(|open| open.page).unwrap_or_default()
+    }
+
+    /// Turn the open menu to `page`; nothing when it has closed.
+    pub(super) fn set_menu_page(&mut self, page: super::message_menu_ui::MessageMenuPage) {
+        if let Some(open) = self.menu.as_mut() {
+            open.page = page;
+        }
+    }
+
+    /// What the open menu was opened over.
+    pub(super) fn menu_target(&self) -> Option<&MenuTarget> {
+        self.menu.as_ref().map(|open| &open.target)
+    }
+
+    /// The task or option the open menu is over (the whole message when
+    /// none, or when no menu is open).
+    pub(super) fn menu_item(&self) -> quill::composer::ReplyItem {
+        self.menu_target()
+            .map_or(quill::composer::ReplyItem::Message, |t| t.item.clone())
+    }
+
+    /// Record what the open menu was opened over.
+    pub(super) fn set_menu_target(&mut self, target: MenuTarget) {
+        if let Some(open) = self.menu.as_mut() {
+            open.target = target;
+        }
+    }
+
+    /// Expand the open menu's reaction strip to every reaction.
+    pub(super) fn expand_menu_reactions(&mut self, expanded: bool) {
+        if let Some(open) = self.menu.as_mut() {
+            open.target.reactions_expanded = expanded;
+        }
+    }
+
     pub(super) fn new(window: &mut Window, cx: &mut Context<QuillApp>) -> Self {
         Self {
             menu: None,
-            menu_target: MenuTarget::default(),
             menu_ui: super::message_menu_ui::MessageMenuUi::new(window, cx),
             right_clicked_link: None,
             right_clicked_item: None,

@@ -52,18 +52,18 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.message_ui.menu = Some(menu);
+        self.message_ui.set_menu(menu);
         // A reactor tab asked for by an earlier menu whose properties never
         // allowed it is not this menu's (a chip's menu sets it after this).
         if let Some(live) = self.live.as_mut() {
             live.driver.session.messages.wanted_reactor_tab = None;
         }
-        self.message_ui.menu_ui.page = super::message_menu_ui::MessageMenuPage::Main;
         let link = self.take_right_clicked_link(menu.position);
         let item = self.take_right_clicked_item(menu.position);
         // Over a poll option the menu shows the option's page.
         if matches!(item, quill::composer::ReplyItem::PollOption(_)) {
-            self.message_ui.menu_ui.page = super::message_menu_ui::MessageMenuPage::PollOption;
+            self.message_ui
+                .set_menu_page(super::message_menu_ui::MessageMenuPage::PollOption);
         }
         self.chat_ui.link_tooltip = None;
         // A right-click keeps the text selection; the menu then acts on it
@@ -86,12 +86,13 @@ impl QuillApp {
                         nth: 0,
                     })
             });
-        self.message_ui.menu_target = super::message_state::MenuTarget {
-            link,
-            item,
-            selection,
-            reactions_expanded: false,
-        };
+        self.message_ui
+            .set_menu_target(super::message_state::MenuTarget {
+                link,
+                item,
+                selection,
+                reactions_expanded: false,
+            });
         if let Some(live) = self.live.as_mut() {
             let _ = live
                 .driver
@@ -101,7 +102,7 @@ impl QuillApp {
                 .fetch_message_menu_actions(menu.chat_id, menu.message_id);
             // A poll option has its own menu facts.
             if let quill::composer::ReplyItem::PollOption(option_id) =
-                &self.screen.message_ui.menu_target.item
+                &self.screen.message_ui.menu_item()
             {
                 let _ = live.driver.fetch_poll_option_properties(
                     menu.chat_id,
@@ -577,7 +578,11 @@ impl QuillApp {
             .flex_col()
             .px_1()
             .py_1();
-        if !self.message_ui.menu_target.reactions_expanded {
+        if !self
+            .message_ui
+            .menu_target()
+            .is_some_and(|t| t.reactions_expanded)
+        {
             let mut row = div().flex().items_center().gap(px(2.));
             for (ix, choice) in options.top.iter().take(7).enumerate() {
                 let chosen = message.chosen_reaction(choice);
@@ -622,7 +627,7 @@ impl QuillApp {
                                         .ready_for(chat_id, message_id)
                                 })
                                 .is_some_and(|o| o.allow_custom_emoji);
-                            let position = this.message_ui.menu.map(|menu| menu.position);
+                            let position = this.message_ui.menu_at().map(|menu| menu.position);
                             match position {
                                 Some(position) if custom => {
                                     this.open_reaction_selector(
@@ -630,7 +635,7 @@ impl QuillApp {
                                     );
                                 }
                                 _ => {
-                                    this.message_ui.menu_target.reactions_expanded = true;
+                                    this.message_ui.expand_menu_reactions(true);
                                     cx.notify();
                                 }
                             }

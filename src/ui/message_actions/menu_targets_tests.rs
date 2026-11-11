@@ -52,7 +52,7 @@ fn message_menu_closes_when_its_message_is_removed(cx: &mut TestAppContext) {
         (open, MessageId(id))
     });
     app.update(vcx, |app, cx| {
-        app.message_ui.menu = Some(MessageMenuState {
+        app.message_ui.set_menu(MessageMenuState {
             chat_id: chat,
             message_id: message,
             position: point(px(400.), px(300.)),
