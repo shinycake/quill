@@ -221,7 +221,10 @@ impl QuillApp {
         self.begin_story_viewer(items, 0, cx);
         // The viewer joins by itself; the demo has no driver, so the
         // watched story is marked here.
-        self.screen.stories.live.watching = Some((ChatId(CHANNEL), STORY));
+        self.screen
+            .stories
+            .live
+            .start_watching((ChatId(CHANNEL), STORY));
         cx.notify();
     }
 }

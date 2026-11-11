@@ -175,6 +175,11 @@ impl QuillApp {
         };
         self.clear_pending_attachments();
         self.composer_ui.edit_replace_as_file = false;
+        // Switching from one edit to another: the first edit's text is not the
+        // draft, so put the real draft and reply back before they are stashed.
+        if self.chat_ui.is_editing() {
+            self.finish_edit_restore_draft(window, cx);
+        }
         let current = self.composer_markup(cx);
         // Flush while the reply is still set so a reply-only draft is not wiped.
         self.note_open_draft(false, cx);

@@ -390,6 +390,18 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.send_json_request(extra, &json)
     }
 
+    /// The session holds one login-URL context, which the answer reads: a
+    /// second button waits until the first one's answer is in.
+    fn refuse_login_url_overlap(&self) -> Result<(), ConnectSendError> {
+        let requests = &self.session.requests;
+        if requests.has_purpose(RequestPurpose::GetLoginUrlInfo)
+            || requests.has_purpose(RequestPurpose::GetLoginUrl)
+        {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        Ok(())
+    }
+
     /// B1: resolve a login-URL button (`getLoginUrlInfo`, schema 1.8.67,
     /// line 12985). `fallback_url` is the button's raw URL, kept in the
     /// session so a TDLib error degrades to a plain URL-button press.
@@ -400,6 +412,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         button_id: i64,
         fallback_url: &str,
     ) -> Result<RequestId, ConnectSendError> {
+        self.refuse_login_url_overlap()?;
         let extra =
             self.callback_query_extra(chat_id, message_id, RequestPurpose::GetLoginUrlInfo)?;
         self.session.bots.login_url_request = Some(LoginUrlRequest {
@@ -422,6 +435,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         request: &LoginUrlRequest,
         allow_write_access: bool,
     ) -> Result<RequestId, ConnectSendError> {
+        self.refuse_login_url_overlap()?;
         let extra = self.callback_query_extra(
             request.chat_id,
             request.message_id,
@@ -625,6 +639,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 bot_user_id,
                 query: query.to_string(),
                 fetch: InlineQueryFetch::Loading,
+                more_failed: None,
             });
         }
         let extra = self.session.request(

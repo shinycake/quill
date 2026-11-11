@@ -26,8 +26,13 @@ impl Session {
                 }
             }
             Some(RequestPurpose::ValidateOrderInfo) => {
-                if extra.is_some() && self.payments.validate_request == extra {
-                    self.payments.validate_request = None;
+                if extra.is_some()
+                    && matches!(
+                        &self.payments.order_info,
+                        OrderInfoStage::Validating { request, .. } if Some(*request) == extra
+                    )
+                {
+                    self.payments.order_info = OrderInfoStage::Unvalidated;
                     self.payments.form_loading = false;
                     self.payments.note = Some(format!("Payment failed: {}", error_reason(err)));
                 }
@@ -88,8 +93,10 @@ impl Session {
             }
             Some(RequestPurpose::GetStarGiftOptions) => {
                 let gift = &mut self.payments.stars_gift;
-                gift.loading = false;
-                gift.error = Some(format!("Couldn't load Star packs: {}", error_reason(err)));
+                if gift.asked.is_some() && gift.asked == pending.map(|p| p.id) {
+                    gift.asked = None;
+                    gift.error = Some(format!("Couldn't load Star packs: {}", error_reason(err)));
+                }
             }
             Some(RequestPurpose::GetStarPackOptions) => {
                 let packs = &mut self.payments.star_packs;
@@ -107,12 +114,18 @@ impl Session {
                     Some(format!("Couldn't send Stars: {}", error_reason(err)));
             }
             Some(RequestPurpose::Payments(PaymentsPurpose::CommitPaidReaction { .. })) => {
+                if let Some(p) = pending {
+                    self.payments.paid.refused(p.id);
+                }
                 self.payments.paid.note =
                     Some(format!("Stars were not sent: {}", error_reason(err)));
             }
             Some(RequestPurpose::Payments(PaymentsPurpose::RemovePendingPaidReaction {
                 ..
             })) => {
+                if let Some(p) = pending {
+                    self.payments.paid.refused(p.id);
+                }
                 self.payments.paid.note =
                     Some(format!("Couldn't undo the Stars: {}", error_reason(err)));
             }

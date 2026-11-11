@@ -2,7 +2,7 @@ use quill::ids::ChatId;
 /// Slice G1: confirmations that need an explicit tap: deleting a chat
 /// (`deleteChat`), leaving a group/channel, the one-way broadcast
 /// upgrade (`toggleSupergroupIsBroadcastGroup`), and banning a member.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum GroupConfirmAction {
     RemoveEmojiSet {
         set_id: i64,
@@ -42,10 +42,11 @@ pub enum GroupConfirmAction {
     /// `chat_id` is a dummy.
     DeleteSyncedContacts,
     /// Slice CL3: multi-select bulk delete — `deleteChatHistory` with
-    /// `remove_from_chat_list: true` for every selected chat. The ids
-    /// are read from the live selection at submit time (the dialog
-    /// blocks selection changes while open).
-    RemoveSelectedChats,
+    /// `remove_from_chat_list: true` for every chat in `ids`, the
+    /// selection captured when the box opened.
+    RemoveSelectedChats {
+        ids: Vec<ChatId>,
+    },
     /// Slice B2: "Restart bot" — clears the bot chat's history
     /// (`deleteChatHistory`, schema line 11845, kept in the chat list)
     /// and re-sends `sendBotStartMessage` with an empty parameter (schema

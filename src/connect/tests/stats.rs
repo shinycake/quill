@@ -6,8 +6,8 @@ use crate::diagnostics::{DiagnosticSink, MemorySink};
 use crate::ids::{AccountKey, ChatId, MessageId, RequestId};
 use crate::platform::MemorySecretStore;
 use crate::state::{
-    GraphFetch, InfoPanelTarget, MessageStatsFetch, RECENT_POSTS_FIRST, RequestPurpose, Session,
-    StatsPage,
+    ChatStatisticsFetch, GraphFetch, InfoPanelTarget, MessageStatsFetch, RECENT_POSTS_FIRST,
+    RequestPurpose, Session, StatsPage,
 };
 use crate::telegram::client::copy_and_parse;
 use crate::telegram::envelope::StatisticalGraph;
@@ -474,4 +474,152 @@ fn reopening_a_post_whose_statistics_are_out_asks_for_its_forwards_again() {
         .message_for(-100, a.0)
         .unwrap();
     assert_eq!(state.forwards.forwards.len(), 2);
+}
+
+/// A chat whose statistics TDLib will not give ends in an error the panel
+/// draws, never a spinner nothing will end (sweep 13-021, 13-022).
+#[test]
+fn unavailable_chat_statistics_end_in_an_error() {
+    let mut rig = Rig::new();
+    for json in [
+        r#"{"@type":"updateNewChat","chat":{"id":-100,"title":"News","type":{"@type":"chatTypeSupergroup","supergroup_id":100,"is_channel":true},"unread_count":0}}"#,
+        r#"{"@type":"updateSupergroupFullInfo","supergroup_id":100,"supergroup_full_info":{"description":"","member_count":3,"can_get_statistics":false}}"#,
+    ] {
+        rig.driver
+            .ingest(copy_and_parse(json, &rig.seq, &rig.sink).unwrap())
+            .unwrap();
+    }
+    let asked = rig.sent().len();
+    assert_eq!(
+        rig.driver.fetch_chat_statistics(ChatId(-100), false),
+        Ok(None)
+    );
+    assert!(matches!(
+        rig.driver.session.groups.chat_statistics.get(&-100),
+        Some(ChatStatisticsFetch::Failed(_))
+    ));
+    assert_eq!(rig.sent().len(), asked, "nothing was sent");
+    // A refresh from the error panel is not blocked by the held error.
+    assert_eq!(
+        rig.driver.refresh_chat_statistics(ChatId(-100), false),
+        Ok(None)
+    );
+}
+
+/// Statistics asked before the chat's full info is known wait for it, ask
+/// for it, and go out (or fail) when it lands (sweep 13-022).
+#[test]
+fn statistics_asked_before_the_full_info_wait_and_go_out_when_it_lands() {
+    let mut rig = Rig::new();
+    rig.driver
+        .ingest(copy_and_parse(
+            r#"{"@type":"updateNewChat","chat":{"id":-100,"title":"News","type":{"@type":"chatTypeSupergroup","supergroup_id":100,"is_channel":true},"unread_count":0}}"#,
+            &rig.seq,
+            &rig.sink,
+        ).unwrap())
+        .unwrap();
+    assert_eq!(
+        rig.driver.fetch_chat_statistics(ChatId(-100), true),
+        Ok(None)
+    );
+    assert_eq!(
+        rig.driver.session.groups.chat_statistics.get(&-100),
+        Some(&ChatStatisticsFetch::WaitingForInfo { is_dark: true })
+    );
+    assert_eq!(rig.last("getSupergroupFullInfo")["supergroup_id"], 100);
+    assert!(!rig.sent().iter().any(|v| v["@type"] == "getChatStatistics"));
+    rig.driver
+        .ingest(copy_and_parse(
+            r#"{"@type":"updateSupergroupFullInfo","supergroup_id":100,"supergroup_full_info":{"description":"","member_count":3,"can_get_statistics":true}}"#,
+            &rig.seq,
+            &rig.sink,
+        ).unwrap())
+        .unwrap();
+    assert_eq!(
+        rig.driver.session.groups.chat_statistics.get(&-100),
+        Some(&ChatStatisticsFetch::Loading)
+    );
+    let request = rig.last("getChatStatistics");
+    assert_eq!(request["chat_id"], -100);
+    assert_eq!(request["is_dark"], true);
+}
+
+#[test]
+fn statistics_waiting_for_a_full_info_that_fails_end_in_an_error() {
+    let mut rig = Rig::new();
+    rig.driver
+        .ingest(copy_and_parse(
+            r#"{"@type":"updateNewChat","chat":{"id":-100,"title":"News","type":{"@type":"chatTypeSupergroup","supergroup_id":100,"is_channel":true},"unread_count":0}}"#,
+            &rig.seq,
+            &rig.sink,
+        ).unwrap())
+        .unwrap();
+    assert_eq!(
+        rig.driver.fetch_chat_statistics(ChatId(-100), false),
+        Ok(None)
+    );
+    let extra = rig.last("getSupergroupFullInfo")["@extra"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    rig.driver
+        .ingest(
+            copy_and_parse(
+                &format!(
+                    r#"{{"@type":"error","@extra":"{extra}","code":500,"message":"Timeout"}}"#
+                ),
+                &rig.seq,
+                &rig.sink,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+    assert!(matches!(
+        rig.driver.session.groups.chat_statistics.get(&-100),
+        Some(ChatStatisticsFetch::Failed(_))
+    ));
+}
+
+/// Refuses every `getSupergroupFullInfo` send, records the rest.
+struct RefuseFullInfoSender(Arc<RecordingSender>);
+
+impl JsonSender for RefuseFullInfoSender {
+    fn send_json(&self, request: &str) -> Result<(), ConnectSendError> {
+        if request.contains("getSupergroupFullInfo") {
+            return Err(ConnectSendError::Native);
+        }
+        self.0.send_json(request)
+    }
+}
+
+/// The full-info request that statistics wait on cannot be sent: the panel
+/// ends in an error instead of waiting for an answer that never comes
+/// (sweep 13-022).
+#[test]
+fn statistics_whose_full_info_send_fails_end_in_an_error() {
+    let store = MemorySecretStore::new();
+    let (dir, prepared) = prepared_tmp(&store);
+    let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+    let session = Session::new(AccountKey::primary(), sink.clone());
+    let mut driver = ConnectDriver::new(
+        session,
+        RefuseFullInfoSender(Arc::new(RecordingSender::new())),
+        test_credentials(),
+        prepared,
+    );
+    let seq = AtomicU64::new(0);
+    seed_ready_alice(&mut driver, &seq, &sink);
+    driver
+        .ingest(copy_and_parse(
+            r#"{"@type":"updateNewChat","chat":{"id":-100,"title":"News","type":{"@type":"chatTypeSupergroup","supergroup_id":100,"is_channel":true},"unread_count":0}}"#,
+            &seq,
+            &sink,
+        ).unwrap())
+        .unwrap();
+    assert!(driver.fetch_chat_statistics(ChatId(-100), false).is_err());
+    assert!(matches!(
+        driver.session.groups.chat_statistics.get(&-100),
+        Some(ChatStatisticsFetch::Failed(_))
+    ));
+    let _ = std::fs::remove_dir_all(&dir);
 }

@@ -1,6 +1,7 @@
 //! Connect driver: supergroups, channels, communities, forums, boosts.
 use super::*;
 use crate::ids::{ChatId, MessageId, RequestId, TopicId};
+use crate::lang::{Key, keys, tr};
 use crate::state::{ChatStatisticsFetch, RequestPurpose, RequestRollback, WelcomeMessagesFetch};
 use crate::state::{GroupsPurpose, ThreadsPurpose, WindowEnd};
 use crate::telegram::envelope::{ChatKind, ParsedCommunity};
@@ -313,32 +314,65 @@ impl<S: JsonSender> ConnectDriver<S> {
         chat_id: ChatId,
         is_dark: bool,
     ) -> Result<Option<RequestId>, ConnectSendError> {
+        self.send_chat_statistics(chat_id, is_dark, false)
+    }
+
+    fn send_chat_statistics(
+        &mut self,
+        chat_id: ChatId,
+        is_dark: bool,
+        refresh: bool,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        let can_get = self
+        let supergroup_id = self
             .session
             .chats
             .get(&chat_id.0)
             .and_then(|chat| match chat.kind {
-                ChatKind::Supergroup { supergroup_id, .. } => self
-                    .session
-                    .groups
-                    .supergroup_full_infos
-                    .get(&supergroup_id),
+                ChatKind::Supergroup { supergroup_id, .. } => Some(supergroup_id),
                 _ => None,
-            })
-            .is_some_and(|info| info.can_get_statistics);
-        if !can_get {
+            });
+        let Some(supergroup_id) = supergroup_id else {
+            self.fail_chat_statistics(chat_id, keys::Q_MONEY_STATISTICS_UNAVAILABLE);
             return Ok(None);
-        }
-        if matches!(
-            self.session.groups.chat_statistics.get(&chat_id.0),
-            Some(ChatStatisticsFetch::Loading | ChatStatisticsFetch::Loaded(_))
-        ) || self
+        };
+        let can_get = self
             .session
-            .requests
-            .has_purpose_for_chat(RequestPurpose::GetChatStatistics, chat_id)
+            .groups
+            .supergroup_full_infos
+            .get(&supergroup_id)
+            .map(|info| info.can_get_statistics);
+        match can_get {
+            Some(true) => {}
+            Some(false) => {
+                self.fail_chat_statistics(chat_id, keys::Q_MONEY_STATISTICS_UNAVAILABLE);
+                return Ok(None);
+            }
+            None => {
+                // The full info says whether the chat can show statistics:
+                // ask for it (deduped) and wait; its arrival sends this.
+                self.session
+                    .groups
+                    .chat_statistics
+                    .insert(chat_id.0, ChatStatisticsFetch::WaitingForInfo { is_dark });
+                return match self.fetch_supergroup_full_info(supergroup_id) {
+                    Ok(_) => Ok(None),
+                    Err(err) => {
+                        self.fail_chat_statistics(chat_id, keys::Q_MONEY_STATISTICS_SEND_FAILED);
+                        Err(err)
+                    }
+                };
+            }
+        }
+        let held = self.session.groups.chat_statistics.get(&chat_id.0);
+        if matches!(held, Some(ChatStatisticsFetch::Loading))
+            || (!refresh && matches!(held, Some(ChatStatisticsFetch::Loaded(_))))
+            || self
+                .session
+                .requests
+                .has_purpose_for_chat(RequestPurpose::GetChatStatistics, chat_id)
         {
             return Ok(None);
         }
@@ -354,10 +388,38 @@ impl<S: JsonSender> ConnectDriver<S> {
             .send_json(&get_chat_statistics(extra, chat_id.0, is_dark))
         {
             self.session.requests.take(extra);
-            self.session.groups.chat_statistics.remove(&chat_id.0);
+            self.session.groups.chat_statistics.insert(
+                chat_id.0,
+                ChatStatisticsFetch::Failed(tr(keys::Q_MONEY_STATISTICS_SEND_FAILED).into()),
+            );
             return Err(err);
         }
         Ok(Some(extra))
+    }
+
+    fn fail_chat_statistics(&mut self, chat_id: ChatId, key: Key) {
+        self.session
+            .groups
+            .chat_statistics
+            .insert(chat_id.0, ChatStatisticsFetch::Failed(tr(key).into()));
+    }
+
+    /// A `supergroupFullInfo` landed: every statistics panel that waited for
+    /// it now knows whether its chat can show them, and asks or fails.
+    pub(crate) fn resume_waiting_statistics(&mut self) {
+        let waiting: Vec<(i64, bool)> = self
+            .session
+            .groups
+            .chat_statistics
+            .iter()
+            .filter_map(|(chat, fetch)| match fetch {
+                ChatStatisticsFetch::WaitingForInfo { is_dark } => Some((*chat, *is_dark)),
+                _ => None,
+            })
+            .collect();
+        for (chat, is_dark) in waiting {
+            let _ = self.send_chat_statistics(ChatId(chat), is_dark, false);
+        }
     }
 
     /// Phase D2: explicit refresh of `getChatStatistics` — clears the
@@ -367,8 +429,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         chat_id: ChatId,
         is_dark: bool,
     ) -> Result<Option<RequestId>, ConnectSendError> {
-        self.session.groups.chat_statistics.remove(&chat_id.0);
-        self.fetch_chat_statistics(chat_id, is_dark)
+        self.send_chat_statistics(chat_id, is_dark, true)
     }
 
     /// Slice G1: `toggleSupergroupIsBroadcastGroup` (schema 1.8.67, line

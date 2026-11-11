@@ -705,8 +705,11 @@ pub(crate) fn parse_groups_payload(
             Ok(EnvelopePayload::Groups(
                 GroupsPayload::UpdateChatPendingJoinRequests {
                     chat_id: int53(value.get("chat_id"))?,
-                    total_count: int53(pending.and_then(|v| v.get("total_count")))
-                        .map(|v| v.sat_i32())?,
+                    // TDLib sends null once no request is pending.
+                    total_count: match pending {
+                        Some(info) => int53(info.get("total_count")).map(|v| v.sat_i32())?,
+                        None => 0,
+                    },
                     user_ids: pending
                         .and_then(|v| v.get("user_ids"))
                         .and_then(Value::as_array)

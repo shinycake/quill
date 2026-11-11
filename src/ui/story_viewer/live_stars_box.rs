@@ -91,7 +91,7 @@ impl QuillApp {
             let name = this
                 .stories
                 .live
-                .watching
+                .watching()
                 .and_then(|(chat_id, _)| session.chats.get(&chat_id.0))
                 .map(|chat| chat.title.clone())
                 .unwrap_or_default();

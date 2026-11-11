@@ -138,6 +138,20 @@ fn a_stars_form_is_paid_without_credentials_and_only_when_asked() {
         .unwrap();
     let pay = sent_request(&recorder, "sendPaymentForm");
     assert_eq!(pay["payment_form_id"], 9);
+    // A second Pay before the answer sends nothing.
+    assert!(
+        driver
+            .submit_payment_form(&invoice, form.id, "", "", Value::Null, 0)
+            .is_err()
+    );
+    assert_eq!(
+        recorder
+            .snapshot()
+            .iter()
+            .filter(|j| j.contains("sendPaymentForm"))
+            .count(),
+        1
+    );
     assert_eq!(pay["credentials"], Value::Null);
     assert_eq!(
         pay["input_invoice"],

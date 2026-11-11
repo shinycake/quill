@@ -3997,3 +3997,247 @@ and 10 are widget items another fixer owns).
   refusal assertion in `channel_auto_translate_is_parsed_gated_and_toggled`.
   None waits on time. No test for 6 and 11 (they need a photo file and a
   download answer the offline harness cannot produce).
+
+### Sweep fixes (s12-ui)
+
+- **Window targets.** The `/` menu and the quick-reply row read
+  `viewed_chat()` (the window's chat), not the main window's `open_chat`
+  (12-049). The music row's play button carries its message's chat
+  (11-p3-001).
+- **Confirms act on what was confirmed.** Manage Topics Delete opens the
+  `DeleteForumTopic` box (10-068). The bulk "Delete chats" box carries its
+  chats in `GroupConfirmAction::RemoveSelectedChats { ids }`, captured when it
+  opens (09-050, 10-087).
+- **Failed pages wait.** `TopicHistory::older` (`OlderEnd`) keeps a failed
+  older thread or topic page from being asked again on every render (06-001,
+  06-002). It is also the topic's first-page stage: `topic_load_failed` is
+  gone, "Couldn't load messages" is `older == Failed` with nothing loaded, so
+  Retry (`retry_topic_history`, `retry_topic_older`) reopens the one stage and
+  a failed jump to the latest no longer ends in "No messages in this topic".
+  The thread's first page is `ThreadStatus::Failed`, already one stage. A
+  failed next inline page (`InlineQuerySlot::more_failed`), story viewers
+  page, similar-channels list and folder-invite chat are asked once (10-121,
+  13-144 with a Retry button, 13-044, 09-110: a chat counts as asked only
+  after the ask was sent). The installed-wallpapers list is a `Fetch` with a
+  Retry, on the Appearance page and in the chat look box (07-035). Thread paging notifies only when a request went out (13-104).
+  A failed older page of a non-empty thread or topic draws a Retry strip
+  over its rows (`conversation/older_retry.rs`); jumping to the latest or
+  reopening clears it too.
+- **Ends in an error.** Statistics: a chat that cannot show them, or a send
+  that failed, lands in the Failed state the panel draws (13-021). A chat
+  whose `supergroupFullInfo` is not known yet is `WaitingForInfo { is_dark }`:
+  the ask for the full info goes out, and the update that stores it
+  (`resume_waiting_statistics`, run where the paid-prices sync runs) sends the
+  statistics request or fails the panel; a failed full-info request fails it
+  too (13-022). No polling. A
+  refused live-story join shows the Join button (13-089); the viewer's join
+  is one enum, `LiveJoin` (`Idle`, `Watching { target, seen_call }`,
+  `Refused(target)`), not `watching`, `seen_call` and `refused_join`.
+- **Smaller.** A language switch whose send fails clears `switching`
+  (02-133); `updateChatPendingJoinRequests` with null parses as zero
+  (06-050); the folder editor is `FolderLoad` (`Loading`, `Failed`, `Ready`): Save
+  waits for `Ready`, a failed `getChatFolder` (`folder_spec_errors`) shows its
+  error with Retry instead of loading forever (09-104, 09-X052); 08-049 is
+  skipped: tdesktop's `ContactStatus::setupReportHandler` runs one callback for
+  both Unarchive-or-Report and Report spam, and both call `deleteConversation`
+  (leave), so the bar reports and leaves as before; a story
+  text reply keeps the chat's draft (07-005); a second edit keeps the real
+  draft (08-127); Promote forgets a selection the new search page hides
+  (10-078); each export worker call carries a call number and its answer comes back
+  under it, so a call never takes the late answer of one that timed out, nor
+  the answer to a request nobody waited on; the `abandoned` flag is gone
+  (03-040; the link cannot know the driver's `RequestId` when the worker
+  sends, so the number is the worker's own); the spell download's worker runs
+  under `run_guarded`: a panic comes back as the row's `Err` and the progress
+  still ends, so awaiting the worker never panics on the UI thread (05-002);
+  the agent's download re-checks access after the copy (01-013).
+- **Off the UI thread.** A round video's thumbnail is made by
+  `VideoNoteCapture::finish` on its background task and rides in
+  `VideoNoteDraft::thumbnail`, so a story reply or chat send never waits for
+  ffmpeg (03-014). Dropping a folder on the "files in folder" zone walks it
+  in `run_off_ui_scoped_then` and applies the plan only if the composer's
+  send slot is unchanged (09-054). Add to Dictionary and Ignore drop the
+  word's underline by its text; the background check settles the rest, so
+  the spell backend is never asked on the UI thread (13-057;
+  `build_composer_menu` still asks it, behind the deferred menu).
+- **Paid chats.** `paid_messages_guard::set_paid` makes a full
+  `messageSendOptions` when a builder sent `"options": null` (media, album,
+  voice and video note, checklist, plain forward), so the agreed price
+  reaches TDLib (07-001).
+- **Pinned drag.** A window that deactivates ends a pinned drag unsaved, so
+  a lost mouse-up no longer keeps the 60 Hz redraw going (08-071). Esc does
+  not cancel it: tdesktop does not either.
+- **Instant View.** The page was already per window (2bae8b8); its
+  browser fallback now carries the asking window (`InstantViewFallback`) and
+  only that window's frame opens it; closing the window drops it (09-X047).
+- **Inline results Start.** `InlineReturn` is `Opening { parameter }` then
+  `Started { baseline }`, carries its account, and ends when the bot chat's
+  lookup fails (`cancel_inline_opening`, from the deep-link outcome and a
+  failed send), when another link ends in any chat but the bot's
+  (`cancel_inline_opening_unless_chat`, an invite preview, a text or typed
+  link), or when another account is on screen (10-119). No timer: a lookup
+  that never answers is the deep-link flow's own concern.
+- Re-review of s12-ui. 10-119: both cancels also run over the round trips
+  that chat windows keep in their own slots
+  (`ChatWindows::cancel_slot_inline_openings`), so a start-bot pressed in a
+  chat window ends when a link overtakes the lookup or the lookup fails.
+  13-022: when the `getSupergroupFullInfo` send that statistics wait on
+  fails, the panel goes to `Failed` instead of staying `WaitingForInfo`.
+  09-110 stays as is: a partly failed send re-asks only chats that are
+  neither in flight nor known, so nothing is asked twice.
+### Sweep fixes (s12-money)
+
+Payments, Stars, gifts, accounts, sign-in and passcode. Each entry was
+re-read at its spot first.
+
+- **Fixed.**
+  - Re-review pass:
+    - Passcode: when a delete fails and the put-back is partial, every key
+      whose put worked is deleted again (it has a wrapped copy), so no key
+      is plain in the OS store while the passcode is on.
+    - 10-001: a verification answer moves the giveaway launch to
+      `GiveawayLaunch::Verifying { chat_id }` whatever the checkout shows;
+      `is_done_for` covers it, so Start stays refused until the form
+      closes. `close_giveaway_form` refreshes boost status for Paid too.
+    - Star reactions: a refused commit or undo releases its Stars and stops
+      (tdesktop does not re-send); a low balance no longer loops.
+    - 09-X061: failed previews are forgotten when the first box opens
+      (`open_market_box`), not only on close.
+    - 09-122: `auction_recipient(gift_id)` defaults to the owner of the
+      user's existing bid. tdesktop's source was not reachable; this is
+      the smallest safe choice.
+    - 11-p7-001: `OrderInfoStage::validated_for(&order)` is used by render
+      (Pay, shipping options) and submit.
+    - 02-062: reopening the send box for its own in-flight send keeps the
+      typed message; another recipient gets its own note.
+    - 13-140: `CloseFriendsList` carries the `getCloseFriends` request id,
+      so its failure no longer reads the viewer's single page op.
+  - 04-052: `passcode::enable` keeps each OS-store key until every delete
+    is done; a failed delete puts the already-deleted keys back before
+    the wrapped files go, and if a put-back fails the wrapped files stay
+    and the passcode stays on. No database key is lost.
+  - 01-044: `read_zip` refuses an archive that reuses one local header or
+    inflates past `SCHEME_LIMIT + BACKGROUND_LIMIT` in total.
+  - 13-140: `CloseFriendsStage { Closed, Loading, Editing, Saving }` in
+    `story_extras` replaces `close_friends_edit` + `close_friends_saving`.
+    Loading shows no checkboxes and no Save, so a save always starts from
+    the loaded list.
+  - 02-075 / 09-X013: a failed send in the login review drops the sends
+    that never went out from `review_pending`.
+  - 02-082 / 13-045: `PhoneLookups { Idle, Asked }` on the sign-in screen;
+    the lookups are asked on arrival, never again from `sync_signin` after
+    an empty or failed answer.
+  - 13-064: see the third pass; a render asks only
+    from `Idle`, Appearance and the look box reopen a failed one.
+  - 09-X061: `gift_market.failed_previews`; a failed preview is not asked
+    again by the auction info box's render.
+  - 02-152 / 10-152: `submit_payment_form` refuses while the invoice has a
+    `sendPaymentForm` in flight (every caller, not the render).
+  - 05-017: `StarsGiftState::asked: Option<RequestId>` replaces
+    `loading`; only that request's answer or error lands.
+  - 03-058: the transfer in flight carries the recipient as confirmed
+    (`GiftManageState::transferring`); the toast reads it, not the picker.
+  - 03-059: `start_gift_resale_buy` refuses while a buy is sending.
+  - 03-060 / 09-123: closing the market boxes during the forge keeps the
+    craft; its outcome opens the result box.
+  - 04-080: a registry file that exists but cannot be read is never saved
+    over by the default registry.
+  - 02-158: Undo forgets the waiting Stars only once the remove was sent.
+  - 02-083: one login-URL context at a time; a second button waits.
+  - 07-012: the hidden translate bars are keyed by account.
+  - 09-122: raising a channel's bid keeps the channel as the recipient.
+  - 10-001: closing a paid giveaway checkout closes the giveaway form.
+  - 11-p7-001: Pay refuses once the order fields differ from the last
+    validated order.
+  - 11-p6-003: the ownership answer closes and leaves only for the dialog
+    of the chat that was transferred.
+  - 12-086: the delete boxes act only on the account that opened them.
+  - 01-051: opening the boost box clears the old chat's intent and slots.
+  - 09-X012: closing a chat window no longer dismisses the queued account
+    notices (not seen on screen).
+- **Fixed, second pass.**
+  - 04-057: `PendingPaid::stage` is `PaidStage { Waiting, Committing(req),
+    Undoing(req) }`. A due or undone reaction stays in the list, and
+    reserved against the balance and the cap, until TDLib's `ok` for that
+    request id; an error puts it back to `Waiting` with a fresh window, so
+    the toast and Undo return and the next tap counts the old Stars.
+  - 12-001: the render's fallback lands through `ScopedApp::app()` (no
+    screen epoch) instead of `main()`, which kept the stale epoch. The tray
+    sits under its account, so the PNG lands there or goes, and
+    `photo_render` is always cleared.
+  - 01-085: `KeyFilter::resync` gives the `Up` a lost event hid. The macOS
+    tap calls it when re-enabled, the Windows hook on the next event after
+    a skipped one, the X11 thread when its stream ends. The app ends the
+    hold (`ptt_end_hold`) when a new hook starts, one fails to start, or
+    the hook's channel closes. No polling. tdesktop's behaviour here could
+    not be checked, so a key-down of another key does not end a hold (a
+    chord with the push-to-talk key would cut the microphone).
+  - passcode `enable`: when a put-back fails, the accounts after the stuck
+    one still leave the OS store (the passcode is on).
+- **Fixed, third pass** (a reviewer re-read the branch; these supersede the
+  earlier lines for the same ids).
+  - 11-p7-001: `OrderInfoStage { Unvalidated, Validating{request, order},
+    Validated{order, info} }` in the session replaces `validated`,
+    `validate_request` and the dialog's `validated_order`. Continue moves
+    it to `Validating` and drops the shipping choice, so Pay has no order
+    id until the answer to that same request arrives; the answer promotes
+    the order that was sent. An error, a new form and a closed checkout
+    leave it `Unvalidated`. Pay compares the typed fields with the
+    validated order.
+  - 01-044: a stored (method 0) entry must hold exactly its declared size,
+    the number the running total counts.
+  - 10-001: a paid giveaway invoice moves the form to
+    `GiveawayLaunch::Paid { chat_id }` when its payment succeeds, whether
+    or not its checkout is still open; the 3-D Secure step names the chat
+    (`PaymentVerification::giveaway_chat_id`) and closes that form with the
+    checkout. Start is refused, and shows its spinner, while that giveaway's
+    `sendPaymentForm` is out or after it was paid.
+  - 09-X012: `dialogs_window_closed` frees an `AccountNotice` like a box
+    with no close of its own (it shows in the last-press window) instead of
+    handing it to the main window's close.
+  - 03-059: `open_gift_resale` keeps a buy whose `sendResoldGift` is out.
+  - 02-062 (fixed now, not skipped): `open_send_gift_to` keeps the stage of
+    a `sendGift` in flight. The same recipient reopens on that send (Send
+    stays off, its answer shows); another recipient waits for the answer.
+  - 11-p6-003: `OwnershipTransfer::leave_after` rides with the transfer
+    that was sent; the answer reads it, not whichever dialog is open.
+  - 13-140: `CloseFriendsStage::Failed`; Loading and Failed both show Cancel,
+    Failed adds Retry.
+  - 09-X061: `failed_previews` is cleared when the market box closes, so
+    the next open asks again.
+  - 13-064: one `installed_backgrounds: Fetch<Vec<Background>>` replaces the
+    list and its `Fetch<()>`.
+  - 09-122: `bid_gift_auction` takes the recipient; a raise
+    (`increaseGiftAuctionBid`) keeps the bid's owner and needs no user, so
+    a channel-owned bid can be raised. A new bid still goes to a user only.
+- **Skipped.** 02-160 (the Star reaction box is already on `OnScreen`, so
+  per account).
+- **Tests.** `enable_failing_midway_keeps_every_database_key`,
+  `enable_with_an_unrestorable_key_still_clears_the_accounts_after_it`,
+  `a_refused_commit_returns_the_stars_to_waiting_and_adds_up_with_a_new_tap`,
+  `a_refused_commit_keeps_the_stars_and_the_next_tap_counts_them`,
+  `a_render_finishing_after_the_screen_was_replaced_still_lands_and_ends`,
+  `resync_ends_a_hold_whose_release_was_missed`,
+  `a_zip_reusing_one_local_header_is_refused`,
+  `close_friends_stage_waits_for_the_list`,
+  `a_failed_send_does_not_leave_the_review_pending`,
+  `a_failed_upgrade_preview_is_not_asked_again`, the second-Pay assertion,
+  `a_late_answer_for_another_contact_is_dropped`, the transfer picker move
+  in `a_transfer_goes_only_to_the_contact_the_confirmation_names`,
+  `closing_the_boxes_during_the_forge_keeps_the_outcome`,
+  `an_unreadable_registry_is_not_overwritten`, `hidden_chats_toggle`. No
+  test for 02-083, 12-086, 01-051 (they need a fixture the offline
+  harness lacks). Third pass:
+  `an_earlier_order_id_never_outlives_a_new_continue`,
+  `a_rejected_continue_leaves_the_order_unvalidated`,
+  `a_stored_entry_larger_than_its_declared_size_is_refused`,
+  `a_paid_giveaway_finishes_its_form_even_with_the_checkout_closed`,
+  `a_giveaway_verification_step_names_its_chat`,
+  `an_account_notice_is_freed_by_its_windows_close_not_dismissed`,
+  `opening_the_resale_list_keeps_a_buy_that_is_out`,
+  `reopening_the_send_dialog_keeps_the_send_that_is_out`,
+  `leave_after_travels_with_the_transfer`,
+  `a_failed_list_request_ends_the_wait_and_only_the_wait`,
+  `a_channel_owned_bid_can_be_raised_but_a_channel_cannot_get_a_new_one`.
+  No test for 09-X061 and 13-064 (the render-side clear and a type
+  change; the existing background and preview tests cover the reducers).

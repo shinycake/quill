@@ -233,3 +233,27 @@ fn main_list_paging_resumes_after_a_failed_page_and_the_archive_starts() {
     rig.ingest(&format!(r#"{{"@type":"ok","@extra":"{}"}}"#, page.0));
     assert!(rig.driver.session.chat_list.chats_retry.is_none());
 }
+
+#[test]
+fn a_failed_folder_fetch_is_recorded_for_the_editor_and_cleared_by_the_retry() {
+    let mut rig = Rig::new();
+    let extra = rig.driver.fetch_chat_folder(5).unwrap().expect("asked");
+    rig.ingest(&format!(
+        r#"{{"@type":"error","@extra":"{}","code":500,"message":"Timeout"}}"#,
+        extra.0
+    ));
+    assert!(
+        rig.driver
+            .session
+            .chat_list
+            .folder_spec_errors
+            .contains_key(&5)
+    );
+    assert!(rig.driver.fetch_chat_folder(5).unwrap().is_some());
+    assert!(
+        rig.driver.session.chat_list.folder_spec_errors.is_empty(),
+        "asking again clears the error"
+    );
+    rig.answer_spec(&[7]);
+    assert!(rig.driver.session.chat_list.fresh_spec(5).is_some());
+}

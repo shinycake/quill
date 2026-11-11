@@ -86,6 +86,13 @@ impl Session {
             // on every ingest would loop at round-trip speed.
             Some(RequestPurpose::GetChatFolder) => {
                 if let Some(folder_id) = pending.and_then(|p| p.folder_id) {
+                    self.chat_list.folder_spec_errors.insert(
+                        folder_id,
+                        call_request_error_line(
+                            err,
+                            crate::lang::tr(crate::lang::keys::Q_NOTES_FAILED_FOLDER),
+                        ),
+                    );
                     let queue = &mut self.chat_list.folder_remove_queue;
                     let before = queue.len();
                     queue.retain(|(_, folder)| *folder != folder_id);

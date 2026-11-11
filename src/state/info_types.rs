@@ -288,6 +288,13 @@ impl Default for SupergroupFullInfoData {
 /// is outstanding.
 #[derive(Debug, Clone, PartialEq)]
 pub enum ChatStatisticsFetch {
+    /// The chat's `supergroupFullInfo` (which says whether statistics can
+    /// be had) has not arrived. The update that stores it moves this on
+    /// (`ConnectDriver::resume_waiting_statistics`); a failed lookup ends it
+    /// in `Failed`. Carries the theme the graphs were asked for.
+    WaitingForInfo {
+        is_dark: bool,
+    },
     Loading,
     Loaded(Box<ChatStatistics>),
     Failed(String),
@@ -437,6 +444,9 @@ pub struct InlineQuerySlot {
     pub bot_user_id: i64,
     pub query: String,
     pub fetch: InlineQueryFetch,
+    /// The `next_offset` a "load more" request failed on: that page is not
+    /// asked again until the next query replaces the slot.
+    pub more_failed: Option<String>,
 }
 
 /// Bots slice: `@botname` → bot user id resolution for inline mode.

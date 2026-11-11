@@ -326,3 +326,33 @@ fn a_premium_limit_toast_shows_in_the_window_that_hit_it(cx: &mut TestAppContext
     assert_eq!(toasts(h.main, cx), main_before);
     assert_eq!(toasts(chat_window, cx), chat_before + 1);
 }
+
+/// The queued account notices are about the account, not the window that
+/// showed one: closing that window frees the notice for the next window to
+/// show instead of handing it to the main window's sync to dismiss unseen,
+/// while an ordinary box of the window is still handed over to close.
+#[gpui_kit::test]
+fn an_account_notice_is_freed_by_its_windows_close_not_dismissed(cx: &mut TestAppContext) {
+    let h = new_app(cx);
+    h.app.update(cx, |app, _| {
+        app.windows
+            .dialog_opened_in(DialogKind::AccountNotice, Some(OTHER));
+        app.windows
+            .dialog_opened_in(DialogKind::MuteMenu, Some(OTHER));
+        app.windows.dialogs_window_closed(OTHER);
+        let left = app.windows.take_left_dialogs();
+        assert!(
+            !left.contains(&DialogKind::AccountNotice),
+            "never closed unseen"
+        );
+        assert!(
+            left.contains(&DialogKind::MuteMenu),
+            "an ordinary box closes"
+        );
+        assert_eq!(
+            app.windows.window_of_box(DialogKind::AccountNotice),
+            app.windows.last_press,
+            "free: it shows in the last-press window"
+        );
+    });
+}

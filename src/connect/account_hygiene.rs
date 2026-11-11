@@ -53,7 +53,8 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.session.settings.notices.review_confirmed = confirmed;
         self.session.settings.notices.review_error = None;
         self.session.settings.notices.review_pending = ids.len();
-        for id in ids {
+        let total = ids.len();
+        for (index, id) in ids.into_iter().enumerate() {
             let extra = self.session.request(
                 RequestPurpose::Settings(SettingsPurpose::ReviewUnconfirmedSession { confirmed }),
                 None,
@@ -65,6 +66,10 @@ impl<S: JsonSender> ConnectDriver<S> {
             };
             if let Err(err) = self.sender.send_json(&json) {
                 self.session.requests.take(extra);
+                // The sends after this one never go out: no answer will
+                // ever count them down.
+                self.session
+                    .abandon_unsent_login_reviews(total.saturating_sub(index + 1));
                 self.session
                     .finish_login_review(confirmed, Some("Could not review the new login.".into()));
                 return Err(err);

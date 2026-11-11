@@ -110,6 +110,15 @@ impl KeyFilter {
     }
 }
 
+impl KeyFilter {
+    /// The hook lost events (a disabled tap, a skipped call, a dead stream):
+    /// forget the held key. Returns the `Up` the caller never saw, if the
+    /// key was held, so the microphone does not stay open without a key down.
+    pub fn resync(&mut self) -> Option<KeyEdge> {
+        std::mem::take(&mut self.held).then_some(KeyEdge::Up)
+    }
+}
+
 /// macOS virtual key code (`kVK_*`, ANSI positions) for a GPUI key name.
 pub fn mac_keycode(key: &str) -> Option<u32> {
     let code = match key {
@@ -466,6 +475,19 @@ mod tests {
         assert_eq!(filter.feed(49, true), None);
         assert_eq!(filter.feed(49, false), Some(KeyEdge::Up));
         assert_eq!(filter.feed(49, false), None);
+    }
+
+    #[test]
+    fn resync_ends_a_hold_whose_release_was_missed() {
+        let mut filter = KeyFilter::new(49);
+        assert_eq!(filter.resync(), None, "nothing held, nothing to end");
+        assert_eq!(filter.feed(49, true), Some(KeyEdge::Down));
+        assert_eq!(filter.resync(), Some(KeyEdge::Up));
+        assert_eq!(filter.resync(), None, "ends once");
+        // The key is still down: its auto-repeat starts a fresh hold, and the
+        // late release ends it.
+        assert_eq!(filter.feed(49, true), Some(KeyEdge::Down));
+        assert_eq!(filter.feed(49, false), Some(KeyEdge::Up));
     }
 
     #[test]

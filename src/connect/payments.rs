@@ -2,8 +2,8 @@
 use super::*;
 use crate::ids::{ChatId, MessageId, RequestId};
 use crate::payment_invoice::InputInvoice;
-use crate::state::BankCardLookup;
 use crate::state::PaymentsPurpose;
+use crate::state::{BankCardLookup, OrderInfoStage};
 use crate::state::{PaymentRequest, RequestPurpose};
 use crate::telegram::envelope::OrderInfoData;
 use crate::telegram::requests::{
@@ -56,9 +56,18 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.session.payments.request = Some(PaymentRequest {
             invoice: invoice.clone(),
         });
-        self.session.payments.validate_request = Some(extra);
+        // The earlier order id and shipping choice are for other fields.
+        self.session.payments.shipping_id = None;
+        self.session.payments.order_info = OrderInfoStage::Validating {
+            request: extra,
+            order: order.clone(),
+        };
         let json = validate_order_info_request(extra, invoice, order, allow_save);
-        self.send_json_request(extra, &json)
+        let sent = self.send_json_request(extra, &json);
+        if sent.is_err() {
+            self.session.payments.order_info = OrderInfoStage::Unvalidated;
+        }
+        sent
     }
 
     /// Slice P1: `sendPaymentForm` (schema 1.8.67, line 15277) — submit the
@@ -74,6 +83,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         credentials: serde_json::Value,
         tip_amount: i64,
     ) -> Result<RequestId, ConnectSendError> {
+        // A second Pay before the answer must not pay twice.
+        if self.session.payments.is_paying(invoice) {
+            return Err(ConnectSendError::InvalidRequest);
+        }
         let extra = self.payment_extra(invoice, RequestPurpose::SendPaymentForm)?;
         self.session.payments.request = Some(PaymentRequest {
             invoice: invoice.clone(),

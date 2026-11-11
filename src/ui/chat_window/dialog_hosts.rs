@@ -261,12 +261,17 @@ impl ChatWindows {
     }
 
     /// The session-wide boxes that belong to `chat`'s window, shown or
-    /// asked for.
+    /// asked for, that close with it. The account
+    /// notices are a queue about the account, not about the window: closing
+    /// the window must not dismiss them unseen (a force-logout notice among
+    /// them), so they stay open and the next window shows them.
     pub(in crate::ui) fn dialogs_of_window(&self, chat: ChatId) -> Vec<DialogKind> {
         self.dialogs
             .hosts
             .iter()
-            .filter(|(_, owner)| owner.window() == Some(chat))
+            .filter(|(kind, owner)| {
+                owner.window() == Some(chat) && **kind != DialogKind::AccountNotice
+            })
             .map(|(kind, _)| *kind)
             .collect()
     }
@@ -284,6 +289,13 @@ impl ChatWindows {
             .collect();
         for (kind, owner) in mine {
             self.dialogs.hosts.remove(&kind);
+            // The account notices are a queue about the account, not about
+            // the window: they are freed like a box with no close of its own
+            // (the next window to show one takes it) and never closed
+            // unseen by the main window's sync.
+            if kind == DialogKind::AccountNotice {
+                continue;
+            }
             if matches!(owner, Host::Shown(_)) && !self.dialogs.left.contains(&kind) {
                 self.dialogs.left.push(kind);
             }

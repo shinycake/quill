@@ -199,7 +199,9 @@ impl QuillApp {
         // The reducer replaced the window (an own send while newer replies
         // were unloaded, or a jump that waited for a stale page): request
         // the newest page.
-        if live.driver.thread_needs_reload() && live.driver.fetch_thread_history().is_ok() {
+        if live.driver.thread_needs_reload()
+            && matches!(live.driver.fetch_thread_history(), Ok(Some(_)))
+        {
             cx.notify();
         }
         // "Jump to root" pages older replies until the root is in; the
@@ -212,7 +214,7 @@ impl QuillApp {
                 .thread
                 .as_ref()
                 .is_none_or(|thread| thread.history.loaded_complete);
-            if !complete && live.driver.fetch_thread_history().is_ok() {
+            if !complete && matches!(live.driver.fetch_thread_history(), Ok(Some(_))) {
                 cx.notify();
             }
         }

@@ -138,7 +138,8 @@ impl QuillApp {
             PreviewSource::Installed(id) => session
                 .chats_state
                 .installed_backgrounds
-                .iter()
+                .data()
+                .into_iter()
                 .flatten()
                 .chain(session.chats_state.default_backgrounds.values())
                 .find(|b| b.id == *id)

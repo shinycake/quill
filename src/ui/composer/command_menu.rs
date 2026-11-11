@@ -98,9 +98,11 @@ impl QuillApp {
     }
 
     fn open_chat_has_command_rows(&self) -> bool {
+        let Some(chat_id) = self.viewed_chat() else {
+            return false;
+        };
         self.session()
-            .and_then(|session| Some(!session.command_menu_items(session.open_chat?).is_empty()))
-            .unwrap_or(false)
+            .is_some_and(|session| !session.command_menu_items(chat_id).is_empty())
     }
 
     /// tdesktop starts below the "Edit Quick Replies" row.
@@ -191,7 +193,7 @@ impl QuillApp {
             CommandMenu::Typed { .. } => self.command_trigger(cx)?.1,
             CommandMenu::Button { .. } => String::new(),
         };
-        let chat_id = self.session()?.open_chat?;
+        let chat_id = self.viewed_chat()?;
         let items = self.session()?.command_menu_items(chat_id);
         if items.is_empty() {
             return None;
@@ -345,7 +347,7 @@ impl QuillApp {
             // The send leaves the chat draft alone (`clear_draft` is off for
             // a menu command); the kept text is saved at once.
             if self.composer.read(cx).value().is_empty() {
-                if let Some(chat_id) = self.open_chat_id() {
+                if let Some(chat_id) = self.viewed_chat() {
                     self.forget_local_draft(chat_id);
                 }
             } else {

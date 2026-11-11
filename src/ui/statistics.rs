@@ -126,27 +126,30 @@ impl QuillApp {
                 )
             });
         match session.and_then(|s| s.groups.chat_statistics.get(&chat_id).cloned()) {
-            None | Some(ChatStatisticsFetch::Loading) => div()
-                .flex()
-                .flex_col()
-                .items_center()
-                .gap_2()
-                .py_6()
-                .child(Spinner::new())
-                .child(
-                    div()
-                        .text_sm()
-                        .font_semibold()
-                        .child(tr(keys::Q_MONEY_LOADING_STATISTICS)),
-                )
-                .child(
-                    div()
-                        .text_xs()
-                        .text_color(text_muted())
-                        .text_center()
-                        .child(tr(keys::Q_MONEY_IT_CAN_TAKE_A_FEW)),
-                )
-                .into_any_element(),
+            None
+            | Some(ChatStatisticsFetch::Loading | ChatStatisticsFetch::WaitingForInfo { .. }) => {
+                div()
+                    .flex()
+                    .flex_col()
+                    .items_center()
+                    .gap_2()
+                    .py_6()
+                    .child(Spinner::new())
+                    .child(
+                        div()
+                            .text_sm()
+                            .font_semibold()
+                            .child(tr(keys::Q_MONEY_LOADING_STATISTICS)),
+                    )
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(text_muted())
+                            .text_center()
+                            .child(tr(keys::Q_MONEY_IT_CAN_TAKE_A_FEW)),
+                    )
+                    .into_any_element()
+            }
             Some(ChatStatisticsFetch::Failed(message)) => div()
                 .flex()
                 .flex_col()

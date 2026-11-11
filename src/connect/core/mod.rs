@@ -382,18 +382,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         // MED4: a failed `getWebPageInstantView` (TDLib 404 = the page has
         // no Instant View) falls back to the browser like TGX — the URL
         // is stashed for the UI drain, never rendered as a reader.
-        let instant_view_fallback: Option<(String, bool)> = match &owned.envelope.payload {
-            EnvelopePayload::Error(_) => owned.envelope.extra.and_then(|id| {
-                (self.session.requests.purpose(id) == Some(RequestPurpose::GetWebPageInstantView))
-                    .then_some(id)
-                    .and_then(|id| {
-                        let messages = &mut self.session.messages;
-                        let from_agent = messages.instant_view_agent_requests.remove(&id);
-                        Some((messages.instant_view_urls.remove(&id)?, from_agent))
-                    })
-            }),
-            _ => None,
-        };
+        let instant_view_fallback = self.take_instant_view_fallback(&owned.envelope);
         // MED4b: capture the `getLinkPreview` answer before `apply` takes
         // the pending request; the composer chip reads
         // `Session::composer_previews`. A late answer for a URL no longer
@@ -574,6 +563,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.run_deferred_caption(send_outcome);
         if paid_prices_change {
             self.sync_paid_guard();
+            self.resume_waiting_statistics();
         }
         if let Some((followups, ok)) = admin_followup {
             self.run_admin_followups(followups, ok);
@@ -807,9 +797,8 @@ impl<S: JsonSender> ConnectDriver<S> {
                 session.messages.instant_view = Some(InstantViewPage { url, rich });
             });
         }
-        if let Some((url, from_agent)) = instant_view_fallback {
-            self.session.messages.instant_view_fallback_url = Some(url);
-            self.session.messages.instant_view_fallback_from_agent = from_agent;
+        if let Some(fallback) = instant_view_fallback {
+            self.session.messages.instant_view_fallbacks.push(fallback);
         }
         // MED4b: stash the `getLinkPreview` answer for the composer
         // chip; a 404 becomes "no link info" (`Some(None)`); answers for

@@ -641,7 +641,7 @@ impl QuillApp {
 
     /// MED4: Instant View reader overlay (TGX behavior — attempt IV
     /// when the card offers it, fall back to the browser on 404 /
-    /// unsupported). Drains `Session::instant_view_fallback_url` into
+    /// unsupported). Drains `Session::messages.instant_view_fallbacks` into
     /// the browser and renders `Session::instant_view` page blocks via
     /// `message_rich_block`. A refusal is never rendered as a reader. A
     /// fallback for a link an agent's step clicked opens as part of that
@@ -650,17 +650,18 @@ impl QuillApp {
         &mut self,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
-        if let Some(live) = self.live.as_mut()
-            && let Some(url) = live
-                .driver
-                .session
-                .messages
-                .instant_view_fallback_url
-                .take()
-        {
-            let messages = &mut live.driver.session.messages;
-            let from_agent = std::mem::take(&mut messages.instant_view_fallback_from_agent);
-            self.agent_step(from_agent, |this| this.open_link(&url, cx));
+        // Only the window that asked opens the link: each window draws
+        // with its own view in place, so the one that matches takes it.
+        if let Some(live) = self.live.as_mut() {
+            let session = &mut live.driver.session;
+            let window = session.view_in_place();
+            let fallbacks = &mut session.messages.instant_view_fallbacks;
+            if let Some(at) = fallbacks.iter().position(|f| f.window == window) {
+                let fallback = fallbacks.remove(at);
+                self.agent_step(fallback.from_agent, |this| {
+                    this.open_link(&fallback.url, cx)
+                });
+            }
         }
         self.session()?.messages.instant_view.as_ref()?;
         self.instant_view_overlay_body(cx)

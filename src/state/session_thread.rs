@@ -171,6 +171,7 @@ impl Session {
                 thread.refresh_has_newer();
             }
         } else {
+            thread.history.older = OlderEnd::Open;
             if empty || added == 0 || reached_root || oldest_reply.is_none() {
                 thread.history.loaded_complete = true;
             }
@@ -225,6 +226,8 @@ impl Session {
             thread.history.newer_failed = true;
         } else if thread.status != ThreadStatus::Ready {
             thread.status = ThreadStatus::Failed(line);
+        } else {
+            thread.history.older = OlderEnd::Failed;
         }
     }
 

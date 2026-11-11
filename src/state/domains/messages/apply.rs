@@ -555,7 +555,7 @@ impl Session {
             MessagesPayload::RichMessage { .. } => {}
             // MED4: `webPageInstantView` — captured by the driver before
             // `apply` into `Session::instant_view` (success) or
-            // `Session::instant_view_fallback_url` (error); nothing to
+            // `MessagesState::instant_view_fallbacks` (error); nothing to
             // reduce here.
             MessagesPayload::WebPageInstantView { .. } => {}
             // MED4b: `linkPreview` (`getLinkPreview` answer) — captured

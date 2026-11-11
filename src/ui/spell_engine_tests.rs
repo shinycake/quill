@@ -140,3 +140,54 @@ fn provisional_checker_is_the_wordlist_with_no_dictionary_calls() {
     assert!(checker.is_correct("hello"));
     assert!(info.active.is_empty() && info.available.is_empty());
 }
+
+/// Judges every word wrong and counts how often it was asked.
+struct CountingBackend(std::sync::atomic::AtomicUsize);
+
+impl quill::spellcheck::SpellBackend for CountingBackend {
+    fn handles(&self, _: quill::spellcheck::Script, _: &str) -> bool {
+        true
+    }
+    fn is_correct(&self, _: &str) -> bool {
+        self.0.fetch_add(1, Ordering::SeqCst);
+        false
+    }
+    fn suggestions(&self, _: &str, _: usize) -> Vec<String> {
+        Vec::new()
+    }
+}
+
+/// Ignoring a word drops its underline by its text: the spell backend is
+/// not asked on the UI thread (sweep 13-057).
+#[gpui_kit::test]
+fn ignoring_a_word_does_not_ask_the_backend_on_the_ui_thread(cx: &mut TestAppContext) {
+    use crate::ui::actions::SpellingIgnore;
+    use quill::spellcheck::Misspelling;
+    let (app, mut vcx) = new_app(cx);
+    let backend = Arc::new(CountingBackend(Default::default()));
+    app.update_in(&mut vcx, |app, _, cx| {
+        app.spell.checker = Arc::new(SpellChecker::new(backend.clone()));
+        app.composer_ui.spelling.misspellings = vec![
+            Misspelling {
+                word: "teh".into(),
+                start: 0,
+                end: 3,
+            },
+            Misspelling {
+                word: "speling".into(),
+                start: 4,
+                end: 11,
+            },
+        ];
+        app.on_spelling_ignore(&SpellingIgnore { word: "teh".into() }, cx);
+        let left: Vec<_> = app
+            .composer_ui
+            .spelling
+            .misspellings
+            .iter()
+            .map(|m| m.word.as_str())
+            .collect();
+        assert_eq!(left, ["speling"]);
+    });
+    assert_eq!(backend.0.load(Ordering::SeqCst), 0);
+}

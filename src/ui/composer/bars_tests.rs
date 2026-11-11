@@ -606,3 +606,27 @@ fn a_text_send_closes_the_quote_picker(cx: &mut TestAppContext) {
         "the next reply to the same message opens no picker"
     );
 }
+
+/// Switching from one edit to another keeps the real draft: cancelling
+/// brings back what was typed before the first edit, not the first edit's
+/// text (sweep 08-127).
+#[gpui_kit::test]
+fn a_second_edit_keeps_the_real_draft(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    set_field(&app, vcx, "my draft");
+    begin_edit(&app, vcx);
+    begin_edit(&app, vcx);
+    assert!(editing(&app, vcx));
+    cx_update_clear_edit(&app, vcx);
+    assert!(!editing(&app, vcx));
+    let text = app.read_with(vcx, |app, cx| app.composer.read(cx).value().to_string());
+    assert_eq!(text, "my draft");
+}
+
+fn cx_update_clear_edit(app: &Entity<QuillApp>, cx: &mut VisualTestContext) {
+    cx.update(|window, cx| {
+        app.update(cx, |app, cx| app.clear_edit(window, cx));
+    });
+    frames(cx);
+}

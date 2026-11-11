@@ -110,6 +110,7 @@ fn driver_story_reply_media_targets_the_story_and_is_gated() {
         path: video_path,
         duration_secs: 3,
         length: 384,
+        thumbnail: None,
     };
     driver
         .send_story_reply_video_note(ChatId(7), 6, &note)
@@ -118,6 +119,24 @@ fn driver_story_reply_media_targets_the_story_and_is_gated() {
     let v: Value = serde_json::from_str(&json).unwrap();
     assert_eq!(v["reply_to"]["@type"], "inputMessageReplyToStory");
     assert_eq!(v["input_message_content"]["@type"], "inputMessageVideoNote");
+
+    // The thumbnail made when the capture finished goes out as given.
+    let with_thumb = crate::video::VideoNoteDraft {
+        thumbnail: Some(crate::video::VideoNoteThumbnail {
+            path: dir.join("thumb.jpg"),
+            width: 240,
+            height: 240,
+        }),
+        ..note
+    };
+    driver
+        .send_story_reply_video_note(ChatId(7), 6, &with_thumb)
+        .unwrap();
+    let json = recorder.snapshot().last().cloned().expect("sendMessage");
+    let v: Value = serde_json::from_str(&json).unwrap();
+    let thumb = &v["input_message_content"]["video_note"]["thumbnail"];
+    assert_eq!(thumb["@type"], "inputThumbnail");
+    assert_eq!(thumb["width"], 240);
 
     // A text reply carries entities: a custom emoji goes out as one.
     driver

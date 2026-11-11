@@ -20,7 +20,10 @@ pub struct StarsGiftState {
     /// `None` while the contact list shows.
     pub target: Option<StarsGiftTarget>,
     pub options: Vec<StarPack>,
-    pub loading: bool,
+    /// The `getStarGiftPaymentOptions` call for the contact picked: only its
+    /// answer fills the packs, so a late answer for another contact (or for
+    /// the list after Back) is dropped.
+    pub asked: Option<crate::ids::RequestId>,
     pub error: Option<String>,
 }
 
@@ -29,8 +32,12 @@ impl StarsGiftState {
     pub fn clear_target(&mut self) {
         self.target = None;
         self.options.clear();
-        self.loading = false;
+        self.asked = None;
         self.error = None;
+    }
+
+    pub fn loading(&self) -> bool {
+        self.asked.is_some()
     }
 }
 
@@ -59,11 +66,11 @@ mod tests {
                 user_id: 5,
                 name: "Ada".into(),
             }),
-            loading: true,
+            asked: Some(crate::ids::RequestId(1)),
             error: Some("x".into()),
             ..Default::default()
         };
         state.clear_target();
-        assert!(state.open && state.target.is_none() && !state.loading && state.error.is_none());
+        assert!(state.open && state.target.is_none() && !state.loading() && state.error.is_none());
     }
 }

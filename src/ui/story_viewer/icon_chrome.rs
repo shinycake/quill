@@ -587,7 +587,7 @@ impl QuillApp {
         let more = self
             .session()
             .and_then(|s| s.stories.viewers.as_ref())
-            .is_some_and(|v| !v.loading && !v.next_offset.is_empty());
+            .is_some_and(|v| v.wants_next_page());
         if more && scrolled_near_end(&self.stories.viewers_scroll) {
             self.load_more_story_viewers(cx);
         }

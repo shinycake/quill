@@ -30,7 +30,7 @@ impl QuillApp {
                 self.stream_sink(chat_id)
             }
             LivePipSource::Story { chat_id, story_id } => {
-                if self.stories.live.watching != Some((chat_id, story_id)) {
+                if self.stories.live.watching() != Some((chat_id, story_id)) {
                     return None;
                 }
                 self.live_story_sink()

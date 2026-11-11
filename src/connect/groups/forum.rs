@@ -169,7 +169,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         // (`retry_topic_history`) instead of re-sending on every render.
         if self
             .session
-            .topic_history_load_failed(chat_id, forum_topic_id)
+            .threads
+            .topic_histories
+            .get(&key)
+            .is_some_and(|h| h.older == crate::state::OlderEnd::Failed)
         {
             return Ok(None);
         }
@@ -222,6 +225,12 @@ impl<S: JsonSender> ConnectDriver<S> {
                 .clear_topic_load_failed(chat_id, forum_topic_id);
         }
         self.fetch_topic_history()
+    }
+
+    /// The same Retry for a topic that has rows: its failed older page is
+    /// asked for again.
+    pub fn retry_topic_older(&mut self) -> Result<Option<RequestId>, ConnectSendError> {
+        self.retry_topic_history()
     }
 
     /// Slice G2: supergroup id for a non-channel supergroup chat —

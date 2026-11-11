@@ -1,7 +1,7 @@
 //! Connect driver: channel comments and group reply threads.
 use super::*;
 use crate::ids::{ChatId, MessageId, RequestId};
-use crate::state::{RequestPurpose, ThreadStatus, ThreadsPurpose};
+use crate::state::{OlderEnd, RequestPurpose, ThreadStatus, ThreadsPurpose};
 use crate::telegram::requests::{
     get_message_thread, get_message_thread_history, route_into_thread,
 };
@@ -58,6 +58,15 @@ impl<S: JsonSender> ConnectDriver<S> {
         };
         self.session.threads.thread = None;
         self.open_thread(chat_id, message_id)
+    }
+
+    /// The "Couldn't load older messages · Retry" strip of a thread that
+    /// has rows: the failed older page is asked for again.
+    pub fn retry_thread_older(&mut self) -> Result<Option<RequestId>, ConnectSendError> {
+        if let Some(thread) = self.session.threads.thread.as_mut() {
+            thread.history.older = OlderEnd::Open;
+        }
+        self.fetch_thread_history()
     }
 
     /// The thread lives in another chat than the open one: close the open
@@ -145,7 +154,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         let Some(thread) = self.session.threads.thread.as_ref() else {
             return Ok(None);
         };
-        if thread.thread_id == 0 || thread.history.loaded_complete {
+        if thread.thread_id == 0
+            || thread.history.loaded_complete
+            || thread.history.older == OlderEnd::Failed
+        {
             return Ok(None);
         }
         let (origin_chat, origin_message) = (thread.origin_chat_id, thread.origin_message_id);

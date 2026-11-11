@@ -310,6 +310,75 @@ fn group_reply_thread_pages_older_and_fails_with_retry() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// A failed older page of a ready thread waits instead of being asked for
+/// again on every render.
+#[test]
+fn failed_older_thread_page_is_not_asked_again() {
+    let store = MemorySecretStore::new();
+    let (dir, prepared) = prepared_tmp(&store);
+    let sink = Arc::new(MemorySink::new());
+    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+    let recorder = Arc::new(RecordingSender::new());
+    let seq = AtomicU64::new(0);
+    let mut driver = ready_driver(&recorder, prepared, &dyn_sink, &seq);
+    let ingest = |driver: &mut ConnectDriver<Arc<RecordingSender>>, json: &str| {
+        driver
+            .ingest(copy_and_parse(json, &seq, &dyn_sink).unwrap())
+            .unwrap();
+    };
+    ingest(
+        &mut driver,
+        r#"{"@type":"updateNewChat","chat":{"id":14,"title":"Group","type":{"@type":"chatTypeSupergroup","supergroup_id":14,"is_channel":false},"unread_count":0}}"#,
+    );
+    driver.select_chat(ChatId(14)).unwrap();
+    let extra = driver
+        .open_thread(ChatId(14), MessageId(40))
+        .unwrap()
+        .unwrap();
+    ingest(
+        &mut driver,
+        &format!(
+            r#"{{"@type":"messageThreadInfo","@extra":"{}","chat_id":14,"message_thread_id":40,"reply_info":{{"@type":"messageReplyInfo","reply_count":1,"recent_replier_ids":[],"last_read_inbox_message_id":0,"last_read_outbox_message_id":0,"last_message_id":90}},"unread_message_count":0,"messages":[{}]}}"#,
+            extra.0,
+            text_message(40, 14, 40, "root")
+        ),
+    );
+    let page = driver
+        .start_thread_in_open_chat()
+        .unwrap()
+        .expect("first page");
+    ingest(
+        &mut driver,
+        &format!(
+            r#"{{"@type":"messages","@extra":"{}","total_count":2,"messages":[{},{}]}}"#,
+            page.0,
+            text_message(90, 14, 40, "newest"),
+            text_message(80, 14, 40, "older"),
+        ),
+    );
+    let older = driver.fetch_thread_history().unwrap().expect("older page");
+    ingest(
+        &mut driver,
+        &format!(
+            r#"{{"@type":"error","@extra":"{}","code":500,"message":"boom"}}"#,
+            older.0
+        ),
+    );
+    let sent = requests_of(&recorder, "getMessageThreadHistory").len();
+    assert_eq!(driver.fetch_thread_history().unwrap(), None);
+    assert_eq!(
+        requests_of(&recorder, "getMessageThreadHistory").len(),
+        sent
+    );
+    // The Retry strip is the way out: it asks for the older page again.
+    assert!(driver.retry_thread_older().unwrap().is_some());
+    assert_eq!(
+        requests_of(&recorder, "getMessageThreadHistory").len(),
+        sent + 1
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// A thread opened from a forum topic stays in the topic: sends keep
 /// `messageTopicForum` and reply to the thread root.
 #[test]

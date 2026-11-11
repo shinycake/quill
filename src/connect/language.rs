@@ -90,14 +90,29 @@ impl<S: JsonSender> ConnectDriver<S> {
             pack: None,
             base: base_id.is_empty().then(Vec::new),
         });
+        let sent = self.send_language_switch(&id, &base_id, custom, generation);
+        if sent.is_err() {
+            // A send that never left must not leave the switch pending.
+            self.session.settings.language.switching = None;
+        }
+        sent
+    }
+
+    fn send_language_switch(
+        &mut self,
+        id: &str,
+        base_id: &str,
+        custom: bool,
+        generation: u32,
+    ) -> Result<(), ConnectSendError> {
         if custom {
             let extra = self
                 .session
                 .request(purpose(LanguagePurpose::Synchronize), None);
-            self.send_json_request(extra, &add_custom_server_language_pack(extra, &id))?;
+            self.send_json_request(extra, &add_custom_server_language_pack(extra, id))?;
         }
-        self.send_language_option("language_pack_id", &id)?;
-        for (pack, base) in [(id.as_str(), false), (base_id.as_str(), true)] {
+        self.send_language_option("language_pack_id", id)?;
+        for (pack, base) in [(id, false), (base_id, true)] {
             if pack.is_empty() {
                 continue;
             }
@@ -109,7 +124,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         let extra = self
             .session
             .request(purpose(LanguagePurpose::Synchronize), None);
-        self.send_json_request(extra, &synchronize_language_pack(extra, &id))
+        self.send_json_request(extra, &synchronize_language_pack(extra, id))
             .map(|_| ())
     }
 }

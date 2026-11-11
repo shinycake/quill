@@ -6,6 +6,16 @@ use quill::folders::FolderEditor;
 use quill::lang::{keys, tr};
 use quill::telegram::envelope::ChatFolderSpec;
 use std::collections::HashSet;
+/// Where the folder editor's form stands: an edited folder is fetched first
+/// (Save would send a blank spec over the real folder), and a failed fetch
+/// offers Retry or closing.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FolderLoad {
+    Loading,
+    Failed(String),
+    Ready,
+}
+
 /// Parity slice: create/edit chat-folder dialog. The editable folder model
 /// is [`FolderEditor`]; on save it freezes to a [`ChatFolderSpec`] sent via
 /// `createChatFolder` / `editChatFolder`.
@@ -14,8 +24,8 @@ pub struct FolderEditorDialog {
     pub(crate) folder_id: Option<i32>,
     pub(crate) editor: FolderEditor,
     pub(crate) name_input: Entity<TextareaState>,
-    /// Edit flow: waiting on `getChatFolder` before the editor prefills.
-    pub(crate) fetch_pending: bool,
+    /// Edit flow: `getChatFolder` before the editor prefills.
+    pub(crate) load: FolderLoad,
     pub(crate) error: Option<String>,
     /// The chat picker is showing for this list (`None` = the form).
     pub(crate) picker: Option<PickerMode>,
@@ -51,7 +61,11 @@ impl FolderEditorDialog {
             folder_id,
             editor: FolderEditor::new(),
             name_input,
-            fetch_pending: folder_id.is_some(),
+            load: if folder_id.is_some() {
+                FolderLoad::Loading
+            } else {
+                FolderLoad::Ready
+            },
             error: None,
             picker: None,
             picker_search,
@@ -66,7 +80,7 @@ impl FolderEditorDialog {
         cx: &mut Context<QuillApp>,
     ) {
         self.editor = FolderEditor::from_spec(spec);
-        self.fetch_pending = false;
+        self.load = FolderLoad::Ready;
         self.error = None;
         let name = spec.name.clone();
         self.name_input.update(cx, |input, cx| {
@@ -136,6 +150,9 @@ pub struct FolderInviteDialog {
     pub(crate) seeded: bool,
     /// `addChatFolderByInviteLink` is in flight.
     pub(crate) adding: bool,
+    /// Chats whose title `getChat` was asked for: each is asked once, so a
+    /// failed answer does not repeat on every poll tick.
+    pub(crate) asked_chats: HashSet<i64>,
 }
 
 impl FolderInviteDialog {
@@ -145,6 +162,7 @@ impl FolderInviteDialog {
             selected: HashSet::new(),
             seeded: false,
             adding: false,
+            asked_chats: HashSet::new(),
         }
     }
 }

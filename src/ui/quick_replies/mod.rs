@@ -398,7 +398,7 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(chat_id) = self.session().and_then(|s| s.open_chat) else {
+        let Some(chat_id) = self.viewed_chat() else {
             return;
         };
         let edit = shortcut_id == qr::EDIT_ROW;

@@ -98,9 +98,13 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         if let Some(live) = self.live.as_mut() {
+            let joined = live.driver.join_live_story(chat_id, story_id);
+            if joined.is_ok() {
+                self.stories.live.start_watching((chat_id, story_id));
+            }
             self.screen.connection.set_note_for(
                 &self.screen.windows,
-                match live.driver.join_live_story(chat_id, story_id) {
+                match joined {
                     Ok(_) => StatusNote::silent(tr(keys::Q_MEDIA_JOINING_LIVE_STORY)),
                     Err(err) => crate::ui::calls::join_error_note(
                         err,
@@ -719,7 +723,7 @@ impl QuillApp {
     pub(super) fn close_story_viewer(&mut self, cx: &mut Context<Self>) {
         self.release_story_viewer(cx);
         // A live story playing on in Picture-in-Picture stays joined.
-        if self.stories.live.watching != self.live_pip_story() {
+        if self.stories.live.watching() != self.live_pip_story() {
             self.leave_live_story_view(cx);
         }
         self.clear_terminal_story_report();
@@ -753,7 +757,7 @@ impl QuillApp {
             || self.stories.viewer_ui().stats_open
             || self.stories.viewer_ui().privacy_edit.is_some()
             || self.stories.viewer_ui().cover.is_some()
-            || self.stories.viewer_ui().close_friends_edit.is_some()
+            || self.stories.viewer_ui().close_friends.is_open()
             || self.stories.viewer_ui().menu_open
             || self.stories.stealth_box.is_some()
             // Edit and Repost open the composer over the viewer: the story

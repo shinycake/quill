@@ -266,7 +266,7 @@ pub enum InstantViewOutcome {
     Browser,
     /// `getWebPageInstantView` was sent. Success lands in
     /// `Session::instant_view`; TDLib's 404 (no Instant View for this
-    /// page) lands in `Session::instant_view_fallback_url` so the UI
+    /// page) lands in `MessagesState::instant_view_fallbacks` so the UI
     /// opens the browser — a refusal is never shown as success.
     Requested,
 }

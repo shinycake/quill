@@ -104,6 +104,7 @@ impl TopicHistory {
         self.reader = ReaderPosition::Tail;
         self.has_newer = false;
         self.newer_failed = false;
+        self.older = OlderEnd::Open;
         self.window_epoch = self.window_epoch.wrapping_add(1);
     }
 
@@ -206,6 +207,7 @@ impl Session {
                 entry.loaded_complete = true;
             }
             entry.next_from_message_id = next_from_message_id;
+            entry.older = OlderEnd::Open;
             WindowEnd::Newest
         };
         let trimmed = entry.trim_after_page(far_end, &[]) > 0;
@@ -225,20 +227,17 @@ impl Session {
         if self.history_pruning.gone_topic_pages.remove(&pending.id.0) {
             return;
         }
-        let history = self.threads.topic_histories.get_mut(&(chat_id.0, topic));
-        if history
-            .as_ref()
-            .is_some_and(|history| history.stale_pages.contains(&pending.id.0))
+        if let Some(history) = self.threads.topic_histories.get_mut(&(chat_id.0, topic))
+            && history.stale_pages.remove(&pending.id.0)
         {
-            if let Some(history) = history {
-                history.stale_pages.remove(&pending.id.0);
-            }
             return;
         }
         match pending.purpose {
-            RequestPurpose::GetTopicHistory => self.mark_topic_load_failed(pending),
+            RequestPurpose::GetTopicHistory => {
+                self.topic_history_entry(chat_id, topic).older = OlderEnd::Failed;
+            }
             _ => {
-                if let Some(history) = history {
+                if let Some(history) = self.threads.topic_histories.get_mut(&(chat_id.0, topic)) {
                     history.newer_failed = true;
                 }
             }

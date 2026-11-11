@@ -27,7 +27,7 @@ impl QuillApp {
     ) -> AnyElement {
         let dark = cx.theme().is_dark();
         let session = self.session();
-        let list = session.and_then(|s| s.chats_state.installed_backgrounds.clone());
+        let list = session.and_then(|s| s.chats_state.installed_backgrounds.data().cloned());
         let in_use = session
             .and_then(|s| s.chats_state.default_backgrounds.get(&dark))
             .map(|b| b.id)
@@ -35,7 +35,23 @@ impl QuillApp {
         let error = session.and_then(|s| s.chats_state.background_error.clone());
         let muted = cx.theme().muted_foreground;
         let mut grid = div().flex().flex_wrap().gap_2();
+        let list_error = session
+            .and_then(|s| s.chats_state.installed_backgrounds.error())
+            .map(str::to_owned);
         match &list {
+            None if list_error.is_some() => {
+                grid = grid.child(
+                    Button::new("appearance-tg-wallpaper-retry")
+                        .label(tr(keys::Q_MONEY_RETRY))
+                        .small()
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            if let Some(live) = this.live.as_mut() {
+                                let _ = live.driver.retry_installed_backgrounds(dark);
+                            }
+                            cx.notify();
+                        })),
+                );
+            }
             None => {
                 grid = grid.child(
                     div()
@@ -195,7 +211,7 @@ impl QuillApp {
             }
             None => {
                 if let Some(session) = self.demo_session.as_mut()
-                    && let Some(list) = session.chats_state.installed_backgrounds.as_mut()
+                    && let Some(list) = session.chats_state.installed_backgrounds.data_mut()
                 {
                     list.retain(|b| b.id != background_id);
                 }
@@ -204,20 +220,24 @@ impl QuillApp {
         cx.notify();
     }
 
+    /// Appearance (or the look box) opened: a failed gallery request may be
+    /// asked once more by the next `ensure_wallpapers_loaded`.
+    pub(in crate::ui) fn retry_failed_wallpapers(&mut self) {
+        if let Some(live) = self.live.as_mut() {
+            live.driver
+                .session
+                .chats_state
+                .installed_backgrounds
+                .clear_error();
+        }
+    }
+
     /// Fetch the installed wallpapers when Appearance opens, and start the
     /// photo and pattern downloads.
     pub(in crate::ui) fn ensure_wallpapers_loaded(&mut self, cx: &mut Context<Self>) {
         let dark = cx.theme().is_dark();
         if let Some(live) = self.live.as_mut() {
-            if live
-                .driver
-                .session
-                .chats_state
-                .installed_backgrounds
-                .is_none()
-            {
-                let _ = live.driver.fetch_installed_backgrounds(dark);
-            }
+            let _ = live.driver.fetch_installed_backgrounds(dark);
             live.driver.download_background_files();
         }
     }

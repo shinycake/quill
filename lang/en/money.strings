@@ -651,6 +651,7 @@
 "qll_money_only_new" = "Only new {who}";
 "qll_money_open_a_chat_with_a" = "Open a chat with a person or a channel to choose who gets the gift.";
 "qll_money_open_app" = "Open App";
+"qll_money_gift_is_being_sent" = "A gift is being sent. Wait for it to finish before choosing someone else.";
 "qll_money_open_sticker_set" = "Open sticker set";
 "qll_money_optional_up_to_characters" = "Optional. Up to {max} characters.";
 "qll_money_outgoing" = "Outgoing";
@@ -905,3 +906,6 @@
 "lng_audio_transcribe_trials_over" = "You have used all your free transcriptions this week. Wait until {date} to use it again or subscribe to {link} now.";
 "lng_settings_privacy_premium_link" = "Telegram Premium";
 "lng_unlock_tags" = "Unlock";
+"qll_money_statistics_unavailable" = "Statistics are not available for this chat.";
+"qll_money_statistics_send_failed" = "Could not send the statistics request.";
+"qll_money_statistics_info_failed" = "Could not load the chat's details.";

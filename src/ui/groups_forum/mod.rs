@@ -229,6 +229,16 @@ impl QuillApp {
         action: ForumTopicAction,
         cx: &mut Context<Self>,
     ) {
+        if action == ForumTopicAction::Delete {
+            self.open_group_confirm(
+                chat_id,
+                crate::ui::dialogs::group_confirm::GroupConfirmAction::DeleteForumTopic {
+                    forum_topic_id: topic_id,
+                },
+                cx,
+            );
+            return;
+        }
         if let Some(live) = self.live.as_mut() {
             let result = match action {
                 ForumTopicAction::Close => live
@@ -243,7 +253,7 @@ impl QuillApp {
                 ForumTopicAction::Unpin => live
                     .driver
                     .toggle_forum_topic_pinned(chat_id, topic_id, false),
-                ForumTopicAction::Delete => live.driver.delete_forum_topic(chat_id, topic_id),
+                ForumTopicAction::Delete => return,
                 ForumTopicAction::HideGeneral => {
                     live.driver.toggle_general_forum_topic_hidden(chat_id, true)
                 }

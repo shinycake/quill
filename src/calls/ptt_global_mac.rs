@@ -105,9 +105,15 @@ extern "C" fn on_event(
         match event_type {
             // SAFETY: `ctx.tap` is the tap `run_tap` created; it outlives the
             // run loop this callback runs on.
-            TAP_DISABLED_BY_TIMEOUT | TAP_DISABLED_BY_USER_INPUT => unsafe {
-                CGEventTapEnable(ctx.tap.get(), true);
-            },
+            TAP_DISABLED_BY_TIMEOUT | TAP_DISABLED_BY_USER_INPUT => {
+                // SAFETY: as above.
+                unsafe { CGEventTapEnable(ctx.tap.get(), true) };
+                // Key events were lost while the tap was off: a held key's
+                // release may be among them.
+                if let Some(edge) = ctx.filter.resync() {
+                    (ctx.sink)(edge);
+                }
+            }
             KEY_DOWN | KEY_UP if ctx.active.load(Ordering::SeqCst) => {
                 // SAFETY: `event` is the key event the tap is delivering now.
                 let code = unsafe { CGEventGetIntegerValueField(event, KEYBOARD_EVENT_KEYCODE) };

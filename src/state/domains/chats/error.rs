@@ -32,9 +32,13 @@ impl Session {
                     self.chats_state.background_error = Some(error_reason(err));
                 }
             }
+            Some(RequestPurpose::GetInstalledBackgrounds) => {
+                let reason = error_reason(err);
+                self.chats_state.background_error = Some(reason.clone());
+                self.chats_state.installed_backgrounds.fail(reason);
+            }
             Some(
-                RequestPurpose::GetInstalledBackgrounds
-                | RequestPurpose::SetDefaultBackground
+                RequestPurpose::SetDefaultBackground
                 | RequestPurpose::DeleteDefaultBackground
                 | RequestPurpose::RemoveInstalledBackground
                 | RequestPurpose::SetDefaultBackgroundLocal

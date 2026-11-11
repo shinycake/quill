@@ -95,7 +95,7 @@ impl QuillApp {
             self.payments.gift_hide_name = false;
             // The purchase returns to the craft box, not to this list.
             self.gift_market.stack.pop();
-            self.gift_market.push(MarketBox::Craft);
+            self.open_market_box(MarketBox::Craft);
             self.gift_market.push(MarketBox::Buy);
             self.open_box(crate::ui::shell::DialogKind::GiftMarket);
         }

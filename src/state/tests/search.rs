@@ -10,6 +10,7 @@ fn inline_query_first_page_loads_slot() {
         chat_id: ChatId(1),
         bot_user_id: 77,
         query: "@gif cats".to_string(),
+        more_failed: None,
         fetch: InlineQueryFetch::Loading,
     });
     let extra = session.request(
@@ -60,6 +61,7 @@ fn inline_query_pagination_appends() {
         chat_id: ChatId(1),
         bot_user_id: 77,
         query: "@gif cats".to_string(),
+        more_failed: None,
         fetch: InlineQueryFetch::Loaded {
             inline_query_id: 9001,
             button: None,
@@ -118,6 +120,7 @@ fn inline_query_first_page_error_fails_slot() {
         chat_id: ChatId(1),
         bot_user_id: 77,
         query: "@gif cats".to_string(),
+        more_failed: None,
         fetch: InlineQueryFetch::Loading,
     });
     let extra = session.request(
@@ -156,6 +159,7 @@ fn inline_query_pagination_error_keeps_loaded_page() {
         chat_id: ChatId(1),
         bot_user_id: 77,
         query: "@gif cats".to_string(),
+        more_failed: None,
         fetch: InlineQueryFetch::Loaded {
             inline_query_id: 9001,
             button: None,
@@ -784,6 +788,7 @@ fn loaded_inline_slot(session: &mut Session, results: Vec<InlineQueryResultSumma
         chat_id: ChatId(1),
         bot_user_id: 77,
         query: "cats".to_string(),
+        more_failed: None,
         fetch: InlineQueryFetch::Loaded {
             inline_query_id: 9001,
             button: Some(InlineQueryResultsButton {
@@ -893,6 +898,7 @@ fn inline_result_images_are_queued_for_download() {
         chat_id: ChatId(1),
         bot_user_id: 77,
         query: "cats".to_string(),
+        more_failed: None,
         fetch: InlineQueryFetch::Loaded {
             inline_query_id: 1,
             button: None,

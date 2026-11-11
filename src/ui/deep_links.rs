@@ -150,6 +150,7 @@ impl QuillApp {
                     // The real in-app updater is a queued future slice; the
                     // honest UI is TDLib's own text saying so.
                     (true, _) => {
+                        self.cancel_inline_opening();
                         self.links.deep_link_dialog = Some(text);
                         self.screen
                             .windows
@@ -163,6 +164,7 @@ impl QuillApp {
                     // Unknown link: TDLib's info text is the confirmation
                     // copy written for exactly this case.
                     (false, None) => {
+                        self.cancel_inline_opening();
                         self.links.deep_link_dialog = Some(text);
                         self.screen
                             .windows
@@ -182,8 +184,10 @@ impl QuillApp {
                 }
                 self.screen.links.deep_link_invite = Some(preview.clone());
                 live.driver.session.chats_state.deep_link = Some(preview);
+                self.cancel_inline_opening();
             }
             Some(DeepLinkState::ChatReady { chat_id, action }) => {
+                self.cancel_inline_opening_unless_chat(chat_id);
                 self.links.pending_deep_link_open = Some(PendingOpen {
                     chat_id,
                     action,
@@ -192,6 +196,7 @@ impl QuillApp {
                 self.hold_resolved_link(from_window, cx);
             }
             Some(DeepLinkState::ShowText(text)) => {
+                self.cancel_inline_opening();
                 self.links.deep_link_dialog = Some(text);
                 self.screen
                     .windows
@@ -202,6 +207,7 @@ impl QuillApp {
             // sticker sets, backgrounds): nothing an agent needs, all of it
             // the user's.
             Some(DeepLinkState::Ui(ui)) => {
+                self.cancel_inline_opening();
                 if from_agent {
                     guard::refuse_typed_link();
                 } else {

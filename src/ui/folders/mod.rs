@@ -44,6 +44,11 @@ impl QuillApp {
                 None => tr(keys::FILTERS_NEW),
             };
             let body = this.folder_editor_panel(cx);
+            let loading = this
+                .folders
+                .editor
+                .as_ref()
+                .is_some_and(|d| d.load != FolderLoad::Ready);
             let footer = div()
                 .flex()
                 .justify_end()
@@ -61,6 +66,7 @@ impl QuillApp {
                 .child(
                     Button::new("folder-editor-save")
                         .label(tr(keys::SETTINGS_SAVE))
+                        .disabled(loading)
                         .on_click(cx.listener(|this, _, window, cx| {
                             this.save_folder_editor(cx);
                             this.close_kit_dialog_if_done(DialogKind::FolderEditor, window, cx);
@@ -555,15 +561,39 @@ impl QuillApp {
                     .child(error),
             );
         }
-        if dialog.fetch_pending {
-            return panel
-                .child(
-                    div()
-                        .text_xs()
-                        .text_color(cx.theme().muted_foreground)
-                        .child(tr(keys::Q_CHATLIST_LOADING_FOLDER)),
-                )
-                .into_any_element();
+        match &dialog.load {
+            FolderLoad::Ready => {}
+            FolderLoad::Loading => {
+                return panel
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(cx.theme().muted_foreground)
+                            .child(tr(keys::Q_CHATLIST_LOADING_FOLDER)),
+                    )
+                    .into_any_element();
+            }
+            FolderLoad::Failed(message) => {
+                return panel
+                    .child(
+                        div()
+                            .id("folder-editor-load-error")
+                            .text_xs()
+                            .text_color(danger_dark())
+                            .child(message.clone()),
+                    )
+                    .child(
+                        div().flex().child(
+                            Button::new("folder-editor-load-retry")
+                                .label(tr(keys::Q_MONEY_RETRY))
+                                .small()
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.retry_folder_editor_load(cx);
+                                })),
+                        ),
+                    )
+                    .into_any_element();
+            }
         }
         if let Some(mode) = dialog.picker {
             return self.folder_chat_picker(mode, cx);
@@ -834,38 +864,63 @@ impl QuillApp {
         } else if let Some(live) = self.live.as_mut()
             && let Err(err) = live.driver.fetch_chat_folder(folder_id)
         {
-            self.set_note(StatusNote::error(user_error_for(
-                keys::Q_NOTES_FAILED_FOLDER,
-                &err,
-            )));
+            let line = user_error_for(keys::Q_NOTES_FAILED_FOLDER, &err);
+            dialog.load = FolderLoad::Failed(line.clone());
+            self.set_note(StatusNote::error(line));
         }
         self.folders.editor = Some(dialog);
         self.open_box(DialogKind::FolderEditor);
         cx.notify();
     }
 
-    /// Edit flow: once the `getChatFolder` spec arrives, prefill the open
-    /// editor (no-op for create, or when already prefilled).
+    /// Edit flow: while the editor loads, a `getChatFolder` spec that
+    /// arrives prefills it, and a failed one ends it in the error with a
+    /// Retry (no-op for create, or once settled).
     pub(super) fn maybe_prefill_folder_editor(
         &mut self,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         let folder_id = match self.folders.editor.as_ref() {
-            Some(dialog) if dialog.fetch_pending => dialog.folder_id,
+            Some(dialog) if dialog.load == FolderLoad::Loading => dialog.folder_id,
             _ => return,
         };
         let Some(folder_id) = folder_id else {
             return;
         };
-        let Some(spec) = self
-            .session()
-            .and_then(|s| s.chat_list.fresh_spec(folder_id).cloned())
-        else {
+        let session = self.session();
+        let spec = session.and_then(|s| s.chat_list.fresh_spec(folder_id).cloned());
+        let error = session.and_then(|s| s.chat_list.folder_spec_errors.get(&folder_id).cloned());
+        let Some(dialog) = self.folders.editor.as_mut() else {
             return;
         };
-        if let Some(dialog) = self.folders.editor.as_mut() {
+        if let Some(spec) = spec {
             dialog.prefill_from_spec(&spec, window, cx);
+        } else if let Some(error) = error {
+            dialog.load = FolderLoad::Failed(error);
+        } else {
+            return;
+        }
+        cx.notify();
+    }
+
+    /// The editor's Retry after a failed `getChatFolder`.
+    pub(in crate::ui) fn retry_folder_editor_load(&mut self, cx: &mut Context<Self>) {
+        let Some(folder_id) = self.folders.editor.as_ref().and_then(|d| d.folder_id) else {
+            return;
+        };
+        let sent = match self.live.as_mut() {
+            Some(live) => live.driver.fetch_chat_folder(folder_id).map(|_| ()),
+            None => Ok(()),
+        };
+        let failed = sent
+            .err()
+            .map(|err| user_error_for(keys::Q_NOTES_FAILED_FOLDER, &err));
+        if let Some(dialog) = self.folders.editor.as_mut() {
+            dialog.load = match failed {
+                Some(line) => FolderLoad::Failed(line),
+                None => FolderLoad::Loading,
+            };
         }
         cx.notify();
     }

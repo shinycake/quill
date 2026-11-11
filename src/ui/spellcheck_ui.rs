@@ -314,17 +314,19 @@ impl QuillApp {
     }
 
     /// After the dictionary changed: re-check every window's composer
-    /// soon.
-    fn recheck_spelling(&mut self, cx: &mut Context<Self>) {
-        let checker = self.spell.checker.clone();
+    /// soon. `accepted` is the word the user just added or ignored: it
+    /// loses its underline at once, by its text, so the UI thread never
+    /// waits on the spell backend; the background check settles the rest.
+    fn recheck_spelling(&mut self, accepted: Option<&str>, cx: &mut Context<Self>) {
         self.in_every_window(cx, |this, cx| {
             let text = this.composer.read(cx).value().to_string();
             this.composer_ui.spelling.checked_text = text;
-            // Words the user just accepted lose their underline right away.
-            this.composer_ui
-                .spelling
-                .misspellings
-                .retain(|m| !checker.is_correct(&m.word));
+            if let Some(word) = accepted {
+                this.composer_ui
+                    .spelling
+                    .misspellings
+                    .retain(|m| m.word != word);
+            }
             this.notify_composer(cx);
             this.schedule_spellcheck(WARM_DELAY, cx);
         });
@@ -403,19 +405,19 @@ impl QuillApp {
         if self.spell.checker.learn(&action.word) == LearnedIn::App {
             self.save_app_words();
         }
-        self.recheck_spelling(cx);
+        self.recheck_spelling(Some(&action.word), cx);
     }
 
     pub(super) fn on_spelling_unlearn(&mut self, action: &SpellingUnlearn, cx: &mut Context<Self>) {
         if self.spell.checker.unlearn(&action.word) == Some(LearnedIn::App) {
             self.save_app_words();
         }
-        self.recheck_spelling(cx);
+        self.recheck_spelling(None, cx);
     }
 
     pub(super) fn on_spelling_ignore(&mut self, action: &SpellingIgnore, cx: &mut Context<Self>) {
         self.spell.checker.ignore(&action.word);
-        self.recheck_spelling(cx);
+        self.recheck_spelling(Some(&action.word), cx);
     }
 
     /// Persist app-level words (`spellcheck_words.json`).

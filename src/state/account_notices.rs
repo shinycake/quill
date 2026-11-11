@@ -143,6 +143,12 @@ impl Session {
         self.settings.notices.service.pop_front();
     }
 
+    /// Sends that were never made no longer count as outstanding.
+    pub(crate) fn abandon_unsent_login_reviews(&mut self, unsent: usize) {
+        self.settings.notices.review_pending =
+            self.settings.notices.review_pending.saturating_sub(unsent);
+    }
+
     /// One `confirmSession` / `terminateSession` finished.
     pub(crate) fn finish_login_review(&mut self, confirmed: bool, error: Option<String>) {
         self.settings.notices.review_pending =
@@ -323,6 +329,21 @@ mod tests {
             device: device.into(),
             location: location.into(),
         }
+    }
+
+    #[test]
+    fn a_failed_send_does_not_leave_the_review_pending() {
+        let sink: std::sync::Arc<dyn crate::diagnostics::DiagnosticSink> =
+            std::sync::Arc::new(crate::diagnostics::MemorySink::new());
+        let mut session = Session::new(crate::ids::AccountKey::primary(), sink);
+        // Three sends planned, the first went out, the second failed.
+        session.settings.notices.review_pending = 3;
+        session.abandon_unsent_login_reviews(1);
+        session.finish_login_review(true, Some("failed".into()));
+        assert_eq!(session.settings.notices.review_pending, 1);
+        // The one answer still out settles the review.
+        session.finish_login_review(true, None);
+        assert_eq!(session.settings.notices.review_pending, 0);
     }
 
     #[test]

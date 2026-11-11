@@ -191,6 +191,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session.requests.take(extra);
             return Err(err);
         }
+        self.session.chat_list.folder_spec_errors.remove(&folder_id);
         Ok(Some(extra))
     }
 

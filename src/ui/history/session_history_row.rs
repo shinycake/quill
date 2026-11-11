@@ -449,8 +449,7 @@ pub(in crate::ui) fn session_history_row(
         }),
         MessageContent::Audio(audio) => seek_bar.as_ref().map(|seek_bar| {
             audio_row(
-                message.id,
-                message.is_outgoing,
+                message,
                 audio,
                 files,
                 downloading,
