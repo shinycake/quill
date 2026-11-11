@@ -6789,7 +6789,7 @@ Thirty-four minor entries; each was proved against the integration branch first.
 
 Implicit-state entries: each struct's stages (bools, `Option`s used as flags,
 a side list beside a stage) became one value. Baseline lines of the converted
-fields are dropped (220 to 194); three more (`CraftSession::candidates_*`,
+fields are dropped (220 to 159); three more (`CraftSession::candidates_*`,
 `GifPanel::*`, `GramsHub::*`) went with their structs.
 
 - **Paged lists: `PageStage`** (`src/state/page_stage.rs`). `Idle`,
