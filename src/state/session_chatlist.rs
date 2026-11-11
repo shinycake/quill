@@ -236,11 +236,7 @@ impl Session {
         let view_generation = self.view_generation;
         let history = self.history_entry(chat_id);
         history.view_generation = view_generation;
-        history.viewed.clear();
-        history.viewing.clear();
-        history.visible.clear();
-        history.visible_reported = false;
-        history.on_screen.clear();
+        history.views.restart();
         history.reader = ReaderPosition::Tail;
         history.unread_anchor = unread_anchor;
         history.opened_with_unread = history.unread_anchor.is_some();
@@ -259,16 +255,9 @@ impl Session {
         let Some(history) = self.histories.get(&chat_id.0) else {
             return Vec::new();
         };
-        let due = |id: i64| id > 0 && !history.viewed.contains(&id) && !history.is_viewing(id);
-        if history.visible_reported {
-            let mut ids: BTreeSet<i64> = history
-                .visible
-                .iter()
-                .copied()
-                .filter(|id| due(*id))
-                .collect();
-            ids.extend(history.on_screen.iter().copied().filter(|id| due(*id)));
-            return ids.into_iter().map(MessageId).collect();
+        let due = |id: i64| history.views.is_due(id);
+        if history.views.reported() {
+            return history.views.due_ids().into_iter().map(MessageId).collect();
         }
         // Opened at the first unread message: nothing is read until the
         // UI reports what is actually on screen.
@@ -295,13 +284,7 @@ impl Session {
             return false;
         }
         let history = self.history_entry(chat_id);
-        history.visible_reported = true;
-        history.on_screen = ids.iter().map(|id| id.0).filter(|id| *id > 0).collect();
-        for id in ids {
-            if id.0 > 0 && !history.viewed.contains(&id.0) && !history.is_viewing(id.0) {
-                history.visible.insert(id.0);
-            }
-        }
+        history.views.report(ids.iter().map(|id| id.0));
         // Thread rows on screen also move the thread's own read position.
         self.thread_read_till(chat_id, ids);
         true
@@ -309,11 +292,7 @@ impl Session {
 
     pub fn mark_viewed(&mut self, chat_id: ChatId, ids: &[MessageId]) {
         let history = self.history_entry(chat_id);
-        for id in ids {
-            history.forget_viewing(id.0);
-            history.visible.remove(&id.0);
-            history.viewed.insert(id.0);
-        }
+        history.views.mark_done(ids.iter().map(|id| id.0));
     }
 
     /// The message "Mark as read" reads the chat till: the chat's last
@@ -362,18 +341,14 @@ impl Session {
     /// until TDLib answers that request (ok or error).
     pub fn begin_viewing(&mut self, chat_id: ChatId, request: RequestId, ids: &[MessageId]) {
         let history = self.history_entry(chat_id);
-        let held = history.viewing.entry(request).or_default();
-        for id in ids {
-            history.visible.remove(&id.0);
-            held.insert(id.0);
-        }
+        history.views.begin(request, ids.iter().map(|id| id.0));
     }
 
     /// The UI no longer shows `chat_id`'s rows (its window went inactive):
     /// none of them reads a reaction until the next report.
     pub fn leave_screen(&mut self, chat_id: ChatId) {
         if let Some(history) = self.histories.get_mut(&chat_id.0) {
-            history.on_screen.clear();
+            history.views.leave_screen();
         }
     }
 
@@ -383,8 +358,7 @@ impl Session {
     /// no longer counts either.
     pub(crate) fn reaction_unread(&mut self, chat_id: ChatId, message_id: MessageId) {
         if let Some(history) = self.histories.get_mut(&chat_id.0) {
-            history.viewed.remove(&message_id.0);
-            history.forget_viewing(message_id.0);
+            history.views.forget(message_id.0);
         }
     }
 
@@ -392,21 +366,16 @@ impl Session {
     /// answer whose ids a re-open of the chat already dropped finds none.
     pub(crate) fn commit_viewed(&mut self, chat_id: ChatId, request: RequestId) {
         let history = self.history_entry(chat_id);
-        if let Some(ids) = history.viewing.remove(&request) {
-            history.viewed.extend(ids);
-        }
+        history.views.commit(request);
     }
 
     /// TDLib refused `request` (or it was lost): its ids, and only its ids,
     /// are due again.
     pub(crate) fn abort_viewing(&mut self, chat_id: ChatId, request: RequestId) {
-        if let Some(history) = self.histories.get_mut(&chat_id.0)
-            && let Some(ids) = history.viewing.remove(&request)
-            // Reported rows stay due so the retry re-sends them; before any
-            // report the newest row is recomputed anyway.
-            && history.visible_reported
-        {
-            history.visible.extend(ids);
+        // Reported rows stay due so the retry re-sends them; before any
+        // report the newest row is recomputed anyway.
+        if let Some(history) = self.histories.get_mut(&chat_id.0) {
+            history.views.abort(request);
         }
     }
 

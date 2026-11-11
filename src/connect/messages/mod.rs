@@ -58,7 +58,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .session
             .histories
             .get(&chat_id.0)
-            .is_some_and(|h| h.loaded_complete)
+            .is_some_and(|h| h.loaded_complete())
         {
             return Ok(None);
         }
@@ -68,7 +68,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .session
             .histories
             .get(&chat_id.0)
-            .is_some_and(|h| h.load_failed && h.messages.is_empty())
+            .is_some_and(|h| h.load_failed() && h.messages.is_empty())
         {
             return Ok(None);
         }
@@ -164,7 +164,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .session
             .histories
             .get(&chat_id.0)
-            .filter(|h| !h.newer_failed)
+            .filter(|h| !h.newer_failed())
             .and_then(|h| h.newest_id())
         else {
             return Ok(None);

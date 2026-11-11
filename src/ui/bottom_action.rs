@@ -32,7 +32,7 @@ impl QuillApp {
         let bot = session.bot_user_id_for_chat(chat.id);
         let history = session.histories.get(&chat.id.0);
         let empty_history = history
-            .is_some_and(|history| history.loaded_complete && history.messages.is_empty())
+            .is_some_and(|history| history.loaded_complete() && history.messages.is_empty())
             && chat.last_message.is_none();
         BarFacts {
             blocked: peer.is_some() && chat.blocked,

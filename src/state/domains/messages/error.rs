@@ -140,7 +140,7 @@ impl Session {
                 {
                     // R5: the empty window shows "Couldn't load messages ·
                     // Retry" instead of a skeleton that never settles.
-                    self.history_entry(chat_id).load_failed = true;
+                    self.history_entry(chat_id).fail_load();
                 }
             }
             // B15: a failed `getPollVoteStatistics` lands in the fetch

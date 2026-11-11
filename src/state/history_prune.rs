@@ -61,6 +61,49 @@ struct DroppedHistory {
     latest_seen: i64,
 }
 
+/// The memos of dropped histories, oldest evicted first: each memo carries
+/// the tick it was last written, so the order is part of the entry and not
+/// a second list kept in step with the map.
+#[derive(Debug, Default)]
+struct DroppedMemos {
+    memos: BTreeMap<i64, (u64, DroppedHistory)>,
+    tick: u64,
+}
+
+impl DroppedMemos {
+    fn get(&self, chat_id: i64) -> Option<&DroppedHistory> {
+        self.memos.get(&chat_id).map(|(_, memo)| memo)
+    }
+
+    /// Merge what `history` knows into the chat's memo and make it the
+    /// newest; the oldest memos beyond [`DROPPED_MEMOS_MAX`] go.
+    fn remember(&mut self, chat_id: i64, history: &HistoryState) {
+        self.tick += 1;
+        let (tick, memo) = self.memos.entry(chat_id).or_default();
+        *tick = self.tick;
+        memo.tombstones.extend(history.tombstones.iter().copied());
+        while memo.tombstones.len() > DROPPED_TOMBSTONES_MAX {
+            memo.tombstones.pop_first();
+        }
+        memo.latest_seen = memo.latest_seen.max(history.latest_seen);
+        while self.memos.len() > DROPPED_MEMOS_MAX {
+            let oldest = self
+                .memos
+                .iter()
+                .min_by_key(|(_, (tick, _))| *tick)
+                .map(|(id, _)| *id);
+            match oldest {
+                Some(id) => self.memos.remove(&id),
+                None => break,
+            };
+        }
+    }
+
+    fn take(&mut self, chat_id: i64) -> Option<DroppedHistory> {
+        self.memos.remove(&chat_id).map(|(_, memo)| memo)
+    }
+}
+
 /// Which closed histories are kept, most recently used first.
 #[derive(Debug, Default)]
 pub struct HistoryPruning {
@@ -73,8 +116,7 @@ pub struct HistoryPruning {
     release_topics: VecDeque<(i64, i32)>,
     /// Topic pages still in flight when their entry was dropped.
     pub(super) gone_topic_pages: BTreeSet<u64>,
-    dropped: BTreeMap<i64, DroppedHistory>,
-    dropped_order: VecDeque<i64>,
+    dropped: DroppedMemos,
     /// The histories are the only copy of the rows ([`Session::keep_all_histories`]).
     keep_all: bool,
 }
@@ -113,7 +155,7 @@ impl HistoryPruning {
     /// entry was dropped.
     pub fn dropped_tombstone(&self, chat_id: ChatId, message_id: MessageId) -> bool {
         self.dropped
-            .get(&chat_id.0)
+            .get(chat_id.0)
             .is_some_and(|memo| memo.tombstones.contains(&message_id.0))
     }
 
@@ -121,24 +163,11 @@ impl HistoryPruning {
         if history.tombstones.is_empty() && history.latest_seen <= 0 {
             return;
         }
-        let memo = self.dropped.entry(chat_id).or_default();
-        memo.tombstones.extend(history.tombstones.iter().copied());
-        while memo.tombstones.len() > DROPPED_TOMBSTONES_MAX {
-            memo.tombstones.pop_first();
-        }
-        memo.latest_seen = memo.latest_seen.max(history.latest_seen);
-        self.dropped_order.retain(|id| *id != chat_id);
-        self.dropped_order.push_back(chat_id);
-        while self.dropped_order.len() > DROPPED_MEMOS_MAX {
-            if let Some(oldest) = self.dropped_order.pop_front() {
-                self.dropped.remove(&oldest);
-            }
-        }
+        self.dropped.remember(chat_id, history);
     }
 
     fn take_dropped(&mut self, chat_id: i64) -> Option<DroppedHistory> {
-        self.dropped_order.retain(|id| *id != chat_id);
-        self.dropped.remove(&chat_id)
+        self.dropped.take(chat_id)
     }
 
     fn queue_chat(&mut self, chat_id: i64) {
@@ -182,11 +211,10 @@ impl HistoryState {
         self.drop_unread_bar_for(&doomed);
         for id in &doomed {
             self.messages.remove(id);
-            self.visible.remove(id);
-            self.viewed.remove(id);
+            self.views.forget(*id);
         }
         if !doomed.is_empty() {
-            self.loaded_complete = false;
+            self.set_loaded_complete(false);
         }
         doomed.len()
     }

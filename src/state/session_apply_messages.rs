@@ -122,7 +122,7 @@ impl Session {
                     }
                 }
                 if reached_start {
-                    self.history_entry(chat_id).loaded_complete = true;
+                    self.history_entry(chat_id).set_loaded_complete(true);
                 }
                 // R6: scrolling far back — drop the newest end of the
                 // window instead of growing it without bound.

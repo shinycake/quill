@@ -95,7 +95,7 @@ impl Session {
             }
         }
         self.reset_history_window(chat_id);
-        self.history_entry(chat_id).loaded_complete = false;
+        self.history_entry(chat_id).set_loaded_complete(false);
         self.prepare_history_view(chat_id);
         self.view_generation.bump();
         true

@@ -384,10 +384,7 @@ impl Session {
     /// reported rows is read.
     pub(crate) fn prepare_thread_marks(&mut self, chat_id: ChatId) {
         let history = self.histories.entry(chat_id.0).or_default();
-        history.viewed.clear();
-        history.viewing.clear();
-        history.visible.clear();
-        history.visible_reported = true;
+        history.views.restart_reported();
         history.end_unread_open();
     }
 }

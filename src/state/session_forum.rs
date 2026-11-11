@@ -19,8 +19,7 @@ impl Session {
         // (`messageSourceForumTopicHistory`), which is what moves the
         // topic's own read position in TDLib.
         if let Some(history) = self.histories.get_mut(&chat_id.0) {
-            history.viewed.clear();
-            history.visible.clear();
+            history.views.forget_settled();
         }
         self.open_topic_info(chat_id)
     }

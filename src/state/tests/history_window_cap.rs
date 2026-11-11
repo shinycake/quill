@@ -87,7 +87,7 @@ fn paging_back_far_trims_the_newest_end_and_marks_has_newer() {
         session.history_has_newer(ChatId(CHAT)),
         "newest end trimmed => newer pages exist"
     );
-    assert!(!history.loaded_complete);
+    assert!(!history.loaded_complete());
     // The reader's end (oldest) is intact; the window is contiguous.
     let oldest = history.oldest_id().unwrap().0;
     let newest = history.newest_id().unwrap().0;
@@ -130,7 +130,7 @@ fn paging_forward_after_a_trim_pages_the_tail_back_in_and_trims_the_old_end() {
     let history = &session.histories[&CHAT];
     assert_eq!(history.messages.len(), HISTORY_WINDOW_TRIM_TO);
     assert!(history.oldest_id().unwrap().0 > oldest_before);
-    assert!(!history.loaded_complete, "older pages exist again");
+    assert!(!history.loaded_complete(), "older pages exist again");
 }
 
 #[test]

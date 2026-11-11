@@ -94,7 +94,7 @@ impl Session {
     pub fn history_load_failed(&self, chat_id: ChatId) -> bool {
         self.histories
             .get(&chat_id.0)
-            .is_some_and(|h| h.load_failed && h.messages.is_empty())
+            .is_some_and(|h| h.load_failed() && h.messages.is_empty())
     }
 
     /// The open history waits for its first page (no entry yet, or a page
@@ -106,7 +106,7 @@ impl Session {
         match self.histories.get(&chat_id.0) {
             None => true,
             Some(history) => {
-                !history.load_failed && self.history_page_in_flight(chat_id, WindowEdge::First)
+                !history.load_failed() && self.history_page_in_flight(chat_id, WindowEdge::First)
             }
         }
     }
@@ -327,7 +327,7 @@ impl Session {
             for id in doomed {
                 history.remove(id, false);
             }
-            history.loaded_complete = false;
+            history.set_loaded_complete(false);
             history.window_epoch = history.window_epoch.wrapping_add(1);
         }
         for message in messages {
@@ -343,13 +343,13 @@ impl Session {
     pub fn prepare_history_window(&mut self, chat_id: ChatId) {
         let has_newer = self.history_has_newer(chat_id);
         let history = self.histories.entry(chat_id.0).or_default();
-        history.newer_failed = false;
+        history.clear_newer_failed();
         let keep = !has_newer
             && match history.unread_anchor {
                 // A tail window that reaches back to the boundary shows the
                 // unread run as is.
                 Some(anchor) => {
-                    history.loaded_complete
+                    history.loaded_complete()
                         || history
                             .oldest_id()
                             .is_some_and(|oldest| oldest.0 <= anchor.0)
@@ -394,7 +394,7 @@ impl Session {
         let history = self.histories.entry(chat_id.0).or_default();
         history.unread_anchor = Some(anchor);
         let covered = history.unread_bar_message().is_some()
-            && (history.loaded_complete
+            && (history.loaded_complete()
                 || history
                     .oldest_id()
                     .is_some_and(|oldest| oldest.0 <= anchor.0));
@@ -429,7 +429,7 @@ impl Session {
         if !any_newer {
             let latest = self.chat_latest_id(chat_id);
             if let Some(history) = self.histories.get_mut(&chat_id.0) {
-                history.newer_exhausted = Some((latest.max(history.latest_seen), from));
+                history.set_newer_exhausted(Some((latest.max(history.latest_seen), from)));
             }
         }
         // R6: reading forward through a long window — drop the oldest end.
@@ -444,7 +444,7 @@ impl Session {
         if let Some(chat_id) = pending.chat_id
             && let Some(history) = self.histories.get_mut(&chat_id.0)
         {
-            history.newer_failed = true;
+            history.fail_newer();
         }
     }
 

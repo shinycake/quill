@@ -124,6 +124,7 @@ mod sponsored_state;
 mod sponsored_types;
 mod submit;
 mod unread_revision;
+mod view_book;
 pub use session_forum::{FORUM_COLUMN_COLLAPSE_BELOW, FORUM_COLUMN_WIDTH, ForumColumn};
 mod session_forward;
 mod session_group_admin;
@@ -267,6 +268,7 @@ pub use story_types::*;
 pub use submit::{Submit, SubmitView};
 pub use thread_types::*;
 pub use updates_sync::*;
+pub use view_book::{Reported, ViewBook, ViewStage};
 pub use web_app_types::*;
 
 #[cfg(test)]

@@ -230,7 +230,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         chat_id: ChatId,
     ) -> Result<Option<RequestId>, ConnectSendError> {
         if let Some(history) = self.session.histories.get_mut(&chat_id.0) {
-            history.load_failed = false;
+            history.clear_load_failed();
         }
         self.fetch_history_for(chat_id)
     }

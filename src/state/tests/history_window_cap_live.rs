@@ -66,7 +66,7 @@ fn a_chat_nobody_has_open_stays_within_the_cap() {
     let history = &session.histories[&7];
     assert!(history.messages.len() <= HISTORY_WINDOW_CAP);
     assert_eq!(history.newest_id(), Some(MessageId(total)), "newest stay");
-    assert!(!history.loaded_complete, "older ones page back in");
+    assert!(!history.loaded_complete(), "older ones page back in");
 }
 
 fn feed_live(session: &mut Session, chat: i64, ids: std::ops::RangeInclusive<i64>) {
@@ -93,7 +93,7 @@ fn a_chat_left_open_at_the_tail_stays_within_the_cap() {
     let history = &session.histories[&7];
     assert!(history.messages.len() <= HISTORY_WINDOW_CAP);
     assert_eq!(history.newest_id(), Some(MessageId(total)));
-    assert!(!history.loaded_complete, "older rows page back in");
+    assert!(!history.loaded_complete(), "older rows page back in");
     assert!(!session.history_has_newer(ChatId(7)), "still at the latest");
 }
 
@@ -126,11 +126,15 @@ fn a_reader_near_the_top_keeps_the_oldest_rows_and_the_tail_waits() {
     session.open_chat(ChatId(7));
     let cap = HISTORY_WINDOW_CAP as i64;
     feed_live(&mut session, 7, 1..=cap);
-    session.histories.get_mut(&7).unwrap().loaded_complete = true;
+    session
+        .histories
+        .get_mut(&7)
+        .unwrap()
+        .set_loaded_complete(true);
     session.note_history_reader((7, None, 0), ReaderPosition::Away { top: MessageId(50) });
     feed_live(&mut session, 7, cap + 1..=cap + 1);
     assert_eq!(session.histories[&7].oldest_id(), Some(MessageId(1)));
-    assert!(session.histories[&7].loaded_complete);
+    assert!(session.histories[&7].loaded_complete());
     assert!(session.history_has_newer(ChatId(7)), "paged back in below");
     feed_live(&mut session, 7, cap + 2..=cap + 500);
     let history = &session.histories[&7];

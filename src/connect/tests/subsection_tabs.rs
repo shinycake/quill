@@ -302,8 +302,8 @@ fn opening_topic_reads_it_and_never_resurrects_a_stale_count() {
         .histories
         .entry(41)
         .or_default()
-        .viewed
-        .insert(800);
+        .views
+        .mark_done([800]);
 
     driver.select_topic(5).unwrap();
     driver.view_messages(ChatId(41), &[MessageId(800)]).unwrap();

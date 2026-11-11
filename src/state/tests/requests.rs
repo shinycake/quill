@@ -470,9 +470,17 @@ fn opening_a_chat_clears_viewed_ids_for_that_generation() {
     let seq = AtomicU64::new(0);
     session.open_chat(ChatId(1));
     session.mark_viewed(ChatId(1), &[MessageId(5)]);
-    assert!(session.histories.get(&1).unwrap().viewed.contains(&5));
+    assert!(session.histories.get(&1).unwrap().views.is_viewed(5));
     session.open_chat(ChatId(1));
-    assert!(session.histories.get(&1).unwrap().viewed.is_empty());
+    assert!(
+        session
+            .histories
+            .get(&1)
+            .unwrap()
+            .views
+            .done_ids()
+            .is_empty()
+    );
     apply_json(
         &mut session,
         &seq,

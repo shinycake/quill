@@ -92,17 +92,16 @@ impl HistoryState {
                 // row is left in the window to say so.
                 let newest = doomed.iter().copied().max().unwrap_or(0);
                 self.latest_seen = self.latest_seen.max(newest);
-                self.newer_failed = false;
+                self.clear_newer_failed();
             }
             WindowEnd::Oldest => {
-                self.loaded_complete = false;
+                self.set_loaded_complete(false);
             }
         }
         self.drop_unread_bar_for(&doomed);
         for id in &doomed {
             self.messages.remove(id);
-            self.visible.remove(id);
-            self.viewed.remove(id);
+            self.views.forget(*id);
         }
         doomed.len()
     }
@@ -310,7 +309,7 @@ mod tests {
         assert_eq!(state.oldest_id(), Some(MessageId(1)));
         assert_eq!(state.newest_id(), Some(MessageId(1200)));
         assert!(state.stops_short_of(0));
-        assert!(!state.newer_failed);
+        assert!(!state.newer_failed());
         // The dropped tail is remembered so has_newer survives a refresh.
         assert_eq!(state.latest_seen, 1600);
         // The window is still one contiguous run.
@@ -321,7 +320,7 @@ mod tests {
     #[test]
     fn scrolling_forward_trims_the_oldest_end_and_clears_loaded_complete() {
         let mut state = window(1..=1600);
-        state.loaded_complete = true;
+        state.set_loaded_complete(true);
         let removed = state.trim_window_end(
             WindowEnd::Oldest,
             HISTORY_WINDOW_CAP,
@@ -330,7 +329,7 @@ mod tests {
         assert_eq!(removed, 400);
         assert_eq!(state.oldest_id(), Some(MessageId(401)));
         assert_eq!(state.newest_id(), Some(MessageId(1600)));
-        assert!(!state.loaded_complete);
+        assert!(!state.loaded_complete());
         assert!(!state.stops_short_of(0));
     }
 
@@ -358,14 +357,17 @@ mod tests {
     fn trimming_keeps_tombstones_and_forgets_what_was_viewed() {
         let mut state = window(1..=1600);
         state.remove(MessageId(5), true);
-        state.viewed.extend([100, 1_500]);
+        state.views.mark_done([100, 1_500]);
         state.trim_window_end(
             WindowEnd::Newest,
             HISTORY_WINDOW_CAP,
             HISTORY_WINDOW_TRIM_TO,
         );
         assert!(state.is_tombstone(MessageId(5)));
-        assert_eq!(state.viewed, HashSet::from([100]));
+        assert_eq!(
+            state.views.done_ids(),
+            std::collections::BTreeSet::from([100])
+        );
     }
 
     #[test]
@@ -425,7 +427,7 @@ mod tests {
         state.reset_window();
         assert!(state.messages.is_empty());
         assert!(!state.stops_short_of(0));
-        assert!(!state.loaded_complete);
+        assert!(!state.loaded_complete());
     }
 
     fn rows(ids: std::ops::RangeInclusive<i64>) -> Vec<(i64, i64)> {
