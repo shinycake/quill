@@ -99,7 +99,8 @@ fn change(change: impl FnOnce(&mut Stored) -> bool) {
 
 /// Apply `change`; an unreadable file is read again first, and what was
 /// answered meanwhile joins what it holds. Whether there is something to
-/// save: the change changed something, or the file was read again.
+/// save: the change changed something, or the file was read again, and
+/// the file is understood (never over an unreadable one).
 fn apply(
     trust: &mut Trust,
     reload: impl FnOnce() -> Trust,
@@ -116,7 +117,8 @@ fn apply(
         save = true;
     }
     let (Trust::Read(stored) | Trust::Unreadable(stored)) = trust;
-    change(stored) || save
+    let changed = change(stored);
+    (changed || save) && matches!(trust, Trust::Read(_))
 }
 
 /// Whether `account` already accepted the first-open box for this bot.
