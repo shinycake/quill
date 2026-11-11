@@ -9,6 +9,8 @@ pub(in crate::ui) enum Capture {
     Idle,
     /// The action with this id waits for a keystroke.
     Waiting(String),
+    /// Settings > Calls waits for the push-to-talk key.
+    PushToTalk,
 }
 
 impl Capture {
@@ -16,8 +18,13 @@ impl Capture {
     pub(in crate::ui) fn waiting(&self) -> Option<&str> {
         match self {
             Self::Waiting(id) => Some(id),
-            Self::Idle => None,
+            Self::Idle | Self::PushToTalk => None,
         }
+    }
+
+    /// The Calls page waits for the push-to-talk key.
+    pub(in crate::ui) fn push_to_talk_armed(&self) -> bool {
+        matches!(self, Self::PushToTalk)
     }
 }
 
@@ -81,7 +88,12 @@ impl KeybindingUi {
     /// by a page that is gone is dropped.
     pub(in crate::ui) fn capture_active(&mut self, shown: bool) -> bool {
         if !shown {
-            self.end();
+            // The push-to-talk capture belongs to the Calls page, which
+            // ends it itself.
+            self.refusals = Refusals::default();
+            if self.capture.waiting().is_some() {
+                self.capture = Capture::Idle;
+            }
         }
         shown && self.capture.waiting().is_some()
     }
@@ -96,6 +108,23 @@ impl KeybindingUi {
     /// keymap needs no reset: it names the account it carries.
     pub(in crate::ui) fn invalidate_account(&mut self) {
         self.end();
+    }
+
+    /// The Calls page's shortcut button: a second press disarms.
+    pub(in crate::ui) fn toggle_ptt_capture(&mut self) {
+        self.capture = if self.capture.push_to_talk_armed() {
+            Capture::Idle
+        } else {
+            Capture::PushToTalk
+        };
+    }
+
+    /// The Calls page is left or its key arrived: only a push-to-talk wait
+    /// ends (a Shortcuts row keeps its own).
+    pub(in crate::ui) fn end_ptt_capture(&mut self) {
+        if self.capture.push_to_talk_armed() {
+            self.capture = Capture::Idle;
+        }
     }
 
     /// Row `id` starts waiting for a keystroke; its old message goes.

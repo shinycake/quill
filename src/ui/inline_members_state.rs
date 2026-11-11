@@ -79,8 +79,14 @@ impl InlineMembersUi {
     pub(super) fn reset(&mut self, chat: Option<ChatId>) {
         self.shown = quill::inline_members::ROWS_STEP;
         self.chat = chat;
+        self.refetch();
+        self.snapshot.replace(None);
+    }
+
+    /// The cached pages are gone (membership changed, Retry, a new open):
+    /// the next scroll or frame asks for every page again.
+    pub(super) fn refetch(&mut self) {
         self.paging = Paging::Idle;
         self.admins = AdminsFallback::NotAsked;
-        self.snapshot.replace(None);
     }
 }

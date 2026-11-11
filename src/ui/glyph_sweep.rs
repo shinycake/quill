@@ -37,27 +37,43 @@ const KEEP_TEXT: usize = 8192;
 struct PendingSweep {
     mark: u64,
     text: bool,
+    /// Idle trims that found the mark still waiting for its frame.
+    waited: u8,
 }
 
+/// Idle trims a mark waits for its frame. A minimized or covered window
+/// draws none, so the mark is dropped after this many and the next trim
+/// begins afresh.
+const MARK_PATIENCE: u8 = 2;
+
 /// Where a window's sweep stands. `Marked` leaves when the frame after the
-/// mark starts (`finish_pending_sweep`), or with the window
-/// (`forget_closed_windows`).
+/// mark starts (`finish_pending_sweep`), after [`MARK_PATIENCE`] trims
+/// without one, or with the window (`forget_closed_windows`).
 #[derive(Clone, Copy, Default)]
 enum Sweep {
     #[default]
     Idle,
+    /// The window left the foreground since the last sweep began: any
+    /// emoji are then worth a sweep. The next `begin` takes this.
+    Left,
     /// The use mark is taken; the next frame to start drops what it did not
     /// ask for.
     Marked(PendingSweep),
 }
 
-/// Whether the window left the foreground since the last sweep began: any
-/// emoji are then worth a sweep.
-#[derive(Clone, Copy, Default, PartialEq, Eq)]
-enum IdleTrigger {
-    #[default]
-    Foreground,
-    Left,
+impl Sweep {
+    /// An idle trim found a mark still waiting for its frame: a hidden
+    /// window draws none, so the mark is given up after [`MARK_PATIENCE`]
+    /// trims and the next trim begins afresh.
+    fn wait_for_frame(&mut self) {
+        if let Sweep::Marked(pending) = self {
+            if pending.waited >= MARK_PATIENCE {
+                *self = Sweep::Idle;
+            } else {
+                pending.waited += 1;
+            }
+        }
+    }
 }
 
 /// Emoji and text glyph counts of one moment.
@@ -74,15 +90,19 @@ struct WindowSweep {
     kept: GlyphCounts,
     /// What the atlas held at the start of the last frame.
     seen: GlyphCounts,
-    trigger: IdleTrigger,
 }
 
 thread_local! {
     static WINDOWS: RefCell<HashMap<WindowId, WindowSweep>> = RefCell::default();
 }
 
-fn with_sweep<R>(id: WindowId, action: impl FnOnce(&mut WindowSweep) -> R) -> R {
-    WINDOWS.with_borrow_mut(|windows| action(windows.entry(id).or_default()))
+/// Runs `action` on the window's sweep; `None` if the map is already in use
+/// (nothing here re-enters it, but a panic would take the UI down).
+fn with_sweep<R>(id: WindowId, action: impl FnOnce(&mut WindowSweep) -> R) -> Option<R> {
+    WINDOWS.with(|windows| {
+        let mut windows = windows.try_borrow_mut().ok()?;
+        Some(action(windows.entry(id).or_default()))
+    })
 }
 
 /// Sweep when the atlas holds more emoji than a screen's worth and twice
@@ -98,7 +118,11 @@ fn text_worth_a_sweep(count: usize, kept: usize) -> bool {
 
 pub(super) fn window_activation(id: WindowId, active: bool) {
     if !active {
-        with_sweep(id, |sweep| sweep.trigger = IdleTrigger::Left);
+        with_sweep(id, |sweep| {
+            if matches!(sweep.sweep, Sweep::Idle) {
+                sweep.sweep = Sweep::Left;
+            }
+        });
         super::image_budget::note_activity();
     }
 }
@@ -111,8 +135,10 @@ pub(super) fn begin_for(open: &[AnyWindowHandle], cx: &mut App) {
 }
 
 fn forget_closed_windows(open: &[AnyWindowHandle]) {
-    WINDOWS.with_borrow_mut(|windows| {
-        windows.retain(|id, _| open.iter().any(|handle| handle.window_id() == *id));
+    WINDOWS.with(|windows| {
+        if let Ok(mut windows) = windows.try_borrow_mut() {
+            windows.retain(|id, _| open.iter().any(|handle| handle.window_id() == *id));
+        }
     });
 }
 
@@ -121,19 +147,35 @@ fn begin(window: &mut Window) {
     let count = window.emoji_glyph_count();
     let text_count = window.text_glyph_count();
     let (emoji, text) = with_sweep(id, |sweep| {
-        if matches!(sweep.sweep, Sweep::Marked(_)) {
-            return (false, false);
-        }
-        let left = mem::take(&mut sweep.trigger) == IdleTrigger::Left;
+        let left = match sweep.sweep {
+            Sweep::Marked(_) => {
+                sweep.sweep.wait_for_frame();
+                return (false, false);
+            }
+            Sweep::Left => true,
+            Sweep::Idle => false,
+        };
         (
             worth_a_sweep(count, sweep.kept.emoji, left),
             text_worth_a_sweep(text_count, sweep.kept.text),
         )
-    });
+    })
+    .unwrap_or((false, false));
     if emoji || text {
         let mark = window.begin_emoji_glyph_sweep();
         with_sweep(id, |sweep| {
-            sweep.sweep = Sweep::Marked(PendingSweep { mark, text });
+            sweep.sweep = Sweep::Marked(PendingSweep {
+                mark,
+                text,
+                waited: 0,
+            });
+        });
+    } else {
+        // Nothing worth sweeping: the leaving-foreground mark is spent.
+        with_sweep(id, |sweep| {
+            if matches!(sweep.sweep, Sweep::Left) {
+                sweep.sweep = Sweep::Idle;
+            }
         });
     }
 }
@@ -145,12 +187,14 @@ pub(super) fn start_frame(window: &mut Window, cx: &mut App) {
 
 fn finish_pending_sweep(window: &mut Window, cx: &mut App) {
     let handle = window.window_handle();
-    let marked = with_sweep(handle.window_id(), |sweep| {
-        match mem::take(&mut sweep.sweep) {
-            Sweep::Idle => None,
-            Sweep::Marked(pending) => Some(pending),
+    let marked = with_sweep(handle.window_id(), |sweep| match sweep.sweep {
+        Sweep::Marked(pending) => {
+            sweep.sweep = Sweep::Idle;
+            Some(pending)
         }
-    });
+        Sweep::Idle | Sweep::Left => None,
+    })
+    .flatten();
     if let Some(pending) = marked {
         // Deferred work runs once this frame is drawn.
         cx.defer(move |cx| {
@@ -171,7 +215,8 @@ fn note_new_glyphs(window: &mut Window) {
                 text: text_count,
             },
         )
-    });
+    })
+    .unwrap_or_default();
     if count > seen.emoji || text_count > seen.text && text_count > KEEP_TEXT {
         super::image_budget::note_activity();
     }
@@ -308,6 +353,21 @@ mod tests {
         assert!(worth_a_sweep(KEEP + 1, 0, false));
         assert!(!worth_a_sweep(300, 200, false));
         assert!(worth_a_sweep(401, 200, false));
+    }
+
+    #[test]
+    fn a_mark_whose_frame_never_starts_is_given_up() {
+        let mut sweep = Sweep::Marked(PendingSweep {
+            mark: 1,
+            text: false,
+            waited: 0,
+        });
+        for _ in 0..MARK_PATIENCE {
+            sweep.wait_for_frame();
+            assert!(matches!(sweep, Sweep::Marked(_)), "still waiting");
+        }
+        sweep.wait_for_frame();
+        assert!(matches!(sweep, Sweep::Idle), "a hidden window frees it");
     }
 
     #[test]

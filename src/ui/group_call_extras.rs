@@ -123,13 +123,17 @@ impl QuillApp {
         let now = self.ptt_now_ms();
         if let Some(action) = self.group_call.ptt.key_up(now, delay) {
             self.apply_ptt_action(action, cx);
-        } else if let Some(deadline) = self.group_call.ptt.mute_deadline() {
+        } else if self.group_call.ptt.needs_wake()
+            && let Some(deadline) = self.group_call.ptt.mute_deadline()
+        {
             let wait = Duration::from_millis(deadline.saturating_sub(now));
-            self.spawn_screen(cx, async move |this, cx| {
+            // The stage keeps the timer: a new key press, a reset or the
+            // deadline itself drops it.
+            let wake = self.spawn_screen(cx, async move |this, cx| {
                 cx.background_executor().timer(wait).await;
                 let _ = this.update(cx, |this, cx| this.group_call_ptt_tick(cx));
-            })
-            .detach();
+            });
+            self.group_call.ptt.hold_wake(wake);
         }
     }
 
@@ -310,7 +314,7 @@ impl QuillApp {
 
     /// Bind the next pressed key as the push-to-talk key (Settings).
     pub(super) fn capture_ptt_key(&mut self, key: &str, cx: &mut Context<Self>) {
-        self.group_call.ptt_capture = false;
+        self.preferences.keybinding.end_ptt_capture();
         if key == "escape" {
             cx.notify();
             return;
@@ -382,7 +386,7 @@ impl QuillApp {
     ) -> AnyElement {
         let muted = cx.theme().muted_foreground;
         let config = config.sanitized();
-        let capturing = self.group_call.ptt_capture;
+        let capturing = self.preferences.keybinding.capture.push_to_talk_armed();
         let needs_permission = config.enabled
             && (matches!(
                 self.group_call.global_ptt.hook.state(),
@@ -401,7 +405,7 @@ impl QuillApp {
                     .checked(config.enabled)
                     .accessibility_label(tr(keys::Q_AV_PUSH_TO_TALK))
                     .on_click(cx.listener(|this, &on, _, cx| {
-                        this.group_call.ptt_capture = false;
+                        this.preferences.keybinding.end_ptt_capture();
                         this.set_call_pref(|prefs| prefs.push_to_talk.enabled = on, cx);
                     })),
             )
@@ -454,7 +458,7 @@ impl QuillApp {
                                     })
                                     .small()
                                     .on_click(cx.listener(|this, _, _, cx| {
-                                        this.group_call.ptt_capture = !this.group_call.ptt_capture;
+                                        this.preferences.keybinding.toggle_ptt_capture();
                                         cx.notify();
                                     })),
                             ),

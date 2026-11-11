@@ -115,8 +115,7 @@ impl QuillApp {
             return;
         };
         if stale.contains(&shape.chat.0) {
-            self.inline_members.paging = Paging::Idle;
-            self.inline_members.admins = AdminsFallback::NotAsked;
+            self.inline_members.refetch();
             self.inline_members_fetch(shape, cx);
             cx.notify();
         }
@@ -182,13 +181,25 @@ impl QuillApp {
             && self.inline_members.admins != AdminsFallback::Asked(shape.chat)
         {
             self.inline_members.admins = AdminsFallback::Asked(shape.chat);
-            if let Some(live) = self.live.as_mut() {
-                let _ = live.driver.fetch_supergroup_members(
+            let sent = self.live.as_mut().map(|live| {
+                live.driver.fetch_supergroup_members(
                     shape.chat,
                     MemberListFilter::Administrators,
                     "",
+                )
+            });
+            // A refused send leaves no fetch behind, which the list would
+            // draw as "Loading" for good: record the failure it draws with
+            // Retry (Retry resets this stage through `refetch`).
+            if matches!(sent, Some(Err(_)))
+                && let Some(session) = self.session_mut()
+            {
+                session.groups.supergroup_members.insert(
+                    (shape.chat.0, MemberListFilter::Administrators),
+                    SupergroupMembersFetch::Failed(tr(keys::Q_MEDIA_COULD_NOT_LOAD_MEMBERS).into()),
                 );
             }
+            cx.notify();
         }
         let Some((loaded, total, filter)) = self.inline_members_counts(shape) else {
             return;

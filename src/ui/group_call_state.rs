@@ -66,10 +66,9 @@ pub(crate) struct GroupCallUi {
     pub(super) window: CallWindow,
     pub(super) chat_shown: bool,
     /// Push-to-talk state for the group call window, its clock origin,
-    /// and whether Settings is waiting for the next key to bind.
-    pub(super) ptt: quill::calls::ptt::PushToTalk,
+    /// and the release delay's timer lives in the stage that waits for it.
+    pub(super) ptt: quill::calls::ptt::PushToTalk<Task<()>>,
     pub(super) ptt_clock: Instant,
-    pub(super) ptt_capture: bool,
     /// System-wide push-to-talk hook, live only while joined with PTT on.
     pub(super) global_ptt: GlobalPtt,
     /// Your own microphone level on the mute button: the halo follows
@@ -478,7 +477,6 @@ impl GroupCallUi {
             chat_shown: false,
             ptt: quill::calls::ptt::PushToTalk::new(),
             ptt_clock: std::time::Instant::now(),
-            ptt_capture: false,
             global_ptt: GlobalPtt::default(),
             tile_overlays: HashMap::new(),
             stage_volume: None,
