@@ -249,7 +249,7 @@ struct Anim {
 
 impl Anim {
     fn value(&self, now: u64) -> f32 {
-        if self.duration_ms == 0 || now >= self.start_ms + self.duration_ms {
+        if self.duration_ms == 0 || now >= self.start_ms.saturating_add(self.duration_ms) {
             return self.to;
         }
         let t = (now.saturating_sub(self.start_ms)) as f32 / self.duration_ms as f32;
@@ -257,7 +257,7 @@ impl Anim {
     }
 
     fn running(&self, now: u64) -> bool {
-        self.duration_ms > 0 && now < self.start_ms + self.duration_ms
+        self.duration_ms > 0 && now < self.start_ms.saturating_add(self.duration_ms)
     }
 }
 

@@ -20,6 +20,7 @@ use crate::ui::settings_window::rows::{detail_row, group, switch_row};
 use gpui_kit::component::button::*;
 use gpui_kit::component::switch::Switch;
 use gpui_kit::component::*;
+use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::data_settings::{
     AutoDownloadNetSettings, CapKind, DataStoragePrefs, NO_LIMIT_SIZE_CAP, NetworkKind,
@@ -335,6 +336,10 @@ impl QuillApp {
                         "data.less_data_calls",
                     ],
                     div()
+                        .flex()
+                        .flex_col()
+                        .items_start()
+                        .gap_1()
                         .px_3()
                         .py_2()
                         .text_xs()
@@ -343,6 +348,19 @@ impl QuillApp {
                             tr(keys::Q_OPS_LOADING_DOWNLOAD_SETTINGS)
                         } else {
                             tr(keys::Q_OPS_DOWNLOAD_SETTINGS_UNAVAILABLE)
+                        })
+                        .when(!loading, |this| {
+                            this.child(
+                                Button::new("data-storage-presets-retry")
+                                    .label(tr(keys::Q_MONEY_RETRY))
+                                    .small()
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        if let Some(live) = this.live.as_mut() {
+                                            let _ = live.driver.fetch_auto_download_presets();
+                                        }
+                                        cx.notify();
+                                    })),
+                            )
                         }),
                     cx,
                 ),
