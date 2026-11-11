@@ -53,10 +53,10 @@ use gpui_kit::component::{ActiveTheme, Sizable as _, StyledExt as _};
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use metrics::{
-    BUTTON_ROW_TOP, BUTTONS_RIGHT, BUTTONS_SKIP, PANEL_HEIGHT, PANEL_OPACITY, PANEL_WIDTH,
-    PLAY_BUTTON, PROGRESS_INSET, PROGRESS_SKIP, SCRUBBER_ROW_TOP, SIDE_BUTTON, VOLUME_LEFT,
-    VOLUME_SKIP, VOLUME_WIDTH,
+    BUTTON_ROW_TOP, BUTTONS_RIGHT, BUTTONS_SKIP, PANEL_OPACITY, PLAY_BUTTON, PROGRESS_INSET,
+    PROGRESS_SKIP, SCRUBBER_ROW_TOP, SIDE_BUTTON, VOLUME_LEFT, VOLUME_SKIP, VOLUME_WIDTH,
 };
+pub(crate) use metrics::{PANEL_HEIGHT, PANEL_WIDTH};
 use quill::lang::{keys, tr};
 use quill::media_viewer::{BoostState, waiting_wait};
 use std::rc::Rc;
@@ -211,6 +211,11 @@ pub(crate) fn overlay_button(cx: &App) -> ButtonCustomVariant {
 /// A press handler from the controller into `QuillApp`.
 pub(crate) type Handler = Rc<dyn Fn(&mut Window, &mut App)>;
 
+/// A press on the panel itself, off its buttons and sliders: the pointer
+/// in window coordinates and the click count. The viewer drags the panel
+/// with it and puts it back home on a double-click.
+pub(crate) type PanelPress = Rc<dyn Fn(Point<Pixels>, usize, &mut Window, &mut App)>;
+
 /// What the controller's buttons do.
 pub(crate) struct ControllerActions {
     pub(crate) toggle_play: Handler,
@@ -236,6 +241,10 @@ pub(crate) struct VideoController {
     speed_dial: Option<AnyElement>,
     quality: Option<AnyElement>,
     actions: ControllerActions,
+    press: Option<PanelPress>,
+    grabbed: bool,
+    bare: bool,
+    snap_back: Option<Handler>,
 }
 
 impl VideoController {
@@ -259,6 +268,10 @@ impl VideoController {
             speed_dial: None,
             quality: None,
             actions,
+            press: None,
+            grabbed: false,
+            bare: false,
+            snap_back: None,
         }
     }
 
@@ -292,6 +305,34 @@ impl VideoController {
         self.quality = quality;
         self
     }
+
+    /// A button that puts the dragged panel back in its spot; `None`
+    /// while it is there.
+    pub(crate) fn snap_back(mut self, snap_back: Option<Handler>) -> Self {
+        self.snap_back = snap_back;
+        self
+    }
+
+    /// No plate of its own: it sits in a bar that draws one (the viewer's
+    /// caption and controller, docked together).
+    pub(crate) fn bare(mut self, bare: bool) -> Self {
+        self.bare = bare;
+        self
+    }
+
+    /// Presses on the panel's background go here (see [`PanelPress`]);
+    /// `grabbed` while the panel is held, for the grabbing cursor.
+    pub(crate) fn on_press(mut self, press: PanelPress, grabbed: bool) -> Self {
+        self.press = Some(press);
+        self.grabbed = grabbed;
+        self
+    }
+}
+
+/// The scrubber and the volume slider keep their presses: a drag there
+/// seeks or sets the volume, it does not move the panel.
+fn keep_press<E: InteractiveElement>(element: E) -> E {
+    element.on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
 }
 
 /// A kit tooltip naming the button and its key.
@@ -336,7 +377,7 @@ impl RenderOnce for VideoController {
             .hover(self.hover.filter(|_| self.shown))
             .preview(self.seek_preview)
         });
-        let scrubber_row = div()
+        let scrubber_row = keep_press(div())
             .absolute()
             .top(SCRUBBER_ROW_TOP)
             .left(PROGRESS_INSET)
@@ -388,7 +429,7 @@ impl RenderOnce for VideoController {
             )
             .when_some(self.volume, |this, slider| {
                 this.child(
-                    div().w(VOLUME_WIDTH).child(
+                    keep_press(div()).w(VOLUME_WIDTH).child(
                         Slider::new(&slider)
                             .bg(crate::ui::chat_theme::accent())
                             .text_color(crate::ui::chat_theme::text_on_fill()),
@@ -415,10 +456,21 @@ impl RenderOnce for VideoController {
                 .accessibility_label(tr(keys::Q_AV_PICTURE_IN_PICTURE))
                 .on_click(move |_, window, cx| pip(window, cx))
         });
+        let snap_back = self.snap_back.map(|snap_back| {
+            let label = tr(keys::Q_AV_CONTROLS_SNAP_BACK);
+            Button::new(("media-viewer-snap-back", row_id))
+                .icon(IconName::PanelBottom)
+                .custom(variant)
+                .with_size(SIDE_BUTTON)
+                .tooltip(label)
+                .accessibility_label(label)
+                .on_click(move |_, window, cx| snap_back(window, cx))
+        });
         let right = div()
             .flex()
             .items_center()
             .gap(BUTTONS_SKIP)
+            .children(snap_back)
             .children(self.speed_dial)
             .children(self.quality)
             .children(pip)
@@ -481,8 +533,18 @@ impl RenderOnce for VideoController {
             .w(PANEL_WIDTH)
             .max_w_full()
             .h(PANEL_HEIGHT)
-            .rounded(cx.theme().radius_lg)
-            .bg(panel_background())
+            .when(!self.bare, |panel| {
+                panel.rounded(cx.theme().radius_lg).bg(panel_background())
+            })
+            .when(self.grabbed, |panel| panel.cursor_grabbing())
+            .when_some(self.press, |panel, press| {
+                // Buttons claim their presses with `prevent_default`.
+                panel.on_mouse_down(MouseButton::Left, move |event, window, cx| {
+                    if !window.default_prevented() {
+                        press(event.position, event.click_count, window, cx);
+                    }
+                })
+            })
             .child(scrubber_row)
             .child(button_row)
     }

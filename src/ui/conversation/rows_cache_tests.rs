@@ -546,3 +546,9 @@ mod paragraph_cache_scroll;
 
 #[path = "file_album_tests.rs"]
 mod file_album;
+
+#[path = "album_row_tests.rs"]
+mod album_row;
+
+#[path = "service_reactions_tests.rs"]
+mod service_reactions;

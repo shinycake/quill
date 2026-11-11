@@ -77,6 +77,9 @@ pub(crate) struct ViewerUi {
     /// The video controller's sliders, drag previews, scrubber hover and
     /// the Space-hold boost (`video_player::controls`).
     pub(super) controls: super::video_player::controls::VideoControlsState,
+    /// Where the video controller rests and the drag moving it; kept
+    /// from one open to the next, so a moved controller stays moved.
+    pub(super) controller: quill::media_viewer::ControllerPlace,
 }
 
 /// The PiP window plays the old account's video: it closes. A window
@@ -123,6 +126,7 @@ impl ViewerUi {
             over_controls: false,
             album_pin: Default::default(),
             controls: Default::default(),
+            controller: Default::default(),
         }
     }
 }

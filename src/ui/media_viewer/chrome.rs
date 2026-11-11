@@ -4,11 +4,11 @@
 //! idle timer (tdesktop `_fullScreenVideo`).
 #![deny(clippy::indexing_slicing)]
 
-use super::geometry::{CAPTION_GAP, GROUP_STRIP_ROOM, lane_width};
+use super::geometry::{BAR_BOTTOM_GAP, BAR_SIDE_GAP, CAPTION_GAP, GROUP_STRIP_ROOM, lane_width};
 use super::layer::ViewerGeometry;
 use super::*;
 use crate::ui::pressable::PressableDiv;
-use crate::ui::video_player::controls::hide_cursor;
+use crate::ui::video_player::controls::{PANEL_WIDTH, hide_cursor, panel_background};
 use quill::album_pin::AlbumPin;
 use quill::lang::{keys, tr};
 use quill::media_viewer::ViewerTtl;
@@ -97,10 +97,12 @@ impl QuillApp {
                     AlbumPin::Unpin => Some(tr(keys::Q_AV_UNPIN_ALBUM).to_string()),
                 }
             });
+        // The caption rides on top of a controller dragged off its spot.
+        let docked = geometry.caption_docked && geometry.caption.is_some();
         // Parity slice 5: the video player panel (or a download CTA).
         let is_video = item.kind == MediaViewerKind::Video;
         let video_controls: Option<AnyElement> = is_video
-            .then(|| self.viewer_video_controls(item, row_id, cx))
+            .then(|| self.viewer_video_controls(item, row_id, geometry.controller, docked, cx))
             .flatten();
         let key_focus = self.viewer_key_focus_probe(cx);
         // Videos get the player panel; zoom controls are for photos.
@@ -126,21 +128,23 @@ impl QuillApp {
             )
         });
         let viewport = window.viewport_size();
-        let lane = lane_width(f32::from(viewport.width));
+        let safe = geometry.safe;
+        let (viewport_w, viewport_full_h) = (f32::from(viewport.width), f32::from(viewport.height));
+        let lane = lane_width(safe.w);
         self.viewer
             .extra
             .set_strip_lane_waking(lane, &quill::wake::UPDATES);
-        let group_thumbs = self.viewer_group_thumbs(f32::from(viewport.width), cx);
+        let group_thumbs = self.viewer_group_thumbs(safe.w, cx);
         // An expanded caption stops short of the top bar with the strip
         // under it too.
-        let viewport_h = f32::from(viewport.height)
+        let viewport_h = safe.h
             - if group_thumbs.is_some() {
                 GROUP_STRIP_ROOM
             } else {
                 0.0
             };
         let caption = caption.zip(geometry.caption).map(|(caption, layout)| {
-            self.viewer_caption_plate(item, caption, layout, viewport_h, cx)
+            self.viewer_caption_plate(item, caption, layout, viewport_h, docked, cx)
         });
         let sender_profile = self.viewer_sender_profile(item);
         let saved_toast: Option<AnyElement> = self.viewer_saved_toast(cx);
@@ -164,9 +168,9 @@ impl QuillApp {
             .on_mouse_move(over_controls(cx))
             .occlude()
             .absolute()
-            .top_0()
-            .left_0()
-            .right_0()
+            .top(px(safe.y))
+            .left(px(safe.x))
+            .w(px(safe.w))
             .h(px(VIEWER_TOP_BAR))
             .px_4()
             .when(traffic_lights > px(16.), |this| this.pl(traffic_lights))
@@ -429,7 +433,7 @@ impl QuillApp {
                         .on_mouse_move(over_controls(cx))
                         .occlude()
                         .absolute()
-                        .left(px(16.))
+                        .left(px(safe.x + 16.))
                         .top(arrow_top)
                         .child(prev),
                     "viewer-prev-fade",
@@ -447,7 +451,7 @@ impl QuillApp {
                         .on_mouse_move(over_controls(cx))
                         .occlude()
                         .absolute()
-                        .right(px(16.))
+                        .right(px(viewport_w - safe.right() + 16.))
                         .top(arrow_top)
                         .child(next),
                     "viewer-next-fade",
@@ -486,6 +490,50 @@ impl QuillApp {
         // Only the rows themselves take the pointer, not the band around
         // them, so the picture under the bar stays clickable. The band
         // still keeps the wheel, so a scroll there does not change the item.
+        let controller_offset = self.viewer_controller_offset(geometry.controller);
+        let drag_layer = self.viewer_controller_drag_layer(geometry.controller, cx);
+        // Docked, the caption and the controller are one bar: one plate,
+        // dragged by either part.
+        let (caption, transport) = match (docked, caption, transport) {
+            (true, Some(caption), Some(transport)) => {
+                let caption = match self.viewer.extra.caption.docked() {
+                    super::caption::DockedCaption::Folded => {
+                        self.viewer_docked_caption_chip(item, row_id, cx)
+                    }
+                    super::caption::DockedCaption::Open => div()
+                        .flex()
+                        .flex_col()
+                        .child(self.viewer_docked_caption_fold(row_id, cx))
+                        .child(caption)
+                        .into_any_element(),
+                };
+                let press = self.viewer_controller_press(geometry.controller, cx);
+                let bar = div()
+                    .id(("media-viewer-docked-bar", row_id))
+                    .w(PANEL_WIDTH)
+                    .max_w_full()
+                    .flex()
+                    .flex_col()
+                    .rounded(cx.theme().radius_lg)
+                    .bg(panel_background())
+                    .when(self.viewer.controller.is_held(), |bar| {
+                        bar.cursor_grabbing()
+                    })
+                    .child(
+                        div()
+                            .on_mouse_down(MouseButton::Left, move |event, window, cx| {
+                                // The chip and its buttons claim their presses.
+                                if !window.default_prevented() {
+                                    press(event.position, event.click_count, window, cx);
+                                }
+                            })
+                            .child(caption),
+                    )
+                    .child(transport);
+                (None, Some(bar.into_any_element()))
+            }
+            (_, caption, transport) => (caption, transport),
+        };
         let rows = [
             ("media-viewer-caption-row", caption),
             ("media-viewer-error-row", error),
@@ -494,8 +542,16 @@ impl QuillApp {
         .into_iter()
         .filter_map(|(id, row)| {
             row.map(|row| {
+                let (dx, dy) = if id == "media-viewer-controls-row" && is_video {
+                    controller_offset
+                } else {
+                    (0.0, 0.0)
+                };
                 div()
                     .id(id)
+                    .relative()
+                    .left(px(dx))
+                    .top(px(dy))
                     .debug_selector(move || id.into())
                     .on_mouse_move(over_controls(cx))
                     .occlude()
@@ -506,11 +562,11 @@ impl QuillApp {
             .debug_selector(|| "media-viewer-bottom-band".into())
             .on_scroll(|_, _, cx| cx.stop_propagation())
             .absolute()
-            .left_0()
-            .right_0()
-            .bottom_0()
-            .px_6()
-            .pb_4()
+            .left(px(safe.x))
+            .w(px(safe.w))
+            .bottom(px(viewport_full_h - safe.bottom()))
+            .px(px(BAR_SIDE_GAP))
+            .pb(px(BAR_BOTTOM_GAP))
             .flex()
             .flex_col()
             .items_center()
@@ -537,6 +593,7 @@ impl QuillApp {
         parts.push(
             fade_controls(bottom_bar, "viewer-bottom-fade", fade_gen, hidden).into_any_element(),
         );
+        parts.extend(drag_layer);
         parts.extend(ttl_badge);
         parts.extend(saved_toast);
         parts.push(key_focus);

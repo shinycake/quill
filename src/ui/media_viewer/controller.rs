@@ -20,6 +20,8 @@ impl QuillApp {
         &mut self,
         item: &MediaViewerItem,
         row_id: u64,
+        place: super::controller_drag::ControllerFrame,
+        docked: bool,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
         self.viewer_clip_path(item)?;
@@ -81,6 +83,15 @@ impl QuillApp {
                 .shown(!self.viewer.visibility.is_hidden())
                 .speed_dial(speed_dial)
                 .quality(quality)
+                .bare(docked)
+                .snap_back(
+                    (self.viewer.controller.spot() != ControllerSpot::Home)
+                        .then(|| handler(|this, _, cx| this.viewer_controller_snap_back(cx))),
+                )
+                .on_press(
+                    self.viewer_controller_press(place, cx),
+                    self.viewer.controller.is_held(),
+                )
                 .into_any_element(),
         )
     }
