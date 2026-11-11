@@ -108,7 +108,7 @@ impl GroupTypeBox {
             .session()
             .is_some_and(|s| s.group_username_check_failed(facts.chat_id, &text));
         match link_status(&text, &facts.editable, verdict) {
-            LinkStatus::Empty if matches!(self.link, LinkCheck::Refused) => {
+            LinkStatus::Empty if matches!(self.link, LinkCheck::Refused { .. }) => {
                 LinkStatus::Problem(LinkProblem::TooShort)
             }
             LinkStatus::Pending if failed => LinkStatus::Problem(LinkProblem::CheckFailed),
