@@ -302,6 +302,12 @@ impl PasskeysState {
         }
     }
 
+    /// Show `list` as an answered list (the offline demo has no server).
+    pub fn show_list(&mut self, list: Vec<Passkey>) {
+        self.list = list;
+        self.stage = ListStage::Known { at: Instant::now() };
+    }
+
     /// An answer arrived since the last change (tdesktop `listKnown`).
     pub fn known(&self) -> bool {
         matches!(self.stage, ListStage::Known { .. })

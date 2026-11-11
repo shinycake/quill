@@ -48,12 +48,14 @@ impl<T> Fetch<T> {
 
     /// A change landed: what is held stays visible and is asked for
     /// again, also when nothing was held (the change needs the answer). A
-    /// request in flight keeps its place: it answers a question asked
-    /// before the change, so the caller's next change outdates it again.
+    /// request in flight asked before the change; the owner that refetches
+    /// drops it. A first ask in flight with nothing held keeps its place:
+    /// there is no answer to be out of date yet.
     pub fn outdate(&mut self) {
-        if !self.is_loading() {
-            *self = Self::Outdated(self.take_data());
+        if matches!(self, Self::Loading { stale: None }) {
+            return;
         }
+        *self = Self::Outdated(self.take_data());
     }
 
     pub fn is_loading(&self) -> bool {

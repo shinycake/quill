@@ -496,7 +496,7 @@ fn sessions_terminate_ok_triggers_authoritative_refetch() {
     assert_eq!(snapshot.len(), sent + 1);
     assert!(snapshot[sent].contains("\"@type\":\"getActiveSessions\""));
     assert_eq!(driver.session.settings.sessions.data().unwrap().len(), 2);
-    assert!(driver.session.settings.sessions.is_outdated());
+    assert!(driver.session.settings.sessions.is_loading());
     assert!(!driver.session.settings.sessions_change.busy());
     // The authoritative answer lands — the @extra comes from the
     // recorded outbound JSON (what TDLib would echo back).
@@ -594,7 +594,7 @@ fn session_toggle_ok_triggers_authoritative_refetch() {
     assert_eq!(snapshot.len(), sent + 1);
     assert!(snapshot[sent].contains("\"@type\":\"getActiveSessions\""));
     assert!(driver.session.settings.sessions.data().unwrap()[1].can_accept_calls);
-    assert!(driver.session.settings.sessions.is_outdated());
+    assert!(driver.session.settings.sessions.is_loading());
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -722,7 +722,7 @@ fn disconnect_all_websites_ok_triggers_authoritative_refetch() {
             .len(),
         1
     );
-    assert!(driver.session.settings.connected_websites.is_outdated());
+    assert!(driver.session.settings.connected_websites.is_loading());
     let _ = std::fs::remove_dir_all(&dir);
 }
 
