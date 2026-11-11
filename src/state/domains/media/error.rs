@@ -89,7 +89,10 @@ impl Session {
                 chat_id,
                 tab,
                 generation,
-                call_request_error_line(err, "Could not load more media"),
+                call_request_error_line(
+                    err,
+                    crate::lang::tr(crate::lang::keys::Q_MEDIA_COULD_NOT_LOAD_MORE_MEDIA),
+                ),
             );
         }
     }

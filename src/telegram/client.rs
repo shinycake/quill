@@ -33,8 +33,13 @@ pub struct ReceiveBridge {
     pub rx: Receiver<OwnedEnvelope>,
     tx_cmd: Sender<BridgeCommand>,
     seq: Arc<AtomicU64>,
-    /// Set by the receive loop's exit guard when it ends without a
-    /// shutdown request (channel closed, thread panicked).
+    /// The feeding side's report, not the owner's stage: the receive loop's
+    /// exit guard (or the hub) sets it, from another thread, when the feed
+    /// ends without a shutdown request (channel closed, thread panicked).
+    /// It only ever goes `false` to `true`, and `feed` is touched by the
+    /// owner alone (`shutdown`), so the two cannot be put in one value
+    /// without a lock both threads take: the owner reads this flag, never
+    /// derives anything from it that `feed` also holds.
     stopped: Arc<AtomicBool>,
     feed: BridgeFeed,
 }

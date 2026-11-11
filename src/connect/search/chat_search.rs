@@ -145,7 +145,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                     chat_id,
                     tab,
                     generation,
-                    "Could not load more media".to_string(),
+                    crate::lang::tr(crate::lang::keys::Q_MEDIA_COULD_NOT_LOAD_MORE_MEDIA).to_string(),
                 );
                 Err(err)
             }
