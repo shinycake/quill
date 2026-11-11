@@ -44,6 +44,7 @@ fn message(chat: i64) -> OsNotification {
     OsNotification {
         chat_id: ChatId(chat),
         message_id: None,
+        topic_id: None,
         title: format!("Chat {chat}"),
         body: "Hello".into(),
     }
@@ -246,6 +247,7 @@ fn a_queued_notification_shows_before_any_window_draws(cx: &mut TestAppContext) 
             notifications: vec![quill::notify::QueuedNotification {
                 chat_id: ChatId(5),
                 message_id: None,
+                topic_id: None,
                 title: "Chat 5".into(),
                 body: "Hello".into(),
                 count: 1,

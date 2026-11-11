@@ -288,3 +288,32 @@ fn an_ask_that_cant_come_up_says_why_in_its_own_words() {
         ask_unreachable(OffReason::RawCallsOff)
     );
 }
+
+/// The "Add a chat" picker is rebuilt when a listed chat is renamed, even
+/// though their number is the same.
+#[gpui_kit::test]
+fn the_chat_picker_fingerprint_follows_a_rename(cx: &mut TestAppContext) {
+    let _guard = quill::locks::lock_or_recover(&TEST_LOCK);
+    let (app, _shell, mut vcx) = new_app(cx);
+    app.update(&mut vcx, |app, _| {
+        let Some(session) = app.session_mut() else {
+            panic!("a demo session");
+        };
+        let before = super::listed_chats_fingerprint(session.chats.values(), &[]);
+        assert_ne!(before, 0, "the demo lists chats");
+        let granted: Vec<i64> = session.chats.values().take(1).map(|c| c.id.0).collect();
+        assert_ne!(
+            super::listed_chats_fingerprint(session.chats.values(), &granted),
+            before,
+            "a granted chat leaves the list"
+        );
+        let Some(chat) = session.chats.values_mut().next() else {
+            panic!("a chat");
+        };
+        chat.title.push_str(" renamed");
+        assert_ne!(
+            super::listed_chats_fingerprint(session.chats.values(), &[]),
+            before
+        );
+    });
+}

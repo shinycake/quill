@@ -28,7 +28,8 @@ use quill::spell_catalog::{
     next_chosen, percent, remove,
 };
 use quill::spell_dict::EngineKind;
-use quill::spell_download::{Progress, download_dictionary, run_guarded};
+use quill::spell_download::{DownloadError, Progress, download_dictionary, run_guarded};
+use std::collections::BTreeSet;
 
 /// The one download in flight (tdesktop also loads a single dictionary at
 /// a time).
@@ -45,6 +46,9 @@ pub(super) struct DictManager {
     pub open: bool,
     download: Option<ActiveDownload>,
     task: Option<Task<()>>,
+    /// The codes of the dictionaries on disk, read when the list opens and
+    /// after a download or a removal, not on every frame.
+    installed: BTreeSet<String>,
     /// `(code, message)` of the last failed download.
     failed: Option<(String, String)>,
     /// Screenshot fixture: rows to show instead of the real ones.
@@ -62,6 +66,13 @@ impl QuillApp {
         self.spell.dict_manager.demo_rows.is_some() || self.spell.info.kind != EngineKind::System
     }
 
+    /// Reads the dictionary folder into [`DictManager::installed`].
+    fn refresh_installed_dictionaries(&mut self) {
+        self.spell.dict_manager.installed = Self::dictionaries_dir()
+            .map(|dir| installed_codes(&dir))
+            .unwrap_or_default();
+    }
+
     fn dictionary_rows(&self, query: &str) -> Vec<ManagerRow> {
         if let Some(rows) = &self.spell.dict_manager.demo_rows {
             return rows
@@ -70,16 +81,14 @@ impl QuillApp {
                 .cloned()
                 .collect();
         }
-        let managed = Self::dictionaries_dir()
-            .map(|dir| installed_codes(&dir))
-            .unwrap_or_default();
+        let managed = &self.spell.dict_manager.installed;
         let transfer = self.spell.dict_manager.download.as_ref().map(|d| Transfer {
             code: &d.code,
             percent: d.percent,
         });
         build_rows(
             &RowInputs {
-                managed: &managed,
+                managed,
                 available: &self.spell.info.available,
                 active: &self.spell.info.active,
                 transfer,
@@ -142,6 +151,10 @@ impl QuillApp {
 
     fn start_dictionary_download(&mut self, code: &str, cx: &mut Context<Self>) {
         if self.spell.dict_manager.download.is_some() {
+            // One download at a time: the switch snaps back, so say why.
+            self.set_note(StatusNote::info(tr(
+                keys::Q_MISC_WAIT_FOR_THE_DICTIONARY_DOWNLOAD,
+            )));
             return;
         }
         let (Some(dir), Some(entry)) =
@@ -183,6 +196,7 @@ impl QuillApp {
             let result = worker.await;
             let _ = this.update(cx, |this, cx| {
                 this.spell.dict_manager.download = None;
+                this.refresh_installed_dictionaries();
                 match result {
                     Ok(()) => {
                         let next = next_chosen(
@@ -193,8 +207,10 @@ impl QuillApp {
                         );
                         this.set_spell_languages(next, cx);
                     }
-                    Err(message) if message == "Cancelled." => {}
-                    Err(message) => this.spell.dict_manager.failed = Some((code.clone(), message)),
+                    Err(DownloadError::Cancelled) => {}
+                    Err(DownloadError::Message(message)) => {
+                        this.spell.dict_manager.failed = Some((code.clone(), message));
+                    }
                 }
                 cx.notify();
             });
@@ -207,11 +223,15 @@ impl QuillApp {
         let Some(dir) = Self::dictionaries_dir() else {
             return;
         };
-        if let Err(err) = remove(&dir, code) {
+        let removed = remove(&dir, code);
+        // A half-removed dictionary still counts as it is on disk.
+        self.refresh_installed_dictionaries();
+        if let Err(err) = removed {
             self.set_note(StatusNote::error(tr_with(
                 keys::Q_MISC_COULDNT_REMOVE_THE_DICTIONARY,
                 &[("err", &err.to_string())],
             )));
+            return;
         }
         let chosen: Vec<String> = self
             .spell
@@ -293,6 +313,9 @@ impl QuillApp {
                 .small()
                 .on_click(cx.listener(|this, _, _, cx| {
                     this.spell.dict_manager.open = !this.spell.dict_manager.open;
+                    if this.spell.dict_manager.open {
+                        this.refresh_installed_dictionaries();
+                    }
                     cx.notify();
                 })),
         );

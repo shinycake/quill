@@ -16,7 +16,9 @@
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, OnceLock};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use crate::spellcheck::{
     Script, SpellBackend, SpellChecker, locale_script, spelling_languages, word_script,
@@ -221,19 +223,59 @@ pub fn load_dictionary(file: &DictionaryFile) -> Option<spellbook::Dictionary> {
     parse_dictionary(&aff_bytes, &dic_bytes)
 }
 
+/// How long a dictionary that failed to load is left alone before the next
+/// check tries it again (a file that was briefly locked or being replaced).
+const RETRY_AFTER: Duration = Duration::from_secs(30);
+
+/// Where one dictionary's parse stands.
+enum Load {
+    Unloaded,
+    Loaded(Arc<spellbook::Dictionary>),
+    /// The files were unreadable or unparsable; asked again at `retry_at`.
+    Failed {
+        retry_at: Instant,
+    },
+}
+
 struct Entry {
     file: DictionaryFile,
     script: Script,
     /// Parsed on first use (a big dictionary takes a noticeable moment),
-    /// which happens on the checker's background thread.
-    dict: OnceLock<Option<spellbook::Dictionary>>,
+    /// which happens on the checker's background thread. The lock is held
+    /// while parsing, so a second asker waits for the one parse.
+    dict: Mutex<Load>,
 }
 
 impl Entry {
-    fn dict(&self) -> Option<&spellbook::Dictionary> {
-        self.dict
-            .get_or_init(|| load_dictionary(&self.file))
-            .as_ref()
+    fn dict(&self) -> Option<Arc<spellbook::Dictionary>> {
+        self.dict_at(Instant::now())
+    }
+
+    fn dict_at(&self, now: Instant) -> Option<Arc<spellbook::Dictionary>> {
+        let mut load = crate::locks::lock_or_recover(&self.dict);
+        match &*load {
+            Load::Loaded(dict) => return Some(Arc::clone(dict)),
+            Load::Failed { retry_at } if now < *retry_at => return None,
+            Load::Unloaded | Load::Failed { .. } => {}
+        }
+        match load_dictionary(&self.file) {
+            Some(dict) => {
+                let dict = Arc::new(dict);
+                *load = Load::Loaded(Arc::clone(&dict));
+                Some(dict)
+            }
+            None => {
+                *load = Load::Failed {
+                    retry_at: now + RETRY_AFTER,
+                };
+                None
+            }
+        }
+    }
+
+    /// Whether a parse has been tried (it may have failed).
+    fn is_tried(&self) -> bool {
+        !matches!(*crate::locks::lock_or_recover(&self.dict), Load::Unloaded)
     }
 }
 
@@ -254,7 +296,7 @@ impl HunspellBackend {
                 Some(Entry {
                     file,
                     script,
-                    dict: OnceLock::new(),
+                    dict: Mutex::new(Load::Unloaded),
                 })
             })
             .collect();
@@ -263,7 +305,7 @@ impl HunspellBackend {
 
     /// Whether every dictionary has been parsed (or failed to).
     pub fn is_warm(&self) -> bool {
-        self.entries.iter().all(|e| e.dict.get().is_some())
+        self.entries.iter().all(Entry::is_tried)
     }
 
     fn for_word(&self, word: &str) -> impl Iterator<Item = &Entry> {
@@ -275,8 +317,11 @@ impl HunspellBackend {
 }
 
 impl SpellBackend for HunspellBackend {
-    fn warm(&self) {
+    fn warm(&self, cancel: &AtomicBool) {
         for entry in &self.entries {
+            if cancel.load(Ordering::Relaxed) {
+                return;
+            }
             let _ = entry.dict();
         }
     }
@@ -286,17 +331,27 @@ impl SpellBackend for HunspellBackend {
     }
 
     fn is_correct(&self, word: &str) -> bool {
+        self.judge(word).unwrap_or(true)
+    }
+
+    /// `None` when a dictionary of the word's script exists but none could
+    /// be loaded: the checker neither flags nor remembers the word, so it is
+    /// judged again once the dictionary loads.
+    fn judge(&self, word: &str) -> Option<bool> {
+        let mut any_entry = false;
         let mut any_loaded = false;
         for entry in self.for_word(word) {
+            any_entry = true;
             let Some(dict) = entry.dict() else { continue };
             any_loaded = true;
             if dict.check(word) {
-                return true;
+                return Some(true);
             }
         }
-        // Nothing could judge the word (unloadable dictionaries): don't
-        // flag it.
-        !any_loaded
+        if any_entry && !any_loaded {
+            return None;
+        }
+        Some(false)
     }
 
     fn suggestions(&self, word: &str, limit: usize) -> Vec<String> {
@@ -364,11 +419,25 @@ pub fn select_backend(
 }
 
 /// Parse the dictionaries off the calling thread. Until it finishes the
-/// checker's background pass simply waits on the same `OnceLock`, so the UI
+/// checker's background pass simply waits on the same lock, so the UI
 /// thread (which only paints cached underlines) never blocks on the parse.
-fn warm_in_background(backend: &Arc<dyn SpellBackend>) {
+/// The returned guard stops the remaining parses when the engine is dropped.
+fn warm_in_background(backend: &Arc<dyn SpellBackend>) -> WarmGuard {
     let backend = Arc::clone(backend);
-    let _ = crate::thread_guard::spawn_guarded("quill-spell-warm", move || backend.warm());
+    let cancel = Arc::new(AtomicBool::new(false));
+    let seen = Arc::clone(&cancel);
+    let _ = crate::thread_guard::spawn_guarded("quill-spell-warm", move || backend.warm(&seen));
+    WarmGuard(cancel)
+}
+
+/// Owned by a [`SpellEngine`]: dropping the engine tells its warm-up thread
+/// to skip the dictionaries it has not parsed yet.
+struct WarmGuard(Arc<AtomicBool>);
+
+impl Drop for WarmGuard {
+    fn drop(&mut self) {
+        self.0.store(true, Ordering::Relaxed);
+    }
 }
 
 /// A checker plus what the settings page shows about it.
@@ -380,6 +449,7 @@ pub struct SpellEngine {
     pub available: Vec<String>,
     /// Dictionaries in use.
     pub active: Vec<String>,
+    _warm: WarmGuard,
 }
 
 /// Builds the Hunspell/none engine from `dirs` (no OS checker). `chosen`
@@ -394,7 +464,7 @@ pub fn hunspell_engine(dirs: &[PathBuf], system: &[String], chosen: &[String]) -
         .collect();
     let hunspell = HunspellBackend::new(ordered).map(|b| Arc::new(b) as Arc<dyn SpellBackend>);
     let (kind, backend) = select_backend(None, hunspell);
-    warm_in_background(&backend);
+    let warm = warm_in_background(&backend);
     SpellEngine {
         kind,
         checker: Arc::new(SpellChecker::new(backend)),
@@ -404,6 +474,7 @@ pub fn hunspell_engine(dirs: &[PathBuf], system: &[String], chosen: &[String]) -
         } else {
             active
         },
+        _warm: warm,
     }
 }
 
@@ -623,8 +694,37 @@ mod tests {
         let files = discover_dictionaries(&[fixtures()]);
         let backend = super::HunspellBackend::new(files).expect("fixture dictionaries");
         assert!(!backend.is_warm());
-        backend.warm();
+        backend.warm(&std::sync::atomic::AtomicBool::new(false));
         assert!(backend.is_warm());
+    }
+
+    #[test]
+    fn a_cancelled_warm_parses_nothing() {
+        let files = discover_dictionaries(&[fixtures()]);
+        let backend = super::HunspellBackend::new(files).expect("fixture dictionaries");
+        backend.warm(&std::sync::atomic::AtomicBool::new(true));
+        assert!(!backend.is_warm());
+    }
+
+    #[test]
+    fn a_failed_load_is_retried_after_the_wait() {
+        let dir = TempDir::new();
+        let file = super::DictionaryFile {
+            code: "en_US".into(),
+            aff: dir.path().join("en.aff"),
+            dic: dir.path().join("en.dic"),
+        };
+        let backend = super::HunspellBackend::new(vec![file]).expect("checkable script");
+        let entry = backend.entries.first().expect("one entry");
+        let start = std::time::Instant::now();
+        // Unreadable now: not flagged, and not retried at once.
+        assert!(entry.dict_at(start).is_none());
+        std::fs::write(dir.path().join("en.aff"), "SET UTF-8\n").unwrap();
+        std::fs::write(dir.path().join("en.dic"), "1\nhello\n").unwrap();
+        assert!(entry.dict_at(start).is_none());
+        let later = start + super::RETRY_AFTER;
+        assert!(entry.dict_at(later).is_some());
+        assert!(backend.is_correct("hello") && !backend.is_correct("wrold"));
     }
 
     #[test]

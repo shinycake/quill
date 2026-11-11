@@ -353,6 +353,7 @@
 "qll_misc_loading_the_day" = "Loading the day…";
 "qll_misc_loading_wallpapers" = "Loading wallpapers…";
 "qll_misc_loading_your_emoji_packs" = "Loading your emoji packs";
+"qll_misc_wait_for_the_dictionary_download" = "Wait for the current dictionary download to finish.";
 "qll_misc_you_have_no_emoji_packs" = "You have no emoji packs";
 "qll_misc_location" = "📍 Location";
 "qll_misc_lock_hands_free_recording_esc" = "Lock: hands-free recording — Esc won't cancel";

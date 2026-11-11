@@ -23,6 +23,20 @@ pub enum ToneProblem {
     Unreadable,
 }
 
+/// The picker an "Upload Sound" was started from: the new sound is
+/// selected there. It travels with the upload in the session, so an account
+/// switch cannot part the two.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ToneTarget {
+    Chat(crate::ids::ChatId),
+    /// The chat's story sound (`story_sound_id`), apart from its message
+    /// sound.
+    ChatStory(crate::ids::ChatId),
+    Scope(crate::telegram::envelope::NotificationSettingsScope),
+    /// `reactionNotificationSettings`.
+    Reaction,
+}
+
 /// The upload as the session knows it.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub enum ToneUpload {
@@ -30,9 +44,13 @@ pub enum ToneUpload {
     Idle,
     Uploading {
         name: String,
+        target: ToneTarget,
     },
+    /// The sound landed; `target` is where it was asked for (`None` when
+    /// the upload is no longer known to the session).
     Added {
         sound_id: i64,
+        target: Option<ToneTarget>,
     },
     Failed(ToneProblem),
 }

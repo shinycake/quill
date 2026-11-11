@@ -19,6 +19,8 @@ pub(crate) enum MuteSection {
     Custom,
     /// The notification sound picker.
     SoundPicker,
+    /// The story sound picker.
+    StorySoundPicker,
 }
 
 /// The open Mute panel (tdesktop Mute submenu: 1 hour / 8 hours / 2 days /
@@ -41,12 +43,6 @@ pub(crate) struct NotifyUi {
     /// conversation header (`setChatMessageAutoDeleteTime`), open for
     /// this chat.
     pub(super) ttl_picker: Option<ChatId>,
-    /// The picker an "Upload Sound" in flight was started from: the new
-    /// sound is selected there.
-    pub(super) tone_upload_target: Option<SoundPickerTarget>,
-    /// Parity slice (`parity:stories-notify-settings`): the notifications
-    /// panel's story-sound picker sub-view is open.
-    pub(super) story_sound_picker_open: bool,
     /// Parity slice: which defaults-dialog section's sound picker is
     /// expanded (`None` = all collapsed).
     pub(super) defaults_sound_picker: Option<SoundPickerTarget>,
@@ -92,6 +88,13 @@ impl NotifyUi {
         }
     }
 
+    /// Collapse the open Mute panel's `section`, if it is the expanded one.
+    pub(super) fn collapse_mute_section(&mut self, section: MuteSection) {
+        if self.mute_section() == section {
+            self.set_mute_section(MuteSection::Collapsed);
+        }
+    }
+
     /// Flip `section`: it opens, or collapses when it was the open one.
     pub(super) fn toggle_mute_section(&mut self, section: MuteSection) -> bool {
         let open = self.mute_section() != section;
@@ -108,8 +111,6 @@ impl NotifyUi {
             mute_box: None,
             mute_time: None,
             ttl_picker: None,
-            tone_upload_target: None,
-            story_sound_picker_open: false,
             defaults_sound_picker: None,
             defaults_exceptions_scope: None,
             notifications_confirm: None,

@@ -67,7 +67,6 @@ impl QuillApp {
     /// Parity slice: apply the reaction-notification sound
     /// (`setReactionNotificationSettings`).
     pub(in crate::ui) fn apply_reaction_sound(&mut self, sound_id: i64, cx: &mut Context<Self>) {
-        self.notify.defaults_sound_picker = None;
         if let Some(live) = self.live.as_mut() {
             // Guard: never send schema-defaults as current state — no
             // getter exists, so wait for the first
@@ -87,6 +86,10 @@ impl QuillApp {
             };
             settings.sound_id = sound_id;
             let result = live.driver.send_reaction_notification_settings(&settings);
+            // The picker closes once the change went out.
+            if result.is_ok() {
+                self.notify.defaults_sound_picker = None;
+            }
             self.set_note(match result {
                 Ok(_) => StatusNote::silent(tr(keys::Q_PREFS_REACTION_SOUND_UPDATED)),
                 Err(_) => StatusNote::error(tr(keys::Q_PREFS_COULD_NOT_CHANGE_REACTION_SOUND)),
@@ -100,6 +103,7 @@ impl QuillApp {
                 .unwrap_or_default();
             settings.sound_id = sound_id;
             session.settings.reaction_notification_settings = Some(settings);
+            self.notify.defaults_sound_picker = None;
             self.set_note(StatusNote::silent(tr(
                 keys::Q_PREFS_REACTION_SOUND_UPDATED_2,
             )));

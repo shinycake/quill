@@ -129,6 +129,19 @@ fn sanitize(zoom: f32) -> f32 {
 
 type ResizeCallback = Box<dyn FnMut(Size<Pixels>, f32)>;
 
+/// Where [`WindowZoom::fire_resize`] stands: a zoom change that arrives
+/// while the callback runs is not lost, the callback runs once more.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum Refire {
+    #[default]
+    Idle,
+    Running,
+    RunAgain,
+}
+
+/// Most times in a row one `fire_resize` re-runs the callback.
+const MAX_REFIRES: u8 = 4;
+
 /// Per-window zoom state shared between the window wrapper, its callbacks
 /// and [`set_zoom`].
 struct WindowZoom {
@@ -136,6 +149,7 @@ struct WindowZoom {
     /// GPUI's resize callback; [`set_zoom`] calls it so GPUI re-reads the
     /// viewport and scale factor.
     resize: RefCell<Option<ResizeCallback>>,
+    refire: Cell<Refire>,
     /// The platform's last reported content size and display scale.
     raw_size: Cell<Size<Pixels>>,
     raw_scale: Cell<f32>,
@@ -156,6 +170,7 @@ impl WindowZoom {
         let state = Rc::new(WindowZoom {
             zoom: Cell::new(zoom),
             resize: RefCell::new(None),
+            refire: Cell::new(Refire::Idle),
             raw_size: Cell::new(raw_size),
             raw_scale: Cell::new(raw_scale),
             traffic_light: Cell::new(traffic_light),
@@ -172,15 +187,27 @@ impl WindowZoom {
     fn fire_resize(&self) {
         // Take the callback out while it runs: GPUI's handler reads the
         // window back through the wrapper, and a nested zoom change must
-        // not find the cell borrowed.
+        // not find the cell borrowed. That nested change asks for another
+        // run instead of being skipped.
+        if self.refire.get() != Refire::Idle {
+            self.refire.set(Refire::RunAgain);
+            return;
+        }
         let Some(mut callback) = self.resize.borrow_mut().take() else {
             return;
         };
-        let zoom = self.zoom.get();
-        callback(
-            size_in(self.raw_size.get(), zoom),
-            self.raw_scale.get() * zoom,
-        );
+        for _ in 0..=MAX_REFIRES {
+            self.refire.set(Refire::Running);
+            let zoom = self.zoom.get();
+            callback(
+                size_in(self.raw_size.get(), zoom),
+                self.raw_scale.get() * zoom,
+            );
+            if self.refire.get() != Refire::RunAgain {
+                break;
+            }
+        }
+        self.refire.set(Refire::Idle);
         let mut slot = self.resize.borrow_mut();
         if slot.is_none() {
             *slot = Some(callback);
@@ -947,6 +974,30 @@ mod tests {
         let mut quit = noting_quit(Box::new(|| true));
         assert!(quit());
         assert!(crate::ui::startup_failure::quit_asked());
+    }
+
+    #[test]
+    fn a_zoom_change_inside_the_resize_callback_runs_it_again() {
+        let state = WindowZoom::register(1., Size::new(px(1000.), px(600.)), 1., None);
+        let seen = Rc::new(RefCell::new(Vec::new()));
+        let log = seen.clone();
+        let inner = Rc::downgrade(&state);
+        *state.resize.borrow_mut() = Some(Box::new(move |size, scale| {
+            log.borrow_mut().push((size, scale));
+            // The first run changes the zoom while it is still running.
+            if log.borrow().len() == 1
+                && let Some(state) = inner.upgrade()
+            {
+                state.zoom.set(2.);
+                state.fire_resize();
+            }
+        }));
+        state.fire_resize();
+        let seen = seen.borrow();
+        assert_eq!(seen.len(), 2, "the nested change was not skipped");
+        assert_eq!(seen[1], (Size::new(px(500.), px(300.)), 2.));
+        assert_eq!(state.refire.get(), Refire::Idle);
+        assert!(state.resize.borrow().is_some(), "the callback is back");
     }
 
     #[test]

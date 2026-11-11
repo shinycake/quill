@@ -452,7 +452,11 @@ impl QuillApp {
     /// the built-in default.
     fn delete_custom_theme(&mut self, name: &str, cx: &mut Context<Self>) {
         if let Err(err) = store::delete(&Self::themes_dir(), name) {
+            // The file is still there: the theme stays applied.
             self.set_note(StatusNote::error(err.note()));
+            self.refresh_custom_themes();
+            cx.notify();
+            return;
         }
         self.refresh_custom_themes();
         let gone = ThemeId::Custom(name.to_string());

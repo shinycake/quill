@@ -151,12 +151,15 @@ fn an_old_bot_message_loaded_after_the_start_does_not_bring_the_user_back(cx: &m
         (origin, chat, user)
     });
     app.update(&mut vcx, |app, cx| {
+        // The user is in the bot's chat when the start goes: the trip ends
+        // when they leave it, and a frame between the steps checks that.
         app.demo_session
             .as_mut()
             .expect("a demo session")
             .histories
             .remove(&bot_chat);
         app.begin_inline_return(bot_id, "somebot", "param");
+        app.demo_session.as_mut().expect("a demo session").open_chat = Some(ChatId(bot_chat));
         assert!(
             app.take_inline_start(ChatId(bot_chat), cx),
             "the start goes"
@@ -165,7 +168,6 @@ fn an_old_bot_message_loaded_after_the_start_does_not_bring_the_user_back(cx: &m
     // The user lands in the bot's chat; its history loads: an old answer
     // of the bot, then the user's own start.
     app.update_in(&mut vcx, |app, window, cx| {
-        app.demo_session.as_mut().expect("a demo session").open_chat = Some(ChatId(bot_chat));
         apply_json(app, &bot_message(bot_chat, 5, false, true));
         apply_json(app, &bot_message(bot_chat, 10, true, false));
         app.flush_inline_return(window, cx);

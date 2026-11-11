@@ -606,8 +606,12 @@ fn installed_backgrounds_and_default_updates_are_cached() {
     assert!(!session.chats_state.default_backgrounds.contains_key(&false));
 
     // A set answer files under the theme it was sent for; errors surface.
-    session.chats_state.background_set_for_dark = false;
-    let extra = session.request(RequestPurpose::SetDefaultBackground, None);
+    let extra = session.request(
+        RequestPurpose::Chats(ChatsPurpose::SetDefaultBackground {
+            for_dark_theme: false,
+        }),
+        None,
+    );
     apply_json(
         &mut session,
         &seq,
@@ -618,6 +622,34 @@ fn installed_backgrounds_and_default_updates_are_cached() {
         ),
     );
     assert_eq!(session.chats_state.default_backgrounds[&false].id, 5);
+
+    // Two sets in flight (light, then dark): each answer files under the
+    // theme of the request it answers, not the latest one sent (02-086).
+    let light = session.request(
+        RequestPurpose::Chats(ChatsPurpose::SetDefaultBackground {
+            for_dark_theme: false,
+        }),
+        None,
+    );
+    let dark = session.request(
+        RequestPurpose::Chats(ChatsPurpose::SetDefaultBackgroundLocal {
+            for_dark_theme: true,
+        }),
+        None,
+    );
+    for (extra, id) in [(light, 11), (dark, 12)] {
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"background","@extra":"{}","id":{id},"is_default":true,"is_dark":false,"name":"w{id}","type":{{"@type":"backgroundTypeFill","fill":{{"@type":"backgroundFillSolid","color":2}}}}}}"#,
+                extra.0
+            ),
+        );
+    }
+    assert_eq!(session.chats_state.default_backgrounds[&false].id, 11);
+    assert_eq!(session.chats_state.default_backgrounds[&true].id, 12);
     let extra = session.request(
         RequestPurpose::Chats(ChatsPurpose::RemoveInstalledBackground { background_id: 1 }),
         None,

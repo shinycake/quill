@@ -34,6 +34,9 @@ use std::time::{Duration, Instant};
 
 /// How long a resized area's size must hold before it re-renders.
 const SETTLE: Duration = Duration::from_millis(150);
+/// How long a fill shown alone (its pattern could not be read) is kept
+/// before the pattern is read again.
+const RETRY_AFTER: Duration = Duration::from_secs(5);
 /// Rendered images kept (a 1200 x 900 area at 2x is about 17 MB).
 const BUDGET_BYTES: usize = 64 << 20;
 /// Finished results nobody picked up are dropped past this many.
@@ -48,7 +51,7 @@ pub(super) enum Slot {
     /// The history of one window (the canvas adds the window id). The
     /// entity re-renders when a crossfade starts.
     History(EntityId),
-    /// The wallpaper preview in a dialog.
+    /// The wallpaper preview in a dialog (the canvas adds the window id).
     Preview,
     /// A gallery thumbnail: fixed size, never replaced or delayed.
     Thumb,
@@ -243,6 +246,8 @@ struct Entry {
     key: u64,
     composite: Option<Composite>,
     bytes: usize,
+    /// For a picture made without its pattern: when to make it again.
+    retry_at: Option<Instant>,
     /// When and where it was last asked for to paint.
     painted: image_budget::PaintStamp,
     /// The windows it was painted in (`painted` counts the main window's
@@ -289,8 +294,19 @@ struct Fade {
 impl Cache {
     /// The image for `key`, to paint now in `window`.
     fn get(&mut self, key: u64, window: WindowId) -> Option<Option<Composite>> {
+        self.get_at(key, window, Instant::now())
+    }
+
+    /// [`Self::get`] at `now`: a picture whose retry time has come is gone,
+    /// so it is made again.
+    fn get_at(&mut self, key: u64, window: WindowId, now: Instant) -> Option<Option<Composite>> {
         let at = self.entries.iter().position(|e| e.key == key)?;
         let mut entry = self.entries.remove(at)?;
+        if entry.retry_at.is_some_and(|retry| now >= retry) {
+            self.bytes -= entry.bytes;
+            image_budget::retire_all(entry.composite.map(|c| c.image));
+            return None;
+        }
         entry.paint_in(window);
         let value = entry.composite.clone();
         self.entries.push_back(entry);
@@ -305,7 +321,18 @@ impl Cache {
         entry.composite.clone()
     }
 
+    #[cfg(test)]
     fn insert(&mut self, key: u64, composite: Option<Composite>, window: WindowId) {
+        self.insert_until(key, composite, window, None);
+    }
+
+    fn insert_until(
+        &mut self,
+        key: u64,
+        composite: Option<Composite>,
+        window: WindowId,
+        retry_at: Option<Instant>,
+    ) {
         let bytes = composite
             .as_ref()
             .map_or(0, |c| c.size.0 as usize * c.size.1 as usize * 4);
@@ -313,6 +340,7 @@ impl Cache {
             key,
             composite,
             bytes,
+            retry_at,
             painted: image_budget::paint_stamp(),
             windows: SmallVec::from_buf([window]),
         });
@@ -527,15 +555,17 @@ fn lookup(
             let rendered = render_guarded(|| {
                 INLINE_SOURCES.with(|s| s.borrow_mut().render(wallpaper, width, height))
             });
+            let retry_at = retry_time(rendered.as_ref());
             let composite = rendered.and_then(|r| to_composite(r, width, height));
-            cache.insert(key, composite.clone(), window);
+            cache.insert_until(key, composite.clone(), window, retry_at);
             return ready(&mut cache, composite, true);
         }
         let mut board = shared.board.lock_or_recover();
         if let Some((_, result)) = board.done.remove(&key) {
             drop(board);
+            let retry_at = retry_time(result.as_ref());
             let composite = result.and_then(|r| to_composite(r, width, height));
-            cache.insert(key, composite.clone(), window);
+            cache.insert_until(key, composite.clone(), window, retry_at);
             return ready(&mut cache, composite, true);
         }
         // Thumbnails share a slot and never resize: no stale picture.
@@ -571,8 +601,15 @@ fn lookup(
     })
 }
 
+/// When a picture made without its pattern is made again.
+fn retry_time(rendered: Option<&Rendered>) -> Option<Instant> {
+    rendered
+        .is_some_and(|r| !r.complete)
+        .then(|| Instant::now() + RETRY_AFTER)
+}
+
 fn to_composite(rendered: Rendered, width: u32, height: u32) -> Option<Composite> {
-    let Rendered { raster, x, y } = rendered;
+    let Rendered { raster, x, y, .. } = rendered;
     let size = (raster.width, raster.height);
     let buffer = image::RgbaImage::from_raw(raster.width, raster.height, raster.bgra)?;
     Some(Composite {
@@ -591,12 +628,12 @@ fn to_composite(rendered: Rendered, width: u32, height: u32) -> Option<Composite
 pub(super) fn wallpaper_layer(
     wallpaper: Wallpaper,
     slot: Slot,
-    on_area: Option<fn(Bounds<Pixels>)>,
+    on_area: Option<fn(Bounds<Pixels>, &Window)>,
 ) -> impl IntoElement {
     canvas(
         move |bounds, window, cx| {
             if let Some(on_area) = on_area {
-                on_area(bounds);
+                on_area(bounds, window);
             }
             let scale = window.scale_factor();
             let width = (f32::from(bounds.size.width) * scale).round().max(0.0) as u32;
@@ -606,7 +643,9 @@ pub(super) fn wallpaper_layer(
             }
             let mut hasher = std::hash::DefaultHasher::new();
             slot.hash(&mut hasher);
-            if let Slot::History(_) = slot {
+            // A history and a preview are one per window: the same slot in
+            // two windows must not replace each other's job.
+            if let Slot::History(_) | Slot::Preview = slot {
                 window
                     .window_handle()
                     .window_id()
@@ -654,7 +693,7 @@ pub(super) fn wallpaper_layer(
 
 #[cfg(test)]
 mod tests {
-    use super::{Board, Cache, Composite, Job, Shown, image_key, render_guarded};
+    use super::{Board, Cache, Composite, Job, RETRY_AFTER, Shown, image_key, render_guarded};
     use crate::ui::image_budget::begin_frame;
     use crate::ui::wallpaper::Wallpaper;
     use gpui_kit::{RenderImage, WindowId};
@@ -700,6 +739,24 @@ mod tests {
             window: window(in_window),
         };
         cache.shown.insert(slot, shown);
+    }
+
+    #[test]
+    fn a_picture_made_without_its_pattern_is_made_again_after_the_wait() {
+        let mut cache = Cache::default();
+        let start = Instant::now();
+        let retry = Some(start + RETRY_AFTER);
+        cache.insert_until(1, Some(composite(1)), window(MAIN), retry);
+        assert!(cache.get_at(1, window(MAIN), start).is_some());
+        assert!(cache.get_at(1, window(MAIN), start + RETRY_AFTER).is_none());
+        assert!(cache.entries.is_empty() && cache.bytes == 0);
+        // A complete picture has no deadline.
+        cache.insert(2, Some(composite(2)), window(MAIN));
+        assert!(
+            cache
+                .get_at(2, window(MAIN), start + RETRY_AFTER * 100)
+                .is_some()
+        );
     }
 
     #[test]

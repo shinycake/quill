@@ -327,6 +327,28 @@ fn take_purpose_drops_only_matching_request() {
     assert!(session.requests.take(sounds_id).is_some());
 }
 
+/// A request that is never answered (the account closes, or the flood
+/// re-send fails) settles through the error path, which ends the stages
+/// that waited on it: nothing blocks until restart (02-206, 02-211).
+#[test]
+fn an_unanswered_device_login_and_tone_upload_settle_with_their_account() {
+    use crate::tone_upload::{ToneTarget, ToneUpload};
+    let (mut session, _) = session();
+    session.request(RequestPurpose::ConfirmDeviceLogin, None);
+    session.request(RequestPurpose::UploadSavedNotificationSound, None);
+    session.settings.sessions_mutating = true;
+    session.settings.tone_upload = ToneUpload::Uploading {
+        name: "Chime".into(),
+        target: ToneTarget::Reaction,
+    };
+    session.settle_account_requests();
+    assert!(!session.settings.sessions_mutating);
+    assert!(matches!(
+        session.settings.tone_upload,
+        ToneUpload::Failed(_)
+    ));
+}
+
 #[test]
 fn storage_statistics_answer_cached_by_purpose() {
     let (mut with_purpose, sink) = session();

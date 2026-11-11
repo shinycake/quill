@@ -131,9 +131,9 @@ impl QuillApp {
         self.privacy.extra.network_reset_confirm = false;
         if let Some(demo) = self.demo_session.as_mut() {
             demo.settings.storage_freed = None;
-            if demo.settings.privacy_data.network_usage.is_none() {
-                demo.settings.privacy_data.network_usage =
-                    Some(super::data_extra::demo_network_usage());
+            if demo.settings.privacy_data.network.data().is_none() {
+                demo.settings.privacy_data.network =
+                    quill::state::fetch::Fetch::Ready(super::data_extra::demo_network_usage());
             }
         }
         cx.notify();

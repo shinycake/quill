@@ -12,6 +12,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     pub fn upload_notification_tone(
         &mut self,
         path: &std::path::Path,
+        target: crate::tone_upload::ToneTarget,
     ) -> Result<RequestId, ToneProblem> {
         if !self.chats_path_active() {
             return Err(ToneProblem::Unreadable);
@@ -35,6 +36,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             Ok(()) => {
                 self.session.settings.tone_upload = ToneUpload::Uploading {
                     name: display_name(path),
+                    target,
                 };
                 Ok(extra)
             }

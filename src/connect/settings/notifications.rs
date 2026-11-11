@@ -438,7 +438,15 @@ impl<S: JsonSender> ConnectDriver<S> {
         // A play request is explicit: retry even if an earlier attempt
         // stalled (the stall mark only stops per-ingest auto retries).
         self.session.media.downloads.clear_stalled(file_id.0);
-        let _ = self.download_file(file_id, USER_DOWNLOAD_PRIORITY);
+        if self.download_file(file_id, USER_DOWNLOAD_PRIORITY).is_err() {
+            // Nothing will complete this file: a later unrelated
+            // completion must not play the sound.
+            self.session.settings.sound_file_ids.remove(&file_id.0);
+            self.session
+                .settings
+                .pending_sound_downloads
+                .remove(&sound_id);
+        }
         R::Pending
     }
 }

@@ -37,6 +37,34 @@ pub struct LanguageSwitch {
     pub pack: Option<Vec<(String, PackValue)>>,
     /// `Some(vec![])` up front when the pack has no base pack.
     pub base: Option<Vec<(String, PackValue)>>,
+    /// What the server changed in this pack while its strings were being
+    /// fetched; applied once the switch is ready.
+    pub late: LateChange,
+}
+
+/// Changes to the pack being switched to that arrived before its strings
+/// did: the fetched snapshot may or may not include them.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub enum LateChange {
+    #[default]
+    Nothing,
+    /// Changed strings to patch over the fetched ones.
+    Patch(Vec<(String, PackValue)>),
+    /// Deleted strings or a base-pack change: fetch both packs again.
+    Reload,
+}
+
+impl LateChange {
+    fn note(&mut self, own_pack: bool, strings: Vec<(String, PackValue)>) {
+        let deletes = strings.iter().any(|(_, v)| matches!(v, PackValue::Deleted));
+        if !own_pack || strings.is_empty() || deletes {
+            *self = Self::Reload;
+        } else if let Self::Patch(queued) = self {
+            queued.extend(strings);
+        } else if matches!(self, Self::Nothing) {
+            *self = Self::Patch(strings);
+        }
+    }
 }
 
 /// The strings of a finished switch, for the UI to install.
@@ -112,6 +140,11 @@ impl Session {
                     // Changes queued for the old pack do not apply to this one.
                     state.patch.clear();
                     state.reload = false;
+                    match switch.late {
+                        LateChange::Nothing => {}
+                        LateChange::Patch(late) => state.patch = late,
+                        LateChange::Reload => state.reload = true,
+                    }
                     state.ready = Some(LanguageReady {
                         info: switch.info,
                         pack: switch.pack.unwrap_or_default(),
@@ -126,6 +159,14 @@ impl Session {
             } => {
                 if localization_target != LOCALIZATION_TARGET {
                     return;
+                }
+                // The pack being switched to is not `current` yet: keep what
+                // changed in it for when its strings arrive.
+                if let Some(switch) = state.switching.as_mut() {
+                    let own = language_pack_id == switch.info.id;
+                    if own || language_pack_id == switch.info.base_language_pack_id {
+                        switch.late.note(own, strings.clone());
+                    }
                 }
                 let Some(current) = state.current.as_ref() else {
                     return;

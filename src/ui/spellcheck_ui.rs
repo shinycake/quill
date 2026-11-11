@@ -313,6 +313,16 @@ impl QuillApp {
         cx.notify();
     }
 
+    /// The Check spelling switch changed: every window's composer drops its
+    /// underlines (off) or is checked for the draft it already holds (on).
+    pub(super) fn sync_spellcheck_everywhere(&mut self, cx: &mut Context<Self>) {
+        self.in_every_window(cx, |this, cx| {
+            let text = this.composer.read(cx).value().to_string();
+            this.sync_spellcheck(&text, cx);
+        });
+        cx.notify();
+    }
+
     /// After the dictionary changed: re-check every window's composer
     /// soon. `accepted` is the word the user just added or ignored: it
     /// loses its underline at once, by its text, so the UI thread never

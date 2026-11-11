@@ -100,6 +100,9 @@ pub struct OsNotification {
     /// typed into the notification answers it in a group
     /// ([`plan_inline_reply`]). `None` for reaction notifications.
     pub message_id: Option<MessageId>,
+    /// The forum topic the message is in, when it is in one: bursts merge
+    /// per chat and topic (tdesktop keys its waiters by thread).
+    pub topic_id: Option<i32>,
     pub title: String,
     pub body: String,
 }
@@ -111,6 +114,7 @@ impl OsNotification {
         Self {
             chat_id: APP_NOTICE_CHAT,
             message_id: None,
+            topic_id: None,
             title,
             body,
         }
@@ -130,6 +134,7 @@ impl OsNotification {
         OsNotification {
             chat_id: self.chat_id,
             message_id: self.message_id,
+            topic_id: self.topic_id,
             title: APP_TITLE.to_string(),
             body: GENERIC_BODY.to_string(),
         }
@@ -155,6 +160,8 @@ pub struct QueuedNotification {
     pub chat_id: ChatId,
     /// The newest message of the burst (see [`OsNotification::message_id`]).
     pub message_id: Option<MessageId>,
+    /// The forum topic of the burst; a burst never spans two topics.
+    pub topic_id: Option<i32>,
     pub title: String,
     pub body: String,
     pub count: u32,
@@ -178,6 +185,7 @@ impl QueuedNotification {
         OsNotification {
             chat_id: self.chat_id,
             message_id: self.message_id,
+            topic_id: self.topic_id,
             title: APP_TITLE.to_string(),
             body: if self.count > 1 {
                 format!("{} new messages", self.count)
@@ -196,6 +204,7 @@ impl QueuedNotification {
         OsNotification {
             chat_id: self.chat_id,
             message_id: self.message_id,
+            topic_id: self.topic_id,
             title: self.title.clone(),
             body,
         }
@@ -203,7 +212,7 @@ impl QueuedNotification {
 }
 
 /// Merge `notification` into `queue`: an existing pending entry for the same
-/// chat bumps its burst count; otherwise a fresh entry is appended. The
+/// chat and topic bumps its burst count; otherwise a fresh entry is appended. The
 /// sound from the first message of a burst wins — a burst plays once.
 pub fn coalesce_notification(queue: &mut Vec<QueuedNotification>, notification: OsNotification) {
     coalesce_notification_with_sound(queue, notification, None, None);
@@ -217,7 +226,10 @@ pub fn coalesce_notification_with_sound(
     sound: Option<NotificationSoundKind>,
     photo: Option<FileId>,
 ) {
-    if let Some(existing) = queue.iter_mut().find(|q| q.chat_id == notification.chat_id) {
+    if let Some(existing) = queue
+        .iter_mut()
+        .find(|q| q.chat_id == notification.chat_id && q.topic_id == notification.topic_id)
+    {
         existing.count += 1;
         existing.photo = existing.photo.or(photo);
         // A reply from the notification answers the newest message.
@@ -228,6 +240,7 @@ pub fn coalesce_notification_with_sound(
         queue.push(QueuedNotification {
             chat_id: notification.chat_id,
             message_id: notification.message_id,
+            topic_id: notification.topic_id,
             title: notification.title,
             body: notification.body,
             count: 1,
@@ -362,6 +375,7 @@ pub fn decide_notify(input: &NotifyInput) -> Option<OsNotification> {
     Some(OsNotification {
         chat_id,
         message_id: Some(message.id),
+        topic_id: message.topic_id,
         title,
         body,
     })
@@ -625,6 +639,7 @@ pub fn decide_reaction_notify(input: &ReactionNotifyInput) -> Option<OsNotificat
     Some(OsNotification {
         chat_id: input.chat_id,
         message_id: None,
+        topic_id: None,
         title: input.chat_title.to_string(),
         body,
     })

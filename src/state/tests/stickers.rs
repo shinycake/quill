@@ -201,6 +201,38 @@ fn sound_list_refetch_prunes_file_ids() {
 }
 
 #[test]
+fn a_sound_list_answer_older_than_the_stale_mark_is_dropped() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    let old = session.request(RequestPurpose::GetSavedNotificationSounds, None);
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        r#"{"@type":"updateSavedNotificationSounds","notification_sound_ids":["1"]}"#,
+    );
+    assert!(session.settings.saved_sounds_stale);
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"notificationSounds","notification_sounds":[],"@extra":"{}"}}"#,
+            old.0
+        ),
+    );
+    assert!(
+        session.settings.saved_sounds_stale && !session.settings.saved_sounds_loaded,
+        "the older answer must not clear the mark"
+    );
+    assert!(
+        !session
+            .requests
+            .has_purpose(RequestPurpose::GetSavedNotificationSounds)
+    );
+}
+
+#[test]
 fn message_emoji_packs_are_distinct_and_skip_unresolved_emoji() {
     use crate::telegram::envelope::{StickerFormat, StickerItem, TextContent};
     use crate::text::{TextEntity, TextEntityKind};

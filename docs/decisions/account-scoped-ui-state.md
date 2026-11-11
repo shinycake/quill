@@ -5464,3 +5464,66 @@ land and the typed form was gone.
 - **Skipped.** 13-069: `AgentUi::pick_account` already resets the activity
   filter wherever `picked` changes, with a test
   (`picking_another_account_resets_the_activity_filter`).
+
+### Sweep fixes (s4-settings)
+
+- **Wallpapers.** A default-wallpaper request carries the theme it was sent for
+  (`SetDefaultBackground { for_dark_theme }`, the Local one too) and its answer
+  files under that theme, so two sets in flight cannot swap themes; the
+  session field `background_set_for_dark` is gone (02-086). An installed
+  wallpaper whose pattern file cannot be read is not remembered as unreadable;
+  the fill-only picture is cached until a retry time, not under the final key
+  for good (`Rendered::complete`, `Entry::retry_at`) (14-026). The preview
+  slot is hashed with its window id like the history's, so two preview areas
+  of different windows stop replacing each other's render job (14-024). A
+  gradient bubble uses the history area only when its own window reported it
+  (08-014).
+- **Settings state.** A saved-sound list answer older than the stale mark is
+  dropped with the request (`mark_saved_sounds_stale` takes the one in flight)
+  (02-209). A custom sound whose download cannot be sent leaves no pending
+  marker (02-210). Turning on "Use less data for calls" and saving the storage
+  limits send every network and option even if one send fails, and report the
+  first error (02-207). Privacy-data errors are one line per control
+  (`PrivacyControl`), shown where that control is; network usage is a
+  `Fetch<NetworkUsage>` (05-254). Updates to the language pack being switched
+  to wait on the switch (`LateChange`: a patch, or a reload when a string was
+  deleted or the base pack changed) and apply when it is ready (05-139). The
+  phone prompt's "No" lives with the suggestion (`PhonePrompt`) and starts at
+  the question whenever TDLib adds or removes the action (12-107). The phone
+  pickers' empty state is Loading, Couldn't load with Retry, or No more
+  contacts (12-020).
+- **Notifications.** Forum bursts coalesce per chat and topic (04-011). The
+  badge pref is saved before the session takes it (`set_badge_prefs`)
+  (11-p5-010). The story sound picker is a `MuteSection`, so the Mute panel
+  reopens collapsed (11-p5-012); a preset closes the box only when the change
+  went out (11-p5-013); the custom fields reset on every opening
+  (11-p5-014); the sound pickers close only when the change went out
+  (11-p5-017). A sound picked after the lock waits for the unlock
+  (11-p5-018). The upload's picker target is part of `ToneUpload` in the
+  session, so an account switch cannot part them (`ToneTarget`, shared with
+  the UI's `SoundPickerTarget`) (11-p5-019). A failed delete of a saved sound
+  says so (11-p5-020).
+- **Appearance and spelling.** A refused delete leaves the custom theme
+  applied (07-040); a renamed one repoints both slots (07-041). One task waits
+  for the Linux accent read (07-049). A zoom change inside the resize callback
+  runs it again (`Refire`) (10-141). The dictionary list is read from disk
+  when it opens and after a download or removal (13-062); a second download
+  says to wait (13-061); a user cancel is `DownloadError::Cancelled` (05-005);
+  a refused remove leaves the language chosen (05-006). A dictionary that
+  failed to load is tried again after 30 s, and the checker does not remember
+  the word it could not judge (05-013). A replaced engine's warm-up thread
+  stops (05-014). A verdict asked for before a cache clear is not stored after
+  it (05-008). Check spelling on checks every window's draft (13-058).
+- **Settings window.** The activity page size lives in `AgentPageUi`, starts
+  over with the filter, the account and each visit (13-070). The Add-a-chat
+  picker is keyed by a fingerprint of the chats it lists (13-076). Leaving a
+  page drops its search arrival, and a search result for the page already
+  shown runs leave then arrive (13-078, 13-077).
+- **Skipped.** 02-203: the refusal already restores the confirmed rule and the
+  call mirror (2ca5a183). 02-206, 02-211: a request that is never answered
+  settles through `settle_lost_request` (account loss, failed flood re-send),
+  whose error arms end the stages; TDLib itself does not drop requests (test
+  `an_unanswered_device_login_and_tone_upload_settle_with_their_account`).
+  03-080: a deleted string already asks for a reload of both packs.
+  05-004: cancel drops the app task, so the completion arm that enables the
+  language never runs (29f24e11).

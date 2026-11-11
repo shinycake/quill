@@ -48,8 +48,9 @@ pub enum ChatsPurpose {
     /// (`Session::installed_backgrounds`).
     GetInstalledBackgrounds,
     /// `setDefaultBackground`. Response is `background`
-    /// (`Session::default_backgrounds`).
-    SetDefaultBackground,
+    /// (`Session::default_backgrounds`) under `for_dark_theme`, the theme this
+    /// request was sent for.
+    SetDefaultBackground { for_dark_theme: bool },
     /// `deleteDefaultBackground`. Response is `ok`; the wallpaper leaves
     /// `default_backgrounds` when it arrives.
     DeleteDefaultBackground { for_dark_theme: bool },
@@ -58,7 +59,7 @@ pub enum ChatsPurpose {
     RemoveInstalledBackground { background_id: i64 },
     /// `setDefaultBackground` with a local image (`inputBackgroundLocal`).
     /// Response is `background`, stored like `SetDefaultBackground`.
-    SetDefaultBackgroundLocal,
+    SetDefaultBackgroundLocal { for_dark_theme: bool },
     /// `searchBackground` for a `bg/` link. Response is `background`
     /// (`ChatsState::background_search`).
     SearchBackground,
@@ -92,8 +93,6 @@ flat_purposes!(Chats(ChatsPurpose) {
     CreatePrivateChat,
     EnsurePrivateChat,
     GetInstalledBackgrounds,
-    SetDefaultBackground,
-    SetDefaultBackgroundLocal,
     SearchBackground,
     SetChatBackground,
     DeleteChatBackground,

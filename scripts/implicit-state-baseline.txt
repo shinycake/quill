@@ -167,8 +167,6 @@ PremiumHub::premium_stickers_loading
 PremiumHub::tx_loaded
 PremiumHub::tx_loaded+tx_error
 PremiumHub::tx_loading
-PrivacyData::network_loading
-PrivacyData::network_loading+error
 ProfileModal::closing
 ProxyState::loading
 ProxyState::loading+error

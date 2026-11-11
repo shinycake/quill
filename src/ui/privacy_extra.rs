@@ -23,7 +23,7 @@ use quill::agent::ui_driver::guard;
 use quill::file_prefs::{self, OpenWarning};
 use quill::lang::{keys, tr, tr_with};
 use quill::privacy::GiftSettings;
-use quill::state::PasswordCheck;
+use quill::state::{PasswordCheck, PrivacyControl};
 use quill::telegram::requests::PrivacyWho;
 use quill::telegram::requests_privacy::PrivacySettingKey;
 use std::cell::RefCell;
@@ -161,6 +161,12 @@ impl QuillApp {
             .and_then(|s| s.my_gift_settings())
             .unwrap_or_default();
         let premium = session.is_some_and(|s| s.payments.premium_option == Some(true));
+        let error = session.and_then(|s| {
+            s.settings
+                .privacy_data
+                .error(PrivacyControl::Gifts)
+                .map(str::to_string)
+        });
         let mut block = div().flex().flex_col().gap_1().mt_1();
         block = block.child(self.gift_switch(
             cx,
@@ -230,6 +236,9 @@ impl QuillApp {
                     tr(keys::Q_PREFS_CHOOSE_THE_TYPES_OF_GIFTS)
                 }),
         );
+        if let Some(line) = error {
+            block = block.child(div().text_xs().px_2().text_color(danger()).child(line));
+        }
         block.into_any_element()
     }
 
@@ -311,7 +320,12 @@ impl QuillApp {
         let ignore = session
             .and_then(|s| s.settings.privacy_data.ignore_sensitive)
             .unwrap_or(false);
-        let error = session.and_then(|s| s.settings.privacy_data.error.clone());
+        let error = session.and_then(|s| {
+            s.settings
+                .privacy_data
+                .error(PrivacyControl::Sensitive)
+                .map(str::to_string)
+        });
         let mut section = div().flex().flex_col().gap_1();
         let heading = div()
             .text_sm()

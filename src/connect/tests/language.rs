@@ -238,6 +238,39 @@ fn a_finished_switch_drops_changes_queued_for_the_old_pack() {
 }
 
 #[test]
+fn a_change_to_the_pack_being_switched_to_is_kept_for_its_arrival() {
+    let mut f = Fixture::new();
+    f.driver.switch_language(pack("pt-br", "")).unwrap();
+    f.feed(
+        json!({"@type":"updateLanguagePackStrings","localization_target":"tdesktop",
+        "language_pack_id":"pt-br","strings":[{"@type":"languagePackString","key":"lng_box_ok",
+        "value":{"@type":"languagePackStringValueOrdinary","value":"Certo"}}]}),
+    );
+    let extra = f.strings_extra("pt-br");
+    f.feed(strings(&extra, "lng_languages", "Idioma"));
+    let state = &f.driver.session.settings.language;
+    assert!(state.ready.is_some());
+    assert_eq!(
+        state.patch,
+        vec![("lng_box_ok".into(), PackValue::Ordinary("Certo".into()))]
+    );
+    assert!(!state.reload);
+
+    // A deleted string while switching asks for a fetch once ready.
+    let mut f = Fixture::new();
+    f.driver.switch_language(pack("pt-br", "")).unwrap();
+    f.feed(
+        json!({"@type":"updateLanguagePackStrings","localization_target":"tdesktop",
+        "language_pack_id":"pt-br","strings":[{"@type":"languagePackString","key":"lng_box_ok",
+        "value":{"@type":"languagePackStringValueDeleted"}}]}),
+    );
+    let extra = f.strings_extra("pt-br");
+    f.feed(strings(&extra, "lng_languages", "Idioma"));
+    let state = &f.driver.session.settings.language;
+    assert!(state.ready.is_some() && state.reload && state.patch.is_empty());
+}
+
+#[test]
 fn failed_strings_end_the_switch_with_an_error() {
     let mut f = Fixture::new();
     f.driver.switch_language(pack("pt-br", "")).unwrap();

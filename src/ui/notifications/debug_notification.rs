@@ -36,6 +36,7 @@ impl QuillApp {
         let notification = quill::notify::OsNotification {
             chat_id: ChatId(0),
             message_id: Some(quill::ids::MessageId(1)),
+            topic_id: None,
             title: tr(keys::Q_PREFS_QUILL_NOTIFICATION_CHECK).to_string(),
             body: tr(keys::Q_PREFS_TYPE_A_REPLY_OR_PRESS).to_string(),
         };

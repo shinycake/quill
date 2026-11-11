@@ -49,7 +49,7 @@ impl AgentUi {
     pub(super) fn pick_account(&mut self, account: Option<AccountKey>) {
         if self.picked != account {
             self.picked = account;
-            self.page.filter = Default::default();
+            self.page.reset_activity();
         }
     }
 
@@ -70,11 +70,9 @@ pub(super) const ACTIVITY_PAGE: usize = 50;
 
 /// The app's side of agent access: the task that wakes the UI for agent
 /// state and requests (agents drive whichever account is on screen), how
-/// many activity rows show, and a send handed to the agent path. A
+/// a send handed to the agent path. A
 /// `QuillApp` field (`agent_bridge`).
 pub(crate) struct AgentBridge {
-    /// How many activity rows Settings shows.
-    pub(super) activity_shown: usize,
     /// A send the composer handed to the agent path while the UI driver
     /// injected input (`agent_driver_send`), until the task picks it up.
     pub(super) ui_send: Option<quill::agent::ui_driver::bridge::UiSend>,
@@ -131,10 +129,7 @@ impl AgentBridge {
             }
         })
         .detach();
-        Self {
-            activity_shown: ACTIVITY_PAGE,
-            ui_send: None,
-        }
+        Self { ui_send: None }
     }
 }
 

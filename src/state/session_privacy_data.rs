@@ -7,6 +7,17 @@ use crate::network_usage::NetworkUsage;
 use crate::privacy::{NewChatPrivacy, NewChatPrivacyState};
 use crate::telegram::envelope::SettingsPayload;
 
+/// The controls of this block, each with a line of its own for the last
+/// request of it that failed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum PrivacyControl {
+    NewChat,
+    Gifts,
+    SessionTtl,
+    Sensitive,
+    ContactJoined,
+}
+
 /// Outcome of the "Do you still remember your password?" check.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum PasswordCheck {
@@ -47,16 +58,31 @@ pub struct PrivacyData {
     /// `can_ignore_sensitive_content_restrictions`: the server lets this
     /// account turn the 18+ toggle on.
     pub can_ignore_sensitive: bool,
-    /// `getNetworkStatistics` answer.
-    pub network_usage: Option<NetworkUsage>,
-    pub network_loading: bool,
+    /// `getNetworkStatistics`: the answer, a refetch under it, or why it
+    /// failed (a failed reset lands here too).
+    pub network: crate::state::fetch::Fetch<NetworkUsage>,
     /// The server asked the client to check the password
     /// (`suggestedActionCheckPassword`).
     pub check_password_suggested: bool,
     pub password_check: PasswordCheck,
-    /// Last failure of one of the requests above, shown where it was
-    /// triggered (never as a toast).
-    pub error: Option<String>,
+    /// The last failure of each control's request, shown where that
+    /// control is (never as a toast). A control's success or retry clears
+    /// only its own line.
+    pub errors: std::collections::BTreeMap<PrivacyControl, String>,
+}
+
+impl PrivacyData {
+    pub fn error(&self, control: PrivacyControl) -> Option<&str> {
+        self.errors.get(&control).map(String::as_str)
+    }
+
+    pub fn clear_error(&mut self, control: PrivacyControl) {
+        self.errors.remove(&control);
+    }
+
+    fn fail(&mut self, control: PrivacyControl, line: String) {
+        self.errors.insert(control, line);
+    }
 }
 
 impl Session {
@@ -129,9 +155,7 @@ impl Session {
             }
             SettingsPayload::NetworkStatistics(usage) => {
                 if purpose == Some(RequestPurpose::GetNetworkStatistics) {
-                    self.settings.privacy_data.network_usage = Some(usage.clone());
-                    self.settings.privacy_data.network_loading = false;
-                    self.settings.privacy_data.error = None;
+                    self.settings.privacy_data.network.succeed(usage.clone());
                 }
                 true
             }
@@ -147,10 +171,10 @@ impl Session {
             }
             SettingsPayload::UpdateSuggestedActions { added, removed } => {
                 for name in added {
-                    self.chat_list.suggestions.actions.insert(name.clone());
+                    self.chat_list.suggestions.add_action(name);
                 }
                 for name in removed {
-                    self.chat_list.suggestions.actions.remove(name);
+                    self.chat_list.suggestions.remove_action(name);
                 }
                 self.chat_list.archive_mute.note_suggested(added);
                 const CHECK: &str = "suggestedActionCheckPassword";
@@ -171,14 +195,20 @@ impl Session {
         match pending.map(|p| p.purpose) {
             Some(RequestPurpose::ResetNetworkStatistics) => {
                 // The old numbers are gone; the next open refetches.
-                self.settings.privacy_data.network_usage = None;
-                self.settings.privacy_data.error = None;
+                let network = &mut self.settings.privacy_data.network;
+                *network = if network.is_loading() {
+                    crate::state::fetch::Fetch::Loading { stale: None }
+                } else {
+                    crate::state::fetch::Fetch::Idle
+                };
             }
             Some(RequestPurpose::HideCheckPasswordSuggestion) => {
                 self.settings.privacy_data.check_password_suggested = false;
             }
             Some(RequestPurpose::Settings(SettingsPurpose::SetInactiveSessionTtl { .. })) => {
-                self.settings.privacy_data.error = None;
+                self.settings
+                    .privacy_data
+                    .clear_error(PrivacyControl::SessionTtl);
             }
             Some(RequestPurpose::Settings(SettingsPurpose::SetPrivacyRules { key })) => {
                 self.settings
@@ -210,10 +240,7 @@ impl Session {
     ) {
         match purpose {
             RequestPurpose::Settings(SettingsPurpose::HideSuggestedAction { action }) => {
-                self.chat_list
-                    .suggestions
-                    .actions
-                    .insert(action.to_string());
+                self.chat_list.suggestions.add_action(action);
                 self.chats_state.chat_action_error = Some(format!(
                     "could not hide the suggestion (error {})",
                     err.code
@@ -253,25 +280,37 @@ impl Session {
                         incoming_paid_message_star_count: previous_stars,
                     }));
                 }
-                data.error = Some(sessions_error_line("change who can message you", err));
+                data.fail(
+                    PrivacyControl::NewChat,
+                    sessions_error_line("change who can message you", err),
+                );
             }
             RequestPurpose::SetGiftSettings => {
-                data.error = Some(sessions_error_line("change the gift settings", err));
+                data.fail(
+                    PrivacyControl::Gifts,
+                    sessions_error_line("change the gift settings", err),
+                );
             }
             RequestPurpose::Settings(SettingsPurpose::SetInactiveSessionTtl { previous }) => {
                 // Back to what the server had: `None` reads as still
                 // loading, and nothing refetches it.
                 data.inactive_session_ttl_days = previous;
-                data.error = Some(sessions_error_line("change the session timeout", err));
+                data.fail(
+                    PrivacyControl::SessionTtl,
+                    sessions_error_line("change the session timeout", err),
+                );
             }
             RequestPurpose::SetSensitiveContent => {
-                data.error = Some(sessions_error_line("change the 18+ setting", err));
+                data.fail(
+                    PrivacyControl::Sensitive,
+                    sessions_error_line("change the 18+ setting", err),
+                );
             }
             RequestPurpose::SetContactJoinedNotifications => {
-                data.error = Some(sessions_error_line(
-                    "change the contact-joined notifications",
-                    err,
-                ));
+                data.fail(
+                    PrivacyControl::ContactJoined,
+                    sessions_error_line("change the contact-joined notifications", err),
+                );
             }
             RequestPurpose::CanSendMessageToUser => {
                 // The chat stays as it was; the next open asks again.
@@ -296,11 +335,12 @@ impl Session {
                 }
             }
             RequestPurpose::GetNetworkStatistics => {
-                data.network_loading = false;
-                data.error = Some(sessions_error_line("load the network usage", err));
+                data.network
+                    .fail(sessions_error_line("load the network usage", err));
             }
             RequestPurpose::ResetNetworkStatistics => {
-                data.error = Some(sessions_error_line("reset the network usage", err));
+                data.network
+                    .fail(sessions_error_line("reset the network usage", err));
             }
             RequestPurpose::CheckRememberedPassword if data.password_check.waits_for(pending) => {
                 data.password_check = if err.class == ErrorClass::Invalid {

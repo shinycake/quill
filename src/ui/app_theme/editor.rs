@@ -90,6 +90,17 @@ pub(crate) fn rows_matching(query: &str) -> Vec<(KeyGroup, Vec<EditorRow>)> {
         .collect()
 }
 
+/// A renamed custom theme: every slot that named the old file names the new
+/// one (the same bookkeeping `delete_custom_theme` does for a removed one).
+fn follow_rename(a: &mut quill::settings::AppearancePrefs, old: &ThemeId, new: &ThemeId) {
+    if a.day_theme == *old {
+        a.day_theme = new.clone();
+    }
+    if a.night_theme == *old {
+        a.night_theme = new.clone();
+    }
+}
+
 fn hsla_of(rgba: u32) -> Hsla {
     super::kit_colors::hsla(rgba)
 }
@@ -298,6 +309,9 @@ impl QuillApp {
                 // Renamed while editing: the old file goes.
                 if let Some(old) = replaced {
                     let _ = store::delete(&dir, &old);
+                    // A slot that named the old file follows the rename.
+                    let (old, new) = (ThemeId::Custom(old), ThemeId::Custom(name.clone()));
+                    self.set_appearance(cx, |a| follow_rename(a, &old, &new));
                 }
                 self.preferences.app_theme.editor = None;
                 self.refresh_custom_themes();
@@ -543,8 +557,27 @@ crate::ui::shell::register_dialogs! {
 
 #[cfg(test)]
 mod tests {
-    use super::{EditorRow, rgba_of, rows_matching};
-    use quill::app_theme::{KeyGroup, PaletteKey};
+    use super::{EditorRow, follow_rename, rgba_of, rows_matching};
+    use quill::app_theme::{KeyGroup, PaletteKey, ThemeId};
+
+    #[test]
+    fn a_rename_repoints_both_slots_that_named_the_old_theme() {
+        let (old, new) = (
+            ThemeId::Custom("Mine".into()),
+            ThemeId::Custom("Mine2".into()),
+        );
+        let mut prefs = quill::settings::AppearancePrefs {
+            day_theme: old.clone(),
+            night_theme: old.clone(),
+            ..Default::default()
+        };
+        follow_rename(&mut prefs, &old, &new);
+        assert_eq!((prefs.day_theme, prefs.night_theme), (new.clone(), new));
+        let mut other = quill::settings::AppearancePrefs::default();
+        let before = (other.day_theme.clone(), other.night_theme.clone());
+        follow_rename(&mut other, &old, &ThemeId::Custom("X".into()));
+        assert_eq!((other.day_theme, other.night_theme), before);
+    }
 
     #[test]
     fn search_filters_rows_by_label_or_key() {

@@ -10,6 +10,7 @@ use crate::ui::settings_window::rows::{group, switch_row};
 use gpui_kit::assets::IconName;
 use gpui_kit::component::menu::{DropdownMenu, PopupMenu, PopupMenuItem};
 use quill::privacy::{SESSION_TTL_DAYS, session_ttl_label};
+use quill::state::PrivacyControl;
 use quill::telegram::envelope::SessionDevice;
 
 /// tdesktop `boxWidth`.
@@ -164,7 +165,12 @@ impl QuillApp {
     pub(super) fn sessions_ttl_section(&self, cx: &mut Context<Self>) -> AnyElement {
         let session = self.session();
         let current = session.and_then(|s| s.settings.privacy_data.inactive_session_ttl_days);
-        let error = session.and_then(|s| s.settings.privacy_data.error.clone());
+        let error = session.and_then(|s| {
+            s.settings
+                .privacy_data
+                .error(PrivacyControl::SessionTtl)
+                .map(str::to_string)
+        });
         let owner = cx.entity().downgrade();
         let period = Button::new("sessions-ttl")
             .label(match current {

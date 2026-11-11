@@ -39,8 +39,10 @@ impl Session {
             // The preview that asked reads its own answer, matched by the
             // request; the page-level line stays for the pages.
             Some(
-                RequestPurpose::SetDefaultBackground
-                | RequestPurpose::SetDefaultBackgroundLocal
+                RequestPurpose::Chats(
+                    ChatsPurpose::SetDefaultBackground { .. }
+                    | ChatsPurpose::SetDefaultBackgroundLocal { .. },
+                )
                 | RequestPurpose::GetBackgroundUrl,
             ) => {
                 let reason = error_reason(err);

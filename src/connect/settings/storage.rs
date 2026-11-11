@@ -130,12 +130,17 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
+        // Every network is sent even if one send fails, so a failure never
+        // leaves the later networks out of a toggle that covers all three.
+        let mut first_error = None;
         for network in NetworkKind::ALL {
             let mut settings = *self.session.settings.data_storage.for_network(network);
             settings.use_less_data_for_calls = on;
-            self.set_auto_download_settings(network, settings)?;
+            if let Err(err) = self.set_auto_download_settings(network, settings) {
+                first_error.get_or_insert(err);
+            }
         }
-        Ok(())
+        first_error.map_or(Ok(()), Err)
     }
 
     /// Batch 6: "Clear cache" and its per-type / per-chat variants
@@ -184,6 +189,9 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
+        // All four options go out even if one send fails; the first error
+        // is the outcome.
+        let mut first_error = None;
         for (name, value) in crate::storage_limits::options_for(size, keep) {
             let extra = self.session.request(RequestPurpose::SetStorageOption, None);
             let json = match value {
@@ -198,10 +206,10 @@ impl<S: JsonSender> ConnectDriver<S> {
                 self.session.requests.take(extra);
                 self.session.settings.data_storage_error =
                     Some("Couldn't save the storage limits.".to_string());
-                return Err(err);
+                first_error.get_or_insert(err);
             }
         }
-        Ok(())
+        first_error.map_or(Ok(()), Err)
     }
 
     /// TDLib keeps every cached file until the optimizer runs, and it only

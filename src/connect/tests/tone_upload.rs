@@ -6,7 +6,7 @@ use crate::diagnostics::DiagnosticSink;
 use crate::diagnostics::MemorySink;
 use crate::platform::MemorySecretStore;
 use crate::telegram::client::copy_and_parse;
-use crate::tone_upload::{ToneProblem, ToneUpload};
+use crate::tone_upload::{ToneProblem, ToneTarget, ToneUpload};
 use serde_json::Value;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -61,18 +61,21 @@ const NEW_SOUND: &str = r#"{"@type":"notificationSound","id":"900","duration":3,
 fn a_picked_file_goes_up_as_a_local_input_file() {
     let (mut driver, recorder, _sink, _seq) = driver();
     let path = tone_file("Soft Bell.mp3", 4000);
-    driver.upload_notification_tone(&path).unwrap();
+    driver
+        .upload_notification_tone(&path, ToneTarget::Reaction)
+        .unwrap();
     let request = sent_request(&recorder, "addSavedNotificationSound");
     assert_eq!(request["sound"]["@type"], "inputFileLocal");
     assert_eq!(request["sound"]["path"], path.to_str().unwrap());
     assert_eq!(
         driver.session.settings.tone_upload,
         ToneUpload::Uploading {
-            name: "Soft Bell".into()
+            name: "Soft Bell".into(),
+            target: ToneTarget::Reaction,
         }
     );
     assert_eq!(
-        driver.upload_notification_tone(&path),
+        driver.upload_notification_tone(&path, ToneTarget::Reaction),
         Err(ToneProblem::Unreadable),
         "one file at a time"
     );
@@ -84,7 +87,7 @@ fn a_file_over_the_option_limit_is_not_sent() {
     driver.session.messages.tone_limits.max_size = 1000;
     let path = tone_file("Big.mp3", 1001);
     assert_eq!(
-        driver.upload_notification_tone(&path),
+        driver.upload_notification_tone(&path, ToneTarget::Reaction),
         Err(ToneProblem::TooBig)
     );
     assert!(
@@ -101,7 +104,7 @@ fn a_file_that_is_not_an_mp3_is_not_sent() {
     let (mut driver, _recorder, _sink, _seq) = driver();
     let path = tone_file("notes.txt", 10);
     assert_eq!(
-        driver.upload_notification_tone(&path),
+        driver.upload_notification_tone(&path, ToneTarget::Reaction),
         Err(ToneProblem::InvalidFile)
     );
 }
@@ -110,7 +113,9 @@ fn a_file_that_is_not_an_mp3_is_not_sent() {
 fn the_new_sound_joins_the_list_and_is_reported_once() {
     let (mut driver, recorder, sink, seq) = driver();
     let path = tone_file("Soft Bell.mp3", 4000);
-    driver.upload_notification_tone(&path).unwrap();
+    driver
+        .upload_notification_tone(&path, ToneTarget::Reaction)
+        .unwrap();
     answer(
         &mut driver,
         &recorder,
@@ -129,7 +134,10 @@ fn the_new_sound_joins_the_list_and_is_reported_once() {
     assert_eq!(ids, vec![900]);
     assert_eq!(
         driver.take_tone_upload_outcome(),
-        Some(ToneUpload::Added { sound_id: 900 })
+        Some(ToneUpload::Added {
+            sound_id: 900,
+            target: Some(ToneTarget::Reaction),
+        })
     );
     assert_eq!(driver.take_tone_upload_outcome(), None);
 }
@@ -138,7 +146,9 @@ fn the_new_sound_joins_the_list_and_is_reported_once() {
 fn the_server_refusing_the_duration_is_reported() {
     let (mut driver, recorder, sink, seq) = driver();
     let path = tone_file("Long.mp3", 4000);
-    driver.upload_notification_tone(&path).unwrap();
+    driver
+        .upload_notification_tone(&path, ToneTarget::Reaction)
+        .unwrap();
     answer(
         &mut driver,
         &recorder,

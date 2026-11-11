@@ -97,7 +97,7 @@ fn every_sweepable_purpose_leaves_the_registry_and_the_session_alive() {
 #[test]
 fn account_loss_resets_the_loading_flags_of_pending_lookups() {
     let mut session = ready_session();
-    session.settings.privacy_data.network_loading = true;
+    session.settings.privacy_data.network.begin();
     session.request(RequestPurpose::GetNetworkStatistics, None);
     let subscriptions = session.request(
         RequestPurpose::Payments(PaymentsPurpose::GetStarSubscriptions { append: false }),
@@ -126,7 +126,7 @@ fn account_loss_resets_the_loading_flags_of_pending_lookups() {
 
     session.begin_logout();
 
-    assert!(!session.settings.privacy_data.network_loading);
+    assert!(!session.settings.privacy_data.network.is_loading());
     assert!(!session.payments.star_subscriptions_loading());
     assert!(!session.payments.hub.tx_loading);
     assert!(!session.payments.hub.gifts_loading);

@@ -308,3 +308,44 @@ fn an_unanswered_check_is_not_cached_as_correct() {
     );
     assert!(!sc.is_correct("bad"), "and now it is remembered");
 }
+
+/// Clears the checker's cache from inside its own judgement, as an Add to
+/// Dictionary does while a background re-check is in the backend.
+struct ClearsDuringJudge {
+    checker: std::sync::OnceLock<std::sync::Weak<SpellChecker>>,
+    calls: std::sync::atomic::AtomicUsize,
+}
+impl SpellBackend for ClearsDuringJudge {
+    fn handles(&self, _: Script, _: &str) -> bool {
+        true
+    }
+    fn is_correct(&self, _: &str) -> bool {
+        false
+    }
+    fn judge(&self, _: &str) -> Option<bool> {
+        let call = self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        if call == 0
+            && let Some(checker) = self.checker.get().and_then(std::sync::Weak::upgrade)
+        {
+            checker.clear_cache();
+        }
+        Some(call == 0)
+    }
+    fn suggestions(&self, _: &str, _: usize) -> Vec<String> {
+        Vec::new()
+    }
+}
+
+#[test]
+fn a_verdict_asked_before_a_cache_clear_is_not_stored_after_it() {
+    let backend = Arc::new(ClearsDuringJudge {
+        checker: std::sync::OnceLock::new(),
+        calls: std::sync::atomic::AtomicUsize::new(0),
+    });
+    let checker = Arc::new(SpellChecker::new(backend.clone()));
+    let _ = backend.checker.set(Arc::downgrade(&checker));
+    assert!(checker.is_correct("wrold"), "the old verdict is returned");
+    // Not remembered: the next ask is judged afresh.
+    assert!(!checker.is_correct("wrold"));
+    assert_eq!(backend.calls.load(std::sync::atomic::Ordering::SeqCst), 2);
+}

@@ -33,6 +33,7 @@ preferences.app_theme * | the app theme: custom themes, palettes, the theme edit
 preferences.system_accent | the OS accent color
 preferences.send_to * | the Explorer "Send to" shortcut belongs to the machine: read once, written off the UI thread, whichever account is on screen
 preferences.system_accent_probed | whether the OS accent was read
+preferences.system_accent_poll | the one task waiting for the OS accent read to land
 preferences.font_picker | the font family picker entity
 preferences.accent_picker | the accent color picker entity
 preferences.index_sliders * | slider entities, keyed by setting; most are app settings, but the two storage-limit sliders show one account's TDLib limits, so every arrival on Data and Storage (and every leave) drops them and they are rebuilt from the account shown (`forget_storage_sliders`)
@@ -85,7 +86,6 @@ update_pill.to | the update pill's glide end
 update_pill.since | when that glide began
 update_pill.downloading | the update is downloading
 update_pill.ready | the update is ready, and since when
-agent_bridge.activity_shown | how many agent activity events were shown
 agent_bridge.ui_send | the channel agents send UI commands on; a command stops when the screen's epoch changes (`agent_driver.rs`)
 takeover.wake_at | when the takeover banner next redraws
 connect.generation | which prepared connection may open

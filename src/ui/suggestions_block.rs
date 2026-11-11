@@ -42,7 +42,7 @@ impl QuillApp {
                 if let Some(demo) = self.demo_session.as_mut() {
                     match quill::chatlist_suggestions::dismiss_action(suggestion) {
                         Some(action) => {
-                            demo.chat_list.suggestions.actions.remove(action);
+                            demo.chat_list.suggestions.remove_action(action);
                         }
                         None => demo.chat_list.suggestions.birthdays_hidden = true,
                     }

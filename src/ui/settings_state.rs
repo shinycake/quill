@@ -49,8 +49,6 @@ pub(crate) struct SettingsUi {
     pub(super) storage_selected: std::collections::BTreeSet<&'static str>,
     /// `parity:proxy-settings`: proxy list / editor / link-confirm state.
     pub(super) proxy: super::proxy::ProxyUi,
-    /// The "No" answer of the phone-number prompt was chosen: show the note.
-    pub(super) phone_change_note: bool,
     /// Release-delay slider in Settings > Calls (`ui/ptt_delay.rs`). The
     /// screen's: it is seeded from, and saves into, the call prefs of the
     /// account it was made for, which are per account.
@@ -76,7 +74,6 @@ impl SettingsUi {
             storage_confirm: None,
             storage_selected: Default::default(),
             proxy: Default::default(),
-            phone_change_note: false,
             ptt_delay_slider: None,
         }
     }
@@ -152,6 +149,9 @@ pub(crate) struct PreferencesUi {
     pub(super) system_accent: Option<u32>,
     /// `system_accent` was read at least once.
     pub(super) system_accent_probed: bool,
+    /// The one task waiting for a Linux accent read to land; a second
+    /// refresh while it runs does not start another.
+    pub(super) system_accent_poll: Option<Task<()>>,
     /// Settings → Appearance: the searchable font family list.
     pub(super) font_picker: super::appearance_power::FontPicker,
     /// Settings → Appearance: the custom accent color field (kit
@@ -193,6 +193,7 @@ impl PreferencesUi {
             app_theme: Default::default(),
             system_accent: None,
             system_accent_probed: false,
+            system_accent_poll: None,
             font_picker,
             accent_picker,
             index_sliders: Default::default(),
