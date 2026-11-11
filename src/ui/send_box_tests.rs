@@ -96,8 +96,10 @@ fn paid_media_is_for_channels_that_allow_it_and_the_price_box_sets_it(cx: &mut T
             .clone();
         input.update(cx, |input, cx| input.set_value("10001", window, cx));
         assert!(!app.submit_price_dialog(cx), "over the limit stays open");
-        assert!(app.composer_ui.send_box.price.as_ref().unwrap().too_high);
+        assert!(app.price_too_high(cx));
+        // Editing the price clears the refusal of the old text.
         input.update(cx, |input, cx| input.set_value("250", window, cx));
+        assert!(!app.price_too_high(cx), "the line goes with the edit");
         assert!(app.submit_price_dialog(cx));
         assert!(app.composer_ui.send_box.price.is_none());
         assert_eq!(app.composer_media_options().paid_stars, 250);
@@ -129,12 +131,18 @@ fn high_quality_is_offered_for_photos_over_1280_only(cx: &mut TestAppContext) {
         .unwrap();
     let (app, mut vcx) = new_app(cx);
     let vcx = &mut vcx;
-    app.update_in(vcx, |app, _, _| {
+    app.update_in(vcx, |app, _, cx| {
         tray(app, &[("demo-thumb.png", AttachmentKind::Photo)]);
         assert!(!app.tray_has_large_photo());
         let photo = ComposerAttachment::pick(&big, AttachmentKind::Photo).unwrap();
         app.update_pending_attachments(|tray| tray.push(photo))
             .expect("an open chat");
+        // The header is read by the media check's worker, not on render.
+        assert!(!app.tray_has_large_photo());
+        app.check_tray_videos(cx);
+    });
+    vcx.run_until_parked();
+    app.update_in(vcx, |app, _, _| {
         assert!(app.tray_has_large_photo());
         assert!(!app.composer_media_options().hd_photos);
         app.update_pending_send(|send| send.hd_photos = true);
@@ -145,6 +153,38 @@ fn high_quality_is_offered_for_photos_over_1280_only(cx: &mut TestAppContext) {
         })
         .expect("an open chat");
         assert!(!app.composer_media_options().hd_photos);
+    });
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// 12-D008: a photo that goes out as a converted JPEG (a picture the header
+/// reader cannot open, or one with a JPEG preset) is sized by that JPEG, so
+/// the High quality offer is not lost.
+#[gpui_kit::test]
+fn high_quality_is_offered_for_a_photo_sent_as_its_converted_jpeg(cx: &mut TestAppContext) {
+    let dir = std::env::temp_dir().join(format!("quill-send-box-jpeg-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let source = dir.join("shot.heic");
+    std::fs::write(&source, b"a picture the header reader cannot open").unwrap();
+    let converted = dir.join("shot.jpg");
+    image::RgbImage::from_pixel(1400, 300, image::Rgb([9, 9, 9]))
+        .save(&converted)
+        .unwrap();
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    app.update_in(vcx, |app, _, cx| {
+        let mut photo = ComposerAttachment::pick(&source, AttachmentKind::Photo).unwrap();
+        photo
+            .extras
+            .set_photo(quill::composer::PhotoPrep::Jpeg(converted.clone()));
+        app.update_pending_attachments(|tray| tray.push(photo))
+            .expect("an open chat");
+        assert!(!app.tray_has_large_photo(), "not read yet");
+        app.check_tray_videos(cx);
+    });
+    vcx.run_until_parked();
+    app.update_in(vcx, |app, _, _| {
+        assert!(app.tray_has_large_photo(), "sized by the JPEG it goes as");
     });
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -185,6 +225,48 @@ fn a_soundless_mp4_becomes_a_gif_after_the_background_check(cx: &mut TestAppCont
     app.read_with(vcx, |app, _| {
         assert!(!app.tray_videos_checking());
         assert!(app.pending_attachments()[0].extras.is_gif());
+    });
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[gpui_kit::test]
+fn a_video_read_settles_when_the_screen_moves_on_before_it_lands(cx: &mut TestAppContext) {
+    let dir = std::env::temp_dir().join(format!("quill-send-box-switch-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let clip = dir.join("silent.mp4");
+    let made = quill::media_tools::command("ffmpeg")
+        .args([
+            "-y",
+            "-f",
+            "lavfi",
+            "-i",
+            "testsrc=duration=1:size=64x64:rate=5",
+            "-c:v",
+            "libx264",
+            "-pix_fmt",
+            "yuv420p",
+        ])
+        .arg(&clip)
+        .output()
+        .is_ok_and(|out| out.status.success());
+    if !made {
+        // Skipped where ffmpeg isn't installed.
+        return;
+    }
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    app.update_in(vcx, |app, window, cx| {
+        app.attach_dropped_files(std::slice::from_ref(&clip), cx);
+        assert!(app.composer_sends.reads.sound.is_reading(&clip));
+        // The account changes before the probe answers.
+        app.switch_account(&quill::ids::AccountKey("other".into()), "", window, cx);
+    });
+    vcx.run_until_parked();
+    app.read_with(vcx, |app, _| {
+        assert!(
+            !app.composer_sends.reads.sound.is_reading(&clip),
+            "the read ended with its answer, not with the screen"
+        );
     });
     let _ = std::fs::remove_dir_all(&dir);
 }

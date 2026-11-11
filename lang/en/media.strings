@@ -373,6 +373,7 @@
 "qll_media_demo_live_stories_join_with" = "Demo — live stories join with live TDLib";
 "qll_media_demo_mode_adding_a_bot" = "Demo mode: adding a bot needs a live session.";
 "qll_media_demo_mode_creating_a_bot" = "Demo mode: creating a bot needs a live session.";
+"qll_media_still_creating_a_bot" = "Still creating a bot. Wait for it to finish.";
 "qll_media_demo_mode_editing_a_bot" = "Demo mode: editing a bot needs a live session.";
 "qll_media_demo_mode_sharing_needs_a" = "Demo mode: sharing needs a live session.";
 "qll_media_demo_mode_verifying_needs_a" = "Demo mode: verifying needs a live session.";
@@ -562,6 +563,7 @@
 "qll_media_post_to_chat_page_keep" = "Post to chat page (keep accessible after expiry)";
 "qll_media_posted_it_will_appear_in" = "✓ Posted — it will appear in your story tray";
 "qll_media_posting" = "Posting…";
+"qll_media_still_posting_story" = "The story is still going out. It stays open until that finishes.";
 "qll_media_posting_to_profile" = "Posting to profile…";
 "qll_media_premium" = "Premium";
 "qll_media_preparing" = "Preparing {file_name}…";

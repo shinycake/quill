@@ -52,7 +52,8 @@ impl QuillApp {
             let worker = cx.background_spawn(async move { write_file_thumbnail(&source, &dir) });
             let timer = cx.background_executor().timer(GIVE_UP_AFTER);
             let waited = path.clone();
-            let path_key = path.clone();
+            // screen-scope: the tray reads are the app's; the answer lands for
+            // every window and account whichever screen is on screen.
             let give_up = Self::spawn_app(cx, async move |this, cx| {
                 timer.await;
                 let _ = this.update(cx, |this, cx| {
@@ -62,7 +63,9 @@ impl QuillApp {
                     }
                 });
             });
-            let read = Self::spawn_app(cx, async move |this, cx| {
+            let key = path.clone();
+            // screen-scope: as the give-up above.
+            let answer = Self::spawn_app(cx, async move |this, cx| {
                 let thumbnail = worker.await;
                 let _ = this.update(cx, |this, cx| {
                     let send_box = &mut this.composer_sends.reads;
@@ -79,10 +82,11 @@ impl QuillApp {
                     cx.notify();
                 });
             });
+            // The stage owns both tasks: leaving it cancels the other.
             self.composer_sends
                 .reads
                 .thumbnails
-                .start(path_key, job, vec![give_up, read]);
+                .start(key, job, vec![give_up, answer]);
         }
     }
 

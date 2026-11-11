@@ -206,3 +206,19 @@ fn a_collectible_answer_of_a_replaced_lookup_is_not_taken_by_the_new_one() {
     let lookup = driver.session.payments.hub.collectible.clone().unwrap();
     assert!(lookup.is_loading(), "the first error is not the second's");
 }
+
+/// A lookup the sender refuses (the chats path is not active) is an error
+/// the UI turns into a note, and no lookup is left behind to open a box.
+#[test]
+fn a_refused_collectible_lookup_is_an_error_and_stores_nothing() {
+    let store = MemorySecretStore::new();
+    let (_dir, prepared) = prepared_tmp(&store);
+    let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+    let recorder = Arc::new(RecordingSender::new());
+    let seq = AtomicU64::new(0);
+    let mut driver = ready_driver(&recorder, prepared, &sink, &seq);
+    driver.session.auth = crate::telegram::envelope::AuthorizationState::WaitPhoneNumber;
+    let lookup = LookupSpec::new("durov", "P", None, String::new());
+    assert!(driver.request_collectible_info(lookup).is_err());
+    assert!(driver.session.payments.hub.collectible.is_none());
+}

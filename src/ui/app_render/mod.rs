@@ -338,8 +338,11 @@ impl Render for QuillApp {
             .when(
                 matches!(
                     self.preferences.update_state,
-                    quill::updater::UpdateState::Installed(_)
-                ) && !self.preferences.update_banner_dismissed,
+                    quill::updater::UpdateState::Installed(
+                        _,
+                        quill::updater::ChangelogBanner::Shown
+                    )
+                ),
                 |this| this.child(self.update_banner(cx)),
             )
             // Slice parity:platform-offline-indicator — slim connection
@@ -471,7 +474,7 @@ impl Render for QuillApp {
                 }
             })
             // Phase 9.3: story composer overlay above the story viewer.
-            .when(self.stories.composer.open, |this| {
+            .when(self.stories.composer.is_open(), |this| {
                 this.child(self.story_composer_overlay(cx))
             })
             // Phase 9.7: chat story page overlay (albums / chat page /

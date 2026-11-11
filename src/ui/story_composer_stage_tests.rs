@@ -227,7 +227,7 @@ fn a_save_settles_by_its_own_request(cx: &mut TestAppContext) {
             session.stories.manage.settle(RequestId(30), None);
         }
         app.story_composer_upkeep(cx);
-        assert!(!app.stories.composer.open, "its own answer closed it");
+        assert!(!app.stories.composer.is_open(), "its own answer closed it");
     });
 }
 
@@ -251,7 +251,7 @@ fn a_failed_save_shows_its_reason(cx: &mut TestAppContext) {
             app.stories.composer.error(),
             Some("Story update failed: GONE")
         );
-        assert!(app.stories.composer.open);
+        assert!(app.stories.composer.is_open());
     });
 }
 
@@ -277,5 +277,71 @@ fn a_failed_cover_save_shows_under_its_story(cx: &mut TestAppContext) {
             .session()
             .and_then(|s| s.stories.manage.error_for(5, 3).map(str::to_string));
         assert_eq!(shown.as_deref(), Some("Story update failed: COVER"));
+    });
+}
+
+/// A press that is out keeps the composer open: closing would drop the
+/// request, and a failed post would never be shown.
+#[gpui_kit::test]
+fn the_composer_stays_open_while_a_post_is_out_and_shows_its_failure(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    app.update_in(&mut vcx, |app, window, cx| {
+        app.open_story_composer(window, cx);
+        let request = send(app, RequestPurpose::PostStory);
+        app.stories.composer.stage = ComposerStage::Posting { request };
+        app.close_story_composer(cx);
+        assert!(app.stories.composer.is_open(), "Esc waits for the answer");
+        record_outcome(
+            app,
+            StoryPostOutcome::Failed {
+                request,
+                message: "No luck".into(),
+            },
+        );
+        app.story_composer_upkeep(cx);
+        assert_eq!(app.stories.composer.error(), Some("No luck"));
+        app.close_story_composer(cx);
+        assert!(!app.stories.composer.is_open(), "answered: it closes");
+    });
+}
+
+/// Close while the post is out says why it stays, and the request is kept.
+#[gpui_kit::test]
+fn close_while_posting_says_why_it_stays(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    app.update_in(&mut vcx, |app, window, cx| {
+        app.open_story_composer(window, cx);
+        let request = send(app, RequestPurpose::PostStory);
+        app.stories.composer.stage = ComposerStage::Posting { request };
+        app.close_story_composer(cx);
+        assert_eq!(
+            app.stories.composer.stage,
+            ComposerStage::Posting { request },
+            "the request that reports the post is kept"
+        );
+        assert_eq!(
+            app.screen.connection.status_note(),
+            quill::lang::tr(quill::lang::keys::Q_MEDIA_STILL_POSTING_STORY)
+        );
+    });
+}
+
+/// 13-037: a file picked for a composer that was closed (and another
+/// opened) meanwhile does not become the new composer's media.
+#[gpui_kit::test]
+fn a_pick_for_a_closed_composer_is_not_taken_by_the_next(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    app.update_in(&mut vcx, |app, window, cx| {
+        app.open_story_composer(window, cx);
+        let asked = app.stories.composer.id;
+        app.close_story_composer(cx);
+        app.open_story_composer(window, cx);
+        assert_ne!(asked, 0);
+        let picked = [std::path::PathBuf::from("/tmp/late.jpg")];
+        app.take_story_media_asked_by(asked, &picked, cx);
+        assert!(app.stories.composer.media.is_none(), "not the asker's");
+        let current = app.stories.composer.id;
+        app.take_story_media_asked_by(current, &picked, cx);
+        assert!(app.stories.composer.media.is_some(), "the asker's own");
     });
 }

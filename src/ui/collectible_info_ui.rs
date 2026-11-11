@@ -25,7 +25,7 @@ use quill::collectible_info::{
 };
 use quill::ids::ChatId;
 use quill::lang::{keys, tr, tr_with};
-use std::cell::RefCell;
+use std::cell::Cell;
 use std::rc::Rc;
 
 /// The error text `COLLECTIBLE_NOT_FOUND` leaves in a failed lookup.
@@ -42,8 +42,14 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         let lookup = LookupSpec::new(entity, owner_name, owner_chat, copy_text);
-        if let Some(live) = self.live.as_mut() {
-            let _ = live.driver.request_collectible_info(lookup);
+        if let Some(live) = self.live.as_mut()
+            && live.driver.request_collectible_info(lookup).is_err()
+        {
+            self.set_note(StatusNote::error(tr(
+                keys::Q_MONEY_COULD_NOT_LOAD_THE_COLLECTIBLE,
+            )));
+            cx.notify();
+            return;
         }
         self.open_box(crate::ui::shell::DialogKind::CollectibleInfo);
         cx.notify();
@@ -247,16 +253,14 @@ impl QuillApp {
                         })),
                 )
                 .into_any_element();
-            let body = Rc::new(RefCell::new(Some(body)));
+            // One-shot hand-over; `Cell::take` cannot panic on re-entry.
+            let body = Rc::new(Cell::new(Some(body)));
             dialog
                 .overlay(true)
                 .title(crate::ui::shell::dialog_title(formatted))
                 .content(crate::ui::shell::scrollable_dialog_content(
                     move |content, _, _| {
-                        let body = body
-                            .borrow_mut()
-                            .take()
-                            .unwrap_or_else(|| div().into_any_element());
+                        let body = body.take().unwrap_or_else(|| div().into_any_element());
                         content.child(body)
                     },
                 ))

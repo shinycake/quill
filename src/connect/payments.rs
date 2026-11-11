@@ -302,8 +302,8 @@ impl<S: JsonSender> ConnectDriver<S> {
 
 impl<S: JsonSender> ConnectDriver<S> {
     /// Look up a tapped collectible username or phone number
-    /// (`getCollectibleItemInfo`). The same item is not asked twice while
-    /// its lookup is running (tdesktop `resolveCollectible`).
+    /// (`getCollectibleItemInfo`). A tap on a lookup still out asks again:
+    /// the newest request is the one answered.
     pub fn request_collectible_info(
         &mut self,
         spec: crate::collectible_info::LookupSpec,
@@ -332,6 +332,6 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session.payments.hub.collectible = None;
             return Err(err);
         }
-        Ok(Some(extra))
+        Ok(extra)
     }
 }

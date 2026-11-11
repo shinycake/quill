@@ -596,7 +596,8 @@ fn a_running_update_download_waits_for_space_and_starts_again(cx: &mut TestAppCo
     };
     let progress = DownloadProgress::default();
     app.update_in(&mut vcx, |app, _, _| {
-        app.preferences.update_state = UpdateState::Downloading(release.clone(), progress.clone());
+        app.preferences.update_state =
+            UpdateState::Downloading(release.clone(), progress.clone(), Default::default());
     });
     read(&app, &mut vcx, Some(FLOORS.warn - 1));
     assert!(progress.is_held(), "the low disk stops the download");

@@ -161,7 +161,6 @@ bare:TransferStage::Probing 1
 bare:TransportState::Connecting 1
 bare:TypeSave::Sent 1
 bare:Unavailable::Checking 1
-bare:UpdateState::Checking 1
 bare:UserLinkFetch::Loading 1
 bare:VenueBot::Resolving 1
 bare:VenueList::Loading 1
@@ -216,7 +215,6 @@ unkeyed:GifPlayback::Waiting 1
 unkeyed:GiftPurchaseStage::Sent 1
 unkeyed:GiftValueStage::Loading 1
 unkeyed:GiftsRest::Waiting 1
-unkeyed:GiveawayLaunch::Verifying 1
 unkeyed:GroupScreenShare::Starting 1
 unkeyed:IconState::Requested 1
 unkeyed:IdLookup::Asking 1
@@ -261,8 +259,6 @@ unkeyed:TonConnectRequestState::Pending 1
 unkeyed:TransferStage::Sending 1
 unkeyed:Translation::Pending 1
 unkeyed:UpdateControl::Downloading 1
-unkeyed:UpdateState::Downloading 1
-unkeyed:UpdateState::Installing 1
 unkeyed:VcardImport::Reading 1
 unkeyed:WaitingCheck::Pending 1
 unkeyed:Watch::Running 1

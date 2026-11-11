@@ -149,12 +149,10 @@ unmatched:Session::apply_messages 1
 unmatched:Session::apply_messages_payload 1
 unmatched:Session::apply_ok 2
 unmatched:Session::apply_payments_payload 4
-unmatched:Session::apply_premium_giveaway_options 1
 unmatched:Session::apply_privacy_data_payload 1
 unmatched:Session::apply_quick_replies_ok 1
 unmatched:Session::apply_saved_tags 1
 unmatched:Session::apply_settings_payload 5
-unmatched:Session::apply_star_giveaway_options 1
 unmatched:Session::apply_stickers_payload 3
 unmatched:Session::apply_time_zones 1
 unmatched:Session::apply_ton_wallet 2

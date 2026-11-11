@@ -39,7 +39,6 @@ impl QuillApp {
             .map(|attachment| (attachment.path.clone(), attachment.kind))
             .collect();
         for (path, kind) in unread {
-            let path_key = path.clone();
             if let Some(check) = self.composer_sends.reads.media.done(&path).cloned() {
                 self.apply_media_check(&path, &check);
                 continue;
@@ -59,17 +58,20 @@ impl QuillApp {
             });
             let timer = cx.background_executor().timer(GIVE_UP_AFTER);
             let waited = path.clone();
-            // The reads are the account's (`TrayReads`), not the window's:
-            // the answer settles them whichever window asked, or the file
-            // would stay "being read" and block Send. The stage owns both
-            // tasks, so forgetting the file stops them.
+            // The reads belong to the app (`TrayReads`), as the sound reads
+            // do: a closed window or a switched account must not drop the
+            // answer and leave the read running for good.
+            // screen-scope: the tray reads are the app's; the answer lands for
+            // every window and account whichever screen is on screen.
             let give_up = Self::spawn_app(cx, async move |this, cx| {
                 timer.await;
                 let _ = this.update(cx, |this, cx| {
                     this.finish_media_check(&waited, job, MediaCheck::FileOnly, cx);
                 });
             });
-            let read = Self::spawn_app(cx, async move |this, cx| {
+            let key = path.clone();
+            // screen-scope: as the give-up above.
+            let answer = Self::spawn_app(cx, async move |this, cx| {
                 let check = worker.await;
                 let _ = this.update(cx, |this, cx| {
                     this.finish_media_check(&path, job, check, cx);
@@ -78,7 +80,7 @@ impl QuillApp {
             self.composer_sends
                 .reads
                 .media
-                .start(path_key, job, vec![give_up, read]);
+                .start(key, job, vec![give_up, answer]);
         }
     }
 
@@ -102,8 +104,10 @@ impl QuillApp {
             return;
         }
         self.apply_media_check(path, &check);
-        // A file now needs its thumbnail (for the screen now showing).
-        self.defer_screen(cx, |this, cx| this.prepare_tray_file_thumbnails(cx));
+        // A file now needs its thumbnail, and a photo that became a JPEG
+        // its size (the JPEG is the picture the offer is about).
+        self.prepare_tray_file_thumbnails(cx);
+        self.check_tray_photo_sizes(cx);
         cx.notify();
     }
 

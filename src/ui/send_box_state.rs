@@ -4,7 +4,6 @@
 //! `send_box_options.rs` and `video_editor.rs`.
 #![deny(clippy::indexing_slicing)]
 
-use std::cell::RefCell;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
@@ -12,9 +11,11 @@ use super::send_box_options::PriceDialog;
 use super::video_editor::VideoEditorDialog;
 
 /// Where the read of one tray file stands: running (its job number tells a
-/// stale answer from the current one) or done with what it found.
-/// The tasks of a running read (its worker and its give-up timer) live in
-/// the stage: a read that is forgotten, restarted or done drops them.
+/// stale answer from the current one) or done with what it found. The tasks
+/// of a running read (its worker and its give-up timer) live in the stage: a
+/// read that leaves `Reading` (its answer, the give-up, the file leaving the
+/// tray) drops them, which cancels the ones still pending, so no timer
+/// outlives its read.
 pub(super) enum Read<T> {
     Reading {
         job: u64,
@@ -50,8 +51,8 @@ impl<T> Reads<T> {
         }
     }
 
-    /// A read starts with job number `job`, running as `tasks` (replacing
-    /// any earlier stage, whose tasks stop).
+    /// A read starts with job number `job` (replacing any earlier stage), its
+    /// `tasks` owned by the stage.
     pub(super) fn start(&mut self, path: PathBuf, job: u64, tasks: Vec<gpui_kit::Task<()>>) {
         self.0.insert(path, Read::Reading { job, _tasks: tasks });
     }
@@ -92,9 +93,12 @@ impl<T> Reads<T> {
 /// app's too (`ComposerSends::reads`): a window that opens the same tray
 /// neither reads again nor misses the result, and a read one window
 /// started lands for all of them.
+#[derive(Default)]
 pub(crate) struct TrayReads {
-    /// Sizes read from the header of tray photos, once per file.
-    pub(super) photo_sizes: RefCell<HashMap<PathBuf, Option<(u32, u32)>>>,
+    /// The size of each tray photo's picture, read from its header off the
+    /// UI thread (`send_box_options.rs`), by the photo's own path.
+    pub(super) photo_sizes: Reads<PhotoSize>,
+    pub(super) photo_size_jobs: u64,
     /// Tray videos whose sound track is being read in the background, or
     /// already read (tdesktop `hasAudio`). Each read has its own number,
     /// like the thumbnails below, so a stale read (a removed and re-added
@@ -112,18 +116,13 @@ pub(crate) struct TrayReads {
     pub(super) media_check_jobs: u64,
 }
 
-impl Default for TrayReads {
-    fn default() -> Self {
-        Self {
-            photo_sizes: RefCell::new(HashMap::new()),
-            sound: Reads::default(),
-            sound_jobs: 0,
-            thumbnails: Reads::default(),
-            thumbnail_jobs: 0,
-            media: Reads::default(),
-            media_check_jobs: 0,
-        }
-    }
+/// What reading the header of the picture a tray photo goes out as found:
+/// the file that was read (the photo's JPEG once one is made, else the file
+/// itself) and its size, `None` when the header could not be read.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct PhotoSize {
+    pub(super) file: PathBuf,
+    pub(super) size: Option<(u32, u32)>,
 }
 
 impl TrayReads {
@@ -131,9 +130,8 @@ impl TrayReads {
     /// file attached again is read again. Callers pass only files no tray
     /// holds any more (`QuillApp::forget_tray_checks`).
     pub(super) fn forget<'a>(&mut self, paths: impl Iterator<Item = &'a Path>) {
-        let mut sizes = self.photo_sizes.borrow_mut();
         for path in paths {
-            sizes.remove(path);
+            self.photo_sizes.forget(path);
             self.sound.forget(path);
             self.thumbnails.forget(path);
             self.media.forget(path);

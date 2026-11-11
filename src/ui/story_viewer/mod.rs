@@ -782,7 +782,7 @@ impl QuillApp {
             // Edit and Repost open the composer over the viewer: the story
             // under it must not play on, and TDLib must not mark the next
             // stories viewed behind it.
-            || self.stories.composer.open
+            || self.stories.composer.is_open()
     }
 
     /// Phase 9.6: 100ms tick while the story viewer is open (mirrors
