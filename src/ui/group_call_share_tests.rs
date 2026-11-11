@@ -107,11 +107,11 @@ fn the_box_copies_the_speaker_or_listener_link(cx: &mut TestAppContext) {
         vcx.read_from_clipboard().and_then(|item| item.text()),
         Some(SPEAKER.to_string())
     );
-    app.read_with(vcx, |app, _| assert!(app.group_call_boxes.share_copied()));
+    app.read_with(vcx, |app, _| assert!(app.share_copied()));
 
     // Unticked: the listener link; the box stays open.
     app.update_in(vcx, |app, _, cx| {
-        app.group_call_boxes.set_share_speaker(false);
+        app.set_share_speaker(false);
         app.copy_group_call_share_link(cx);
     });
     assert_eq!(
@@ -163,7 +163,7 @@ fn a_chat_gets_the_link_in_its_message_box(cx: &mut TestAppContext) {
                 }
             ))
         );
-        assert!(!app.group_call_boxes.share_open());
+        assert!(!app.share_open());
     });
 }
 
@@ -184,8 +184,8 @@ fn the_invite_row_shares_the_link_in_a_public_channel(cx: &mut TestAppContext) {
             Some(InviteRowAction::ShareLink)
         );
         app.group_call_invite_row_clicked(cx);
-        assert!(app.group_call_boxes.share_open());
-        assert!(!app.group_call_boxes.invite_open());
+        assert!(app.share_open());
+        assert!(!app.invite_open());
     });
 }
 
@@ -217,13 +217,10 @@ fn the_call_boxes_close_with_their_call(cx: &mut TestAppContext) {
     app.update_in(vcx, |app, _, cx| {
         app.sync_group_call_boxes();
         app.open_group_call_share_links(cx);
-        app.group_call_screen.settings_open = true;
         app.sync_group_call_boxes();
     });
-    let open = app.read_with(vcx, |app, _| {
-        app.group_call_boxes.share_open() && app.group_call_screen.settings_open
-    });
-    assert!(open, "the same call keeps them");
+    let open = app.read_with(vcx, |app, _| app.share_open());
+    assert!(open, "the same call keeps it");
 
     app.update_in(vcx, |app, _, _| {
         if let Some(session) = app.demo_session.as_mut() {
@@ -232,22 +229,16 @@ fn the_call_boxes_close_with_their_call(cx: &mut TestAppContext) {
         app.sync_group_call_boxes();
     });
     app.read_with(vcx, |app, _| {
-        assert!(!app.group_call_boxes.share_open());
-        assert!(!app.group_call_screen.settings_open);
+        assert!(!app.share_open());
     });
 
     app.update_in(vcx, |app, _, _| {
-        let call = app
-            .session()
-            .and_then(|s| s.calls.active_group_call.as_ref())
-            .map(|call| call.id);
-        app.group_call_boxes.call_box = crate::ui::group_call_state::CallBox::Share {
-            call,
+        app.open_call_box(crate::ui::group_call_state::CallBox::Share {
             speaker: true,
             copied: false,
-        };
+        });
         app.sync_group_call_boxes();
     });
-    let open = app.read_with(vcx, |app, _| app.group_call_boxes.share_open());
+    let open = app.read_with(vcx, |app, _| app.share_open());
     assert!(!open, "no links and none on the way: the box closes");
 }

@@ -174,6 +174,7 @@ fn a_replaced_call_window_hiding_leaves_the_large_tile(cx: &mut TestAppContext) 
         app.group_call.window = crate::ui::group_call_state::CallWindow::Open {
             handle: replacement,
             visible: true,
+            layout: crate::ui::group_call_state::CallLayout::Voice,
         }
     });
 
