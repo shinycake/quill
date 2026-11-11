@@ -297,7 +297,10 @@ fn the_chat_list_bar_shows_while_a_bid_runs(cx: &mut TestAppContext) {
     vcx.run_until_parked();
     app.update_in(vcx, |app, _, cx| {
         assert_eq!(app.gift_market.bar_opens, 1);
-        assert_eq!(app.gift_market.top(), Some(&MarketBox::bid(AUCTION_GIFT)));
+        assert!(matches!(
+            app.gift_market.top(),
+            Some(MarketBox::AuctionBid { gift_id, .. }) if *gift_id == AUCTION_GIFT
+        ));
         if let Some(market) = app.gift_market_mut() {
             market.active.clear();
         }
