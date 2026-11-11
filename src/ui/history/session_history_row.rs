@@ -195,9 +195,6 @@ pub(in crate::ui) fn session_history_row(
     // Telegram Desktop widens a picture to its caption's longest line (the
     // time's skip block included when the caption ends the bubble).
     let info_width = footer_meta.reserve(footer_reserve(message.is_outgoing));
-    let chips = message.reaction_chips();
-    // Telegram Desktop shows who reacted (small avatars) instead of a
-    // count when there are at most three known reactors, outside channels.
     let in_channel = session
         .and_then(|s| s.chats.get(&message.chat_id.0))
         .is_some_and(|chat| {
@@ -209,19 +206,6 @@ pub(in crate::ui) fn session_history_row(
                 }
             )
         });
-    // Saved Messages reactions are tags: Telegram Desktop shows just the
-    // tag's emoji, without a count or who reacted.
-    let are_tags = message
-        .interaction_info
-        .as_ref()
-        .and_then(|info| info.reactions.as_ref())
-        .is_some_and(|reactions| reactions.are_tags);
-    let can_list_reactors = message
-        .interaction_info
-        .as_ref()
-        .and_then(|info| info.reactions.as_ref())
-        .is_some_and(|reactions| reactions.can_get_added_reactions);
-    let has_chips = !chips.is_empty() || message.paid_reaction().is_some();
     // Channel posts open their comments, group messages their replies
     // (tdesktop `paintCommentsButton`). Inside the open thread itself the
     // bar would only point back at the view.
@@ -297,21 +281,16 @@ pub(in crate::ui) fn session_history_row(
                 || message.auto_delete_chip(unix_ms_now()).is_some(),
         }
         .needs_bubble();
-    let chip_row = (!chips.is_empty() || message.paid_reaction().is_some()).then(|| {
-        reaction_chip_row(
-            message,
-            &chips,
-            are_tags,
-            can_list_reactors,
-            in_channel,
-            session,
-            files,
-            media_roots,
-            &footer_meta,
-            bubbleless,
-            cx,
-        )
-    });
+    let chip_row = message_reactions_row(
+        message,
+        &footer_meta,
+        bubbleless,
+        session,
+        files,
+        media_roots,
+        cx,
+    );
+    let has_chips = chip_row.is_some();
     let tail = bubble_width::caption_tail(message, reply_bar_el.is_some(), unix_ms_now());
     let caption_w = bubble_width::caption_width(
         cx,

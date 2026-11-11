@@ -87,6 +87,42 @@ impl QuillApp {
         if let Some(session) = self.demo_session.as_mut() {
             self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
             apply_ready_albums(session, &self.demo_ui.sink, &self.demo_ui.seq);
+            // `QUILL_DEMO_ALBUM_REACTIONS=1`: reactions on the second item
+            // of each album (any item of an album may carry them).
+            if std::env::var_os("QUILL_DEMO_ALBUM_REACTIONS").is_some() {
+                // And a received album without a caption: bubble-less.
+                let bare = crate::ui::demo::demo_file_json(
+                    77,
+                    &crate::ui::demo::demo_thumb_png_path(),
+                    true,
+                );
+                let photos = [821, 822].map(|id| {
+                    format!(
+                        r#"{{"@type":"updateNewMessage","message":{{"id":{id},"chat_id":11,"is_outgoing":false,"date":1790632500,"media_album_id":"77003","content":{{"@type":"messagePhoto","photo":{{"@type":"photo","has_stickers":false,"sizes":[{{"@type":"photoSize","type":"m","photo":{bare},"width":320,"height":200,"progressive_sizes":[]}}]}},"caption":{{"@type":"formattedText","text":"","entities":[]}},"has_spoiler":false,"is_secret":false}}}}}}"#
+                    )
+                });
+                let sink: std::sync::Arc<dyn quill::diagnostics::DiagnosticSink> =
+                    self.demo_ui.sink.clone();
+                for json in &photos {
+                    if let Some(owned) =
+                        quill::telegram::client::copy_and_parse(json, &self.demo_ui.seq, &sink)
+                    {
+                        session.apply(owned);
+                    }
+                }
+                for (message_id, emoji, chosen) in
+                    [(802, "😭", false), (812, "❤", true), (822, "😭", false)]
+                {
+                    let json = format!(
+                        r#"{{"@type":"updateMessageInteractionInfo","chat_id":11,"message_id":{message_id},"interaction_info":{{"@type":"messageInteractionInfo","view_count":0,"forward_count":0,"reactions":{{"@type":"messageReactions","reactions":[{{"@type":"messageReaction","type":{{"@type":"reactionTypeEmoji","emoji":"{emoji}"}},"total_count":1,"is_chosen":{chosen},"recent_sender_ids":[{{"@type":"messageSenderUser","user_id":11}}]}}],"are_tags":false,"can_get_added_reactions":true}}}}}}"#
+                    );
+                    if let Some(owned) =
+                        quill::telegram::client::copy_and_parse(&json, &self.demo_ui.seq, &sink)
+                    {
+                        session.apply(owned);
+                    }
+                }
+            }
         }
         self.composer.update(cx, |input, cx| {
             input.set_value("album caption", window, cx);

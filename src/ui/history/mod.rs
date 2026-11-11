@@ -212,6 +212,7 @@ pub(super) fn album_history_row(
     let (box_w, box_h) = quill::album::layout_bounds(&layout);
     let mut mosaic = div()
         .id(("album", album_id as u64))
+        .debug_selector(move || format!("album-mosaic-{album_id}"))
         .relative()
         .w(px(box_w as f32))
         .h(px(box_h as f32))
@@ -230,6 +231,20 @@ pub(super) fn album_history_row(
             ..Default::default()
         }
         .needs_bubble();
+    // Reactions sit under the mosaic, on the chat background when the
+    // album has no bubble (`quill::media_bubble`).
+    let footer_meta = FooterMeta::of(first, receipt, None, None);
+    let chip_row = album_reactions_owner(messages).and_then(|owner| {
+        message_reactions_row(
+            owner,
+            &footer_meta,
+            bubbleless,
+            session,
+            files,
+            media_roots,
+            cx,
+        )
+    });
     let corner_base = if bubbleless {
         MediaCorners::bare(
             cx,
@@ -243,7 +258,7 @@ pub(super) fn album_history_row(
             look.plain,
             true,
             sender.is_none(),
-            !album_has_caption,
+            !album_has_caption && chip_row.is_none(),
         )
         .joined(
             quill::chat_wide::has_right_layout(first.is_outgoing, look.wide),
@@ -299,7 +314,23 @@ pub(super) fn album_history_row(
     chrome.media_led = true;
     chrome.bubbleless = bubbleless;
     chrome.media_width = Some(media_content_width(px(box_w as f32), px(0.), media_max));
-    chrome.footer_overlay = !has_caption;
+    chrome.footer_overlay = !has_caption && chip_row.is_none();
+    // Bubble-less, the time stays on the picture with reactions under it;
+    // in a bubble it moves to the reactions' line.
+    let pill = (bubbleless && chip_row.is_some())
+        .then(|| message_footer_meta(&footer_meta))
+        .flatten()
+        .map(|footer| {
+            let meta = footer_meta.mirrored();
+            crate::ui::synthetic::media_footer_pill(
+                footer,
+                Some(std::rc::Rc::new(move || message_footer_meta(&meta))),
+            )
+        });
+    if chip_row.is_some() {
+        chrome.footer = None;
+    }
+    let mosaic = div().relative().child(mosaic).children(pill);
     chrome.actions = corner.mount(|| message_actions_button(first.chat_id, first.id, cx));
     let emoji: HashMap<i64, ImageSource> = HashMap::new();
     let layered: HashMap<i64, super::sticker_player::StickerView> = HashMap::new();
@@ -331,6 +362,9 @@ pub(super) fn album_history_row(
                         cx,
                     )),
             )
+        })
+        .when_some(chip_row, |this, chips| {
+            this.child(chips.when(!bubbleless, |chips| chips.px_2().pb_1()))
         })
         .into_any_element();
     session_bubble_quoted(
@@ -518,7 +552,7 @@ mod reaction_chip_row;
 mod row_hover;
 pub(in crate::ui) use row_hover::{CornerActions, RowHover};
 pub(in crate::ui) mod text_measure;
-use reaction_chip_row::reaction_chip_row;
+use reaction_chip_row::{album_reactions_owner, message_reactions_row};
 mod album_tile;
 pub(in crate::ui) use album_tile::album_tile;
 mod community_rows;

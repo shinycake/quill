@@ -123,6 +123,15 @@ pub(in crate::ui) fn file_album_history_row(
         chrome.avatar = Some(link.wrap(avatar));
     }
     chrome.sender_status = sender_status;
+    // Reactions close the bubble and carry its time.
+    let footer_meta = FooterMeta::of(first, receipt, None, None);
+    let chip_row = album_reactions_owner(messages).and_then(|owner| {
+        message_reactions_row(owner, &footer_meta, false, session, files, media_roots, cx)
+    });
+    if chip_row.is_some() {
+        chrome.footer = None;
+    }
+    let stack = stack.children(chip_row);
     chrome.actions = corner.mount(|| message_actions_button(first.chat_id, first.id, cx));
     session_bubble_quoted(
         first.chat_id,

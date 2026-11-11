@@ -4,8 +4,77 @@ use super::*;
 use quill::lang::{keys, tr_with};
 use quill::telegram::envelope::MessageReaction;
 
+/// Whether `message` shows reaction chips (or a paid reaction).
+fn has_reactions(message: &HistoryMessage) -> bool {
+    !message.reaction_chips().is_empty() || message.paid_reaction().is_some()
+}
+
+/// The album item whose reactions show under the album. Telegram Desktop
+/// draws the reactions of the group's first item (`GroupedMedia` lives on
+/// `group->items.front()`); other apps can react to any item, so the first
+/// item that has reactions wins.
+pub(super) fn album_reactions_owner<'a>(
+    messages: &[&'a HistoryMessage],
+) -> Option<&'a HistoryMessage> {
+    messages
+        .iter()
+        .copied()
+        .find(|message| has_reactions(message))
+}
+
+/// The reaction row under `message`, `None` when it has no reactions.
+/// `outside`: under bubble-less media (see [`reaction_chip_row`]).
+pub(super) fn message_reactions_row(
+    message: &HistoryMessage,
+    footer_meta: &super::super::message_text::FooterMeta,
+    outside: bool,
+    session: Option<&Session>,
+    files: &quill::state::FileMap,
+    media_roots: &[PathBuf],
+    cx: &mut Context<QuillApp>,
+) -> Option<Stateful<Div>> {
+    if !has_reactions(message) {
+        return None;
+    }
+    let chips = message.reaction_chips();
+    // Telegram Desktop shows who reacted (small avatars) instead of a
+    // count when there are at most three known reactors, outside channels.
+    let in_channel = session
+        .and_then(|s| s.chats.get(&message.chat_id.0))
+        .is_some_and(|chat| {
+            matches!(
+                chat.kind,
+                quill::telegram::envelope::ChatKind::Supergroup {
+                    is_channel: true,
+                    ..
+                }
+            )
+        });
+    let reactions = message
+        .interaction_info
+        .as_ref()
+        .and_then(|info| info.reactions.as_ref());
+    // Saved Messages reactions are tags: Telegram Desktop shows just the
+    // tag's emoji, without a count or who reacted.
+    let are_tags = reactions.is_some_and(|reactions| reactions.are_tags);
+    let can_list_reactors = reactions.is_some_and(|reactions| reactions.can_get_added_reactions);
+    Some(reaction_chip_row(
+        message,
+        &chips,
+        are_tags,
+        can_list_reactors,
+        in_channel,
+        session,
+        files,
+        media_roots,
+        footer_meta,
+        outside,
+        cx,
+    ))
+}
+
 #[allow(clippy::too_many_arguments)]
-pub(super) fn reaction_chip_row(
+fn reaction_chip_row(
     message: &HistoryMessage,
     chips: &[&MessageReaction],
     are_tags: bool,
@@ -31,6 +100,7 @@ pub(super) fn reaction_chip_row(
     let chat_id = message.chat_id;
     let mut row = div()
         .id(("reaction-chips", message_id.0 as u64))
+        .debug_selector(move || format!("reaction-chips-{}", message_id.0))
         .flex()
         .flex_wrap()
         .items_center()
