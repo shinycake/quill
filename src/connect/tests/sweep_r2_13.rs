@@ -3,6 +3,7 @@
 //! that asked.
 use super::sweep_s3_payments_1::Flaky;
 use crate::earn::*;
+use crate::connect::JsonSender;
 use serde_json::json;
 
 const CHANNEL: i64 = -100_500;
@@ -274,4 +275,94 @@ fn a_refused_gift_code_check_keeps_the_box() {
     assert!(t.driver.request_gift_code_info("B").is_err());
     let lookup = t.driver.session.payments.gift_code.as_ref().unwrap();
     assert_eq!(lookup.code, "A");
+}
+
+fn sticker_set_json(extra: &serde_json::Value, ids: &[i32]) -> serde_json::Value {
+    let stickers: Vec<serde_json::Value> = ids
+        .iter()
+        .map(|id| {
+            json!({"@type":"sticker","id":id,"set_id":"77","emoji":"x","width":512,"height":512,
+                "format":{"@type":"stickerFormatWebp"},
+                "full_type":{"@type":"stickerFullTypeRegular"},
+                "sticker":{"@type":"file","id":id,"local":{"@type":"localFile","can_be_downloaded":true},
+                    "remote":{"@type":"remoteFile"}}})
+        })
+        .collect();
+    json!({"@type":"stickerSet","@extra":extra,"id":"77","title":"Mine","name":"mine",
+        "is_installed":true,"is_owned":false,"sticker_type":{"@type":"stickerTypeRegular"},
+        "stickers":stickers,"emojis":[]})
+}
+
+/// 02-083 / 13-028: the set view's previews are marked asked only once the
+/// downloads left; a refused send is asked again.
+#[test]
+fn a_refused_preview_download_is_asked_again_for_the_set_view() {
+    use crate::state::{SetFiles, StickerSetViewStage};
+    let mut t = Flaky::new();
+    let extra = t.driver.view_sticker_set(77).unwrap();
+    t.feed(sticker_set_json(&extra.as_extra().into(), &[1, 2]));
+    let files = |t: &Flaky| match &t.driver.session.stickers.sticker_set_view.as_ref().unwrap().stage {
+        StickerSetViewStage::Ready { files, .. } => *files,
+        other => panic!("not ready: {other:?}"),
+    };
+    t.sender.refuse(&["downloadFile"]);
+    assert!(t.driver.ensure_sticker_set_view_files().is_err());
+    assert_eq!(files(&t), SetFiles::Unasked);
+    t.sender.refuse(&[]);
+    t.driver.ensure_sticker_set_view_files().unwrap();
+    assert_eq!(files(&t), SetFiles::Asked);
+    assert!(t.sender.count("downloadFile") >= 2);
+}
+
+/// 02-084: opening the menu twice asks the emoji pack's title once.
+#[test]
+fn the_emoji_pack_title_is_asked_once_while_it_is_pending() {
+    let mut t = Flaky::new();
+    t.driver.fetch_emoji_pack_title(88).unwrap();
+    t.driver.fetch_emoji_pack_title(88).unwrap();
+    assert_eq!(t.sender.count("getStickerSet"), 1);
+}
+
+/// 02-086: a refused viewers send fails that list and the author list is
+/// still asked.
+#[test]
+fn a_refused_audience_list_does_not_strand_the_others() {
+    use crate::ids::{ChatId, MessageId};
+    use crate::state::Audience;
+    use crate::telegram::envelope::MessageActions;
+    let mut t = Flaky::new();
+    t.sender.refuse(&["getMessageViewers"]);
+    let actions = MessageActions {
+        can_get_viewers: true,
+        can_get_author: true,
+        ..MessageActions::default()
+    };
+    assert!(
+        t.driver
+            .fetch_message_audience(ChatId(-100_9), MessageId(5), actions)
+            .is_err()
+    );
+    let audience = t.driver.session.messages.message_audience.as_ref().unwrap();
+    assert_eq!(audience.viewers, Audience::Failed);
+    assert_eq!(audience.author, Audience::Loading);
+    assert_eq!(t.sender.count("getMessageAuthor"), 1);
+}
+
+/// 02-089: "Don't ask again" is remembered only once the paid send left.
+#[test]
+fn a_refused_paid_send_does_not_trust_the_price() {
+    use std::collections::HashMap;
+    let mut t = Flaky::new();
+    t.sender
+        .guard
+        .set_state(HashMap::from([(600, 25)]), HashMap::new());
+    let sticker = r#"{"@type":"sendMessage","@extra":"3","chat_id":600,"options":{"@type":"messageSendOptions","paid_message_star_count":0},"input_message_content":{"@type":"inputMessageSticker"}}"#;
+    t.driver.sender.send_json(sticker).unwrap();
+    t.sender.refuse(&["sendMessage"]);
+    assert!(t.driver.release_paid_send(true).is_err());
+    let trust = &t.driver.session.payments.paid_messages.trust;
+    assert!(!trust.is_trusted(600, 25), "the price was never paid");
+    t.sender.refuse(&[]);
+    t.driver.release_paid_send(true).unwrap();
+    assert!(t.driver.session.payments.paid_messages.trust.is_trusted(600, 25));
 }

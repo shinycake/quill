@@ -4,7 +4,7 @@ use super::*;
 use crate::ids::{ChatId, MessageId, RequestId};
 use crate::moderation::ModerationStep;
 use crate::state::RequestPurpose;
-use crate::state::{MessagesPurpose, StickersPurpose};
+use crate::state::{Audience, MessagesPurpose, StickersPurpose};
 use crate::telegram::envelope::{ChatKind, ChatPermissions, MessageActions, MessageSender};
 use crate::telegram::requests::{
     MessageSenderRef, add_profile_audio, delete_chat_messages_by_sender,
@@ -134,6 +134,10 @@ impl<S: JsonSender> ConnectDriver<S> {
             .and_then(|m| m.interaction_info.as_ref())
             .and_then(|info| info.reactions.as_ref())
             .is_some_and(|r| r.can_get_added_reactions && !r.reactions.is_empty());
+        // Each list is its own request: one that cannot be sent is a failed
+        // list, and the others are still asked. The call fails with the first
+        // refusal.
+        let mut refused = None;
         if actions.can_get_viewers && !private {
             let extra = self.session.request(
                 RequestPurpose::Messages(MessagesPurpose::GetMessageViewers {
@@ -142,8 +146,15 @@ impl<S: JsonSender> ConnectDriver<S> {
                 }),
                 Some(chat_id),
             );
-            self.send_audience(extra, &get_message_viewers(extra, chat_id, message_id))?;
-            self.session.audience_viewers_loading(chat_id, message_id);
+            match self.send_audience(extra, &get_message_viewers(extra, chat_id, message_id)) {
+                Ok(()) => self.session.audience_viewers_loading(chat_id, message_id),
+                Err(err) => {
+                    if let Some(a) = self.session.audience_for(chat_id, message_id) {
+                        a.viewers = Audience::Failed;
+                    }
+                    refused.get_or_insert(err);
+                }
+            }
         }
         if actions.can_get_read_date && private {
             let extra = self.session.request(
@@ -153,8 +164,15 @@ impl<S: JsonSender> ConnectDriver<S> {
                 }),
                 Some(chat_id),
             );
-            self.send_audience(extra, &get_message_read_date(extra, chat_id, message_id))?;
-            self.session.audience_read_date_loading(chat_id, message_id);
+            match self.send_audience(extra, &get_message_read_date(extra, chat_id, message_id)) {
+                Ok(()) => self.session.audience_read_date_loading(chat_id, message_id),
+                Err(err) => {
+                    if let Some(a) = self.session.audience_for(chat_id, message_id) {
+                        a.read_date = Audience::Failed;
+                    }
+                    refused.get_or_insert(err);
+                }
+            }
         }
         if actions.can_get_author {
             let extra = self.session.request(
@@ -164,8 +182,15 @@ impl<S: JsonSender> ConnectDriver<S> {
                 }),
                 Some(chat_id),
             );
-            self.send_audience(extra, &get_message_author(extra, chat_id, message_id))?;
-            self.session.audience_author_loading(chat_id, message_id);
+            match self.send_audience(extra, &get_message_author(extra, chat_id, message_id)) {
+                Ok(()) => self.session.audience_author_loading(chat_id, message_id),
+                Err(err) => {
+                    if let Some(a) = self.session.audience_for(chat_id, message_id) {
+                        a.author = Audience::Failed;
+                    }
+                    refused.get_or_insert(err);
+                }
+            }
         }
         if can_react_list {
             let extra = self.session.request(
@@ -177,18 +202,23 @@ impl<S: JsonSender> ConnectDriver<S> {
                 }),
                 Some(chat_id),
             );
-            self.send_audience(
+            let json = get_message_added_reactions(
                 extra,
-                &get_message_added_reactions(
-                    extra,
-                    chat_id,
-                    message_id,
-                    None,
-                    "",
-                    ADDED_REACTIONS_PAGE,
-                ),
-            )?;
-            self.session.audience_reactions_loading(chat_id, message_id);
+                chat_id,
+                message_id,
+                None,
+                "",
+                ADDED_REACTIONS_PAGE,
+            );
+            match self.send_audience(extra, &json) {
+                Ok(()) => self.session.audience_reactions_loading(chat_id, message_id),
+                Err(err) => {
+                    if let Some(a) = self.session.audience_for(chat_id, message_id) {
+                        a.reactions = Audience::Failed;
+                    }
+                    refused.get_or_insert(err);
+                }
+            }
         }
         // A right-clicked reaction chip asked for its own tab.
         if let Some((wanted_chat, wanted_message, reaction)) =
@@ -197,9 +227,12 @@ impl<S: JsonSender> ConnectDriver<S> {
             && wanted_message == message_id
             && can_react_list
         {
-            self.fetch_reactors_tab(chat_id, message_id, Some(&reaction), false)?;
+            if let Err(err) = self.fetch_reactors_tab(chat_id, message_id, Some(&reaction), false)
+            {
+                refused.get_or_insert(err);
+            }
         }
-        Ok(())
+        refused.map_or(Ok(()), Err)
     }
 
     /// A "who reacted" tab: its first page when it was never asked, or
@@ -579,6 +612,9 @@ impl<S: JsonSender> ConnectDriver<S> {
                 .stickers
                 .emoji_pack_titles
                 .contains_key(&set_id)
+            || self.session.requests.has_purpose(RequestPurpose::Stickers(
+                StickersPurpose::EmojiPackTitle { set_id },
+            ))
         {
             return Ok(());
         }
@@ -633,13 +669,20 @@ impl<S: JsonSender> ConnectDriver<S> {
         if *files == crate::state::SetFiles::Asked {
             return Ok(());
         }
-        *files = crate::state::SetFiles::Asked;
-        let files: Vec<crate::ids::FileId> = stickers
+        let wanted: Vec<crate::ids::FileId> = stickers
             .iter()
             .filter_map(|s| s.display_file_id())
             .take(60)
             .collect();
-        self.ensure_media_files(&files)
+        // Asked only once the downloads left: a refused send leaves the view
+        // to ask again at the next upkeep.
+        self.ensure_media_files(&wanted)?;
+        if let Some(view) = self.session.stickers.sticker_set_view.as_mut()
+            && let crate::state::StickerSetViewStage::Ready { files, .. } = &mut view.stage
+        {
+            *files = crate::state::SetFiles::Asked;
+        }
+        Ok(())
     }
 
     /// What a sticker message's menu needs to word its sticker items:
