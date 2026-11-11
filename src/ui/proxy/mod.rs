@@ -739,10 +739,12 @@ impl QuillApp {
         };
         let mut body = div().flex().flex_col().gap_2();
         if let Some(error) = state.error() {
-            body = body.child(div().text_xs().text_color(danger()).child(tr_with(
-                keys::Q_PREFS_ERROR_2,
-                &[("error", &error.to_string())],
-            )));
+            body = body.child(
+                div()
+                    .text_xs()
+                    .text_color(danger())
+                    .child(tr_with(keys::Q_PREFS_ERROR_2, &[("error", error)])),
+            );
         }
         let ipv6 = Self::switch_row(
             "proxy-ipv6",

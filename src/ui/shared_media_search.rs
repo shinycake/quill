@@ -162,12 +162,13 @@ impl QuillApp {
             self.session()
                 .is_some_and(|session| session.shared_media_search_shown(tab))
         });
-        if was_typing && drawn {
-            if let Some(input) = self.media_search.input().cloned() {
-                window.defer(cx, move |window, cx| {
-                    input.update(cx, |input, cx| input.focus(window, cx));
-                });
-            }
+        if was_typing
+            && drawn
+            && let Some(input) = self.media_search.input().cloned()
+        {
+            window.defer(cx, move |window, cx| {
+                input.update(cx, |input, cx| input.focus(window, cx));
+            });
         }
     }
 }
