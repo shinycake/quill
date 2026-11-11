@@ -255,8 +255,12 @@ pub struct GifPanel {
 pub enum SavedGifs {
     /// Not asked for yet, or dropped to be asked again.
     Unloaded(Vec<AnimationItem>),
-    /// The request is in flight.
-    Loading(Vec<AnimationItem>),
+    /// The request is in flight. `stale`: `updateSavedAnimations` arrived
+    /// meanwhile, so its answer is shown but the list is fetched again.
+    Loading {
+        items: Vec<AnimationItem>,
+        stale: bool,
+    },
     /// The latest answer. `stale`: `updateSavedAnimations` arrived since, so
     /// the list is fetched again even while the panel is closed.
     Ready {
@@ -276,15 +280,15 @@ impl Default for SavedGifs {
 impl SavedGifs {
     pub fn items(&self) -> &[AnimationItem] {
         match self {
-            Self::Unloaded(items) | Self::Loading(items) | Self::Failed(items) => items,
-            Self::Ready { items, .. } => items,
+            Self::Unloaded(items) | Self::Failed(items) => items,
+            Self::Loading { items, .. } | Self::Ready { items, .. } => items,
         }
     }
 
     fn take_items(&mut self) -> Vec<AnimationItem> {
         match std::mem::take(self) {
-            Self::Unloaded(items) | Self::Loading(items) | Self::Failed(items) => items,
-            Self::Ready { items, .. } => items,
+            Self::Unloaded(items) | Self::Failed(items) => items,
+            Self::Loading { items, .. } | Self::Ready { items, .. } => items,
         }
     }
 
@@ -295,7 +299,7 @@ impl SavedGifs {
     }
 
     pub fn is_loading(&self) -> bool {
-        matches!(self, Self::Loading(_))
+        matches!(self, Self::Loading { .. })
     }
 
     pub fn is_failed(&self) -> bool {
@@ -309,15 +313,16 @@ impl SavedGifs {
 
     /// The request goes out.
     pub fn begin_load(&mut self) {
-        *self = Self::Loading(self.take_items());
+        *self = Self::Loading {
+            items: self.take_items(),
+            stale: false,
+        };
     }
 
     /// `getSavedAnimations` answered.
     pub fn loaded(&mut self, items: Vec<AnimationItem>) {
-        *self = Self::Ready {
-            items,
-            stale: false,
-        };
+        let stale = matches!(self, Self::Loading { stale: true, .. });
+        *self = Self::Ready { items, stale };
     }
 
     /// The request or a change failed.
@@ -346,8 +351,9 @@ impl SavedGifs {
                 }
             }
             // The request in flight answers for a list the server has since
-            // changed: its answer is dropped, so ask again.
-            Self::Loading(_) => *self = Self::Unloaded(self.take_items()),
+            // changed: it stays loading (the spinner holds), and its answer
+            // is kept but marked stale, so the list is asked for again.
+            Self::Loading { stale, .. } => *stale = true,
             Self::Unloaded(_) => {}
         }
     }

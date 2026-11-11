@@ -870,10 +870,7 @@ pub(super) fn session_chat_row(
                 .on_mouse_down(
                     MouseButton::Left,
                     cx.listener(move |this, event: &MouseDownEvent, _, _| {
-                        this.chat_list.pin = crate::ui::chat_list_state::PinStage::Pressed {
-                            chat: id.0,
-                            y: f32::from(event.position.y),
-                        };
+                        this.chat_list.pin.press(id.0, f32::from(event.position.y));
                     }),
                 )
                 .on_drop(cx.listener(move |this, _: &PinnedChatDrag, _, cx| {

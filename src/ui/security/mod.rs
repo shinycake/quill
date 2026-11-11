@@ -211,7 +211,7 @@ impl QuillApp {
                         cx,
                     ),
                 );
-            } else {
+            } else if !this.privacy.device_link.is_busy() {
                 // Cross-platform: paste the `tg://login?token=...` link that
                 // a QR reader shows for the other device's code.
                 let mut row = div().flex().flex_wrap().gap_2();

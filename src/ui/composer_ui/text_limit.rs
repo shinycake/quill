@@ -1,7 +1,7 @@
 use super::*;
 use quill::lang::{keys, tr_with};
 use quill::text_split::{split_markup_text, units_over_limit};
-use std::cell::RefCell;
+use std::cell::Cell;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum TextLimitNote {
@@ -53,35 +53,44 @@ enum TextLimitCount {
     },
 }
 
+/// A `Cell`, not a `RefCell`: each method takes the value out, reads it and
+/// puts it back, so no borrow is held while a dropped count's task is freed.
 #[derive(Default)]
-pub(in crate::ui) struct TextLimitMemo(Box<RefCell<TextLimitCount>>);
+pub(in crate::ui) struct TextLimitMemo(Cell<TextLimitCount>);
 
 impl TextLimitMemo {
     fn known(&self) -> Option<(TextLimitKey, TextLimitNote)> {
-        match &*self.0.borrow() {
+        let state = self.0.take();
+        let known = match &state {
             TextLimitCount::Idle => None,
             TextLimitCount::Known(key, note) => Some((*key, *note)),
             TextLimitCount::Counting { last, .. } => *last,
-        }
+        };
+        self.0.set(state);
+        known
     }
 
     /// An answer: any count in flight is over.
     fn set(&self, key: TextLimitKey, note: TextLimitNote) {
-        *self.0.borrow_mut() = TextLimitCount::Known(key, note);
+        drop(self.0.replace(TextLimitCount::Known(key, note)));
     }
 
     fn is_counting(&self, key: TextLimitKey) -> bool {
-        matches!(&*self.0.borrow(), TextLimitCount::Counting { key: counting, .. } if *counting == key)
+        let state = self.0.take();
+        let counting =
+            matches!(&state, TextLimitCount::Counting { key: counting, .. } if *counting == key);
+        self.0.set(state);
+        counting
     }
 
     /// A count for `key` runs as `task`; an earlier count is dropped.
     fn start(&self, key: TextLimitKey, task: Task<()>) {
         let last = self.known();
-        *self.0.borrow_mut() = TextLimitCount::Counting {
+        drop(self.0.replace(TextLimitCount::Counting {
             key,
             _task: task,
             last,
-        };
+        }));
     }
 }
 

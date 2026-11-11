@@ -28,9 +28,12 @@ pub(crate) struct PinDrag {
 pub(crate) enum PeekPreview {
     #[default]
     Idle,
+    /// A press on a row; `over` is the panel still showing under it (a new
+    /// press leaves an open panel until its own opens).
     Pressing {
         chat: ChatId,
         started: Instant,
+        over: Option<ChatPreviewState>,
     },
     Open(ChatPreviewState),
 }
@@ -38,9 +41,27 @@ pub(crate) enum PeekPreview {
 impl PeekPreview {
     pub(super) fn open(&self) -> Option<ChatPreviewState> {
         match *self {
-            Self::Open(state) => Some(state),
+            Self::Open(state)
+            | Self::Pressing {
+                over: Some(state), ..
+            } => Some(state),
             _ => None,
         }
+    }
+
+    /// A new press on `chat`; an open panel stays under it.
+    pub(super) fn press(&mut self, chat: ChatId, started: Instant) {
+        *self = Self::Pressing {
+            chat,
+            started,
+            over: self.open(),
+        };
+    }
+
+    /// Whether this is still the press `press` started (no release, no
+    /// newer press).
+    pub(super) fn is_press(&self, chat: ChatId, started: Instant) -> bool {
+        matches!(*self, Self::Pressing { chat: c, started: s, .. } if c == chat && s == started)
     }
 
     /// The chat being long-pressed, if a press is in progress.
@@ -54,8 +75,8 @@ impl PeekPreview {
 
     /// A release or a click elsewhere: a press ends, an open panel stays.
     pub(super) fn cancel_press(&mut self) {
-        if matches!(self, Self::Pressing { .. }) {
-            *self = Self::Idle;
+        if let Self::Pressing { over, .. } = *self {
+            *self = over.map_or(Self::Idle, Self::Open);
         }
     }
 
@@ -80,6 +101,14 @@ pub(crate) enum PinStage {
 }
 
 impl PinStage {
+    /// A mouse-down on a pinned row. A drag (or its release slide) is not
+    /// cut by another press: only an idle or pressed stage takes it.
+    pub(super) fn press(&mut self, chat: i64, y: f32) {
+        if matches!(self, Self::Idle | Self::Pressed { .. }) {
+            *self = Self::Pressed { chat, y };
+        }
+    }
+
     pub(super) fn drag(&self) -> Option<&PinDrag> {
         match self {
             Self::Dragging(drag) => Some(drag),
@@ -229,10 +258,8 @@ mod tests {
     #[core::prelude::v1::test]
     fn a_release_ends_a_press_but_leaves_an_open_peek() {
         let started = Instant::now();
-        let mut peek = PeekPreview::Pressing {
-            chat: ChatId(5),
-            started,
-        };
+        let mut peek = PeekPreview::Idle;
+        peek.press(ChatId(5), started);
         assert_eq!(peek.pressing(), Some(ChatId(5)));
         peek.cancel_press();
         assert!(peek.is_idle());
@@ -243,6 +270,33 @@ mod tests {
         peek.cancel_press();
         assert!(peek.open().is_some(), "an open panel stays");
         assert!(!peek.is_idle());
+        // A new press leaves the open panel under it; its release restores it.
+        peek.press(ChatId(6), started);
+        assert!(peek.open().is_some() && peek.pressing() == Some(ChatId(6)));
+        peek.cancel_press();
+        assert!(matches!(peek, PeekPreview::Open(_)));
+    }
+
+    #[core::prelude::v1::test]
+    fn a_press_over_a_drag_does_not_cut_it() {
+        let mut pin = PinStage::Idle;
+        pin.press(4, 30.);
+        assert!(matches!(pin, PinStage::Pressed { chat: 4, .. }));
+        pin.press(5, 40.);
+        assert!(matches!(pin, PinStage::Pressed { chat: 5, .. }));
+        let ids = vec![4, 5];
+        let heights = ids.iter().map(|id| (*id, 10.)).collect();
+        let reorder =
+            quill::pin_reorder::PinReorder::begin(ids, heights, 4, 1., Instant::now());
+        assert!(reorder.is_some());
+        if let Some(reorder) = reorder {
+            let mut dragging = PinStage::Dragging(PinDrag {
+                archived: false,
+                reorder,
+            });
+            dragging.press(6, 1.);
+            assert!(dragging.drag().is_some(), "the drag or its slide stays");
+        }
     }
 
     #[core::prelude::v1::test]

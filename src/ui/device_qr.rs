@@ -107,9 +107,9 @@ impl DeviceLink {
         matches!(self, Self::Scanning(_))
     }
 
-    /// A scan or a consent is on screen.
-    fn is_busy(&self) -> bool {
-        self.is_scanning() || self.is_confirming()
+    /// A scan, a consent or the account's answer is pending: no new link may start.
+    pub(super) fn is_busy(&self) -> bool {
+        !matches!(self, Self::Idle { .. })
     }
 
     fn failed(notice: &'static str) -> Self {
@@ -188,7 +188,7 @@ impl QuillApp {
     /// through the same validation and explicit consent step as a scan; it
     /// is never logged.
     pub(super) fn paste_device_login_link(&mut self, cx: &mut Context<Self>) {
-        if self.privacy.device_link.is_confirming()
+        if self.privacy.device_link.is_busy()
             || !self.live.as_ref().is_some_and(|live| {
                 matches!(
                     live.driver.session.auth,
@@ -239,5 +239,18 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut() {
             live.driver.session.settings.device_login_result = None;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn linking_is_busy_so_no_new_link_replaces_the_pending_answer() {
+        assert!(!DeviceLink::default().is_busy());
+        assert!(!DeviceLink::failed("x").is_busy());
+        assert!(DeviceLink::Linking.is_busy());
+        assert!(DeviceLink::Confirm(Zeroizing::new(String::new())).is_busy());
     }
 }
