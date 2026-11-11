@@ -8043,3 +8043,42 @@ whose variants carry the data, with a way out of every stage.
 - **A refused refetch of a stale proxy list** lands in
   `ProxyFetch::FailedStale`: the tick does not ask again, the list stays
   busy (never planned on), and Refresh is the way out.
+
+### Sweep fixes (r2-35)
+
+Round 2, bundle 35: the chat list (rows, drop on row, drop topic, sidebar,
+view), join requests, chat look, forum row topics, the chat window slot,
+saved windows and dialog hosts, communities, the composer's thread and
+mention helpers, and the bar slide.
+
+| Id | Fix |
+| --- | --- |
+| 08-082 | `ConnectDriver::retry_join_requests` drops the failed value and asks again; the box no longer edits the session from the UI. |
+| 08-084, 08-085 | The take-once dialog bodies are `Rc<Cell<Option<AnyElement>>>` (`take()`), no `RefCell` borrow. |
+| 08-063, 08-064, 08-065 | `DropOnRow` is `seen: Dragged` and `freeze: Freeze`. The lit row lives inside each drag (`Over::Row` for files, `hover` for a forward drag); a file drag is `Unsendable { paths }` or `Sendable { paths, kind, over }` with the pointer position and the one-second wait inside the row stage. The screenshot demos' fixed drag is `Dragged::Staged` (demo builds only). `Freeze::Released` names the released-with-timer stage. |
+| 08-080 | The drop chooser's "topics could not load" line has Retry, which sends `getForumTopics` again. |
+| 08-066 | `ChatListView { filter, folder }` is one value owned by `ChatListUi` (`view`); `FolderUi::tab` is gone. Only `ChatListUi::show_view` writes it and ends the selection and pinned drag. The folder-removed path in `notifications` runs the same transition (it used to clear the selection only). |
+| 08-075 | `ChatListUi::show_tab` / `leave_rows` end the pinned drag and the laid-out rows when Contacts, Calls or the search take the column; `begin_pin_drag` owns the peek reset; `PinStage::advance` ends a drag whose window lost focus. Render writes none of them. |
+| 08-074, 08-098 | `row_fx` is read through `begin_row_pass` / `observe_row` with `try_borrow_mut`; a map in use shows the row settled. |
+| 08-076 | `createPrivateChat` is keyed by the chat it creates (a private chat's id is its user's id): another user's creation in flight no longer swallows Saved Messages. |
+| 08-094 | `both` is the argument of `apply_chat_look`, not a dialog field. |
+| 08-093 | `LookStage::Blocked { why, done }` keeps the acknowledged changes. |
+| 08-095 | `RowForum::list` is `RowTopics::{Loading, Failed, Loaded(Vec<RowTopic>)}`; a failed list draws "topics could not load" with a Retry chip on the row. `RowForum::loaded` left the implicit-state baseline. |
+| 08-097, 08-106 | Every non-test slot borrow in `cover.rs`, `slot.rs`, `view.rs` and `chat_window/mod.rs` is a `try_borrow`/`try_borrow_mut`; `swap_slot` reports whether it swapped and `set_window_scope` keeps the scope (or returns the session to the main view) when it did not. `WindowSlot::stand: Standing` records active, place and bounds in one `report`. |
+| 08-099 | `Host::Asked { window, since }` ends when no request sent since the ask (`RequestRegistry::any_since`) is in flight, not when no request at all is. |
+| 08-103 | `Restore::Opening { waiting, refused }` and `Restore::Done(kept)`: a window whose open was refused stays in the file; one whose chat can never have a window is dropped. |
+| 08-104 | Closing the offer without an answer (`on_close`) is `Restore::dismissed`: "not now", nothing asked again this launch, no answer stored. |
+| 08-105 | The reopen place and the "moved" test read the slot's `Standing`, which `placed()` also updates under the lock; a move while locked schedules the save. `bounds_seen` is gone. |
+| 08-110 | The community create box's busy state is keyed by its chat (`has_purpose_for_chat`). |
+| 08-112 | The chooser reads Loading while either list loads. |
+| 08-111 | The photo picker's answer is applied only to the Create box that asked (its name field's entity id). |
+| 08-109 | `ban_waits` is a queue: a newer ban waits behind the first. |
+| 08-117 | `start_bot_thread` no longer dedups by purpose and chat; each window's own `BotThreadStart` stage guards its own send. |
+| 08-118 | `end_mention_search(chat)` ends only that chat's `@` search; closing or completing one window's menu leaves another window's results. |
+| 09-005 | `follow_bar` uses `try_borrow_mut` and draws no bar for one frame on contention. |
+
+Touched outside the bundle's files, as small as possible: `src/connect/{invite_admin,chat_list/mod,forum_saved,composer}.rs`,
+`src/state/{requests,session_history_window,session_subsection_tabs}.rs`, `src/ui/chat_list_state.rs`,
+`src/ui/folders_state.rs`, `src/ui/shell.rs` (the ask expiry), `src/ui/deep_links.rs`, `src/ui/search_ui/mod.rs`
+and the readers of the chat list view (`folder_tabs`, `folder_extras`, `chat_list_keys`, `shortcut_pack`, `pull_next_ui`,
+`stories_pull_ui`, `folders/save_folder_editor`, `empty_state_demo`).

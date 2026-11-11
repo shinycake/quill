@@ -90,7 +90,6 @@ purpose:ConnectDriver::sync_sticker_set_view 1
 purpose:ConnectDriver::toggle_saved_topic_pinned 1
 purpose:ConnectDriver::update_animated_emoji_suggestion 2
 purpose:ConnectDriver::update_sticker_suggestions 3
-purpose:QuillApp::build_community_visibility_dialog 1
 purpose:QuillApp::emoji_sets_panel 1
 purpose:QuillApp::gif_grid 2
 purpose:QuillApp::manager_set_pending 1

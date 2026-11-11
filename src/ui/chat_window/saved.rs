@@ -34,6 +34,17 @@ pub(super) enum Restore {
     Done(Vec<SavedChatWindow>),
 }
 
+impl Restore {
+    /// The offer's box was closed with no answer: "not now". The windows
+    /// stay in the file; any other stage is unchanged.
+    fn dismissed(self) -> Self {
+        match self {
+            Self::Offered(saved) => Self::Done(saved),
+            other => other,
+        }
+    }
+}
+
 /// The write of the window places: nothing due, or a quiet-period timer
 /// running for the screen it was started on. The timer is the stage, so
 /// it goes with its owner; one started on an earlier screen epoch never
@@ -331,8 +342,9 @@ impl QuillApp {
     /// "not now". The windows stay in the file, nothing is asked again this
     /// launch, and no answer is stored, so the next launch asks again.
     fn dismiss_restore(&mut self, cx: &mut Context<Self>) {
-        if let Restore::Offered(saved) = std::mem::take(&mut self.windows.restore) {
-            self.windows.restore = Restore::Done(saved);
+        let offered = matches!(self.windows.restore, Restore::Offered(_));
+        self.windows.restore = std::mem::take(&mut self.windows.restore).dismissed();
+        if offered {
             cx.notify();
         }
     }
@@ -380,6 +392,22 @@ mod tests {
         assert_eq!(ready[0].2.size, size(px(700.), px(500.)));
         assert_eq!(waiting.len(), 1);
         assert_eq!(waiting[0].chat_id, 2);
+    }
+
+    #[test]
+    fn a_dismissed_offer_keeps_its_windows_and_a_settled_stage_is_left_alone() {
+        let kept = |restore: Restore| match restore {
+            Restore::Done(saved) => Some(saved.len()),
+            _ => None,
+        };
+        assert_eq!(kept(Restore::Offered(vec![saved(1)]).dismissed()), Some(1));
+        // The box closes after an answer too: that changes nothing.
+        let opening = Restore::Opening {
+            waiting: vec![saved(1)],
+            refused: Vec::new(),
+        };
+        assert!(matches!(opening.dismissed(), Restore::Opening { .. }));
+        assert_eq!(kept(Restore::Done(vec![saved(2)]).dismissed()), Some(1));
     }
 
     #[test]

@@ -235,7 +235,7 @@ impl ChatWindows {
     /// window the caller is inside of counts too.
     pub(super) fn open_places(&self) -> impl Iterator<Item = (ChatId, Bounds<Pixels>)> + '_ {
         self.open.iter().filter_map(|open| {
-            let bounds = open.slot.try_borrow().ok()?.bounds?;
+            let bounds = open.slot.try_borrow().ok()?.stand.bounds?;
             Some((open.chat_id, bounds))
         })
     }
@@ -269,9 +269,9 @@ impl ChatWindows {
     ) -> Vec<(Entity<super::image_budget::BoundedImageCache>, bool)> {
         self.open
             .iter()
-            .map(|open| {
-                let slot = open.slot.borrow();
-                (slot.images.clone(), slot.active)
+            .filter_map(|open| {
+                let slot = open.slot.try_borrow().ok()?;
+                Some((slot.images.clone(), slot.stand.active))
             })
             .collect()
     }
@@ -285,7 +285,7 @@ impl ChatWindows {
             .open
             .iter()
             .find(|open| open.handle.window_id() == id)?;
-        Some(open.slot.borrow().images.clone())
+        Some(open.slot.try_borrow().ok()?.images.clone())
     }
 
     /// The image cache of the chat window whose state is in place.
@@ -293,7 +293,7 @@ impl ChatWindows {
         &self,
     ) -> Option<Entity<super::image_budget::BoundedImageCache>> {
         let slot = self.slot_for(self.scope?)?;
-        Some(slot.borrow().images.clone())
+        Some(slot.try_borrow().ok()?.images.clone())
     }
 
     fn slot_for(&self, chat_id: ChatId) -> Option<slot::SharedSlot> {
@@ -355,7 +355,9 @@ impl ChatWindows {
 
     /// A chat window is the active one (the frame clock runs for it).
     pub(super) fn any_active(&self) -> bool {
-        self.open.iter().any(|open| open.slot.borrow().active)
+        self.open
+            .iter()
+            .any(|open| open.slot.try_borrow().is_ok_and(|slot| slot.stand.active))
     }
 
     pub(super) fn any_open(&self) -> bool {
@@ -374,13 +376,16 @@ impl ChatWindows {
         };
         cx.activate(true);
         let composer = if self.scope == Some(chat_id) {
-            in_place.clone()
+            Some(in_place.clone())
         } else {
-            open.slot.borrow().composer.clone()
+            // A slot in use is not read: the window still comes forward.
+            open.slot.try_borrow().ok().map(|slot| slot.composer.clone())
         };
         let _ = open.handle.update(cx, |_, window, cx| {
             window.activate_window();
-            composer.update(cx, |input, cx| input.focus(window, cx));
+            if let Some(composer) = composer {
+                composer.update(cx, |input, cx| input.focus(window, cx));
+            }
         });
         true
     }
@@ -538,7 +543,10 @@ impl QuillApp {
             };
             owner.update(cx, |app, cx| {
                 app.in_screen_scope(screen, cx, |app, cx| {
-                    let views = slot.borrow().slices.view_ids().collect();
+                    let views = slot
+                        .try_borrow()
+                        .map(|slot| slot.slices.view_ids().collect())
+                        .unwrap_or_default();
                     app.windows.open.push(OpenChatWindow {
                         chat_id,
                         handle,

@@ -811,3 +811,34 @@ fn a_pin_counts_for_the_next_chats_limit_check_as_soon_as_it_is_sent() {
     assert_eq!(pinned(&driver), 2, "both count before any answer");
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn r2_35_a_second_window_gets_its_own_bot_thread_request() {
+    let store = MemorySecretStore::new();
+    let (dir, prepared) = prepared_tmp(&store);
+    let sink = Arc::new(MemorySink::new());
+    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+    let recorder = ViewCtlSender::new();
+    let session = Session::new(AccountKey::primary(), dyn_sink.clone());
+    let mut driver = ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
+    let seq = AtomicU64::new(0);
+    ready_private_chat(&mut driver, &seq, &dyn_sink);
+    for json in [
+        r#"{"@type":"updateUser","user":{"id":41,"first_name":"Bot","type":{"@type":"userTypeBot","has_topics":true,"allows_users_to_create_topics":true,"is_inline":false}}}"#,
+        r#"{"@type":"updateNewChat","chat":{"id":41,"title":"Bot","type":{"@type":"chatTypePrivate","user_id":41},"unread_count":0}}"#,
+    ] {
+        driver
+            .ingest(copy_and_parse(json, &seq, &dyn_sink).unwrap())
+            .unwrap();
+    }
+    let first = driver
+        .start_bot_thread(ChatId(41), "New Chat")
+        .expect("send")
+        .expect("the first window's request");
+    let second = driver
+        .start_bot_thread(ChatId(41), "New Chat")
+        .expect("send")
+        .expect("the second window's own request, not a refusal");
+    assert_ne!(first, second);
+    let _ = std::fs::remove_dir_all(&dir);
+}

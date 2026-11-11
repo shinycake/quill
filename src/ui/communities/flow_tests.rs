@@ -372,7 +372,7 @@ fn ban_waiting_for_a_warning(app: &Entity<QuillApp>, vcx: &mut VisualTestContext
     let member = CommunityMember::User(5);
     app.update(vcx, |app, _| {
         // Ban was pressed with no box open; the member owns a chat.
-        app.admin.community.flow.ban_wait = Some(PendingBan {
+        app.admin.community.flow.ban_waits.push_back(PendingBan {
             community_id: RUSTACEANS,
             member,
             name: "Ann".into(),
@@ -400,7 +400,7 @@ fn a_ban_warning_waits_while_another_box_is_open_then_opens(cx: &mut TestAppCont
         // The confirmed ban is kept, not dropped, and nothing opens over Pick.
         assert!(!app.drain_pending_ban(cx));
     });
-    assert!(app.read_with(&vcx, |app, _| app.admin.community.flow.ban_wait.is_some()));
+    assert!(app.read_with(&vcx, |app, _| !app.admin.community.flow.ban_waits.is_empty()));
     assert_eq!(open_box(&app, &mut vcx), "pick");
     app.update(&mut vcx, |app, cx| {
         app.admin.community.flow.open = None;
@@ -408,7 +408,7 @@ fn a_ban_warning_waits_while_another_box_is_open_then_opens(cx: &mut TestAppCont
     });
     frames(&mut vcx);
     app.update(&mut vcx, |app, cx| assert!(app.drain_pending_ban(cx)));
-    assert!(app.read_with(&vcx, |app, _| app.admin.community.flow.ban_wait.is_none()));
+    assert!(app.read_with(&vcx, |app, _| app.admin.community.flow.ban_waits.is_empty()));
     assert_eq!(open_box(&app, &mut vcx), "ban-warning");
 }
 
@@ -418,6 +418,31 @@ fn a_ban_warning_opens_at_once_when_no_box_is_open(cx: &mut TestAppContext) {
     frames(&mut vcx);
     ban_waiting_for_a_warning(&app, &mut vcx);
     app.update(&mut vcx, |app, cx| assert!(app.drain_pending_ban(cx)));
-    assert!(app.read_with(&vcx, |app, _| app.admin.community.flow.ban_wait.is_none()));
+    assert!(app.read_with(&vcx, |app, _| app.admin.community.flow.ban_waits.is_empty()));
     assert_eq!(open_box(&app, &mut vcx), "ban-warning");
+}
+
+#[gpui_kit::test]
+fn the_chooser_reads_loading_while_the_owned_bots_load(cx: &mut TestAppContext) {
+    use super::chooser::CandidateStatus;
+    let (app, mut vcx) = new_app(cx);
+    frames(&mut vcx);
+    app.update(&mut vcx, |app, _| {
+        if let Some(session) = app.demo_session.as_mut() {
+            session.communities.owned_bots.begin();
+        }
+    });
+    let status = app.read_with(&vcx, |app, _| app.community_candidates("").1);
+    assert_eq!(
+        status,
+        CandidateStatus::Loading,
+        "the empty list is not 'No chats found' while the bots are on their way"
+    );
+    app.update(&mut vcx, |app, _| {
+        if let Some(session) = app.demo_session.as_mut() {
+            session.communities.owned_bots.succeed(Vec::new());
+        }
+    });
+    let status = app.read_with(&vcx, |app, _| app.community_candidates("").1);
+    assert_eq!(status, CandidateStatus::Ready);
 }

@@ -811,6 +811,34 @@ mod tests {
     }
 
     #[test]
+    fn a_lit_row_belongs_to_its_drag_and_goes_with_it() {
+        let mut state = over_a_file_drag();
+        assert_eq!(state.hover(), Some(ChatId(1)));
+        state.seen.unlight();
+        assert_eq!(state.hover(), None);
+        assert!(
+            state.file_kind().is_some(),
+            "the drag stays, only the row is no longer lit"
+        );
+        state.clear();
+        assert_eq!(state.hover(), None);
+        assert!(matches!(state.seen, Dragged::Nothing));
+    }
+
+    #[test]
+    fn a_drag_nothing_can_be_sent_from_lights_no_row() {
+        let state = DropOnRow {
+            seen: Dragged::Files(FileDrag::Unsendable {
+                paths: vec![PathBuf::from("a")],
+            }),
+            ..DropOnRow::default()
+        };
+        assert_eq!(state.hover(), None);
+        assert!(state.file_kind().is_none());
+        assert!(state.same_paths(&[PathBuf::from("a")]));
+    }
+
+    #[test]
     fn a_forward_drag_drops_the_file_drags_wait_and_probe() {
         let mut state = over_a_file_drag();
         state.forward_takes_over();

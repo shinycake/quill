@@ -89,14 +89,10 @@ super::super::on_screen::on_screen_fields! {
     pub(super) images: Entity<BoundedImageCache>,
     /// The frame `QuillApp::chat_frame_starts` last ran for.
     pub(super) frame_started: Cell<u64>,
-    /// The window was the active one at its last render or activation
-    /// change.
-    pub(super) active: bool,
-    /// Where the window stood then (`cover`).
-    pub(super) place: Option<super::cover::WindowPlace>,
-    /// The window's geometry at its last render or move, so the places
-    /// can be saved while the window itself is leased (`saved`).
-    pub(super) bounds: Option<Bounds<Pixels>>,
+    /// Where the window stands as the platform last reported it, so the
+    /// places can be read and saved while the window itself is leased
+    /// (`cover`, `saved`).
+    pub(super) stand: super::cover::Standing,
     ;
     history: HistoryUi,
     composer: Entity<TextareaState>,
@@ -260,9 +256,7 @@ impl WindowSlot {
                 .with_composer_height(app.slices.composer_height()),
             images: cx.new(|_| BoundedImageCache::for_window(chat_id, app.slices.scope())),
             frame_started: Cell::new(0),
-            active: false,
-            place: None,
-            bounds: None,
+            stand: Default::default(),
         }
     }
 }

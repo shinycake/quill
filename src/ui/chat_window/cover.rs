@@ -84,6 +84,34 @@ impl WindowPlace {
     }
 }
 
+/// Where a chat window stands, as its platform last reported it: all
+/// three at once, by [`Standing::report`].
+#[derive(Debug, Default)]
+pub(super) struct Standing {
+    /// The window was the active one.
+    pub(super) active: bool,
+    /// Where it stood (`WindowPlace`), when the platform could tell.
+    pub(super) place: Option<WindowPlace>,
+    /// Its geometry; none before the first report.
+    pub(super) bounds: Option<Bounds<Pixels>>,
+}
+
+impl Standing {
+    /// Records one report and says what changed.
+    fn report(
+        &mut self,
+        active: bool,
+        place: Option<WindowPlace>,
+        bounds: Bounds<Pixels>,
+    ) -> Placed {
+        self.place = place;
+        Placed {
+            moved: self.bounds.replace(bounds) != Some(bounds),
+            activation_changed: std::mem::replace(&mut self.active, active) != active,
+        }
+    }
+}
+
 /// What a report of a window's place changed.
 #[derive(Debug, Default, Clone, Copy)]
 pub(super) struct Placed {
@@ -103,7 +131,7 @@ impl ChatWindows {
         self.open.iter().any(|open| {
             // A slot in use (a re-entrant read) counts as not covering.
             open.slot.try_borrow().is_ok_and(|slot| {
-                slot.active && slot.place.is_some_and(|place| place.covers(&main))
+                slot.stand.active && slot.stand.place.is_some_and(|place| place.covers(&main))
             })
         }) && !hover_activates()
     }
@@ -124,7 +152,7 @@ impl ChatWindows {
         } else {
             self.open.iter().find_map(|open| {
                 let slot = open.slot.try_borrow().ok()?;
-                slot.place.filter(|_| slot.active)
+                slot.stand.place.filter(|_| slot.stand.active)
             })
         };
         let Some(front) = front else {
@@ -134,7 +162,8 @@ impl ChatWindows {
             .iter()
             .filter(|open| {
                 open.slot.try_borrow().is_ok_and(|slot| {
-                    !slot.active && slot.place.is_some_and(|place| front.covers(&place))
+                    !slot.stand.active
+                        && slot.stand.place.is_some_and(|place| front.covers(&place))
                 })
             })
             .map(|open| open.handle.window_id())
@@ -167,17 +196,12 @@ impl ChatWindows {
         let Ok(mut slot) = slot.try_borrow_mut() else {
             return Placed::default();
         };
-        slot.place = place;
-        let moved = slot.bounds.replace(bounds) != Some(bounds);
-        Placed {
-            activation_changed: std::mem::replace(&mut slot.active, active) != active,
-            moved,
-        }
+        slot.stand.report(active, place, bounds)
     }
 
     /// Where `chat_id`'s window stood last, for "Reopen closed window".
     pub(super) fn window_bounds(&self, chat_id: ChatId) -> Option<Bounds<Pixels>> {
-        self.slot_for(chat_id)?.try_borrow().ok()?.bounds
+        self.slot_for(chat_id)?.try_borrow().ok()?.stand.bounds
     }
 }
 

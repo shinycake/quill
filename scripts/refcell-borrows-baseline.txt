@@ -7,11 +7,6 @@ ChatListKeys::begin_search_rows::search_order.borrow_mut 1
 ChatListKeys::push_search_row::search_order.borrow_mut 1
 ChatListKeys::search_order::search_order.borrow 1
 ChatListKeys::search_selection::search_order.borrow 1
-ChatWindows::activate::slot.borrow 1
-ChatWindows::any_active::slot.borrow 1
-ChatWindows::image_cache_for::slot.borrow 1
-ChatWindows::image_cache_in_place::slot.borrow 1
-ChatWindows::image_caches::slot.borrow 1
 ContextMenuItems::begin::keys.borrow_mut 1
 ContextMenuItems::begin::parents.borrow_mut 1
 ContextMenuItems::claim::handles.borrow 1
@@ -173,7 +168,6 @@ QuillApp::ensure_sticker_closer::closer.borrow 1
 QuillApp::ensure_sticker_pump::pump.borrow 1
 QuillApp::event_log_list_view::event_log_ids.borrow_mut 1
 QuillApp::event_log_reset_list::event_log_ids.borrow_mut 1
-QuillApp::follow_bar::presence.borrow_mut 1
 QuillApp::history_row_bands::hit_rows.borrow 1
 QuillApp::inline_members_view::snapshot.borrow 1
 QuillApp::jump_corner_buttons::corner_lift.borrow_mut 1
@@ -225,7 +219,6 @@ QuillApp::tick_after_draws::layers_drawn.borrow 1
 QuillApp::translate_offer::offer.borrow 1
 QuillApp::translate_offer::offer.borrow_mut 1
 QuillApp::tray_photo_size::photo_sizes.borrow_mut 1
-QuillApp::try_open_chat_window_at::slot.borrow 1
 QuillApp::widgets_left_window::passes.borrow_mut 1
 QuillApp::window_title_in_place::title_badge.borrow_mut 1
 QuillShell::sync_host_dialogs::dialogs_closed.borrow_mut 1

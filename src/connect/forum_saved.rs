@@ -195,7 +195,10 @@ impl<S: JsonSender> ConnectDriver<S> {
 
     /// A new thread in a bot chat that lets users create them, for a
     /// message sent from its "All" view (tdesktop `reserveNewBotTopic`:
-    /// "New Chat" with a random icon color). One at a time per chat.
+    /// "New Chat" with a random icon color). Every call is a thread of its
+    /// own, answered to its own request: a window waits on its own stage
+    /// (`BotThreadStart`), so a second window sending in the same chat
+    /// gets its own thread, not a refusal.
     pub fn start_bot_thread(&mut self, chat_id: ChatId, name: &str) -> Sent {
         if !self
             .session
@@ -203,13 +206,6 @@ impl<S: JsonSender> ConnectDriver<S> {
             .is_some_and(|bot| bot.allows_users_to_create_topics)
         {
             return Err(ConnectSendError::InvalidRequest);
-        }
-        if self
-            .session
-            .requests
-            .has_purpose_for_chat(RequestPurpose::StartBotThread, chat_id)
-        {
-            return Ok(None);
         }
         let color = {
             use rand::RngExt as _;
