@@ -31,7 +31,8 @@ impl DemoUi {
     /// `last`: the demo's one counter, never behind the session's, so an
     /// update numbered through it is not dropped as old.
     pub(super) fn next_seq(&self, last: u64) -> u64 {
-        self.seq.fetch_max(last, std::sync::atomic::Ordering::SeqCst);
+        self.seq
+            .fetch_max(last, std::sync::atomic::Ordering::SeqCst);
         self.seq.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1
     }
 

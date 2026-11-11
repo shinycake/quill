@@ -146,7 +146,11 @@ fn s9_gif_backend_purpose_gated_dispatch() {
 
     // An addSavedAnimation `ok` clears the saved-GIF cache so it
     // refetches the server-confirmed list.
-    with_purpose.stickers.gifs.saved.loaded(with_purpose.stickers.gifs.search_results.clone());
+    with_purpose
+        .stickers
+        .gifs
+        .saved
+        .loaded(with_purpose.stickers.gifs.search_results.clone());
     let extra = with_purpose.request(RequestPurpose::AddSavedAnimation, None);
     apply_json(
         &mut with_purpose,
@@ -157,7 +161,11 @@ fn s9_gif_backend_purpose_gated_dispatch() {
     assert!(with_purpose.stickers.gifs.saved.items().is_empty());
 
     // A removeSavedAnimation `ok` invalidates the same way.
-    with_purpose.stickers.gifs.saved.loaded(with_purpose.stickers.gifs.search_results.clone());
+    with_purpose
+        .stickers
+        .gifs
+        .saved
+        .loaded(with_purpose.stickers.gifs.search_results.clone());
     let extra = with_purpose.request(RequestPurpose::RemoveSavedAnimation, None);
     apply_json(
         &mut with_purpose,
