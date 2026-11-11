@@ -42,16 +42,12 @@ impl QuillApp {
             .map(|op| match op.state {
                 StoryPageOpState::Checking => format!("{}…", op.kind.label()),
                 StoryPageOpState::Sending => format!("{}…", op.kind.label()),
-                StoryPageOpState::Succeeded => tr_with(
-                    keys::Q_MEDIA_DONE,
-                    &[("label", &op.kind.label().to_string())],
-                ),
+                StoryPageOpState::Succeeded => {
+                    tr_with(keys::Q_MEDIA_DONE, &[("label", op.kind.label())])
+                }
                 StoryPageOpState::Failed(reason) => tr_with(
                     keys::Q_MEDIA_FAILED,
-                    &[
-                        ("label", &op.kind.label().to_string()),
-                        ("reason", &reason.to_string()),
-                    ],
+                    &[("label", op.kind.label()), ("reason", &reason.to_string())],
                 ),
             });
         let label_for = |story_id: i32| {

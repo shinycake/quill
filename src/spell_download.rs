@@ -87,11 +87,20 @@ impl Progress {
     }
 
     pub fn finish(&self) {
-        let _ = self
-            .stage
-            .try_update(Ordering::AcqRel, Ordering::Acquire, |raw| {
-                Some(DownloadStage::from_raw(raw).finished() as u8)
-            });
+        let mut raw = self.stage.load(Ordering::Acquire);
+        loop {
+            let next = DownloadStage::from_raw(raw).finished() as u8;
+            if next == raw {
+                return;
+            }
+            match self
+                .stage
+                .compare_exchange(raw, next, Ordering::AcqRel, Ordering::Acquire)
+            {
+                Ok(_) => return,
+                Err(seen) => raw = seen,
+            }
+        }
     }
 
     /// Marks the download finished when dropped, so a worker that panics

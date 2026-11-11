@@ -8043,3 +8043,44 @@ whose variants carry the data, with a way out of every stage.
 - **A refused refetch of a stale proxy list** lands in
   `ProxyFetch::FailedStale`: the tick does not ask again, the list stays
   busy (never planned on), and Refresh is the way out.
+
+### Sweep fixes (r2-11)
+
+File-complete bundle: the agent log and tools, the spell engines, the story
+composer, close-friends editor and story page, suggested posts, the system
+accent, the tone upload, the tray worker, video crop and voice capture.
+
+| Ids | Fix |
+|---|---|
+| 01-001 | `Action::outcome: Outcome { Done, Failed, Declined, Undone }` replaces `ok`/`declined`/`undone`; the log file still reads and writes the three flags (`ActionRecord`), and Undo lands only on `Done`. |
+| 01-003 | `Pending::conn: Option<u64>`; `current_conn()` is `None` off a connection, so `withdraw_connection` has no sentinel. |
+| 01-004 | `live_inputs` reads the takeover once (`takeover::snapshot`), so Hold and Phase come from one lock. |
+| 01-005 | `list_chats` and `list_unread` page the list (`getChats` wider, `loadChats` on a short page, 404 ends) up to 2,000 chats and say when they stopped (`truncated`). |
+| 01-006, 01-007, 01-008, 01-016 | `td::client_closed` drops the client from `CLIENTS`, `events::forget_client` drops its folders, messages and send outcomes, `tools::forget_client` its cached account and chat classes. The message and outcome buffers are also emptied when Quill locks and when the last agent connection ends (`ClearBuffersWhenEmpty`). |
+| 01-009, 01-011, 04-054 | Tests wait on channels, `Duration::ZERO` or the manual clock, never on the wall clock. |
+| 01-012 | A revoked connection's process (`peer_creds().pid()`) stays refused under any other name the client declares (`activity::refused_from`); Allow again clears both. Where the socket gives no pid the name alone decides, as before. |
+| 01-013 | `grants::for_account` uses `read_or_recover`/`write_or_recover`, one write-locked load. |
+| 04-052 | `SpellChecker::is_correct_now` / `suggestions_now` and the backend's `judge_now` / `suggestions_now`: the spelling menu never parses or waits for a parse (`Ready::Pending` gives no verdict). `Entry` has a `Load::Parsing` stage and a condvar for the background askers; the parse runs outside the lock under `catch_unwind`. Touched outside the bundle: `spellcheck/mod.rs` (the `_now` methods), `ui/spellcheck_ui.rs` (two calls). |
+| 04-053 | The COM thread skips a job whose caller gave up (`abandoned` flag), counts queued jobs, and the UI-thread calls answer nothing while it is busy. Windows only: not compiled here. |
+| 04-060 | `DownloadStage { Running, Cancelling, Done, Cancelled }` behind one accessor; a cancelled finish reads `Cancelled`, a completed one `Done`. |
+| 06-044 | `StoryComposer::open` is gone: `ComposerStage::Closed` is the closed composer (`is_open()`), and `set_error` on a closed one does nothing. Edited `esc_stack`, `story_viewer/mod`, `app_render/mod` and tests for `is_open()`. |
+| 06-045 | The link and reaction mirrors are gone: `areas_json(link, emojis)` and `link_url_error(link)` take what the inputs hold at send time. `as_chat_id` is folded into `ComposerMode::{New, Repost}` as `post_as`; an edit has none. Edited `ui/story_composer.rs`. |
+| 06-046 | `CloseFriendsStage::Loading`/`Failed` are replaced by `Awaiting`; the panel draws loading or the retry from the session's `CloseFriendsList` (one owner of the load). Edited `ui/story_more.rs`. |
+| 06-047 | `StoryPageOp` carries a typed `StoryPageOpKind` (no label text) and `Option<ChatId>`; `begin` drops the same call's finished outcome on the same page and caps the list (oldest finished first, else oldest). Callers settle on page leave as before. |
+| 06-048 | One capped `failures` queue (`SuggestedPostFailure::{Note, BalanceLow}`, newest 16) in failure order; the drain waits while locked. The drain stays at the toast host (`status_toast_visible`), which is the hand-off to the toast queue that any window's toast must run. |
+| 06-052 | `AccentRead::Failed { retry_at }`: a read that found nothing is tried again 30 s later by the next `refresh()` (Appearance open), not never. |
+| 07-009 | `TopPerson::kind: TopPersonKind { SavedMessages, Chat { muted, online } }`; baseline line dropped. |
+| 07-017 | `ToneUpload::Uploading { request, .. }`; the answer and the error settle only the matching request, a new upload starts only from `Idle`. |
+| 07-020 | The tray worker's `stopped` flag is set by a drop guard owned by the worker, so a panic or a thread that never started reads as stopped and `poll` restarts the item. |
+| 14-034 | `Crop::mirrored` clamps first and subtracts with `saturating_sub`. |
+| 14-084 | `RunClock` lives in `Live` / `Fixture`; `Live::pause`, `resume` and `preview_ready` move the clock, the encoder handshake and the microphone in one place. |
+
+Tests added: `activity` (only a done write is undone; flags round trip),
+`events` (closing a client; waiter test without a sleep), `chats`
+(`next_step`), `activity` (revoked process), `spell_dict` (UI calls never
+wait; background asker waits for the parse), `spell_download` (cancelled
+finish), `story_composer` (closed stage, post-as), `panel_tests` (awaiting
+editor follows the session list), `story_page` (supersede and cap),
+`connect/tests/suggested_posts` (failure cap), `system_accent` (retry),
+`connect/tests/tone_upload` (another request's answer), `tray_sni`
+(panicking update), `video_edit` (mirror outside the frame).
