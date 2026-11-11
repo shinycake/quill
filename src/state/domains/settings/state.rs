@@ -166,34 +166,6 @@ impl ListEdit {
     }
 }
 
-/// The device-link round trip (`confirmQrCodeAuthentication`).
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub enum DeviceLogin {
-    #[default]
-    Idle,
-    /// The confirmation is in flight.
-    InFlight,
-    /// It ended; the screen takes the result once.
-    Done(crate::auth::DeviceLoginResult),
-}
-
-impl DeviceLogin {
-    pub fn in_flight(self) -> bool {
-        self == Self::InFlight
-    }
-
-    /// The result, once: the stage returns to `Idle`.
-    pub fn take_result(&mut self) -> Option<crate::auth::DeviceLoginResult> {
-        match *self {
-            Self::Done(result) => {
-                *self = Self::Idle;
-                Some(result)
-            }
-            _ => None,
-        }
-    }
-}
-
 /// How the last `setAutoDownloadSettings` ended, by the request that asked:
 /// the editor that sent it closes on `Saved` and reopens on `Refused`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -357,7 +329,9 @@ pub struct SettingsState {
     pub sessions_op: crate::state::fetch::ListOp,
     /// The device-link (`confirmQrCodeAuthentication`) round trip and how
     /// it ended until the screen has reacted.
-    pub device_login: DeviceLogin,
+    /// How the last `confirmQrCodeAuthentication` ended, for the screen to
+    /// take once; the request in flight is `sessions_op`'s mutating stage.
+    pub device_login_result: Option<crate::auth::DeviceLoginResult>,
     /// Slice A7: cached `getAccountTtl` answer, in days — drives the
     /// self-destruct-if-away picker (UI half ships post-Phase-9).
     /// A `getAccountTtl` or `setAccountTtl` round trip is in flight, the
@@ -578,7 +552,7 @@ impl SettingsState {
             notices: AccountNotices::default(),
             sessions: Fetch::Idle,
             sessions_op: Default::default(),
-            device_login: DeviceLogin::Idle,
+            device_login_result: None,
             account_ttl: Fetch::Idle,
             account_delete: Fetch::Idle,
             connected_websites: Fetch::Idle,
@@ -623,7 +597,7 @@ impl SettingsState {
     /// The device link is out: the sessions buttons stay disabled (a
     /// terminate in flight is `sessions_op`).
     pub fn sessions_busy(&self) -> bool {
-        self.sessions_op.is_mutating() || self.device_login.in_flight()
+        self.sessions_op.is_mutating()
     }
 
     /// The Data & Storage failure line: the presets fetch, the cache clear

@@ -15,7 +15,7 @@ impl Session {
             || self.apply_business_error(err, pending.map(|p| p.purpose))
             || self.apply_business_extra_error(err, pending.map(|p| p.purpose), extra)
             || self.apply_passkeys_error(err, pending.map(|p| (p.id, p.purpose)))
-            || self.apply_tone_upload_error(err, pending.map(|p| p.purpose))
+            || self.apply_tone_upload_error(err, pending)
         {
             return;
         }
@@ -81,13 +81,7 @@ impl Session {
             Some(RequestPurpose::Settings(SettingsPurpose::GetPrivacyRules { key })) => {
                 // Only the key's live load fails it; a save or an update
                 // since then already settled the key.
-                let live = matches!(
-                    self.settings.privacy.get(&key),
-                    Some(PrivacyKeyState::Loading(id)) if Some(*id) == pending.map(|p| p.id)
-                );
-                if live {
-                    self.settings.privacy.insert(key, PrivacyKeyState::Failed);
-                }
+                self.settings.fail_privacy_load(key, pending.map(|p| p.id));
             }
             // A refused save puts back what the server kept (and the call
             // rules mirrored from it) and says why in the editor.
@@ -149,8 +143,7 @@ impl Session {
             // flood state worsens; retry is user-driven via the
             // Refresh button. The old cache stays visible.
             Some(RequestPurpose::ConfirmDeviceLogin) => {
-                self.settings.device_login =
-                    DeviceLogin::Done(crate::auth::DeviceLoginResult::Failed);
+                self.settings.device_login_result = Some(crate::auth::DeviceLoginResult::Failed);
                 self.settings.sessions_op.failed(pending.map(|p| p.id));
                 self.settings
                     .sessions
@@ -295,11 +288,9 @@ impl Session {
         if pending.map(|p| p.purpose) == Some(RequestPurpose::GetChatNotificationSettingsExceptions)
             && let Some(scope) = pending.and_then(|p| p.scope)
         {
-            self.settings
-                .notification_exceptions
-                .entry(scope)
-                .or_default()
-                .fail(error_reason(err));
+            if let Some(list) = self.settings.notification_exceptions.get_mut(&scope) {
+                list.failed(pending.map(|p| p.id), error_reason(err), false);
+            }
         }
     }
 }

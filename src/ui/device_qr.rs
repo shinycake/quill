@@ -152,7 +152,7 @@ impl QuillApp {
         if let Some(linked) = self
             .live
             .as_mut()
-            .and_then(|live| live.driver.session.settings.device_login.take_result())
+            .and_then(|live| live.driver.session.settings.device_login_result.take())
         {
             // The answer is for the link this stage sent; one that arrives
             // with nothing asking is dropped.
@@ -237,7 +237,7 @@ impl QuillApp {
     pub(super) fn clear_device_qr(&mut self) {
         self.privacy.device_link = DeviceLink::default();
         if let Some(live) = self.live.as_mut() {
-            live.driver.session.settings.device_login = Default::default();
+            live.driver.session.settings.device_login_result = None;
         }
     }
 }

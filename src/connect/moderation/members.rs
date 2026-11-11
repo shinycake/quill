@@ -174,7 +174,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         // channels take a single bulk `addChatMembers`.
         let mut first_extra = None;
         if is_basic_group {
-            for user_id in user_ids {
+            for (index, user_id) in user_ids.iter().enumerate() {
                 let req_extra = self.session.request(purpose, Some(chat_id));
                 if let Err(err) = self
                     .sender
@@ -184,6 +184,17 @@ impl<S: JsonSender> ConnectDriver<S> {
                     if first_extra.is_none() {
                         return Err(err);
                     }
+                    // The users not sent count as failed to add, so the
+                    // dialog's note says so instead of reporting success.
+                    let unsent =
+                        i32::try_from(user_ids.len().saturating_sub(index)).unwrap_or(i32::MAX);
+                    let failed = self
+                        .session
+                        .groups
+                        .add_members_failed
+                        .entry(chat_id.0)
+                        .or_insert(0);
+                    *failed = failed.saturating_add(unsent);
                     break;
                 }
                 if first_extra.is_none() {

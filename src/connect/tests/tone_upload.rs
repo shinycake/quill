@@ -72,6 +72,7 @@ fn a_picked_file_goes_up_as_a_local_input_file() {
         ToneUpload::Uploading {
             name: "Soft Bell".into(),
             target: ToneTarget::Reaction,
+            request: crate::ids::RequestId(request["@extra"].as_str().unwrap().parse().unwrap()),
         }
     );
     assert_eq!(

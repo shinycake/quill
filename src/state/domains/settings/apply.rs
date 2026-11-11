@@ -142,7 +142,7 @@ impl Session {
                 }
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::UploadSavedNotificationSound)
                 {
-                    self.finish_tone_upload(sounds);
+                    self.finish_tone_upload(pending.map(|p| p.id), sounds);
                 // Parity slice: `getSavedNotificationSounds` answer.
                 } else if pending.map(|p| p.purpose)
                     == Some(RequestPurpose::GetSavedNotificationSounds)
@@ -242,7 +242,7 @@ impl Session {
             }
             SettingsPayload::DeviceLoginResult { result } => {
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::ConfirmDeviceLogin) {
-                    self.settings.device_login = DeviceLogin::Done(result);
+                    self.settings.device_login_result = Some(result);
                     if result != crate::auth::DeviceLoginResult::Failed {
                         self.settings.sessions_op.changed(pending.map(|p| p.id));
                         self.settings.sessions.clear_error();

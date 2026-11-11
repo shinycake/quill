@@ -84,7 +84,9 @@ impl Session {
             }
             (EarnPayload::TonStats(stats), Some(EarnPurpose::TonStats { peer })) => {
                 earn.ton_balances.insert(peer, stats.amounts);
-                if let Some(page) = earn.page.as_mut().filter(|p| p.peer == peer) {
+                if let Some(page) = earn.page.as_mut().filter(|p| p.peer == peer)
+                    && page.ton.waits_for(pending.map(|p| p.id))
+                {
                     page.ton = Load::Ready(stats);
                 }
             }
@@ -114,7 +116,9 @@ impl Session {
                 if me.is_some_and(|me| peer == EarnPeer::User(me)) {
                     earn.self_stats = Some(true);
                 }
-                if let Some(page) = earn.page.as_mut().filter(|p| p.peer == peer) {
+                if let Some(page) = earn.page.as_mut().filter(|p| p.peer == peer)
+                    && page.stars.waits_for(pending.map(|p| p.id))
+                {
                     page.stars = Load::Ready(stats);
                 }
             }
@@ -484,7 +488,11 @@ impl Session {
         let earn = &mut self.payments.earn;
         match purpose {
             EarnPurpose::TonStats { peer } => {
-                if let Some(page) = earn.page.as_mut().filter(|p| p.peer == peer) {
+                if let Some(page) = earn
+                    .page
+                    .as_mut()
+                    .filter(|p| p.peer == peer && p.ton.waits_for(request))
+                {
                     // tdesktop: a group without TON ads just leaves the
                     // TON part out; anything else is shown.
                     if matches!(peer, EarnPeer::Chat(_))
@@ -505,7 +513,11 @@ impl Session {
                 if self.my_user_id.is_some_and(|me| peer == EarnPeer::User(me)) {
                     earn.self_stats = Some(false);
                 }
-                if let Some(page) = earn.page.as_mut().filter(|p| p.peer == peer) {
+                if let Some(page) = earn
+                    .page
+                    .as_mut()
+                    .filter(|p| p.peer == peer && p.stars.waits_for(request))
+                {
                     page.stars = Load::Failed(crate::lang::tr_with(
                         crate::lang::keys::Q_MONEY_COULD_NOT_LOAD_REVENUE_REASON,
                         &[("reason", &reason)],
@@ -540,10 +552,8 @@ impl Session {
                 }
             }
             EarnPurpose::SetProgram { .. } => {
-                if let Some(setup) = earn.setup.as_mut()
-                    && setup.waits_for(request)
-                {
-                    setup.saving = None;
+                if let Some(setup) = earn.setup.as_mut() {
+                    setup.save_refused(request);
                 }
                 // tdesktop `UpdateProgram`: "Failed: " and the error.
                 earn.note(format!("Failed: {reason}"));

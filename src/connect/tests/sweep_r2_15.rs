@@ -138,3 +138,55 @@ fn a_full_rich_load_ends_only_with_the_answer_of_the_ask_that_waits() {
     ));
     assert!(!rig.driver.session.full_rich_loading(key.chat, key.message));
 }
+
+/// A sender that lets `ok` sends through and refuses every later one.
+struct FailsAfter {
+    inner: Arc<RecordingSender>,
+    ok: std::sync::atomic::AtomicUsize,
+}
+
+impl JsonSender for FailsAfter {
+    fn send_json(&self, request: &str) -> Result<(), ConnectSendError> {
+        use std::sync::atomic::Ordering;
+        let left = self.ok.load(Ordering::SeqCst);
+        if left == 0 {
+            return Err(ConnectSendError::Native);
+        }
+        self.ok.store(left - 1, Ordering::SeqCst);
+        self.inner.send_json(request)
+    }
+}
+
+#[test]
+fn a_basic_group_add_that_stops_midway_counts_the_unsent_users_as_failed() {
+    let store = MemorySecretStore::new();
+    let (dir, prepared) = prepared_tmp(&store);
+    let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+    let sender = FailsAfter {
+        inner: Arc::new(RecordingSender::new()),
+        ok: std::sync::atomic::AtomicUsize::new(usize::MAX),
+    };
+    let session = Session::new(AccountKey::primary(), sink.clone());
+    let mut driver = ConnectDriver::new(session, sender, test_credentials(), prepared);
+    let seq = AtomicU64::new(0);
+    for json in [
+        r#"{"@type":"updateAuthorizationState","authorization_state":{"@type":"authorizationStateReady"}}"#,
+        r#"{"@type":"updateNewChat","chat":{"id":5,"title":"g","type":{"@type":"chatTypeBasicGroup","basic_group_id":5},"permissions":{"@type":"chatPermissions","can_invite_users":true},"unread_count":0}}"#,
+    ] {
+        if let Some(parsed) = copy_and_parse(json, &seq, &sink) {
+            driver.ingest(parsed).unwrap();
+        }
+    }
+    driver
+        .sender
+        .ok
+        .store(1, std::sync::atomic::Ordering::SeqCst);
+    let first = driver.add_chat_members(ChatId(5), &[1, 2, 3]).unwrap();
+    assert!(first.is_some(), "the first user went out");
+    assert_eq!(
+        driver.session.groups.add_members_failed.get(&5),
+        Some(&2),
+        "users 2 and 3 were never sent"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}

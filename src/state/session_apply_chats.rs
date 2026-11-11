@@ -713,11 +713,14 @@ impl Session {
         if pending.map(|p| p.purpose) == Some(RequestPurpose::GetChatNotificationSettingsExceptions)
             && let Some(scope) = pending.and_then(|p| p.scope)
         {
-            self.settings
-                .notification_exceptions
-                .entry(scope)
-                .or_default()
-                .succeed(chat_ids.iter().map(|id| id.0).collect());
+            // Only the ask that waits for it takes the list: an answer for a
+            // list dropped as stale meanwhile is not the list now wanted.
+            if let Some(list) = self.settings.notification_exceptions.get_mut(&scope) {
+                list.answered(
+                    pending.map(|p| p.id),
+                    chat_ids.iter().map(|id| id.0).collect(),
+                );
+            }
         }
         if let Some(pending) = pending
             && matches!(

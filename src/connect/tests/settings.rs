@@ -762,10 +762,7 @@ fn device_login_qr_requires_confirmation_and_correlated_native_acceptance() {
         ))
         .unwrap();
     assert!(driver.session.settings.sessions_op.is_mutating());
-    assert_eq!(
-        driver.session.settings.device_login,
-        crate::state::DeviceLogin::InFlight
-    );
+    assert!(driver.session.settings.sessions_busy());
     driver
         .ingest(response(
             request,
@@ -773,8 +770,8 @@ fn device_login_qr_requires_confirmation_and_correlated_native_acceptance() {
         ))
         .unwrap();
     assert_eq!(
-        driver.session.settings.device_login,
-        crate::state::DeviceLogin::Done(crate::auth::DeviceLoginResult::Linked)
+        driver.session.settings.device_login_result,
+        Some(crate::auth::DeviceLoginResult::Linked)
     );
     assert!(!driver.session.settings.sessions_op.is_mutating());
     assert!(
@@ -789,8 +786,8 @@ fn device_login_qr_requires_confirmation_and_correlated_native_acceptance() {
         let request = driver.confirm_device_login(link).unwrap();
         driver.ingest(response(request, body)).unwrap();
         assert_eq!(
-            driver.session.settings.device_login,
-            crate::state::DeviceLogin::Done(crate::auth::DeviceLoginResult::Failed)
+            driver.session.settings.device_login_result,
+            Some(crate::auth::DeviceLoginResult::Failed)
         );
         assert!(!driver.session.settings.sessions_op.is_mutating());
     }
@@ -802,8 +799,8 @@ fn device_login_qr_requires_confirmation_and_correlated_native_acceptance() {
         ))
         .unwrap();
     assert_eq!(
-        driver.session.settings.device_login,
-        crate::state::DeviceLogin::Done(crate::auth::DeviceLoginResult::PasswordRequired)
+        driver.session.settings.device_login_result,
+        Some(crate::auth::DeviceLoginResult::PasswordRequired)
     );
     driver.session.auth = crate::telegram::envelope::AuthorizationState::WaitPhoneNumber;
     assert!(driver.confirm_device_login(link).is_err());
