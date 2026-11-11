@@ -411,6 +411,8 @@ fn story_manage_state_transitions() {
     // Review fix-up: a failed `getChatsToPostStories` surfaces a
     // transient error instead of silently leaving only "Myself".
     let extra = session.request(RequestPurpose::GetChatsToPostStories, None);
+    session.stories.post_as.begin();
+    session.stories.post_as.sent(extra);
     apply_json(
         &mut session,
         &seq,

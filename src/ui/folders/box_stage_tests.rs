@@ -329,12 +329,13 @@ fn shared_delete_box(app: &mut QuillApp) -> RequestId {
     });
     let request = sent(app, RequestPurpose::GetChatFolderChatsToLeave, Some(5));
     if let Some(session) = app.demo_session.as_mut() {
-        session
+        let to_leave = session
             .chat_list
             .folder_chats_to_leave
             .entry(5)
-            .or_default()
-            .begin();
+            .or_default();
+        to_leave.begin();
+        to_leave.sent(request);
     }
     request
 }
