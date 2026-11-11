@@ -32,66 +32,62 @@ const TOP_SLACK: f32 = 2.;
 const LIST_OVERDRAW: f32 = 400.;
 
 impl QuillApp {
-    /// The search box (created on first use; its value follows the chat's
-    /// stored query).
-    pub(super) fn ensure_event_log_search(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.admin.event_log_search.is_some() {
-            return;
-        }
-        let input = cx.new(|cx| {
-            TextareaState::new(window, cx)
-                .placeholder(tr(keys::Q_PEOPLE_SEARCH_RECENT_ACTIONS))
-                .auto_grow(1, 1)
-                .submit_on_enter(false)
-        });
-        cx.subscribe_in(&input, window, |this, _, event: &InputEvent, window, cx| {
-            if matches!(event, InputEvent::Change) {
-                this.in_window_of(window, cx, |this, _, cx| this.event_log_search_typed(cx));
-            }
-        })
-        .detach();
-        self.admin.event_log_search = Some(EventLogSearch { input, shows: None });
-    }
-
-    /// Fill the search box with `chat_id`'s stored query (an empty one for a
-    /// chat never searched): what the box shows is always that of the log
-    /// it sits over.
-    pub(super) fn show_event_log_query(
+    /// The search box of `chat_id`'s page, built on first use with the
+    /// chat's stored query. The page owns it, so another chat's page has a
+    /// box of its own.
+    pub(super) fn ensure_event_log_search(
         &mut self,
         chat_id: ChatId,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if self.event_log_page_for(chat_id).search.is_some() {
+            return;
+        }
         let query = self
             .session()
             .map(|session| session.groups.event_log_query(chat_id.0).to_string())
             .unwrap_or_default();
-        if let Some(search) = self.admin.event_log_search.as_mut() {
-            search.shows = Some(chat_id);
-            let input = search.input.clone();
-            input.update(cx, |state, cx| state.set_value(&query, window, cx));
-        }
+        let input = cx.new(|cx| {
+            let mut state = TextareaState::new(window, cx)
+                .placeholder(tr(keys::Q_PEOPLE_SEARCH_RECENT_ACTIONS))
+                .auto_grow(1, 1)
+                .submit_on_enter(false);
+            state.set_value(&query, window, cx);
+            state
+        });
+        let typed = cx.subscribe_in(&input, window, |this, _, event: &InputEvent, window, cx| {
+            if matches!(event, InputEvent::Change) {
+                this.in_window_of(window, cx, |this, _, cx| this.event_log_search_typed(cx));
+            }
+        });
+        self.event_log_page_for(chat_id).search = Some(EventLogSearch {
+            input,
+            _typed: typed,
+        });
     }
 
-    /// Frame upkeep of the window hosting Group Settings: the search box
-    /// follows the chat whose recent actions are open, however the page was
-    /// reached.
+    /// Frame upkeep of the window hosting Group Settings: the page of the
+    /// chat whose recent actions are open has its search box, however the
+    /// page was reached.
     pub(in crate::ui) fn event_log_search_upkeep(
         &mut self,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(chat_id) = self.event_log_open_chat() else {
-            return;
-        };
-        if self
-            .admin
-            .event_log_search
-            .as_ref()
-            .is_some_and(|search| search.shows != Some(chat_id))
-        {
-            self.show_event_log_query(chat_id, window, cx);
+        if let Some(chat_id) = self.event_log_open_chat() {
+            self.ensure_event_log_search(chat_id, window, cx);
         }
+    }
+
+    /// The search box of the open page of `chat_id`.
+    fn event_log_search_input(&self, chat_id: ChatId) -> Option<Entity<TextareaState>> {
+        self.admin
+            .event_log_page
+            .as_ref()
+            .filter(|page| page.chat == chat_id)
+            .and_then(|page| page.search.as_ref())
+            .map(|search| search.input.clone())
     }
 
     /// The chat whose recent actions are open.
@@ -140,10 +136,8 @@ impl QuillApp {
     /// box clears it) when it differs from what the log is filtered by.
     pub(super) fn apply_event_log_search(&mut self, chat_id: ChatId, cx: &mut Context<Self>) {
         let query = self
-            .admin
-            .event_log_search
-            .as_ref()
-            .map(|search| search.input.read(cx).value().trim().to_string())
+            .event_log_search_input(chat_id)
+            .map(|input| input.read(cx).value().trim().to_string())
             .unwrap_or_default();
         let current = self
             .session()
@@ -365,12 +359,7 @@ impl QuillApp {
                 .child(div().text_sm().font_semibold().child(title))
                 .child(filter_button),
         );
-        if let Some(input) = self
-            .admin
-            .event_log_search
-            .as_ref()
-            .map(|s| s.input.clone())
-        {
+        if let Some(input) = self.event_log_search_input(chat_id) {
             header = header.child(
                 Textarea::new(&input)
                     .aria_label(tr(keys::Q_PEOPLE_SEARCH_RECENT_ACTIONS))
@@ -492,12 +481,7 @@ impl QuillApp {
         if let Some(page) = self.admin.event_log_page.as_ref() {
             page.autoload.set(None);
         }
-        let was_shown = {
-            let mut shown = self.admin.event_log_ids.borrow_mut();
-            let was_shown = !shown.is_empty();
-            shown.clear();
-            was_shown
-        };
+        let was_shown = !self.admin.event_log_ids.take().is_empty();
         if was_shown {
             self.admin.event_log_list.reset(0);
         }
@@ -516,13 +500,12 @@ impl QuillApp {
         let entries: Rc<Vec<LogEntry>> = Rc::new(self.event_log_entries(&chronological));
         let ids: Vec<i64> = entries.iter().map(|entry| entry.id).collect();
         let state = self.admin.event_log_list.clone();
-        // The borrow ends before the list is touched.
-        let (plan, before) = {
-            let shown = self.admin.event_log_ids.borrow();
-            (plan_sync(&shown, &ids), shown.len())
-        };
+        // The list is taken out of its cell before it is read, so nothing
+        // is held while the list is touched.
+        let shown = self.admin.event_log_ids.take();
+        let (plan, before) = (plan_sync(&shown, &ids), shown.len());
         let count = ids.len();
-        *self.admin.event_log_ids.borrow_mut() = ids;
+        self.admin.event_log_ids.set(ids);
         match plan {
             ListSync::Keep => {}
             ListSync::Reset => state.reset(count),

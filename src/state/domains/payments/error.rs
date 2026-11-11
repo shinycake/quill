@@ -20,8 +20,7 @@ impl Session {
             // An earlier checkout's form fetch failing is not this one's.
             Some(RequestPurpose::GetPaymentForm) => {
                 if extra.is_some() && self.payments.checkout.waits_for(extra) {
-                    self.payments.checkout = CheckoutForm::Closed;
-                    self.payments.note = Some(crate::lang::tr_with(
+                    self.payments.checkout = CheckoutForm::Failed(crate::lang::tr_with(
                         crate::lang::keys::Q_MONEY_PAYMENT_FAILED_REASON,
                         &[("reason", &error_reason(err))],
                     ));
@@ -29,13 +28,14 @@ impl Session {
             }
             Some(RequestPurpose::ValidateOrderInfo) => {
                 if extra.is_some()
+                    && let CheckoutForm::Ready(checkout) = &mut self.payments.checkout
                     && matches!(
-                        &self.payments.order_info,
+                        &checkout.order_info,
                         OrderInfoStage::Validating { request, .. } if Some(*request) == extra
                     )
                 {
-                    self.payments.order_info = OrderInfoStage::Unvalidated;
-                    self.payments.note = Some(crate::lang::tr_with(
+                    checkout.order_info = OrderInfoStage::Unvalidated;
+                    checkout.note = Some(crate::lang::tr_with(
                         crate::lang::keys::Q_MONEY_PAYMENT_FAILED_REASON,
                         &[("reason", &error_reason(err))],
                     ));
@@ -50,7 +50,7 @@ impl Session {
                         &[("reason", &error_reason(err))],
                     );
                     if self.payments.shows(&failed.invoice) {
-                        self.payments.note = Some(text);
+                        self.payments.checkout.set_note(Some(text));
                     } else {
                         // The checkout was closed while it paid.
                         self.payments.notify(NoticeKind::Error, text);

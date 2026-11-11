@@ -37,10 +37,9 @@ impl Session {
                     && extra.is_some()
                     && self.payments.checkout.waits_for(extra)
                 {
-                    self.payments.checkout = CheckoutForm::Ready(form);
-                    self.payments.order_info = OrderInfoStage::Unvalidated;
-                    self.payments.shipping_id = None;
-                    self.payments.note = None;
+                    if let CheckoutForm::Loading { invoice, .. } = &self.payments.checkout {
+                        self.payments.checkout = CheckoutForm::ready(form, invoice.clone());
+                    }
                 }
             }
             PaymentsPayload::ValidatedOrderInfo(validated) => {
@@ -50,17 +49,17 @@ impl Session {
                 // is not this one's.
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::ValidateOrderInfo)
                     && extra.is_some()
-                    && let OrderInfoStage::Validating { request, order } = &self.payments.order_info
+                    && let CheckoutForm::Ready(checkout) = &mut self.payments.checkout
+                    && let OrderInfoStage::Validating { request, order } = &checkout.order_info
                     && Some(*request) == extra
                 {
                     let order = order.clone();
-                    self.payments.shipping_id =
-                        validated.shipping_options.first().map(|o| o.id.clone());
-                    self.payments.order_info = OrderInfoStage::Validated {
+                    checkout.shipping_id = validated.shipping_options.first().map(|o| o.id.clone());
+                    checkout.order_info = OrderInfoStage::Validated {
                         order,
                         info: validated,
                     };
-                    self.payments.note = None;
+                    checkout.note = None;
                 }
             }
             PaymentsPayload::PaymentResult(result) => {
@@ -88,10 +87,10 @@ impl Session {
                         }
                         if shown {
                             self.payments.checkout.mark_paid();
-                            self.payments.note = Some(format!(
+                            self.payments.checkout.set_note(Some(format!(
                                 "✅ {}",
                                 crate::lang::tr(crate::lang::keys::Q_MONEY_PAYMENT_SUCCESS_NOTE)
-                            ));
+                            )));
                         }
                     } else if !result.verification_url.is_empty() {
                         // Schema: the URL is for additional payment
@@ -112,9 +111,9 @@ impl Session {
                             self.payments.checkout.mark_verifying();
                         }
                     } else if shown {
-                        self.payments.note = Some(
+                        self.payments.checkout.set_note(Some(
                             crate::lang::tr(crate::lang::keys::Q_MONEY_PAYMENT_FAILED).to_string(),
-                        );
+                        ));
                     } else {
                         self.payments.notify(
                             NoticeKind::Error,

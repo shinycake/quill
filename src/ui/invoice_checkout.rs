@@ -33,7 +33,7 @@ impl QuillApp {
             && self.session().is_some_and(|s| {
                 s.payments.checkout.form().is_some()
                     || s.payments.checkout.is_loading()
-                    || s.payments.note.is_some()
+                    || s.payments.checkout.note().is_some()
             })
     }
 
@@ -200,7 +200,7 @@ impl QuillApp {
         let snapshot = self.session().map(|session| {
             (
                 session.payments.checkout.form().cloned(),
-                session.payments.request.clone(),
+                session.payments.checkout.invoice().cloned(),
                 session.payments.checkout.is_paid(),
             )
         });
@@ -211,7 +211,7 @@ impl QuillApp {
             return;
         }
         let sent = self.live.as_mut().map(|live| {
-            live.driver.session.payments.note = None;
+            live.driver.session.payments.checkout.set_note(None);
             live.driver.submit_payment_form(
                 &request.invoice,
                 form.id,

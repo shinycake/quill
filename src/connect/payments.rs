@@ -3,7 +3,7 @@ use super::*;
 use crate::ids::{ChatId, MessageId, RequestId};
 use crate::payment_invoice::InputInvoice;
 use crate::state::PaymentsPurpose;
-use crate::state::{BankCardLookup, BankCardStage, OrderInfoStage};
+use crate::state::{BankCardLookup, BankCardStage};
 use crate::state::{PaymentRequest, RequestPurpose};
 use crate::telegram::envelope::OrderInfoData;
 use crate::telegram::requests::{
@@ -45,8 +45,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         let json = get_payment_form(extra, &invoice);
         let sent = self.send_json_request(extra, &json)?;
         // The checkout waits on the form only once the request is out.
-        self.session.payments.request = Some(PaymentRequest { invoice });
-        self.session.payments.checkout = crate::state::CheckoutForm::Loading { request: extra };
+        self.session.payments.checkout = crate::state::CheckoutForm::Loading {
+            request: extra,
+            invoice: PaymentRequest { invoice },
+        };
         Ok(sent)
     }
 
@@ -61,16 +63,14 @@ impl<S: JsonSender> ConnectDriver<S> {
         let extra = self.payment_extra(invoice, RequestPurpose::ValidateOrderInfo)?;
         let json = validate_order_info_request(extra, invoice, order, allow_save);
         let sent = self.send_json_request(extra, &json)?;
-        self.session.payments.request = Some(PaymentRequest {
-            invoice: invoice.clone(),
-        });
         // Stored only once the send went out; the earlier order id and
         // shipping choice are for other fields.
-        self.session.payments.shipping_id = None;
-        self.session.payments.order_info = OrderInfoStage::Validating {
-            request: extra,
-            order: order.clone(),
-        };
+        if self.session.payments.shows(invoice) {
+            self.session
+                .payments
+                .checkout
+                .begin_validating(extra, order.clone());
+        }
         Ok(sent)
     }
 
@@ -102,10 +102,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             tip_amount,
         );
         let sent = self.send_json_request(extra, &json)?;
-        self.session.payments.request = Some(PaymentRequest {
-            invoice: invoice.clone(),
-        });
-        self.session.payment_sent(extra);
+        self.session.payment_sent(extra, invoice);
         Ok(sent)
     }
 
@@ -122,8 +119,8 @@ impl<S: JsonSender> ConnectDriver<S> {
         let extra = self
             .session
             .request(RequestPurpose::GetPaymentReceipt, Some(chat_id));
-        // A receipt is no checkout: `payments.request` stays the open
-        // checkout's invoice, which `shows` and `checkout_sending` read.
+        // A receipt is no checkout: the open checkout's stage stays as it
+        // is (`shows` and `checkout_sending` read its invoice).
         let json = get_payment_receipt(extra, chat_id, message_id);
         let sent = self.send_json_request(extra, &json)?;
         self.session.payments.receipt = crate::state::ReceiptStage::Loading(extra);

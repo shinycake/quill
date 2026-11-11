@@ -413,7 +413,9 @@ impl QuillApp {
             dialog
                 .overlay(true)
                 .title(crate::ui::shell::dialog_title(tr(keys::Q_PREFS_ACCOUNT)))
-                .content(crate::ui::shell::one_shot_dialog_content(body.into_any_element()))
+                .content(crate::ui::shell::one_shot_dialog_content(
+                    body.into_any_element(),
+                ))
                 .footer(footer)
                 .on_close(on_close)
         })

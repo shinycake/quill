@@ -178,9 +178,11 @@ impl QuillApp {
                     })));
                     let (sender, answer) = std::sync::mpsc::channel();
                     request(device, sender);
-                    // The recording starts in the window that asked, or
-                    // not at all once that window closed.
-                    let task = self.spawn_scoped(cx, async move |this, cx| {
+                    // The wait belongs to the account on screen, so the stage
+                    // ends whichever window asked; the recording starts in
+                    // the window that asked, or not at all once it closed.
+                    let asker = self.scoped_app(cx);
+                    let task = self.spawn_screen(cx, async move |this, cx| {
                         let granted = loop {
                             match answer.try_recv() {
                                 Ok(granted) => break granted,
@@ -192,11 +194,18 @@ impl QuillApp {
                                 Err(_) => break false,
                             }
                         };
-                        let answered = this.update(cx, |this, cx| {
-                            if !this.recording.permission.is_asking(id) {
-                                return;
+                        let ended = this.update(cx, |this, cx| {
+                            let mine = this.recording.permission.is_asking(id);
+                            if mine {
+                                this.recording.permission = PermissionAsk::Idle;
+                                cx.notify();
                             }
-                            this.recording.permission = PermissionAsk::Idle;
+                            mine
+                        });
+                        if !ended.is_ok_and(|mine| mine) {
+                            return;
+                        }
+                        let _ = asker.update(cx, |this, cx| {
                             // The call the press was for ended or changed
                             // while the prompt was up: nothing to start.
                             if call.is_some() && this.active_call_id() != call {
@@ -209,17 +218,6 @@ impl QuillApp {
                                 cx.notify();
                             }
                         });
-                        if answered.is_err() {
-                            // The asking window closed first: the answer
-                            // starts nothing, but the stage must end or every
-                            // later press would wait behind it.
-                            let _ = this.main().update(cx, |this, cx| {
-                                if this.recording.permission.is_asking(id) {
-                                    this.recording.permission = PermissionAsk::Idle;
-                                    cx.notify();
-                                }
-                            });
-                        }
                     });
                     self.recording.permission = PermissionAsk::Asking { id, _task: task };
                     cx.notify();

@@ -234,7 +234,9 @@ impl QuillApp {
             None | Some(SupergroupMembersFetch::Loading) => {
                 list = list.child(message(tr(keys::CONTACTS_LOADING)));
             }
-            Some(SupergroupMembersFetch::Failed(error) | SupergroupMembersFetch::NotSent(error)) => {
+            Some(
+                SupergroupMembersFetch::Failed(error) | SupergroupMembersFetch::NotSent(error),
+            ) => {
                 list = list.child(div().px_2().text_sm().text_color(muted).child(error));
             }
             Some(SupergroupMembersFetch::Loaded { members, .. }) => {

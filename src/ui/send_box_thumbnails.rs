@@ -45,12 +45,12 @@ impl QuillApp {
             let send_box = &mut self.composer_sends.reads;
             send_box.thumbnail_jobs += 1;
             let job = send_box.thumbnail_jobs;
-            send_box.thumbnails.start(path.clone(), job);
             let source = path.clone();
             let worker = cx.background_spawn(async move { write_file_thumbnail(&source) });
             let timer = cx.background_executor().timer(GIVE_UP_AFTER);
             let waited = path.clone();
-            Self::spawn_app(cx, async move |this, cx| {
+            let path_key = path.clone();
+            let give_up = Self::spawn_app(cx, async move |this, cx| {
                 timer.await;
                 let _ = this.update(cx, |this, cx| {
                     let send_box = &mut this.composer_sends.reads;
@@ -58,9 +58,8 @@ impl QuillApp {
                         cx.notify();
                     }
                 });
-            })
-            .detach();
-            Self::spawn_app(cx, async move |this, cx| {
+            });
+            let read = Self::spawn_app(cx, async move |this, cx| {
                 let thumbnail = worker.await;
                 let _ = this.update(cx, |this, cx| {
                     let send_box = &mut this.composer_sends.reads;
@@ -76,8 +75,11 @@ impl QuillApp {
                     }
                     cx.notify();
                 });
-            })
-            .detach();
+            });
+            self.composer_sends
+                .reads
+                .thumbnails
+                .start(path_key, job, vec![give_up, read]);
         }
     }
 

@@ -222,7 +222,11 @@ fn event_log_failure_states() {
     else {
         panic!("expected loaded event log");
     };
-    assert_eq!(loaded.older, OlderEvents::Available, "asking clears the line");
+    assert_eq!(
+        loaded.older,
+        OlderEvents::Available,
+        "asking clears the line"
+    );
 }
 
 #[test]

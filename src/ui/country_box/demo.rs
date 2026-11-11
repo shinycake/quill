@@ -88,7 +88,12 @@ impl QuillApp {
 
     fn demo_country_payment(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(session) = self.demo_session.as_mut() {
-            session.payments.checkout = quill::state::CheckoutForm::Ready(shipping_form());
+            session.payments.checkout = quill::state::CheckoutForm::ready(
+                shipping_form(),
+                quill::state::PaymentRequest {
+                    invoice: quill::payment_invoice::InputInvoice::Name("demo".into()),
+                },
+            );
         }
         self.open_payment_dialog(window, cx);
         if let Some(dialog) = self.payments.dialog.as_mut() {

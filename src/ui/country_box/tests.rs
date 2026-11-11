@@ -39,7 +39,12 @@ fn the_shipping_country_is_picked_from_the_list(cx: &mut TestAppContext) {
     let (app, mut vcx) = new_app(cx);
     app.update_in(&mut vcx, |app, window, cx| {
         if let Some(session) = app.demo_session.as_mut() {
-            session.payments.checkout = quill::state::CheckoutForm::Ready(shipping_form());
+            session.payments.checkout = quill::state::CheckoutForm::ready(
+                shipping_form(),
+                quill::state::PaymentRequest {
+                    invoice: quill::payment_invoice::InputInvoice::Name("demo".into()),
+                },
+            );
         }
         app.open_payment_dialog(window, cx);
         let dialog = app.payments.dialog.as_ref().unwrap();
@@ -73,7 +78,12 @@ fn cancelling_keeps_the_shipping_country(cx: &mut TestAppContext) {
     let (app, mut vcx) = new_app(cx);
     app.update_in(&mut vcx, |app, window, cx| {
         if let Some(session) = app.demo_session.as_mut() {
-            session.payments.checkout = quill::state::CheckoutForm::Ready(shipping_form());
+            session.payments.checkout = quill::state::CheckoutForm::ready(
+                shipping_form(),
+                quill::state::PaymentRequest {
+                    invoice: quill::payment_invoice::InputInvoice::Name("demo".into()),
+                },
+            );
         }
         app.open_payment_dialog(window, cx);
         app.payments.dialog.as_mut().unwrap().country_iso = "DE".into();
@@ -153,7 +163,12 @@ fn both_boxes_render_their_rows_and_buttons(cx: &mut TestAppContext) {
     let (app, mut vcx) = new_app(cx);
     app.update_in(&mut vcx, |app, window, cx| {
         if let Some(session) = app.demo_session.as_mut() {
-            session.payments.checkout = quill::state::CheckoutForm::Ready(shipping_form());
+            session.payments.checkout = quill::state::CheckoutForm::ready(
+                shipping_form(),
+                quill::state::PaymentRequest {
+                    invoice: quill::payment_invoice::InputInvoice::Name("demo".into()),
+                },
+            );
         }
         app.open_payment_dialog(window, cx);
         app.open_poll_dialog(window, cx);

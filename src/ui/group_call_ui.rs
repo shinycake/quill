@@ -290,11 +290,13 @@ impl QuillApp {
     /// 1.8.69). Incoming, not joined and not missed: Join / Decline.
     /// Anything else reads as tdesktop's group call entries ("Outgoing
     /// group call", "Missed group call", ...); TDLib updates refresh the
-    /// row when it is joined or missed.
+    /// row when it is joined or missed. While a join is on its way
+    /// (`joining`) neither button acts: the answer settles the row.
     pub(super) fn group_call_invitation_row(
         message: &HistoryMessage,
         is_active: bool,
         was_missed: bool,
+        joining: bool,
         cx: &mut Context<QuillApp>,
     ) -> impl IntoElement {
         let mut inner = div().flex().flex_col().items_center().gap_2();
@@ -315,6 +317,7 @@ impl QuillApp {
                         .child(
                             Button::new(format!("gc-invite-accept-{}", message_id.0))
                                 .label(tr(keys::GROUP_CALL_JOIN))
+                                .disabled(joining)
                                 .on_click(cx.listener(move |this, _, _, cx| {
                                     this.accept_group_call_invitation(chat_id, message_id, cx);
                                 })),
@@ -323,6 +326,7 @@ impl QuillApp {
                             Button::new(format!("gc-invite-decline-{}", message_id.0))
                                 .label(tr(keys::CALL_DECLINE))
                                 .ghost()
+                                .disabled(joining)
                                 .on_click(cx.listener(move |this, _, _, cx| {
                                     this.decline_group_call_invitation(chat_id, message_id, cx);
                                 })),

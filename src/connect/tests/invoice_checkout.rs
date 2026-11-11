@@ -10,7 +10,7 @@ use crate::payment_card::{CardDetails, NativeProvider, tokenize};
 use crate::payment_invoice::{InputInvoice, TelegramPaymentPurpose};
 use crate::platform::MemorySecretStore;
 use crate::telegram::client::copy_and_parse;
-use crate::telegram::envelope::PaymentFormTypeData;
+use crate::telegram::envelope::{PaymentFormData, PaymentFormTypeData};
 use crate::telegram::requests::input_credentials_new;
 use serde_json::{Value, json};
 use std::sync::Arc;
@@ -70,7 +70,12 @@ fn an_invoice_link_asks_for_its_form_by_name() {
         json!({"@type": "inputInvoiceName", "name": "shop_1"})
     );
     assert_eq!(
-        driver.session.payments.request.as_ref().map(|r| &r.invoice),
+        driver
+            .session
+            .payments
+            .checkout
+            .invoice()
+            .map(|r| &r.invoice),
         Some(&invoice)
     );
 }
@@ -107,7 +112,7 @@ fn a_message_invoice_still_needs_a_real_message() {
         driver.send_payment_form_request(invoice),
         Err(ConnectSendError::InvalidRequest)
     );
-    assert!(driver.session.payments.request.is_none());
+    assert!(driver.session.payments.checkout.invoice().is_none());
     assert!(
         recorder
             .snapshot()
@@ -321,19 +326,34 @@ fn a_new_card_pays_with_the_provider_token_and_may_need_verification() {
 }
 
 /// Sweep 10-117: a new checkout replaces the whole earlier one in the driver,
-/// the note, shipping choice and order info included.
+/// the note, shipping choice and order info included: they live in the one
+/// stage, so nothing of the old one can be left behind.
 #[test]
 fn a_new_checkout_replaces_the_earlier_one_whole() {
     let (mut driver, _recorder, _sink, _seq) = driver_parts();
+    let old = InputInvoice::Name("old".into());
     let payments = &mut driver.session.payments;
-    payments.note = Some("old outcome".into());
-    payments.shipping_id = Some("express".into());
+    payments.checkout = crate::state::CheckoutForm::ready(
+        PaymentFormData {
+            id: 1,
+            form_type: PaymentFormTypeData::Stars { star_count: 5 },
+            seller_bot_user_id: 0,
+            product_title: String::new(),
+            product_description: String::new(),
+        },
+        crate::state::PaymentRequest { invoice: old },
+    );
+    payments.checkout.set_note(Some("old outcome".into()));
+    payments.checkout.choose_shipping("express".into());
     driver
         .send_payment_form_request(InputInvoice::Name("shop_1".into()))
         .unwrap();
-    let payments = &driver.session.payments;
-    assert!(payments.note.is_none());
-    assert!(payments.shipping_id.is_none());
-    assert!(payments.checkout.is_loading());
-    assert!(payments.request.is_some());
+    let checkout = &driver.session.payments.checkout;
+    assert!(checkout.is_loading());
+    assert!(checkout.note().is_none());
+    assert!(checkout.shipping_id().is_none());
+    assert_eq!(
+        checkout.invoice().map(|r| &r.invoice),
+        Some(&InputInvoice::Name("shop_1".into()))
+    );
 }
